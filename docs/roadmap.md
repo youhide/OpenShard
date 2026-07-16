@@ -77,9 +77,11 @@ arrived. The channel is where async stops and the tick begins.
 - [x] `map*.mul` / `statics*.mul` — column-major blocks, 2.9M statics
 - [x] `MapTerrain` — real heights, walls, water, the two-unit step limit
 - [x] `WalkPace` — a token bucket; a client can no longer walk as fast as it sends
-- [ ] `world` crate: the tick loop, composing `Registry` + `EventBus`
+- [x] `World::tick` — a fixed 20Hz timestep; commands in, events and packets out
+- [x] Core components: `Position`, `Heading`, `Body`, `Name`, `Client`, `Movement`
+- [x] Domain events: `PlayerEntered`, `MobileMoved`, `StepRefused`, `PlayerLeft`
 - [ ] Spatial index (sectors) and "what can this player see"
-- [ ] Core components: `Position`, `Graphic`, `Body`, `Name`
+- [ ] Other mobiles: 0x77/0x78, so two players can see each other
 - [ ] Character creation (0x00), not just playing a configured name
 - [ ] Multiple facets; only map0 is wired up
 
@@ -111,10 +113,28 @@ buffer exists to give. Either the constant means something undocumented or the
 check does not do what it says. `movement::WalkPace` is a token bucket instead:
 the same intent, stated plainly.
 
-**What is still missing:** the tick. `game.rs` answers packets as they arrive
-rather than simulating anything, and it is the placeholder the world crate grows
-out of. Until it exists there is no place for anything that happens *without* a
-client asking — decay, regeneration, an NPC deciding to move.
+### The tick
+
+`World::tick` is the deterministic half of the boundary the gateway's channel
+draws. Commands queue from network tasks and are applied in a fixed order at a
+fixed rate; nothing inside a tick awaits, reads a clock or touches a socket.
+
+That is what makes anything that happens *without* a client asking possible at
+all — decay, regeneration, an NPC deciding to move. It is also what makes replay
+possible: the same commands produce the same world.
+
+Two things worth knowing:
+
+- **`select!` is `biased`** so the tick cannot be starved. Without it a flood of
+  packets keeps `recv` ready forever and the world stops simulating under
+  exactly the load that needs it most.
+- **A late tick does not catch up.** `MissedTickBehavior::Delay`, because running
+  several ticks back-to-back turns a hiccup into a stall and a fixed timestep
+  into a variable one.
+
+**What is still missing:** a spatial index, and therefore other mobiles. Two
+players in the same room cannot see each other, because nothing yet answers
+"what is near this point".
 
 ## 4. Persistence
 

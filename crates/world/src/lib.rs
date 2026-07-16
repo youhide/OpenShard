@@ -2,13 +2,14 @@
 //!
 //! # What is here
 //!
-//! The map, and only the map. Reading the client's `map*.mul`, `statics*.mul`
-//! and `tiledata.mul`, and answering the one question movement asks: can a
-//! mobile stand here.
+//! The tick, the components a character is made of, and the client's map files.
 //!
-//! The tick, the spatial index and the systems are not written yet. This crate
-//! is named for what it will hold; today it holds the part that unblocks
-//! walking.
+//! [`World::tick`] is the deterministic half of the boundary the gateway's
+//! channel draws: commands queue in from network tasks, are applied in a fixed
+//! order at a fixed rate, and packets come out. Nothing inside it awaits, reads
+//! a clock, or touches a socket.
+//!
+//! The spatial index and the gameplay systems are not written yet.
 //!
 //! # The client's files are the source of truth
 //!
@@ -28,12 +29,20 @@
 //!
 //! Both are settled by arithmetic and pinned by tests against real files.
 
+pub mod components;
+pub mod events;
 pub mod map;
 pub mod terrain;
+pub mod tick;
 pub mod tiledata;
 pub mod uop;
 
+pub use components::{Body, Client, Heading, Movement, Name, Position};
+pub use events::{
+    MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
+};
 pub use map::{LandCell, Map, MapError, StaticItem, BLOCK_SIZE};
 pub use terrain::{MapTerrain, MAX_STEP_DOWN, MAX_STEP_UP, PLAYER_HEIGHT};
+pub use tick::{Command, Outbound, World, TICK_INTERVAL};
 pub use tiledata::{LandTile, StaticTile, TileData, TileDataError, TileDataFormat, TileFlags};
 pub use uop::UopError;

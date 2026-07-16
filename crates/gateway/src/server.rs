@@ -29,6 +29,20 @@ impl ConnectionId {
     pub const fn get(self) -> u64 {
         self.0
     }
+
+    /// Name a connection that no gateway handed out.
+    ///
+    /// Only the accept loop should mint these in a running server — an id is
+    /// meaningless unless a socket is behind it. But every crate downstream
+    /// addresses clients by one, and their tests need to say "this connection"
+    /// without standing up a listener.
+    ///
+    /// Not `Default`: there is no sensible default connection, and deriving one
+    /// would let `..Default::default()` quietly address whatever `#0` turns out
+    /// to be.
+    pub const fn from_raw(id: u64) -> Self {
+        Self(id)
+    }
 }
 
 impl std::fmt::Display for ConnectionId {
