@@ -33,8 +33,10 @@
 
 mod journal;
 pub mod record;
+mod sqlite;
 mod store;
 
 pub use journal::{Journal, Snapshot};
 pub use record::{AccountRecord, CharacterRecord, SCHEMA_VERSION};
+pub use sqlite::SqliteStore;
 pub use store::{MemoryStore, Store, StoreError};

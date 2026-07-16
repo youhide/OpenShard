@@ -14,8 +14,10 @@ workspace = true
 [dependencies]
 async-trait.workspace = true
 openshard-entities.workspace = true
+rusqlite = { version = "0.32", features = ["bundled"] }
 serde.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
 serde_json.workspace = true

@@ -30,7 +30,8 @@ use openshard_gateway::{ConnectionId, Event, Server, ServerEvent};
 use openshard_login::{Accounts, DevAccounts, LoginServer, LoginSession, Response};
 use openshard_persistence::{MemoryStore, Snapshot, Store};
 use openshard_protocol::{
-    encode_login_denied, huffman, CharacterPlay, CreateCharacter, GameServerLogin, WalkRequest,
+    encode_login_denied, huffman, CharacterPlay, CreateCharacter, GameServerLogin, StartLocation,
+    WalkRequest,
 };
 use openshard_world::{Appearance, Command, Map, MapTerrain, TileData, World, TICK_INTERVAL};
 use std::sync::Arc;
@@ -234,6 +235,10 @@ async fn run_shard(
         }
     }
     let mut login = LoginServer::new(accounts, &config.server.name, advertised);
+    // The character-creation screen needs somewhere to start. Without it the
+    // client refuses to create at all — "No city found. Something wrong with the
+    // received cities." — because the list it was sent is empty.
+    login.starts = start_cities((config.world.start.x, config.world.start.y));
     let mut sessions: HashMap<ConnectionId, Session> = HashMap::new();
     let mut ticker = tokio::time::interval(TICK_INTERVAL);
     // A tick that ran late must not try to catch up by running several in a row:
@@ -441,6 +446,27 @@ fn dispatch(session: &mut Session, world: &mut World, packet: &[u8], id: Connect
     }
 }
 
+/// The starting cities offered on the character-creation screen.
+///
+/// There is always at least one, because the client refuses to create a
+/// character with an empty list and says so — "No city found. Something wrong
+/// with the received cities." Until the world models separate start locations
+/// across more than one facet, every choice spawns at the world's configured
+/// start, so the single city offered *is* that spot: what the player picks and
+/// where they wake up agree.
+///
+/// The description cliloc is Britannia's generic one; a client older than
+/// 7.0.13.0 ignores the field entirely.
+fn start_cities(start: (u16, u16)) -> Vec<StartLocation> {
+    vec![StartLocation {
+        area: "Britannia".to_owned(),
+        name: "Britain".to_owned(),
+        position: (i32::from(start.0), i32::from(start.1), 0),
+        map: 0,
+        description_cliloc: 1075074,
+    }]
+}
+
 /// Create a character on the authenticated account, then enter the world with
 /// it — the two halves of what a `0x00`/`0xF8` packet asks for.
 ///
@@ -644,5 +670,15 @@ mod tests {
             packet,
             "the login connection is never compressed"
         );
+    }
+
+    #[test]
+    fn there_is_always_at_least_one_start_city() {
+        // An empty list is what makes ClassicUO refuse to open the creation
+        // screen, so there is always one, sitting at the configured start.
+        let cities = start_cities((1363, 1600));
+        assert!(!cities.is_empty());
+        assert_eq!(cities[0].position, (1363, 1600, 0));
+        assert_eq!(cities[0].map, 0);
     }
 }

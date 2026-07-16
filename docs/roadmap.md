@@ -143,7 +143,7 @@ connection takes the mobile off every screen that had it.
 ## 4. Persistence
 
 - [x] Persistence queue, drained outside the tick
-- [ ] SQLite backend first (dev), PostgreSQL after
+- [x] SQLite backend (dev) — `SqliteStore`, tested; PostgreSQL after
 - [ ] Save and load accounts and characters
 - [ ] Serial reservation on load — `Registry::bind_serial` already handles this
 - [ ] Crash recovery
