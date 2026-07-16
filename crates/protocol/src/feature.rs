@@ -26,8 +26,8 @@ use crate::version::ClientVersion;
 /// use openshard_protocol::{ClientVersion, Feature};
 ///
 /// let aos = ClientVersion::new(4, 0, 3, 0);
-/// assert!(aos.supports(Feature::Tooltips));      // since 4.0.0a
-/// assert!(!aos.supports(Feature::TooltipHash));  // not until 4.0.5a
+/// assert!(aos.supports(Feature::Tooltips));      // since 4.0.0
+/// assert!(!aos.supports(Feature::TooltipHash));  // not until 4.0.5
 /// assert!(!aos.supports(Feature::Buffs));        // not until 5.0.2b
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
@@ -104,6 +104,12 @@ pub enum Feature {
     MapWaypoints,
 
     // -- behaviours ------------------------------------------------------
+    /// Shard IPs in the 0xA8 list go in wire order rather than reversed.
+    /// Since 4.0.0.
+    ForwardShardIp,
+    /// The 0xA9 character list carries a trailing u32 flags field.
+    /// Since 1.26.0.1.
+    CharacterListFlags,
     /// The character list must be padded to at least five slots. Since 3.0.0a.
     PaddedCharacterList,
     /// Closing a dialog server-side does not echo a client response. Since 4.0.4.0.
@@ -119,11 +125,11 @@ impl Feature {
             // MINCLIVER_LBR 3000702
             Self::LbrPackets => ClientVersion::new(3, 0, 7, 2),
             // MINCLIVER_AOS 4000000
-            Self::AosPackets => ClientVersion::new(4, 0, 0, 1),
+            Self::AosPackets => ClientVersion::new(4, 0, 0, 0),
             // MINCLIVER_SE 4000500
-            Self::SePackets => ClientVersion::new(4, 0, 5, 1),
+            Self::SePackets => ClientVersion::new(4, 0, 5, 0),
             // MINCLIVER_ML 5000000
-            Self::MlPackets => ClientVersion::new(5, 0, 0, 1),
+            Self::MlPackets => ClientVersion::new(5, 0, 0, 0),
             // MINCLIVER_SA 7000000
             Self::SaPackets => ClientVersion::new(7, 0, 0, 0),
             // MINCLIVER_HS 7000900
@@ -132,30 +138,30 @@ impl Feature {
             Self::TolPackets => ClientVersion::new(7, 0, 45, 65),
 
             // MINCLIVER_TOOLTIP 4000000
-            Self::Tooltips => ClientVersion::new(4, 0, 0, 1),
+            Self::Tooltips => ClientVersion::new(4, 0, 0, 0),
             // MINCLIVER_TOOLTIPHASH 4000500
-            Self::TooltipHash => ClientVersion::new(4, 0, 5, 1),
+            Self::TooltipHash => ClientVersion::new(4, 0, 5, 0),
             // MINCLIVER_BUFFS 5000202
             Self::Buffs => ClientVersion::new(5, 0, 2, 2),
             // MINCLIVER_STATLOCKS 4000100
-            Self::StatLocks => ClientVersion::new(4, 0, 1, 1),
+            Self::StatLocks => ClientVersion::new(4, 0, 1, 0),
             // MINCLIVER_SKILLCAPS 4000000
-            Self::SkillCaps => ClientVersion::new(4, 0, 0, 1),
+            Self::SkillCaps => ClientVersion::new(4, 0, 0, 0),
             // MINCLIVER_NOTOINVUL 4000000
-            Self::NotorietyInvulnerable => ClientVersion::new(4, 0, 0, 1),
+            Self::NotorietyInvulnerable => ClientVersion::new(4, 0, 0, 0),
 
             // MINCLIVER_DAMAGE 4000000
-            Self::DamagePacketExtended => ClientVersion::new(4, 0, 0, 1),
+            Self::DamagePacketExtended => ClientVersion::new(4, 0, 0, 0),
             // MINCLIVER_NEWDAMAGE 4000700
-            Self::DamagePacket => ClientVersion::new(4, 0, 7, 1),
+            Self::DamagePacket => ClientVersion::new(4, 0, 7, 0),
             // MINCLIVER_SPELLBOOK 4000000
-            Self::SpellbookPacket => ClientVersion::new(4, 0, 0, 1),
+            Self::SpellbookPacket => ClientVersion::new(4, 0, 0, 0),
             // MINCLIVER_CUSTOMMULTI 4000000
-            Self::CustomMulti => ClientVersion::new(4, 0, 0, 1),
+            Self::CustomMulti => ClientVersion::new(4, 0, 0, 0),
             // MINCLIVER_NEWBOOK 5000000
-            Self::NewBook => ClientVersion::new(5, 0, 0, 1),
+            Self::NewBook => ClientVersion::new(5, 0, 0, 0),
             // MINCLIVER_COMPRESSDIALOG 5000000
-            Self::CompressedGumps => ClientVersion::new(5, 0, 0, 1),
+            Self::CompressedGumps => ClientVersion::new(5, 0, 0, 0),
             // MINCLIVER_ITEMGRID 6000107
             Self::ItemGrid => ClientVersion::new(6, 0, 1, 7),
             // MINCLIVER_NEWCONTEXTMENU 6000000
@@ -182,6 +188,16 @@ impl Feature {
             // MINCLIVER_MAPWAYPOINT 7008400
             Self::MapWaypoints => ClientVersion::new(7, 0, 84, 0),
 
+            // MAXCLIVER_REVERSEIP 4000000, inverted.
+            //
+            // Sphere states this one backwards: it is a *maximum*, and clients
+            // below it reverse the IP bytes. Expressing it as "since 4.0.0 the
+            // IP goes in wire order" is the same rule with the polarity the
+            // rest of this table uses, so it does not need a special case.
+            Self::ForwardShardIp => ClientVersion::new(4, 0, 0, 0),
+            // send.cpp writes the 0xA9 flags only when the reported version is
+            // strictly greater than 1260000, so the boundary is one patch above.
+            Self::CharacterListFlags => ClientVersion::new(1, 26, 0, 1),
             // MINCLIVER_PADCHARLIST 3000010
             Self::PaddedCharacterList => ClientVersion::new(3, 0, 0, 10),
             // MINCLIVER_CLOSEDIALOG 4000400
@@ -194,9 +210,11 @@ impl Feature {
     /// Exists so tooling (the dashboard's compatibility view, the tests below)
     /// can enumerate the table rather than hard-coding a list that drifts.
     pub const ALL: &'static [Feature] = &[
+        Feature::CharacterListFlags,
         Feature::PaddedCharacterList,
         Feature::LbrPackets,
         Feature::AosPackets,
+        Feature::ForwardShardIp,
         Feature::Tooltips,
         Feature::SkillCaps,
         Feature::NotorietyInvulnerable,
@@ -336,6 +354,8 @@ mod tests {
             | Feature::GlobalChat
             | Feature::NewSecureTrade
             | Feature::MapWaypoints
+            | Feature::ForwardShardIp
+            | Feature::CharacterListFlags
             | Feature::PaddedCharacterList
             | Feature::SilentCloseDialog => Feature::ALL.contains(&feature),
         }
@@ -383,23 +403,135 @@ mod tests {
     }
 
     #[test]
-    fn a_feature_is_off_one_patch_before_its_boundary() {
-        // The whole point of the table: boundaries are exact.
+    fn every_boundary_is_exact() {
+        // The whole point of the table. Borrowing across fields matters here:
+        // most boundaries sit at patch 0, so a naive `patch - 1` would skip
+        // nearly every feature and prove almost nothing.
         for feature in Feature::ALL {
             let since = feature.since();
             assert!(
                 since.supports(*feature),
-                "{feature:?} off at its own boundary"
+                "{feature:?} is off at its own boundary {since}"
             );
 
-            if since.patch > 0 {
-                let before =
-                    ClientVersion::new(since.major, since.minor, since.revision, since.patch - 1);
-                assert!(
-                    !before.supports(*feature),
-                    "{feature:?} claims {before} but wants {since}"
-                );
-            }
+            let Some(before) = one_below(since) else {
+                continue;
+            };
+            assert!(
+                !before.supports(*feature),
+                "{feature:?} claims {before} but wants {since}"
+            );
+        }
+    }
+
+    /// The version immediately below `version` in the total order.
+    fn one_below(version: ClientVersion) -> Option<ClientVersion> {
+        let ClientVersion {
+            major,
+            minor,
+            revision,
+            patch,
+        } = version;
+        if patch > 0 {
+            Some(ClientVersion::new(major, minor, revision, patch - 1))
+        } else if revision > 0 {
+            Some(ClientVersion::new(major, minor, revision - 1, u8::MAX))
+        } else if minor > 0 {
+            Some(ClientVersion::new(major, minor - 1, u8::MAX, u8::MAX))
+        } else if major > 0 {
+            Some(ClientVersion::new(major - 1, u8::MAX, u8::MAX, u8::MAX))
+        } else {
+            None
+        }
+    }
+
+    /// Decode a SphereServer `MINCLIVER_*` constant into a version.
+    ///
+    /// Sphere packs a version into one decimal number: `major * 1_000_000 +
+    /// minor * 10_000 + revision * 100 + patch`. So 3000702 is 3.0.7.2, which
+    /// its own comment spells "3.0.7b" — the trailing letter *is* the patch.
+    fn from_sphere_number(packed: u32) -> ClientVersion {
+        ClientVersion::new(
+            (packed / 1_000_000) as u8,
+            ((packed / 10_000) % 100) as u8,
+            ((packed / 100) % 100) as u8,
+            (packed % 100) as u8,
+        )
+    }
+
+    #[test]
+    fn sphere_number_decoding_is_right() {
+        // The one Sphere constant whose comment and number provably agree.
+        assert_eq!(
+            from_sphere_number(3_000_702),
+            ClientVersion::new(3, 0, 7, 2)
+        );
+        assert_eq!(
+            from_sphere_number(3_000_702),
+            "3.0.7b".parse::<ClientVersion>().unwrap(),
+            "Sphere's packed form and the old-style string must agree"
+        );
+        assert_eq!(
+            from_sphere_number(7_004_565),
+            ClientVersion::new(7, 0, 45, 65)
+        );
+    }
+
+    #[test]
+    fn every_boundary_matches_spheres_constant_verbatim() {
+        // Pinned to the *numbers* in Sphere's sphereproto.h, not to the prose in
+        // its comments. The two disagree: MINCLIVER_AOS is 4000000, which is
+        // 4.0.0.0, while the comment beside it says "4.0.0a", which would be
+        // 4.0.0.1. Trusting the comment over the number is exactly how this
+        // table drifts a patch out of true, silently.
+        let table = [
+            (Feature::LbrPackets, 3_000_702),
+            (Feature::AosPackets, 4_000_000),
+            (Feature::SePackets, 4_000_500),
+            (Feature::MlPackets, 5_000_000),
+            (Feature::SaPackets, 7_000_000),
+            (Feature::HsPackets, 7_000_900),
+            (Feature::TolPackets, 7_004_565),
+            (Feature::Tooltips, 4_000_000),
+            (Feature::TooltipHash, 4_000_500),
+            (Feature::Buffs, 5_000_202),
+            (Feature::StatLocks, 4_000_100),
+            (Feature::SkillCaps, 4_000_000),
+            (Feature::NotorietyInvulnerable, 4_000_000),
+            (Feature::DamagePacketExtended, 4_000_000),
+            (Feature::DamagePacket, 4_000_700),
+            (Feature::SpellbookPacket, 4_000_000),
+            (Feature::CustomMulti, 4_000_000),
+            (Feature::NewBook, 5_000_000),
+            (Feature::CompressedGumps, 5_000_000),
+            (Feature::ItemGrid, 6_000_107),
+            (Feature::NewContextMenu, 6_000_000),
+            (Feature::ExtraFeatureMask, 6_001_402),
+            (Feature::NewMobileAnimation, 7_000_000),
+            (Feature::SmoothShip, 7_000_900),
+            (Feature::NewMapDisplay, 7_001_300),
+            (Feature::ExtraStartInfo, 7_001_300),
+            (Feature::NewMobileIncoming, 7_003_301),
+            (Feature::NewChatSystem, 7_000_401),
+            (Feature::GlobalChat, 7_006_202),
+            (Feature::NewSecureTrade, 7_004_565),
+            (Feature::MapWaypoints, 7_008_400),
+            (Feature::ForwardShardIp, 4_000_000), // MAXCLIVER_REVERSEIP, inverted
+            (Feature::CharacterListFlags, 1_260_001), // send.cpp: `> 1'26'00'00`
+            (Feature::PaddedCharacterList, 3_000_010),
+            (Feature::SilentCloseDialog, 4_000_400),
+        ];
+        assert_eq!(
+            table.len(),
+            Feature::ALL.len(),
+            "every feature needs its Sphere constant pinned here"
+        );
+        for (feature, packed) in table {
+            assert_eq!(
+                feature.since(),
+                from_sphere_number(packed),
+                "{feature:?} drifted from MINCLIVER {packed}"
+            );
         }
     }
 
@@ -423,7 +555,13 @@ mod tests {
         assert!(!t2a.supports(Feature::LbrPackets));
         assert!(!t2a.supports(Feature::Buffs));
         assert!(!t2a.supports(Feature::ItemGrid));
-        assert_eq!(FeatureSet::resolve(t2a).count(), 0);
+
+        // CharacterListFlags is the one thing this old: the 0xA9 flags dword
+        // arrived at 1.26.0.1, a hair after T2A itself.
+        assert_eq!(
+            FeatureSet::resolve(t2a).iter().collect::<Vec<_>>(),
+            vec![Feature::CharacterListFlags]
+        );
     }
 
     #[test]

@@ -54,13 +54,23 @@
 
 mod codec;
 mod feature;
+pub mod huffman;
+mod login;
 mod packet;
+mod seed;
 mod version;
 
 pub use codec::{CodecError, CodecResult, PacketReader, PacketWriter};
 pub use feature::{Feature, FeatureSet};
+pub use login::{
+    encode_character_list, encode_login_denied, encode_relay, encode_shard_list, AccountLogin,
+    CharacterEntry, ClientVersionReport, DenyReason, GameServerLogin, LoginDecodeError,
+    SelectShard, ShardEntry, StartLocation, WrongPacket, ACCOUNT_NAME_LENGTH,
+    CHARACTER_NAME_LENGTH, MAX_SHARDS, MIN_CHARACTER_SLOTS, PASSWORD_LENGTH, SHARD_NAME_LENGTH,
+};
 pub use packet::{
     client_packet_length, frame_client_packet, Frame, FrameError, PacketLength, MAX_PACKET_SIZE,
     SEED_LENGTH_NEW, SEED_LENGTH_OLD,
 };
+pub use seed::{Seed, SeedReader, SEED_COMMAND};
 pub use version::{ClientVersion, Era, ParseVersionError};

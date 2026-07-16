@@ -44,14 +44,14 @@ impl ClientVersion {
 
     /// 1.26.4 — The Second Age.
     pub const T2A: Self = Self::new(1, 26, 4, 0);
-    /// 3.0.7b — Lord Blackthorn's Revenge.
+    /// 3.0.7b (= 3.0.7.2) — Lord Blackthorn's Revenge.
     pub const LBR: Self = Self::new(3, 0, 7, 2);
-    /// 4.0.0a — Age of Shadows.
-    pub const AOS: Self = Self::new(4, 0, 0, 1);
-    /// 4.0.5a — Samurai Empire.
-    pub const SE: Self = Self::new(4, 0, 5, 1);
-    /// 5.0.0a — Mondain's Legacy.
-    pub const ML: Self = Self::new(5, 0, 0, 1);
+    /// 4.0.0 — Age of Shadows. Sphere's MINCLIVER_AOS is 4000000, not 4000001.
+    pub const AOS: Self = Self::new(4, 0, 0, 0);
+    /// 4.0.5 — Samurai Empire.
+    pub const SE: Self = Self::new(4, 0, 5, 0);
+    /// 5.0.0 — Mondain's Legacy.
+    pub const ML: Self = Self::new(5, 0, 0, 0);
     /// 7.0.0.0 — Stygian Abyss.
     pub const SA: Self = Self::new(7, 0, 0, 0);
     /// 7.0.9.0 — High Seas.
@@ -82,8 +82,8 @@ impl ClientVersion {
     pub fn status_packet_version(self) -> u8 {
         const VERSIONS: [(u8, ClientVersion); 5] = [
             (6, ClientVersion::new(7, 0, 30, 0)),
-            (5, ClientVersion::new(5, 0, 0, 1)),
-            (4, ClientVersion::new(4, 0, 0, 1)),
+            (5, ClientVersion::new(5, 0, 0, 0)),
+            (4, ClientVersion::new(4, 0, 0, 0)),
             (3, ClientVersion::new(3, 0, 8, 10)),
             (2, ClientVersion::new(3, 0, 8, 4)),
         ];
@@ -410,7 +410,7 @@ mod tests {
     #[test]
     fn era_boundaries_are_exact() {
         // One patch below each boundary must fall in the previous era.
-        assert_eq!(Era::of(ClientVersion::new(4, 0, 0, 0)), Era::Lbr);
+        assert_eq!(Era::of(ClientVersion::new(3, 255, 255, 255)), Era::Lbr);
         assert_eq!(Era::of(ClientVersion::new(4, 0, 4, 99)), Era::Aos);
         assert_eq!(Era::of(ClientVersion::new(6, 99, 99, 99)), Era::Ml);
         assert_eq!(Era::of(ClientVersion::new(7, 0, 8, 99)), Era::Sa);
@@ -447,12 +447,16 @@ mod tests {
         // Sphere: v2 at 3.0.8d, v3 at 3.0.8j, v4 at 4.0.0a, v5 at 5.0.0a,
         // v6 at 7.0.30.0.
         assert_eq!(ClientVersion::new(3, 0, 8, 3).status_packet_version(), 1);
+        assert_eq!(
+            ClientVersion::new(3, 255, 255, 255).status_packet_version(),
+            3
+        );
         assert_eq!(ClientVersion::new(3, 0, 8, 4).status_packet_version(), 2);
         assert_eq!(ClientVersion::new(3, 0, 8, 9).status_packet_version(), 2);
         assert_eq!(ClientVersion::new(3, 0, 8, 10).status_packet_version(), 3);
-        assert_eq!(ClientVersion::new(4, 0, 0, 1).status_packet_version(), 4);
+        assert_eq!(ClientVersion::new(4, 0, 0, 0).status_packet_version(), 4);
         assert_eq!(ClientVersion::new(4, 9, 9, 9).status_packet_version(), 4);
-        assert_eq!(ClientVersion::new(5, 0, 0, 1).status_packet_version(), 5);
+        assert_eq!(ClientVersion::new(5, 0, 0, 0).status_packet_version(), 5);
         assert_eq!(ClientVersion::new(7, 0, 29, 9).status_packet_version(), 5);
         assert_eq!(ClientVersion::new(7, 0, 30, 0).status_packet_version(), 6);
         assert_eq!(ClientVersion::TOL.status_packet_version(), 6);

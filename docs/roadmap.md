@@ -10,15 +10,16 @@ Order, not dates.
 - [x] `protocol` — `ClientVersion`, `Era`, `Feature`, `FeatureSet`
 - [x] `cargo test --workspace` green: 125 tests, clippy clean, fmt clean
 
-## 1. Protocol — in progress
+## 1. Protocol — mostly done
 
 - [x] `PacketReader` / `PacketWriter` — std only, every read fallible
 - [x] Client packet length table ported from Sphere's `receive.h` (70 packets)
 - [x] `frame_client_packet` — split a TCP stream into packets
-- [ ] Seed handshake state: old 4-byte form, new `0xEF` form, lone-`0xEF` segment
-- [ ] Login sequence: `0x80` login, `0xA8` shard list, `0xA0` select, `0x8C` relay
-- [ ] Version negotiation from `0xBD` → `FeatureSet` per connection
-- [ ] Login encryption and server→client Huffman compression
+- [x] Seed handshake state: old 4-byte form, new `0xEF` form, lone-`0xEF` segment
+- [x] Login sequence: `0x80`, `0x82`, `0xA8`, `0xA0`, `0x8C`, `0x91`, `0xA9`
+- [x] `0xBD` client version report → `ClientVersion` → `FeatureSet`
+- [x] Server→client Huffman compression (Sphere's "golden key" table)
+- [ ] Login encryption — see below
 - [ ] Packet tests against captured dumps from real clients
 
 Version-gate everything from the first packet. Retrofitting is the thing this
@@ -27,6 +28,18 @@ crate exists to avoid.
 The codec deliberately has no dependencies — not even `bytes`. Keeping the
 foundation crates dependency-free is what lets them build in environments where
 crates.io is unreachable.
+
+### Login encryption is deliberately deferred
+
+Sphere ships `sphereCrypt.ini`: a per-client-version key table for the login
+stream, and separate game-stream encryption. It is a real lift and it buys
+nothing — the keys are extracted from the client binary, so anyone can read the
+stream. It is obfuscation, not security.
+
+ClassicUO connects with encryption off, which is what freeshards use in
+practice. So: support unencrypted first, get a client on screen, and revisit
+only if a real client turns up that cannot be configured without it. Do not
+mistake this for a security feature when it lands.
 
 ## 2. Gateway and login
 
