@@ -2,12 +2,12 @@
 //!
 //! # Why a trait and not just SQLite
 //!
-//! Development runs on SQLite and production runs on PostgreSQL, and that is not
-//! a preference anyone should have to relitigate per shard. But the reason for
-//! the trait is narrower than "swappable backends": it is that the *tests* need
-//! a store that cannot fail, and every backend can fail. [`MemoryStore`] is what
-//! lets a test assert what the world hands to persistence without a database
-//! anywhere near it.
+//! A shard runs on SQLite or on PostgreSQL, whichever the operator prefers —
+//! neither is "the real one", and SQLite is a fine choice for a live shard. But
+//! the reason for the trait is narrower than "swappable backends": it is that the
+//! *tests* need a store that cannot fail, and every backend can fail.
+//! [`MemoryStore`] is what lets a test assert what the world hands to persistence
+//! without a database anywhere near it.
 //!
 //! # Errors are for the caller to decide about
 //!

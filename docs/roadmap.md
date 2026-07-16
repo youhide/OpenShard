@@ -143,10 +143,16 @@ connection takes the mobile off every screen that had it.
 ## 4. Persistence
 
 - [x] Persistence queue, drained outside the tick
-- [x] SQLite backend (dev) — `SqliteStore`, tested; PostgreSQL after
+- [x] SQLite backend — `SqliteStore`, tested
 - [ ] Save and load accounts and characters
 - [ ] Serial reservation on load — `Registry::bind_serial` already handles this
 - [ ] Crash recovery
+- [ ] PostgreSQL backend — the same `Store` trait, for operators who want it
+
+Two backends, one choice. A shard runs on SQLite or on PostgreSQL, and which is
+the operator's to make: neither is "the production one", and SQLite runs a real
+shard perfectly well. Some will want a text file or a Postgres cluster; the
+`Store` trait is the seam that lets any of them sit behind the same simulation.
 
 The queue is done and there is nothing at the end of it. `Journal` tracks what
 changed, `Snapshot` is a consistent picture of one tick, and a task writes it

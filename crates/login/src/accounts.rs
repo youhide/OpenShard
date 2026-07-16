@@ -9,8 +9,9 @@ use openshard_protocol::{
 
 /// Somewhere accounts live.
 ///
-/// A trait because the dev store below is a placeholder: real shards keep
-/// accounts in PostgreSQL, and the login state machine must not care which.
+/// A trait because the in-memory store below is a placeholder: real shards keep
+/// accounts in a database — SQLite or PostgreSQL — and the login state machine
+/// must not care which.
 ///
 /// # Implementors must hash
 ///

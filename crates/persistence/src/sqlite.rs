@@ -2,13 +2,13 @@
 //!
 //! # Why SQLite is sync behind an async trait
 //!
-//! [`Store`] is async because production is PostgreSQL, whose every call is a
-//! network round-trip. SQLite is a file on the same disk, and `rusqlite` is a
-//! blocking C library. Rather than pretend it is async, each method does its work
-//! on [`tokio::task::spawn_blocking`]: the blocking read or write runs on a
-//! thread that is allowed to block, and the shard's async runtime is not stalled
-//! waiting on a disk. This is the same bargain the whole crate is built on — the
-//! save is allowed to be slow, it is not allowed to be in the way.
+//! [`Store`] is async because one of its backends, PostgreSQL, is a network
+//! server whose every call is a round-trip. SQLite is a file on the same disk,
+//! and `rusqlite` is a blocking C library. Rather than pretend it is async, each
+//! method does its work on [`tokio::task::spawn_blocking`]: the blocking read or
+//! write runs on a thread that is allowed to block, and the shard's async runtime
+//! is not stalled waiting on a disk. This is the same bargain the whole crate is
+//! built on — the save is allowed to be slow, it is not allowed to be in the way.
 //!
 //! # One connection behind a mutex
 //!
@@ -50,9 +50,10 @@ CREATE TABLE IF NOT EXISTS characters (
 
 /// A `Store` kept in a SQLite database.
 ///
-/// Development runs on this; production runs on PostgreSQL behind the same
-/// [`Store`] trait. The character's [`serial`](CharacterRecord::serial) is the
-/// primary key, because that is the identity that has to survive a restart.
+/// One of the two backends behind the [`Store`] trait; PostgreSQL is the other,
+/// and which a shard runs is the operator's choice, not a tier — SQLite handles
+/// a live shard perfectly well. The character's [`serial`](CharacterRecord::serial)
+/// is the primary key, because that is the identity that has to survive a restart.
 #[derive(Debug)]
 pub struct SqliteStore {
     connection: Arc<Mutex<Connection>>,

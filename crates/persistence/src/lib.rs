@@ -27,9 +27,10 @@
 //!
 //! # What is not here yet
 //!
-//! A SQLite backend, and PostgreSQL after it. Items — the journal takes
-//! entities, and a character is the only thing it knows how to record so far.
-//! See `docs/roadmap.md`.
+//! A PostgreSQL backend, for operators who want one — [`SqliteStore`] is the
+//! other choice and neither is a tier. Items, too: the journal takes entities,
+//! and a character is the only thing it knows how to record so far. See
+//! `docs/roadmap.md`.
 
 mod journal;
 pub mod record;
