@@ -307,13 +307,20 @@ listen = "0.0.0.0:2593"
 
 # What to TELL CLIENTS to dial, in the 0x8C relay packet.
 #
-# This is not the same as `listen`, and getting it wrong fails silently: the
-# client logs in, picks the shard, is told to connect to an address it cannot
-# reach, and gives up without the server ever seeing it.
+# NOT the same as `listen`, and the single most likely reason a client hangs.
+# `listen` is where this shard answers; `advertise` is the address it hands out.
+# Get it wrong and the failure is silent from here: the client logs in fine,
+# picks the shard, is told to dial somewhere it cannot reach, and sits on
+# "logging into shard" until it times out. This end sees one connection and a
+# disconnect, and nothing that looks like an error, because nothing here failed.
 #
-#   local only     127.0.0.1:2593
-#   LAN            this machine's LAN address
-#   behind NAT     your PUBLIC address, with 2593 forwarded
+# The default only works if the client runs on THIS MACHINE. A client anywhere
+# else — another PC, a VM, a phone — will dial its own 127.0.0.1 and find
+# nothing.
+#
+#   client on this machine   127.0.0.1:2593
+#   client on your LAN       this machine's LAN address, e.g. 192.168.1.10:2593
+#   client over the internet your PUBLIC address, with 2593 forwarded
 advertise = "127.0.0.1:2593"
 
 [world]

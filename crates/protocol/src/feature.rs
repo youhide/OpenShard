@@ -104,9 +104,11 @@ pub enum Feature {
     MapWaypoints,
 
     // -- behaviours ------------------------------------------------------
-    /// Shard IPs in the 0xA8 list go in wire order rather than reversed.
-    /// Since 4.0.0.
-    ForwardShardIp,
+    /// Shard IPs in the 0xA8 list are sent reversed. Since 4.0.0.
+    ///
+    /// Reversed, for the *newer* clients. That is not a typo and it is not what
+    /// the 0x8C relay does — see `encode_shard_list` and `encode_relay`.
+    ReversedShardIp,
     /// The 0xA9 character list carries a trailing u32 flags field.
     /// Since 1.26.0.1.
     CharacterListFlags,
@@ -190,11 +192,17 @@ impl Feature {
 
             // MAXCLIVER_REVERSEIP 4000000, inverted.
             //
-            // Sphere states this one backwards: it is a *maximum*, and clients
-            // below it reverse the IP bytes. Expressing it as "since 4.0.0 the
-            // IP goes in wire order" is the same rule with the polarity the
-            // rest of this table uses, so it does not need a special case.
-            Self::ForwardShardIp => ClientVersion::new(4, 0, 0, 0),
+            // Sphere states this one as a *maximum*: below 4.0.0 it takes the
+            // other branch. Expressed here as a "since" like everything else in
+            // this table, which flips which branch the name refers to — hence
+            // "reversed since 4.0.0" rather than Sphere's "reverse below it".
+            //
+            // Do not trust Sphere's inline comments on this one. They say the
+            // reverseIp branch sends "in reverse" and the other sends "in
+            // order", and both are the wrong way round for the bytes that
+            // actually leave: `s_addr` is already network order, so the branch
+            // that reverses the dword un-reverses the address. Read the shifts.
+            Self::ReversedShardIp => ClientVersion::new(4, 0, 0, 0),
             // send.cpp writes the 0xA9 flags only when the reported version is
             // strictly greater than 1260000, so the boundary is one patch above.
             Self::CharacterListFlags => ClientVersion::new(1, 26, 0, 1),
@@ -214,7 +222,7 @@ impl Feature {
         Feature::PaddedCharacterList,
         Feature::LbrPackets,
         Feature::AosPackets,
-        Feature::ForwardShardIp,
+        Feature::ReversedShardIp,
         Feature::Tooltips,
         Feature::SkillCaps,
         Feature::NotorietyInvulnerable,
@@ -354,7 +362,7 @@ mod tests {
             | Feature::GlobalChat
             | Feature::NewSecureTrade
             | Feature::MapWaypoints
-            | Feature::ForwardShardIp
+            | Feature::ReversedShardIp
             | Feature::CharacterListFlags
             | Feature::PaddedCharacterList
             | Feature::SilentCloseDialog => Feature::ALL.contains(&feature),
@@ -516,7 +524,7 @@ mod tests {
             (Feature::GlobalChat, 7_006_202),
             (Feature::NewSecureTrade, 7_004_565),
             (Feature::MapWaypoints, 7_008_400),
-            (Feature::ForwardShardIp, 4_000_000), // MAXCLIVER_REVERSEIP, inverted
+            (Feature::ReversedShardIp, 4_000_000), // MAXCLIVER_REVERSEIP, inverted
             (Feature::CharacterListFlags, 1_260_001), // send.cpp: `> 1'26'00'00`
             (Feature::PaddedCharacterList, 3_000_010),
             (Feature::SilentCloseDialog, 4_000_400),

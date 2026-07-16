@@ -235,7 +235,9 @@ impl<A: Accounts> LoginServer<A> {
             return Response::Close;
         }
 
-        let key = self.keys.issue(&account, now);
+        // The version goes with the key: the game connection has no other way
+        // to learn it. See `PendingLogin::version`.
+        let key = self.keys.issue(&account, session.version, now);
         debug!(account, slot, "relaying to the game server");
         session.state = State::Finished;
         Response::SendThenClose(encode_relay(
@@ -274,6 +276,12 @@ impl<A: Accounts> LoginServer<A> {
             session.state = State::Finished;
             return Response::SendThenClose(encode_login_denied(DenyReason::BadAuthId));
         };
+
+        // Adopt the dialect the client declared on the login connection. This
+        // one told us nothing but a key, and guessing "oldest" here means
+        // sending an ancient character list to a modern client, which it reads
+        // past the end of.
+        session.version = pending.version;
 
         // The key says who selected the shard. If the account on this packet is
         // a different one, someone is replaying a key they did not earn.
@@ -348,6 +356,29 @@ mod tests {
             password: password.to_owned(),
         }
         .encode()
+    }
+
+    fn game_login(key: u32, account: &str) -> Vec<u8> {
+        GameServerLogin {
+            auth_key: key,
+            account: account.to_owned(),
+            password: "hunter2".to_owned(),
+        }
+        .encode()
+    }
+
+    /// Take an already-authenticated session through shard select to the relay.
+    fn relay_key_from(
+        server: &mut LoginServer<DevAccounts>,
+        session: &mut LoginSession,
+        now: Instant,
+    ) -> u32 {
+        let Response::SendThenClose(relay) =
+            server.handle(session, &SelectShard { index: 1 }.encode(), now)
+        else {
+            panic!("expected a relay");
+        };
+        u32::from_be_bytes([relay[7], relay[8], relay[9], relay[10]])
     }
 
     /// Run the whole conversation and return the auth key from the relay.
@@ -604,8 +635,96 @@ mod tests {
     }
 
     #[test]
+    fn the_dialect_survives_the_reconnect_to_the_game_server() {
+        // The game connection is a different socket and the client says nothing
+        // on it: four bytes of key, then 0x91. No seed, no version.
+        //
+        // So a session that only knows its own socket knows nothing, falls back
+        // to the oldest dialect, and sends a 1997 character list to a modern
+        // client — no padding, narrow city names, no trailing flags. The client
+        // reads the fields it expects, runs off the end, and desynchronises. It
+        // surfaces as a garbage packet id hundreds of bytes later and looks
+        // nothing like a version problem.
+        //
+        // The key is the only thing linking the two connections, so the version
+        // rides on the key.
+        let mut server = server();
+        let now = Instant::now();
+
+        // Connection one: the client announces a modern version in the seed.
+        let mut first = LoginSession::new();
+        first.on_seed(Seed {
+            value: 1,
+            version: Some(ClientVersion::TOL),
+        });
+        let Response::Send(_) = server.handle(&mut first, &login("admin", "hunter2"), now) else {
+            panic!("expected the shard list");
+        };
+        let key = relay_key_from(&mut server, &mut first, now);
+
+        // Connection two: a brand new session that has been told nothing.
+        let mut second = LoginSession::new();
+        assert_eq!(
+            second.version(),
+            ClientVersion::OLDEST,
+            "the game socket carries no version of its own"
+        );
+
+        let Response::Send(list) = server.handle(&mut second, &game_login(key, "admin"), now)
+        else {
+            panic!("expected the character list");
+        };
+        assert_eq!(
+            second.version(),
+            ClientVersion::TOL,
+            "the key must carry the dialect across the gap"
+        );
+
+        // And the list is in the modern shape, which is the thing the client
+        // actually chokes on: five padded slots and a trailing flags dword.
+        let modern = encode_character_list(
+            &server.accounts.characters("admin"),
+            &server.starts,
+            server.character_list_flags,
+            ClientVersion::TOL,
+        );
+        assert_eq!(list, modern, "the client must get its own dialect");
+    }
+
+    #[test]
+    fn a_key_from_an_ancient_client_does_not_promote_it() {
+        // The other direction: the key carries whatever was declared, and an old
+        // client must keep getting the old shape.
+        let mut server = server();
+        let now = Instant::now();
+
+        let mut first = LoginSession::new();
+        first.on_seed(Seed {
+            value: 1,
+            version: Some(ClientVersion::new(2, 0, 0, 0)),
+        });
+        let Response::Send(_) = server.handle(&mut first, &login("admin", "hunter2"), now) else {
+            panic!("expected the shard list");
+        };
+        let key = relay_key_from(&mut server, &mut first, now);
+
+        let mut second = LoginSession::new();
+        let Response::Send(_) = server.handle(&mut second, &game_login(key, "admin"), now) else {
+            panic!("expected the character list");
+        };
+        assert_eq!(second.version(), ClientVersion::new(2, 0, 0, 0));
+    }
+
+    #[test]
     fn the_seed_version_shapes_the_shard_list() {
-        // The IP order flips at 4.0.0, so the seed has to reach the encoder.
+        // What this actually protects is the wiring: the version arrives in the
+        // seed, and the encoder cannot ask for it. If the seed stops reaching
+        // `encode_shard_list` every client gets whatever the default is, and
+        // half of them get an address backwards.
+        //
+        // Which order belongs to which client is `encode_shard_list`'s business
+        // and is pinned there. This asserts only that the two differ and that
+        // the boundary is where the seed says.
         let mut server = server();
         let now = Instant::now();
 
@@ -618,7 +737,7 @@ mod tests {
         else {
             panic!("expected the shard list");
         };
-        assert_eq!(&list[42..46], &[127, 0, 0, 1], "wire order since 4.0.0");
+        assert_eq!(&list[42..46], &[1, 0, 0, 127], "reversed since 4.0.0");
 
         let mut ancient = LoginSession::new();
         ancient.on_seed(Seed {
@@ -629,7 +748,7 @@ mod tests {
         else {
             panic!("expected the shard list");
         };
-        assert_eq!(&list[42..46], &[1, 0, 0, 127], "reversed below it");
+        assert_eq!(&list[42..46], &[127, 0, 0, 1], "in order below it");
     }
 
     #[test]
@@ -639,7 +758,7 @@ mod tests {
         // the client cannot parse gets silence, not an error.
         let session = LoginSession::new();
         assert_eq!(session.version(), ClientVersion::OLDEST);
-        assert!(!session.version().supports(Feature::ForwardShardIp));
+        assert!(!session.version().supports(Feature::ReversedShardIp));
     }
 
     #[test]

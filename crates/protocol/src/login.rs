@@ -249,15 +249,27 @@ pub const MAX_SHARDS: usize = 32;
 
 /// `0xA8` — the shard list.
 ///
-/// `version` decides the IP byte order: clients before 4.0.0 want it reversed.
-/// Sphere spells this `MAXCLIVER_REVERSEIP`; here it is
-/// [`Feature::ForwardShardIp`].
+/// # The address goes in backwards, and that is correct
+///
+/// A shard at 192.168.11.6 is sent to a modern client as `06 0B A8 C0` — the
+/// octets reversed. Clients before 4.0.0 get `C0 A8 0B 06` instead.
+///
+/// This is the opposite of [`encode_relay`], which always sends the octets in
+/// order. Two packets, two conventions, in the same conversation, about the same
+/// address. There is no reason for it; it is simply what the client does, and
+/// both SphereServer and ServUO encode it exactly this way.
+///
+/// **Do not "fix" this by reading Sphere's comments.** `send.cpp` labels the
+/// branch that emits `C0 A8 0B 06` as sending the IP "in reverse", because it
+/// reverses the *dword*. The dword is `s_addr`, which is already network byte
+/// order, so reversing it un-reverses the address. The comments are the wrong
+/// way round for the bytes that actually leave. The shifts are not.
 ///
 /// Entries past [`MAX_SHARDS`] are dropped rather than sent, because sending
 /// them crashes the client.
 pub fn encode_shard_list(shards: &[ShardEntry], version: ClientVersion) -> Vec<u8> {
     let shards = &shards[..shards.len().min(MAX_SHARDS)];
-    let forward_ip = version.supports(Feature::ForwardShardIp);
+    let reversed_ip = version.supports(Feature::ReversedShardIp);
 
     let mut writer = PacketWriter::with_capacity(6 + shards.len() * 40);
     writer.u8(0xA8);
@@ -274,10 +286,10 @@ pub fn encode_shard_list(shards: &[ShardEntry], version: ClientVersion) -> Vec<u
         writer.u8(shard.timezone);
 
         let octets = shard.address.octets();
-        if forward_ip {
-            writer.bytes(&octets);
-        } else {
+        if reversed_ip {
             writer.bytes(&[octets[3], octets[2], octets[1], octets[0]]);
+        } else {
+            writer.bytes(&octets);
         }
     }
 
@@ -337,15 +349,28 @@ impl SelectShard {
 
 /// `0x8C` — go connect to the game server. 11 bytes.
 ///
-/// The IP here is **always** reversed, on every client version — unlike 0xA8,
-/// which only reverses below 4.0.0. Sphere writes it unconditionally in
-/// `PacketServerRelay`. There is no reason for the asymmetry; it is simply what
-/// the client does.
+/// # The octets go in order, on every client version
+///
+/// A shard at 192.168.11.6 is sent as `C0 A8 0B 06`. Unconditionally: there is
+/// no version gate here, unlike [`encode_shard_list`], which reverses them for
+/// clients from 4.0.0 on. The same address, two packets apart, in two different
+/// orders. Both SphereServer and ServUO encode it exactly this way.
+///
+/// This is the single most expensive byte order in the file to get wrong, and it
+/// is silent on this end. The client takes the relay, dials whatever it was
+/// handed, and never comes back; the server sees a login, a clean disconnect,
+/// and no second connection. Nothing here fails. The packet was well-formed and
+/// pointed at 6.11.168.192.
+///
+/// It was wrong for exactly that reason once, from reading Sphere's
+/// `PacketServerRelay` and seeing `writeByte((ip) & 0xFF)` written first. That
+/// looks like a little-endian write of an address, and it is — of an `s_addr`,
+/// which is *already* network byte order, so the low byte is the first octet.
+/// The shifts undo an endianness the value never had. Trace it, do not read it.
 pub fn encode_relay(address: Ipv4Addr, port: u16, auth_key: u32) -> Vec<u8> {
-    let octets = address.octets();
     let mut writer = PacketWriter::with_capacity(11);
     writer.u8(0x8C);
-    writer.bytes(&[octets[3], octets[2], octets[1], octets[0]]);
+    writer.bytes(&address.octets());
     writer.u16(port);
     writer.u32(auth_key);
     writer.into_bytes()
@@ -690,18 +715,28 @@ mod tests {
     }
 
     #[test]
-    fn shard_list_ip_order_flips_at_4_0_0() {
-        // MAXCLIVER_REVERSEIP: the one boundary Sphere states backwards.
-        let shards = [shard("Britannia", [10, 0, 0, 1])];
+    fn shard_list_reverses_the_ip_for_modern_clients() {
+        // The address is 192.168.11.6 because that is the one that caught this:
+        // a real client, told to dial 6.11.168.192, timing out.
+        //
+        // Reversed for the NEWER client. That is the way round it goes, it is
+        // the opposite of the relay two packets later, and both SphereServer and
+        // ServUO do exactly this. Sphere's inline comments say otherwise and are
+        // wrong; its shifts are right. This test is the shifts.
+        let shards = [shard("Britannia", [192, 168, 11, 6])];
 
         let modern = encode_shard_list(&shards, ClientVersion::new(4, 0, 0, 0));
-        assert_eq!(&modern[42..46], &[10, 0, 0, 1], "4.0.0 sends wire order");
+        assert_eq!(
+            &modern[42..46],
+            &[6, 11, 168, 192],
+            "since 4.0.0 the shard list carries the address backwards"
+        );
 
         let ancient = encode_shard_list(&shards, ClientVersion::new(3, 255, 255, 255));
         assert_eq!(
             &ancient[42..46],
-            &[1, 0, 0, 10],
-            "one patch below, reversed"
+            &[192, 168, 11, 6],
+            "one patch below, the octets go in order"
         );
     }
 
@@ -747,17 +782,58 @@ mod tests {
     }
 
     #[test]
-    fn relay_always_reverses_the_ip() {
-        // Unlike 0xA8, this one does not depend on the client version at all.
-        let bytes = encode_relay(Ipv4Addr::new(10, 0, 0, 1), 2593, 0xDEAD_BEEF);
+    fn the_relay_sends_the_octets_in_order() {
+        // This is the packet that decides whether anyone ever reaches the shard,
+        // and getting it wrong is invisible from the server: the client dials
+        // what it was given, finds nothing, and the log shows a clean login
+        // followed by a disconnect that looks entirely normal.
+        //
+        // It shipped reversed once. A real ClassicUO, told 192.168.11.6, said:
+        //
+        //     Connecting to tcp://6.11.168.192:2593/
+        //     error while connecting ... Operation timed out
+        //
+        // Hence the address. This test is that log line.
+        let bytes = encode_relay(Ipv4Addr::new(192, 168, 11, 6), 2593, 0xDEAD_BEEF);
         assert_eq!(bytes.len(), 11);
-        assert_eq!(&bytes[1..5], &[1, 0, 0, 10]);
+        assert_eq!(&bytes[1..5], &[192, 168, 11, 6]);
         assert_eq!(
             &bytes[5..7],
             &2593u16.to_be_bytes(),
-            "the port is not reversed"
+            "the port is not touched"
         );
         assert_eq!(&bytes[7..11], &0xDEAD_BEEFu32.to_be_bytes());
+    }
+
+    #[test]
+    fn the_relay_and_the_shard_list_disagree_about_the_same_address() {
+        // Not a curiosity: this is the whole trap, and a change that makes these
+        // two agree has broken one of them. Two packets, one conversation, one
+        // address, opposite orders — because that is what the client does.
+        let address = Ipv4Addr::new(192, 168, 11, 6);
+        let modern = ClientVersion::new(7, 0, 45, 65);
+
+        let list = encode_shard_list(&[shard("Britannia", address.octets())], modern);
+        let relay = encode_relay(address, 2593, 0);
+
+        assert_eq!(&list[42..46], &[6, 11, 168, 192]);
+        assert_eq!(&relay[1..5], &[192, 168, 11, 6]);
+    }
+
+    #[test]
+    fn the_relay_does_not_care_what_the_client_is() {
+        // 0xA8 has a version gate. This one does not, and adding one would be
+        // the obvious "symmetry" fix that breaks every modern client.
+        for version in [
+            ClientVersion::OLDEST,
+            ClientVersion::new(3, 0, 0, 0),
+            ClientVersion::new(4, 0, 0, 0),
+            ClientVersion::TOL,
+        ] {
+            let _ = version;
+            let bytes = encode_relay(Ipv4Addr::new(192, 168, 11, 6), 2593, 0);
+            assert_eq!(&bytes[1..5], &[192, 168, 11, 6]);
+        }
     }
 
     #[test]

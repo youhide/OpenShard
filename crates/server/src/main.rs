@@ -20,7 +20,7 @@
 //! crate.
 
 use std::collections::HashMap;
-use std::net::SocketAddrV4;
+use std::net::{SocketAddr, SocketAddrV4};
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
@@ -271,7 +271,7 @@ async fn run_shard(
                     error!("the gateway stopped");
                     return;
                 };
-                handle(&mut sessions, &mut login, &mut world, event);
+                handle(&mut sessions, &mut login, &mut world, advertised, event);
             }
         }
 
@@ -280,10 +280,34 @@ async fn run_shard(
     }
 }
 
+/// Whether the relay is about to send this client somewhere it cannot get back
+/// from.
+///
+/// True when `advertise` is loopback and the client is not on this machine: the
+/// relay will tell it to dial `127.0.0.1`, it will reach its own loopback, find
+/// nothing, and give up.
+///
+/// # Why this is worth catching here and not only at startup
+///
+/// The startup warning fires before anyone has connected, and it scrolls away.
+/// By the time the mistake is *made* — the moment a client that is not on this
+/// machine picks the shard — the warning is a hundred lines up, and what the
+/// operator is looking at is a client stuck on "logging into shard" and a server
+/// log that says nothing is wrong.
+///
+/// And nothing here *is* wrong, which is the whole difficulty. This end sends a
+/// perfectly good packet and never sees a second connection, because the failure
+/// happens somewhere it cannot observe. This is the last moment the shard can
+/// still see both addresses at once and say what is about to happen.
+fn relay_is_unreachable(client: SocketAddr, advertised: SocketAddrV4) -> bool {
+    advertised.ip().is_loopback() && !client.ip().is_loopback()
+}
+
 fn handle(
     sessions: &mut HashMap<ConnectionId, Session>,
     login: &mut LoginServer<DevAccounts>,
     world: &mut World,
+    advertised: SocketAddrV4,
     event: ServerEvent,
 ) {
     match event {
@@ -293,6 +317,16 @@ fn handle(
             outbox,
         } => {
             info!(%id, %address, "connected");
+            if relay_is_unreachable(address, advertised) {
+                error!(
+                    client = %address,
+                    %advertised,
+                    "this client is not on this machine and server.advertise is loopback. \
+                     When it picks the shard it will be told to dial {advertised} — its own \
+                     loopback — and will hang on \"logging into shard\" until it times out. \
+                     Set server.advertise to the address this client can reach."
+                );
+            }
             sessions.insert(
                 id,
                 Session {
@@ -403,5 +437,62 @@ impl Session {
                 false
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn client(address: &str) -> SocketAddr {
+        address.parse().expect("a client address")
+    }
+
+    fn advertise(address: &str) -> SocketAddrV4 {
+        address.parse().expect("an advertised address")
+    }
+
+    #[test]
+    fn a_loopback_advertise_is_unreachable_to_a_client_on_the_network() {
+        // The bug this exists for: the client dials its own loopback and hangs
+        // on "logging into shard" while this end sees one connection, a clean
+        // disconnect, and nothing to explain either.
+        assert!(relay_is_unreachable(
+            client("192.168.11.163:51606"),
+            advertise("127.0.0.1:2593")
+        ));
+    }
+
+    #[test]
+    fn a_loopback_advertise_is_fine_for_a_client_on_this_machine() {
+        // And this is why the shard does not simply refuse to start on a
+        // loopback advertise: a developer with the client on their own desk is
+        // the common case, and it works.
+        assert!(!relay_is_unreachable(
+            client("127.0.0.1:51606"),
+            advertise("127.0.0.1:2593")
+        ));
+    }
+
+    #[test]
+    fn a_real_advertise_is_fine_for_anyone() {
+        for address in ["127.0.0.1:51606", "192.168.11.163:51606", "8.8.8.8:51606"] {
+            assert!(
+                !relay_is_unreachable(client(address), advertise("192.168.11.10:2593")),
+                "{address} should be able to reach an advertised LAN address"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ipv6_loopback_client_is_still_on_this_machine() {
+        // `::1` is loopback and the obvious check — comparing against the string
+        // "127.0.0.1", or against Ipv4Addr::LOCALHOST — misses it, and fires a
+        // scary error at a developer whose client happens to have resolved
+        // localhost to v6.
+        assert!(!relay_is_unreachable(
+            client("[::1]:51606"),
+            advertise("127.0.0.1:2593")
+        ));
     }
 }

@@ -132,8 +132,12 @@ async fn a_client_reaches_the_character_list() {
     let mut relay = [0u8; 11];
     client.read_exact(&mut relay).await.unwrap();
     assert_eq!(relay[0], 0x8C, "relay");
-    // The relay IP is reversed on every client version.
-    assert_eq!(&relay[1..5], &[1, 0, 0, 127]);
+    // The relay carries the octets in order, on every client version — and the
+    // opposite way round from the shard list two packets ago. This is the byte
+    // order that decides whether anyone ever reaches the shard: the client dials
+    // exactly what is here, and if it is wrong it never comes back and this end
+    // sees nothing but a tidy disconnect.
+    assert_eq!(&relay[1..5], &[127, 0, 0, 1]);
     let port = u16::from_be_bytes([relay[5], relay[6]]);
     let auth_key = u32::from_be_bytes([relay[7], relay[8], relay[9], relay[10]]);
     assert_eq!(port, address.port());
@@ -220,8 +224,8 @@ async fn the_client_version_from_the_seed_shapes_the_reply() {
     let shards = read_variable(&mut client).await;
     assert_eq!(
         &shards[42..46],
-        &[1, 0, 0, 127],
-        "a pre-4.0.0 client wants the shard IP reversed"
+        &[127, 0, 0, 1],
+        "a pre-4.0.0 client wants the shard IP in order"
     );
     assert!(ClientVersion::new(3, 0, 7, 2) < ClientVersion::AOS);
 }
