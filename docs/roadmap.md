@@ -80,8 +80,8 @@ arrived. The channel is where async stops and the tick begins.
 - [x] `World::tick` — a fixed 20Hz timestep; commands in, events and packets out
 - [x] Core components: `Position`, `Heading`, `Body`, `Name`, `Client`, `Movement`
 - [x] Domain events: `PlayerEntered`, `MobileMoved`, `StepRefused`, `PlayerLeft`
-- [ ] Spatial index (sectors) and "what can this player see"
-- [ ] Other mobiles: 0x77/0x78, so two players can see each other
+- [x] Spatial index — a 64-tile sector grid, Chebyshev range
+- [x] Other mobiles: 0x77/0x78/0x1D, and the `seen` set that sends each once
 - [ ] Character creation (0x00), not just playing a configured name
 - [ ] Multiple facets; only map0 is wired up
 
@@ -132,9 +132,13 @@ Two things worth knowing:
   several ticks back-to-back turns a hiccup into a stall and a fixed timestep
   into a variable one.
 
-**What is still missing:** a spatial index, and therefore other mobiles. Two
-players in the same room cannot see each other, because nothing yet answers
-"what is near this point".
+**What is still missing:** persistence. The world is built at start and lost
+at stop.
+
+Two players do now see each other. Verified over real TCP, on the real map:
+each is drawn on the other's screen exactly once, steps arrive as `0x77`,
+walking past 18 tiles sends `0x1D` and walking back re-draws, and a dropped
+connection takes the mobile off every screen that had it.
 
 ## 4. Persistence
 

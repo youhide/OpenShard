@@ -8,11 +8,11 @@ nothing else. OpenShard is not a SphereServer clone. It is an attempt at the
 engine Sphere would likely be if it were designed from scratch today: Rust,
 multi-core, data-oriented, script-first, hot-reloadable, observable.
 
-> **Status: early, but a client walks around Britannia.** `cargo run -p openshard-server`
-> loads the client's map and takes a client through login into a ticking world,
-> where walls block and water is wet. What is missing is a spatial index, and so
-> two players cannot see each other. Nothing is saved.
-> See [`docs/roadmap.md`](docs/roadmap.md).
+> **Status: early, but two players walk around Britannia together.**
+> `cargo run -p openshard-server` loads the client's map and takes clients
+> through login into a ticking, shared world, where walls block, water is wet,
+> and you can watch someone else walk over the horizon and back. Nothing is
+> saved. See [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Design
 
@@ -40,7 +40,7 @@ crates/
   gateway       sans-io connection + Tokio listener      implemented
   login         accounts, auth keys, the whole sequence  implemented
   movement      the walk handshake                       implemented
-  world         the tick, components, client map files    partial
+  world         tick, sectors, interest, client map files partial
   config        TOML, validated at load                  implemented
   server        the binary                               implemented
   combat ai items magic skills housing guilds

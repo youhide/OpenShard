@@ -2,14 +2,15 @@
 //!
 //! # What is here
 //!
-//! The tick, the components a character is made of, and the client's map files.
+//! The tick, the components a character is made of, the sector grid that
+//! answers "what is near this point", and the client's map files.
 //!
 //! [`World::tick`] is the deterministic half of the boundary the gateway's
 //! channel draws: commands queue in from network tasks, are applied in a fixed
 //! order at a fixed rate, and packets come out. Nothing inside it awaits, reads
 //! a clock, or touches a socket.
 //!
-//! The spatial index and the gameplay systems are not written yet.
+//! The gameplay systems are not written yet.
 //!
 //! # The client's files are the source of truth
 //!
@@ -32,6 +33,7 @@
 pub mod components;
 pub mod events;
 pub mod map;
+pub mod sectors;
 pub mod terrain;
 pub mod tick;
 pub mod tiledata;
@@ -42,6 +44,7 @@ pub use events::{
     MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
 };
 pub use map::{LandCell, Map, MapError, StaticItem, BLOCK_SIZE};
+pub use sectors::{distance, in_range, Sectors, SECTOR_SIZE, VIEW_RANGE};
 pub use terrain::{MapTerrain, MAX_STEP_DOWN, MAX_STEP_UP, PLAYER_HEIGHT};
 pub use tick::{Command, Outbound, World, TICK_INTERVAL};
 pub use tiledata::{LandTile, StaticTile, TileData, TileDataError, TileDataFormat, TileFlags};
