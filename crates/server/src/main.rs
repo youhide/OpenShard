@@ -88,19 +88,30 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 /// Blocking, and on purpose: this reads ~110MB and takes a moment, and there is
 /// no sense accepting a client before the world it will walk in exists.
 fn load_world(config: &Config) -> Result<Game, Box<dyn std::error::Error>> {
+    let start = (config.world.start.x, config.world.start.y);
     let dir = config.world.client_files.trim();
     if dir.is_empty() {
         warn!(
             "world.client_files is empty: running with no map. Every step will be allowed — \
              players walk through walls and across water. Set it to a client install."
         );
-        return Ok(Game::new());
+        return Ok(Game::new(start));
     }
 
     let dir = Path::new(dir);
     let started = Instant::now();
     let map = Map::load_facet(dir, 0)?;
     let tiles = TileData::load(dir.join("tiledata.mul"))?;
+    // A start position off the map, or in the sea, is worth saying out loud:
+    // the shard still runs and every player spawns somewhere useless.
+    match map.land(start.0, start.1) {
+        Some(cell) => info!(x = start.0, y = start.1, z = cell.z, "start position"),
+        None => warn!(
+            x = start.0,
+            y = start.1,
+            "world.start is off the map; characters will spawn in nowhere"
+        ),
+    }
     info!(
         facet = map.facet_name(),
         size = format!("{}x{}", map.width(), map.height()),
@@ -109,7 +120,7 @@ fn load_world(config: &Config) -> Result<Game, Box<dyn std::error::Error>> {
         took = ?started.elapsed(),
         "map loaded"
     );
-    Ok(Game::new().with_terrain(MapTerrain::new(map, tiles)))
+    Ok(Game::new(start).with_terrain(MapTerrain::new(map, tiles)))
 }
 
 /// Load the config, writing the shipped default if there is none.
@@ -244,7 +255,7 @@ fn dispatch(game: &mut Game, session: &mut Session, packet: &[u8], id: Connectio
                 warn!(%id, "malformed 0x02");
                 return false;
             };
-            let reply = game.walk(player, request);
+            let reply = game.walk(player, request, Instant::now());
             session.send_all(reply.packets)
         }
         _ => true,

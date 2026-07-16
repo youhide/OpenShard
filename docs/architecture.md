@@ -56,19 +56,29 @@ events, not by calling.
 
 ## Crates
 
-**Foundation** — implemented.
+**Implemented.**
 
 | Crate | Owns |
 |---|---|
 | `entities` | `EntityId`, `Serial`, `SparseSet`, `Registry`. Identity and storage. No gameplay. |
 | `events` | `Events<E>`, `Cursor<E>`, `EventBus`. Machinery. Defines no game events. |
-| `protocol` | `ClientVersion`, `Era`, `Feature`, `FeatureSet`. Packets to come. |
+| `protocol` | Versions, feature gates, the codec, framing, the login and world packets. |
+| `gateway` | The sans-io `Connection` and a thin Tokio `Server`. Finds packet boundaries; knows nothing of meaning. |
+| `login` | `Accounts`, `AuthKeys`, and the sans-io `LoginServer`. |
+| `movement` | The walk handshake, the sequence rules, and the pace limiter. `Terrain` is a trait it does not implement. |
+| `config` | TOML, validated at load. |
+| `server` | The binary. Glue only. |
+
+**Partial.**
+
+| Crate | Owns | Missing |
+|---|---|---|
+| `world` | The client's file formats and `MapTerrain`. | The tick, the spatial index, components. |
 
 **Stubs** — declared so the dependency graph is visible.
 
-`gateway`, `login`, `world`, `combat`, `movement`, `ai`, `items`, `magic`,
-`skills`, `housing`, `guilds`, `chat`, `persistence`, `scripting`, `plugins`,
-`metrics`, `config`.
+`combat`, `ai`, `items`, `magic`, `skills`, `housing`, `guilds`, `chat`,
+`persistence`, `scripting`, `plugins`, `metrics`.
 
 ## Entities
 

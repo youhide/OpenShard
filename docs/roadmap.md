@@ -76,6 +76,7 @@ arrived. The channel is where async stops and the tick begins.
 - [x] UOP containers — the map is in `map0LegacyMUL.uop`, not `map0.mul`
 - [x] `map*.mul` / `statics*.mul` — column-major blocks, 2.9M statics
 - [x] `MapTerrain` — real heights, walls, water, the two-unit step limit
+- [x] `WalkPace` — a token bucket; a client can no longer walk as fast as it sends
 - [ ] `world` crate: the tick loop, composing `Registry` + `EventBus`
 - [ ] Spatial index (sectors) and "what can this player see"
 - [ ] Core components: `Position`, `Graphic`, `Body`, `Name`
@@ -96,9 +97,24 @@ if guessed:
   `hashlittle2(key, len, &pc, &pb)`, so `(c << 32) | b` is the natural reading.
   It matches zero entries.
 
+### The pace limiter takes Sphere's numbers and not its arithmetic
+
+The intervals are Sphere's — 200ms on foot, 100ms running — and those are worth
+having: two decades of tuning against real clients.
+
+The arithmetic is ours. Sphere's `Event_Walking` keeps a running average in
+milliseconds and clamps it against `WALKBUFFER`, which defaults to `15` — a
+duration compared against what its own docs call a count of "points". Read
+literally, a normal walker sits at a balance of 15ms and one early step puts it
+at `15 - 200 = -185`, refused instantly, with none of the burst tolerance the
+buffer exists to give. Either the constant means something undocumented or the
+check does not do what it says. `movement::WalkPace` is a token bucket instead:
+the same intent, stated plainly.
+
 **What is still missing:** the tick. `game.rs` answers packets as they arrive
 rather than simulating anything, and it is the placeholder the world crate grows
-out of.
+out of. Until it exists there is no place for anything that happens *without* a
+client asking — decay, regeneration, an NPC deciding to move.
 
 ## 4. Persistence
 

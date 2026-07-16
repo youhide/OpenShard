@@ -61,6 +61,37 @@ pub struct WorldConfig {
     /// feature, and the server says so at startup.
     #[serde(default)]
     pub client_files: String,
+
+    /// Where a new character appears.
+    ///
+    /// Only x and y: the height is taken from the map at spawn. A configured `z`
+    /// would be a second source of truth for something the map already knows,
+    /// and getting it wrong by three units leaves a character unable to take a
+    /// single step, with nothing in the log to say why.
+    #[serde(default)]
+    pub start: StartConfig,
+}
+
+/// Where a new character appears.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartConfig {
+    /// East-west tile.
+    pub x: u16,
+    /// North-south tile.
+    pub y: u16,
+}
+
+impl Default for StartConfig {
+    /// Open ground north-west of Britain.
+    ///
+    /// A default, not a fact. Facets differ — the classic Britain centre at
+    /// (1475, 1774) is open water on some maps — so this is only right for the
+    /// files it was picked against, and it is in config precisely so it can be
+    /// wrong for you and fixable without a rebuild.
+    fn default() -> Self {
+        Self { x: 1363, y: 1600 }
+    }
 }
 
 /// Network and identity.
@@ -292,6 +323,13 @@ advertise = "127.0.0.1:2593"
 # players walk through walls and across water. Useful for testing the protocol,
 # useless as a game.
 client_files = ""
+
+# Where a new character appears. The height comes from the map, not from here.
+#
+# This default is open ground on one facet and may be open water on yours.
+[world.start]
+x = 1363
+y = 1600
 
 # Development accounts, in plaintext, until there is a database.
 [[accounts]]
