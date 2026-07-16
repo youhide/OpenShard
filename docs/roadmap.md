@@ -144,9 +144,10 @@ connection takes the mobile off every screen that had it.
 
 - [x] Persistence queue, drained outside the tick
 - [x] SQLite backend — `SqliteStore`, tested
-- [ ] Save and load accounts and characters
-- [ ] Serial reservation on load — `Registry::bind_serial` already handles this
-- [ ] Crash recovery
+- [x] Save and load accounts and characters
+- [x] Serial reservation on load — `Registry::reserve_serial`, for load-on-play
+- [x] Crash recovery — the boot load restores the world; a played character
+  returns on its saved serial and spot
 - [ ] PostgreSQL backend — the same `Store` trait, for operators who want it
 
 Two backends, one choice. A shard runs on SQLite or on PostgreSQL, and which is
@@ -154,11 +155,12 @@ the operator's to make: neither is "the production one", and SQLite runs a real
 shard perfectly well. Some will want a text file or a Postgres cluster; the
 `Store` trait is the seam that lets any of them sit behind the same simulation.
 
-The queue is done and there is nothing at the end of it. `Journal` tracks what
-changed, `Snapshot` is a consistent picture of one tick, and a task writes it
-where the tick cannot see. The `Store` behind that is `MemoryStore`, so a restart
-still loses the world — the shard warns at startup rather than implying
-otherwise.
+`persistence.database` in the config picks the file; empty keeps the world in
+memory, the same bargain as running with no map, and the shard says so. A
+logged-out character lives as a row, not an entity: its serial is reserved at
+boot so nothing new can take it, and playing it (`0x5D`) spawns it back on that
+serial, at its saved position, looking as it did. Characters save as they change
+and on logout, through the same journal the tick already feeds.
 
 **Three things it is worth knowing before touching this:**
 

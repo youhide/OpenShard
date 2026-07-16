@@ -27,7 +27,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use openshard_entities::{EntityId, Registry, SerialKind};
+use openshard_entities::{EntityId, Registry, Serial, SerialKind};
 use openshard_events::{Cursor, EventBus};
 use openshard_gateway::ConnectionId;
 use openshard_movement::{OpenWorld, Walk, Walker};
@@ -39,7 +39,7 @@ use openshard_protocol::{
 };
 use tracing::{debug, info, warn};
 
-use crate::components::{Body, Client, Heading, Movement, Name, Position};
+use crate::components::{Account, Body, Client, Heading, Movement, Name, Position};
 use crate::events::{
     MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
 };
@@ -103,10 +103,22 @@ pub enum Command {
         connection: ConnectionId,
         /// What the client claims to be.
         version: ClientVersion,
+        /// The account the character belongs to. Saved with the character so a
+        /// load knows whose it is.
+        account: String,
         /// The character's name.
         name: String,
-        /// How the character looks, when the client just created it. `None`
-        /// when an existing character is played and the world uses its default.
+        /// The saved wire serial, when a stored character is being played. `None`
+        /// creates a fresh one — a character being made for the first time. A
+        /// played character must come back with the serial it was saved under,
+        /// because that serial is what every packet ever sent about it referred to.
+        serial: Option<u32>,
+        /// Where to spawn, when a stored character is loaded at its saved spot.
+        /// `None` uses the world's configured start — a newly created character,
+        /// or a played one from before positions were stored.
+        position: Option<Point>,
+        /// How the character looks: chosen at creation, or restored from the save.
+        /// `None` falls back to the default body.
         appearance: Option<Appearance>,
     },
     /// A client asked to take a step.
@@ -121,6 +133,19 @@ pub enum Command {
         /// Which connection.
         connection: ConnectionId,
     },
+}
+
+/// Everything [`World::enter`] needs: who is entering, and as what. A plain
+/// bundle so the one function that puts a character in the world takes one
+/// argument instead of seven.
+struct Entering {
+    connection: ConnectionId,
+    version: ClientVersion,
+    account: String,
+    name: String,
+    serial: Option<u32>,
+    position: Option<Point>,
+    appearance: Option<Appearance>,
 }
 
 /// Bytes for a connection, produced by a tick.
@@ -398,13 +423,13 @@ impl World {
         let heading = registry.get::<Heading>(entity)?.0;
         let body = registry.get::<Body>(entity)?;
         let name = registry.get::<Name>(entity)?;
+        // No account means this is not a player character — an NPC, say — so it
+        // is not a `CharacterRecord`. Returning `None` drops it from the save,
+        // which is the honest answer.
+        let account = registry.get::<Account>(entity)?;
         Some(CharacterRecord {
             serial: serial.raw(),
-            // Every character is on the dev account until accounts are real.
-            // A field with one possible value is a lie the schema is already
-            // telling; it is here because the column has to exist before the
-            // account system can fill it, not because this is right.
-            account: String::new(),
+            account: account.0.clone(),
             name: name.0.clone(),
             body: body.id,
             hue: body.hue,
@@ -416,14 +441,37 @@ impl World {
         })
     }
 
+    /// Reserve a serial read from persistence so a fresh spawn never takes it.
+    ///
+    /// A logged-out character is not in the world — it is a row in the database —
+    /// but its serial is still spoken for. Call this at boot for every stored
+    /// character, before anyone can create a new one. Values outside the serial
+    /// range are ignored: a corrupt row should not stop the shard from starting.
+    pub fn reserve_serial(&mut self, raw: u32) {
+        if let Some(serial) = Serial::new(raw) {
+            self.registry.reserve_serial(serial);
+        }
+    }
+
     fn apply(&mut self, command: Command, now: Instant) {
         match command {
             Command::Enter {
                 connection,
                 version,
+                account,
                 name,
+                serial,
+                position,
                 appearance,
-            } => self.enter(connection, version, name, appearance),
+            } => self.enter(Entering {
+                connection,
+                version,
+                account,
+                name,
+                serial,
+                position,
+                appearance,
+            }),
             Command::Walk {
                 connection,
                 request,
@@ -448,27 +496,49 @@ impl World {
         Point::new(x, y, z)
     }
 
-    fn enter(
-        &mut self,
-        connection: ConnectionId,
-        version: ClientVersion,
-        name: String,
-        appearance: Option<Appearance>,
-    ) {
+    fn enter(&mut self, entering: Entering) {
+        let Entering {
+            connection,
+            version,
+            account,
+            name,
+            serial,
+            position,
+            appearance,
+        } = entering;
         if self.players.contains_key(&connection) {
             warn!(%connection, "already in the world");
             return;
         }
-        let Ok((entity, serial)) = self.registry.spawn_with_serial(SerialKind::Mobile) else {
-            warn!(%connection, "the mobile serial pool is exhausted");
-            return;
+
+        // A stored character comes back on the serial it was saved under; a new
+        // one takes a fresh serial from the pool. The saved serial was reserved
+        // at boot (see `World::reserve_serial`), so binding it here cannot collide.
+        let (entity, serial) = match serial.and_then(Serial::new) {
+            Some(saved) => {
+                let entity = self.registry.spawn();
+                if let Err(error) = self.registry.bind_serial(entity, saved) {
+                    warn!(%connection, ?error, "could not restore the saved serial");
+                    self.registry.despawn(entity);
+                    return;
+                }
+                (entity, saved)
+            }
+            None => match self.registry.spawn_with_serial(SerialKind::Mobile) {
+                Ok(pair) => pair,
+                Err(_) => {
+                    warn!(%connection, "the mobile serial pool is exhausted");
+                    return;
+                }
+            },
         };
 
-        let position = self.start_position();
+        // A loaded character spawns exactly where it was saved, its own z
+        // included; a fresh one takes the world's configured start.
+        let position = position.unwrap_or_else(|| self.start_position());
         let facing = Facing::walking(Direction::South);
-        // A created character brings its chosen body and hue; a played one has
-        // none here yet, so it falls back to the default until persistence
-        // stores appearances.
+        // A created or loaded character brings its body and hue; without one it
+        // falls back to the default.
         let body = Body {
             id: appearance.map_or(BODY_HUMAN_MALE, |look| look.body),
             hue: appearance.map_or(DEFAULT_HUE, |look| look.hue),
@@ -478,6 +548,7 @@ impl World {
         self.registry.insert(entity, Heading(facing));
         self.registry.insert(entity, body);
         self.registry.insert(entity, Name(name.clone()));
+        self.registry.insert(entity, Account(account));
         self.registry
             .insert(entity, Movement(Walker::new(position, facing)));
         self.registry.insert(
@@ -857,7 +928,10 @@ pub(crate) mod tests {
         world.queue(Command::Enter {
             connection,
             version: ClientVersion::TOL,
+            account: "admin".to_owned(),
             name: "Lord British".to_owned(),
+            serial: None,
+            position: None,
             appearance: None,
         });
         world.tick(now);
@@ -902,7 +976,10 @@ pub(crate) mod tests {
         world.queue(Command::Enter {
             connection: connection(),
             version: ClientVersion::TOL,
+            account: "admin".to_owned(),
             name: "Lord British".to_owned(),
+            serial: None,
+            position: None,
             appearance: None,
         });
 
@@ -952,7 +1029,10 @@ pub(crate) mod tests {
         world.queue(Command::Enter {
             connection,
             version: ClientVersion::TOL,
+            account: "admin".to_owned(),
             name: "Nyx".to_owned(),
+            serial: None,
+            position: None,
             appearance: Some(Appearance {
                 body: 0x025E,
                 hue: 0x0430,
@@ -987,6 +1067,57 @@ pub(crate) mod tests {
         let body = world.registry().get::<Body>(entity).copied().unwrap();
         assert_eq!(body.id, BODY_HUMAN_MALE);
         assert_eq!(body.hue, DEFAULT_HUE);
+    }
+
+    #[test]
+    fn a_loaded_character_returns_on_its_saved_serial_and_spot() {
+        // Load-on-play: a stored character is played with its saved serial and
+        // position, and must come back exactly there — not at the start point,
+        // and not on a fresh serial that would orphan every reference to it.
+        let mut world = world();
+        let connection = connection();
+        world.reserve_serial(0x0000_0202);
+        world.queue(Command::Enter {
+            connection,
+            version: ClientVersion::TOL,
+            account: "admin".to_owned(),
+            name: "Lord British".to_owned(),
+            serial: Some(0x0000_0202),
+            position: Some(Point::new(1500, 1000, -5)),
+            appearance: Some(Appearance {
+                body: 0x0191,
+                hue: 0x83EA,
+            }),
+        });
+        world.tick(Instant::now());
+
+        let entity = world.players[&connection];
+        assert_eq!(
+            world.registry().serial_of(entity).unwrap().raw(),
+            0x0000_0202,
+            "it kept its saved serial"
+        );
+        assert_eq!(
+            world.registry().get::<Position>(entity).unwrap().0,
+            Point::new(1500, 1000, -5),
+            "and its saved spot, z and all"
+        );
+    }
+
+    #[test]
+    fn a_saved_character_remembers_whose_it_is() {
+        // The other half: `record_of` fills the account from the entity, so a
+        // saved character can be tied back to its owner on load. A blank account
+        // here is what left every loaded character ownerless before.
+        let mut world = world();
+        enter(&mut world, Instant::now());
+        world.take_snapshot();
+        let snapshot = world
+            .drain_saves()
+            .next()
+            .expect("entering the world is a change worth saving");
+        assert_eq!(snapshot.characters[0].account, "admin");
+        assert_eq!(snapshot.characters[0].name, "Lord British");
     }
 
     #[test]
@@ -1188,7 +1319,10 @@ pub(crate) mod tests {
         world.queue(Command::Enter {
             connection: connection(),
             version: ClientVersion::TOL,
+            account: "admin".to_owned(),
             name: "a".to_owned(),
+            serial: None,
+            position: None,
             appearance: None,
         });
         assert_eq!(world.player_count(), 0);

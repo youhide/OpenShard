@@ -44,6 +44,14 @@ pub struct Body {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Name(pub String);
 
+/// The account a player character belongs to.
+///
+/// Kept out of [`Client`] so that stays `Copy` — this is a heap string, and the
+/// only thing that needs it is persistence, turning an entity into a record that
+/// remembers whose character it is. An NPC has no account and no `Client`.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Account(pub String);
+
 /// Marks an entity as driven by a person rather than by the server.
 ///
 /// Carries the connection so the world can answer it, and the version so

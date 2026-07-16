@@ -28,10 +28,12 @@ use std::time::Instant;
 use openshard_config::{Config, DEFAULT_TOML};
 use openshard_gateway::{ConnectionId, Event, Server, ServerEvent};
 use openshard_login::{Accounts, DevAccounts, LoginServer, LoginSession, Response};
-use openshard_persistence::{MemoryStore, Snapshot, Store};
+use openshard_persistence::{
+    AccountRecord, CharacterRecord, MemoryStore, Snapshot, SqliteStore, Store,
+};
 use openshard_protocol::{
-    encode_login_denied, huffman, CharacterPlay, CreateCharacter, GameServerLogin, StartLocation,
-    WalkRequest,
+    encode_login_denied, huffman, CharacterPlay, CreateCharacter, GameServerLogin, Point,
+    StartLocation, WalkRequest,
 };
 use openshard_world::{Appearance, Command, Map, MapTerrain, TileData, World, TICK_INTERVAL};
 use std::sync::Arc;
@@ -89,7 +91,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let world = load_world(&config)?;
-    let store = open_store();
+    let store = open_store(&config)?;
     tokio::spawn(server.run());
     run_shard(events, &config, advertised, world, store).await;
     Ok(())
@@ -111,20 +113,28 @@ fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
 
 /// Where the world is kept.
 ///
-/// Nowhere, for now. The save path is wired end to end and the store at the end
-/// of it holds everything in memory, so a restart loses the world exactly as it
-/// did before — the difference is that the tick, the journal and the save task
-/// are the ones that will be there when a real database is, and they are being
-/// exercised rather than waiting to be written.
+/// A configured `persistence.database` opens a SQLite file the world survives a
+/// restart in; an empty one keeps everything in memory and says so. The
+/// in-memory mode is a real choice, not a broken one — the same bargain as
+/// running with no map — but a shard that stays quiet about it is one an operator
+/// assumes is saving, so it warns.
 ///
-/// The warning is not decoration. A shard that says nothing here is a shard an
-/// operator assumes is saving.
-fn open_store() -> Arc<dyn Store> {
-    warn!(
-        "no database yet: the world is kept in memory and lost at stop. \
-         Characters will not survive a restart."
-    );
-    Arc::new(MemoryStore::new())
+/// Opening the database can fail, and that is fatal: a shard told to persist that
+/// cannot is not a shard anyone wants started in memory by surprise, losing
+/// everything at the next stop.
+fn open_store(config: &Config) -> Result<Arc<dyn Store>, Box<dyn std::error::Error>> {
+    let path = config.persistence.database.trim();
+    if path.is_empty() {
+        warn!(
+            "no database configured: the world is kept in memory and lost at stop. \
+             Set persistence.database to a file to keep characters across a restart."
+        );
+        return Ok(Arc::new(MemoryStore::new()));
+    }
+    let store = SqliteStore::open(path)
+        .map_err(|error| format!("could not open the database at {path:?}: {error}"))?;
+    info!(path, "persisting to SQLite");
+    Ok(Arc::new(store))
 }
 
 /// Load the client's map, if it is configured.
@@ -225,7 +235,6 @@ async fn run_shard(
 ) {
     let (saves, snapshots) = mpsc::unbounded_channel();
     let (failed, mut failures) = mpsc::unbounded_channel();
-    tokio::spawn(save_loop(store, snapshots, failed));
 
     let mut accounts = DevAccounts::new();
     for account in &config.accounts {
@@ -234,11 +243,56 @@ async fn run_shard(
             accounts = accounts.with_character(&account.name, character);
         }
     }
+
+    // Bring the world back from the database: reserve every stored serial so a new
+    // character cannot take one, list the stored characters so they show up to
+    // play, and keep their records so playing one restores it where it was. This
+    // borrows the store; the save task takes ownership after, so the load has to
+    // come first.
+    for account in &config.accounts {
+        let record = AccountRecord {
+            name: account.name.clone(),
+            credential: account.password.clone(),
+        };
+        if let Err(error) = store.put_account(&record).await {
+            warn!(account = account.name, %error, "could not persist a configured account");
+        }
+    }
+    let mut saved: HashMap<(String, String), CharacterRecord> = HashMap::new();
+    match store.characters().await {
+        Ok(characters) => {
+            for record in characters {
+                world.reserve_serial(record.serial);
+                let listed = accounts
+                    .characters(&record.account)
+                    .iter()
+                    .any(|entry| entry.name.eq_ignore_ascii_case(&record.name));
+                if !listed {
+                    accounts = accounts.with_character(&record.account, &record.name);
+                }
+                saved.insert(
+                    (record.account.to_lowercase(), record.name.to_lowercase()),
+                    record,
+                );
+            }
+            if !saved.is_empty() {
+                info!(
+                    characters = saved.len(),
+                    "restored the world from the database"
+                );
+            }
+        }
+        Err(error) => error!(%error, "could not read saved characters; starting with none"),
+    }
+
     let mut login = LoginServer::new(accounts, &config.server.name, advertised);
     // The character-creation screen needs somewhere to start. Without it the
     // client refuses to create at all — "No city found. Something wrong with the
     // received cities." — because the list it was sent is empty.
     login.starts = start_cities((config.world.start.x, config.world.start.y));
+
+    tokio::spawn(save_loop(store, snapshots, failed));
+
     let mut sessions: HashMap<ConnectionId, Session> = HashMap::new();
     let mut ticker = tokio::time::interval(TICK_INTERVAL);
     // A tick that ran late must not try to catch up by running several in a row:
@@ -282,7 +336,7 @@ async fn run_shard(
                     error!("the gateway stopped");
                     return;
                 };
-                handle(&mut sessions, &mut login, &mut world, advertised, event);
+                handle(&mut sessions, &mut login, &mut world, advertised, &saved, event);
             }
         }
 
@@ -319,6 +373,7 @@ fn handle(
     login: &mut LoginServer<DevAccounts>,
     world: &mut World,
     advertised: SocketAddrV4,
+    saved: &HashMap<(String, String), CharacterRecord>,
     event: ServerEvent,
 ) {
     match event {
@@ -379,7 +434,7 @@ fn handle(
                         }
                         return;
                     }
-                    if !dispatch(session, world, &packet, id) {
+                    if !dispatch(session, world, &packet, id, saved) {
                         sessions.remove(&id);
                         return;
                     }
@@ -409,21 +464,44 @@ fn handle(
 ///
 /// Nothing here answers the client. Every reply comes out of a tick, which is
 /// what keeps the two ends in one order.
-fn dispatch(session: &mut Session, world: &mut World, packet: &[u8], id: ConnectionId) -> bool {
+fn dispatch(
+    session: &mut Session,
+    world: &mut World,
+    packet: &[u8],
+    id: ConnectionId,
+    saved: &HashMap<(String, String), CharacterRecord>,
+) -> bool {
     match packet.first().copied() {
         Some(CharacterPlay::ID) => {
             let Ok(play) = CharacterPlay::decode(packet) else {
                 warn!(%id, "malformed 0x5D");
                 return false;
             };
+            let account = session.login.account().unwrap_or_default().to_owned();
+            // A stored character enters on its saved serial, spot and look; one
+            // the database has never seen — a config-only character on a fresh
+            // shard — enters fresh at the start.
+            let key = (account.to_lowercase(), play.name.to_lowercase());
+            let (serial, position, appearance) = match saved.get(&key) {
+                Some(record) => (
+                    Some(record.serial),
+                    Some(Point::new(record.x, record.y, record.z)),
+                    Some(Appearance {
+                        body: record.body,
+                        hue: record.hue,
+                    }),
+                ),
+                None => (None, None, None),
+            };
             session.in_world = true;
             world.queue(Command::Enter {
                 connection: id,
                 version: session.login.version(),
+                account,
                 name: play.name,
-                // Playing an existing character: its stored appearance will come
-                // from persistence. Until then the world uses its default body.
-                appearance: None,
+                serial,
+                position,
+                appearance,
             });
             true
         }
@@ -508,7 +586,14 @@ fn create_character(
     world.queue(Command::Enter {
         connection: id,
         version: session.login.version(),
+        account,
         name,
+        // A brand-new character: a fresh serial, and the world's start until it
+        // walks somewhere worth saving. The tick will journal it, so it is in the
+        // database — and in the character list — by the next time the player logs
+        // in.
+        serial: None,
+        position: None,
         appearance: Some(Appearance {
             body: create.body(),
             hue: create.skin_hue,

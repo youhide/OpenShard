@@ -48,6 +48,9 @@ pub struct Config {
     /// Accounts, for as long as there is no database.
     #[serde(default)]
     pub accounts: Vec<AccountConfig>,
+    /// Where the world is kept between restarts.
+    #[serde(default)]
+    pub persistence: PersistenceConfig,
 }
 
 /// Where to find the client's data files.
@@ -92,6 +95,21 @@ impl Default for StartConfig {
     fn default() -> Self {
         Self { x: 1363, y: 1600 }
     }
+}
+
+/// Where the world is kept between restarts.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersistenceConfig {
+    /// Path to a SQLite database file, or empty to keep the world in memory.
+    ///
+    /// Empty is a real mode, not a broken one: the shard runs and loses the
+    /// world at stop, the same bargain as running with no map. Point this at a
+    /// file — `openshard.db` — and characters survive a restart. SQLite or
+    /// PostgreSQL is the operator's choice; only SQLite is wired in so far, and
+    /// this is its path.
+    #[serde(default)]
+    pub database: String,
 }
 
 /// Network and identity.
@@ -337,6 +355,13 @@ client_files = ""
 [world.start]
 x = 1363
 y = 1600
+
+[persistence]
+# Path to a SQLite database file. Leave empty to keep the world in memory and
+# lose it at stop; point it at a file to have characters survive a restart.
+#
+#   database = "openshard.db"
+database = ""
 
 # Development accounts, in plaintext, until there is a database.
 [[accounts]]
@@ -623,6 +648,29 @@ mod tests {
         let text = toml::to_string(&original).unwrap();
         let parsed: Config = toml::from_str(&text).unwrap();
         assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn persistence_defaults_to_no_database() {
+        // A config with no [persistence] section — every config written before
+        // this option existed — must still parse and mean "keep it in memory".
+        assert_eq!(config(MINIMAL).persistence.database, "");
+    }
+
+    #[test]
+    fn a_database_path_is_read() {
+        let config = config(
+            r#"
+            [server]
+            name = "OpenShard"
+            listen = "0.0.0.0:2593"
+            advertise = "127.0.0.1:2593"
+
+            [persistence]
+            database = "openshard.db"
+            "#,
+        );
+        assert_eq!(config.persistence.database, "openshard.db");
     }
 
     #[test]

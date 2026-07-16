@@ -241,6 +241,18 @@ impl Registry {
         Ok(())
     }
 
+    /// Reserve a serial that belongs to something not currently spawned.
+    ///
+    /// The counterpart to [`bind_serial`](Self::bind_serial) for a load that does
+    /// not spawn everything it reads: a logged-out character lives in the database
+    /// rather than as an entity, but its serial was on the wire in every packet it
+    /// was ever in and must not be handed to someone else before it is next
+    /// played. This bumps the allocator past it so a fresh spawn never collides,
+    /// with no entity to hang it on. Binding it to an entity later still succeeds.
+    pub fn reserve_serial(&mut self, serial: Serial) {
+        self.serials.reserve(serial);
+    }
+
     /// The wire serial of `entity`, if it has one.
     #[inline]
     pub fn serial_of(&self, entity: EntityId) -> Option<Serial> {
@@ -506,6 +518,26 @@ mod tests {
 
         let (_, fresh) = reg.spawn_with_serial(SerialKind::Item).unwrap();
         assert_eq!(fresh.raw(), 0x4000_0501);
+    }
+
+    #[test]
+    fn reserve_serial_keeps_a_loaded_serial_out_of_the_allocator() {
+        // The load-on-play path: a character read from the database is not
+        // spawned until it is played, but its serial must be off-limits from
+        // boot so a newly created character never takes it.
+        let mut reg = Registry::new();
+        let loaded = Serial::new(0x0000_0005).unwrap();
+        reg.reserve_serial(loaded);
+
+        let (_, fresh) = reg.spawn_with_serial(SerialKind::Mobile).unwrap();
+        assert!(
+            fresh.raw() > loaded.raw(),
+            "a fresh spawn skips the reserved serial"
+        );
+
+        // And the reserved serial can still be bound when the character is played.
+        let entity = reg.spawn();
+        assert_eq!(reg.bind_serial(entity, loaded), Ok(()));
     }
 
     #[test]
