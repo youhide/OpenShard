@@ -302,8 +302,13 @@ async fn run_shard(
     let mut login = LoginServer::new(accounts, &config.server.name, advertised);
     // The character-creation screen needs somewhere to start. Without it the
     // client refuses to create at all — "No city found. Something wrong with the
-    // received cities." — because the list it was sent is empty.
-    login.starts = start_cities((config.world.start.x, config.world.start.y));
+    // received cities." — because the list it was sent is empty. The list is
+    // filtered to the facets this shard loaded, so every city offered is one a
+    // player can actually be placed in.
+    login.starts = start_cities(
+        &config.world.facets,
+        (config.world.start.x, config.world.start.y),
+    );
 
     tokio::spawn(save_loop(store, snapshots, failed));
 
@@ -543,23 +548,59 @@ fn dispatch(
 
 /// The starting cities offered on the character-creation screen.
 ///
-/// There is always at least one, because the client refuses to create a
-/// character with an empty list and says so — "No city found. Something wrong
-/// with the received cities." Until the world models separate start locations
-/// across more than one facet, every choice spawns at the world's configured
-/// start, so the single city offered *is* that spot: what the player picks and
-/// where they wake up agree.
+/// The nine classic towns a new character could wake up in on the original
+/// Felucca map — the same list, inns and coordinates RunUO and ServUO have
+/// shipped for two decades. Their order is what matters as much as their
+/// contents: `start_location` in the create packet is a raw index into this
+/// list, so position N here is the city the player picked when they clicked the
+/// Nth entry. `create_character` reads the same list back to place the spawn, so
+/// the two agree by construction.
 ///
-/// The description cliloc is Britannia's generic one; a client older than
-/// 7.0.13.0 ignores the field entirely.
-fn start_cities(start: (u16, u16)) -> Vec<StartLocation> {
-    vec![StartLocation {
-        area: "Britannia".to_owned(),
-        name: "Britain".to_owned(),
-        position: (i32::from(start.0), i32::from(start.1), 0),
-        map: 0,
-        description_cliloc: 1075074,
-    }]
+/// All nine are on facet 0, the only facet a new character starts on, so the
+/// list is filtered to the facets this shard actually loaded: offering a city on
+/// a facet with no terrain would spawn the player in nowhere. If that leaves it
+/// empty — a shard that loaded no facet carrying a starting city — one city at
+/// the configured start is kept, because the client refuses an empty list and
+/// says so: "No city found. Something wrong with the received cities."
+///
+/// The description cliloc is left 0: a client older than 7.0.13.0 ignores the
+/// field, and a newer one shows the city and inn names either way.
+fn start_cities(facets: &[u8], start: (u16, u16)) -> Vec<StartLocation> {
+    fn city(area: &str, name: &str, x: i32, y: i32, z: i32) -> StartLocation {
+        StartLocation {
+            area: area.to_owned(),
+            name: name.to_owned(),
+            position: (x, y, z),
+            map: 0,
+            description_cliloc: 0,
+        }
+    }
+
+    let mut cities: Vec<StartLocation> = [
+        city("Yew", "The Empath Abbey", 633, 858, 0),
+        city("Minoc", "The Barnacle", 2476, 413, 15),
+        city("Britain", "Sweet Dreams Inn", 1496, 1628, 10),
+        city("Moonglow", "The Scholars Inn", 4408, 1168, 0),
+        city("Trinsic", "The Traveler's Inn", 1845, 2745, 0),
+        city("Magincia", "The Great Horns Tavern", 3734, 2222, 20),
+        city("Jhelom", "The Mercenary Inn", 1374, 3826, 0),
+        city("Skara Brae", "The Falconer's Inn", 618, 2234, 0),
+        city("Vesper", "The Ironwood Inn", 2771, 976, 0),
+    ]
+    .into_iter()
+    .filter(|city| facets.contains(&(city.map as u8)))
+    .collect();
+
+    if cities.is_empty() {
+        cities.push(StartLocation {
+            area: "Britannia".to_owned(),
+            name: "Britain".to_owned(),
+            position: (i32::from(start.0), i32::from(start.1), 0),
+            map: i32::from(facets.first().copied().unwrap_or(0)),
+            description_cliloc: 0,
+        });
+    }
+    cities
 }
 
 /// Create a character on the authenticated account, then enter the world with
@@ -599,19 +640,34 @@ fn create_character(
         }
     }
 
+    // Place the character in the city they picked. `start_location` indexes the
+    // very list `start_cities` built and the character-list packet offered, so a
+    // valid pick names a real city; only a client sending an out-of-range index
+    // falls back to the default facet and a fresh spawn.
+    let (facet, position) = match login.starts.get(create.start_location as usize) {
+        Some(city) => (
+            city.map as u8,
+            Some(Point::new(
+                city.position.0 as u16,
+                city.position.1 as u16,
+                city.position.2 as i8,
+            )),
+        ),
+        None => (0, None),
+    };
+
     session.in_world = true;
     world.queue(Command::Enter {
         connection: id,
         version: session.login.version(),
         account,
         name,
-        // A brand-new character: a fresh serial, and the world's start on the
-        // default facet until it walks somewhere worth saving. The tick will
-        // journal it, so it is in the database — and in the character list — by
-        // the next time the player logs in.
+        // A brand-new character: a fresh serial, spawned in the chosen city. The
+        // tick will journal it, so it is in the database — and in the character
+        // list — by the next time the player logs in.
         serial: None,
-        position: None,
-        facet: 0,
+        position,
+        facet,
         appearance: Some(Appearance {
             body: create.body(),
             hue: create.skin_hue,
@@ -776,12 +832,45 @@ mod tests {
     }
 
     #[test]
-    fn there_is_always_at_least_one_start_city() {
+    fn a_facet_zero_shard_offers_the_classic_towns() {
+        // Facet 0 loaded — the normal case — offers the nine classic Felucca
+        // cities, every one of them on map 0 with a real, non-origin position.
+        let cities = start_cities(&[0], (1363, 1600));
+        assert_eq!(cities.len(), 9, "the nine classic starting cities");
+        assert!(
+            cities.iter().any(|city| city.area == "Britain"),
+            "Britain is one of them"
+        );
+        for city in &cities {
+            assert_eq!(city.map, 0, "every classic city is on Felucca");
+            assert!(
+                city.position.0 > 0 && city.position.1 > 0,
+                "a real spot, not the origin"
+            );
+        }
+    }
+
+    #[test]
+    fn a_shard_without_facet_zero_still_offers_one_city() {
         // An empty list is what makes ClassicUO refuse to open the creation
-        // screen, so there is always one, sitting at the configured start.
-        let cities = start_cities((1363, 1600));
-        assert!(!cities.is_empty());
+        // screen. No classic city lives on a non-zero facet, so a shard that
+        // loaded only facet 1 keeps a single fallback at the configured start —
+        // on a facet it actually loaded, not facet 0 it did not.
+        let cities = start_cities(&[1], (1363, 1600));
+        assert_eq!(cities.len(), 1, "never empty");
         assert_eq!(cities[0].position, (1363, 1600, 0));
-        assert_eq!(cities[0].map, 0);
+        assert_eq!(cities[0].map, 1, "on a loaded facet");
+    }
+
+    #[test]
+    fn start_location_indexes_the_offered_list() {
+        // The contract create_character depends on: the byte the client sends is
+        // a raw index into exactly this list, so the Nth city is the one picked
+        // by clicking the Nth entry. If this order ever shifts, spawns land in
+        // the wrong town silently.
+        let cities = start_cities(&[0], (1363, 1600));
+        assert_eq!(cities[0].area, "Yew");
+        assert_eq!(cities[2].area, "Britain");
+        assert_eq!(cities[8].area, "Vesper");
     }
 }

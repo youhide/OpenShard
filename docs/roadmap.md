@@ -83,6 +83,8 @@ arrived. The channel is where async stops and the tick begins.
 - [x] Spatial index — a 64-tile sector grid, Chebyshev range
 - [x] Other mobiles: 0x77/0x78/0x1D, and the `seen` set that sends each once
 - [x] Character creation (0x00 and 0xF8), not just playing a configured name
+- [x] Starting cities — the nine classic Felucca towns, filtered to the loaded
+  facets; a new character spawns in the one it picked
 - [x] Multiple facets — `[world] facets`, terrain and interest per facet
 
 **Three things about the client file formats that are not written down
