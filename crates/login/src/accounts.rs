@@ -2,7 +2,10 @@
 
 use std::collections::HashMap;
 
-use openshard_protocol::{CharacterEntry, DenyReason, ACCOUNT_NAME_LENGTH, PASSWORD_LENGTH};
+use openshard_protocol::{
+    CharacterEntry, DenyReason, ACCOUNT_NAME_LENGTH, CHARACTER_NAME_LENGTH, MIN_CHARACTER_SLOTS,
+    PASSWORD_LENGTH,
+};
 
 /// Somewhere accounts live.
 ///
@@ -28,6 +31,19 @@ pub trait Accounts {
     ///
     /// Empty for an account with none; the 0xA9 encoder pads the list out.
     fn characters(&self, account: &str) -> Vec<CharacterEntry>;
+
+    /// Create a character in the first free slot and return its slot index.
+    ///
+    /// The client sends this as `0x00`/`0xF8` on the game connection, after it
+    /// is already authenticated, so the account is expected to exist. Failure
+    /// modes map to the codes the client can render: a full account is
+    /// [`DenyReason::TooManyCharacters`], and an empty, overlong or duplicate
+    /// name is [`DenyReason::BadCharacter`].
+    ///
+    /// Takes `&mut self` because it writes: a real store persists here, and the
+    /// dev store keeps it in memory for the life of the process, which is enough
+    /// for a freshly created character to show up in the list on reconnect.
+    fn create_character(&mut self, account: &str, name: &str) -> Result<u32, DenyReason>;
 }
 
 /// Compare two strings without leaking their contents through timing.
@@ -146,6 +162,39 @@ impl Accounts for DevAccounts {
             .map(|entry| entry.characters.clone())
             .unwrap_or_default()
     }
+
+    fn create_character(&mut self, account: &str, name: &str) -> Result<u32, DenyReason> {
+        // The name is trimmed because the client pads its 30-byte field, and a
+        // name that is only spaces is not a name. Width is the wire field's.
+        let trimmed = name.trim();
+        if trimmed.is_empty() || name.len() > CHARACTER_NAME_LENGTH {
+            return Err(DenyReason::BadCharacter);
+        }
+
+        let Some(entry) = self.accounts.get_mut(&account.to_lowercase()) else {
+            return Err(DenyReason::NoAccount);
+        };
+        // The 0xA9 list shows exactly five slots, so a sixth character would be
+        // created and then be invisible. Refuse it where the client can hear why.
+        if entry.characters.len() >= MIN_CHARACTER_SLOTS {
+            return Err(DenyReason::TooManyCharacters);
+        }
+        // Two characters with one name make 0x5D ambiguous — it echoes the name,
+        // not the slot — so a duplicate is refused rather than quietly shadowed.
+        if entry
+            .characters
+            .iter()
+            .any(|character| character.name.eq_ignore_ascii_case(trimmed))
+        {
+            return Err(DenyReason::BadCharacter);
+        }
+
+        let slot = entry.characters.len() as u32;
+        entry.characters.push(CharacterEntry {
+            name: trimmed.to_owned(),
+        });
+        Ok(slot)
+    }
 }
 
 #[cfg(test)]
@@ -239,6 +288,76 @@ mod tests {
     #[test]
     fn an_unknown_account_has_no_characters() {
         assert_eq!(store().characters("nobody"), vec![]);
+    }
+
+    #[test]
+    fn create_character_fills_the_first_free_slot() {
+        let mut store = DevAccounts::new().with_account("a", "p");
+        assert_eq!(store.create_character("a", "First"), Ok(0));
+        assert_eq!(store.create_character("a", "Second"), Ok(1));
+        let characters = store.characters("a");
+        assert_eq!(characters.len(), 2);
+        assert_eq!(characters[0].name, "First");
+        assert_eq!(characters[1].name, "Second");
+    }
+
+    #[test]
+    fn create_character_survives_to_the_next_read() {
+        // The dev store keeps it in memory, which is enough for the new
+        // character to be in the list when the client reconnects to play it.
+        let mut store = DevAccounts::new().with_account("a", "p");
+        let _ = store.create_character("a", "Newbie");
+        assert_eq!(store.characters("a")[0].name, "Newbie");
+    }
+
+    #[test]
+    fn create_character_refuses_a_sixth_character() {
+        let mut store = DevAccounts::new().with_account("a", "p");
+        for index in 0..MIN_CHARACTER_SLOTS {
+            assert!(store.create_character("a", &format!("C{index}")).is_ok());
+        }
+        assert_eq!(
+            store.create_character("a", "TooMany"),
+            Err(DenyReason::TooManyCharacters)
+        );
+    }
+
+    #[test]
+    fn create_character_refuses_an_empty_or_overlong_name() {
+        let mut store = DevAccounts::new().with_account("a", "p");
+        assert_eq!(
+            store.create_character("a", "   "),
+            Err(DenyReason::BadCharacter)
+        );
+        assert_eq!(
+            store.create_character("a", ""),
+            Err(DenyReason::BadCharacter)
+        );
+        let long = "x".repeat(CHARACTER_NAME_LENGTH + 1);
+        assert_eq!(
+            store.create_character("a", &long),
+            Err(DenyReason::BadCharacter)
+        );
+    }
+
+    #[test]
+    fn create_character_refuses_a_duplicate_name() {
+        let mut store = DevAccounts::new().with_account("a", "p");
+        assert!(store.create_character("a", "Twin").is_ok());
+        assert_eq!(
+            store.create_character("a", "twin"),
+            Err(DenyReason::BadCharacter),
+            "case-insensitively, since the client does not preserve case"
+        );
+    }
+
+    #[test]
+    fn create_character_refuses_an_unknown_account() {
+        let mut store = DevAccounts::new();
+        assert_eq!(
+            store.create_character("nobody", "X"),
+            Err(DenyReason::NoAccount)
+        );
     }
 
     #[test]

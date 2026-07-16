@@ -21,9 +21,9 @@
 
 use std::fmt;
 
-use crate::codec::PacketWriter;
+use crate::codec::{PacketReader, PacketWriter};
 use crate::direction::Facing;
-use crate::login::{expect_id, LoginDecodeError};
+use crate::login::{expect_id, LoginDecodeError, WrongPacket, CHARACTER_NAME_LENGTH};
 
 /// Where something is.
 ///
@@ -99,6 +99,236 @@ impl CharacterPlay {
         writer.zeros(24);
         writer.u32(self.slot);
         writer.u32(self.client_ip);
+        writer.into_bytes()
+    }
+}
+
+// -- 0x00 / 0xF8 create character -----------------------------------------
+
+/// The race a player picked at character creation.
+///
+/// The world does not model races yet; this exists so the create packet can be
+/// decoded without losing what the player chose, and so [`CreateCharacter::body`]
+/// can pick the right graphic.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Race {
+    /// The default, and the only one before Mondain's Legacy.
+    Human,
+    /// Since Mondain's Legacy.
+    Elf,
+    /// Since Stygian Abyss.
+    Gargoyle,
+}
+
+/// One starting skill a player chose at creation: which skill, and its value.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct SkillChoice {
+    /// The skill id, as the client numbers them.
+    pub skill: u8,
+    /// Its starting value; the client sends whole points here. Stored raw.
+    pub value: u8,
+}
+
+/// `0x00` / `0xF8` — the client asks to create a character.
+///
+/// # Two ids, one packet
+///
+/// `0x00` is the classic 104-byte form with three starting skills. `0xF8` is
+/// what ClassicUO 7.0.16 and later send — 106 bytes, with a fourth skill. The
+/// two are otherwise byte-for-byte identical, so they decode through one path
+/// that differs only by how many skill pairs it reads. Which id a client uses is
+/// the client's business; the shard accepts both.
+///
+/// The sex/race byte is read with the Stygian Abyss encoding (`0x2`–`0x7`), what
+/// every client that reaches character creation on a modern shard sends. A
+/// genuinely pre-SA client using the old `0x0`–`0x3` encoding would have its race
+/// read one off; that is a deliberate simplification while the world models no
+/// races, noted here so it is a choice and not a surprise.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct CreateCharacter {
+    /// The new character's name.
+    pub name: String,
+    /// Client flags reported at creation.
+    pub flags: u32,
+    /// The chosen profession, or 0 for the "advanced"/custom option.
+    pub profession: u8,
+    /// The raw sex/race byte, exactly as sent. [`Self::race`] and
+    /// [`Self::is_female`] interpret it.
+    pub sex_race: u8,
+    /// Starting strength.
+    pub strength: u8,
+    /// Starting dexterity.
+    pub dexterity: u8,
+    /// Starting intelligence.
+    pub intelligence: u8,
+    /// The starting skills: three for `0x00`, four for `0xF8`.
+    pub skills: Vec<SkillChoice>,
+    /// Skin hue.
+    pub skin_hue: u16,
+    /// Hair graphic.
+    pub hair: u16,
+    /// Hair hue.
+    pub hair_hue: u16,
+    /// Facial-hair graphic.
+    pub beard: u16,
+    /// Facial-hair hue.
+    pub beard_hue: u16,
+    /// Which starting city the player picked, as an index into the list the
+    /// character-list packet offered.
+    pub start_location: u8,
+    /// Which character slot to fill.
+    pub slot: u32,
+    /// Shirt hue.
+    pub shirt_hue: u16,
+    /// Trousers hue.
+    pub pants_hue: u16,
+}
+
+impl CreateCharacter {
+    /// The classic create-character id: 104 bytes, three skills.
+    pub const ID_CLASSIC: u8 = 0x00;
+    /// The 7.0.16+ create-character id: 106 bytes, four skills.
+    pub const ID_HIGH_SEAS: u8 = 0xF8;
+
+    /// Decode either the `0x00` or the `0xF8` create-character packet.
+    pub fn decode(bytes: &[u8]) -> Result<Self, LoginDecodeError> {
+        let mut reader = PacketReader::new(bytes);
+        let id = reader.u8()?;
+        let skill_count = match id {
+            Self::ID_CLASSIC => 3,
+            Self::ID_HIGH_SEAS => 4,
+            found => {
+                return Err(LoginDecodeError::WrongPacket(WrongPacket {
+                    expected: Self::ID_HIGH_SEAS,
+                    found,
+                }))
+            }
+        };
+
+        // pattern1 (4), pattern2 (4), a "kuoc" byte (1) — constants the client
+        // sends and the server has no use for.
+        reader.skip(9)?;
+        let name = reader.fixed_string(CHARACTER_NAME_LENGTH)?;
+        reader.skip(2)?; // 0x0000
+        let flags = reader.u32()?;
+        reader.skip(8)?; // unknown
+        let profession = reader.u8()?;
+        reader.skip(15)?; // 0x00 * 15
+        let sex_race = reader.u8()?;
+        let strength = reader.u8()?;
+        let dexterity = reader.u8()?;
+        let intelligence = reader.u8()?;
+
+        let mut skills = Vec::with_capacity(skill_count);
+        for _ in 0..skill_count {
+            let skill = reader.u8()?;
+            let value = reader.u8()?;
+            skills.push(SkillChoice { skill, value });
+        }
+
+        let skin_hue = reader.u16()?;
+        let hair = reader.u16()?;
+        let hair_hue = reader.u16()?;
+        let beard = reader.u16()?;
+        let beard_hue = reader.u16()?;
+        reader.skip(1)?; // shard index
+        let start_location = reader.u8()?;
+        let slot = reader.u32()?;
+        reader.skip(4)?; // the client's claimed ip; not to be trusted
+        let shirt_hue = reader.u16()?;
+        let pants_hue = reader.u16()?;
+
+        Ok(Self {
+            name,
+            flags,
+            profession,
+            sex_race,
+            strength,
+            dexterity,
+            intelligence,
+            skills,
+            skin_hue,
+            hair,
+            hair_hue,
+            beard,
+            beard_hue,
+            start_location,
+            slot,
+            shirt_hue,
+            pants_hue,
+        })
+    }
+
+    /// Whether the character is female. Odd sex/race values are female on every
+    /// client — Sphere notes this rule holds across versions.
+    pub const fn is_female(&self) -> bool {
+        self.sex_race % 2 != 0
+    }
+
+    /// The chosen race, read with the Stygian Abyss encoding.
+    pub const fn race(&self) -> Race {
+        match self.sex_race {
+            0x4 | 0x5 => Race::Elf,
+            0x6 | 0x7 => Race::Gargoyle,
+            // 0x2 / 0x3, and anything unexpected, is a human — the safe default
+            // Sphere falls back to.
+            _ => Race::Human,
+        }
+    }
+
+    /// The body graphic for this character's race and sex.
+    pub const fn body(&self) -> u16 {
+        match (self.race(), self.is_female()) {
+            (Race::Human, false) => 0x0190,
+            (Race::Human, true) => 0x0191,
+            (Race::Elf, false) => 0x025D,
+            (Race::Elf, true) => 0x025E,
+            (Race::Gargoyle, false) => 0x029A,
+            (Race::Gargoyle, true) => 0x029B,
+        }
+    }
+
+    /// Encode the packet. The `0xF8` (four-skill) form is written when four
+    /// skills are present, the classic `0x00` form otherwise. Mostly for tests.
+    pub fn encode(&self) -> Vec<u8> {
+        let high_seas = self.skills.len() >= 4;
+        let capacity = if high_seas { 106 } else { 104 };
+        let mut writer = PacketWriter::with_capacity(capacity);
+        writer.u8(if high_seas {
+            Self::ID_HIGH_SEAS
+        } else {
+            Self::ID_CLASSIC
+        });
+        writer.zeros(9); // pattern1, pattern2, kuoc
+        writer.fixed_string(&self.name, CHARACTER_NAME_LENGTH);
+        writer.zeros(2);
+        writer.u32(self.flags);
+        writer.zeros(8);
+        writer.u8(self.profession);
+        writer.zeros(15);
+        writer.u8(self.sex_race);
+        writer.u8(self.strength);
+        writer.u8(self.dexterity);
+        writer.u8(self.intelligence);
+
+        let count = if high_seas { 4 } else { 3 };
+        for index in 0..count {
+            let choice = self.skills.get(index).copied().unwrap_or_default();
+            writer.u8(choice.skill);
+            writer.u8(choice.value);
+        }
+
+        writer.u16(self.skin_hue);
+        writer.u16(self.hair);
+        writer.u16(self.hair_hue);
+        writer.u16(self.beard);
+        writer.u16(self.beard_hue);
+        writer.zeros(1); // shard index
+        writer.u8(self.start_location);
+        writer.u32(self.slot);
+        writer.zeros(4); // client ip
+        writer.u16(self.shirt_hue);
+        writer.u16(self.pants_hue);
         writer.into_bytes()
     }
 }
@@ -323,6 +553,132 @@ mod tests {
     #[test]
     fn character_play_rejects_a_truncated_packet() {
         assert!(CharacterPlay::decode(&[0x5D, 0x00]).is_err());
+    }
+
+    fn sample_create(high_seas: bool) -> CreateCharacter {
+        let mut skills = vec![
+            SkillChoice {
+                skill: 1,
+                value: 50,
+            },
+            SkillChoice {
+                skill: 2,
+                value: 30,
+            },
+            SkillChoice {
+                skill: 3,
+                value: 20,
+            },
+        ];
+        if high_seas {
+            skills.push(SkillChoice { skill: 4, value: 0 });
+        }
+        CreateCharacter {
+            name: "Lord British".to_owned(),
+            flags: 0x0000_001F,
+            profession: 1,
+            sex_race: 0x3, // human female
+            strength: 60,
+            dexterity: 20,
+            intelligence: 20,
+            skills,
+            skin_hue: 0x83EA,
+            hair: 0x203B,
+            hair_hue: 0x044E,
+            beard: 0,
+            beard_hue: 0,
+            start_location: 0,
+            slot: 0,
+            shirt_hue: 0x0386,
+            pants_hue: 0x01BB,
+        }
+    }
+
+    #[test]
+    fn create_character_high_seas_round_trips_at_its_declared_length() {
+        let create = sample_create(true);
+        let bytes = create.encode();
+        assert_eq!(bytes[0], CreateCharacter::ID_HIGH_SEAS);
+        assert_eq!(bytes.len(), 106, "the 0xF8 form is 106 bytes, four skills");
+        assert_eq!(
+            client_packet_length(CreateCharacter::ID_HIGH_SEAS),
+            Some(PacketLength::Fixed(106)),
+            "the table and the encoder must agree"
+        );
+        assert_eq!(CreateCharacter::decode(&bytes).unwrap(), create);
+    }
+
+    #[test]
+    fn create_character_classic_round_trips_at_its_declared_length() {
+        let create = sample_create(false);
+        let bytes = create.encode();
+        assert_eq!(bytes[0], CreateCharacter::ID_CLASSIC);
+        assert_eq!(bytes.len(), 104, "the 0x00 form is 104 bytes, three skills");
+        assert_eq!(
+            client_packet_length(CreateCharacter::ID_CLASSIC),
+            Some(PacketLength::Fixed(104))
+        );
+        assert_eq!(CreateCharacter::decode(&bytes).unwrap(), create);
+    }
+
+    #[test]
+    fn create_character_reads_the_name_and_skills_at_the_right_offsets() {
+        // The whole risk in a fixed-layout packet is a field one byte out of
+        // place, which shifts everything after it. Pin the name and the skills.
+        let decoded = CreateCharacter::decode(&sample_create(true).encode()).unwrap();
+        assert_eq!(decoded.name, "Lord British");
+        assert_eq!(decoded.skin_hue, 0x83EA);
+        assert_eq!(decoded.skills.len(), 4);
+        assert_eq!(
+            decoded.skills[0],
+            SkillChoice {
+                skill: 1,
+                value: 50
+            }
+        );
+        assert_eq!(decoded.start_location, 0);
+    }
+
+    #[test]
+    fn create_character_maps_race_and_sex_to_a_body() {
+        let human_female = CreateCharacter {
+            sex_race: 0x3,
+            ..sample_create(true)
+        };
+        assert!(human_female.is_female());
+        assert_eq!(human_female.race(), Race::Human);
+        assert_eq!(human_female.body(), 0x0191);
+
+        let elf_male = CreateCharacter {
+            sex_race: 0x4,
+            ..sample_create(true)
+        };
+        assert!(!elf_male.is_female());
+        assert_eq!(elf_male.race(), Race::Elf);
+        assert_eq!(elf_male.body(), 0x025D);
+
+        let gargoyle_female = CreateCharacter {
+            sex_race: 0x7,
+            ..sample_create(true)
+        };
+        assert!(gargoyle_female.is_female());
+        assert_eq!(gargoyle_female.race(), Race::Gargoyle);
+        assert_eq!(gargoyle_female.body(), 0x029B);
+    }
+
+    #[test]
+    fn create_character_rejects_a_truncated_packet() {
+        assert!(CreateCharacter::decode(&[CreateCharacter::ID_HIGH_SEAS, 0x00]).is_err());
+    }
+
+    #[test]
+    fn create_character_rejects_the_wrong_id() {
+        let mut bytes = sample_create(true).encode();
+        bytes[0] = 0x5D;
+        assert!(matches!(
+            CreateCharacter::decode(&bytes),
+            Err(LoginDecodeError::WrongPacket(_))
+        ));
     }
 
     #[test]

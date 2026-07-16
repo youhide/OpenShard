@@ -55,6 +55,9 @@ pub const TICK_INTERVAL: Duration = Duration::from_millis(50);
 
 /// A human male body.
 const BODY_HUMAN_MALE: u16 = 0x0190;
+/// The skin hue a character gets when nothing else chose one — the same one
+/// Sphere hands a body with no stored colour.
+const DEFAULT_HUE: u16 = 0x83EA;
 /// Full daylight. The scale runs backwards: 0 is brightest, 0x1F pitch dark.
 const LIGHT_DAY: u8 = 0;
 /// Zero is Felucca.
@@ -78,6 +81,19 @@ const FACET_WITHOUT_A_MAP: (u32, u32) = (7168, 4096);
 /// should save less often, not spend its shortfall on the disk.
 pub const SAVE_EVERY_TICKS: u64 = 400;
 
+/// How a freshly created character looks: its body graphic and hue.
+///
+/// [`Command::Enter`] carries this when the client just made the character and
+/// chose it. Playing an existing one carries `None`, and the world falls back to
+/// its default body until persistence can supply the stored appearance.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Appearance {
+    /// The body graphic id.
+    pub body: u16,
+    /// The skin hue.
+    pub hue: u16,
+}
+
 /// Something for the world to do, from outside the world.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Command {
@@ -89,6 +105,9 @@ pub enum Command {
         version: ClientVersion,
         /// The character's name.
         name: String,
+        /// How the character looks, when the client just created it. `None`
+        /// when an existing character is played and the world uses its default.
+        appearance: Option<Appearance>,
     },
     /// A client asked to take a step.
     Walk {
@@ -403,7 +422,8 @@ impl World {
                 connection,
                 version,
                 name,
-            } => self.enter(connection, version, name),
+                appearance,
+            } => self.enter(connection, version, name, appearance),
             Command::Walk {
                 connection,
                 request,
@@ -428,7 +448,13 @@ impl World {
         Point::new(x, y, z)
     }
 
-    fn enter(&mut self, connection: ConnectionId, version: ClientVersion, name: String) {
+    fn enter(
+        &mut self,
+        connection: ConnectionId,
+        version: ClientVersion,
+        name: String,
+        appearance: Option<Appearance>,
+    ) {
         if self.players.contains_key(&connection) {
             warn!(%connection, "already in the world");
             return;
@@ -440,9 +466,12 @@ impl World {
 
         let position = self.start_position();
         let facing = Facing::walking(Direction::South);
+        // A created character brings its chosen body and hue; a played one has
+        // none here yet, so it falls back to the default until persistence
+        // stores appearances.
         let body = Body {
-            id: BODY_HUMAN_MALE,
-            hue: 0x83EA,
+            id: appearance.map_or(BODY_HUMAN_MALE, |look| look.body),
+            hue: appearance.map_or(DEFAULT_HUE, |look| look.hue),
         };
 
         self.registry.insert(entity, Position(position));
@@ -829,6 +858,7 @@ pub(crate) mod tests {
             connection,
             version: ClientVersion::TOL,
             name: "Lord British".to_owned(),
+            appearance: None,
         });
         world.tick(now);
         connection
@@ -873,6 +903,7 @@ pub(crate) mod tests {
             connection: connection(),
             version: ClientVersion::TOL,
             name: "Lord British".to_owned(),
+            appearance: None,
         });
 
         assert_eq!(world.player_count(), 0, "queued, not applied");
@@ -910,6 +941,52 @@ pub(crate) mod tests {
             "and has a connection"
         );
         assert!(world.registry().serial_of(entity).is_some());
+    }
+
+    #[test]
+    fn a_created_character_enters_with_its_chosen_body() {
+        // Character creation carries the body and hue the player picked; the
+        // world must spawn that rather than its default human male.
+        let mut world = world();
+        let connection = connection();
+        world.queue(Command::Enter {
+            connection,
+            version: ClientVersion::TOL,
+            name: "Nyx".to_owned(),
+            appearance: Some(Appearance {
+                body: 0x025E,
+                hue: 0x0430,
+            }),
+        });
+        world.tick(Instant::now());
+
+        let entity = world.players[&connection];
+        let body = world.registry().get::<Body>(entity).copied().unwrap();
+        assert_eq!(body.id, 0x025E, "the elf-female body the client chose");
+        assert_eq!(body.hue, 0x0430);
+
+        // And 0x1B tells the client the same body.
+        let start = packets_for(&mut world, connection)
+            .into_iter()
+            .find(|packet| packet[0] == 0x1B)
+            .expect("a PlayerStart");
+        assert_eq!(
+            &start[9..11],
+            &0x025Eu16.to_be_bytes(),
+            "0x1B carries the chosen body"
+        );
+    }
+
+    #[test]
+    fn a_played_character_keeps_the_default_body() {
+        // The `None` path: playing an existing character has no appearance yet,
+        // so the world uses its default and does not send a body of zero.
+        let mut world = world();
+        let connection = enter(&mut world, Instant::now());
+        let entity = world.players[&connection];
+        let body = world.registry().get::<Body>(entity).copied().unwrap();
+        assert_eq!(body.id, BODY_HUMAN_MALE);
+        assert_eq!(body.hue, DEFAULT_HUE);
     }
 
     #[test]
@@ -1112,6 +1189,7 @@ pub(crate) mod tests {
             connection: connection(),
             version: ClientVersion::TOL,
             name: "a".to_owned(),
+            appearance: None,
         });
         assert_eq!(world.player_count(), 0);
         world.tick(now);

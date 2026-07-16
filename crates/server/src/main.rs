@@ -27,10 +27,12 @@ use std::time::Instant;
 
 use openshard_config::{Config, DEFAULT_TOML};
 use openshard_gateway::{ConnectionId, Event, Server, ServerEvent};
-use openshard_login::{DevAccounts, LoginServer, LoginSession, Response};
+use openshard_login::{Accounts, DevAccounts, LoginServer, LoginSession, Response};
 use openshard_persistence::{MemoryStore, Snapshot, Store};
-use openshard_protocol::{huffman, CharacterPlay, GameServerLogin, WalkRequest};
-use openshard_world::{Command, Map, MapTerrain, TileData, World, TICK_INTERVAL};
+use openshard_protocol::{
+    encode_login_denied, huffman, CharacterPlay, CreateCharacter, GameServerLogin, WalkRequest,
+};
+use openshard_world::{Appearance, Command, Map, MapTerrain, TileData, World, TICK_INTERVAL};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -359,6 +361,19 @@ fn handle(
                     if packet.first().copied() == Some(GameServerLogin::ID) {
                         session.game = true;
                     }
+                    // Character creation crosses the login/world line: it writes
+                    // the new character onto the account and then enters the world
+                    // with it. Handle it here, where both are in reach — dispatch
+                    // sees only the world, and the login state machine is done.
+                    if matches!(
+                        packet.first().copied(),
+                        Some(CreateCharacter::ID_CLASSIC | CreateCharacter::ID_HIGH_SEAS)
+                    ) {
+                        if !create_character(session, login, world, &packet, id) {
+                            sessions.remove(&id);
+                        }
+                        return;
+                    }
                     if !dispatch(session, world, &packet, id) {
                         sessions.remove(&id);
                         return;
@@ -401,6 +416,9 @@ fn dispatch(session: &mut Session, world: &mut World, packet: &[u8], id: Connect
                 connection: id,
                 version: session.login.version(),
                 name: play.name,
+                // Playing an existing character: its stored appearance will come
+                // from persistence. Until then the world uses its default body.
+                appearance: None,
             });
             true
         }
@@ -421,6 +439,56 @@ fn dispatch(session: &mut Session, world: &mut World, packet: &[u8], id: Connect
         }
         _ => true,
     }
+}
+
+/// Create a character on the authenticated account, then enter the world with
+/// it — the two halves of what a `0x00`/`0xF8` packet asks for.
+///
+/// Returns `false` only to drop the connection: a malformed packet, or one with
+/// no game login behind it to say whose character this is. A *refused* creation
+/// — a full account, an empty or duplicate name — keeps the connection. Sphere
+/// answers that with the same `0x82` a login error uses, and the client stays on
+/// the creation screen to try again.
+fn create_character(
+    session: &mut Session,
+    login: &mut LoginServer<DevAccounts>,
+    world: &mut World,
+    packet: &[u8],
+    id: ConnectionId,
+) -> bool {
+    let create = match CreateCharacter::decode(packet) {
+        Ok(create) => create,
+        Err(error) => {
+            warn!(%id, %error, "malformed create-character");
+            return false;
+        }
+    };
+    let Some(account) = session.login.account().map(str::to_owned) else {
+        warn!(%id, "create-character before a game login");
+        return false;
+    };
+
+    let name = create.name.trim().to_owned();
+    match login.accounts.create_character(&account, &name) {
+        Ok(_slot) => info!(%id, account, name, "character created"),
+        Err(reason) => {
+            warn!(%id, account, name, ?reason, "character creation refused");
+            let _ = session.send_packet(encode_login_denied(reason));
+            return true;
+        }
+    }
+
+    session.in_world = true;
+    world.queue(Command::Enter {
+        connection: id,
+        version: session.login.version(),
+        name,
+        appearance: Some(Appearance {
+            body: create.body(),
+            hue: create.skin_hue,
+        }),
+    });
+    true
 }
 
 /// Per-connection state this loop owns.

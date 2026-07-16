@@ -46,6 +46,6 @@ pub use events::{
 pub use map::{LandCell, Map, MapError, StaticItem, BLOCK_SIZE};
 pub use sectors::{distance, in_range, Sectors, SECTOR_SIZE, VIEW_RANGE};
 pub use terrain::{MapTerrain, MAX_STEP_DOWN, MAX_STEP_UP, PLAYER_HEIGHT};
-pub use tick::{Command, Outbound, World, TICK_INTERVAL};
+pub use tick::{Appearance, Command, Outbound, World, TICK_INTERVAL};
 pub use tiledata::{LandTile, StaticTile, TileData, TileDataError, TileDataFormat, TileFlags};
 pub use uop::UopError;

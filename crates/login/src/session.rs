@@ -62,6 +62,12 @@ pub struct LoginSession {
     /// choice: every feature gate is "since version X", so an unknown client
     /// gets the plainest dialect rather than packets it cannot parse.
     version: ClientVersion,
+    /// The account, once a game login has proved it. `None` until then.
+    ///
+    /// The character-creation packet (`0x00`/`0xF8`) arrives later on this same
+    /// connection and says which character to make but not on whose account; the
+    /// game login is where that is known, so it is kept here.
+    account: Option<String>,
 }
 
 impl Default for LoginSession {
@@ -76,12 +82,21 @@ impl LoginSession {
         Self {
             state: State::Fresh,
             version: ClientVersion::OLDEST,
+            account: None,
         }
     }
 
     /// What the client claims to be.
     pub const fn version(&self) -> ClientVersion {
         self.version
+    }
+
+    /// The account this session authenticated, or `None` before a game login.
+    ///
+    /// Character creation needs it: the packet names the character, not the
+    /// account it belongs to.
+    pub fn account(&self) -> Option<&str> {
+        self.account.as_deref()
     }
 
     /// Whether the conversation has run to its end.
@@ -301,6 +316,10 @@ impl<A: Accounts> LoginServer<A> {
             return Response::SendThenClose(encode_login_denied(reason));
         }
 
+        // The game connection is now authenticated. Remember whose it is: a
+        // later 0x00/0xF8 will create a character and needs the account.
+        session.account = Some(login.account.clone());
+
         let characters = self.accounts.characters(&login.account);
         debug!(
             account = login.account,
@@ -431,6 +450,20 @@ mod tests {
         assert_eq!(characters[0], 0xA9);
         assert_eq!(&characters[4..16], b"Lord British");
         assert!(session.is_finished());
+    }
+
+    #[test]
+    fn the_game_login_remembers_whose_account_it_is() {
+        // Character creation arrives later on this same connection and asks the
+        // session whose account to create the character on.
+        let mut server = server();
+        let now = Instant::now();
+        let key = relay_key(&mut server, now);
+
+        let mut session = modern_session();
+        assert_eq!(session.account(), None, "nothing is known before the login");
+        let _ = server.handle(&mut session, &game_login(key, "admin"), now);
+        assert_eq!(session.account(), Some("admin"));
     }
 
     #[test]
