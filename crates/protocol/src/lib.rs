@@ -53,14 +53,17 @@
 //! `docs/roadmap.md`.
 
 mod codec;
+mod direction;
 mod feature;
 pub mod huffman;
 mod login;
 mod packet;
 mod seed;
 mod version;
+mod world;
 
 pub use codec::{CodecError, CodecResult, PacketReader, PacketWriter};
+pub use direction::{Direction, Facing, RUNNING_BIT};
 pub use feature::{Feature, FeatureSet};
 pub use login::{
     encode_character_list, encode_login_denied, encode_relay, encode_shard_list, AccountLogin,
@@ -74,3 +77,8 @@ pub use packet::{
 };
 pub use seed::{Seed, SeedReader, SEED_COMMAND};
 pub use version::{ClientVersion, Era, ParseVersionError};
+pub use world::{
+    encode_light_level, encode_login_complete, encode_map_change, encode_walk_ack,
+    encode_walk_reject, CharacterPlay, PlayerStart, PlayerUpdate, Point, WalkRequest,
+    DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
+};

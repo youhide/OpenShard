@@ -12,3 +12,4 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+openshard-protocol.workspace = true

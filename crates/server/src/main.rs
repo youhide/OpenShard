@@ -9,6 +9,8 @@
 //! machines with their own tests. If logic starts collecting here, it belongs in
 //! a crate instead.
 
+mod game;
+
 use std::collections::HashMap;
 use std::net::SocketAddrV4;
 use std::path::Path;
@@ -18,8 +20,11 @@ use std::time::Instant;
 use openshard_config::{Config, DEFAULT_TOML};
 use openshard_gateway::{ConnectionId, Event, Server, ServerEvent};
 use openshard_login::{DevAccounts, LoginServer, LoginSession, Response};
+use openshard_protocol::{CharacterPlay, WalkRequest};
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
+
+use crate::game::{Game, Player};
 use tracing_subscriber::EnvFilter;
 
 /// Where the config lives, relative to the working directory.
@@ -104,6 +109,7 @@ async fn run_login(
         }
     }
     let mut login = LoginServer::new(accounts, &config.server.name, advertised);
+    let mut game = Game::new();
 
     // One session per live connection. Not a global: this task owns it, and the
     // gateway's Disconnected event is what keeps it from growing forever.
@@ -121,6 +127,7 @@ async fn run_login(
                     id,
                     Session {
                         login: LoginSession::new(),
+                        player: None,
                         outbox,
                     },
                 );
@@ -138,6 +145,15 @@ async fn run_login(
                         session.login.on_seed(seed);
                     }
                     Event::Packet(packet) => {
+                        // The world gets first refusal on packets that are
+                        // unambiguously its own; everything else is login's.
+                        // `LoginServer` ignores what it does not know, so the
+                        // order only matters for ids both could claim — and
+                        // there are none.
+                        if !dispatch(&mut game, session, &packet, id) {
+                            sessions.remove(&id);
+                            continue;
+                        }
                         let response = login.handle(&mut session.login, &packet, Instant::now());
                         if !session.apply(response, id) {
                             sessions.remove(&id);
@@ -166,10 +182,52 @@ async fn run_login(
 /// Per-connection state this loop owns.
 struct Session {
     login: LoginSession,
+    /// Set once the client picks a character. Before that it is still logging in.
+    player: Option<Player>,
     outbox: mpsc::UnboundedSender<Vec<u8>>,
 }
 
+/// Give the world a look at a packet. Returns `false` if the connection should go.
+fn dispatch(game: &mut Game, session: &mut Session, packet: &[u8], id: ConnectionId) -> bool {
+    match packet.first().copied() {
+        Some(CharacterPlay::ID) => {
+            let Ok(play) = CharacterPlay::decode(packet) else {
+                warn!(%id, "malformed 0x5D");
+                return false;
+            };
+            let Some((player, reply)) = game.character_play(&play) else {
+                error!(%id, "the mobile serial pool is exhausted");
+                return false;
+            };
+            session.player = Some(player);
+            session.send_all(reply.packets)
+        }
+        Some(WalkRequest::ID) => {
+            let Some(player) = session.player.as_mut() else {
+                // A walk before a character. Not fatal — a stray packet from a
+                // client that reconnected — but nothing to act on either.
+                debug!(%id, "0x02 before entering the world");
+                return true;
+            };
+            let Ok(request) = WalkRequest::decode(packet) else {
+                warn!(%id, "malformed 0x02");
+                return false;
+            };
+            let reply = game.walk(player, request);
+            session.send_all(reply.packets)
+        }
+        _ => true,
+    }
+}
+
 impl Session {
+    /// Send several packets in order. Returns `false` if the client is gone.
+    fn send_all(&self, packets: Vec<Vec<u8>>) -> bool {
+        packets
+            .into_iter()
+            .all(|packet| self.outbox.send(packet).is_ok())
+    }
+
     /// Act on a login response. Returns `false` if the connection should go.
     ///
     /// Dropping the outbox is what closes the socket: the gateway's write task

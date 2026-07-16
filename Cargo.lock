@@ -209,6 +209,9 @@ version = "0.0.1"
 [[package]]
 name = "openshard-movement"
 version = "0.0.1"
+dependencies = [
+ "openshard-protocol",
+]
 
 [[package]]
 name = "openshard-persistence"
@@ -231,8 +234,10 @@ name = "openshard-server"
 version = "0.0.1"
 dependencies = [
  "openshard-config",
+ "openshard-entities",
  "openshard-gateway",
  "openshard-login",
+ "openshard-movement",
  "openshard-protocol",
  "tokio",
  "tracing",

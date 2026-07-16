@@ -66,18 +66,31 @@ machine each one is a deterministic test with no ports and no sleeps.
 world code inside a network task, on whatever thread Tokio picked, whenever bytes
 arrived. The channel is where async stops and the tick begins.
 
-## 3. World — first vertical slice
+## 3. World — the slice walks; the world does not exist
 
-The goal: **a ClassicUO client logs in and walks around.**
+The goal was **a client logs in and walks around**, and it does.
 
+- [x] `Direction` / `Facing` — steps ported verbatim from Sphere's `sm_Moves`
+- [x] World entry: 0x5D, 0x1B, 0xBF.0x08, 0x20, 0x4F, 0x55
+- [x] `movement`: the walk handshake, turning as a step, the world edge
+- [x] `WalkSequence` — 0 means fresh, 255 wraps to 1, a reject resets both ends
+- [x] `crates/server/src/game.rs` — a player enters and walks, over real TCP
 - [ ] `world` crate: the tick loop, composing `Registry` + `EventBus`
 - [ ] Map loading from client MUL/UOP files
+- [ ] `Terrain` for real: heights, blocking, statics
 - [ ] Spatial index (sectors) and "what can this player see"
 - [ ] Core components: `Position`, `Graphic`, `Body`, `Name`
-- [ ] `movement`: walk, run, fastwalk rejection
-- [ ] Character creation and login into the world
+- [ ] Character creation (0x00), not just playing a configured name
 
-Nothing else. No combat, no items, no database.
+**What the slice actually proves.** The packets are right and the walk handshake
+is right. It does not prove there is a world: `movement::OpenWorld` allows every
+step, so a player walks across water, through walls and off cliffs. `game.rs`
+holds a `Registry` with a serial in it and no components at all.
+
+That is deliberate. The handshake is protocol — finishable now, and pinned. The
+map is a project of its own, and `Terrain` is the seam it lands on without
+touching any of the above. What `game.rs` must not do is grow: the moment it
+wants components, the `world` crate is what it wants.
 
 ## 4. Persistence
 

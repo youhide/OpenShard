@@ -8,9 +8,10 @@ nothing else. OpenShard is not a SphereServer clone. It is an attempt at the
 engine Sphere would likely be if it were designed from scratch today: Rust,
 multi-core, data-oriented, script-first, hot-reloadable, observable.
 
-> **Status: early, but it runs.** `cargo run -p openshard-server` listens on
-> 2593 and takes a client through login to a character list. There is no world
-> behind it yet. See [`docs/roadmap.md`](docs/roadmap.md).
+> **Status: early, but it runs and a client walks.** `cargo run -p openshard-server`
+> takes a client through login into the world. There is no world behind it yet —
+> every step is allowed, so you walk across water and through walls, and nothing
+> is saved. See [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Design
 
@@ -34,15 +35,15 @@ Read [`docs/architecture.md`](docs/architecture.md) for the reasoning.
 crates/
   entities      ECS: EntityId, Serial, Registry          implemented
   events        double-buffered typed event bus          implemented
-  protocol      client versions, feature gates, packets  versioning only
+  protocol      versions, feature gates, packets, codec  implemented
   gateway       sans-io connection + Tokio listener      implemented
   login         accounts, auth keys, the whole sequence  implemented
+  movement      the walk handshake; terrain is a stub    implemented
   config        TOML, validated at load                  implemented
   server        the binary                               implemented
   world         the tick loop and spatial index          stub
-  combat movement ai items magic skills housing
-  guilds chat persistence scripting plugins
-  metrics                                                stubs
+  combat ai items magic skills housing guilds
+  chat persistence scripting plugins metrics             stubs
 tools/
   dashboard launcher map-editor cli                      planned
 ```

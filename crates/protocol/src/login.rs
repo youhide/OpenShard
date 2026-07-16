@@ -93,7 +93,7 @@ impl fmt::Display for LoginDecodeError {
 impl std::error::Error for LoginDecodeError {}
 
 /// Check and strip the id byte.
-fn expect_id(bytes: &[u8], expected: u8) -> Result<PacketReader<'_>, LoginDecodeError> {
+pub(crate) fn expect_id(bytes: &[u8], expected: u8) -> Result<PacketReader<'_>, LoginDecodeError> {
     let mut reader = PacketReader::new(bytes);
     let found = reader.u8()?;
     if found == expected {
