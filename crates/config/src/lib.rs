@@ -122,13 +122,15 @@ impl Default for StartConfig {
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistenceConfig {
-    /// Path to a SQLite database file, or empty to keep the world in memory.
+    /// Where the world is kept: a SQLite file path, a `postgres://` URL, or empty
+    /// to keep it in memory.
     ///
     /// Empty is a real mode, not a broken one: the shard runs and loses the
-    /// world at stop, the same bargain as running with no map. Point this at a
-    /// file — `openshard.db` — and characters survive a restart. SQLite or
-    /// PostgreSQL is the operator's choice; only SQLite is wired in so far, and
-    /// this is its path.
+    /// world at stop, the same bargain as running with no map. Give it a value
+    /// and characters survive a restart. The shape picks the backend — a
+    /// `postgres://` (or `postgresql://`) URL connects to PostgreSQL, anything
+    /// else is a SQLite file such as `openshard.db`. SQLite or PostgreSQL is the
+    /// operator's choice, and neither is a tier.
     #[serde(default)]
     pub database: String,
 }
@@ -382,10 +384,12 @@ x = 1363
 y = 1600
 
 [persistence]
-# Path to a SQLite database file. Leave empty to keep the world in memory and
-# lose it at stop; point it at a file to have characters survive a restart.
+# Where the world is kept. Leave empty to keep it in memory and lose it at stop;
+# give it a value to have characters survive a restart. A "postgres://" URL uses
+# PostgreSQL; anything else is a SQLite file path. Neither backend is a tier.
 #
 #   database = "openshard.db"
+#   database = "postgres://user:pass@localhost/openshard"
 database = ""
 
 # Development accounts, in plaintext, until there is a database.

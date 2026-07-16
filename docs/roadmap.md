@@ -150,17 +150,19 @@ connection takes the mobile off every screen that had it.
 - [x] Serial reservation on load — `Registry::reserve_serial`, for load-on-play
 - [x] Crash recovery — the boot load restores the world; a played character
   returns on its saved serial and spot
-- [ ] PostgreSQL backend — the same `Store` trait, for operators who want it
+- [x] PostgreSQL backend — `PgStore`, the same `Store` trait, tested against a
+  live server
 
 Two backends, one choice. A shard runs on SQLite or on PostgreSQL, and which is
 the operator's to make: neither is "the production one", and SQLite runs a real
 shard perfectly well. Some will want a text file or a Postgres cluster; the
 `Store` trait is the seam that lets any of them sit behind the same simulation.
 
-`persistence.database` in the config picks the file; empty keeps the world in
-memory, the same bargain as running with no map, and the shard says so. A
-logged-out character lives as a row, not an entity: its serial is reserved at
-boot so nothing new can take it, and playing it (`0x5D`) spawns it back on that
+`persistence.database` picks the backend by what it looks like: a `postgres://`
+URL connects to PostgreSQL, anything else is a SQLite file path, and empty keeps
+the world in memory — the same bargain as running with no map, and the shard says
+so. A logged-out character lives as a row, not an entity: its serial is reserved
+at boot so nothing new can take it, and playing it (`0x5D`) spawns it back on that
 serial, at its saved position, looking as it did. Characters save as they change
 and on logout, through the same journal the tick already feeds.
 
@@ -177,6 +179,19 @@ and on logout, through the same journal the tick already feeds.
 - **A failed write costs a full sweep, not a rollback.** Re-writing the failed
   snapshot would put everyone back where they were when the write started. The
   world is marked dirty instead and the next save reads it fresh.
+
+**Two things specific to the PostgreSQL backend:**
+
+- **It connects with `NoTls`.** Enough for a database on the same host or a
+  trusted network, which is where a first backend earns its keep. An encryptor is
+  a later, additive change and does not touch the shape — `PgStore` is one
+  connection behind an async mutex, the same shape as SQLite's, because a
+  transaction borrows the client and saves are off the tick either way.
+- **`tokio-postgres` is pinned below its latest.** From 0.7.13 on it pulls a
+  crypto stack (RustCrypto 0.11, `rand` 0.10) that wants Rust 1.85, above this
+  workspace's 1.82. `Cargo.lock` holds it at 0.7.12 with `postgres-protocol`
+  0.6.7; a bare `cargo update` will try to walk past that and break the MSRV. See
+  the `Cargo.lock` note in `CLAUDE.md`.
 
 ## 5. Scripting
 

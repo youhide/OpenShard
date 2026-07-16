@@ -17,8 +17,9 @@ openshard-entities.workspace = true
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt"] }
+tokio = { workspace = true, features = ["rt", "sync"] }
+tokio-postgres = "0.7"
 
 [dev-dependencies]
 serde_json.workspace = true
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "net", "time", "sync"] }

@@ -29,7 +29,7 @@ use openshard_config::{Config, DEFAULT_TOML};
 use openshard_gateway::{ConnectionId, Event, Server, ServerEvent};
 use openshard_login::{Accounts, DevAccounts, LoginServer, LoginSession, Response};
 use openshard_persistence::{
-    AccountRecord, CharacterRecord, MemoryStore, Snapshot, SqliteStore, Store,
+    AccountRecord, CharacterRecord, MemoryStore, PgStore, Snapshot, SqliteStore, Store,
 };
 use openshard_protocol::{
     encode_login_denied, huffman, CharacterPlay, CreateCharacter, GameServerLogin, Point,
@@ -91,7 +91,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let world = load_world(&config)?;
-    let store = open_store(&config)?;
+    let store = open_store(&config).await?;
     tokio::spawn(server.run());
     run_shard(events, &config, advertised, world, store).await;
     Ok(())
@@ -113,28 +113,50 @@ fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
 
 /// Where the world is kept.
 ///
-/// A configured `persistence.database` opens a SQLite file the world survives a
-/// restart in; an empty one keeps everything in memory and says so. The
-/// in-memory mode is a real choice, not a broken one — the same bargain as
-/// running with no map — but a shard that stays quiet about it is one an operator
-/// assumes is saving, so it warns.
+/// `persistence.database` picks the backend by what it looks like: a
+/// `postgres://` (or `postgresql://`) URL connects to PostgreSQL, anything else
+/// is a SQLite file path, and an empty string keeps everything in memory and says
+/// so. The two databases are equal choices, not a dev-and-prod pair — SQLite runs
+/// a live shard perfectly well, and which one an operator wants is theirs to
+/// decide.
+///
+/// The in-memory mode is a real choice too, not a broken one — the same bargain
+/// as running with no map — but a shard that stays quiet about it is one an
+/// operator assumes is saving, so it warns.
 ///
 /// Opening the database can fail, and that is fatal: a shard told to persist that
 /// cannot is not a shard anyone wants started in memory by surprise, losing
 /// everything at the next stop.
-fn open_store(config: &Config) -> Result<Arc<dyn Store>, Box<dyn std::error::Error>> {
-    let path = config.persistence.database.trim();
-    if path.is_empty() {
+async fn open_store(config: &Config) -> Result<Arc<dyn Store>, Box<dyn std::error::Error>> {
+    let target = config.persistence.database.trim();
+    if target.is_empty() {
         warn!(
             "no database configured: the world is kept in memory and lost at stop. \
-             Set persistence.database to a file to keep characters across a restart."
+             Set persistence.database to a file (SQLite) or a postgres:// URL to keep \
+             characters across a restart."
         );
         return Ok(Arc::new(MemoryStore::new()));
     }
-    let store = SqliteStore::open(path)
-        .map_err(|error| format!("could not open the database at {path:?}: {error}"))?;
-    info!(path, "persisting to SQLite");
+    if is_postgres_url(target) {
+        // The URL can carry a password, so it is never logged — only that this is
+        // the PostgreSQL backend.
+        let store = PgStore::connect(target)
+            .await
+            .map_err(|error| format!("could not connect to PostgreSQL: {error}"))?;
+        info!("persisting to PostgreSQL");
+        return Ok(Arc::new(store));
+    }
+    let store = SqliteStore::open(target)
+        .map_err(|error| format!("could not open the database at {target:?}: {error}"))?;
+    info!(path = target, "persisting to SQLite");
     Ok(Arc::new(store))
+}
+
+/// Whether `persistence.database` names a PostgreSQL server rather than a SQLite
+/// file. The two `postgres` spellings are the ones libpq itself accepts.
+fn is_postgres_url(target: &str) -> bool {
+    let lower = target.to_ascii_lowercase();
+    lower.starts_with("postgres://") || lower.starts_with("postgresql://")
 }
 
 /// Load the client's map, if it is configured.

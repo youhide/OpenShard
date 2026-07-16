@@ -22,22 +22,24 @@
 //! - [`Journal`] tracks what changed and hands it over exactly once.
 //! - [`Snapshot`] is that handover: owned, consistent, taken at one tick.
 //! - [`Store`] is a database, and [`MemoryStore`] is the one that cannot fail.
+//!   [`SqliteStore`] and [`PgStore`] are the two real backends; which a shard
+//!   runs is the operator's choice, and neither is a tier.
 //! - [`record`] is what the shapes look like on disk, which is deliberately
 //!   *not* what the components look like in memory.
 //!
 //! # What is not here yet
 //!
-//! A PostgreSQL backend, for operators who want one — [`SqliteStore`] is the
-//! other choice and neither is a tier. Items, too: the journal takes entities,
-//! and a character is the only thing it knows how to record so far. See
-//! `docs/roadmap.md`.
+//! Items: the journal takes entities, and a character is the only thing it knows
+//! how to record so far. See `docs/roadmap.md`.
 
 mod journal;
+mod pg;
 pub mod record;
 mod sqlite;
 mod store;
 
 pub use journal::{Journal, Snapshot};
+pub use pg::PgStore;
 pub use record::{AccountRecord, CharacterRecord, SCHEMA_VERSION};
 pub use sqlite::SqliteStore;
 pub use store::{MemoryStore, Store, StoreError};

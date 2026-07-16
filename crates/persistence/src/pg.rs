@@ -1,0 +1,551 @@
+//! The PostgreSQL backend.
+//!
+//! # A second backend, not a better one
+//!
+//! `PgStore` sits behind the same [`Store`] trait as
+//! [`SqliteStore`](crate::SqliteStore), and which a shard runs is the operator's
+//! choice, not a tier. SQLite keeps a live shard on one disk with no server to
+//! run; PostgreSQL puts the same world on a database another machine can reach,
+//! shared by more than one process. The simulation cannot tell them apart — the
+//! trait is the seam that makes the choice a config line rather than a rewrite.
+//!
+//! # Async all the way down, so no `spawn_blocking`
+//!
+//! Where the SQLite backend wraps a blocking C library in
+//! [`tokio::task::spawn_blocking`], `tokio-postgres` is native async: every call
+//! is already a network round-trip that yields rather than blocks. What this file
+//! adds is the one piece the driver leaves to its caller — the *connection
+//! future*, which drives the actual socket and which nothing works without —
+//! spawned onto the runtime so the client it is paired with can make progress.
+//!
+//! # One connection behind an async mutex
+//!
+//! The same shape as SQLite's, for the same reasons. A transaction borrows the
+//! client mutably, so the client cannot simply be shared by `&`; and saves are
+//! infrequent and off the tick, so serialising them through a single connection
+//! costs nothing that matters and keeps the all-or-nothing write the trait
+//! demands. An async [`Mutex`] rather than a `std` one because the guard is held
+//! across `.await` — the whole point is that holding it never blocks the runtime.
+//!
+//! # No TLS yet
+//!
+//! Connections are made with [`NoTls`]. That is enough for a database on the same
+//! host or a trusted network, which is where a first backend earns its keep;
+//! wiring an encryptor in is a later, additive change and does not touch the
+//! shape here. The connection string is never logged, because it can carry a
+//! password.
+
+use std::fmt;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use tokio::sync::Mutex;
+use tokio_postgres::{Client, NoTls, Row};
+
+use crate::journal::Snapshot;
+use crate::record::{AccountRecord, CharacterRecord, SCHEMA_VERSION};
+use crate::store::{Store, StoreError};
+
+/// The tables, created on connect. `IF NOT EXISTS` so connecting to a database
+/// that already has them is a no-op rather than an error.
+///
+/// PostgreSQL has no unsigned integers: a `serial` is a `u32`, stored as
+/// `BIGINT` so its full range fits with room to spare, and the small fields go in
+/// `INTEGER`. The conversion back is checked — see [`character_from_row`] — so a
+/// value the column should never hold surfaces as [`StoreError::Corrupt`] rather
+/// than a silently wrong character.
+const SCHEMA_SQL: &str = "\
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS accounts (
+    name       TEXT PRIMARY KEY,
+    credential TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS characters (
+    serial  BIGINT PRIMARY KEY,
+    account TEXT NOT NULL,
+    name    TEXT NOT NULL,
+    body    INTEGER NOT NULL,
+    hue     INTEGER NOT NULL,
+    facet   INTEGER NOT NULL,
+    x       INTEGER NOT NULL,
+    y       INTEGER NOT NULL,
+    z       INTEGER NOT NULL,
+    facing  INTEGER NOT NULL
+);";
+
+/// A `Store` kept in a PostgreSQL database.
+///
+/// One of the two backends behind the [`Store`] trait; SQLite is the other, and
+/// which a shard runs is the operator's choice, not a tier. The character's
+/// [`serial`](CharacterRecord::serial) is the primary key, because that is the
+/// identity that has to survive a restart.
+pub struct PgStore {
+    /// One connection, behind an async mutex — see the module docs for why a
+    /// single serialised connection rather than a pool.
+    client: Arc<Mutex<Client>>,
+}
+
+impl fmt::Debug for PgStore {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The client holds a live socket and a connection string that can carry a
+        // password; neither belongs in a debug line.
+        formatter.debug_struct("PgStore").finish_non_exhaustive()
+    }
+}
+
+impl PgStore {
+    /// Connect to the database named by a `postgres://` URL and make sure the
+    /// tables and schema stamp are in place.
+    ///
+    /// Refuses a database written by a build with a different [`SCHEMA_VERSION`]
+    /// rather than reading it and silently dropping what it does not understand —
+    /// the same refusal the SQLite backend makes.
+    pub async fn connect(url: &str) -> Result<Self, StoreError> {
+        let (client, connection) = tokio_postgres::connect(url, NoTls)
+            .await
+            .map_err(database)?;
+
+        // The connection future is the half of the driver that owns the socket:
+        // until something polls it, the client's calls never leave the process.
+        // It ends when the client is dropped or the server hangs up — and when
+        // the server hangs up, every pending and future client call already
+        // returns its own error, which is where the shard reacts. So there is
+        // nothing to do here but let it finish.
+        tokio::spawn(async move {
+            let _ = connection.await;
+        });
+
+        Self::init(client).await
+    }
+
+    async fn init(client: Client) -> Result<Self, StoreError> {
+        client.batch_execute(SCHEMA_SQL).await.map_err(database)?;
+
+        // The schema version is stamped once, on a fresh database, and checked on
+        // every connect after. A database from the future is refused, not read.
+        let found: Option<i64> = client
+            .query_opt("SELECT value FROM meta WHERE key = 'schema'", &[])
+            .await
+            .map_err(database)?
+            .map(|row| row.get(0));
+        match found {
+            Some(version) if version != i64::from(SCHEMA_VERSION) => {
+                return Err(StoreError::SchemaMismatch {
+                    found: u32::try_from(version).unwrap_or(u32::MAX),
+                    understood: SCHEMA_VERSION,
+                });
+            }
+            Some(_) => {}
+            None => {
+                client
+                    .execute(
+                        "INSERT INTO meta (key, value) VALUES ('schema', $1)",
+                        &[&i64::from(SCHEMA_VERSION)],
+                    )
+                    .await
+                    .map_err(database)?;
+            }
+        }
+
+        Ok(Self {
+            client: Arc::new(Mutex::new(client)),
+        })
+    }
+}
+
+#[async_trait]
+impl Store for PgStore {
+    async fn save(&self, snapshot: &Snapshot) -> Result<(), StoreError> {
+        // Refuse before touching the database, exactly as the other backends do:
+        // a snapshot from a future schema must not be half-written.
+        if snapshot.schema != SCHEMA_VERSION {
+            return Err(StoreError::SchemaMismatch {
+                found: snapshot.schema,
+                understood: SCHEMA_VERSION,
+            });
+        }
+
+        let mut client = self.client.lock().await;
+        // One transaction: all of the snapshot or none of it. A half-written
+        // world is a world that never existed — see `crate::journal`.
+        let transaction = client.transaction().await.map_err(database)?;
+        for record in &snapshot.characters {
+            transaction
+                .execute(
+                    "INSERT INTO characters \
+                     (serial, account, name, body, hue, facet, x, y, z, facing) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
+                     ON CONFLICT (serial) DO UPDATE SET \
+                     account = EXCLUDED.account, name = EXCLUDED.name, \
+                     body = EXCLUDED.body, hue = EXCLUDED.hue, facet = EXCLUDED.facet, \
+                     x = EXCLUDED.x, y = EXCLUDED.y, z = EXCLUDED.z, facing = EXCLUDED.facing",
+                    &[
+                        &i64::from(record.serial),
+                        &record.account,
+                        &record.name,
+                        &i32::from(record.body),
+                        &i32::from(record.hue),
+                        &i32::from(record.facet),
+                        &i32::from(record.x),
+                        &i32::from(record.y),
+                        &i32::from(record.z),
+                        &i32::from(record.facing),
+                    ],
+                )
+                .await
+                .map_err(database)?;
+        }
+        for serial in &snapshot.removed {
+            transaction
+                .execute(
+                    "DELETE FROM characters WHERE serial = $1",
+                    &[&i64::from(*serial)],
+                )
+                .await
+                .map_err(database)?;
+        }
+        transaction.commit().await.map_err(database)?;
+        Ok(())
+    }
+
+    async fn characters(&self) -> Result<Vec<CharacterRecord>, StoreError> {
+        let client = self.client.lock().await;
+        let rows = client
+            .query(
+                "SELECT serial, account, name, body, hue, facet, x, y, z, facing \
+                 FROM characters",
+                &[],
+            )
+            .await
+            .map_err(database)?;
+        rows.iter().map(character_from_row).collect()
+    }
+
+    async fn accounts(&self) -> Result<Vec<AccountRecord>, StoreError> {
+        let client = self.client.lock().await;
+        let rows = client
+            .query("SELECT name, credential FROM accounts", &[])
+            .await
+            .map_err(database)?;
+        Ok(rows
+            .iter()
+            .map(|row| AccountRecord {
+                name: row.get(0),
+                credential: row.get(1),
+            })
+            .collect())
+    }
+
+    async fn put_account(&self, account: &AccountRecord) -> Result<(), StoreError> {
+        let client = self.client.lock().await;
+        client
+            .execute(
+                "INSERT INTO accounts (name, credential) VALUES ($1, $2) \
+                 ON CONFLICT (name) DO UPDATE SET credential = EXCLUDED.credential",
+                &[&account.name, &account.credential],
+            )
+            .await
+            .map_err(database)?;
+        Ok(())
+    }
+}
+
+/// Rebuild a [`CharacterRecord`] from a row, checking every narrowing.
+///
+/// The columns are `BIGINT`/`INTEGER` because PostgreSQL has no unsigned or
+/// one-byte integers, so each field is wider on disk than in the record. A value
+/// that does not fit the record's type — a `z` above 127, a `serial` past
+/// `u32::MAX` — means the row was written by something other than this code, so
+/// it is [`StoreError::Corrupt`], not a silently truncated character standing in
+/// the wrong place.
+fn character_from_row(row: &Row) -> Result<CharacterRecord, StoreError> {
+    Ok(CharacterRecord {
+        serial: u32::try_from(row.get::<_, i64>(0)).map_err(|_| corrupt("serial"))?,
+        account: row.get(1),
+        name: row.get(2),
+        body: u16::try_from(row.get::<_, i32>(3)).map_err(|_| corrupt("body"))?,
+        hue: u16::try_from(row.get::<_, i32>(4)).map_err(|_| corrupt("hue"))?,
+        facet: u8::try_from(row.get::<_, i32>(5)).map_err(|_| corrupt("facet"))?,
+        x: u16::try_from(row.get::<_, i32>(6)).map_err(|_| corrupt("x"))?,
+        y: u16::try_from(row.get::<_, i32>(7)).map_err(|_| corrupt("y"))?,
+        z: i8::try_from(row.get::<_, i32>(8)).map_err(|_| corrupt("z"))?,
+        facing: u8::try_from(row.get::<_, i32>(9)).map_err(|_| corrupt("facing"))?,
+    })
+}
+
+/// A column held a value outside the range of the record field it maps to.
+fn corrupt(field: &str) -> StoreError {
+    StoreError::Corrupt(format!(
+        "the {field} column holds a value outside the range of its record field"
+    ))
+}
+
+/// Turn a `tokio_postgres` error into the trait's error. The database says what
+/// went wrong; whether that is fatal is the shard's call, not this crate's.
+fn database(error: tokio_postgres::Error) -> StoreError {
+    StoreError::Database(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // These tests need a real PostgreSQL. They read a connection URL from
+    // `OPENSHARD_POSTGRES` and skip when it is unset, the same bargain the
+    // client-file tests strike with `OPENSHARD_CLIENT`: a checkout with no
+    // database configured stays green, and the coverage is there for anyone who
+    // points the variable at a server.
+    //
+    // They share one database's tables, so a single async lock serialises them
+    // and each one drops the tables first — no ordering between tests, no
+    // leftovers from a crashed run.
+    static LOCK: Mutex<()> = Mutex::const_new(());
+
+    fn character(serial: u32, x: u16) -> CharacterRecord {
+        CharacterRecord {
+            serial,
+            account: "admin".into(),
+            name: "Alpha".into(),
+            body: 0x0190,
+            hue: 0,
+            facet: 0,
+            x,
+            y: 1600,
+            z: 30,
+            facing: 0,
+        }
+    }
+
+    fn snapshot(characters: Vec<CharacterRecord>, removed: Vec<u32>) -> Snapshot {
+        Snapshot {
+            tick: 1,
+            schema: SCHEMA_VERSION,
+            characters,
+            removed,
+        }
+    }
+
+    /// Connect if a database is configured, dropping the tables so the test
+    /// starts from nothing. `None` means "no `OPENSHARD_POSTGRES`; skip".
+    async fn fresh() -> Option<PgStore> {
+        let url = std::env::var("OPENSHARD_POSTGRES").ok()?;
+        let (client, connection) = tokio_postgres::connect(&url, NoTls)
+            .await
+            .expect("connect to the test database");
+        tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        client
+            .batch_execute(
+                "DROP TABLE IF EXISTS characters; \
+                 DROP TABLE IF EXISTS accounts; \
+                 DROP TABLE IF EXISTS meta;",
+            )
+            .await
+            .expect("reset the test database");
+        drop(client);
+        Some(PgStore::connect(&url).await.expect("open the store"))
+    }
+
+    #[tokio::test]
+    async fn a_saved_character_reads_back() {
+        let _guard = LOCK.lock().await;
+        let Some(store) = fresh().await else {
+            return;
+        };
+        store
+            .save(&snapshot(vec![character(1, 100)], vec![]))
+            .await
+            .expect("save");
+        let characters = store.characters().await.expect("read");
+        assert_eq!(characters.len(), 1);
+        assert_eq!(characters[0].serial, 1);
+        assert_eq!(characters[0].x, 100);
+    }
+
+    #[tokio::test]
+    async fn saving_the_same_serial_twice_updates_rather_than_duplicates() {
+        // The primary key is the serial, so a second save of the same character
+        // is an upsert, not a second row — the same guarantee the other backends
+        // give. `ON CONFLICT DO UPDATE` is where PostgreSQL spells that.
+        let _guard = LOCK.lock().await;
+        let Some(store) = fresh().await else {
+            return;
+        };
+        store
+            .save(&snapshot(vec![character(1, 100)], vec![]))
+            .await
+            .expect("save");
+        store
+            .save(&snapshot(vec![character(1, 200)], vec![]))
+            .await
+            .expect("save");
+        let characters = store.characters().await.expect("read");
+        assert_eq!(characters.len(), 1);
+        assert_eq!(characters[0].x, 200);
+    }
+
+    #[tokio::test]
+    async fn a_removal_takes_the_character_out() {
+        let _guard = LOCK.lock().await;
+        let Some(store) = fresh().await else {
+            return;
+        };
+        store
+            .save(&snapshot(vec![character(1, 100)], vec![]))
+            .await
+            .expect("save");
+        store.save(&snapshot(vec![], vec![1])).await.expect("save");
+        assert!(store.characters().await.expect("read").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_negative_height_survives_the_database() {
+        // z is i8 and the column is a signed INTEGER. The mistake would be reading
+        // it back as u8, turning a basement at z=-40 into z=216.
+        let _guard = LOCK.lock().await;
+        let Some(store) = fresh().await else {
+            return;
+        };
+        let mut record = character(1, 100);
+        record.z = -40;
+        store
+            .save(&snapshot(vec![record], vec![]))
+            .await
+            .expect("save");
+        assert_eq!(store.characters().await.expect("read")[0].z, -40);
+    }
+
+    #[tokio::test]
+    async fn a_full_range_serial_survives_the_database() {
+        // The widest serial an item can carry is 0x7FFF_FFFF. Stored as BIGINT and
+        // read back through a checked narrowing, it must come out unchanged rather
+        // than tripping the corruption guard.
+        let _guard = LOCK.lock().await;
+        let Some(store) = fresh().await else {
+            return;
+        };
+        store
+            .save(&snapshot(vec![character(0x7FFF_FFFF, 100)], vec![]))
+            .await
+            .expect("save");
+        assert_eq!(
+            store.characters().await.expect("read")[0].serial,
+            0x7FFF_FFFF
+        );
+    }
+
+    #[tokio::test]
+    async fn accounts_round_trip() {
+        let _guard = LOCK.lock().await;
+        let Some(store) = fresh().await else {
+            return;
+        };
+        store
+            .put_account(&AccountRecord {
+                name: "admin".into(),
+                credential: "secret".into(),
+            })
+            .await
+            .expect("put");
+        // And an upsert on the same name updates rather than duplicating.
+        store
+            .put_account(&AccountRecord {
+                name: "admin".into(),
+                credential: "changed".into(),
+            })
+            .await
+            .expect("put again");
+        let accounts = store.accounts().await.expect("read");
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].name, "admin");
+        assert_eq!(accounts[0].credential, "changed");
+    }
+
+    #[tokio::test]
+    async fn a_save_from_the_future_is_refused_and_not_written() {
+        let _guard = LOCK.lock().await;
+        let Some(store) = fresh().await else {
+            return;
+        };
+        store
+            .save(&snapshot(vec![character(1, 100)], vec![]))
+            .await
+            .expect("save");
+        let future = Snapshot {
+            tick: 2,
+            schema: SCHEMA_VERSION + 1,
+            characters: vec![character(1, 999)],
+            removed: vec![],
+        };
+        let error = store.save(&future).await.expect_err("must refuse");
+        assert!(matches!(error, StoreError::SchemaMismatch { .. }));
+        assert_eq!(
+            store.characters().await.expect("read")[0].x,
+            100,
+            "the refused save must not have landed"
+        );
+    }
+
+    #[tokio::test]
+    async fn it_persists_across_a_reconnect() {
+        // The whole point of the crate: write, drop the store, connect a fresh one
+        // to the same database, and find the world still there.
+        let _guard = LOCK.lock().await;
+        let Some(store) = fresh().await else {
+            return;
+        };
+        store
+            .save(&snapshot(vec![character(7, 4242)], vec![]))
+            .await
+            .expect("save");
+        store
+            .put_account(&AccountRecord {
+                name: "admin".into(),
+                credential: "x".into(),
+            })
+            .await
+            .expect("put");
+        drop(store);
+
+        let url = std::env::var("OPENSHARD_POSTGRES").expect("still set");
+        let reopened = PgStore::connect(&url).await.expect("reconnect");
+        let characters = reopened.characters().await.expect("read");
+        assert_eq!(characters.len(), 1);
+        assert_eq!(characters[0].serial, 7);
+        assert_eq!(characters[0].x, 4242, "position survived the reconnect");
+        assert_eq!(reopened.accounts().await.expect("read").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn connecting_to_a_database_from_the_future_is_refused() {
+        // Older code connecting to a newer save must refuse, not read it and write
+        // the loss back on the next save.
+        let _guard = LOCK.lock().await;
+        let url = match std::env::var("OPENSHARD_POSTGRES").ok() {
+            Some(url) => url,
+            None => return,
+        };
+        let (client, connection) = tokio_postgres::connect(&url, NoTls).await.expect("connect");
+        tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        client
+            .batch_execute(
+                "DROP TABLE IF EXISTS characters; \
+                 DROP TABLE IF EXISTS accounts; \
+                 DROP TABLE IF EXISTS meta; \
+                 CREATE TABLE meta (key TEXT PRIMARY KEY, value BIGINT NOT NULL); \
+                 INSERT INTO meta (key, value) VALUES ('schema', 999);",
+            )
+            .await
+            .expect("stamp a future schema");
+        drop(client);
+
+        let error = PgStore::connect(&url).await.expect_err("must refuse");
+        assert!(matches!(
+            error,
+            StoreError::SchemaMismatch { found: 999, .. }
+        ));
+    }
+}
