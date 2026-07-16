@@ -50,12 +50,12 @@ mistake this for a security feature when it lands.
 - [x] Sans-io `LoginServer`: 0x80 → 0xA8 → 0xA0 → 0x8C → 0x91 → 0xA9
 - [x] Auth key issued at relay, one-shot, expiring, bound to its account
 - [x] `crates/server` — a binary that runs and reaches a character list
-- [ ] Load accounts from TOML rather than hard-coding them
-- [ ] Advertise a configured address, not loopback
+- [x] `config` — TOML, validated at load; accounts and addresses come from it
+- [x] A fresh checkout writes a default `openshard.toml` and runs
 
-**The advertised address is the next real bug.** `0x8C` currently hands out
-`127.0.0.1`, so a client on another machine dutifully connects to its own
-loopback and fails. This is the first thing `config` has to own.
+`config` refuses to start on a wildcard `advertise` rather than accepting it and
+failing silently for every remote client. That check is the reason the crate
+exists; parsing TOML is three lines of serde.
 
 The connection logic is a pure state machine on purpose. Everything hard about a
 gateway is byte boundaries — a seed split across three segments, four packets in
@@ -122,7 +122,7 @@ and edited as normal source afterwards — there is no ongoing `.scp` dependency
 
 ## 8. Operations
 
-- [ ] `config` — TOML, validated at load
+- [x] `config` — TOML, validated at load
 - [ ] `metrics` — tracing, Prometheus, health endpoints
 - [ ] `plugins` — manifests, lifecycle, enable/disable
 - [ ] REST API + JWT

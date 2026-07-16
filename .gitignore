@@ -17,6 +17,11 @@ dist/
 .env
 .env.local
 
+# The generated config. It holds plaintext passwords and one operator's network
+# layout, neither of which belongs to anyone else. The binary writes a default
+# on first run; `openshard_config::DEFAULT_TOML` is the version under review.
+/openshard.toml
+
 # Editors / OS
 .DS_Store
 .idea/

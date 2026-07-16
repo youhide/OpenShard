@@ -10,54 +10,100 @@
 //! a crate instead.
 
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::SocketAddrV4;
+use std::path::Path;
+use std::process::ExitCode;
 use std::time::Instant;
 
+use openshard_config::{Config, DEFAULT_TOML};
 use openshard_gateway::{ConnectionId, Event, Server, ServerEvent};
-use openshard_login::{single_shard, DevAccounts, LoginServer, LoginSession, Response};
+use openshard_login::{DevAccounts, LoginServer, LoginSession, Response};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
-/// Where the shard listens. 2593 is the UO game port; 7775 is the login port.
-///
-/// One port for both: the login server relays the client to this same address,
-/// and it reconnects here. Sphere splits them across processes for a shard
-/// cluster; a single shard has no reason to.
-const LISTEN_PORT: u16 = 2593;
-
-/// What the shard calls itself in the 0xA8 list.
-const SHARD_NAME: &str = "OpenShard";
+/// Where the config lives, relative to the working directory.
+const CONFIG_PATH: &str = "openshard.toml";
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
 
-    let address = SocketAddr::from(([0, 0, 0, 0], LISTEN_PORT));
-    let (server, events) = Server::bind(address).await?;
-    info!(%address, "OpenShard starting");
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            // Printed rather than returned as a `Result`: `main` returning `Err`
+            // renders it with `Debug`, which for a config error is a wall of
+            // struct fields instead of the sentence that says what to fix.
+            error!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
 
-    // The address handed to clients in the 0x8C relay. Loopback is right for a
-    // laptop and wrong for anything else: a client on another machine will
-    // dutifully try to connect to its own 127.0.0.1 and fail. This is the first
-    // thing config has to own.
-    let advertised = single_shard(Ipv4Addr::new(127, 0, 0, 1), LISTEN_PORT);
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let config = load_config(CONFIG_PATH)?;
+
+    // The 0x8C relay carries four bytes of address. There is no IPv6 form of it,
+    // so a v6 `advertise` cannot be honoured — better to say so at startup than
+    // to hand clients an address the packet cannot express.
+    let advertised = config.advertise_v4().ok_or(
+        "server.advertise is IPv6; the UO relay packet has four bytes for an address \
+         and no way to carry one",
+    )?;
+
+    let (server, events) = Server::bind(config.server.listen).await?;
+    info!(
+        shard = config.server.name,
+        listen = %config.server.listen,
+        advertise = %config.server.advertise,
+        accounts = config.accounts.len(),
+        "OpenShard starting"
+    );
+    if advertised.ip().is_loopback() {
+        warn!(
+            "server.advertise is loopback: only clients on this machine can reach the shard. \
+             Set it to the address clients dial."
+        );
+    }
 
     tokio::spawn(server.run());
-    run_login(events, advertised).await;
+    run_login(events, &config, advertised).await;
     Ok(())
 }
 
+/// Load the config, writing the shipped default if there is none.
+///
+/// A fresh checkout should run. Writing the default rather than baking one in
+/// means the first thing a new operator sees is the file they need to edit, with
+/// the `advertise` warning in it, instead of a shard that works on their laptop
+/// and nowhere else for reasons nobody wrote down.
+fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
+    if !Path::new(path).exists() {
+        std::fs::write(path, DEFAULT_TOML)?;
+        info!(path, "no config found; wrote the default");
+    }
+    Ok(Config::load(path)?)
+}
+
 /// Drive login for every connection until the gateway stops.
-async fn run_login(mut events: mpsc::UnboundedReceiver<ServerEvent>, advertised: SocketAddrV4) {
-    let accounts = DevAccounts::new()
-        .with_account("admin", "hunter2")
-        .with_character("admin", "Lord British");
-    let mut login = LoginServer::new(accounts, SHARD_NAME, advertised);
+async fn run_login(
+    mut events: mpsc::UnboundedReceiver<ServerEvent>,
+    config: &Config,
+    advertised: SocketAddrV4,
+) {
+    let mut accounts = DevAccounts::new();
+    for account in &config.accounts {
+        accounts = accounts.with_account(&account.name, &account.password);
+        for character in &account.characters {
+            accounts = accounts.with_character(&account.name, character);
+        }
+    }
+    let mut login = LoginServer::new(accounts, &config.server.name, advertised);
 
     // One session per live connection. Not a global: this task owns it, and the
     // gateway's Disconnected event is what keeps it from growing forever.

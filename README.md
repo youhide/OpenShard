@@ -35,12 +35,14 @@ crates/
   entities      ECS: EntityId, Serial, Registry          implemented
   events        double-buffered typed event bus          implemented
   protocol      client versions, feature gates, packets  versioning only
-  gateway       connection accept and framing            stub
-  login         accounts, shard list                     stub
+  gateway       sans-io connection + Tokio listener      implemented
+  login         accounts, auth keys, the whole sequence  implemented
+  config        TOML, validated at load                  implemented
+  server        the binary                               implemented
   world         the tick loop and spatial index          stub
   combat movement ai items magic skills housing
   guilds chat persistence scripting plugins
-  metrics config                                         stubs
+  metrics                                                stubs
 tools/
   dashboard launcher map-editor cli                      planned
 ```
@@ -48,12 +50,16 @@ tools/
 ## Running
 
 ```sh
-cargo run -p openshard-server     # listens on 0.0.0.0:2593
+cargo run -p openshard-server
 ```
 
-The dev account is `admin` / `hunter2`, hard-coded in `crates/server/src/main.rs`
-until `config` lands. The shard advertises `127.0.0.1`, so a client on another
-machine will not reach it yet.
+The first run writes an `openshard.toml` and starts on `0.0.0.0:2593` with a dev
+account of `admin` / `hunter2`.
+
+The one setting worth reading before you touch anything else is
+`server.advertise`. It is **not** `server.listen`: it is the address the server
+tells clients to dial, so it defaults to `127.0.0.1` and only works on the
+machine running the shard. Behind NAT it must be your public address.
 
 ## Building
 
