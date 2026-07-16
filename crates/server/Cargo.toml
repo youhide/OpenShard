@@ -22,6 +22,7 @@ openshard-login.workspace = true
 openshard-entities.workspace = true
 openshard-movement.workspace = true
 openshard-protocol.workspace = true
+openshard-world.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true

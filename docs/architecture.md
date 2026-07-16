@@ -223,6 +223,20 @@ Event-sourcing inspired. Autosave configurable. Crash recovery from the log.
 The load path is why `Registry::bind_serial` exists: serials come from the save,
 not the allocator, and binding one reserves it so nothing fresh collides.
 
+## Client files
+
+None are in this repository and none will be. They are copyrighted; the operator
+points `world.client_files` at an install they already have.
+
+What is here are readers for the *formats*, and only the formats. The server does
+not send map tiles — the client has had them since it was installed. What the
+server needs a map for is deciding: how high the ground is, what blocks, what
+floats. If the two disagree, the client draws a wall the server lets you walk
+through and the player rubber-bands.
+
+Nothing in these parsers is derived from any particular shard's data, and nothing
+should be documented as if it were.
+
 ## Non-goals
 
 Reimplementing SphereScript. Parsing `.scp` at runtime. Source compatibility with

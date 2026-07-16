@@ -239,6 +239,7 @@ dependencies = [
  "openshard-login",
  "openshard-movement",
  "openshard-protocol",
+ "openshard-world",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -251,6 +252,13 @@ version = "0.0.1"
 [[package]]
 name = "openshard-world"
 version = "0.0.1"
+dependencies = [
+ "openshard-entities",
+ "openshard-events",
+ "openshard-movement",
+ "openshard-protocol",
+ "tracing",
+]
 
 [[package]]
 name = "parking_lot"

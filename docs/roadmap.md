@@ -66,31 +66,39 @@ machine each one is a deterministic test with no ports and no sleeps.
 world code inside a network task, on whatever thread Tokio picked, whenever bytes
 arrived. The channel is where async stops and the tick begins.
 
-## 3. World — the slice walks; the world does not exist
-
-The goal was **a client logs in and walks around**, and it does.
+## 3. World — a client walks in Britannia
 
 - [x] `Direction` / `Facing` — steps ported verbatim from Sphere's `sm_Moves`
 - [x] World entry: 0x5D, 0x1B, 0xBF.0x08, 0x20, 0x4F, 0x55
 - [x] `movement`: the walk handshake, turning as a step, the world edge
 - [x] `WalkSequence` — 0 means fresh, 255 wraps to 1, a reject resets both ends
-- [x] `crates/server/src/game.rs` — a player enters and walks, over real TCP
+- [x] `tiledata.mul` — both layouts, told apart by arithmetic
+- [x] UOP containers — the map is in `map0LegacyMUL.uop`, not `map0.mul`
+- [x] `map*.mul` / `statics*.mul` — column-major blocks, 2.9M statics
+- [x] `MapTerrain` — real heights, walls, water, the two-unit step limit
 - [ ] `world` crate: the tick loop, composing `Registry` + `EventBus`
-- [ ] Map loading from client MUL/UOP files
-- [ ] `Terrain` for real: heights, blocking, statics
 - [ ] Spatial index (sectors) and "what can this player see"
 - [ ] Core components: `Position`, `Graphic`, `Body`, `Name`
 - [ ] Character creation (0x00), not just playing a configured name
+- [ ] Multiple facets; only map0 is wired up
 
-**What the slice actually proves.** The packets are right and the walk handshake
-is right. It does not prove there is a world: `movement::OpenWorld` allows every
-step, so a player walks across water, through walls and off cliffs. `game.rs`
-holds a `Registry` with a serial in it and no components at all.
+**Three things about the client file formats that are not written down
+anywhere**, each of which parses cleanly and produces a plausible, wrong world
+if guessed:
 
-That is deliberate. The handshake is protocol — finishable now, and pinned. The
-map is a project of its own, and `Terrain` is the seam it lands on without
-touching any of the above. What `game.rs` must not do is grow: the moment it
-wants components, the `world` crate is what it wants.
+- **`map0.mul` may be a stub.** It can be 90MB of zeroes, at exactly the right
+  size. The real map is `map0LegacyMUL.uop`. Reading the stub raises no error
+  and yields a flat, empty, perfectly smooth world.
+- **UOP entries need not be in index order.** Sorting by file offset — the
+  obvious shortcut — scrambles the map. The entries are named by a 64-bit hash
+  and it has to be computed.
+- **The UOP hash packs its halves `(b << 32) | c`.** Jenkins' own signature is
+  `hashlittle2(key, len, &pc, &pb)`, so `(c << 32) | b` is the natural reading.
+  It matches zero entries.
+
+**What is still missing:** the tick. `game.rs` answers packets as they arrive
+rather than simulating anything, and it is the placeholder the world crate grows
+out of.
 
 ## 4. Persistence
 
@@ -128,7 +136,7 @@ Roughly in dependency order, each script-first:
 ## 7. Scriptpack conversion
 
 - [ ] `tools/cli`: one-shot `.scp` → TS/TOML converter
-- [ ] Run it over `Sphere/Scripts-X`, review the output by hand
+- [ ] Run it over a scriptpack, review the output by hand
 
 A build-time tool that runs once, not an engine feature. The output is committed
 and edited as normal source afterwards — there is no ongoing `.scp` dependency.
@@ -146,3 +154,12 @@ and edited as normal source afterwards — there is no ongoing `.scp` dependency
 
 LLM NPCs, quest generation, GM assistant, Discord integration. All optional, all
 after the engine stands on its own.
+
+## A note on client files
+
+None are in this repository and none will be: they are copyrighted and not ours
+to redistribute. `world.client_files` points at an install the operator already
+has. Tests that need one read `OPENSHARD_CLIENT` and skip when it is unset.
+
+What this project contains is readers for the *formats*. Nothing is derived from
+any particular shard's data, and nothing should be documented as if it were.

@@ -21,6 +21,7 @@ use openshard_config::{Config, DEFAULT_TOML};
 use openshard_gateway::{ConnectionId, Event, Server, ServerEvent};
 use openshard_login::{DevAccounts, LoginServer, LoginSession, Response};
 use openshard_protocol::{CharacterPlay, WalkRequest};
+use openshard_world::{Map, MapTerrain, TileData};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
@@ -76,9 +77,39 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    let game = load_world(&config)?;
     tokio::spawn(server.run());
-    run_login(events, &config, advertised).await;
+    run_login(events, &config, advertised, game).await;
     Ok(())
+}
+
+/// Load the client's map, if it is configured.
+///
+/// Blocking, and on purpose: this reads ~110MB and takes a moment, and there is
+/// no sense accepting a client before the world it will walk in exists.
+fn load_world(config: &Config) -> Result<Game, Box<dyn std::error::Error>> {
+    let dir = config.world.client_files.trim();
+    if dir.is_empty() {
+        warn!(
+            "world.client_files is empty: running with no map. Every step will be allowed — \
+             players walk through walls and across water. Set it to a client install."
+        );
+        return Ok(Game::new());
+    }
+
+    let dir = Path::new(dir);
+    let started = Instant::now();
+    let map = Map::load_facet(dir, 0)?;
+    let tiles = TileData::load(dir.join("tiledata.mul"))?;
+    info!(
+        facet = map.facet_name(),
+        size = format!("{}x{}", map.width(), map.height()),
+        statics = map.static_count(),
+        tiledata = ?tiles.format(),
+        took = ?started.elapsed(),
+        "map loaded"
+    );
+    Ok(Game::new().with_terrain(MapTerrain::new(map, tiles)))
 }
 
 /// Load the config, writing the shipped default if there is none.
@@ -100,6 +131,7 @@ async fn run_login(
     mut events: mpsc::UnboundedReceiver<ServerEvent>,
     config: &Config,
     advertised: SocketAddrV4,
+    mut game: Game,
 ) {
     let mut accounts = DevAccounts::new();
     for account in &config.accounts {
@@ -109,7 +141,6 @@ async fn run_login(
         }
     }
     let mut login = LoginServer::new(accounts, &config.server.name, advertised);
-    let mut game = Game::new();
 
     // One session per live connection. Not a global: this task owns it, and the
     // gateway's Disconnected event is what keeps it from growing forever.

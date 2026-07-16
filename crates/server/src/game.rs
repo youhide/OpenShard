@@ -1,14 +1,15 @@
 //! Everything after the character list: entering the world, and walking in it.
 //!
-//! # This is a placeholder for `openshard-world`
+//! # This is a placeholder for the rest of `openshard-world`
 //!
-//! There is no tick, no spatial index, no other mobiles, and no map. A player
-//! enters, walks around alone on flat nothing, and none of it is saved. It
-//! exists because a client on screen taking a step is worth more than another
-//! crate of tests, and because everything it leans on — the packets, the walk
-//! sequence — is already finished and pinned underneath.
+//! There is no tick, no spatial index and no other mobiles. A player enters,
+//! walks around alone, and none of it is saved.
 //!
-//! When `openshard-world` lands this file goes away. Do not grow it.
+//! There *is* a map: `MapTerrain` from `openshard-world`, when the client files
+//! are configured. Without them the shard falls back to `OpenWorld`, where every
+//! step is allowed — which is a development mode, not a feature.
+//!
+//! When the world crate grows a tick this file goes away. Do not grow it.
 
 use openshard_entities::{Registry, Serial, SerialKind};
 use openshard_movement::{OpenWorld, Walk, Walker};
@@ -17,10 +18,22 @@ use openshard_protocol::{
     encode_walk_reject, CharacterPlay, Direction, Facing, PlayerStart, PlayerUpdate, Point,
     WalkRequest, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
 };
+use openshard_world::MapTerrain;
 use tracing::{debug, info, warn};
 
-/// Where a new character appears: the centre of Britain, on Felucca.
-const START_POSITION: Point = Point::new(1475, 1774, 20);
+/// Where a new character appears: open ground north-west of Britain.
+///
+/// # This is a guess and it belongs in config
+///
+/// Facets differ. The classic (1475, 1774) — Britain's centre — is open water on
+/// some maps, and a hard-coded coordinate is only right for the files it was
+/// picked against.
+///
+/// The `z` matters more than it looks: `Game::start_position` corrects it from
+/// the map at spawn, because a character standing more than two units off the
+/// ground has every first step refused and cannot move, with nothing in the log
+/// to say why.
+const START_POSITION: Point = Point::new(1363, 1600, 30);
 
 /// A human male body.
 const BODY_HUMAN_MALE: u16 = 0x0190;
@@ -45,6 +58,8 @@ pub struct Player {
 pub struct Game {
     /// Every entity. Real for its size, and the seam the world crate grows from.
     registry: Registry,
+    /// The map, if the client files were configured.
+    terrain: Option<MapTerrain>,
 }
 
 /// What a game packet produced.
@@ -61,9 +76,31 @@ impl Reply {
 }
 
 impl Game {
-    /// An empty world.
+    /// An empty world with no map.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Give this world a map.
+    pub fn with_terrain(mut self, terrain: MapTerrain) -> Self {
+        self.terrain = Some(terrain);
+        self
+    }
+
+    /// Where a character should appear.
+    ///
+    /// The configured spot, with its height corrected to whatever the map says
+    /// the ground actually is. A hard-coded z is a guess, and a guess that is
+    /// more than two units out means the player's first step is refused — they
+    /// spawn unable to move, with nothing in the log to explain it.
+    fn start_position(&self) -> Point {
+        let Some(terrain) = &self.terrain else {
+            return START_POSITION;
+        };
+        match terrain.map().land(START_POSITION.x, START_POSITION.y) {
+            Some(cell) => Point::new(START_POSITION.x, START_POSITION.y, cell.z),
+            None => START_POSITION,
+        }
     }
 
     /// How many entities exist.
@@ -81,7 +118,7 @@ impl Game {
     pub fn character_play(&mut self, play: &CharacterPlay) -> Option<(Player, Reply)> {
         let (entity, serial) = self.registry.spawn_with_serial(SerialKind::Mobile).ok()?;
         let facing = Facing::walking(Direction::South);
-        let walker = Walker::new(START_POSITION, facing);
+        let walker = Walker::new(self.start_position(), facing);
 
         // The registry is barely used yet — it holds the serial mapping and
         // nothing else. That is deliberate: the components belong to
@@ -123,10 +160,14 @@ impl Game {
     /// Handle `0x02`: try to take a step.
     pub fn walk(&mut self, player: &mut Player, request: WalkRequest) -> Reply {
         let mut reply = Reply::default();
-        // No terrain yet, so every step onto a legal coordinate is allowed. This
-        // is the one place `OpenWorld` is a lie the server tells the client, and
-        // it is why a player can currently walk across water.
-        match player.walker.request(request, &OpenWorld) {
+        // Without client files there is no map, and `OpenWorld` allows
+        // everything. That is a lie the server tells the client, and the reason
+        // startup warns about it.
+        let outcome = match &self.terrain {
+            Some(terrain) => player.walker.request(request, terrain),
+            None => player.walker.request(request, &OpenWorld),
+        };
+        match outcome {
             // A turn and a step are the same answer to the client: one ack.
             // They differ only in whether the position moved, and the walker
             // already knows that.

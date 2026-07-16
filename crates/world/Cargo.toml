@@ -12,3 +12,8 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+openshard-entities.workspace = true
+openshard-events.workspace = true
+openshard-movement.workspace = true
+openshard-protocol.workspace = true
+tracing.workspace = true

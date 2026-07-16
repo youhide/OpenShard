@@ -42,9 +42,25 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     /// Network and identity.
     pub server: ServerConfig,
+    /// Where the client's map files live.
+    #[serde(default)]
+    pub world: WorldConfig,
     /// Accounts, for as long as there is no database.
     #[serde(default)]
     pub accounts: Vec<AccountConfig>,
+}
+
+/// Where to find the client's data files.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldConfig {
+    /// The client install directory: `map0LegacyMUL.uop`, `tiledata.mul` and so on.
+    ///
+    /// Empty means no map. The shard still runs and a player can still walk —
+    /// on nothing, through everything. That is a development mode, not a
+    /// feature, and the server says so at startup.
+    #[serde(default)]
+    pub client_files: String,
 }
 
 /// Network and identity.
@@ -268,6 +284,14 @@ listen = "0.0.0.0:2593"
 #   LAN            this machine's LAN address
 #   behind NAT     your PUBLIC address, with 2593 forwarded
 advertise = "127.0.0.1:2593"
+
+[world]
+# The client install directory, holding map0LegacyMUL.uop and tiledata.mul.
+#
+# Leave empty and the shard runs with no map at all: every step is allowed and
+# players walk through walls and across water. Useful for testing the protocol,
+# useless as a game.
+client_files = ""
 
 # Development accounts, in plaintext, until there is a database.
 [[accounts]]
