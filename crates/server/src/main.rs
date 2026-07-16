@@ -29,7 +29,7 @@ use openshard_config::{Config, DEFAULT_TOML};
 use openshard_gateway::{ConnectionId, Event, Server, ServerEvent};
 use openshard_login::{DevAccounts, LoginServer, LoginSession, Response};
 use openshard_persistence::{MemoryStore, Snapshot, Store};
-use openshard_protocol::{CharacterPlay, WalkRequest};
+use openshard_protocol::{huffman, CharacterPlay, GameServerLogin, WalkRequest};
 use openshard_world::{Command, Map, MapTerrain, TileData, World, TICK_INTERVAL};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -249,7 +249,11 @@ async fn run_shard(
                 world.tick(Instant::now());
                 for out in world.drain_outbound() {
                     if let Some(session) = sessions.get(&out.connection) {
-                        let _ = session.outbox.send(out.packet);
+                        // A connection reaches the world only after its game
+                        // login, so this is always a game connection and every
+                        // packet leaves compressed. `send_packet` gates on the
+                        // flag anyway, so it stays correct if that ever changes.
+                        let _ = session.send_packet(out.packet);
                     }
                 }
                 // Handed off, not awaited. The tick's job here is to stop
@@ -332,6 +336,7 @@ fn handle(
                 Session {
                     login: LoginSession::new(),
                     in_world: false,
+                    game: false,
                     outbox,
                 },
             );
@@ -346,6 +351,14 @@ fn handle(
             match event {
                 Event::Seeded(seed) => session.login.on_seed(seed),
                 Event::Packet(packet) => {
+                    // The game login is the seam Sphere calls CONNECT_GAME: from
+                    // here on, this connection's every server->client packet is
+                    // Huffman-compressed — starting with the character list this
+                    // very packet triggers. Set the flag before the reply is
+                    // built so that reply goes out compressed.
+                    if packet.first().copied() == Some(GameServerLogin::ID) {
+                        session.game = true;
+                    }
                     if !dispatch(session, world, &packet, id) {
                         sessions.remove(&id);
                         return;
@@ -416,6 +429,16 @@ struct Session {
     /// Whether a character has been asked for. The world owns the entity; this
     /// is only enough to know a `0x02` is worth queueing.
     in_world: bool,
+    /// Whether this is a game-server connection, whose every server-to-client
+    /// packet is Huffman-compressed.
+    ///
+    /// The UO login connection is uncompressed; the game connection compresses
+    /// everything from the character list on. This mirrors Sphere's
+    /// `CONNECT_GAME`, which it sets during the game socket's crypt handshake —
+    /// before the character list is sent — so the list and all world traffic go
+    /// out compressed. Here the seam is the `0x91` game login: see the flag being
+    /// set in `handle`.
+    game: bool,
     outbox: mpsc::UnboundedSender<Vec<u8>>,
 }
 
@@ -427,9 +450,9 @@ impl Session {
     fn apply(&self, response: Response, id: ConnectionId) -> bool {
         match response {
             Response::Idle => true,
-            Response::Send(bytes) => self.outbox.send(bytes).is_ok(),
+            Response::Send(bytes) => self.send_packet(bytes),
             Response::SendThenClose(bytes) => {
-                let _ = self.outbox.send(bytes);
+                let _ = self.send_packet(bytes);
                 false
             }
             Response::Close => {
@@ -437,6 +460,25 @@ impl Session {
                 false
             }
         }
+    }
+
+    /// Send one server-to-client packet, compressing it on a game connection.
+    ///
+    /// The login connection sends plain bytes; the game connection Huffman-
+    /// compresses every packet, each one independently — terminator and all —
+    /// exactly as Sphere's `CNetworkOutput` does for `CONNECT_GAME`. Skip this
+    /// and ClassicUO, which decompresses the game stream unconditionally, decodes
+    /// the raw bytes through its Huffman tree, produces plausible garbage for a
+    /// while, and then desyncs on a fabricated packet id far downstream —
+    /// surfacing as `need more data ID: 0E ...` hundreds of bytes in, looking
+    /// nothing like a compression problem.
+    fn send_packet(&self, bytes: Vec<u8>) -> bool {
+        let bytes = if self.game {
+            huffman::compress(&bytes)
+        } else {
+            bytes
+        };
+        self.outbox.send(bytes).is_ok()
     }
 }
 
@@ -494,5 +536,45 @@ mod tests {
             client("[::1]:51606"),
             advertise("127.0.0.1:2593")
         ));
+    }
+
+    fn session(game: bool) -> (Session, mpsc::UnboundedReceiver<Vec<u8>>) {
+        let (outbox, wire) = mpsc::unbounded_channel();
+        (
+            Session {
+                login: LoginSession::new(),
+                in_world: false,
+                game,
+                outbox,
+            },
+            wire,
+        )
+    }
+
+    #[test]
+    fn a_game_connection_compresses_and_a_login_one_does_not() {
+        // The whole bug. ClassicUO Huffman-decodes every packet on the game
+        // connection; send one raw and it decodes garbage and desyncs later on a
+        // fabricated id ("need more data ID: 0E ..."). A character-list-shaped
+        // packet, since 0xA9 is the first thing the game connection ever sends.
+        let packet = vec![0xA9u8, 0x00, 0x08, 0x05, b'L', b'o', b'r', b'd'];
+
+        let (game, mut wire) = session(true);
+        assert!(game.send_packet(packet.clone()));
+        let on_wire = wire.try_recv().expect("a packet was sent");
+        assert_ne!(on_wire, packet, "a game packet must not leave raw");
+        assert_eq!(
+            huffman::decompress(&on_wire).expect("valid stream"),
+            packet,
+            "and the client must get its bytes back"
+        );
+
+        let (login, mut wire) = session(false);
+        assert!(login.send_packet(packet.clone()));
+        assert_eq!(
+            wire.try_recv().expect("a packet was sent"),
+            packet,
+            "the login connection is never compressed"
+        );
     }
 }
