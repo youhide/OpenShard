@@ -1,0 +1,14 @@
+[package]
+name = "openshard-gateway"
+description = "Accepts client TCP connections and pumps encoded packets to and from the world server."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

@@ -1,0 +1,64 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/hideOut/OpenShard"
+authors = ["OpenShard contributors"]
+
+[workspace.dependencies]
+# Internal crates
+openshard-ai = { path = "crates/ai", version = "0.0.1" }
+openshard-chat = { path = "crates/chat", version = "0.0.1" }
+openshard-combat = { path = "crates/combat", version = "0.0.1" }
+openshard-config = { path = "crates/config", version = "0.0.1" }
+openshard-entities = { path = "crates/entities", version = "0.0.1" }
+openshard-events = { path = "crates/events", version = "0.0.1" }
+openshard-gateway = { path = "crates/gateway", version = "0.0.1" }
+openshard-guilds = { path = "crates/guilds", version = "0.0.1" }
+openshard-housing = { path = "crates/housing", version = "0.0.1" }
+openshard-items = { path = "crates/items", version = "0.0.1" }
+openshard-login = { path = "crates/login", version = "0.0.1" }
+openshard-magic = { path = "crates/magic", version = "0.0.1" }
+openshard-metrics = { path = "crates/metrics", version = "0.0.1" }
+openshard-movement = { path = "crates/movement", version = "0.0.1" }
+openshard-persistence = { path = "crates/persistence", version = "0.0.1" }
+openshard-plugins = { path = "crates/plugins", version = "0.0.1" }
+openshard-protocol = { path = "crates/protocol", version = "0.0.1" }
+openshard-scripting = { path = "crates/scripting", version = "0.0.1" }
+openshard-skills = { path = "crates/skills", version = "0.0.1" }
+openshard-world = { path = "crates/world", version = "0.0.1" }
+
+# External
+anyhow = "1"
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+todo = "warn"
+dbg_macro = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+# Deliberately not `panic = "abort"`. A panic in one connection's task should
+# drop that connection, not take the shard down with it.
+
+[profile.bench]
+lto = "thin"

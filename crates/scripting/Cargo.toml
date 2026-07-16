@@ -1,0 +1,14 @@
+[package]
+name = "openshard-scripting"
+description = "TypeScript runtime (deno_core / V8) with hot reload and the script-facing API."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
