@@ -142,11 +142,31 @@ connection takes the mobile off every screen that had it.
 
 ## 4. Persistence
 
-- [ ] Persistence queue, drained outside the tick
+- [x] Persistence queue, drained outside the tick
 - [ ] SQLite backend first (dev), PostgreSQL after
 - [ ] Save and load accounts and characters
 - [ ] Serial reservation on load — `Registry::bind_serial` already handles this
 - [ ] Crash recovery
+
+The queue is done and there is nothing at the end of it. `Journal` tracks what
+changed, `Snapshot` is a consistent picture of one tick, and a task writes it
+where the tick cannot see. The `Store` behind that is `MemoryStore`, so a restart
+still loses the world — the shard warns at startup rather than implying
+otherwise.
+
+**Three things it is worth knowing before touching this:**
+
+- **The dirty marks come from the event bus.** Nothing calls `journal.touch()`
+  by hand. A system that moves a mobile already emits `MobileMoved`, because
+  that is how the client hears about it; persistence reads the same event. There
+  is no line to forget.
+- **Logout uses `Journal::keep`, not `touch`.** A touch is a promise to read the
+  entity at the next save, and the entity is about to be despawned. Logout is
+  when a save matters most, so the record is taken before the despawn. There is
+  a test with that name.
+- **A failed write costs a full sweep, not a rollback.** Re-writing the failed
+  snapshot would put everyone back where they were when the write started. The
+  world is marked dirty instead and the next save reads it fresh.
 
 ## 5. Scripting
 

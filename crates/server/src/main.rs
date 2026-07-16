@@ -5,7 +5,11 @@
 //! ```text
 //!   gateway tasks ──> ServerEvent ──> [ this loop ] ──> Command ──> World::tick
 //!                                            │                          │
-//!                                            └──────  Outbound  <───────┘
+//!                                            ├──────  Outbound  <───────┤
+//!                                            │                          │
+//!                                            └──> [ save task ]  <──  Snapshot
+//!                                                      │
+//!                                                    a disk
 //! ```
 //!
 //! This file owns neither half. The gateway is a state machine with its own
@@ -24,8 +28,10 @@ use std::time::Instant;
 use openshard_config::{Config, DEFAULT_TOML};
 use openshard_gateway::{ConnectionId, Event, Server, ServerEvent};
 use openshard_login::{DevAccounts, LoginServer, LoginSession, Response};
+use openshard_persistence::{MemoryStore, Snapshot, Store};
 use openshard_protocol::{CharacterPlay, WalkRequest};
 use openshard_world::{Command, Map, MapTerrain, TileData, World, TICK_INTERVAL};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -80,8 +86,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let world = load_world(&config)?;
+    let store = open_store();
     tokio::spawn(server.run());
-    run_shard(events, &config, advertised, world).await;
+    run_shard(events, &config, advertised, world, store).await;
     Ok(())
 }
 
@@ -97,6 +104,24 @@ fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
         info!(path, "no config found; wrote the default");
     }
     Ok(Config::load(path)?)
+}
+
+/// Where the world is kept.
+///
+/// Nowhere, for now. The save path is wired end to end and the store at the end
+/// of it holds everything in memory, so a restart loses the world exactly as it
+/// did before — the difference is that the tick, the journal and the save task
+/// are the ones that will be there when a real database is, and they are being
+/// exercised rather than waiting to be written.
+///
+/// The warning is not decoration. A shard that says nothing here is a shard an
+/// operator assumes is saving.
+fn open_store() -> Arc<dyn Store> {
+    warn!(
+        "no database yet: the world is kept in memory and lost at stop. \
+         Characters will not survive a restart."
+    );
+    Arc::new(MemoryStore::new())
 }
 
 /// Load the client's map, if it is configured.
@@ -141,6 +166,47 @@ fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> {
     Ok(World::new(start).with_terrain(MapTerrain::new(map, tiles)))
 }
 
+/// Write snapshots, forever, on a task nothing waits for.
+///
+/// # This is the only place that touches a disk
+///
+/// And it is deliberately somewhere the tick cannot reach. The world hands over
+/// owned values and moves on; whatever happens here — a slow disk, a lock, a
+/// database in another country — happens to this task and to nothing else. A
+/// shard whose store is wedged saves late. It does not lag, and it does not stop
+/// letting people play.
+///
+/// # A failed write is reported, not retried here
+///
+/// Retrying from here would write the same stale snapshot at a world that has
+/// moved on. The failure goes back to the shard loop, which asks the world for a
+/// full sweep — see `World::resweep`. The cost of a failure is a fat save, and
+/// the recovery reads the world as it is now rather than as it was.
+async fn save_loop(
+    store: Arc<dyn Store>,
+    mut snapshots: mpsc::UnboundedReceiver<Snapshot>,
+    failures: mpsc::UnboundedSender<()>,
+) {
+    while let Some(snapshot) = snapshots.recv().await {
+        let rows = snapshot.len();
+        let started = Instant::now();
+        match store.save(&snapshot).await {
+            Ok(()) => debug!(
+                tick = snapshot.tick,
+                rows,
+                took = ?started.elapsed(),
+                "saved"
+            ),
+            Err(error) => {
+                error!(tick = snapshot.tick, rows, %error, "save failed; the next one will be a full sweep");
+                // If the shard loop is gone there is nobody to sweep and nothing
+                // to do about it. The `let _` is that, not carelessness.
+                let _ = failures.send(());
+            }
+        }
+    }
+}
+
 /// Drive login and the world until the gateway stops.
 ///
 /// One task owns both. That is not a limitation: the world is deliberately
@@ -152,7 +218,12 @@ async fn run_shard(
     config: &Config,
     advertised: SocketAddrV4,
     mut world: World,
+    store: Arc<dyn Store>,
 ) {
+    let (saves, snapshots) = mpsc::unbounded_channel();
+    let (failed, mut failures) = mpsc::unbounded_channel();
+    tokio::spawn(save_loop(store, snapshots, failed));
+
     let mut accounts = DevAccounts::new();
     for account in &config.accounts {
         accounts = accounts.with_account(&account.name, &account.password);
@@ -181,6 +252,18 @@ async fn run_shard(
                         let _ = session.outbox.send(out.packet);
                     }
                 }
+                // Handed off, not awaited. The tick's job here is to stop
+                // holding the only copy.
+                for snapshot in world.drain_saves() {
+                    let _ = saves.send(snapshot);
+                }
+            }
+
+            // Before `events`: a store that is failing is worth hearing about
+            // ahead of the next packet, and there is never a queue of these.
+            Some(()) = failures.recv() => {
+                warn!("a save failed; marking the world for a full sweep");
+                world.resweep();
             }
 
             event = events.recv() => {

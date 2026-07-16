@@ -12,3 +12,11 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+async-trait.workspace = true
+openshard-entities.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }

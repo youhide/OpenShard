@@ -16,5 +16,6 @@ openshard-entities.workspace = true
 openshard-gateway.workspace = true
 openshard-events.workspace = true
 openshard-movement.workspace = true
+openshard-persistence.workspace = true
 openshard-protocol.workspace = true
 tracing.workspace = true

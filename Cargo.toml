@@ -10,6 +10,20 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/hideOut/OpenShard"
 authors = ["OpenShard contributors"]
 
+# A debug build is mostly debug info, and most of the debug info is Tokio's.
+#
+# Nobody steps into `serde_derive`. Symbols for dependencies are bytes that will
+# never be read by anyone, and there are gigabytes of them: this workspace's
+# `target/` was 2.7GB before this block and it is the reason a sandbox ran out of
+# disk mid-test. `debug = false` on dependencies only — the workspace's own
+# crates keep theirs, because those are the backtraces that get read.
+[profile.dev.package."*"]
+debug = false
+
+# The same, for the profile `cargo test` builds under.
+[profile.test.package."*"]
+debug = false
+
 [workspace.dependencies]
 # Internal crates
 openshard-ai = { path = "crates/ai", version = "0.0.1" }
@@ -36,6 +50,7 @@ openshard-world = { path = "crates/world", version = "0.0.1" }
 
 # External
 anyhow = "1"
+async-trait = "0.1"
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

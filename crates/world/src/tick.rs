@@ -28,9 +28,10 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use openshard_entities::{EntityId, Registry, SerialKind};
-use openshard_events::EventBus;
+use openshard_events::{Cursor, EventBus};
 use openshard_gateway::ConnectionId;
 use openshard_movement::{OpenWorld, Walk, Walker};
+use openshard_persistence::{CharacterRecord, Journal, Snapshot};
 use openshard_protocol::{
     encode_light_level, encode_login_complete, encode_map_change, encode_remove, encode_walk_ack,
     encode_walk_reject, ClientVersion, Direction, Facing, MobileIncoming, MobileMove, Notoriety,
@@ -65,6 +66,17 @@ const NOTORIETY_INNOCENT: u8 = 0x01;
 /// The facet size used when there is no map. Big enough for anywhere a test
 /// puts something; the grid is a `Vec` of empty buckets and costs nothing.
 const FACET_WITHOUT_A_MAP: (u32, u32) = (7168, 4096);
+
+/// How often the world offers a snapshot to persistence, in ticks.
+///
+/// Twenty seconds at [`TICK_INTERVAL`]. Sphere's default world save is ten
+/// minutes, which is ten minutes of play a crash can cost; that number is from
+/// an era when a save walked the entire world and blocked while it did. This one
+/// writes what changed, on another task, so it can afford to be frequent.
+///
+/// In ticks and not a `Duration` on purpose. A shard that has fallen behind
+/// should save less often, not spend its shortfall on the disk.
+pub const SAVE_EVERY_TICKS: u64 = 400;
 
 /// Something for the world to do, from outside the world.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -121,6 +133,18 @@ pub struct World {
     seen: HashMap<EntityId, HashSet<EntityId>>,
     /// Where new characters appear. The height comes from the map.
     start: (u16, u16),
+    /// What has changed since the last save.
+    journal: Journal,
+    /// How often to offer a snapshot, in ticks. Zero never saves.
+    save_every: u64,
+    /// Snapshots the tick has taken and nobody has collected yet.
+    saves: Vec<Snapshot>,
+    /// Read to find out what to mark dirty. See `mark_dirty`.
+    entered: Cursor<PlayerEntered>,
+    /// Read to find out what to mark dirty. See `mark_dirty`.
+    moved: Cursor<MobileMoved>,
+    /// Read to find out what to mark dirty. See `mark_dirty`.
+    turned: Cursor<MobileTurned>,
     /// Commands waiting for the next tick.
     inbox: Vec<Command>,
     /// Packets the last tick produced.
@@ -151,10 +175,27 @@ impl World {
             players: HashMap::new(),
             seen: HashMap::new(),
             start,
+            journal: Journal::new(),
+            save_every: SAVE_EVERY_TICKS,
+            saves: Vec::new(),
+            entered: Cursor::default(),
+            moved: Cursor::default(),
+            turned: Cursor::default(),
             inbox: Vec::new(),
             outbox: Vec::new(),
             ticks: 0,
         }
+    }
+
+    /// How often to offer a snapshot, in ticks. Zero never saves.
+    ///
+    /// Zero is a real mode and not a broken one: the shard already runs with no
+    /// map, and running with nothing to save to is the same bargain. What it
+    /// must not do is pretend — a world with nowhere to write is a world that
+    /// says so, not one that keeps a journal nobody ever collects.
+    pub const fn with_save_every(mut self, ticks: u64) -> Self {
+        self.save_every = ticks;
+        self
     }
 
     /// Give this world a map.
@@ -204,6 +245,46 @@ impl World {
         self.outbox.drain(..)
     }
 
+    /// Take the snapshots the tick has offered to persistence.
+    ///
+    /// The same shape as [`drain_outbound`](Self::drain_outbound), and for the
+    /// same reason: the world produces owned values and never waits for anyone
+    /// to take them. What the caller does with a snapshot — write it, queue it,
+    /// drop it — is not the tick's problem, and the tick is not slower for the
+    /// answer being "write it to a disk in Frankfurt".
+    pub fn drain_saves(&mut self) -> std::vec::Drain<'_, Snapshot> {
+        self.saves.drain(..)
+    }
+
+    /// How many entities are waiting to be saved.
+    pub fn unsaved(&self) -> usize {
+        self.journal.len()
+    }
+
+    /// Mark everything as needing saving, whatever the tracking thinks.
+    ///
+    /// # This is what a failed save costs
+    ///
+    /// The precise answer is to remember which entities were in the snapshot
+    /// that failed and mark those. The reason not to is that it means the world
+    /// tracking in-flight writes — a map of tick to entities, a message back per
+    /// success, and a leak the first time a store neither succeeds nor fails.
+    /// That is real bookkeeping on the common path to make the rare path cheap.
+    ///
+    /// So the rare path is expensive instead: a save that failed makes the next
+    /// one a full sweep. It is more rows than necessary, it is always correct
+    /// whatever was lost, and it costs nothing at all when nothing goes wrong.
+    ///
+    /// Also for shutdown, where "everything" is the only right answer.
+    pub fn resweep(&mut self) {
+        let characters: Vec<EntityId> = self
+            .registry
+            .query::<Name>()
+            .map(|(entity, _)| entity)
+            .collect();
+        self.journal.touch_all(characters);
+    }
+
     /// Run one tick.
     ///
     /// `now` is a parameter, like everywhere else on this path: a tick that read
@@ -220,9 +301,100 @@ impl World {
             self.apply(command, now);
         }
 
+        // Before the bus retires anything: what happened is what needs saving,
+        // and reading it after `update` would read it a tick late.
+        self.mark_dirty();
+        self.offer_snapshot();
+
         // Retire the oldest events. Once per tick, after every system, so that
         // "one tick" means the same thing for every event type.
         self.bus.update();
+    }
+
+    // -- persistence -------------------------------------------------------
+
+    /// Mark what changed, from what the tick said happened.
+    ///
+    /// # Why this reads the bus instead of being called from each mutation
+    ///
+    /// The obvious version is a `journal.touch(entity)` next to every
+    /// `registry.insert`. It works, and it decays: the day someone adds a system
+    /// that moves a mobile — a teleport, a knockback, a script — they have to
+    /// know that persistence exists and remember a line that nothing will fail
+    /// without. The bug is silent, it survives every test that does not restart
+    /// the shard, and it looks like the disk lost something.
+    ///
+    /// Emitting the event *is* the touch. A system that moves a mobile already
+    /// has to say so, because that is how the client hears about it, and the
+    /// same event now also means "and write it down". There is nothing left to
+    /// forget.
+    fn mark_dirty(&mut self) {
+        // Collected first: `read` borrows the bus, and the journal is a
+        // different field but the iterator holds the borrow across the loop.
+        let mut changed: Vec<EntityId> = Vec::new();
+        changed.extend(self.bus.read(&mut self.entered).map(|event| event.entity));
+        changed.extend(self.bus.read(&mut self.moved).map(|event| event.entity));
+        changed.extend(self.bus.read(&mut self.turned).map(|event| event.entity));
+        for entity in changed {
+            self.journal.touch(entity);
+        }
+    }
+
+    /// Every `save_every` ticks, hand what changed to whoever is collecting.
+    fn offer_snapshot(&mut self) {
+        if self.save_every == 0 || self.ticks % self.save_every != 0 {
+            return;
+        }
+        self.take_snapshot();
+    }
+
+    /// Take a snapshot now, whatever the cadence says.
+    ///
+    /// For shutdown, for a GM save command, and for tests that would rather not
+    /// tick four hundred times to see one row.
+    pub fn take_snapshot(&mut self) {
+        let ticks = self.ticks;
+        // The borrow split: `drain` needs the journal mutably and the closure
+        // needs the registry, so the registry is taken out of `self` by
+        // reference first. The closure is called inside the tick and reads
+        // memory only — this is the "consistent picture at one instant" the
+        // snapshot promises.
+        let registry = &self.registry;
+        let snapshot = self
+            .journal
+            .drain(ticks, |entity| Self::record_of(registry, entity));
+        if let Some(snapshot) = snapshot {
+            debug!(tick = ticks, rows = snapshot.len(), "snapshot taken");
+            self.saves.push(snapshot);
+        }
+    }
+
+    /// What a character looks like on disk.
+    ///
+    /// `None` for anything that is not a character, which is not an error: the
+    /// journal tracks entities and the world will hold more than people.
+    fn record_of(registry: &Registry, entity: EntityId) -> Option<CharacterRecord> {
+        let serial = registry.serial_of(entity)?;
+        let position = registry.get::<Position>(entity)?.0;
+        let heading = registry.get::<Heading>(entity)?.0;
+        let body = registry.get::<Body>(entity)?;
+        let name = registry.get::<Name>(entity)?;
+        Some(CharacterRecord {
+            serial: serial.raw(),
+            // Every character is on the dev account until accounts are real.
+            // A field with one possible value is a lie the schema is already
+            // telling; it is here because the column has to exist before the
+            // account system can fill it, not because this is right.
+            account: String::new(),
+            name: name.0.clone(),
+            body: body.id,
+            hue: body.hue,
+            facet: MAP_FELUCCA,
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            facing: heading.to_bits(),
+        })
     }
 
     fn apply(&mut self, command: Command, now: Instant) {
@@ -423,6 +595,15 @@ impl World {
             return;
         };
         let serial = self.registry.serial_of(entity);
+
+        // Save before despawning, and not by marking it dirty: a `touch` is a
+        // promise to read the entity at the next save, and in a moment there
+        // will be no entity to read. Logging out is when a save matters most —
+        // it is the only moment a player's whole session is at stake — so the
+        // record is taken at the one instant it still can be.
+        if let Some(record) = Self::record_of(&self.registry, entity) {
+            self.journal.keep(record);
+        }
 
         // Take it off every screen *before* despawning: once the entity is gone
         // its serial is released and there is nothing left to tell anyone about.
@@ -1004,6 +1185,301 @@ pub(crate) mod tests {
             TICK_INTERVAL < WALK_INTERVAL,
             "a step must not span two ticks"
         );
+    }
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::tests::{enter, enter_as, walk, START};
+    use super::*;
+    use openshard_gateway::ConnectionId;
+    use openshard_movement::WALK_INTERVAL;
+
+    /// A world that saves every tick, so a test does not have to run four
+    /// hundred of them to see one row.
+    fn eager() -> World {
+        World::new(START).with_save_every(1)
+    }
+
+    /// Take `count` steps, and return the tick time afterwards.
+    ///
+    /// The extra request is not a typo: a character spawns facing south, and the
+    /// first request in any other direction turns rather than steps. A test that
+    /// sends one request per step is a test that is off by one.
+    fn steps(
+        world: &mut World,
+        connection: ConnectionId,
+        direction: Direction,
+        count: u32,
+        start: Instant,
+    ) -> Instant {
+        let mut now = start;
+        for request in 0..=count {
+            now += WALK_INTERVAL;
+            world.queue(Command::Walk {
+                connection,
+                request: walk(request as u8, direction),
+            });
+            world.tick(now);
+        }
+        now
+    }
+
+    fn only_snapshot(world: &mut World) -> Option<Snapshot> {
+        let mut saves: Vec<_> = world.drain_saves().collect();
+        assert!(saves.len() <= 1, "one tick, one snapshot");
+        saves.pop()
+    }
+
+    #[test]
+    fn entering_the_world_is_worth_saving() {
+        let mut world = eager();
+        let now = Instant::now();
+        enter(&mut world, now);
+
+        let snapshot = only_snapshot(&mut world).expect("a new character is a change");
+        assert_eq!(snapshot.characters.len(), 1);
+        assert_eq!(snapshot.characters[0].name, "Lord British");
+        assert_eq!(snapshot.characters[0].x, START.0);
+    }
+
+    #[test]
+    fn a_quiet_world_offers_nothing() {
+        // The reason the tick offers an Option and not an empty snapshot. A
+        // shard where nobody is doing anything must not queue a transaction
+        // twenty times a second to say so.
+        let mut world = eager();
+        let now = Instant::now();
+        enter(&mut world, now);
+        let _ = world.drain_saves();
+
+        for tick in 1..10 {
+            world.tick(now + WALK_INTERVAL * tick);
+        }
+        assert_eq!(world.drain_saves().count(), 0);
+    }
+
+    #[test]
+    fn walking_marks_the_character_without_anyone_remembering_to() {
+        // The point of reading the bus. Nothing in `walk` mentions the journal:
+        // the step is saved because the step was announced.
+        let mut world = World::new(START).with_save_every(0);
+        let now = Instant::now();
+        let connection = enter(&mut world, now);
+
+        let _ = steps(&mut world, connection, Direction::North, 1, now);
+        world.take_snapshot();
+
+        let snapshot = only_snapshot(&mut world).expect("a step is a change");
+        assert_eq!(snapshot.characters.len(), 1);
+        assert_eq!(
+            snapshot.characters[0].y,
+            START.1 - 1,
+            "the snapshot must hold where the step went, not where it started"
+        );
+    }
+
+    #[test]
+    fn turning_is_worth_saving_too() {
+        // A turn moves nobody, and a character that logs in facing the wrong way
+        // is a small bug that is invisible until someone looks for it.
+        let mut world = eager();
+        let now = Instant::now();
+        let connection = enter(&mut world, now);
+        let _ = world.drain_saves();
+
+        // One request, one tick: a character spawns facing south, so the first
+        // request east turns and goes nowhere.
+        world.queue(Command::Walk {
+            connection,
+            request: walk(0, Direction::East),
+        });
+        world.tick(now + WALK_INTERVAL);
+
+        let snapshot = only_snapshot(&mut world).expect("a turn is a change");
+        assert_eq!(snapshot.characters[0].x, START.0, "a turn moves nobody");
+        assert_eq!(
+            snapshot.characters[0].facing,
+            Facing::walking(Direction::East).to_bits()
+        );
+    }
+
+    #[test]
+    fn logging_out_saves_where_the_player_actually_stopped() {
+        // The test `keep` exists for, and the one a `touch` cannot pass: by the
+        // next save the entity is despawned and there is nothing left to read.
+        // Getting this wrong loses the whole session and looks like a disk fault.
+        let mut world = World::new(START).with_save_every(0);
+        let now = Instant::now();
+        let connection = enter(&mut world, now);
+
+        let now = steps(&mut world, connection, Direction::North, 2, now);
+
+        world.queue(Command::Disconnect { connection });
+        world.tick(now + WALK_INTERVAL);
+        assert_eq!(world.player_count(), 0, "and the entity is gone");
+
+        world.take_snapshot();
+        let snapshot = only_snapshot(&mut world).expect("a session is worth saving");
+        assert_eq!(snapshot.characters.len(), 1);
+        assert_eq!(
+            snapshot.characters[0].y,
+            START.1 - 2,
+            "two steps north is where the player stopped"
+        );
+    }
+
+    #[test]
+    fn logging_out_does_not_delete_the_character() {
+        // Disconnecting is not deleting. The entity goes; the character stays.
+        let mut world = World::new(START).with_save_every(0);
+        let now = Instant::now();
+        let connection = enter(&mut world, now);
+        world.queue(Command::Disconnect { connection });
+        world.tick(now + WALK_INTERVAL);
+
+        world.take_snapshot();
+        let snapshot = only_snapshot(&mut world).expect("a change");
+        assert!(
+            snapshot.removed.is_empty(),
+            "a logout must not queue a deletion"
+        );
+    }
+
+    #[test]
+    fn a_world_with_nowhere_to_save_keeps_no_journal_anyone_waits_on() {
+        // save_every = 0 is a real mode. What it must not do is quietly grow a
+        // journal forever, which is a leak that looks like a working shard.
+        let mut world = World::new(START).with_save_every(0);
+        let now = Instant::now();
+        let connection = enter(&mut world, now);
+        steps(&mut world, connection, Direction::North, 4, now);
+        assert_eq!(world.drain_saves().count(), 0, "nothing was offered");
+        assert!(world.unsaved() > 0, "but it is still tracked, and takeable");
+
+        // And a caller that asks explicitly gets it all.
+        world.take_snapshot();
+        assert_eq!(
+            only_snapshot(&mut world)
+                .expect("a change")
+                .characters
+                .len(),
+            1
+        );
+        assert_eq!(world.unsaved(), 0);
+    }
+
+    #[test]
+    fn the_snapshot_arrives_on_the_cadence_and_not_before() {
+        let mut world = World::new(START).with_save_every(4);
+        let now = Instant::now();
+        let connection = enter(&mut world, now);
+
+        // enter() ran tick 1. Ticks 2 and 3 offer nothing; tick 4 does.
+        world.queue(Command::Walk {
+            connection,
+            request: walk(0, Direction::North),
+        });
+        world.tick(now + WALK_INTERVAL);
+        assert_eq!(world.drain_saves().count(), 0, "tick 2 is not a save tick");
+        world.tick(now + WALK_INTERVAL * 2);
+        assert_eq!(world.drain_saves().count(), 0, "nor tick 3");
+        world.tick(now + WALK_INTERVAL * 3);
+        assert_eq!(world.drain_saves().count(), 1, "tick 4 is");
+    }
+
+    #[test]
+    fn thirty_steps_in_one_save_window_are_one_row() {
+        // What the dirty set buys: a save proportional to activity, not to how
+        // chatty the activity was.
+        let mut world = World::new(START).with_save_every(0);
+        let now = Instant::now();
+        let connection = enter(&mut world, now);
+
+        steps(&mut world, connection, Direction::North, 20, now);
+        world.take_snapshot();
+        let snapshot = only_snapshot(&mut world).expect("a change");
+        assert_eq!(snapshot.characters.len(), 1, "one character, one row");
+    }
+
+    #[test]
+    fn a_failed_save_is_retried_with_fresh_data_and_not_the_old_snapshot() {
+        // Re-writing the failed snapshot would put the character back where it
+        // was when the write began, which is a rollback nobody asked for. The
+        // sweep re-reads instead.
+        let mut world = World::new(START).with_save_every(0);
+        let now = Instant::now();
+        let connection = enter(&mut world, now);
+
+        world.take_snapshot();
+        let first = only_snapshot(&mut world).expect("a change");
+        assert_eq!(first.characters[0].y, START.1);
+        assert_eq!(world.unsaved(), 0, "the journal was drained");
+
+        // The store said no.
+        world.resweep();
+
+        // And the world kept ticking while the write was failing.
+        steps(&mut world, connection, Direction::North, 1, now);
+
+        world.take_snapshot();
+        let retry = only_snapshot(&mut world).expect("swept");
+        assert_eq!(
+            retry.characters[0].y,
+            START.1 - 1,
+            "the retry must write where the character is now, not where it was"
+        );
+    }
+
+    #[test]
+    fn a_sweep_finds_characters_nothing_has_touched() {
+        // The escape hatch has to actually escape: a character that has done
+        // nothing since the last save is not dirty, and a sweep must still find
+        // it. Otherwise "always correct" is only true for people who moved.
+        let mut world = World::new(START).with_save_every(0);
+        let now = Instant::now();
+        enter_as(&mut world, ConnectionId::from_raw(1), now);
+        enter_as(&mut world, ConnectionId::from_raw(2), now);
+
+        world.take_snapshot();
+        let _ = world.drain_saves();
+        assert_eq!(world.unsaved(), 0, "nobody is dirty");
+
+        world.resweep();
+        world.take_snapshot();
+        let snapshot = only_snapshot(&mut world).expect("a sweep is a change");
+        assert_eq!(snapshot.characters.len(), 2, "including the idle one");
+    }
+
+    #[test]
+    fn two_players_are_two_rows_in_one_snapshot() {
+        // The consistency promise: one drain, one instant, everyone in it.
+        let mut world = World::new(START).with_save_every(0);
+        let now = Instant::now();
+        enter_as(&mut world, ConnectionId::from_raw(1), now);
+        enter_as(&mut world, ConnectionId::from_raw(2), now);
+
+        world.take_snapshot();
+        let snapshot = only_snapshot(&mut world).expect("a change");
+        assert_eq!(snapshot.characters.len(), 2);
+        let serials: HashSet<u32> = snapshot.characters.iter().map(|c| c.serial).collect();
+        assert_eq!(serials.len(), 2, "and two distinct serials");
+    }
+
+    #[test]
+    fn a_saved_serial_is_the_one_the_client_was_told() {
+        // The serial is on the wire and in every packet the client has been
+        // sent. A character that comes back under a different one is a different
+        // character with the same name.
+        let mut world = World::new(START).with_save_every(0);
+        let now = Instant::now();
+        let connection = enter(&mut world, now);
+        let entity = world.players[&connection];
+        let serial = world.registry.serial_of(entity).expect("bound");
+
+        world.take_snapshot();
+        let snapshot = only_snapshot(&mut world).expect("a change");
+        assert_eq!(snapshot.characters[0].serial, serial.raw());
     }
 }
 
