@@ -1,0 +1,27 @@
+[package]
+name = "openshard-server"
+description = "The shard binary: wires the gateway to the login server."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "openshard"
+path = "src/main.rs"
+
+[dependencies]
+openshard-gateway.workspace = true
+openshard-login.workspace = true
+openshard-protocol.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }

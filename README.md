@@ -8,8 +8,9 @@ nothing else. OpenShard is not a SphereServer clone. It is an attempt at the
 engine Sphere would likely be if it were designed from scratch today: Rust,
 multi-core, data-oriented, script-first, hot-reloadable, observable.
 
-> **Status: early.** The foundation crates are written; the server does not run
-> yet. See [`docs/roadmap.md`](docs/roadmap.md).
+> **Status: early, but it runs.** `cargo run -p openshard-server` listens on
+> 2593 and takes a client through login to a character list. There is no world
+> behind it yet. See [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Design
 
@@ -43,6 +44,16 @@ crates/
 tools/
   dashboard launcher map-editor cli                      planned
 ```
+
+## Running
+
+```sh
+cargo run -p openshard-server     # listens on 0.0.0.0:2593
+```
+
+The dev account is `admin` / `hunter2`, hard-coded in `crates/server/src/main.rs`
+until `config` lands. The shard advertises `127.0.0.1`, so a client on another
+machine will not reach it yet.
 
 ## Building
 

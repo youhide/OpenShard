@@ -579,7 +579,7 @@ mod tests {
     #[test]
     fn account_login_round_trips_at_the_declared_length() {
         let login = AccountLogin {
-            account: "youri".to_owned(),
+            account: "admin".to_owned(),
             password: "hunter2".to_owned(),
         };
         let bytes = login.encode();
@@ -764,7 +764,7 @@ mod tests {
     fn game_server_login_round_trips_at_the_declared_length() {
         let login = GameServerLogin {
             auth_key: 0x1234_5678,
-            account: "youri".to_owned(),
+            account: "admin".to_owned(),
             password: "hunter2".to_owned(),
         };
         let bytes = login.encode();

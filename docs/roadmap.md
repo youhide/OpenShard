@@ -41,14 +41,21 @@ practice. So: support unencrypted first, get a client on screen, and revisit
 only if a real client turns up that cannot be configured without it. Do not
 mistake this for a security feature when it lands.
 
-## 2. Gateway — done; login server next
+## 2. Gateway and login — done
 
 - [x] Sans-io `Connection`: handshake then framing, no async, no sockets
 - [x] Tokio listener, one task per connection, events onto a channel
 - [x] Disconnect handling; every protocol violation is fatal
-- [ ] Account verification (`config`-driven, no DB yet)
-- [ ] Drive the login conversation: 0x80 → 0xA8 → 0xA0 → 0x8C → 0x91 → 0xA9
-- [ ] Auth key issued at relay, checked at 0x91
+- [x] `Accounts` trait + `DevAccounts` in-memory store
+- [x] Sans-io `LoginServer`: 0x80 → 0xA8 → 0xA0 → 0x8C → 0x91 → 0xA9
+- [x] Auth key issued at relay, one-shot, expiring, bound to its account
+- [x] `crates/server` — a binary that runs and reaches a character list
+- [ ] Load accounts from TOML rather than hard-coding them
+- [ ] Advertise a configured address, not loopback
+
+**The advertised address is the next real bug.** `0x8C` currently hands out
+`127.0.0.1`, so a client on another machine dutifully connects to its own
+loopback and fails. This is the first thing `config` has to own.
 
 The connection logic is a pure state machine on purpose. Everything hard about a
 gateway is byte boundaries — a seed split across three segments, four packets in
