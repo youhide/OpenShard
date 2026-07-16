@@ -111,7 +111,8 @@ impl EventBus {
     /// Take this once at startup and keep it; a fresh cursor every tick would
     /// re-read the previous tick's events.
     pub fn cursor<E: Event>(&self) -> Cursor<E> {
-        self.queue::<E>().map_or_else(Cursor::default, Events::cursor)
+        self.queue::<E>()
+            .map_or_else(Cursor::default, Events::cursor)
     }
 
     /// A cursor for `E` that skips everything already buffered.
@@ -201,8 +202,14 @@ mod tests {
         bus.send(Logout(2));
 
         assert_eq!(bus.event_types(), 2);
-        assert_eq!(bus.read(&mut logins).map(|l| l.0).collect::<Vec<_>>(), vec![1]);
-        assert_eq!(bus.read(&mut logouts).map(|l| l.0).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(
+            bus.read(&mut logins).map(|l| l.0).collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert_eq!(
+            bus.read(&mut logouts).map(|l| l.0).collect::<Vec<_>>(),
+            vec![2]
+        );
     }
 
     #[test]
@@ -222,7 +229,10 @@ mod tests {
         // before the first event of that type is sent.
         let mut cursor = bus.cursor::<Login>();
         bus.send(Login(1));
-        assert_eq!(bus.read(&mut cursor).map(|l| l.0).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(
+            bus.read(&mut cursor).map(|l| l.0).collect::<Vec<_>>(),
+            vec![1]
+        );
     }
 
     #[test]
@@ -246,12 +256,18 @@ mod tests {
         let mut slow = bus.cursor::<Login>();
 
         bus.send(Login(1));
-        assert_eq!(bus.read(&mut fast).map(|l| l.0).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(
+            bus.read(&mut fast).map(|l| l.0).collect::<Vec<_>>(),
+            vec![1]
+        );
 
         bus.update();
         bus.send(Login(2));
 
-        assert_eq!(bus.read(&mut fast).map(|l| l.0).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(
+            bus.read(&mut fast).map(|l| l.0).collect::<Vec<_>>(),
+            vec![2]
+        );
         assert_eq!(
             bus.read(&mut slow).map(|l| l.0).collect::<Vec<_>>(),
             vec![1, 2],
@@ -271,7 +287,10 @@ mod tests {
         assert_eq!(bus.read(&mut cursor).count(), 0);
 
         bus.send(Login(2));
-        assert_eq!(bus.read(&mut cursor).map(|l| l.0).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(
+            bus.read(&mut cursor).map(|l| l.0).collect::<Vec<_>>(),
+            vec![2]
+        );
     }
 
     #[test]
@@ -279,13 +298,16 @@ mod tests {
         let mut bus = EventBus::new();
         let mut cursor = bus.cursor::<Login>();
         bus.extend([Login(1), Login(2), Login(3)]);
-        assert_eq!(bus.read(&mut cursor).map(|l| l.0).collect::<Vec<_>>(), vec![1, 2, 3]);
+        assert_eq!(
+            bus.read(&mut cursor).map(|l| l.0).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
     }
 
     #[test]
     fn buses_are_independent() {
         let mut a = EventBus::new();
-        let mut b = EventBus::new();
+        let b = EventBus::new();
         let mut ca = a.cursor::<Login>();
         let mut cb = b.cursor::<Login>();
 

@@ -2,24 +2,31 @@
 
 Order, not dates.
 
-## 0. Foundation — done, unverified
+## 0. Foundation — done
 
 - [x] Cargo workspace, all 20 crates declared
 - [x] `entities` — generational `EntityId`, UO `Serial`, sparse-set columns, `Registry`
 - [x] `events` — double-buffered `Events<E>`, `Cursor<E>`, `EventBus`
 - [x] `protocol` — `ClientVersion`, `Era`, `Feature`, `FeatureSet`
-- [ ] **`cargo test --workspace` actually run** — written without a toolchain available
+- [x] `cargo test --workspace` green: 125 tests, clippy clean, fmt clean
 
-## 1. Protocol
+## 1. Protocol — in progress
 
-- [ ] `PacketReader` / `PacketWriter` over `bytes`
-- [ ] Login sequence: `0xEF` seed, `0x80` login, `0xA8` shard list, `0x8C` relay
-- [ ] Compression (server→client Huffman) and login encryption
+- [x] `PacketReader` / `PacketWriter` — std only, every read fallible
+- [x] Client packet length table ported from Sphere's `receive.h` (70 packets)
+- [x] `frame_client_packet` — split a TCP stream into packets
+- [ ] Seed handshake state: old 4-byte form, new `0xEF` form, lone-`0xEF` segment
+- [ ] Login sequence: `0x80` login, `0xA8` shard list, `0xA0` select, `0x8C` relay
+- [ ] Version negotiation from `0xBD` → `FeatureSet` per connection
+- [ ] Login encryption and server→client Huffman compression
 - [ ] Packet tests against captured dumps from real clients
-- [ ] Version negotiation from the `0xBD` seed packet → `FeatureSet` per connection
 
 Version-gate everything from the first packet. Retrofitting is the thing this
 crate exists to avoid.
+
+The codec deliberately has no dependencies — not even `bytes`. Keeping the
+foundation crates dependency-free is what lets them build in environments where
+crates.io is unreachable.
 
 ## 2. Gateway and login
 

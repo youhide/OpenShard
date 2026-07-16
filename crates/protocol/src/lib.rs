@@ -48,11 +48,19 @@
 //!
 //! # Status
 //!
-//! Versioning and feature gates are done. Packet encode/decode is not written
-//! yet; see `docs/roadmap.md`.
+//! Versioning, feature gates, the client packet length table, framing and the
+//! byte codec are written. Individual packet types are not; see
+//! `docs/roadmap.md`.
 
+mod codec;
 mod feature;
+mod packet;
 mod version;
 
+pub use codec::{CodecError, CodecResult, PacketReader, PacketWriter};
 pub use feature::{Feature, FeatureSet};
+pub use packet::{
+    client_packet_length, frame_client_packet, Frame, FrameError, PacketLength, MAX_PACKET_SIZE,
+    SEED_LENGTH_NEW, SEED_LENGTH_OLD,
+};
 pub use version::{ClientVersion, Era, ParseVersionError};

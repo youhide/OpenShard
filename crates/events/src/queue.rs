@@ -139,8 +139,14 @@ impl<E> Events<E> {
         // survives rather than panicking.
         let skip_older = from.saturating_sub(self.older_start) as usize;
         let skip_newer = from.saturating_sub(self.newer_start) as usize;
-        let older = self.older.get(skip_older.min(self.older.len())..).unwrap_or(&[]);
-        let newer = self.newer.get(skip_newer.min(self.newer.len())..).unwrap_or(&[]);
+        let older = self
+            .older
+            .get(skip_older.min(self.older.len())..)
+            .unwrap_or(&[]);
+        let newer = self
+            .newer
+            .get(skip_newer.min(self.newer.len())..)
+            .unwrap_or(&[]);
         older.iter().chain(newer.iter())
     }
 
@@ -220,7 +226,11 @@ mod tests {
         events.send(Ping(1));
         events.send(Ping(2));
         assert_eq!(drain(&events, &mut cursor), vec![1, 2]);
-        assert_eq!(drain(&events, &mut cursor), Vec::<u32>::new(), "no re-reads");
+        assert_eq!(
+            drain(&events, &mut cursor),
+            Vec::<u32>::new(),
+            "no re-reads"
+        );
     }
 
     #[test]
@@ -230,7 +240,11 @@ mod tests {
 
         events.update();
         let mut cursor = events.cursor();
-        assert_eq!(drain(&events, &mut cursor), vec![1], "readable one tick later");
+        assert_eq!(
+            drain(&events, &mut cursor),
+            vec![1],
+            "readable one tick later"
+        );
 
         events.update();
         let mut cursor = events.cursor();
@@ -264,7 +278,11 @@ mod tests {
 
         events.send(Ping(1));
         assert_eq!(drain(&events, &mut a), vec![1]);
-        assert_eq!(drain(&events, &mut b), vec![1], "one reader cannot consume for another");
+        assert_eq!(
+            drain(&events, &mut b),
+            vec![1],
+            "one reader cannot consume for another"
+        );
 
         events.send(Ping(2));
         assert_eq!(drain(&events, &mut a), vec![2]);
@@ -309,7 +327,11 @@ mod tests {
         events.update(); // Ping(1) is gone now.
         events.send(Ping(3));
 
-        assert_eq!(drain(&events, &mut cursor), vec![2, 3], "missed events, no panic");
+        assert_eq!(
+            drain(&events, &mut cursor),
+            vec![2, 3],
+            "missed events, no panic"
+        );
     }
 
     #[test]
@@ -350,7 +372,11 @@ mod tests {
         events.send(Ping(3));
         events.update();
         events.send(Ping(4));
-        assert_eq!(events.unread(&stale), 2, "Ping(1) and Ping(2) are unreachable");
+        assert_eq!(
+            events.unread(&stale),
+            2,
+            "Ping(1) and Ping(2) are unreachable"
+        );
     }
 
     #[test]
@@ -363,7 +389,11 @@ mod tests {
         assert!(events.is_empty());
         assert_eq!(drain(&events, &mut cursor), Vec::<u32>::new());
         events.send(Ping(2));
-        assert_eq!(drain(&events, &mut cursor), vec![2], "the queue still works after clear");
+        assert_eq!(
+            drain(&events, &mut cursor),
+            vec![2],
+            "the queue still works after clear"
+        );
     }
 
     #[test]
@@ -372,7 +402,10 @@ mod tests {
         for tick in 0..1_000 {
             events.send(Ping(tick));
             events.update();
-            assert!(events.len() <= 2, "at most two ticks of events are retained");
+            assert!(
+                events.len() <= 2,
+                "at most two ticks of events are retained"
+            );
         }
     }
 }

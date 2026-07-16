@@ -310,7 +310,11 @@ mod tests {
         assert_eq!(set.get(fresh), Some(&2));
         assert_eq!(set.get(old), None, "stale generation must not alias");
         assert_eq!(set.remove(old), None);
-        assert_eq!(set.get(fresh), Some(&2), "failed stale remove must not disturb the live entry");
+        assert_eq!(
+            set.get(fresh),
+            Some(&2),
+            "failed stale remove must not disturb the live entry"
+        );
     }
 
     #[test]
@@ -329,7 +333,11 @@ mod tests {
         // is `Registry`'s job, so `old`'s data is legitimately still here.
         assert_eq!(set.get(old), Some(&1));
         // What must never happen is the new occupant seeing it.
-        assert_eq!(set.get(fresh), None, "the new entity inherits no components");
+        assert_eq!(
+            set.get(fresh),
+            None,
+            "the new entity inherits no components"
+        );
     }
 
     #[test]
@@ -344,13 +352,20 @@ mod tests {
         let fresh = alloc.alloc();
 
         // No prior remove: `sparse[0]` still points at `old`'s dense entry.
-        assert_eq!(set.insert(fresh, 3), None, "previous value belonged to another entity");
+        assert_eq!(
+            set.insert(fresh, 3),
+            None,
+            "previous value belonged to another entity"
+        );
         assert_eq!(set.len(), 2, "the dead entry is taken over, not orphaned");
         assert_eq!(set.get(fresh), Some(&3));
         assert_eq!(set.get(other), Some(&2), "the untouched entry survives");
 
         let entities: Vec<_> = set.entities().collect();
-        assert!(!entities.contains(&old), "no dead entity may survive in the dense array");
+        assert!(
+            !entities.contains(&old),
+            "no dead entity may survive in the dense array"
+        );
     }
 
     #[test]

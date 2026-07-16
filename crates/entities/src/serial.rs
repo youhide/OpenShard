@@ -228,7 +228,10 @@ mod tests {
         let mut alloc = SerialAllocator::new();
         alloc.reserve(Serial::new(ITEM_MAX).unwrap());
         assert_eq!(alloc.alloc(SerialKind::Mobile).unwrap().raw(), MOBILE_MIN);
-        assert_eq!(alloc.alloc(SerialKind::Item), Err(SerialPoolExhausted(SerialKind::Item)));
+        assert_eq!(
+            alloc.alloc(SerialKind::Item),
+            Err(SerialPoolExhausted(SerialKind::Item))
+        );
     }
 
     #[test]

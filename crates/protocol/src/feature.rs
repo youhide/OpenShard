@@ -387,15 +387,14 @@ mod tests {
         // The whole point of the table: boundaries are exact.
         for feature in Feature::ALL {
             let since = feature.since();
-            assert!(since.supports(*feature), "{feature:?} off at its own boundary");
+            assert!(
+                since.supports(*feature),
+                "{feature:?} off at its own boundary"
+            );
 
             if since.patch > 0 {
-                let before = ClientVersion::new(
-                    since.major,
-                    since.minor,
-                    since.revision,
-                    since.patch - 1,
-                );
+                let before =
+                    ClientVersion::new(since.major, since.minor, since.revision, since.patch - 1);
                 assert!(
                     !before.supports(*feature),
                     "{feature:?} claims {before} but wants {since}"
