@@ -24,7 +24,7 @@
 //! rather than calling back. This is the other half: nothing inside
 //! [`World::tick`] awaits, reads a clock, or touches a socket.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use openshard_entities::{EntityId, Registry, Serial, SerialKind};
@@ -39,7 +39,7 @@ use openshard_protocol::{
 };
 use tracing::{debug, info, warn};
 
-use crate::components::{Account, Body, Client, Heading, Movement, Name, Position};
+use crate::components::{Account, Body, Client, Facet, Heading, Movement, Name, Position};
 use crate::events::{
     MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
 };
@@ -60,8 +60,9 @@ const BODY_HUMAN_MALE: u16 = 0x0190;
 const DEFAULT_HUE: u16 = 0x83EA;
 /// Full daylight. The scale runs backwards: 0 is brightest, 0x1F pitch dark.
 const LIGHT_DAY: u8 = 0;
-/// Zero is Felucca.
-const MAP_FELUCCA: u8 = 0;
+/// The facet a new character spawns on, and the world's fallback for a facet it
+/// has not loaded. Zero is Felucca.
+const DEFAULT_FACET: u8 = 0;
 /// The height to use when there is no map to ask.
 const Z_WITHOUT_A_MAP: i8 = 0;
 /// Notoriety 0x01 is "innocent" — the blue health bar.
@@ -117,6 +118,10 @@ pub enum Command {
         /// `None` uses the world's configured start — a newly created character,
         /// or a played one from before positions were stored.
         position: Option<Point>,
+        /// Which facet to spawn on: a stored character's saved one, or the
+        /// world's default for a new character. An unloaded facet falls back to
+        /// the default.
+        facet: u8,
         /// How the character looks: chosen at creation, or restored from the save.
         /// `None` falls back to the default body.
         appearance: Option<Appearance>,
@@ -145,6 +150,7 @@ struct Entering {
     name: String,
     serial: Option<u32>,
     position: Option<Point>,
+    facet: u8,
     appearance: Option<Appearance>,
 }
 
@@ -157,6 +163,17 @@ pub struct Outbound {
     pub packet: Vec<u8>,
 }
 
+/// One facet: its ground, and who is near what on it.
+///
+/// The world keeps one of these per loaded facet. Two mobiles on different
+/// facets never share a sector grid, so they never see each other and never
+/// block each other — the isolation is a property of the data structure, not a
+/// check anyone has to remember to write.
+struct FacetState {
+    terrain: Option<MapTerrain>,
+    sectors: Sectors,
+}
+
 /// The world.
 ///
 /// Owns the registry, the bus and the map. A plain value: nothing here is a
@@ -164,9 +181,12 @@ pub struct Outbound {
 pub struct World {
     registry: Registry,
     bus: EventBus,
-    terrain: Option<MapTerrain>,
-    /// What is near what.
-    sectors: Sectors,
+    /// The loaded facets, each with its own ground and interest grid, keyed by
+    /// facet number. There is always at least the default one.
+    facets: BTreeMap<u8, FacetState>,
+    /// The facet a new character spawns on, and the one the world falls back to
+    /// for anything asking for a facet it does not have.
+    default_facet: u8,
     /// Which entity a connection is driving.
     players: HashMap<ConnectionId, EntityId>,
     /// What each player's client currently has on screen.
@@ -203,7 +223,7 @@ impl std::fmt::Debug for World {
             .field("ticks", &self.ticks)
             .field("entities", &self.registry.len())
             .field("players", &self.players.len())
-            .field("map", &self.terrain.is_some())
+            .field("facets", &self.facets.len())
             .finish()
     }
 }
@@ -211,11 +231,21 @@ impl std::fmt::Debug for World {
 impl World {
     /// An empty world with no map, spawning at `start`.
     pub fn new(start: (u16, u16)) -> Self {
+        // Always at least the default facet, so there is somewhere to stand even
+        // with no map loaded — the same no-map mode the shard has always had.
+        let mut facets = BTreeMap::new();
+        facets.insert(
+            DEFAULT_FACET,
+            FacetState {
+                terrain: None,
+                sectors: Sectors::new(FACET_WITHOUT_A_MAP.0, FACET_WITHOUT_A_MAP.1),
+            },
+        );
         Self {
             registry: Registry::new(),
             bus: EventBus::new(),
-            terrain: None,
-            sectors: Sectors::new(FACET_WITHOUT_A_MAP.0, FACET_WITHOUT_A_MAP.1),
+            facets,
+            default_facet: DEFAULT_FACET,
             players: HashMap::new(),
             seen: HashMap::new(),
             start,
@@ -242,16 +272,28 @@ impl World {
         self
     }
 
-    /// Give this world a map.
-    pub fn with_terrain(mut self, terrain: MapTerrain) -> Self {
-        self.sectors = Sectors::new(terrain.map().width(), terrain.map().height());
-        self.terrain = Some(terrain);
+    /// Give the default facet a map.
+    pub fn with_terrain(self, terrain: MapTerrain) -> Self {
+        let facet = self.default_facet;
+        self.with_facet(facet, terrain)
+    }
+
+    /// Load `terrain` as facet `facet`, its interest grid sized to the map.
+    pub fn with_facet(mut self, facet: u8, terrain: MapTerrain) -> Self {
+        let sectors = Sectors::new(terrain.map().width(), terrain.map().height());
+        self.facets.insert(
+            facet,
+            FacetState {
+                terrain: Some(terrain),
+                sectors,
+            },
+        );
         self
     }
 
-    /// The spatial index.
-    pub const fn sectors(&self) -> &Sectors {
-        &self.sectors
+    /// The default facet's spatial index.
+    pub fn sectors(&self) -> &Sectors {
+        &self.facets[&self.default_facet].sectors
     }
 
     /// The event bus, for reading what happened.
@@ -427,13 +469,14 @@ impl World {
         // is not a `CharacterRecord`. Returning `None` drops it from the save,
         // which is the honest answer.
         let account = registry.get::<Account>(entity)?;
+        let facet = registry.get::<Facet>(entity).map_or(DEFAULT_FACET, |f| f.0);
         Some(CharacterRecord {
             serial: serial.raw(),
             account: account.0.clone(),
             name: name.0.clone(),
             body: body.id,
             hue: body.hue,
-            facet: MAP_FELUCCA,
+            facet,
             x: position.x,
             y: position.y,
             z: position.z,
@@ -462,6 +505,7 @@ impl World {
                 name,
                 serial,
                 position,
+                facet,
                 appearance,
             } => self.enter(Entering {
                 connection,
@@ -470,6 +514,7 @@ impl World {
                 name,
                 serial,
                 position,
+                facet,
                 appearance,
             }),
             Command::Walk {
@@ -480,17 +525,43 @@ impl World {
         }
     }
 
-    /// Where a character appears: the configured x and y, at the map's height.
+    /// The facet a mobile is on, or the default if it carries none.
+    ///
+    /// Always a facet the world actually has: [`enter`](Self::enter) clamps an
+    /// unloaded facet to the default before it ever reaches a `Facet` component,
+    /// so callers can index `self.facets` with the result.
+    fn facet_of(&self, entity: EntityId) -> u8 {
+        self.registry
+            .get::<Facet>(entity)
+            .map_or(self.default_facet, |facet| facet.0)
+    }
+
+    /// The state of a facet the world is known to have.
+    fn facet_state(&self, facet: u8) -> &FacetState {
+        &self.facets[&facet]
+    }
+
+    /// The same, mutably. Panics only on a facet no entity should carry —
+    /// `facet_of` and `enter` keep every live entity on a loaded facet.
+    fn facet_state_mut(&mut self, facet: u8) -> &mut FacetState {
+        self.facets
+            .get_mut(&facet)
+            .expect("an entity's facet is always loaded")
+    }
+
+    /// Where a character appears on `facet`: the configured x and y, at that
+    /// facet's height.
     ///
     /// The `z` is read from the map rather than configured. A second source of
     /// truth that disagrees by three units leaves a character unable to take a
     /// single step — every one is more than a two-unit climb — with nothing in
     /// the log to explain it.
-    fn start_position(&self) -> Point {
+    fn start_position(&self, facet: u8) -> Point {
         let (x, y) = self.start;
         let z = self
-            .terrain
-            .as_ref()
+            .facets
+            .get(&facet)
+            .and_then(|state| state.terrain.as_ref())
             .and_then(|terrain| terrain.map().land(x, y))
             .map_or(Z_WITHOUT_A_MAP, |cell| cell.z);
         Point::new(x, y, z)
@@ -504,12 +575,23 @@ impl World {
             name,
             serial,
             position,
+            facet,
             appearance,
         } = entering;
         if self.players.contains_key(&connection) {
             warn!(%connection, "already in the world");
             return;
         }
+
+        // A character can only stand on a facet the shard loaded. An unloaded one
+        // — a save from a shard that had more facets, say — falls back to the
+        // default rather than leaving the character nowhere.
+        let facet = if self.facets.contains_key(&facet) {
+            facet
+        } else {
+            warn!(%connection, facet, "unloaded facet; falling back to the default");
+            self.default_facet
+        };
 
         // A stored character comes back on the serial it was saved under; a new
         // one takes a fresh serial from the pool. The saved serial was reserved
@@ -534,8 +616,8 @@ impl World {
         };
 
         // A loaded character spawns exactly where it was saved, its own z
-        // included; a fresh one takes the world's configured start.
-        let position = position.unwrap_or_else(|| self.start_position());
+        // included; a fresh one takes the world's configured start on its facet.
+        let position = position.unwrap_or_else(|| self.start_position(facet));
         let facing = Facing::walking(Direction::South);
         // A created or loaded character brings its body and hue; without one it
         // falls back to the default.
@@ -549,6 +631,7 @@ impl World {
         self.registry.insert(entity, body);
         self.registry.insert(entity, Name(name.clone()));
         self.registry.insert(entity, Account(account));
+        self.registry.insert(entity, Facet(facet));
         self.registry
             .insert(entity, Movement(Walker::new(position, facing)));
         self.registry.insert(
@@ -559,7 +642,7 @@ impl World {
             },
         );
         self.players.insert(connection, entity);
-        self.sectors.insert(entity, position);
+        self.facet_state_mut(facet).sectors.insert(entity, position);
         self.seen.insert(entity, HashSet::new());
 
         // The order is the client's, not ours. 0x1B must come first — until it
@@ -578,7 +661,7 @@ impl World {
             }
             .encode(),
         );
-        self.send(connection, encode_map_change(MAP_FELUCCA));
+        self.send(connection, encode_map_change(facet));
         self.send(
             connection,
             PlayerUpdate {
@@ -621,9 +704,10 @@ impl World {
             return;
         };
 
+        let facet = self.facet_of(entity);
         let was = walker.position;
         let out_of_sequence = walker.sequence.is_fresh() && request.sequence != 0;
-        let outcome = match &self.terrain {
+        let outcome = match &self.facet_state(facet).terrain {
             Some(terrain) => walker.request(request, terrain, now),
             None => walker.request(request, &OpenWorld, now),
         };
@@ -635,7 +719,7 @@ impl World {
                 self.registry.insert(entity, Heading(facing));
                 // The index is a second copy of the position; this is the line
                 // that keeps it honest.
-                self.sectors.insert(entity, position);
+                self.facet_state_mut(facet).sectors.insert(entity, position);
                 self.send(
                     connection,
                     encode_walk_ack(request.sequence, NOTORIETY_INNOCENT),
@@ -695,6 +779,7 @@ impl World {
             return;
         };
         let serial = self.registry.serial_of(entity);
+        let facet = self.facet_of(entity);
 
         // Save before despawning, and not by marking it dirty: a `touch` is a
         // promise to read the entity at the next save, and in a moment there
@@ -713,7 +798,7 @@ impl World {
             }
         }
         self.seen.remove(&entity);
-        self.sectors.remove(entity);
+        self.facet_state_mut(facet).sectors.remove(entity);
         self.registry.despawn(entity);
 
         if let Some(serial) = serial {
@@ -739,7 +824,11 @@ impl World {
     /// symmetric here and doing one direction leaves the other end with a mobile
     /// that walked away and never left the screen.
     fn refresh_around(&mut self, entity: EntityId) {
-        let Some(centre) = self.sectors.position_of(entity) else {
+        // Only this entity's facet: two mobiles on different facets share no
+        // sector grid, so a lookup here never turns up anyone on another one.
+        let facet = self.facet_of(entity);
+        let sectors = &self.facet_state(facet).sectors;
+        let Some(centre) = sectors.position_of(entity) else {
             return;
         };
 
@@ -747,8 +836,7 @@ impl World {
         // `self` mutably, and more importantly a `Vec` here is what makes the
         // set of neighbours a snapshot rather than something that shifts while
         // it is walked.
-        let neighbours: Vec<EntityId> = self
-            .sectors
+        let neighbours: Vec<EntityId> = sectors
             .nearby(centre, VIEW_RANGE)
             .map(|(id, _)| id)
             .filter(|id| *id != entity)
@@ -932,6 +1020,7 @@ pub(crate) mod tests {
             name: "Lord British".to_owned(),
             serial: None,
             position: None,
+            facet: 0,
             appearance: None,
         });
         world.tick(now);
@@ -955,7 +1044,8 @@ pub(crate) mod tests {
             walker.position = point;
             world.registry.insert(entity, Movement(walker));
         }
-        world.sectors.insert(entity, point);
+        let facet = world.facet_of(entity);
+        world.facet_state_mut(facet).sectors.insert(entity, point);
         world.refresh_around(entity);
     }
 
@@ -980,6 +1070,7 @@ pub(crate) mod tests {
             name: "Lord British".to_owned(),
             serial: None,
             position: None,
+            facet: 0,
             appearance: None,
         });
 
@@ -1033,6 +1124,7 @@ pub(crate) mod tests {
             name: "Nyx".to_owned(),
             serial: None,
             position: None,
+            facet: 0,
             appearance: Some(Appearance {
                 body: 0x025E,
                 hue: 0x0430,
@@ -1084,6 +1176,7 @@ pub(crate) mod tests {
             name: "Lord British".to_owned(),
             serial: Some(0x0000_0202),
             position: Some(Point::new(1500, 1000, -5)),
+            facet: 0,
             appearance: Some(Appearance {
                 body: 0x0191,
                 hue: 0x83EA,
@@ -1118,6 +1211,74 @@ pub(crate) mod tests {
             .expect("entering the world is a change worth saving");
         assert_eq!(snapshot.characters[0].account, "admin");
         assert_eq!(snapshot.characters[0].name, "Lord British");
+    }
+
+    /// Register a mapless facet, so a test can populate more than one without
+    /// client files. Its interest grid is the same no-map size facet 0 uses.
+    fn add_empty_facet(world: &mut World, facet: u8) {
+        world.facets.insert(
+            facet,
+            FacetState {
+                terrain: None,
+                sectors: Sectors::new(FACET_WITHOUT_A_MAP.0, FACET_WITHOUT_A_MAP.1),
+            },
+        );
+    }
+
+    fn enter_on_facet(world: &mut World, connection: ConnectionId, facet: u8, now: Instant) {
+        world.queue(Command::Enter {
+            connection,
+            version: ClientVersion::TOL,
+            account: "admin".to_owned(),
+            name: "P".to_owned(),
+            serial: None,
+            position: None,
+            facet,
+            appearance: None,
+        });
+        world.tick(now);
+    }
+
+    #[test]
+    fn two_facets_do_not_see_each_other() {
+        // The whole point of a per-facet interest grid: two mobiles standing on
+        // the very same coordinates, one on Felucca and one on Trammel, share no
+        // screen. If this ever fails, someone reached for a single global grid.
+        let mut world = world();
+        add_empty_facet(&mut world, 1);
+        let now = Instant::now();
+        let here = ConnectionId::from_raw(1);
+        let there = ConnectionId::from_raw(2);
+        enter_on_facet(&mut world, here, 0, now);
+        enter_on_facet(&mut world, there, 1, now);
+
+        let a = world.players[&here];
+        let b = world.players[&there];
+        assert!(
+            !world.seen[&a].contains(&b),
+            "a mobile on facet 0 must not have drawn one on facet 1"
+        );
+        assert!(!world.seen[&b].contains(&a), "nor the other way round");
+    }
+
+    #[test]
+    fn one_facet_at_the_same_spot_does_see() {
+        // The control: the isolation above is facet-specific, not a bug that
+        // hides everyone. Same coordinates, same facet — they see each other.
+        let mut world = world();
+        let now = Instant::now();
+        let here = ConnectionId::from_raw(1);
+        let there = ConnectionId::from_raw(2);
+        enter_on_facet(&mut world, here, 0, now);
+        enter_on_facet(&mut world, there, 0, now);
+
+        let a = world.players[&here];
+        let b = world.players[&there];
+        assert!(
+            world.seen[&a].contains(&b),
+            "same facet, same spot: they see"
+        );
+        assert!(world.seen[&b].contains(&a));
     }
 
     #[test]
@@ -1323,6 +1484,7 @@ pub(crate) mod tests {
             name: "a".to_owned(),
             serial: None,
             position: None,
+            facet: 0,
             appearance: None,
         });
         assert_eq!(world.player_count(), 0);

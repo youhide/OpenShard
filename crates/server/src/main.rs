@@ -155,28 +155,42 @@ fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> {
 
     let dir = Path::new(dir);
     let started = Instant::now();
-    let map = Map::load_facet(dir, 0)?;
+    // One tile table, shared by every facet: `tiledata.mul` describes tiles, not
+    // a map, so it is read once and each facet's terrain gets a copy.
     let tiles = TileData::load(dir.join("tiledata.mul"))?;
 
-    // A start position off the map, or in the sea, is worth saying out loud: the
-    // shard still runs and every player spawns somewhere useless.
-    match map.land(start.0, start.1) {
-        Some(cell) => info!(x = start.0, y = start.1, z = cell.z, "start position"),
-        None => warn!(
-            x = start.0,
-            y = start.1,
-            "world.start is off the map; characters will spawn in nowhere"
-        ),
+    let mut world = World::new(start);
+    for &facet in &config.world.facets {
+        let map = Map::load_facet(dir, facet)?;
+        // The start is only checked against facet 0, where new characters spawn.
+        // A start off the map, or in the sea, is worth saying out loud: the shard
+        // still runs and every player spawns somewhere useless.
+        if facet == 0 {
+            match map.land(start.0, start.1) {
+                Some(cell) => info!(x = start.0, y = start.1, z = cell.z, "start position"),
+                None => warn!(
+                    x = start.0,
+                    y = start.1,
+                    "world.start is off the map; characters will spawn in nowhere"
+                ),
+            }
+        }
+        info!(
+            facet,
+            name = map.facet_name(),
+            size = format!("{}x{}", map.width(), map.height()),
+            statics = map.static_count(),
+            "facet loaded"
+        );
+        world = world.with_facet(facet, MapTerrain::new(map, tiles.clone()));
     }
     info!(
-        facet = map.facet_name(),
-        size = format!("{}x{}", map.width(), map.height()),
-        statics = map.static_count(),
+        facets = config.world.facets.len(),
         tiledata = ?tiles.format(),
         took = ?started.elapsed(),
-        "map loaded"
+        "world loaded"
     );
-    Ok(World::new(start).with_terrain(MapTerrain::new(map, tiles)))
+    Ok(world)
 }
 
 /// Write snapshots, forever, on a task nothing waits for.
@@ -482,7 +496,9 @@ fn dispatch(
             // the database has never seen — a config-only character on a fresh
             // shard — enters fresh at the start.
             let key = (account.to_lowercase(), play.name.to_lowercase());
-            let (serial, position, appearance) = match saved.get(&key) {
+            let record = saved.get(&key);
+            let facet = record.map_or(0, |record| record.facet);
+            let (serial, position, appearance) = match record {
                 Some(record) => (
                     Some(record.serial),
                     Some(Point::new(record.x, record.y, record.z)),
@@ -501,6 +517,7 @@ fn dispatch(
                 name: play.name,
                 serial,
                 position,
+                facet,
                 appearance,
             });
             true
@@ -588,12 +605,13 @@ fn create_character(
         version: session.login.version(),
         account,
         name,
-        // A brand-new character: a fresh serial, and the world's start until it
-        // walks somewhere worth saving. The tick will journal it, so it is in the
-        // database — and in the character list — by the next time the player logs
-        // in.
+        // A brand-new character: a fresh serial, and the world's start on the
+        // default facet until it walks somewhere worth saving. The tick will
+        // journal it, so it is in the database — and in the character list — by
+        // the next time the player logs in.
         serial: None,
         position: None,
+        facet: 0,
         appearance: Some(Appearance {
             body: create.body(),
             hue: create.skin_hue,

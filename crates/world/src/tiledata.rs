@@ -239,6 +239,10 @@ impl std::error::Error for TileDataError {
 }
 
 /// Every tile definition the client has.
+///
+/// `Clone` because it is shared across facets: `tiledata.mul` describes tiles,
+/// not a map, so one copy is read and each facet's terrain gets its own.
+#[derive(Clone)]
 pub struct TileData {
     land: Vec<LandTile>,
     statics: Vec<StaticTile>,

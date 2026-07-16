@@ -39,7 +39,7 @@ pub mod tick;
 pub mod tiledata;
 pub mod uop;
 
-pub use components::{Account, Body, Client, Heading, Movement, Name, Position};
+pub use components::{Account, Body, Client, Facet, Heading, Movement, Name, Position};
 pub use events::{
     MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
 };

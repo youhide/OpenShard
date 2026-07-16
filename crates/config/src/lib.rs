@@ -54,7 +54,7 @@ pub struct Config {
 }
 
 /// Where to find the client's data files.
-#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldConfig {
     /// The client install directory: `map0LegacyMUL.uop`, `tiledata.mul` and so on.
@@ -73,6 +73,27 @@ pub struct WorldConfig {
     /// single step, with nothing in the log to say why.
     #[serde(default)]
     pub start: StartConfig,
+
+    /// Which facets to load from `client_files`: 0 is Felucca, then Trammel,
+    /// Ilshenar, Malas, Tokuno, Ter Mur. Defaults to just the first. A character
+    /// stays on the facet it is on — there is no travel between them yet.
+    #[serde(default = "default_facets")]
+    pub facets: Vec<u8>,
+}
+
+impl Default for WorldConfig {
+    fn default() -> Self {
+        Self {
+            client_files: String::new(),
+            start: StartConfig::default(),
+            facets: default_facets(),
+        }
+    }
+}
+
+/// The facets loaded when the config does not say which: just Felucca.
+fn default_facets() -> Vec<u8> {
+    vec![0]
 }
 
 /// Where a new character appears.
@@ -348,6 +369,10 @@ advertise = "127.0.0.1:2593"
 # players walk through walls and across water. Useful for testing the protocol,
 # useless as a game.
 client_files = ""
+
+# Which facets to load: 0 is Felucca, then Trammel, Ilshenar, Malas, Tokuno,
+# Ter Mur. A character stays on its facet; there is no travel between them yet.
+facets = [0]
 
 # Where a new character appears. The height comes from the map, not from here.
 #
@@ -655,6 +680,31 @@ mod tests {
         // A config with no [persistence] section — every config written before
         // this option existed — must still parse and mean "keep it in memory".
         assert_eq!(config(MINIMAL).persistence.database, "");
+    }
+
+    #[test]
+    fn facets_default_to_just_felucca() {
+        // A config from before facets existed, and the shipped default, both mean
+        // "load map0 only".
+        assert_eq!(config(MINIMAL).world.facets, vec![0]);
+        let default: Config = toml::from_str(DEFAULT_TOML).unwrap();
+        assert_eq!(default.world.facets, vec![0]);
+    }
+
+    #[test]
+    fn facets_are_read_as_a_list() {
+        let config = config(
+            r#"
+            [server]
+            name = "OpenShard"
+            listen = "0.0.0.0:2593"
+            advertise = "127.0.0.1:2593"
+
+            [world]
+            facets = [0, 1, 4]
+            "#,
+        );
+        assert_eq!(config.world.facets, vec![0, 1, 4]);
     }
 
     #[test]
