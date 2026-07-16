@@ -41,12 +41,23 @@ practice. So: support unencrypted first, get a client on screen, and revisit
 only if a real client turns up that cannot be configured without it. Do not
 mistake this for a security feature when it lands.
 
-## 2. Gateway and login
+## 2. Gateway — done; login server next
 
-- [ ] Tokio listener, one task per connection
-- [ ] Framing, backpressure, disconnect handling
+- [x] Sans-io `Connection`: handshake then framing, no async, no sockets
+- [x] Tokio listener, one task per connection, events onto a channel
+- [x] Disconnect handling; every protocol violation is fatal
 - [ ] Account verification (`config`-driven, no DB yet)
-- [ ] Shard list and relay to the game server
+- [ ] Drive the login conversation: 0x80 → 0xA8 → 0xA0 → 0x8C → 0x91 → 0xA9
+- [ ] Auth key issued at relay, checked at 0x91
+
+The connection logic is a pure state machine on purpose. Everything hard about a
+gateway is byte boundaries — a seed split across three segments, four packets in
+one read — and a real socket will not reproduce those on demand. As a state
+machine each one is a deterministic test with no ports and no sleeps.
+
+`Server` hands events to a channel rather than calling back. A callback would run
+world code inside a network task, on whatever thread Tokio picked, whenever bytes
+arrived. The channel is where async stops and the tick begins.
 
 ## 3. World — first vertical slice
 
