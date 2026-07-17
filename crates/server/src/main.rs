@@ -41,6 +41,9 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
+mod scripting;
+use scripting::Scripts;
+
 /// Where the config lives, relative to the working directory.
 const CONFIG_PATH: &str = "openshard.toml";
 
@@ -334,6 +337,10 @@ async fn run_shard(
 
     tokio::spawn(save_loop(store, snapshots, failed));
 
+    // The gameplay script, if one is configured. Constructed after the world is
+    // built and restored, before the first tick, so its cursors start clean.
+    let mut scripts = Scripts::load(&config.scripting.main, &world);
+
     let mut sessions: HashMap<ConnectionId, Session> = HashMap::new();
     let mut ticker = tokio::time::interval(TICK_INTERVAL);
     // A tick that ran late must not try to catch up by running several in a row:
@@ -362,6 +369,12 @@ async fn run_shard(
                 // holding the only copy.
                 for snapshot in world.drain_saves() {
                     let _ = saves.send(snapshot);
+                }
+                // Feed the script this tick's events and queue its commands for
+                // the next one. After the drains, so a command a script emits is
+                // applied by a tick and leaves through this same path.
+                if let Some(scripts) = scripts.as_mut() {
+                    scripts.pump(&mut world);
                 }
             }
 

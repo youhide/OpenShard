@@ -238,6 +238,13 @@ The design does not have to change. Gameplay can depend on it.
 
 Roughly in dependency order, each script-first:
 
+- [x] **The script is wired into the tick.** The bridge §5 deferred: the server
+  owns a `DenoEngine`, delivers each tick's domain events to it, and queues the
+  commands it emits for the next tick. `scripting.main` in the config names the
+  script; empty runs scriptless, the same bargain as an empty map. A script acts
+  through `Command::Step` — server-authoritative movement, no client sequence or
+  pace, terrain the only judge — which is the first thing a script command lands
+  on. `crates/server/src/scripting.rs` is the whole seam.
 - [ ] `items` — containers, stacking, equipment layers, decay
 - [ ] `combat` — swing timers, damage, resistances, notoriety
 - [ ] `skills` — usage checks, gain curves
@@ -245,6 +252,17 @@ Roughly in dependency order, each script-first:
 - [ ] `ai` — brains, aggro, wandering
 - [ ] `chat` — speech, journal routing
 - [ ] `housing`, `guilds`
+
+The bridge is event-driven today: the server calls the script's `onEvent`, not a
+per-mobile `onTick`. The per-entity hook the benchmark measured is what `ai`
+(wandering, aggro) will want, and wiring it is a server-loop change when that
+lands — the engine already supports it. The script vocabulary — the events in,
+the commands out — grows one gameplay area at a time, each new command mapped in
+`into_world`.
+
+The balance data comes from the SphereServer scriptpack (`Scripts-X`): `items/`,
+`skills/`, `spells/`, `npcs/`, `crafting/`. Numbers taken, arithmetic audited —
+the same bargain as everywhere else Sphere is read.
 
 ## 7. Scriptpack conversion
 

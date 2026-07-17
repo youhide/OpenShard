@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 use openshard_entities::{EntityId, Registry, Serial, SerialKind};
 use openshard_events::{Cursor, EventBus};
 use openshard_gateway::ConnectionId;
-use openshard_movement::{OpenWorld, Walk, Walker};
+use openshard_movement::{step_from, OpenWorld, Terrain, Walk, Walker};
 use openshard_persistence::{CharacterRecord, Journal, Snapshot};
 use openshard_protocol::{
     encode_light_level, encode_login_complete, encode_map_change, encode_remove, encode_walk_ack,
@@ -132,6 +132,22 @@ pub enum Command {
         connection: ConnectionId,
         /// The request.
         request: WalkRequest,
+    },
+    /// The server moves a mobile one step — a script or AI decree, not a client
+    /// request.
+    ///
+    /// Server-authoritative, so unlike [`Walk`](Self::Walk) there is no walk
+    /// sequence to keep in step and no pace budget to spend: those exist to catch
+    /// a *client* lying about how fast it moves, and the server is not lying to
+    /// itself. Only the terrain gets a say. Turning is the step, exactly as it is
+    /// for a client — a mobile not yet facing `direction` turns to face it and
+    /// stays put, and the next `Step` moves it — because the clients watching
+    /// animate the turn and the move the same way whoever ordered it.
+    Step {
+        /// Which mobile, by wire serial.
+        serial: u32,
+        /// Which way: the low three bits of a facing byte (0 N, clockwise).
+        direction: u8,
     },
     /// A connection went away.
     Disconnect {
@@ -521,6 +537,7 @@ impl World {
                 connection,
                 request,
             } => self.walk(connection, request, now),
+            Command::Step { serial, direction } => self.step(serial, direction),
             Command::Disconnect { connection } => self.disconnect(connection),
         }
     }
@@ -772,6 +789,84 @@ impl World {
                 debug!(%serial, ?reason, "step refused");
             }
         }
+    }
+
+    /// Move a mobile one step by server decree. See [`Command::Step`].
+    ///
+    /// Shares the interest-management tail with [`walk`](Self::walk) —
+    /// [`refresh_around`](Self::refresh_around) and
+    /// [`broadcast_move`](Self::broadcast_move) — because a mobile the server
+    /// moved has to appear on the same screens, and leave the same ones, as a
+    /// mobile that walked itself. What it does not share is the client half:
+    /// there is no `0x22`/`0x21` ack, because there may be no client, and the
+    /// mobile might be an NPC nobody is driving.
+    fn step(&mut self, serial: u32, direction: u8) {
+        let Some(serial) = Serial::new(serial) else {
+            return;
+        };
+        let Some(entity) = self.registry.entity_of(serial) else {
+            return;
+        };
+        let Some(Movement(mut walker)) = self.registry.get::<Movement>(entity).copied() else {
+            return;
+        };
+        let direction = Direction::from_bits(direction);
+        let facet = self.facet_of(entity);
+        let was = walker.position;
+
+        // Turn-as-step: a mobile not yet facing this way turns and stays put.
+        if walker.facing.direction != direction {
+            let facing = Facing::walking(direction);
+            walker.facing = facing;
+            self.registry.insert(entity, Movement(walker));
+            self.registry.insert(entity, Heading(facing));
+            self.bus.send(MobileTurned {
+                entity,
+                serial,
+                facing,
+            });
+            self.broadcast_move(entity);
+            return;
+        }
+
+        let Some(target) = step_from(walker.position, direction) else {
+            // Off the edge of the coordinate space — nowhere to go, and no client
+            // to snap back, so it is simply refused.
+            self.bus.send(StepRefused {
+                entity,
+                serial,
+                reason: RefusedReason::Blocked,
+            });
+            return;
+        };
+        let landed = match &self.facet_state(facet).terrain {
+            Some(terrain) => terrain.can_step(walker.position, target),
+            None => OpenWorld.can_step(walker.position, target),
+        };
+        let Some(landed) = landed else {
+            self.bus.send(StepRefused {
+                entity,
+                serial,
+                reason: RefusedReason::Blocked,
+            });
+            return;
+        };
+
+        let facing = Facing::walking(direction);
+        walker.position = landed;
+        walker.facing = facing;
+        self.registry.insert(entity, Movement(walker));
+        self.registry.insert(entity, Position(landed));
+        self.registry.insert(entity, Heading(facing));
+        self.facet_state_mut(facet).sectors.insert(entity, landed);
+        self.bus.send(MobileMoved {
+            entity,
+            serial,
+            from: was,
+            to: landed,
+            facing,
+        });
+        self.refresh_around(entity);
     }
 
     fn disconnect(&mut self, connection: ConnectionId) {
@@ -1055,6 +1150,109 @@ pub(crate) mod tests {
             sequence,
             fastwalk_key: 0,
         }
+    }
+
+    /// The serial the world gave the character a connection is driving.
+    fn serial_of(world: &World, connection: ConnectionId) -> u32 {
+        let entity = world.players[&connection];
+        world.registry.serial_of(entity).unwrap().raw()
+    }
+
+    #[test]
+    fn a_server_step_turns_first_then_moves() {
+        // Turn-as-step, server side: the first `Step` in a new direction turns
+        // and stays put; the second moves. The same rule a client walk follows,
+        // because the clients watching cannot tell who ordered the step.
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        let entity = world.players[&connection];
+        let serial = serial_of(&world, connection);
+
+        let facing0 = world.registry.get::<Heading>(entity).unwrap().0.direction;
+        let dir = if facing0 == Direction::North {
+            Direction::South
+        } else {
+            Direction::North
+        };
+        let from = world.registry.get::<Position>(entity).unwrap().0;
+
+        let mut moved: Cursor<MobileMoved> = world.bus().cursor();
+        let mut turned: Cursor<MobileTurned> = world.bus().cursor();
+
+        world.queue(Command::Step {
+            serial,
+            direction: dir.to_bits(),
+        });
+        world.tick(now);
+        assert_eq!(world.bus().read(&mut turned).count(), 1, "first step turns");
+        assert_eq!(world.bus().read(&mut moved).count(), 0, "and does not move");
+        assert_eq!(
+            world.registry.get::<Position>(entity).unwrap().0,
+            from,
+            "still on the same tile"
+        );
+
+        world.queue(Command::Step {
+            serial,
+            direction: dir.to_bits(),
+        });
+        world.tick(now);
+        let moves: Vec<MobileMoved> = world.bus().read(&mut moved).copied().collect();
+        assert_eq!(moves.len(), 1, "second step moves");
+        assert_eq!(moves[0].from, from);
+        assert_eq!(moves[0].to, step_from(from, dir).unwrap());
+        assert_eq!(
+            world.registry.get::<Position>(entity).unwrap().0,
+            step_from(from, dir).unwrap(),
+        );
+    }
+
+    #[test]
+    fn a_server_step_for_an_unknown_serial_is_a_no_op() {
+        // A script can name a serial that has logged out between the event and
+        // the command it queued in response. That is a miss, not a crash.
+        let now = Instant::now();
+        let mut world = world();
+        enter(&mut world, now);
+        let mut moved: Cursor<MobileMoved> = world.bus().cursor();
+        world.queue(Command::Step {
+            serial: 0x4000_0001,
+            direction: 0,
+        });
+        world.tick(now);
+        assert_eq!(world.bus().read(&mut moved).count(), 0);
+    }
+
+    #[test]
+    fn a_server_step_off_the_edge_is_refused_not_a_wrap() {
+        // Stepping north from y=0 has no landing tile. Refuse it — the mobile
+        // must not wrap to the far side of the map.
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        let entity = world.players[&connection];
+        let serial = serial_of(&world, connection);
+        teleport(&mut world, connection, Point::new(0, 0, 0));
+
+        let mut refused: Cursor<StepRefused> = world.bus().cursor();
+        // Twice: the first may only turn to face north, the second attempts it.
+        for _ in 0..2 {
+            world.queue(Command::Step {
+                serial,
+                direction: Direction::North.to_bits(),
+            });
+            world.tick(now);
+        }
+        assert!(
+            world.bus().read(&mut refused).count() >= 1,
+            "a step off the edge is refused"
+        );
+        assert_eq!(
+            world.registry.get::<Position>(entity).unwrap().0,
+            Point::new(0, 0, 0),
+            "and it did not move"
+        );
     }
 
     #[test]

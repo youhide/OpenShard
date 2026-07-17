@@ -238,6 +238,16 @@ are in `docs/roadmap.md` §5.
 the live isolate — and `DenoEngine::reload_if_changed` polls a watched file's
 mtime so iterating on a hook is save-the-file, not bounce-the-shard.
 
+And it is wired into the running shard. The server (`crates/server/src/scripting.rs`)
+owns the engine and drives it around the tick: after `world.tick()` it hands the
+tick's domain events to the script and queues the commands the script emits for
+the next tick. That keeps a script on the same side of the boundary as a network
+task — it never writes the world inside the tick that is running, only enqueues a
+command a later tick applies. World and scripting stay ignorant of each other;
+the server is the adapter, which is what an adapter is for. `Command::Step` —
+server-authoritative movement, terrain the only judge — is the first command a
+script can land, and the seam §6 gameplay grows from.
+
 ## Persistence (planned)
 
 ```

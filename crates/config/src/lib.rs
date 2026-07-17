@@ -51,6 +51,9 @@ pub struct Config {
     /// Where the world is kept between restarts.
     #[serde(default)]
     pub persistence: PersistenceConfig,
+    /// The gameplay script the shard runs.
+    #[serde(default)]
+    pub scripting: ScriptingConfig,
 }
 
 /// Where to find the client's data files.
@@ -133,6 +136,21 @@ pub struct PersistenceConfig {
     /// operator's choice, and neither is a tier.
     #[serde(default)]
     pub database: String,
+}
+
+/// The gameplay script the shard runs.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScriptingConfig {
+    /// The script to load and hot-reload — a path to a `.js`/`.ts` file.
+    ///
+    /// Empty means no scripting: the shard runs, mobiles move when clients ask,
+    /// and nothing reacts on its own. A real mode, not a broken one — the same
+    /// bargain as an empty map or an empty database — and the seam gameplay (§6)
+    /// hangs off, so it is here from the start rather than retrofitted. The file
+    /// is watched, so saving it reloads the hooks in the live shard.
+    #[serde(default)]
+    pub main: String,
 }
 
 /// Network and identity.
@@ -391,6 +409,17 @@ y = 1600
 #   database = "openshard.db"
 #   database = "postgres://user:pass@localhost/openshard"
 database = ""
+
+[scripting]
+# The gameplay script the shard loads and hot-reloads. A path to a .js/.ts file.
+#
+# Leave empty and nothing reacts on its own: mobiles move when clients ask and
+# no more. Point it at a script and the shard delivers domain events to it every
+# tick and applies the commands it enqueues. The file is watched — save it and
+# the hooks reload without a restart.
+#
+#   main = "scripts/main.js"
+main = ""
 
 # Development accounts, in plaintext, until there is a database.
 [[accounts]]

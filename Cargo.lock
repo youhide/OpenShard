@@ -1262,10 +1262,12 @@ name = "openshard-server"
 version = "0.0.1"
 dependencies = [
  "openshard-config",
+ "openshard-events",
  "openshard-gateway",
  "openshard-login",
  "openshard-persistence",
  "openshard-protocol",
+ "openshard-scripting",
  "openshard-world",
  "tokio",
  "tracing",
