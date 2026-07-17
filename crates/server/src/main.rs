@@ -32,8 +32,8 @@ use openshard_persistence::{
     AccountRecord, CharacterRecord, MemoryStore, PgStore, Snapshot, SqliteStore, Store,
 };
 use openshard_protocol::{
-    encode_login_denied, huffman, CharacterPlay, CreateCharacter, DropItem, GameServerLogin,
-    PickUpItem, Point, StartLocation, WalkRequest,
+    encode_login_denied, huffman, CharacterPlay, CreateCharacter, DoubleClick, DropItem,
+    EquipItemRequest, GameServerLogin, PickUpItem, Point, StartLocation, WalkRequest,
 };
 use openshard_world::{Appearance, Command, Map, MapTerrain, TileData, World, TICK_INTERVAL};
 use std::sync::Arc;
@@ -605,6 +605,36 @@ fn dispatch(
                 serial: drop.serial,
                 position: drop.position,
                 container: drop.container,
+            });
+            true
+        }
+        Some(DoubleClick::ID) => {
+            if !session.in_world {
+                return true;
+            }
+            let Ok(click) = DoubleClick::decode(packet) else {
+                warn!(%id, "malformed 0x06");
+                return false;
+            };
+            world.queue(Command::DoubleClick {
+                connection: id,
+                serial: click.serial,
+            });
+            true
+        }
+        Some(EquipItemRequest::ID) => {
+            if !session.in_world {
+                return true;
+            }
+            let Ok(equip) = EquipItemRequest::decode(packet) else {
+                warn!(%id, "malformed 0x13");
+                return false;
+            };
+            world.queue(Command::EquipItem {
+                connection: id,
+                item: equip.item,
+                layer: equip.layer,
+                mobile: equip.mobile,
             });
             true
         }

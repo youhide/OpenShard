@@ -115,6 +115,8 @@ struct SpawnSpec {
     hue: u16,
     #[serde(default = "one")]
     amount: u16,
+    #[serde(default)]
+    stackable: bool,
     x: u16,
     y: u16,
     #[serde(default)]
@@ -136,6 +138,7 @@ fn op_spawn_item(state: &mut OpState, #[serde] spec: SpawnSpec) {
         graphic: spec.graphic,
         hue: spec.hue,
         amount: spec.amount,
+        stackable: spec.stackable,
         x: spec.x,
         y: spec.y,
         z: spec.z,
@@ -143,9 +146,42 @@ fn op_spawn_item(state: &mut OpState, #[serde] spec: SpawnSpec) {
     });
 }
 
+/// What a script passes to spawn a container: a [`SpawnSpec`] plus the gump the
+/// client opens for it.
+#[derive(serde::Deserialize)]
+struct ContainerSpec {
+    graphic: u16,
+    gump: u16,
+    #[serde(default)]
+    hue: u16,
+    x: u16,
+    y: u16,
+    #[serde(default)]
+    z: i8,
+    #[serde(default)]
+    facet: u8,
+}
+
+/// Put a container on the ground.
+#[op2]
+fn op_spawn_container(state: &mut OpState, #[serde] spec: ContainerSpec) {
+    state
+        .borrow_mut::<Host>()
+        .outbox
+        .push(Command::SpawnContainer {
+            graphic: spec.graphic,
+            gump: spec.gump,
+            hue: spec.hue,
+            x: spec.x,
+            y: spec.y,
+            z: spec.z,
+            facet: spec.facet,
+        });
+}
+
 extension!(
     openshard_ops,
-    ops = [op_position, op_move, op_spawn_item],
+    ops = [op_position, op_move, op_spawn_item, op_spawn_container],
     docs = "OpenShard's script-facing ops: read entity state, enqueue commands.",
 );
 
@@ -515,6 +551,7 @@ mod tests {
                 graphic: 0x0EED,
                 hue: 0,
                 amount: 1,
+                stackable: false,
                 x: 42,
                 y: 100,
                 z: 0,

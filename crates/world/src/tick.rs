@@ -33,15 +33,18 @@ use openshard_gateway::ConnectionId;
 use openshard_movement::{step_from, OpenWorld, Terrain, Walk, Walker};
 use openshard_persistence::{CharacterRecord, Journal, Snapshot};
 use openshard_protocol::{
-    encode_drag_cancel, encode_light_level, encode_login_complete, encode_map_change,
-    encode_remove, encode_walk_ack, encode_walk_reject, ClientVersion, Direction, DragCancelReason,
-    Facing, MobileIncoming, MobileMove, Notoriety, PlayerStart, PlayerUpdate, Point, WalkRequest,
-    WorldItem, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, DROP_TO_GROUND,
+    encode_add_to_container, encode_container_contents, encode_drag_cancel, encode_equip,
+    encode_light_level, encode_login_complete, encode_map_change, encode_open_container,
+    encode_remove, encode_walk_ack, encode_walk_reject, ClientVersion, ContainedItem, Direction,
+    DragCancelReason, Equipment, Facing, MobileIncoming, MobileMove, Notoriety, PlayerStart,
+    PlayerUpdate, Point, WalkRequest, WorldItem, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
+    DROP_TO_GROUND,
 };
 use tracing::{debug, info, warn};
 
 use crate::components::{
-    Account, Amount, Body, Client, Facet, Graphic, Heading, Movement, Name, Position,
+    Account, Amount, Body, Client, Contained, Container, Decays, Equipped, Facet, Graphic, Heading,
+    Movement, Name, Position, Stackable,
 };
 use crate::events::{
     ItemSpawned, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
@@ -80,6 +83,19 @@ const FACET_WITHOUT_A_MAP: (u32, u32) = (7168, 4096);
 /// starting number and an auditable one, not a rule carved anywhere — reach is
 /// exactly the sort of thing a shard retunes.
 const ITEM_REACH: u32 = 3;
+/// The highest layer an item can be worn on.
+///
+/// Layers 1–25 are the body: hands, armour, clothing, the mount. Higher numbers
+/// are the backpack, the bank box and other slots that are not "worn" and cannot
+/// be equipped by dragging an item onto them.
+const MAX_WEARABLE_LAYER: u8 = 25;
+/// How many ticks an item lies on the ground before it decays.
+///
+/// Twenty minutes at [`TICK_INTERVAL`] — Sphere's default `DECAY_TIME` is fifteen
+/// to thirty depending on the item; one number stands in for the table until
+/// per-item decay is script-driven. A starting value, tuned per shard, and the
+/// kind of thing §6 hands to scripts.
+const DECAY_TICKS: u64 = 20 * 60 * 20;
 
 /// How often the world offers a snapshot to persistence, in ticks.
 ///
@@ -172,10 +188,44 @@ pub enum Command {
         hue: u16,
         /// How many, for a stackable item; 0 or 1 is a single.
         amount: u16,
+        /// Whether it merges with an identical pile when dropped onto one.
+        stackable: bool,
         /// Where it lies.
         position: Point,
         /// Which facet.
         facet: u8,
+    },
+    /// The server puts a container on the ground — a script decree, like
+    /// [`SpawnItem`](Self::SpawnItem) but the thing can hold others.
+    SpawnContainer {
+        /// The tiledata graphic id (a chest, a backpack).
+        graphic: u16,
+        /// The gump the client opens when it is double-clicked.
+        gump: u16,
+        /// Its hue, or 0 for none.
+        hue: u16,
+        /// Where it lies.
+        position: Point,
+        /// Which facet.
+        facet: u8,
+    },
+    /// A client double-clicked an object (`0x06`) — for now, to open a container.
+    DoubleClick {
+        /// Which connection.
+        connection: ConnectionId,
+        /// The object's serial.
+        serial: u32,
+    },
+    /// A client asked to wear the item on its cursor (`0x13`).
+    EquipItem {
+        /// Which connection.
+        connection: ConnectionId,
+        /// The item to wear.
+        item: u32,
+        /// The layer to wear it on.
+        layer: u8,
+        /// The mobile to wear it — usually the player's own.
+        mobile: u32,
     },
     /// A client asked to pick an item up onto its cursor (`0x07`).
     PickUpItem {
@@ -245,13 +295,23 @@ struct FacetState {
 ///
 /// The origin is the whole reason to remember more than the entity. A drag that
 /// is refused — dropped out of reach, into nothing — has to put the item back
-/// exactly where it was, and by then it is off the ground with no position of
-/// its own to return to.
+/// exactly where it was, and by then it is off the ground (and out of any
+/// container) with no place of its own to return to.
 #[derive(Clone, Copy, Debug)]
 struct HeldItem {
     entity: EntityId,
-    origin: Point,
-    facet: u8,
+    origin: Origin,
+}
+
+/// Where a held item came from, so a cancelled drag can put it back.
+#[derive(Clone, Copy, Debug)]
+enum Origin {
+    /// It was on the ground.
+    Ground { position: Point, facet: u8 },
+    /// It was inside a container.
+    Container(Contained),
+    /// It was worn by a mobile.
+    Worn(Equipped),
 }
 
 /// The world.
@@ -472,6 +532,10 @@ impl World {
             self.apply(command, now);
         }
 
+        // Rot away what has lain on the ground too long. After the commands, so
+        // an item dropped this tick is not aged by the same tick that placed it.
+        self.decay();
+
         // Before the bus retires anything: what happened is what needs saving,
         // and reading it after `update` would read it a tick late.
         self.mark_dirty();
@@ -611,9 +675,26 @@ impl World {
                 graphic,
                 hue,
                 amount,
+                stackable,
                 position,
                 facet,
-            } => self.spawn_item(graphic, hue, amount, position, facet),
+            } => {
+                self.spawn_item(graphic, hue, amount, stackable, position, facet);
+            }
+            Command::SpawnContainer {
+                graphic,
+                gump,
+                hue,
+                position,
+                facet,
+            } => self.spawn_container(graphic, gump, hue, position, facet),
+            Command::DoubleClick { connection, serial } => self.double_click(connection, serial),
+            Command::EquipItem {
+                connection,
+                item,
+                layer,
+                mobile,
+            } => self.equip_item(connection, item, layer, mobile),
             Command::PickUpItem {
                 connection,
                 serial,
@@ -957,7 +1038,18 @@ impl World {
     }
 
     /// Put an item on the ground. See [`Command::SpawnItem`].
-    fn spawn_item(&mut self, graphic: u16, hue: u16, amount: u16, position: Point, facet: u8) {
+    ///
+    /// Returns the entity so [`spawn_container`](Self::spawn_container) can make
+    /// the same thing and then say it holds others.
+    fn spawn_item(
+        &mut self,
+        graphic: u16,
+        hue: u16,
+        amount: u16,
+        stackable: bool,
+        position: Point,
+        facet: u8,
+    ) -> Option<EntityId> {
         let facet = if self.facets.contains_key(&facet) {
             facet
         } else {
@@ -968,7 +1060,7 @@ impl World {
             Ok(pair) => pair,
             Err(error) => {
                 warn!(?error, "out of item serials; not spawning");
-                return;
+                return None;
             }
         };
         self.registry.insert(entity, Graphic { id: graphic, hue });
@@ -978,6 +1070,10 @@ impl World {
         if amount > 1 {
             self.registry.insert(entity, Amount(amount));
         }
+        if stackable {
+            self.registry.insert(entity, Stackable);
+        }
+        self.mark_decay(entity);
         self.facet_state_mut(facet).sectors.insert(entity, position);
         self.bus.send(ItemSpawned {
             entity,
@@ -986,6 +1082,195 @@ impl World {
         });
         self.reveal_item(entity);
         debug!(%serial, graphic, position = %position, "item on the ground");
+        Some(entity)
+    }
+
+    /// Put a container on the ground. See [`Command::SpawnContainer`].
+    ///
+    /// A container is an ordinary ground item that also carries a [`Container`],
+    /// which is the only thing that makes it openable. So it is spawned exactly
+    /// like one and then marked.
+    fn spawn_container(&mut self, graphic: u16, gump: u16, hue: u16, position: Point, facet: u8) {
+        if let Some(entity) = self.spawn_item(graphic, hue, 1, false, position, facet) {
+            self.registry.insert(entity, Container { gump });
+            // A container does not rot with its contents inside it; only loose
+            // ground clutter decays.
+            self.registry.remove::<Decays>(entity);
+        }
+    }
+
+    /// Set an item's decay clock: it rots [`DECAY_TICKS`] from now. Every item on
+    /// the ground has one; every item off it has none.
+    fn mark_decay(&mut self, item: EntityId) {
+        self.registry.insert(
+            item,
+            Decays {
+                at_tick: self.ticks + DECAY_TICKS,
+            },
+        );
+    }
+
+    /// Open a container onto a client's screen. See [`Command::DoubleClick`].
+    ///
+    /// Only containers do anything yet — a double-click on anything else is
+    /// ignored rather than answered, because "use" for a door or a food is a
+    /// later rule and a wrong guess is worse than silence.
+    fn double_click(&mut self, connection: ConnectionId, serial: u32) {
+        let Some(&player) = self.players.get(&connection) else {
+            return;
+        };
+        let Some(item_serial) = Serial::new(serial) else {
+            return;
+        };
+        let Some(item) = self.registry.entity_of(item_serial) else {
+            return;
+        };
+        let Some(&Container { gump }) = self.registry.get::<Container>(item) else {
+            return;
+        };
+        // The container has to be in reach on the ground. Nesting — opening one
+        // out of another already open — is a later refinement.
+        let Some(&Position(item_pos)) = self.registry.get::<Position>(item) else {
+            return;
+        };
+        let Some(&Position(player_pos)) = self.registry.get::<Position>(player) else {
+            return;
+        };
+        if self.facet_of(item) != self.facet_of(player)
+            || !in_range(item_pos, player_pos, ITEM_REACH)
+        {
+            return;
+        }
+        let Some(&Client { version, .. }) = self.registry.get::<Client>(player) else {
+            return;
+        };
+
+        let contents = self.contents_of(item_serial);
+        self.send(connection, encode_open_container(serial, gump, version));
+        self.send(
+            connection,
+            encode_container_contents(serial, &contents, version),
+        );
+        debug!(%item_serial, items = contents.len(), "container opened");
+    }
+
+    /// Everything inside a container, as the wire records `0x3C`/`0x25` need.
+    fn contents_of(&self, container: Serial) -> Vec<ContainedItem> {
+        self.registry
+            .query::<Contained>()
+            .filter(|(_, held)| held.container == container)
+            .filter_map(|(entity, _)| self.contained_record(entity))
+            .collect()
+    }
+
+    /// How many items a container already holds — the next free grid slot.
+    fn item_count(&self, container: Serial) -> u8 {
+        self.registry
+            .query::<Contained>()
+            .filter(|(_, held)| held.container == container)
+            .count()
+            .min(u8::MAX as usize) as u8
+    }
+
+    /// Wear a client's held item on a mobile. See [`Command::EquipItem`].
+    fn equip_item(&mut self, connection: ConnectionId, item: u32, layer: u8, mobile: u32) {
+        // Equipping is a *drop* of the dragged item, so there has to be one, and
+        // it has to be the item named.
+        let Some(held) = self.held.get(&connection).copied() else {
+            return;
+        };
+        if self.registry.serial_of(held.entity) != Serial::new(item) {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        }
+        if layer == 0 || layer > MAX_WEARABLE_LAYER {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        }
+        let (Some(wearer_serial), Some(wearer)) = (
+            Serial::new(mobile),
+            Serial::new(mobile).and_then(|s| self.registry.entity_of(s)),
+        ) else {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        };
+        // Only a mobile wears things, and only within reach of the player.
+        let Some(&player) = self.players.get(&connection) else {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        };
+        let (Some(&Position(wearer_pos)), Some(&Position(player_pos))) = (
+            self.registry.get::<Position>(wearer),
+            self.registry.get::<Position>(player),
+        ) else {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        };
+        if !self.registry.has::<Body>(wearer) {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        }
+        if self.facet_of(wearer) != self.facet_of(player)
+            || !in_range(wearer_pos, player_pos, ITEM_REACH)
+        {
+            self.bounce(connection, held, DragCancelReason::OutOfRange);
+            return;
+        }
+        // A layer holds one thing.
+        if self.layer_taken(wearer_serial, layer) {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        }
+
+        self.held.remove(&connection);
+        self.registry.insert(
+            held.entity,
+            Equipped {
+                mobile: wearer_serial,
+                layer,
+            },
+        );
+        self.broadcast_equip(held.entity, wearer);
+        debug!(item, layer, "equipped");
+    }
+
+    /// Whether a mobile already wears something on a layer.
+    fn layer_taken(&self, mobile: Serial, layer: u8) -> bool {
+        self.registry
+            .query::<Equipped>()
+            .any(|(_, worn)| worn.mobile == mobile && worn.layer == layer)
+    }
+
+    /// Tell everyone who can see `mobile`, and the mobile itself if it is a
+    /// player, that it is now wearing `item` — a `0x2E` each.
+    fn broadcast_equip(&mut self, item: EntityId, mobile: EntityId) {
+        let Some(packet) = self.equip_packet(item) else {
+            return;
+        };
+        for watcher in self.equip_audience(mobile) {
+            if let Some(&Client { connection, .. }) = self.registry.get::<Client>(watcher) {
+                self.outbox.push(Outbound {
+                    connection,
+                    packet: packet.clone(),
+                });
+            }
+        }
+    }
+
+    /// Everyone who should hear about a change to `mobile`'s outfit: those who
+    /// can see it, and the mobile itself.
+    fn equip_audience(&self, mobile: EntityId) -> Vec<EntityId> {
+        let mut audience = self.watchers_of(mobile);
+        audience.push(mobile);
+        audience
+    }
+
+    /// Build the `0x2E` for a worn item.
+    fn equip_packet(&self, item: EntityId) -> Option<Vec<u8>> {
+        let serial = self.registry.serial_of(item)?;
+        let Equipped { mobile, layer } = *self.registry.get::<Equipped>(item)?;
+        let Graphic { id, hue } = *self.registry.get::<Graphic>(item)?;
+        Some(encode_equip(serial.raw(), id, layer, mobile.raw(), hue))
     }
 
     /// Draw a freshly placed item for every player who can see its tile.
@@ -1026,47 +1311,93 @@ impl World {
             self.reject_drag(connection, DragCancelReason::CannotLift);
             return;
         };
-        // Only a thing on the ground can be lifted: a graphic and a position. A
-        // mobile has no `Graphic`, so this rejects trying to pick up a person.
+        // Only a thing with a graphic is an item. A mobile has none, so this
+        // rejects trying to pick up a person.
         if !self.registry.has::<Graphic>(item) {
             self.reject_drag(connection, DragCancelReason::CannotLift);
             return;
         }
-        let Some(&Position(item_pos)) = self.registry.get::<Position>(item) else {
+
+        // Where it is now decides how it is lifted and where a cancelled drag
+        // will put it back.
+        if let Some(&Position(item_pos)) = self.registry.get::<Position>(item) {
+            let Some(&Position(player_pos)) = self.registry.get::<Position>(player) else {
+                return;
+            };
+            let facet = self.facet_of(item);
+            if facet != self.facet_of(player) || !in_range(item_pos, player_pos, ITEM_REACH) {
+                self.reject_drag(connection, DragCancelReason::OutOfRange);
+                return;
+            }
+            // Off the sector grid, off every screen but the picker's — whose own
+            // client already put it on the cursor, so a 0x1D there would fight it.
+            self.facet_state_mut(facet).sectors.remove(item);
+            for watcher in self.watchers_of(item) {
+                if watcher == player {
+                    if let Some(seen) = self.seen.get_mut(&player) {
+                        seen.remove(&item);
+                    }
+                } else {
+                    self.forget(watcher, item, item_serial);
+                }
+            }
+            self.registry.remove::<Position>(item);
+            // Off the ground, off the decay clock.
+            self.registry.remove::<Decays>(item);
+            self.held.insert(
+                connection,
+                HeldItem {
+                    entity: item,
+                    origin: Origin::Ground {
+                        position: item_pos,
+                        facet,
+                    },
+                },
+            );
+        } else if let Some(&contained) = self.registry.get::<Contained>(item) {
+            // Out of a container. The client with the gump open removes it from
+            // the gump itself; the server just drops the containment.
+            self.registry.remove::<Contained>(item);
+            self.held.insert(
+                connection,
+                HeldItem {
+                    entity: item,
+                    origin: Origin::Container(contained),
+                },
+            );
+        } else if let Some(&worn) = self.registry.get::<Equipped>(item) {
+            // Off a mobile. The picker's own client drags it off the paperdoll;
+            // everyone else watching the mobile is told to forget it, because
+            // they knew it only as part of that mobile.
+            self.registry.remove::<Equipped>(item);
+            if let Some(mobile) = self.registry.entity_of(worn.mobile) {
+                for watcher in self.equip_audience(mobile) {
+                    if watcher == player {
+                        continue;
+                    }
+                    if let Some(&Client { connection: to, .. }) =
+                        self.registry.get::<Client>(watcher)
+                    {
+                        self.outbox.push(Outbound {
+                            connection: to,
+                            packet: encode_remove(item_serial.raw()),
+                        });
+                    }
+                }
+            }
+            self.held.insert(
+                connection,
+                HeldItem {
+                    entity: item,
+                    origin: Origin::Worn(worn),
+                },
+            );
+        } else {
+            // Neither on the ground nor in a container: already on a cursor, or
+            // nowhere. Nothing to lift.
             self.reject_drag(connection, DragCancelReason::CannotLift);
             return;
-        };
-        let Some(&Position(player_pos)) = self.registry.get::<Position>(player) else {
-            return;
-        };
-        let facet = self.facet_of(item);
-        if facet != self.facet_of(player) || !in_range(item_pos, player_pos, ITEM_REACH) {
-            self.reject_drag(connection, DragCancelReason::OutOfRange);
-            return;
         }
-
-        // Off the sector grid, off every screen but the picker's — whose own
-        // client already put it on the cursor, so a 0x1D there would fight it —
-        // and out of the world's idea of where it is.
-        self.facet_state_mut(facet).sectors.remove(item);
-        for watcher in self.watchers_of(item) {
-            if watcher == player {
-                if let Some(seen) = self.seen.get_mut(&player) {
-                    seen.remove(&item);
-                }
-            } else {
-                self.forget(watcher, item, item_serial);
-            }
-        }
-        self.registry.remove::<Position>(item);
-        self.held.insert(
-            connection,
-            HeldItem {
-                entity: item,
-                origin: item_pos,
-                facet,
-            },
-        );
         debug!(%item_serial, "lifted onto the cursor");
     }
 
@@ -1088,12 +1419,13 @@ impl World {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         }
-        // Only ground drops are handled. Into a container or onto a mobile is
-        // §6's next two slices; until then it bounces rather than vanishes.
+
         if container != DROP_TO_GROUND {
-            self.bounce(connection, held, DragCancelReason::Other);
+            self.drop_onto_item(connection, held, position, container);
             return;
         }
+
+        // Onto the ground: within reach of the player, on the player's facet.
         let Some(&player) = self.players.get(&connection) else {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
@@ -1112,12 +1444,227 @@ impl World {
         debug!(serial, "dropped on the ground");
     }
 
+    /// Put a held item into a container. See [`Command::DropItem`].
+    fn drop_into_container(
+        &mut self,
+        connection: ConnectionId,
+        held: HeldItem,
+        position: Point,
+        container: u32,
+    ) {
+        let Some(container_serial) = Serial::new(container) else {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        };
+        let Some(container_entity) = self.registry.entity_of(container_serial) else {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        };
+        if !self.registry.has::<Container>(container_entity) {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        }
+        let Some(&player) = self.players.get(&connection) else {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        };
+        // The container has to be a reachable one on the ground. Dropping into a
+        // container that is itself inside another is a later refinement.
+        let Some(&Position(container_pos)) = self.registry.get::<Position>(container_entity) else {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        };
+        let Some(&Position(player_pos)) = self.registry.get::<Position>(player) else {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        };
+        if self.facet_of(container_entity) != self.facet_of(player)
+            || !in_range(container_pos, player_pos, ITEM_REACH)
+        {
+            self.bounce(connection, held, DragCancelReason::OutOfRange);
+            return;
+        }
+
+        // In it goes. The drop's `x`/`y` are gump coordinates, not world tiles.
+        let grid = self.item_count(container_serial);
+        self.held.remove(&connection);
+        self.registry.insert(
+            held.entity,
+            Contained {
+                container: container_serial,
+                x: position.x,
+                y: position.y,
+                grid,
+            },
+        );
+        // Tell the client, whose gump is open, that the item is now inside.
+        if let (Some(&Client { version, .. }), Some(record)) = (
+            self.registry.get::<Client>(player),
+            self.contained_record(held.entity),
+        ) {
+            self.send(
+                connection,
+                encode_add_to_container(record, container, version),
+            );
+        }
+        debug!(container, "dropped into a container");
+    }
+
+    /// A drop onto another item: into it if it is a container, merged with it if
+    /// it is an identical stack, refused otherwise.
+    fn drop_onto_item(
+        &mut self,
+        connection: ConnectionId,
+        held: HeldItem,
+        position: Point,
+        target_serial: u32,
+    ) {
+        let target = Serial::new(target_serial).and_then(|s| self.registry.entity_of(s));
+        match target {
+            Some(target) if self.registry.has::<Container>(target) => {
+                self.drop_into_container(connection, held, position, target_serial);
+            }
+            Some(target) if self.can_stack(held.entity, target) => {
+                self.merge_onto(connection, held, target);
+            }
+            _ => self.bounce(connection, held, DragCancelReason::Other),
+        }
+    }
+
+    /// Whether two items are one pile waiting to happen: both stackable, same
+    /// graphic and hue, and not the same entity.
+    fn can_stack(&self, a: EntityId, b: EntityId) -> bool {
+        a != b
+            && self.registry.has::<Stackable>(a)
+            && self.registry.has::<Stackable>(b)
+            && self.registry.get::<Graphic>(a) == self.registry.get::<Graphic>(b)
+    }
+
+    /// Merge a held stack onto a stack on the ground. See [`can_stack`](Self::can_stack).
+    fn merge_onto(&mut self, connection: ConnectionId, held: HeldItem, target: EntityId) {
+        // Only ground stacks merge for now; merging onto a stack inside a
+        // container is a later refinement, and until then it bounces.
+        let Some(&Position(target_pos)) = self.registry.get::<Position>(target) else {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        };
+        let Some(&player) = self.players.get(&connection) else {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        };
+        let Some(&Position(player_pos)) = self.registry.get::<Position>(player) else {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        };
+        if self.facet_of(target) != self.facet_of(player)
+            || !in_range(target_pos, player_pos, ITEM_REACH)
+        {
+            self.bounce(connection, held, DragCancelReason::OutOfRange);
+            return;
+        }
+
+        // Sum, clamped: a pile cannot count past what its amount word can hold.
+        let total = self
+            .amount_of(held.entity)
+            .saturating_add(self.amount_of(target));
+        self.registry.insert(target, Amount(total));
+        self.held.remove(&connection);
+        // The dragged stack is gone into the other; it was on a cursor, on
+        // nobody's ground, so despawning it needs no packet.
+        self.registry.despawn(held.entity);
+        self.redraw_ground_item(target);
+        debug!(total, "stacks merged");
+    }
+
+    /// How many an item is: its [`Amount`], or one if it has none.
+    fn amount_of(&self, item: EntityId) -> u16 {
+        self.registry.get::<Amount>(item).map_or(1, |a| a.0)
+    }
+
+    /// Re-send a ground item to everyone already watching it — for when its
+    /// amount changed and the `seen` set would otherwise suppress the redraw.
+    fn redraw_ground_item(&mut self, item: EntityId) {
+        for watcher in self.watchers_of(item) {
+            let Some(&Client {
+                connection,
+                version,
+            }) = self.registry.get::<Client>(watcher)
+            else {
+                continue;
+            };
+            if let Some(packet) = self.draw_packet(item, version) {
+                self.outbox.push(Outbound { connection, packet });
+            }
+        }
+    }
+
+    /// Remove every ground item whose decay tick has arrived. Runs each tick,
+    /// against [`ticks`](Self::ticks), so it reads no clock.
+    fn decay(&mut self) {
+        let now = self.ticks;
+        let expired: Vec<EntityId> = self
+            .registry
+            .query::<Decays>()
+            .filter(|(_, decays)| decays.at_tick <= now)
+            .map(|(entity, _)| entity)
+            .collect();
+        for item in expired {
+            let Some(serial) = self.registry.serial_of(item) else {
+                continue;
+            };
+            let facet = self.facet_of(item);
+            for watcher in self.watchers_of(item) {
+                self.forget(watcher, item, serial);
+            }
+            self.facet_state_mut(facet).sectors.remove(item);
+            self.registry.despawn(item);
+            debug!(%serial, "decayed");
+        }
+    }
+
     /// Put a held item back where it was lifted and tell the client the drag is
     /// off, so it stops showing the item on the cursor.
     fn bounce(&mut self, connection: ConnectionId, held: HeldItem, reason: DragCancelReason) {
         self.held.remove(&connection);
-        self.place_on_ground(held.entity, held.origin, held.facet);
+        self.restore(held);
         self.reject_drag(connection, reason);
+    }
+
+    /// Put a held item back exactly where it came from — the ground it lay on or
+    /// the container it was in.
+    fn restore(&mut self, held: HeldItem) {
+        match held.origin {
+            Origin::Ground { position, facet } => {
+                self.place_on_ground(held.entity, position, facet);
+            }
+            Origin::Container(contained) => {
+                self.registry.insert(held.entity, contained);
+            }
+            Origin::Worn(worn) => {
+                self.registry.insert(held.entity, worn);
+                // Back on the mobile, and back on every screen that shows it.
+                if let Some(mobile) = self.registry.entity_of(worn.mobile) {
+                    self.broadcast_equip(held.entity, mobile);
+                }
+            }
+        }
+    }
+
+    /// Build the `0x25`/`0x3C` record for one contained item.
+    fn contained_record(&self, entity: EntityId) -> Option<ContainedItem> {
+        let serial = self.registry.serial_of(entity)?;
+        let Contained { x, y, grid, .. } = *self.registry.get::<Contained>(entity)?;
+        let Graphic { id, hue } = *self.registry.get::<Graphic>(entity)?;
+        let amount = self.registry.get::<Amount>(entity).map_or(1, |a| a.0);
+        Some(ContainedItem {
+            serial: serial.raw(),
+            graphic: id,
+            amount,
+            x,
+            y,
+            grid,
+            hue,
+        })
     }
 
     /// Send a `0x27`, cancelling whatever drag the client thinks it has.
@@ -1129,15 +1676,18 @@ impl World {
     fn place_on_ground(&mut self, item: EntityId, position: Point, facet: u8) {
         self.registry.insert(item, Position(position));
         self.registry.insert(item, Facet(facet));
+        // Back on the ground, back on the decay clock.
+        self.mark_decay(item);
         self.facet_state_mut(facet).sectors.insert(item, position);
         self.reveal_item(item);
     }
 
     fn disconnect(&mut self, connection: ConnectionId) {
         // A client that logs out mid-drag would otherwise leave its item nowhere —
-        // off the ground, on a cursor that is gone. Put it back where it was.
+        // off the ground and out of any container, on a cursor that is gone. Put
+        // it back where it was.
         if let Some(held) = self.held.remove(&connection) {
-            self.place_on_ground(held.entity, held.origin, held.facet);
+            self.restore(held);
         }
 
         let Some(entity) = self.players.remove(&connection) else {
@@ -1351,10 +1901,26 @@ impl World {
             hue: body.hue,
             flags: 0,
             notoriety: Notoriety::Innocent,
-            // Nothing wears anything yet: there is no items crate. The list is
-            // empty rather than absent, which is what the client expects.
-            equipment: Vec::new(),
+            equipment: self.equipment_of(serial),
         })
+    }
+
+    /// What a mobile is wearing, as the `0x78` equipment list.
+    fn equipment_of(&self, mobile: Serial) -> Vec<Equipment> {
+        self.registry
+            .query::<Equipped>()
+            .filter(|(_, worn)| worn.mobile == mobile)
+            .filter_map(|(item, worn)| {
+                let serial = self.registry.serial_of(item)?;
+                let Graphic { id, hue } = *self.registry.get::<Graphic>(item)?;
+                Some(Equipment {
+                    serial: serial.raw(),
+                    graphic: id,
+                    layer: worn.layer,
+                    hue,
+                })
+            })
+            .collect()
     }
 
     /// Build a 0x77 for an entity.
@@ -1560,10 +2126,32 @@ pub(crate) mod tests {
             graphic: GOLD,
             hue: 0,
             amount: 1,
+            stackable: false,
             position: point,
             facet: 0,
         });
         world.tick(now);
+    }
+
+    /// Spawn a stackable pile of `amount` gold and return its serial.
+    fn spawn_gold(world: &mut World, point: Point, amount: u16, now: Instant) -> u32 {
+        world.queue(Command::SpawnItem {
+            graphic: GOLD,
+            hue: 0,
+            amount,
+            stackable: true,
+            position: point,
+            facet: 0,
+        });
+        world.tick(now);
+        // The newest ground item, by serial.
+        world
+            .registry
+            .query::<Position>()
+            .filter(|(entity, _)| world.registry.has::<Stackable>(*entity))
+            .filter_map(|(entity, _)| world.registry.serial_of(entity).map(|s| s.raw()))
+            .max()
+            .expect("the gold was spawned")
     }
 
     #[test]
@@ -1642,6 +2230,7 @@ pub(crate) mod tests {
             graphic: GOLD,
             hue: 0,
             amount: 500,
+            stackable: false,
             position: Point::new(START.0, START.1, 0),
             facet: 0,
         });
@@ -1843,6 +2432,549 @@ pub(crate) mod tests {
                 .iter()
                 .any(|p| p == &[0x27, 0x00]),
             "cannot-lift is the reason"
+        );
+    }
+
+    /// A backpack graphic and its gump.
+    const BACKPACK: u16 = 0x0E75;
+    const BACKPACK_GUMP: u16 = 0x003C;
+
+    fn spawn_container_at(world: &mut World, point: Point, now: Instant) -> u32 {
+        world.queue(Command::SpawnContainer {
+            graphic: BACKPACK,
+            gump: BACKPACK_GUMP,
+            hue: 0,
+            position: point,
+            facet: 0,
+        });
+        world.tick(now);
+        let (entity, _) = world
+            .registry
+            .query::<Container>()
+            .next()
+            .expect("a container is in the world");
+        world.registry.serial_of(entity).unwrap().raw()
+    }
+
+    /// The serial of the one item that is not a container.
+    fn loose_item_serial(world: &World) -> u32 {
+        let (entity, _) = world
+            .registry
+            .query::<Graphic>()
+            .find(|(entity, _)| !world.registry.has::<Container>(*entity))
+            .expect("a non-container item exists");
+        world.registry.serial_of(entity).unwrap().raw()
+    }
+
+    fn entity(world: &World, serial: u32) -> EntityId {
+        world
+            .registry
+            .entity_of(Serial::new(serial).unwrap())
+            .unwrap()
+    }
+
+    #[test]
+    fn double_clicking_a_container_opens_it() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let container = spawn_container_at(&mut world, Point::new(START.0, START.1, 0), now);
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::DoubleClick {
+            connection: player,
+            serial: container,
+        });
+        world.tick(now);
+
+        let packets = packets_for(&mut world, player);
+        assert!(packets.iter().any(|p| p[0] == 0x24), "the gump opens");
+        assert!(packets.iter().any(|p| p[0] == 0x3C), "the contents follow");
+    }
+
+    #[test]
+    fn dropping_an_item_into_a_container_puts_it_inside() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let here = Point::new(START.0, START.1, 0);
+        let container = spawn_container_at(&mut world, here, now);
+        spawn_item_at(&mut world, here, now);
+        let item_serial = loose_item_serial(&world);
+        let item = entity(&world, item_serial);
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::PickUpItem {
+            connection: player,
+            serial: item_serial,
+            amount: 1,
+        });
+        world.tick(now);
+        world.queue(Command::DropItem {
+            connection: player,
+            serial: item_serial,
+            position: Point::new(50, 60, 0), // gump coordinates, not tiles
+            container,
+        });
+        world.tick(now);
+
+        let contained = world
+            .registry
+            .get::<Contained>(item)
+            .expect("the item is now in a container");
+        assert_eq!(contained.container.raw(), container);
+        assert_eq!((contained.x, contained.y), (50, 60));
+        assert!(
+            !world.registry.has::<Position>(item),
+            "and no longer on the ground"
+        );
+        assert!(
+            packets_for(&mut world, player).iter().any(|p| p[0] == 0x25),
+            "the client is told the item went in"
+        );
+    }
+
+    #[test]
+    fn an_opened_container_lists_what_was_put_in_it() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let here = Point::new(START.0, START.1, 0);
+        let container = spawn_container_at(&mut world, here, now);
+        spawn_item_at(&mut world, here, now);
+        let item_serial = loose_item_serial(&world);
+
+        // Put the item in, then open the container and read the count.
+        world.queue(Command::PickUpItem {
+            connection: player,
+            serial: item_serial,
+            amount: 1,
+        });
+        world.tick(now);
+        world.queue(Command::DropItem {
+            connection: player,
+            serial: item_serial,
+            position: Point::new(50, 60, 0),
+            container,
+        });
+        world.tick(now);
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::DoubleClick {
+            connection: player,
+            serial: container,
+        });
+        world.tick(now);
+
+        let contents = packets_for(&mut world, player)
+            .into_iter()
+            .find(|p| p[0] == 0x3C)
+            .expect("a contents packet");
+        assert_eq!(
+            u16::from_be_bytes([contents[3], contents[4]]),
+            1,
+            "the one item is listed"
+        );
+    }
+
+    #[test]
+    fn picking_an_item_out_of_a_container_holds_it() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let here = Point::new(START.0, START.1, 0);
+        let container = spawn_container_at(&mut world, here, now);
+        spawn_item_at(&mut world, here, now);
+        let item_serial = loose_item_serial(&world);
+        let item = entity(&world, item_serial);
+
+        // In, then straight back out.
+        for _ in 0..1 {
+            world.queue(Command::PickUpItem {
+                connection: player,
+                serial: item_serial,
+                amount: 1,
+            });
+            world.tick(now);
+            world.queue(Command::DropItem {
+                connection: player,
+                serial: item_serial,
+                position: Point::new(50, 60, 0),
+                container,
+            });
+            world.tick(now);
+        }
+        assert!(world.registry.has::<Contained>(item));
+
+        world.queue(Command::PickUpItem {
+            connection: player,
+            serial: item_serial,
+            amount: 1,
+        });
+        world.tick(now);
+        assert!(
+            !world.registry.has::<Contained>(item),
+            "lifting it out drops the containment"
+        );
+        assert!(world.held.contains_key(&player), "and it is on the cursor");
+    }
+
+    #[test]
+    fn dropping_into_something_that_is_not_a_container_bounces() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let here = Point::new(START.0, START.1, 0);
+        // Two plain items: one to hold, one to (wrongly) drop onto.
+        spawn_item_at(&mut world, here, now);
+        let target = loose_item_serial(&world);
+        world.queue(Command::SpawnItem {
+            graphic: GOLD,
+            hue: 0,
+            amount: 1,
+            stackable: false,
+            position: here,
+            facet: 0,
+        });
+        world.tick(now);
+        // The held one is whichever item is not the target.
+        let held_serial = world
+            .registry
+            .query::<Graphic>()
+            .filter_map(|(e, _)| world.registry.serial_of(e).map(|s| s.raw()))
+            .find(|s| *s != target)
+            .unwrap();
+        let held_item = entity(&world, held_serial);
+
+        world.queue(Command::PickUpItem {
+            connection: player,
+            serial: held_serial,
+            amount: 1,
+        });
+        world.tick(now);
+        let origin = Point::new(START.0, START.1, 0);
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::DropItem {
+            connection: player,
+            serial: held_serial,
+            position: Point::new(0, 0, 0),
+            container: target, // a real item, but not a container
+        });
+        world.tick(now);
+
+        assert!(
+            packets_for(&mut world, player).iter().any(|p| p[0] == 0x27),
+            "the drag is cancelled"
+        );
+        assert_eq!(
+            world.registry.get::<Position>(held_item).map(|p| p.0),
+            Some(origin),
+            "and the item is back on the ground where it was"
+        );
+    }
+
+    /// Whether a 4-byte serial appears anywhere in a packet's body.
+    fn mentions(packet: &[u8], serial: u32) -> bool {
+        packet.windows(4).any(|w| w == serial.to_be_bytes())
+    }
+
+    /// Spawn a ground item at the player's feet and pick it up. Returns the item
+    /// it just made — the newest one, by serial, so earlier items in the world do
+    /// not confuse it.
+    fn take_loose_item(
+        world: &mut World,
+        connection: ConnectionId,
+        now: Instant,
+    ) -> (u32, EntityId) {
+        spawn_item_at(world, Point::new(START.0, START.1, 0), now);
+        let (item, serial) = world
+            .registry
+            .query::<Position>()
+            .filter(|(entity, _)| {
+                world.registry.has::<Graphic>(*entity) && !world.registry.has::<Container>(*entity)
+            })
+            .filter_map(|(entity, _)| world.registry.serial_of(entity).map(|s| (entity, s.raw())))
+            .max_by_key(|(_, serial)| *serial)
+            .expect("a ground item to lift");
+        world.queue(Command::PickUpItem {
+            connection,
+            serial,
+            amount: 1,
+        });
+        world.tick(now);
+        (serial, item)
+    }
+
+    /// A plausible armour layer.
+    const LAYER_TORSO: u8 = 5;
+
+    #[test]
+    fn equipping_a_held_item_dresses_the_mobile() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let me = serial_of(&world, player);
+        let (item_serial, item) = take_loose_item(&mut world, player, now);
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::EquipItem {
+            connection: player,
+            item: item_serial,
+            layer: LAYER_TORSO,
+            mobile: me,
+        });
+        world.tick(now);
+
+        let worn = world
+            .registry
+            .get::<Equipped>(item)
+            .expect("the item is now worn");
+        assert_eq!(worn.mobile.raw(), me);
+        assert_eq!(worn.layer, LAYER_TORSO);
+        assert_eq!(world.equipment_of(Serial::new(me).unwrap()).len(), 1);
+        assert!(
+            packets_for(&mut world, player).iter().any(|p| p[0] == 0x2E),
+            "the wearer is told they put it on"
+        );
+    }
+
+    #[test]
+    fn a_newcomer_sees_a_dressed_mobile_in_its_0x78() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let me = serial_of(&world, player);
+        let (item_serial, _) = take_loose_item(&mut world, player, now);
+        world.queue(Command::EquipItem {
+            connection: player,
+            item: item_serial,
+            layer: LAYER_TORSO,
+            mobile: me,
+        });
+        world.tick(now);
+
+        // A second player walks up and is drawn the first, now dressed.
+        let newcomer = enter_as(&mut world, ConnectionId::from_raw(2), now);
+        let drawn = packets_for(&mut world, newcomer)
+            .into_iter()
+            .find(|p| p[0] == 0x78 && mentions(p, me))
+            .expect("the dressed mobile is drawn");
+        assert!(
+            mentions(&drawn, item_serial),
+            "the worn item rides along in the 0x78"
+        );
+    }
+
+    #[test]
+    fn unequipping_lifts_the_item_off_and_forgets_it_for_others() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let watcher = enter_as(&mut world, ConnectionId::from_raw(2), now);
+        let me = serial_of(&world, player);
+        let (item_serial, item) = take_loose_item(&mut world, player, now);
+        world.queue(Command::EquipItem {
+            connection: player,
+            item: item_serial,
+            layer: LAYER_TORSO,
+            mobile: me,
+        });
+        world.tick(now);
+        let _ = packets_for(&mut world, watcher);
+
+        world.queue(Command::PickUpItem {
+            connection: player,
+            serial: item_serial,
+            amount: 1,
+        });
+        world.tick(now);
+
+        assert!(!world.registry.has::<Equipped>(item), "it comes off");
+        assert!(world.held.contains_key(&player), "and onto the cursor");
+        assert!(
+            packets_for(&mut world, watcher)
+                .iter()
+                .any(|p| p == &encode_remove(item_serial)),
+            "the other player is told to forget it"
+        );
+    }
+
+    #[test]
+    fn a_layer_holds_only_one_item() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let me = serial_of(&world, player);
+
+        // First item onto the torso.
+        let (first, _) = take_loose_item(&mut world, player, now);
+        world.queue(Command::EquipItem {
+            connection: player,
+            item: first,
+            layer: LAYER_TORSO,
+            mobile: me,
+        });
+        world.tick(now);
+
+        // Second item, same layer: refused, and it bounces back to the ground.
+        let (second, second_item) = take_loose_item(&mut world, player, now);
+        let _ = packets_for(&mut world, player);
+        world.queue(Command::EquipItem {
+            connection: player,
+            item: second,
+            layer: LAYER_TORSO,
+            mobile: me,
+        });
+        world.tick(now);
+
+        assert!(
+            packets_for(&mut world, player).iter().any(|p| p[0] == 0x27),
+            "the second is refused"
+        );
+        assert!(
+            world.registry.has::<Position>(second_item),
+            "and returns to where it was lifted"
+        );
+        assert!(!world.registry.has::<Equipped>(second_item));
+    }
+
+    #[test]
+    fn you_cannot_equip_onto_something_that_is_not_a_mobile() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        // A second ground item to (wrongly) equip onto.
+        spawn_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+        let target = loose_item_serial(&world);
+        let (held, held_item) = take_loose_item(&mut world, player, now);
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::EquipItem {
+            connection: player,
+            item: held,
+            layer: LAYER_TORSO,
+            mobile: target, // an item, not a mobile
+        });
+        world.tick(now);
+
+        assert!(
+            packets_for(&mut world, player).iter().any(|p| p[0] == 0x27),
+            "refused"
+        );
+        assert!(
+            world.registry.has::<Position>(held_item),
+            "and bounced back"
+        );
+    }
+
+    #[test]
+    fn dropping_a_stack_onto_an_identical_one_merges_them() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let here = Point::new(START.0, START.1, 0);
+        let pile = spawn_gold(&mut world, here, 100, now);
+        let loose = spawn_gold(&mut world, here, 50, now);
+        let pile_item = entity(&world, pile);
+        let loose_item = entity(&world, loose);
+        let _ = packets_for(&mut world, player);
+
+        // Lift the small pile and drop it onto the big one.
+        world.queue(Command::PickUpItem {
+            connection: player,
+            serial: loose,
+            amount: 50,
+        });
+        world.tick(now);
+        world.queue(Command::DropItem {
+            connection: player,
+            serial: loose,
+            position: here,
+            container: pile, // dropping onto the other stack
+        });
+        world.tick(now);
+
+        assert_eq!(
+            world.registry.get::<Amount>(pile_item).map(|a| a.0),
+            Some(150),
+            "the amounts add"
+        );
+        assert!(
+            !world.registry.contains(loose_item),
+            "and the dropped pile is gone"
+        );
+        assert!(
+            packets_for(&mut world, player).iter().any(|p| p[0] == 0x1A),
+            "the surviving pile is redrawn with its new amount"
+        );
+    }
+
+    #[test]
+    fn a_non_stackable_item_does_not_merge() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let here = Point::new(START.0, START.1, 0);
+        // Two plain (non-stackable) items.
+        spawn_item_at(&mut world, here, now);
+        let target = loose_item_serial(&world);
+        let (held, held_item) = take_loose_item(&mut world, player, now);
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::DropItem {
+            connection: player,
+            serial: held,
+            position: here,
+            container: target,
+        });
+        world.tick(now);
+
+        assert!(
+            packets_for(&mut world, player).iter().any(|p| p[0] == 0x27),
+            "dropping one onto the other is refused"
+        );
+        assert!(
+            world.registry.has::<Position>(held_item),
+            "and it bounces back to the ground"
+        );
+    }
+
+    #[test]
+    fn a_ground_item_decays_after_its_time() {
+        let now = Instant::now();
+        let mut world = world();
+        let watcher = enter(&mut world, now);
+        spawn_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+        let serial = loose_item_serial(&world);
+        let item = entity(&world, serial);
+        let _ = packets_for(&mut world, watcher);
+
+        // Bring the decay forward rather than run twenty minutes of ticks.
+        let soon = world.ticks + 1;
+        world.registry.insert(item, Decays { at_tick: soon });
+        world.tick(now);
+
+        assert!(!world.registry.contains(item), "the item has rotted away");
+        assert!(
+            packets_for(&mut world, watcher)
+                .iter()
+                .any(|p| p == &encode_remove(serial)),
+            "and left every screen"
+        );
+    }
+
+    #[test]
+    fn an_item_off_the_ground_does_not_decay() {
+        // Lifting an item takes the decay clock off it: a stack on a cursor, in a
+        // pack or worn does not rot.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let (_, item) = take_loose_item(&mut world, player, now);
+        assert!(
+            !world.registry.has::<Decays>(item),
+            "a held item carries no decay clock"
         );
     }
 

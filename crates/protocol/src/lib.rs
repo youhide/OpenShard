@@ -53,6 +53,7 @@
 //! `docs/roadmap.md`.
 
 mod codec;
+mod containers;
 mod direction;
 mod feature;
 pub mod huffman;
@@ -65,10 +66,15 @@ mod version;
 mod world;
 
 pub use codec::{CodecError, CodecResult, PacketReader, PacketWriter};
+pub use containers::{
+    encode_add_to_container, encode_container_contents, encode_open_container, ContainedItem,
+    DoubleClick,
+};
 pub use direction::{Direction, Facing, RUNNING_BIT};
 pub use feature::{Feature, FeatureSet};
 pub use items::{
-    encode_drag_cancel, DragCancelReason, DropItem, PickUpItem, WorldItem, DROP_TO_GROUND,
+    encode_drag_cancel, encode_equip, DragCancelReason, DropItem, EquipItemRequest, PickUpItem,
+    WorldItem, DROP_TO_GROUND,
 };
 pub use login::{
     encode_character_list, encode_login_denied, encode_relay, encode_shard_list, AccountLogin,

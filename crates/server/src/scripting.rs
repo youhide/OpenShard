@@ -143,6 +143,7 @@ fn into_world(command: ScriptCommand) -> Command {
             graphic,
             hue,
             amount,
+            stackable,
             x,
             y,
             z,
@@ -151,6 +152,22 @@ fn into_world(command: ScriptCommand) -> Command {
             graphic,
             hue,
             amount,
+            stackable,
+            position: openshard_protocol::Point::new(x, y, z),
+            facet,
+        },
+        ScriptCommand::SpawnContainer {
+            graphic,
+            gump,
+            hue,
+            x,
+            y,
+            z,
+            facet,
+        } => Command::SpawnContainer {
+            graphic,
+            gump,
+            hue,
             position: openshard_protocol::Point::new(x, y, z),
             facet,
         },
@@ -290,5 +307,56 @@ mod tests {
             drew_item,
             "the player was sent the 0x1A for the dropped item"
         );
+    }
+
+    #[test]
+    fn a_script_spawns_a_container_the_player_can_open() {
+        // A script drops a chest at the player's feet; double-clicking it (the
+        // 0x06 the server would translate) opens the gump.
+        let script = TempScript::new(
+            "chest",
+            "function onEvent(e) {\n\
+             if (e.type === 'PlayerEntered') {\n\
+                 Deno.core.ops.op_spawn_container({ graphic: 0x0E43, gump: 0x0049, x: e.x, y: e.y, z: e.z });\n\
+             }\n\
+             }",
+        );
+
+        let now = Instant::now();
+        let mut world = World::new((1363, 1600));
+        let mut scripts = Scripts::load(script.path(), &world).expect("script loads");
+
+        world.queue(Command::Enter {
+            connection: ConnectionId::from_raw(1),
+            version: ClientVersion::TOL,
+            account: "admin".to_owned(),
+            name: "Lord British".to_owned(),
+            serial: None,
+            position: None,
+            facet: 0,
+            appearance: None,
+        });
+        world.tick(now);
+        scripts.pump(&mut world); // spawns the container
+        world.tick(now);
+        let _ = world.drain_outbound().count();
+
+        // The container is the one entity carrying a Container. Double-click it.
+        let container = world
+            .registry()
+            .query::<openshard_world::Container>()
+            .next()
+            .map(|(e, _)| world.registry().serial_of(e).unwrap().raw())
+            .expect("the script spawned a container");
+        world.queue(Command::DoubleClick {
+            connection: ConnectionId::from_raw(1),
+            serial: container,
+        });
+        world.tick(now);
+
+        let opened = world
+            .drain_outbound()
+            .any(|out| out.packet.first() == Some(&0x24));
+        assert!(opened, "the container gump opens for the player");
     }
 }

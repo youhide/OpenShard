@@ -245,7 +245,7 @@ Roughly in dependency order, each script-first:
   through `Command::Step` — server-authoritative movement, no client sequence or
   pace, terrain the only judge — which is the first thing a script command lands
   on. `crates/server/src/scripting.rs` is the whole seam.
-- [ ] `items` — containers, stacking, equipment layers, decay
+- [x] `items` — containers, stacking, equipment layers, decay
   - [x] **On the ground and visible.** A script drops an item
     (`op_spawn_item` → `Command::SpawnItem`) and every client in range is sent
     the `0x1A` that draws it; walking up to one draws it, walking away sends the
@@ -261,9 +261,37 @@ Roughly in dependency order, each script-first:
     drag-cancel with a reason. Server-authoritative reach (`ITEM_REACH`), no
     trust in the client's claim. Ground-to-ground only; dropping *into* a
     container is the next slice, and it bounces for now.
-  - [ ] containers (`0x24` open, `0x3C` contents, `0x25` add), and drop-into
-  - [ ] equipment layers (`0x2E`, worn items on the `0x78`)
-  - [ ] stacking rules and decay (script-first, off the tick)
+  - [x] **Containers** (`0x06` open, `0x24`/`0x3C`/`0x25`). A container is an
+    item that also carries a `Container` (its gump); items inside carry a
+    `Contained` and no `Position` — the two are exclusive, on the ground *or* in
+    a container, never both. Double-click opens it (`0x24` + the `0x3C` contents
+    list); dropping onto its serial puts the item inside (`Contained` + a `0x25`
+    to the open gump); lifting a contained item drops the containment. A drop
+    onto a non-container, or out of reach, bounces to origin — and origin is now
+    "the ground *or* the container it was in", so a cancelled drag always undoes
+    cleanly. Live updates go to the acting client only; a second viewer re-opens
+    to refresh (a noted limitation, not a bug). The `0x24`/`0x25`/`0x3C` version
+    seams (High Seas type word, `ItemGrid` grid byte) are gated on `Feature`, not
+    era.
+  - [x] **Equipment layers** (`0x13` wear, `0x2E` equipped). A worn item carries
+    an `Equipped { mobile, layer }` and no `Position`/`Contained` — the third and
+    last place an item can be, all three exclusive. Dragging an item onto a
+    paperdoll (`0x13`) wears it: the layer is checked free, the wearer reachable,
+    and a `0x2E` goes to everyone who can see the mobile. A newcomer sees a
+    dressed mobile because the `0x78` now lists what it wears (it sent an empty
+    list before). Lifting a worn item takes it off. A held item's origin is now
+    "ground, container, *or* mobile", so every cancelled drag still undoes to
+    exactly where it came from.
+  - [x] **Stacking and decay.** A `Stackable` item merges with an identical pile
+    (same graphic and hue) when dropped onto it — amounts sum, clamped, the
+    dragged one despawns, the survivor is redrawn past the `seen` set. Ground
+    items carry a `Decays { at_tick }` and rot when the tick counter reaches it;
+    lifting, containing or wearing an item takes the clock off it, and the tick's
+    `decay()` reads only its own counter, no wall clock. Containers do not decay
+    with their contents inside. Deferred with a note: **partial-stack pickup
+    (split)** — the `0x07` amount is still ignored and the whole pile is lifted,
+    because which end of a split keeps the original serial is a protocol subtlety
+    worth reading Sphere closely for, not guessing.
 - [ ] `combat` — swing timers, damage, resistances, notoriety
 - [ ] `skills` — usage checks, gain curves
 - [ ] `magic` — spells, reagents, casting

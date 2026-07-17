@@ -202,6 +202,52 @@ pub fn encode_drag_cancel(reason: DragCancelReason) -> Vec<u8> {
     vec![0x27, reason as u8]
 }
 
+/// `0x13` — the client asks to equip the dragged item onto a mobile. 10 bytes.
+///
+/// Dragging an item onto a paperdoll sends this: the item goes onto `mobile` at
+/// `layer`, the slot the client worked out from the item's tiledata. The server
+/// checks it rather than trusting it, but the layer is the client's to propose.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct EquipItemRequest {
+    /// The item being worn.
+    pub item: u32,
+    /// The layer to wear it on.
+    pub layer: u8,
+    /// The mobile wearing it.
+    pub mobile: u32,
+}
+
+impl EquipItemRequest {
+    /// The packet id.
+    pub const ID: u8 = 0x13;
+
+    /// Decode a whole `0x13` packet.
+    pub fn decode(bytes: &[u8]) -> Result<Self, LoginDecodeError> {
+        let mut reader = expect_id(bytes, Self::ID)?;
+        Ok(Self {
+            item: reader.u32()?,
+            layer: reader.u8()?,
+            mobile: reader.u32()?,
+        })
+    }
+}
+
+/// `0x2E` — a mobile is now wearing an item. 15 bytes.
+///
+/// The single-item counterpart of the equipment list inside a `0x78`: sent when
+/// one item is put on or the mobile is already drawn and only its outfit changed.
+pub fn encode_equip(item: u32, graphic: u16, layer: u8, mobile: u32, hue: u16) -> Vec<u8> {
+    let mut writer = PacketWriter::with_capacity(15);
+    writer.u8(0x2E);
+    writer.u32(item);
+    writer.u16(graphic);
+    writer.u8(0); // graphic offset, always zero
+    writer.u8(layer);
+    writer.u32(mobile);
+    writer.u16(hue);
+    writer.into_bytes()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,5 +370,31 @@ mod tests {
             encode_drag_cancel(DragCancelReason::AlreadyHolding),
             vec![0x27, 0x04]
         );
+    }
+
+    #[test]
+    fn an_equip_request_is_item_layer_mobile() {
+        let mut bytes = vec![0x13];
+        bytes.extend_from_slice(&0x4000_0002u32.to_be_bytes());
+        bytes.push(2); // layer 2, the left hand
+        bytes.extend_from_slice(&0x0000_0001u32.to_be_bytes());
+        assert_eq!(bytes.len(), 10);
+        let req = EquipItemRequest::decode(&bytes).unwrap();
+        assert_eq!(req.item, 0x4000_0002);
+        assert_eq!(req.layer, 2);
+        assert_eq!(req.mobile, 0x0000_0001);
+    }
+
+    #[test]
+    fn an_equip_packet_is_fifteen_bytes() {
+        let packet = encode_equip(0x4000_0002, 0x13B9, 1, 0x0000_0001, 0x0021);
+        assert_eq!(packet.len(), 15);
+        assert_eq!(packet[0], 0x2E);
+        assert_eq!(&packet[1..5], &0x4000_0002u32.to_be_bytes());
+        assert_eq!(&packet[5..7], &0x13B9u16.to_be_bytes());
+        assert_eq!(packet[7], 0);
+        assert_eq!(packet[8], 1); // layer
+        assert_eq!(&packet[9..13], &0x0000_0001u32.to_be_bytes());
+        assert_eq!(&packet[13..15], &0x0021u16.to_be_bytes());
     }
 }

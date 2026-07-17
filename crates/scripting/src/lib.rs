@@ -111,6 +111,25 @@ pub enum Command {
         hue: u16,
         /// How many, for a stackable item; 0 or 1 is a single.
         amount: u16,
+        /// Whether it merges with an identical pile when dropped onto one.
+        stackable: bool,
+        /// Where it lies.
+        x: u16,
+        /// Where it lies.
+        y: u16,
+        /// Where it lies.
+        z: i8,
+        /// Which facet.
+        facet: u8,
+    },
+    /// Put a container on the ground — an item others can be put inside.
+    SpawnContainer {
+        /// The tiledata graphic id.
+        graphic: u16,
+        /// The gump the client opens when it is double-clicked.
+        gump: u16,
+        /// Its hue, or 0 for none.
+        hue: u16,
         /// Where it lies.
         x: u16,
         /// Where it lies.

@@ -12,6 +12,7 @@
 //! `Components` grab-bag every crate imports from would be an inheritance tree
 //! with extra steps.
 
+use openshard_entities::Serial;
 use openshard_gateway::ConnectionId;
 use openshard_movement::Walker;
 use openshard_protocol::{ClientVersion, Facing, Point};
@@ -64,6 +65,73 @@ pub struct Graphic {
 /// every one of them is a column of ones. An item with no `Amount` is a single.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Amount(pub u16);
+
+/// Marks an item as a container: something other items can be put inside.
+///
+/// The `gump` is the window the client draws when the container is opened — a
+/// backpack, a wooden chest, a bank box each have their own. An item is a
+/// container exactly when it carries this; nothing else changes about it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Container {
+    /// The gump graphic the client opens for it.
+    pub gump: u16,
+}
+
+/// Marks an item as being *inside* a container rather than on the ground.
+///
+/// An item carries either a [`Position`] (on the ground, in the sector grid and
+/// on nearby screens) or a `Contained` (in a container, on nobody's ground) —
+/// never both. The `x`/`y` are where it sits in the container's gump, not world
+/// tiles; `grid` is its slot in the enhanced grid view.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Contained {
+    /// The container it is in, by serial.
+    pub container: Serial,
+    /// Its column in the gump.
+    pub x: u16,
+    /// Its row in the gump.
+    pub y: u16,
+    /// Its slot in the grid view.
+    pub grid: u8,
+}
+
+/// Marks an item as *worn* by a mobile, at a layer.
+///
+/// The third and last place an item can be, alongside [`Position`] (the ground)
+/// and [`Contained`] (a container) — and exclusive with both. A layer holds at
+/// most one item: a right hand has one weapon, a torso one shirt. Which layer an
+/// item belongs on comes from its tiledata; the client proposes it and the
+/// server checks the slot is free.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Equipped {
+    /// The mobile wearing it.
+    pub mobile: Serial,
+    /// Which layer it sits on.
+    pub layer: u8,
+}
+
+/// Marks an item as one that stacks: two of them of the same graphic and hue
+/// are one pile, not two objects.
+///
+/// A marker, not a rule engine. Gold, arrows and reagents carry it; a sword does
+/// not, which is why dropping a sword on a sword leaves two swords. Whether a
+/// graphic stacks is really a tiledata fact, but keeping it an explicit component
+/// set at spawn keeps the rule where a script can see it — the §6 way.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Stackable;
+
+/// When an item on the ground will rot away, as a tick number.
+///
+/// A tick count and not an `Instant` on purpose: the tick already counts itself,
+/// so decay is checked against [`World::ticks`](crate::World::ticks) and stays as
+/// deterministic and replayable as everything else the tick does — no clock read
+/// inside it. An item carries this only while it is on the ground; lifting it,
+/// putting it in a container or wearing it takes the clock off it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Decays {
+    /// The tick at or after which it rots.
+    pub at_tick: u64,
+}
 
 /// What something is called.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
