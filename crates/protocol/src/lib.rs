@@ -67,7 +67,9 @@ mod world;
 pub use codec::{CodecError, CodecResult, PacketReader, PacketWriter};
 pub use direction::{Direction, Facing, RUNNING_BIT};
 pub use feature::{Feature, FeatureSet};
-pub use items::WorldItem;
+pub use items::{
+    encode_drag_cancel, DragCancelReason, DropItem, PickUpItem, WorldItem, DROP_TO_GROUND,
+};
 pub use login::{
     encode_character_list, encode_login_denied, encode_relay, encode_shard_list, AccountLogin,
     CharacterEntry, ClientVersionReport, DenyReason, GameServerLogin, LoginDecodeError,

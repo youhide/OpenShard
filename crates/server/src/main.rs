@@ -32,8 +32,8 @@ use openshard_persistence::{
     AccountRecord, CharacterRecord, MemoryStore, PgStore, Snapshot, SqliteStore, Store,
 };
 use openshard_protocol::{
-    encode_login_denied, huffman, CharacterPlay, CreateCharacter, GameServerLogin, Point,
-    StartLocation, WalkRequest,
+    encode_login_denied, huffman, CharacterPlay, CreateCharacter, DropItem, GameServerLogin,
+    PickUpItem, Point, StartLocation, WalkRequest,
 };
 use openshard_world::{Appearance, Command, Map, MapTerrain, TileData, World, TICK_INTERVAL};
 use std::sync::Arc;
@@ -574,6 +574,37 @@ fn dispatch(
             world.queue(Command::Walk {
                 connection: id,
                 request,
+            });
+            true
+        }
+        Some(PickUpItem::ID) => {
+            if !session.in_world {
+                return true;
+            }
+            let Ok(pickup) = PickUpItem::decode(packet) else {
+                warn!(%id, "malformed 0x07");
+                return false;
+            };
+            world.queue(Command::PickUpItem {
+                connection: id,
+                serial: pickup.serial,
+                amount: pickup.amount,
+            });
+            true
+        }
+        Some(DropItem::ID) => {
+            if !session.in_world {
+                return true;
+            }
+            let Ok(drop) = DropItem::decode(packet) else {
+                warn!(%id, "malformed 0x08");
+                return false;
+            };
+            world.queue(Command::DropItem {
+                connection: id,
+                serial: drop.serial,
+                position: drop.position,
+                container: drop.container,
             });
             true
         }

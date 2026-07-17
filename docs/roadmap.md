@@ -253,7 +253,15 @@ Roughly in dependency order, each script-first:
     `Graphic` and a `Position`, drawn through the same `seen`/interest machinery
     as bodies. A stack carries an `Amount`. The `WorldItem` (`0x1A`) encoder is
     ported from Sphere's `PacketItemWorld`, flag bits and all.
-  - [ ] containers (`0x24`/`0x3C`/`0x25`), pick up and drop (`0x07`/`0x08`)
+  - [x] **Pick up and drop** (`0x07`/`0x08`). The client's own item loop: lift
+    an item onto the cursor and set it back on the ground. The world holds it in
+    limbo — off the sector grid, off every screen but the picker's — and
+    remembers where it came from, so a drop out of reach or a logout mid-drag
+    bounces it back rather than losing it. A refused lift or drop is a `0x27`
+    drag-cancel with a reason. Server-authoritative reach (`ITEM_REACH`), no
+    trust in the client's claim. Ground-to-ground only; dropping *into* a
+    container is the next slice, and it bounces for now.
+  - [ ] containers (`0x24` open, `0x3C` contents, `0x25` add), and drop-into
   - [ ] equipment layers (`0x2E`, worn items on the `0x78`)
   - [ ] stacking rules and decay (script-first, off the tick)
 - [ ] `combat` — swing timers, damage, resistances, notoriety

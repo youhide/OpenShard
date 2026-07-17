@@ -1,11 +1,19 @@
-//! Item packets: what the client is told about things on the ground.
+//! Item packets: what the client is told about things on the ground, and what it
+//! asks to do with them.
 //!
 //! A mobile and an item are drawn by different packets — `0x78` for a mobile,
 //! `0x1A` for an item — but the interest machinery that decides *when* to draw
-//! them is the same. This module is the item half of that.
+//! them is the same. This module is the item half of that, plus the two requests
+//! a client makes about an item it can reach: `0x07` to pick it up and `0x08` to
+//! put it down.
 
 use crate::codec::PacketWriter;
+use crate::login::{expect_id, LoginDecodeError};
 use crate::world::Point;
+
+/// The serial a `0x08` drop carries when the item is going onto the ground
+/// rather than into a container or onto a mobile.
+pub const DROP_TO_GROUND: u32 = 0xFFFF_FFFF;
 
 /// `0x1A` — draw an item on the ground the client has not seen. Variable length.
 ///
@@ -88,6 +96,112 @@ impl WorldItem {
     }
 }
 
+/// `0x07` — the client asks to pick an item up. 7 bytes.
+///
+/// The item goes onto the client's cursor, dragged, until a `0x08` puts it down.
+/// `amount` is how much of a stack to lift; the whole item unless the client is
+/// splitting a pile.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PickUpItem {
+    /// The item's serial.
+    pub serial: u32,
+    /// How many to lift, for a stack.
+    pub amount: u16,
+}
+
+impl PickUpItem {
+    /// The packet id.
+    pub const ID: u8 = 0x07;
+
+    /// Decode a whole `0x07` packet.
+    pub fn decode(bytes: &[u8]) -> Result<Self, LoginDecodeError> {
+        let mut reader = expect_id(bytes, Self::ID)?;
+        Ok(Self {
+            serial: reader.u32()?,
+            amount: reader.u16()?,
+        })
+    }
+}
+
+/// `0x08` — the client asks to put the dragged item down. 14 bytes.
+///
+/// # The grid byte, and why this is the short form
+///
+/// Where the item goes is [`container`](Self::container): a real item serial
+/// drops it *into* that container, a mobile serial equips it, and
+/// [`DROP_TO_GROUND`] (`0xFFFFFFFF`) drops it at [`position`](Self::position) on
+/// the ground.
+///
+/// Newer clients (SA and up, and the enhanced client) slip a one-byte *grid
+/// index* in before the container serial, making the packet fifteen bytes. The
+/// game connection here defaults to the older dialect and frames `0x08` at
+/// fourteen, so this decodes the no-grid form; a client that sends the grid byte
+/// would need a version-gated length, which is a change to the framing table and
+/// this decoder together, not one of them alone.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DropItem {
+    /// The item being dropped.
+    pub serial: u32,
+    /// Where, when dropping on the ground.
+    pub position: Point,
+    /// Where the item is going: a container serial, a mobile serial to equip on,
+    /// or [`DROP_TO_GROUND`].
+    pub container: u32,
+}
+
+impl DropItem {
+    /// The packet id.
+    pub const ID: u8 = 0x08;
+
+    /// Decode a whole `0x08` packet, no-grid form.
+    pub fn decode(bytes: &[u8]) -> Result<Self, LoginDecodeError> {
+        let mut reader = expect_id(bytes, Self::ID)?;
+        let serial = reader.u32()?;
+        let x = reader.u16()?;
+        let y = reader.u16()?;
+        let z = reader.u8()? as i8;
+        let container = reader.u32()?;
+        Ok(Self {
+            serial,
+            position: Point::new(x, y, z),
+            container,
+        })
+    }
+
+    /// Whether this drop is onto the ground rather than into a container or onto
+    /// a mobile.
+    pub const fn to_ground(&self) -> bool {
+        self.container == DROP_TO_GROUND
+    }
+}
+
+/// Why the server cancelled a drag — the `code` in a `0x27`.
+///
+/// From Sphere's `PacketDragCancel::Reason`. The client bounces the item back to
+/// where it came from whichever it is; the code only changes the message it
+/// shows.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum DragCancelReason {
+    /// The item cannot be lifted at all.
+    CannotLift = 0x00,
+    /// Too far away to reach.
+    OutOfRange = 0x01,
+    /// Out of line of sight.
+    OutOfSight = 0x02,
+    /// It is not yours to take.
+    TryToSteal = 0x03,
+    /// You are already holding something.
+    AlreadyHolding = 0x04,
+    /// Anything else.
+    Other = 0x05,
+}
+
+/// `0x27` — cancel a drag and tell the client to bounce the item back. 2 bytes.
+pub fn encode_drag_cancel(reason: DragCancelReason) -> Vec<u8> {
+    vec![0x27, reason as u8]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +274,55 @@ mod tests {
         }
         .encode();
         assert_eq!(packet[13], 0xFB);
+    }
+
+    #[test]
+    fn a_pickup_is_a_serial_and_an_amount() {
+        let bytes = [0x07, 0x40, 0x00, 0x00, 0x2A, 0x00, 0x05];
+        let pickup = PickUpItem::decode(&bytes).unwrap();
+        assert_eq!(pickup.serial, 0x4000_002A);
+        assert_eq!(pickup.amount, 5);
+    }
+
+    #[test]
+    fn a_ground_drop_reads_its_target_as_the_ground() {
+        // serial, x=1000, y=2000, z=5, container=0xFFFFFFFF
+        let mut bytes = vec![0x08];
+        bytes.extend_from_slice(&0x4000_002Au32.to_be_bytes());
+        bytes.extend_from_slice(&1000u16.to_be_bytes());
+        bytes.extend_from_slice(&2000u16.to_be_bytes());
+        bytes.push(5);
+        bytes.extend_from_slice(&DROP_TO_GROUND.to_be_bytes());
+        assert_eq!(bytes.len(), 14);
+
+        let drop = DropItem::decode(&bytes).unwrap();
+        assert_eq!(drop.serial, 0x4000_002A);
+        assert_eq!(drop.position, Point::new(1000, 2000, 5));
+        assert!(drop.to_ground());
+    }
+
+    #[test]
+    fn a_drop_into_a_container_is_not_a_ground_drop() {
+        let mut bytes = vec![0x08];
+        bytes.extend_from_slice(&0x4000_002Au32.to_be_bytes());
+        bytes.extend_from_slice(&0u16.to_be_bytes());
+        bytes.extend_from_slice(&0u16.to_be_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(&0x4000_00FFu32.to_be_bytes()); // a container serial
+        let drop = DropItem::decode(&bytes).unwrap();
+        assert!(!drop.to_ground());
+        assert_eq!(drop.container, 0x4000_00FF);
+    }
+
+    #[test]
+    fn a_drag_cancel_is_two_bytes_with_the_reason() {
+        assert_eq!(
+            encode_drag_cancel(DragCancelReason::OutOfRange),
+            vec![0x27, 0x01]
+        );
+        assert_eq!(
+            encode_drag_cancel(DragCancelReason::AlreadyHolding),
+            vec![0x27, 0x04]
+        );
     }
 }

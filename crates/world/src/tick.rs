@@ -33,10 +33,10 @@ use openshard_gateway::ConnectionId;
 use openshard_movement::{step_from, OpenWorld, Terrain, Walk, Walker};
 use openshard_persistence::{CharacterRecord, Journal, Snapshot};
 use openshard_protocol::{
-    encode_light_level, encode_login_complete, encode_map_change, encode_remove, encode_walk_ack,
-    encode_walk_reject, ClientVersion, Direction, Facing, MobileIncoming, MobileMove, Notoriety,
-    PlayerStart, PlayerUpdate, Point, WalkRequest, WorldItem, DEFAULT_MAP_HEIGHT,
-    DEFAULT_MAP_WIDTH,
+    encode_drag_cancel, encode_light_level, encode_login_complete, encode_map_change,
+    encode_remove, encode_walk_ack, encode_walk_reject, ClientVersion, Direction, DragCancelReason,
+    Facing, MobileIncoming, MobileMove, Notoriety, PlayerStart, PlayerUpdate, Point, WalkRequest,
+    WorldItem, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, DROP_TO_GROUND,
 };
 use tracing::{debug, info, warn};
 
@@ -46,7 +46,7 @@ use crate::components::{
 use crate::events::{
     ItemSpawned, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
 };
-use crate::sectors::{Sectors, VIEW_RANGE};
+use crate::sectors::{in_range, Sectors, VIEW_RANGE};
 use crate::terrain::MapTerrain;
 
 /// How often the world ticks.
@@ -73,6 +73,13 @@ const NOTORIETY_INNOCENT: u8 = 0x01;
 /// The facet size used when there is no map. Big enough for anywhere a test
 /// puts something; the grid is a `Vec` of empty buckets and costs nothing.
 const FACET_WITHOUT_A_MAP: (u32, u32) = (7168, 4096);
+/// How close, in tiles (Chebyshev), a player must be to lift an item off the
+/// ground or set one down.
+///
+/// Sphere reaches two; a third forgives the diagonal the cursor is shown on. A
+/// starting number and an auditable one, not a rule carved anywhere — reach is
+/// exactly the sort of thing a shard retunes.
+const ITEM_REACH: u32 = 3;
 
 /// How often the world offers a snapshot to persistence, in ticks.
 ///
@@ -170,6 +177,29 @@ pub enum Command {
         /// Which facet.
         facet: u8,
     },
+    /// A client asked to pick an item up onto its cursor (`0x07`).
+    PickUpItem {
+        /// Which connection.
+        connection: ConnectionId,
+        /// The item's serial.
+        serial: u32,
+        /// How many of a stack to lift. Ignored for now — the whole item is
+        /// lifted; splitting a pile is a stacking concern (§6 items).
+        amount: u16,
+    },
+    /// A client asked to put the item on its cursor down (`0x08`).
+    DropItem {
+        /// Which connection.
+        connection: ConnectionId,
+        /// The item's serial, as the client names it.
+        serial: u32,
+        /// Where, for a ground drop.
+        position: Point,
+        /// Where it is going: a container serial, a mobile to equip on, or
+        /// [`DROP_TO_GROUND`](openshard_protocol::DROP_TO_GROUND). Only ground
+        /// drops are handled yet; anything else is bounced.
+        container: u32,
+    },
     /// A connection went away.
     Disconnect {
         /// Which connection.
@@ -211,6 +241,19 @@ struct FacetState {
     sectors: Sectors,
 }
 
+/// An item on a cursor: the entity, and where it was lifted from.
+///
+/// The origin is the whole reason to remember more than the entity. A drag that
+/// is refused — dropped out of reach, into nothing — has to put the item back
+/// exactly where it was, and by then it is off the ground with no position of
+/// its own to return to.
+#[derive(Clone, Copy, Debug)]
+struct HeldItem {
+    entity: EntityId,
+    origin: Point,
+    facet: u8,
+}
+
 /// The world.
 ///
 /// Owns the registry, the bus and the map. A plain value: nothing here is a
@@ -232,6 +275,10 @@ pub struct World {
     /// "what can you see" packet — only "draw this" and "forget that" — so the
     /// only way to send a mobile exactly once is to know what was sent before.
     seen: HashMap<EntityId, HashSet<EntityId>>,
+    /// The item each connection is dragging on its cursor, and where it was so a
+    /// cancelled drag can put it back. An item here is off the ground and out of
+    /// everyone's [`seen`](Self::seen) — in limbo until a `0x08` lands it.
+    held: HashMap<ConnectionId, HeldItem>,
     /// Where new characters appear. The height comes from the map.
     start: (u16, u16),
     /// What has changed since the last save.
@@ -285,6 +332,7 @@ impl World {
             default_facet: DEFAULT_FACET,
             players: HashMap::new(),
             seen: HashMap::new(),
+            held: HashMap::new(),
             start,
             journal: Journal::new(),
             save_every: SAVE_EVERY_TICKS,
@@ -566,6 +614,17 @@ impl World {
                 position,
                 facet,
             } => self.spawn_item(graphic, hue, amount, position, facet),
+            Command::PickUpItem {
+                connection,
+                serial,
+                amount,
+            } => self.pick_up(connection, serial, amount),
+            Command::DropItem {
+                connection,
+                serial,
+                position,
+                container,
+            } => self.drop_item(connection, serial, position, container),
             Command::Disconnect { connection } => self.disconnect(connection),
         }
     }
@@ -950,7 +1009,137 @@ impl World {
         }
     }
 
+    /// Lift an item onto a client's cursor. See [`Command::PickUpItem`].
+    fn pick_up(&mut self, connection: ConnectionId, serial: u32, _amount: u16) {
+        let Some(&player) = self.players.get(&connection) else {
+            return;
+        };
+        if self.held.contains_key(&connection) {
+            self.reject_drag(connection, DragCancelReason::AlreadyHolding);
+            return;
+        }
+        let Some(item_serial) = Serial::new(serial) else {
+            self.reject_drag(connection, DragCancelReason::CannotLift);
+            return;
+        };
+        let Some(item) = self.registry.entity_of(item_serial) else {
+            self.reject_drag(connection, DragCancelReason::CannotLift);
+            return;
+        };
+        // Only a thing on the ground can be lifted: a graphic and a position. A
+        // mobile has no `Graphic`, so this rejects trying to pick up a person.
+        if !self.registry.has::<Graphic>(item) {
+            self.reject_drag(connection, DragCancelReason::CannotLift);
+            return;
+        }
+        let Some(&Position(item_pos)) = self.registry.get::<Position>(item) else {
+            self.reject_drag(connection, DragCancelReason::CannotLift);
+            return;
+        };
+        let Some(&Position(player_pos)) = self.registry.get::<Position>(player) else {
+            return;
+        };
+        let facet = self.facet_of(item);
+        if facet != self.facet_of(player) || !in_range(item_pos, player_pos, ITEM_REACH) {
+            self.reject_drag(connection, DragCancelReason::OutOfRange);
+            return;
+        }
+
+        // Off the sector grid, off every screen but the picker's — whose own
+        // client already put it on the cursor, so a 0x1D there would fight it —
+        // and out of the world's idea of where it is.
+        self.facet_state_mut(facet).sectors.remove(item);
+        for watcher in self.watchers_of(item) {
+            if watcher == player {
+                if let Some(seen) = self.seen.get_mut(&player) {
+                    seen.remove(&item);
+                }
+            } else {
+                self.forget(watcher, item, item_serial);
+            }
+        }
+        self.registry.remove::<Position>(item);
+        self.held.insert(
+            connection,
+            HeldItem {
+                entity: item,
+                origin: item_pos,
+                facet,
+            },
+        );
+        debug!(%item_serial, "lifted onto the cursor");
+    }
+
+    /// Put a client's held item down. See [`Command::DropItem`].
+    fn drop_item(
+        &mut self,
+        connection: ConnectionId,
+        serial: u32,
+        position: Point,
+        container: u32,
+    ) {
+        let Some(held) = self.held.get(&connection).copied() else {
+            // Nothing on the cursor — a stray 0x08, nothing to bounce.
+            return;
+        };
+        // The serial has to be the thing actually held; a mismatch is a confused
+        // client, and the safe answer is to give it back what it was holding.
+        if self.registry.serial_of(held.entity) != Serial::new(serial) {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        }
+        // Only ground drops are handled. Into a container or onto a mobile is
+        // §6's next two slices; until then it bounces rather than vanishes.
+        if container != DROP_TO_GROUND {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        }
+        let Some(&player) = self.players.get(&connection) else {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        };
+        let Some(&Position(player_pos)) = self.registry.get::<Position>(player) else {
+            self.bounce(connection, held, DragCancelReason::Other);
+            return;
+        };
+        if !in_range(position, player_pos, ITEM_REACH) {
+            self.bounce(connection, held, DragCancelReason::OutOfRange);
+            return;
+        }
+
+        self.held.remove(&connection);
+        self.place_on_ground(held.entity, position, self.facet_of(player));
+        debug!(serial, "dropped on the ground");
+    }
+
+    /// Put a held item back where it was lifted and tell the client the drag is
+    /// off, so it stops showing the item on the cursor.
+    fn bounce(&mut self, connection: ConnectionId, held: HeldItem, reason: DragCancelReason) {
+        self.held.remove(&connection);
+        self.place_on_ground(held.entity, held.origin, held.facet);
+        self.reject_drag(connection, reason);
+    }
+
+    /// Send a `0x27`, cancelling whatever drag the client thinks it has.
+    fn reject_drag(&mut self, connection: ConnectionId, reason: DragCancelReason) {
+        self.send(connection, encode_drag_cancel(reason));
+    }
+
+    /// Land an item on the ground at `position` and draw it for everyone in range.
+    fn place_on_ground(&mut self, item: EntityId, position: Point, facet: u8) {
+        self.registry.insert(item, Position(position));
+        self.registry.insert(item, Facet(facet));
+        self.facet_state_mut(facet).sectors.insert(item, position);
+        self.reveal_item(item);
+    }
+
     fn disconnect(&mut self, connection: ConnectionId) {
+        // A client that logs out mid-drag would otherwise leave its item nowhere —
+        // off the ground, on a cursor that is gone. Put it back where it was.
+        if let Some(held) = self.held.remove(&connection) {
+            self.place_on_ground(held.entity, held.origin, held.facet);
+        }
+
         let Some(entity) = self.players.remove(&connection) else {
             return;
         };
@@ -1465,6 +1654,196 @@ pub(crate) mod tests {
             .expect("the item was drawn");
         // The amount bit on the serial says a stack; a single item would not set it.
         assert_ne!(item[3] & 0x80, 0, "the stack sets the amount flag");
+    }
+
+    /// The serial of the one item in the world.
+    fn only_item_serial(world: &World) -> u32 {
+        let (entity, _) = world
+            .registry
+            .query::<Graphic>()
+            .next()
+            .expect("an item is in the world");
+        world.registry.serial_of(entity).unwrap().raw()
+    }
+
+    #[test]
+    fn picking_up_then_dropping_moves_an_item_on_everyone_elses_screen() {
+        // Two players on the same tile, an item between them. When one lifts it,
+        // the other's client is told to forget it (0x1D); when it is set back
+        // down, the other is told to draw it again (0x1A).
+        let now = Instant::now();
+        let mut world = world();
+        let picker = enter(&mut world, now);
+        let watcher = enter_as(&mut world, ConnectionId::from_raw(2), now);
+        spawn_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+        let _ = packets_for(&mut world, picker);
+        let _ = packets_for(&mut world, watcher);
+        let serial = only_item_serial(&world);
+
+        world.queue(Command::PickUpItem {
+            connection: picker,
+            serial,
+            amount: 1,
+        });
+        world.tick(now);
+        assert!(
+            packets_for(&mut world, watcher)
+                .iter()
+                .any(|p| p[0] == 0x1D),
+            "the other player is told to forget the lifted item"
+        );
+
+        world.queue(Command::DropItem {
+            connection: picker,
+            serial,
+            position: Point::new(START.0, START.1, 0),
+            container: DROP_TO_GROUND,
+        });
+        world.tick(now);
+        assert!(
+            packets_for(&mut world, watcher)
+                .iter()
+                .any(|p| p[0] == 0x1A),
+            "and to draw it again where it was dropped"
+        );
+    }
+
+    #[test]
+    fn picking_up_out_of_reach_is_rejected_and_leaves_the_item() {
+        let now = Instant::now();
+        let mut world = world();
+        let picker = enter(&mut world, now);
+        spawn_item_at(&mut world, Point::new(START.0 + 20, START.1, 0), now);
+        let _ = packets_for(&mut world, picker);
+        let serial = only_item_serial(&world);
+        let item = world
+            .registry
+            .entity_of(Serial::new(serial).unwrap())
+            .unwrap();
+
+        world.queue(Command::PickUpItem {
+            connection: picker,
+            serial,
+            amount: 1,
+        });
+        world.tick(now);
+
+        assert!(
+            packets_for(&mut world, picker)
+                .iter()
+                .any(|p| p == &[0x27, 0x01]),
+            "the client is told the item is out of range"
+        );
+        assert!(
+            world.registry.has::<Position>(item),
+            "the item stays on the ground"
+        );
+        assert!(world.held.is_empty(), "and nothing is on the cursor");
+    }
+
+    #[test]
+    fn dropping_out_of_reach_bounces_the_item_back_to_where_it_was() {
+        let now = Instant::now();
+        let mut world = world();
+        let picker = enter(&mut world, now);
+        let origin = Point::new(START.0, START.1, 0);
+        spawn_item_at(&mut world, origin, now);
+        let serial = only_item_serial(&world);
+        let item = world
+            .registry
+            .entity_of(Serial::new(serial).unwrap())
+            .unwrap();
+
+        world.queue(Command::PickUpItem {
+            connection: picker,
+            serial,
+            amount: 1,
+        });
+        world.tick(now);
+        let _ = packets_for(&mut world, picker);
+
+        // Drop it far from the player: refused, and put back where it started.
+        world.queue(Command::DropItem {
+            connection: picker,
+            serial,
+            position: Point::new(START.0 + 40, START.1, 0),
+            container: DROP_TO_GROUND,
+        });
+        world.tick(now);
+
+        assert!(
+            packets_for(&mut world, picker).iter().any(|p| p[0] == 0x27),
+            "the drag is cancelled"
+        );
+        assert_eq!(
+            world.registry.get::<Position>(item).map(|p| p.0),
+            Some(origin),
+            "and the item is back where it was lifted"
+        );
+        assert!(world.held.is_empty());
+    }
+
+    #[test]
+    fn logging_out_while_holding_an_item_returns_it_to_the_ground() {
+        let now = Instant::now();
+        let mut world = world();
+        let picker = enter(&mut world, now);
+        let watcher = enter_as(&mut world, ConnectionId::from_raw(2), now);
+        let origin = Point::new(START.0, START.1, 0);
+        spawn_item_at(&mut world, origin, now);
+        let serial = only_item_serial(&world);
+        let item = world
+            .registry
+            .entity_of(Serial::new(serial).unwrap())
+            .unwrap();
+
+        world.queue(Command::PickUpItem {
+            connection: picker,
+            serial,
+            amount: 1,
+        });
+        world.tick(now);
+        let _ = packets_for(&mut world, watcher);
+
+        world.queue(Command::Disconnect { connection: picker });
+        world.tick(now);
+
+        assert_eq!(
+            world.registry.get::<Position>(item).map(|p| p.0),
+            Some(origin),
+            "the item is back on the ground, not lost with the cursor"
+        );
+        assert!(
+            packets_for(&mut world, watcher)
+                .iter()
+                .any(|p| p[0] == 0x1A),
+            "and the player still online sees it reappear"
+        );
+    }
+
+    #[test]
+    fn you_cannot_pick_up_a_mobile() {
+        // A body has no `Graphic`, so lifting one is refused rather than yanking
+        // a person onto the cursor.
+        let now = Instant::now();
+        let mut world = world();
+        let picker = enter(&mut world, now);
+        let other = enter_as(&mut world, ConnectionId::from_raw(2), now);
+        let mobile_serial = serial_of(&world, other);
+        let _ = packets_for(&mut world, picker);
+
+        world.queue(Command::PickUpItem {
+            connection: picker,
+            serial: mobile_serial,
+            amount: 1,
+        });
+        world.tick(now);
+        assert!(
+            packets_for(&mut world, picker)
+                .iter()
+                .any(|p| p == &[0x27, 0x00]),
+            "cannot-lift is the reason"
+        );
     }
 
     #[test]
