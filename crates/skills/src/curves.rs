@@ -2,7 +2,7 @@
 //! teaches something.
 //!
 //! Pure functions, no randomness — the roll happens in the tick, against the
-//! world's [`Rng`](crate::rng::Rng). Keeping the curves here, separate and
+//! world's [`Rng`](openshard_state::rng::Rng). Keeping the curves here, separate and
 //! total, is what lets them be tested against exact numbers rather than a
 //! sampled distribution.
 

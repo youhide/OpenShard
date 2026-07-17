@@ -1159,6 +1159,12 @@ version = "0.0.1"
 [[package]]
 name = "openshard-chat"
 version = "0.0.1"
+dependencies = [
+ "openshard-entities",
+ "openshard-gateway",
+ "openshard-protocol",
+ "openshard-state",
+]
 
 [[package]]
 name = "openshard-combat"
@@ -1213,6 +1219,11 @@ dependencies = [
 [[package]]
 name = "openshard-magic"
 version = "0.0.1"
+dependencies = [
+ "openshard-entities",
+ "openshard-skills",
+ "openshard-state",
+]
 
 [[package]]
 name = "openshard-metrics"
@@ -1277,17 +1288,36 @@ dependencies = [
 [[package]]
 name = "openshard-skills"
 version = "0.0.1"
+dependencies = [
+ "openshard-entities",
+ "openshard-state",
+]
 
 [[package]]
-name = "openshard-world"
+name = "openshard-state"
 version = "0.0.1"
 dependencies = [
  "openshard-entities",
  "openshard-events",
  "openshard-gateway",
  "openshard-movement",
+ "openshard-protocol",
+]
+
+[[package]]
+name = "openshard-world"
+version = "0.0.1"
+dependencies = [
+ "openshard-chat",
+ "openshard-entities",
+ "openshard-events",
+ "openshard-gateway",
+ "openshard-magic",
+ "openshard-movement",
  "openshard-persistence",
  "openshard-protocol",
+ "openshard-skills",
+ "openshard-state",
  "tracing",
 ]
 

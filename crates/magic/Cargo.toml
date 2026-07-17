@@ -12,3 +12,6 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+openshard-entities.workspace = true
+openshard-skills.workspace = true
+openshard-state.workspace = true

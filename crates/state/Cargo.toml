@@ -1,6 +1,6 @@
 [package]
-name = "openshard-chat"
-description = "Speech, journal routing, and the chat systems."
+name = "openshard-state"
+description = "The world's runtime state: components, the spatial index, and the seeded generator every system operates on."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 openshard-entities.workspace = true
+openshard-events.workspace = true
 openshard-gateway.workspace = true
+openshard-movement.workspace = true
 openshard-protocol.workspace = true
-openshard-state.workspace = true

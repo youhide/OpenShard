@@ -44,6 +44,15 @@ pub trait Terrain {
     /// `to`'s `z` is a guess from the caller; an implementation that knows the
     /// map should correct it and return the real height.
     fn can_step(&self, from: Point, to: Point) -> Option<Point>;
+
+    /// The ground height at `(x, y)`, if this terrain knows one.
+    ///
+    /// Where a character spawns: the map holds the floor, not the config. An
+    /// implementation with no map — [`OpenWorld`] — returns `None`, and the
+    /// caller falls back to a flat default.
+    fn ground_z(&self, _x: u16, _y: u16) -> Option<i8> {
+        None
+    }
 }
 
 /// A world with no floor and no walls: every step is allowed, z never changes.
@@ -91,7 +100,7 @@ impl Walker {
     ///
     /// `now` is a parameter rather than read here, so that a whole walk — pace
     /// and all — is a deterministic test with no `sleep` in it.
-    pub fn request(&mut self, request: WalkRequest, terrain: &impl Terrain, now: Instant) -> Walk {
+    pub fn request(&mut self, request: WalkRequest, terrain: &dyn Terrain, now: Instant) -> Walk {
         if self.sequence.accept(request.sequence).is_err() {
             self.sequence.reject();
             return Walk::Refused;

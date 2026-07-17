@@ -122,60 +122,14 @@ pub struct MobileDamaged {
     pub remaining: u16,
 }
 
-/// A mobile used a skill: the check resolved, and any gain is already applied.
-///
-/// What the *use* accomplishes is not decided here — whether the ore comes out
-/// of the rock, whether the lockpick turns — only whether the roll passed and
-/// where the skill stands now. A script reads this and grants the reward, the
-/// same decoupling combat's `MobileDied` has.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct SkillUsed {
-    /// The mobile.
-    pub entity: EntityId,
-    /// Its wire identity.
-    pub serial: Serial,
-    /// Which skill, by id.
-    pub skill: u8,
-    /// Whether the check succeeded.
-    pub success: bool,
-    /// The skill's value now, in tenths, after any gain.
-    pub value: u16,
-}
+// `SkillUsed` moved to `openshard-skills` with the skill system that emits it.
+// `world` re-exports it.
 
-/// A spell was cast: the mana was paid and the skill rolled. What the spell
-/// *does* is a script's to decide — this only says who cast what at whom, and
-/// whether it took. A fireball's damage, a heal's mending, a summon's creature
-/// all hang off this event, none of them known to the casting machinery.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct SpellCast {
-    /// The caster.
-    pub caster: EntityId,
-    /// Its wire identity.
-    pub serial: Serial,
-    /// Which spell, by id.
-    pub spell: u16,
-    /// The target's serial, or zero for a spell that needs none.
-    pub target: u32,
-    /// Whether the cast succeeded (mana paid and the skill check passed).
-    pub success: bool,
-}
+// `SpellCast` moved to `openshard-magic` with the casting system that emits it.
+// `world` re-exports it.
 
-/// A mobile said something.
-///
-/// The hook chat hangs everything off: a GM command, an NPC that answers its
-/// name, a keyword that starts a quest. Combat's decoupling once more — the
-/// speaker only says it happened; whoever cares reads the words. Carries an owned
-/// `String`, so unlike most events it is not `Copy`; the bus never needed it to
-/// be.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct MobileSpoke {
-    /// The speaker.
-    pub entity: EntityId,
-    /// Its wire identity.
-    pub serial: Serial,
-    /// What was said.
-    pub text: String,
-}
+// `MobileSpoke` moved to `openshard-chat` with the speech system that emits it —
+// "domain events live with the crate that owns the rule". `world` re-exports it.
 
 /// A mobile died — its hit points reached zero.
 ///

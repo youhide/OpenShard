@@ -30,29 +30,33 @@
 //!
 //! Both are settled by arithmetic and pinned by tests against real files.
 
-pub mod components;
 pub mod events;
 pub mod map;
-mod rng;
-pub mod sectors;
-mod skills;
 pub mod terrain;
 pub mod tick;
 pub mod tiledata;
 pub mod uop;
 
-pub use components::{
+// Components, the spatial index and the generator moved down into
+// `openshard-state` so the gameplay systems can live in their own crates above
+// it. Re-exported here so `openshard_world::Position` and friends keep resolving.
+pub use events::{
+    ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
+    RefusedReason, StepRefused,
+};
+pub use map::{LandCell, Map, MapError, StaticItem, BLOCK_SIZE};
+pub use openshard_chat::MobileSpoke;
+pub use openshard_magic::SpellCast;
+pub use openshard_skills::SkillUsed;
+pub use openshard_state::components;
+pub use openshard_state::Outbound;
+pub use openshard_state::{distance, in_range, sectors, Sectors, SECTOR_SIZE, VIEW_RANGE};
+pub use openshard_state::{
     Account, Amount, Body, Brain, Client, Combat, Contained, Container, CriminalUntil, DamageType,
     Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name,
     Position, Resistance, Skills, Stackable, Stats, SwingSpeed,
 };
-pub use events::{
-    ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileSpoke, MobileTurned, PlayerEntered,
-    PlayerLeft, RefusedReason, SkillUsed, SpellCast, StepRefused,
-};
-pub use map::{LandCell, Map, MapError, StaticItem, BLOCK_SIZE};
-pub use sectors::{distance, in_range, Sectors, SECTOR_SIZE, VIEW_RANGE};
 pub use terrain::{MapTerrain, MAX_STEP_DOWN, MAX_STEP_UP, PLAYER_HEIGHT};
-pub use tick::{Appearance, Command, Outbound, World, TICK_INTERVAL};
+pub use tick::{Appearance, Command, World, TICK_INTERVAL};
 pub use tiledata::{LandTile, StaticTile, TileData, TileDataError, TileDataFormat, TileFlags};
 pub use uop::UopError;

@@ -61,6 +61,7 @@ events, not by calling.
 | Crate | Owns |
 |---|---|
 | `entities` | `EntityId`, `Serial`, `SparseSet`, `Registry`. Identity and storage. No gameplay. |
+| `state` | Components, the `Sectors` spatial index, the seeded `Rng`. The world's runtime *data*, below the systems that act on it, so each system can live in its own crate. Knows nothing of *when* state changes. |
 | `events` | `Events<E>`, `Cursor<E>`, `EventBus`. Machinery. Defines no game events. |
 | `protocol` | Versions, feature gates, the codec, framing, the login and world packets. |
 | `gateway` | The sans-io `Connection` and a thin Tokio `Server`. Finds packet boundaries; knows nothing of meaning. |
@@ -73,12 +74,25 @@ events, not by calling.
 
 | Crate | Owns | Missing |
 |---|---|---|
-| `world` | The client's file formats and `MapTerrain`. | The tick, the spatial index, components. |
+| `world` | The tick, the client's file formats, `MapTerrain`, and the persistence journal. Owns `WorldState` and drives it. | The gameplay *systems*, being extracted into their domain crates one at a time; they still live in `world::tick`. |
+
+`world` holds a [`WorldState`](../crates/state/src/runtime.rs) and the tick that
+drives it; the systems that mutate it are moving out into the domain crates
+below, each becoming a `fn(&mut WorldState)`. Until a system moves it still lives
+in `world::tick`, so that file shrinks rather than the design changing under it.
+
+**Systems being extracted from `world::tick` into their own crates.** Each
+becomes a set of `fn(&mut WorldState)` and owns its domain events. Done: `chat`
+(`say`/`speak`, `MobileSpoke`), `skills` (skill/stat checks, the gain curve,
+`SkillUsed`; its `roll_skill` is shared), and `magic` (`cast_spell`/`heal`/
+`regen_mana`, `SpellCast`). `combat`, `items`, `ai` follow — `combat` and `items`
+after the rest of the drawing/interest substrate (`show`, `forget`,
+`broadcast_move`, …) moves onto `WorldState` (its `watchers_of` and
+`broadcast_health` are there already).
 
 **Stubs** — declared so the dependency graph is visible.
 
-`combat`, `ai`, `items`, `magic`, `skills`, `housing`, `guilds`, `chat`,
-`persistence`, `scripting`, `plugins`, `metrics`.
+`housing`, `guilds`, `plugins`, `metrics`.
 
 ## Entities
 

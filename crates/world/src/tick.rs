@@ -34,27 +34,30 @@ use openshard_movement::{step_from, OpenWorld, Terrain, Walk, Walker};
 use openshard_persistence::{CharacterRecord, Journal, Snapshot};
 use openshard_protocol::{
     encode_add_to_container, encode_attack, encode_container_contents, encode_drag_cancel,
-    encode_equip, encode_health, encode_light_level, encode_login_complete, encode_map_change,
-    encode_message, encode_open_container, encode_remove, encode_unicode_message, encode_walk_ack,
-    encode_walk_reject, encode_war_mode, ClientVersion, ContainedItem, Direction, DragCancelReason,
-    Equipment, Facing, MobileIncoming, MobileMove, Notoriety, PlayerStart, PlayerUpdate, Point,
-    WalkRequest, WorldItem, DEFAULT_LANGUAGE_TAG, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
-    DROP_TO_GROUND, NO_GRAPHIC,
+    encode_equip, encode_light_level, encode_login_complete, encode_map_change,
+    encode_open_container, encode_remove, encode_walk_ack, encode_walk_reject, encode_war_mode,
+    ClientVersion, ContainedItem, Direction, DragCancelReason, Facing, Notoriety, PlayerStart,
+    PlayerUpdate, Point, WalkRequest, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, DROP_TO_GROUND,
 };
 use tracing::{debug, info, warn};
 
-use crate::components::{
+use openshard_state::components::{
     Account, Amount, Body, Brain, Client, Combat, Contained, Container, CriminalUntil, DamageType,
     Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name,
-    Position, Resistance, Skills, Stackable, Stats, SwingSpeed,
+    Position, Resistance, Stackable, Stats, SwingSpeed,
 };
+use openshard_state::rng::Rng;
+use openshard_state::sectors::{distance, in_range, Sectors, VIEW_RANGE};
+use openshard_state::{FacetState, HeldItem, Origin, Outbound, WorldState};
+
+use openshard_chat as chat;
+use openshard_magic as magic;
+use openshard_skills as skills;
+
 use crate::events::{
-    ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileSpoke, MobileTurned, PlayerEntered,
-    PlayerLeft, RefusedReason, SkillUsed, SpellCast, StepRefused,
+    ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
+    RefusedReason, StepRefused,
 };
-use crate::rng::Rng;
-use crate::sectors::{distance, in_range, Sectors, VIEW_RANGE};
-use crate::skills;
 use crate::terrain::MapTerrain;
 
 /// How often the world ticks.
@@ -74,7 +77,9 @@ const LIGHT_DAY: u8 = 0;
 /// The facet a new character spawns on, and the world's fallback for a facet it
 /// has not loaded. Zero is Felucca.
 const DEFAULT_FACET: u8 = 0;
-/// The height to use when there is no map to ask.
+/// The height to use when there is no map to ask. Only the tests still name it;
+/// the world reads the flat default through [`WorldState::start_position`].
+#[cfg(test)]
 const Z_WITHOUT_A_MAP: i8 = 0;
 /// Notoriety 0x01 is "innocent" — the blue health bar.
 const NOTORIETY_INNOCENT: u8 = 0x01;
@@ -102,9 +107,6 @@ const DEFAULT_HITPOINTS: u16 = 100;
 const DEFAULT_MANA: u16 = 100;
 /// The dexterity a character starts with.
 const DEFAULT_DEXTERITY: u16 = 100;
-/// Ticks between mana regenerating a point: three seconds at [`TICK_INTERVAL`].
-/// A flat rate until it derives from meditation and intelligence.
-const MANA_REGEN_TICKS: u64 = 60;
 /// Ticks between a brain's beats — half a second at [`TICK_INTERVAL`]. Creatures
 /// think in beats, not every tick: it paces their walk and spares the loop from
 /// re-deciding a thousand times a second what has not changed.
@@ -112,32 +114,6 @@ const AI_THINK_TICKS: u64 = 10;
 /// The chance in eight, per beat, that an idle wanderer takes a step. Low enough
 /// that a field of creatures drifts rather than marches.
 const WANDER_IN_EIGHT: u32 = 3;
-/// The talk mode of a whisper — heard only by those right beside the speaker.
-/// Sphere's `TALKMODE_WHISPER`; the client sends it for `;`-prefixed speech.
-const TALKMODE_WHISPER: u8 = 8;
-/// The talk mode of a yell — carried two screens off. Sphere's `TALKMODE_YELL`,
-/// the client's `!`-prefixed speech.
-const TALKMODE_YELL: u8 = 9;
-/// How far a whisper carries, in tiles. Sphere's `DISTANCEWHISPER`.
-const WHISPER_RANGE: u32 = 3;
-/// How far normal speech carries — the client's default view, so you hear anyone
-/// on your screen. Sphere's `DISTANCETALK` (`UO_MAP_VIEW_SIZE_DEFAULT`).
-const SAY_RANGE: u32 = 18;
-/// How far a yell carries. Sphere's `DISTANCEYELL` (`UO_MAP_VIEW_RADAR`).
-const YELL_RANGE: u32 = 31;
-
-/// How far speech in `mode` carries, in tiles. A whisper is heard only right up
-/// close, a yell two screens off, everything else across the screen — Sphere's
-/// three `DISTANCE*` defaults, chosen by the mode byte the client sends.
-const fn speech_range(mode: u8) -> u32 {
-    match mode {
-        TALKMODE_WHISPER => WHISPER_RANGE,
-        TALKMODE_YELL => YELL_RANGE,
-        _ => SAY_RANGE,
-    }
-}
-/// A middling font the client renders speech in when the speaker names none.
-const DEFAULT_FONT: u16 = 3;
 /// How near, in tiles (Chebyshev), a mobile must be to land a melee blow: the
 /// next tile over, diagonals included.
 const MELEE_RANGE: u32 = 1;
@@ -381,7 +357,7 @@ pub enum Command {
         intelligence: u16,
     },
     /// Set a mobile's skill value — a script configuring a character. `value` is
-    /// in tenths, capped at [`SKILL_CAP`](crate::skills::SKILL_CAP).
+    /// in tenths, capped at [`SKILL_CAP`](openshard_skills::SKILL_CAP).
     SetSkill {
         /// Whose, by wire serial.
         serial: u32,
@@ -532,76 +508,21 @@ struct SpawnMobile {
     facet: u8,
 }
 
-/// Bytes for a connection, produced by a tick.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Outbound {
-    /// Who to send to.
-    pub connection: ConnectionId,
-    /// What to send.
-    pub packet: Vec<u8>,
-}
+// `Outbound`, `FacetState`, `HeldItem` and `Origin` are the world's runtime
+// state, moved down into `openshard-state` with `WorldState` so the systems can
+// live in their own crates. Imported at the top of the file.
 
-/// One facet: its ground, and who is near what on it.
+/// The world: the runtime state plus the tick that drives it and the journal
+/// that saves it.
 ///
-/// The world keeps one of these per loaded facet. Two mobiles on different
-/// facets never share a sector grid, so they never see each other and never
-/// block each other — the isolation is a property of the data structure, not a
-/// check anyone has to remember to write.
-struct FacetState {
-    terrain: Option<MapTerrain>,
-    sectors: Sectors,
-}
-
-/// An item on a cursor: the entity, and where it was lifted from.
-///
-/// The origin is the whole reason to remember more than the entity. A drag that
-/// is refused — dropped out of reach, into nothing — has to put the item back
-/// exactly where it was, and by then it is off the ground (and out of any
-/// container) with no place of its own to return to.
-#[derive(Clone, Copy, Debug)]
-struct HeldItem {
-    entity: EntityId,
-    origin: Origin,
-}
-
-/// Where a held item came from, so a cancelled drag can put it back.
-#[derive(Clone, Copy, Debug)]
-enum Origin {
-    /// It was on the ground.
-    Ground { position: Point, facet: u8 },
-    /// It was inside a container.
-    Container(Contained),
-    /// It was worn by a mobile.
-    Worn(Equipped),
-}
-
-/// The world.
-///
-/// Owns the registry, the bus and the map. A plain value: nothing here is a
-/// static, and a test builds as many as it likes.
+/// The gameplay state — registry, bus, facets, who-sees-what — lives in
+/// [`WorldState`], one level down, so systems can operate on it from their own
+/// crates. What stays here is what a system never touches: the persistence
+/// journal, the save cadence, and the command queue the tick drains. A plain
+/// value: nothing is a static, and a test builds as many as it likes.
 pub struct World {
-    registry: Registry,
-    bus: EventBus,
-    /// The loaded facets, each with its own ground and interest grid, keyed by
-    /// facet number. There is always at least the default one.
-    facets: BTreeMap<u8, FacetState>,
-    /// The facet a new character spawns on, and the one the world falls back to
-    /// for anything asking for a facet it does not have.
-    default_facet: u8,
-    /// Which entity a connection is driving.
-    players: HashMap<ConnectionId, EntityId>,
-    /// What each player's client currently has on screen.
-    ///
-    /// The server has to remember, because the client never says. There is no
-    /// "what can you see" packet — only "draw this" and "forget that" — so the
-    /// only way to send a mobile exactly once is to know what was sent before.
-    seen: HashMap<EntityId, HashSet<EntityId>>,
-    /// The item each connection is dragging on its cursor, and where it was so a
-    /// cancelled drag can put it back. An item here is off the ground and out of
-    /// everyone's [`seen`](Self::seen) — in limbo until a `0x08` lands it.
-    held: HashMap<ConnectionId, HeldItem>,
-    /// Where new characters appear. The height comes from the map.
-    start: (u16, u16),
+    /// The runtime state every gameplay system reads and writes.
+    state: WorldState,
     /// What has changed since the last save.
     journal: Journal,
     /// How often to offer a snapshot, in ticks. Zero never saves.
@@ -616,22 +537,13 @@ pub struct World {
     turned: Cursor<MobileTurned>,
     /// Commands waiting for the next tick.
     inbox: Vec<Command>,
-    /// Packets the last tick produced.
-    outbox: Vec<Outbound>,
-    /// The generator behind every roll — a swing landing, a skill gaining. Part
-    /// of the world so replay is exact; advanced only inside the tick.
-    rng: Rng,
-    /// How many ticks have run.
-    ticks: u64,
 }
 
 impl std::fmt::Debug for World {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("World")
-            .field("ticks", &self.ticks)
-            .field("entities", &self.registry.len())
-            .field("players", &self.players.len())
-            .field("facets", &self.facets.len())
+            .field("state", &self.state)
+            .field("unsaved", &self.journal.len())
             .finish()
     }
 }
@@ -650,14 +562,19 @@ impl World {
             },
         );
         Self {
-            registry: Registry::new(),
-            bus: EventBus::new(),
-            facets,
-            default_facet: DEFAULT_FACET,
-            players: HashMap::new(),
-            seen: HashMap::new(),
-            held: HashMap::new(),
-            start,
+            state: WorldState {
+                registry: Registry::new(),
+                bus: EventBus::new(),
+                facets,
+                default_facet: DEFAULT_FACET,
+                players: HashMap::new(),
+                seen: HashMap::new(),
+                held: HashMap::new(),
+                start,
+                rng: Rng::new(DEFAULT_SEED),
+                ticks: 0,
+                outbox: Vec::new(),
+            },
             journal: Journal::new(),
             save_every: SAVE_EVERY_TICKS,
             saves: Vec::new(),
@@ -665,9 +582,6 @@ impl World {
             moved: Cursor::default(),
             turned: Cursor::default(),
             inbox: Vec::new(),
-            outbox: Vec::new(),
-            rng: Rng::new(DEFAULT_SEED),
-            ticks: 0,
         }
     }
 
@@ -684,17 +598,19 @@ impl World {
 
     /// Give the default facet a map.
     pub fn with_terrain(self, terrain: MapTerrain) -> Self {
-        let facet = self.default_facet;
+        let facet = self.state.default_facet;
         self.with_facet(facet, terrain)
     }
 
     /// Load `terrain` as facet `facet`, its interest grid sized to the map.
     pub fn with_facet(mut self, facet: u8, terrain: MapTerrain) -> Self {
         let sectors = Sectors::new(terrain.map().width(), terrain.map().height());
-        self.facets.insert(
+        // Boxed as `dyn Terrain`: the state crate holds the abstraction, and the
+        // world supplies the concrete map here.
+        self.state.facets.insert(
             facet,
             FacetState {
-                terrain: Some(terrain),
+                terrain: Some(Box::new(terrain) as Box<dyn Terrain + Send + Sync>),
                 sectors,
             },
         );
@@ -703,27 +619,27 @@ impl World {
 
     /// The default facet's spatial index.
     pub fn sectors(&self) -> &Sectors {
-        &self.facets[&self.default_facet].sectors
+        &self.state.facets[&self.state.default_facet].sectors
     }
 
     /// The event bus, for reading what happened.
     pub const fn bus(&self) -> &EventBus {
-        &self.bus
+        &self.state.bus
     }
 
     /// Everything in the world.
     pub const fn registry(&self) -> &Registry {
-        &self.registry
+        &self.state.registry
     }
 
     /// How many ticks have run.
     pub const fn ticks(&self) -> u64 {
-        self.ticks
+        self.state.ticks
     }
 
     /// How many people are in the world.
     pub fn player_count(&self) -> usize {
-        self.players.len()
+        self.state.players.len()
     }
 
     /// Queue a command for the next tick.
@@ -738,7 +654,7 @@ impl World {
 
     /// Take the packets the last tick produced.
     pub fn drain_outbound(&mut self) -> std::vec::Drain<'_, Outbound> {
-        self.outbox.drain(..)
+        self.state.outbox.drain(..)
     }
 
     /// Take the snapshots the tick has offered to persistence.
@@ -774,6 +690,7 @@ impl World {
     /// Also for shutdown, where "everything" is the only right answer.
     pub fn resweep(&mut self) {
         let characters: Vec<EntityId> = self
+            .state
             .registry
             .query::<Name>()
             .map(|(entity, _)| entity)
@@ -787,7 +704,7 @@ impl World {
     /// the clock could not be replayed, and a simulation that cannot be replayed
     /// cannot be debugged from a log.
     pub fn tick(&mut self, now: Instant) {
-        self.ticks += 1;
+        self.state.ticks += 1;
 
         // Take the whole inbox. A command queued *during* a tick belongs to the
         // next one — otherwise a system that queues work could starve the loop,
@@ -804,7 +721,7 @@ impl World {
         self.think();
         self.swings();
         self.expire_criminality();
-        self.regen_mana();
+        magic::regen_mana(&mut self.state);
         self.decay();
 
         // Before the bus retires anything: what happened is what needs saving,
@@ -814,7 +731,7 @@ impl World {
 
         // Retire the oldest events. Once per tick, after every system, so that
         // "one tick" means the same thing for every event type.
-        self.bus.update();
+        self.state.bus.update();
     }
 
     // -- persistence -------------------------------------------------------
@@ -838,9 +755,24 @@ impl World {
         // Collected first: `read` borrows the bus, and the journal is a
         // different field but the iterator holds the borrow across the loop.
         let mut changed: Vec<EntityId> = Vec::new();
-        changed.extend(self.bus.read(&mut self.entered).map(|event| event.entity));
-        changed.extend(self.bus.read(&mut self.moved).map(|event| event.entity));
-        changed.extend(self.bus.read(&mut self.turned).map(|event| event.entity));
+        changed.extend(
+            self.state
+                .bus
+                .read(&mut self.entered)
+                .map(|event| event.entity),
+        );
+        changed.extend(
+            self.state
+                .bus
+                .read(&mut self.moved)
+                .map(|event| event.entity),
+        );
+        changed.extend(
+            self.state
+                .bus
+                .read(&mut self.turned)
+                .map(|event| event.entity),
+        );
         for entity in changed {
             self.journal.touch(entity);
         }
@@ -848,7 +780,7 @@ impl World {
 
     /// Every `save_every` ticks, hand what changed to whoever is collecting.
     fn offer_snapshot(&mut self) {
-        if self.save_every == 0 || !self.ticks.is_multiple_of(self.save_every) {
+        if self.save_every == 0 || !self.state.ticks.is_multiple_of(self.save_every) {
             return;
         }
         self.take_snapshot();
@@ -859,13 +791,13 @@ impl World {
     /// For shutdown, for a GM save command, and for tests that would rather not
     /// tick four hundred times to see one row.
     pub fn take_snapshot(&mut self) {
-        let ticks = self.ticks;
+        let ticks = self.state.ticks;
         // The borrow split: `drain` needs the journal mutably and the closure
         // needs the registry, so the registry is taken out of `self` by
         // reference first. The closure is called inside the tick and reads
         // memory only — this is the "consistent picture at one instant" the
         // snapshot promises.
-        let registry = &self.registry;
+        let registry = &self.state.registry;
         let snapshot = self
             .journal
             .drain(ticks, |entity| Self::record_of(registry, entity));
@@ -912,7 +844,7 @@ impl World {
     /// range are ignored: a corrupt row should not stop the shard from starting.
     pub fn reserve_serial(&mut self, raw: u32) {
         if let Some(serial) = Serial::new(raw) {
-            self.registry.reserve_serial(serial);
+            self.state.registry.reserve_serial(serial);
         }
     }
 
@@ -996,24 +928,32 @@ impl World {
                 mana,
                 difficulty,
                 skill,
-            } => self.cast_spell(serial, spell, target, mana, difficulty, skill),
-            Command::Heal { serial, amount } => self.heal(serial, amount),
+            } => magic::cast_spell(
+                &mut self.state,
+                serial,
+                spell,
+                target,
+                mana,
+                difficulty,
+                skill,
+            ),
+            Command::Heal { serial, amount } => magic::heal(&mut self.state, serial, amount),
             Command::SetStats {
                 serial,
                 strength,
                 dexterity,
                 intelligence,
-            } => self.set_stats(serial, strength, dexterity, intelligence),
+            } => skills::set_stats(&mut self.state, serial, strength, dexterity, intelligence),
             Command::SetSkill {
                 serial,
                 skill,
                 value,
-            } => self.set_skill(serial, skill, value),
+            } => skills::set_skill(&mut self.state, serial, skill, value),
             Command::UseSkill {
                 serial,
                 skill,
                 difficulty,
-            } => self.use_skill(serial, skill, difficulty),
+            } => skills::use_skill(&mut self.state, serial, skill, difficulty),
             Command::WarMode { connection, war } => self.war_mode(connection, war),
             Command::Attack { connection, target } => self.attack(connection, target),
             Command::Say {
@@ -1022,10 +962,12 @@ impl World {
                 hue,
                 font,
                 text,
-            } => self.say(connection, mode, hue, font, &text),
+            } => chat::say(&mut self.state, connection, mode, hue, font, &text),
             Command::Speak { serial, hue, text } => {
-                if let Some(entity) = Serial::new(serial).and_then(|s| self.registry.entity_of(s)) {
-                    self.speak(entity, 0, hue, DEFAULT_FONT, &text);
+                if let Some(entity) =
+                    Serial::new(serial).and_then(|s| self.state.registry.entity_of(s))
+                {
+                    chat::speak(&mut self.state, entity, 0, hue, chat::DEFAULT_FONT, &text);
                 }
             }
             Command::DoubleClick { connection, serial } => self.double_click(connection, serial),
@@ -1054,44 +996,6 @@ impl World {
     ///
     /// Always a facet the world actually has: [`enter`](Self::enter) clamps an
     /// unloaded facet to the default before it ever reaches a `Facet` component,
-    /// so callers can index `self.facets` with the result.
-    fn facet_of(&self, entity: EntityId) -> u8 {
-        self.registry
-            .get::<Facet>(entity)
-            .map_or(self.default_facet, |facet| facet.0)
-    }
-
-    /// The state of a facet the world is known to have.
-    fn facet_state(&self, facet: u8) -> &FacetState {
-        &self.facets[&facet]
-    }
-
-    /// The same, mutably. Panics only on a facet no entity should carry —
-    /// `facet_of` and `enter` keep every live entity on a loaded facet.
-    fn facet_state_mut(&mut self, facet: u8) -> &mut FacetState {
-        self.facets
-            .get_mut(&facet)
-            .expect("an entity's facet is always loaded")
-    }
-
-    /// Where a character appears on `facet`: the configured x and y, at that
-    /// facet's height.
-    ///
-    /// The `z` is read from the map rather than configured. A second source of
-    /// truth that disagrees by three units leaves a character unable to take a
-    /// single step — every one is more than a two-unit climb — with nothing in
-    /// the log to explain it.
-    fn start_position(&self, facet: u8) -> Point {
-        let (x, y) = self.start;
-        let z = self
-            .facets
-            .get(&facet)
-            .and_then(|state| state.terrain.as_ref())
-            .and_then(|terrain| terrain.map().land(x, y))
-            .map_or(Z_WITHOUT_A_MAP, |cell| cell.z);
-        Point::new(x, y, z)
-    }
-
     fn enter(&mut self, entering: Entering) {
         let Entering {
             connection,
@@ -1103,7 +1007,7 @@ impl World {
             facet,
             appearance,
         } = entering;
-        if self.players.contains_key(&connection) {
+        if self.state.players.contains_key(&connection) {
             warn!(%connection, "already in the world");
             return;
         }
@@ -1111,11 +1015,11 @@ impl World {
         // A character can only stand on a facet the shard loaded. An unloaded one
         // — a save from a shard that had more facets, say — falls back to the
         // default rather than leaving the character nowhere.
-        let facet = if self.facets.contains_key(&facet) {
+        let facet = if self.state.facets.contains_key(&facet) {
             facet
         } else {
             warn!(%connection, facet, "unloaded facet; falling back to the default");
-            self.default_facet
+            self.state.default_facet
         };
 
         // A stored character comes back on the serial it was saved under; a new
@@ -1123,15 +1027,15 @@ impl World {
         // at boot (see `World::reserve_serial`), so binding it here cannot collide.
         let (entity, serial) = match serial.and_then(Serial::new) {
             Some(saved) => {
-                let entity = self.registry.spawn();
-                if let Err(error) = self.registry.bind_serial(entity, saved) {
+                let entity = self.state.registry.spawn();
+                if let Err(error) = self.state.registry.bind_serial(entity, saved) {
                     warn!(%connection, ?error, "could not restore the saved serial");
-                    self.registry.despawn(entity);
+                    self.state.registry.despawn(entity);
                     return;
                 }
                 (entity, saved)
             }
-            None => match self.registry.spawn_with_serial(SerialKind::Mobile) {
+            None => match self.state.registry.spawn_with_serial(SerialKind::Mobile) {
                 Ok(pair) => pair,
                 Err(_) => {
                     warn!(%connection, "the mobile serial pool is exhausted");
@@ -1142,7 +1046,7 @@ impl World {
 
         // A loaded character spawns exactly where it was saved, its own z
         // included; a fresh one takes the world's configured start on its facet.
-        let position = position.unwrap_or_else(|| self.start_position(facet));
+        let position = position.unwrap_or_else(|| self.state.start_position(facet));
         let facing = Facing::walking(Direction::South);
         // A created or loaded character brings its body and hue; without one it
         // falls back to the default.
@@ -1151,16 +1055,16 @@ impl World {
             hue: appearance.map_or(DEFAULT_HUE, |look| look.hue),
         };
 
-        self.registry.insert(entity, Position(position));
-        self.registry.insert(entity, Heading(facing));
-        self.registry.insert(entity, body);
-        self.registry.insert(entity, Name(name.clone()));
-        self.registry.insert(entity, Account(account));
-        self.registry.insert(entity, Facet(facet));
+        self.state.registry.insert(entity, Position(position));
+        self.state.registry.insert(entity, Heading(facing));
+        self.state.registry.insert(entity, body);
+        self.state.registry.insert(entity, Name(name.clone()));
+        self.state.registry.insert(entity, Account(account));
+        self.state.registry.insert(entity, Facet(facet));
         // Strength caps hit points, intelligence caps mana — the first derived
         // numbers. Character creation will choose the stats; until it does, the
         // defaults reproduce the flat hundreds the world had before.
-        self.registry.insert(
+        self.state.registry.insert(
             entity,
             Stats {
                 strength: DEFAULT_HITPOINTS,
@@ -1168,49 +1072,53 @@ impl World {
                 intelligence: DEFAULT_MANA,
             },
         );
-        self.registry.insert(
+        self.state.registry.insert(
             entity,
             Hitpoints {
                 current: DEFAULT_HITPOINTS,
                 max: DEFAULT_HITPOINTS,
             },
         );
-        self.registry.insert(
+        self.state.registry.insert(
             entity,
             Mana {
                 current: DEFAULT_MANA,
                 max: DEFAULT_MANA,
             },
         );
-        self.registry.insert(entity, Combat::default());
-        self.registry.insert(entity, Notoriety::Innocent);
-        self.registry.insert(
+        self.state.registry.insert(entity, Combat::default());
+        self.state.registry.insert(entity, Notoriety::Innocent);
+        self.state.registry.insert(
             entity,
             MeleeDamage {
                 amount: SWING_DAMAGE,
             },
         );
-        self.registry.insert(entity, Resistance::default());
+        self.state.registry.insert(entity, Resistance::default());
         // No explicit `SwingSpeed`: a player swings at the pace their dexterity
         // dictates, through `swing_speed`.
-        self.registry
+        self.state
+            .registry
             .insert(entity, Movement(Walker::new(position, facing)));
-        self.registry.insert(
+        self.state.registry.insert(
             entity,
             Client {
                 connection,
                 version,
             },
         );
-        self.players.insert(connection, entity);
-        self.facet_state_mut(facet).sectors.insert(entity, position);
-        self.seen.insert(entity, HashSet::new());
+        self.state.players.insert(connection, entity);
+        self.state
+            .facet_state_mut(facet)
+            .sectors
+            .insert(entity, position);
+        self.state.seen.insert(entity, HashSet::new());
 
         // The order is the client's, not ours. 0x1B must come first — until it
         // lands there is no body to attach anything to — and 0x55 must come
         // last, because it is what tells the client to start drawing. What is
         // between can be reordered; the two ends cannot.
-        self.send(
+        self.state.send(
             connection,
             PlayerStart {
                 serial: serial.raw(),
@@ -1222,8 +1130,8 @@ impl World {
             }
             .encode(),
         );
-        self.send(connection, encode_map_change(facet));
-        self.send(
+        self.state.send(connection, encode_map_change(facet));
+        self.state.send(
             connection,
             PlayerUpdate {
                 serial: serial.raw(),
@@ -1235,10 +1143,10 @@ impl World {
             }
             .encode(),
         );
-        self.send(connection, encode_light_level(LIGHT_DAY));
-        self.send(connection, encode_login_complete());
+        self.state.send(connection, encode_light_level(LIGHT_DAY));
+        self.state.send(connection, encode_login_complete());
 
-        self.bus.send(PlayerEntered {
+        self.state.bus.send(PlayerEntered {
             entity,
             serial,
             position,
@@ -1248,66 +1156,70 @@ impl World {
         // Draw whoever is already here, and draw this one for them. Both
         // directions, because arriving is symmetric: the newcomer has an empty
         // screen and everyone nearby has a gap where it now stands.
-        self.refresh_around(entity);
+        self.state.refresh_around(entity);
     }
 
     fn walk(&mut self, connection: ConnectionId, request: WalkRequest, now: Instant) {
-        let Some(&entity) = self.players.get(&connection) else {
+        let Some(&entity) = self.state.players.get(&connection) else {
             // A walk before a character. Not fatal — a stray packet from a
             // client that reconnected — but nothing to act on either.
             debug!(%connection, "0x02 from a connection with no character");
             return;
         };
-        let Some(serial) = self.registry.serial_of(entity) else {
+        let Some(serial) = self.state.registry.serial_of(entity) else {
             return;
         };
-        let Some(Movement(mut walker)) = self.registry.get::<Movement>(entity).copied() else {
+        let Some(Movement(mut walker)) = self.state.registry.get::<Movement>(entity).copied()
+        else {
             return;
         };
 
-        let facet = self.facet_of(entity);
+        let facet = self.state.facet_of(entity);
         let was = walker.position;
         let out_of_sequence = walker.sequence.is_fresh() && request.sequence != 0;
-        let outcome = match &self.facet_state(facet).terrain {
-            Some(terrain) => walker.request(request, terrain, now),
+        let outcome = match &self.state.facet_state(facet).terrain {
+            Some(terrain) => walker.request(request, terrain.as_ref(), now),
             None => walker.request(request, &OpenWorld, now),
         };
-        self.registry.insert(entity, Movement(walker));
+        self.state.registry.insert(entity, Movement(walker));
 
         match outcome {
             Walk::Moved { position, facing } => {
-                self.registry.insert(entity, Position(position));
-                self.registry.insert(entity, Heading(facing));
+                self.state.registry.insert(entity, Position(position));
+                self.state.registry.insert(entity, Heading(facing));
                 // The index is a second copy of the position; this is the line
                 // that keeps it honest.
-                self.facet_state_mut(facet).sectors.insert(entity, position);
-                self.send(
+                self.state
+                    .facet_state_mut(facet)
+                    .sectors
+                    .insert(entity, position);
+                self.state.send(
                     connection,
                     encode_walk_ack(request.sequence, NOTORIETY_INNOCENT),
                 );
-                self.bus.send(MobileMoved {
+                self.state.bus.send(MobileMoved {
                     entity,
                     serial,
                     from: was,
                     to: position,
                     facing,
                 });
-                self.refresh_around(entity);
+                self.state.refresh_around(entity);
             }
             Walk::Turned { facing } => {
-                self.registry.insert(entity, Heading(facing));
-                self.send(
+                self.state.registry.insert(entity, Heading(facing));
+                self.state.send(
                     connection,
                     encode_walk_ack(request.sequence, NOTORIETY_INNOCENT),
                 );
-                self.bus.send(MobileTurned {
+                self.state.bus.send(MobileTurned {
                     entity,
                     serial,
                     facing,
                 });
                 // A turn moves nobody, but it changes what everyone watching
                 // draws — the client animates a facing it is told about.
-                self.broadcast_move(entity);
+                self.state.broadcast_move(entity);
             }
             Walk::Refused => {
                 // Which of the three it was is not something `Walk` says, and
@@ -1321,11 +1233,11 @@ impl World {
                 } else {
                     RefusedReason::Blocked
                 };
-                self.send(
+                self.state.send(
                     connection,
                     encode_walk_reject(request.sequence, walker.position, walker.facing),
                 );
-                self.bus.send(StepRefused {
+                self.state.bus.send(StepRefused {
                     entity,
                     serial,
                     reason,
@@ -1348,47 +1260,48 @@ impl World {
         let Some(serial) = Serial::new(serial) else {
             return;
         };
-        let Some(entity) = self.registry.entity_of(serial) else {
+        let Some(entity) = self.state.registry.entity_of(serial) else {
             return;
         };
-        let Some(Movement(mut walker)) = self.registry.get::<Movement>(entity).copied() else {
+        let Some(Movement(mut walker)) = self.state.registry.get::<Movement>(entity).copied()
+        else {
             return;
         };
         let direction = Direction::from_bits(direction);
-        let facet = self.facet_of(entity);
+        let facet = self.state.facet_of(entity);
         let was = walker.position;
 
         // Turn-as-step: a mobile not yet facing this way turns and stays put.
         if walker.facing.direction != direction {
             let facing = Facing::walking(direction);
             walker.facing = facing;
-            self.registry.insert(entity, Movement(walker));
-            self.registry.insert(entity, Heading(facing));
-            self.bus.send(MobileTurned {
+            self.state.registry.insert(entity, Movement(walker));
+            self.state.registry.insert(entity, Heading(facing));
+            self.state.bus.send(MobileTurned {
                 entity,
                 serial,
                 facing,
             });
-            self.broadcast_move(entity);
+            self.state.broadcast_move(entity);
             return;
         }
 
         let Some(target) = step_from(walker.position, direction) else {
             // Off the edge of the coordinate space — nowhere to go, and no client
             // to snap back, so it is simply refused.
-            self.bus.send(StepRefused {
+            self.state.bus.send(StepRefused {
                 entity,
                 serial,
                 reason: RefusedReason::Blocked,
             });
             return;
         };
-        let landed = match &self.facet_state(facet).terrain {
+        let landed = match &self.state.facet_state(facet).terrain {
             Some(terrain) => terrain.can_step(walker.position, target),
             None => OpenWorld.can_step(walker.position, target),
         };
         let Some(landed) = landed else {
-            self.bus.send(StepRefused {
+            self.state.bus.send(StepRefused {
                 entity,
                 serial,
                 reason: RefusedReason::Blocked,
@@ -1399,18 +1312,21 @@ impl World {
         let facing = Facing::walking(direction);
         walker.position = landed;
         walker.facing = facing;
-        self.registry.insert(entity, Movement(walker));
-        self.registry.insert(entity, Position(landed));
-        self.registry.insert(entity, Heading(facing));
-        self.facet_state_mut(facet).sectors.insert(entity, landed);
-        self.bus.send(MobileMoved {
+        self.state.registry.insert(entity, Movement(walker));
+        self.state.registry.insert(entity, Position(landed));
+        self.state.registry.insert(entity, Heading(facing));
+        self.state
+            .facet_state_mut(facet)
+            .sectors
+            .insert(entity, landed);
+        self.state.bus.send(MobileMoved {
             entity,
             serial,
             from: was,
             to: landed,
             facing,
         });
-        self.refresh_around(entity);
+        self.state.refresh_around(entity);
     }
 
     /// Put an item on the ground. See [`Command::SpawnItem`].
@@ -1426,32 +1342,37 @@ impl World {
         position: Point,
         facet: u8,
     ) -> Option<EntityId> {
-        let facet = if self.facets.contains_key(&facet) {
+        let facet = if self.state.facets.contains_key(&facet) {
             facet
         } else {
             warn!(facet, "unloaded facet; spawning the item on the default");
-            self.default_facet
+            self.state.default_facet
         };
-        let (entity, serial) = match self.registry.spawn_with_serial(SerialKind::Item) {
+        let (entity, serial) = match self.state.registry.spawn_with_serial(SerialKind::Item) {
             Ok(pair) => pair,
             Err(error) => {
                 warn!(?error, "out of item serials; not spawning");
                 return None;
             }
         };
-        self.registry.insert(entity, Graphic { id: graphic, hue });
-        self.registry.insert(entity, Position(position));
-        self.registry.insert(entity, Facet(facet));
+        self.state
+            .registry
+            .insert(entity, Graphic { id: graphic, hue });
+        self.state.registry.insert(entity, Position(position));
+        self.state.registry.insert(entity, Facet(facet));
         // Only a real stack carries an amount; a single item stays a bare graphic.
         if amount > 1 {
-            self.registry.insert(entity, Amount(amount));
+            self.state.registry.insert(entity, Amount(amount));
         }
         if stackable {
-            self.registry.insert(entity, Stackable);
+            self.state.registry.insert(entity, Stackable);
         }
         self.mark_decay(entity);
-        self.facet_state_mut(facet).sectors.insert(entity, position);
-        self.bus.send(ItemSpawned {
+        self.state
+            .facet_state_mut(facet)
+            .sectors
+            .insert(entity, position);
+        self.state.bus.send(ItemSpawned {
             entity,
             serial,
             position,
@@ -1468,10 +1389,10 @@ impl World {
     /// like one and then marked.
     fn spawn_container(&mut self, graphic: u16, gump: u16, hue: u16, position: Point, facet: u8) {
         if let Some(entity) = self.spawn_item(graphic, hue, 1, false, position, facet) {
-            self.registry.insert(entity, Container { gump });
+            self.state.registry.insert(entity, Container { gump });
             // A container does not rot with its contents inside it; only loose
             // ground clutter decays.
-            self.registry.remove::<Decays>(entity);
+            self.state.registry.remove::<Decays>(entity);
         }
     }
 
@@ -1497,13 +1418,13 @@ impl World {
             position,
             facet,
         } = spec;
-        let facet = if self.facets.contains_key(&facet) {
+        let facet = if self.state.facets.contains_key(&facet) {
             facet
         } else {
             warn!(facet, "unloaded facet; spawning the mobile on the default");
-            self.default_facet
+            self.state.default_facet
         };
-        let (entity, serial) = match self.registry.spawn_with_serial(SerialKind::Mobile) {
+        let (entity, serial) = match self.state.registry.spawn_with_serial(SerialKind::Mobile) {
             Ok(pair) => pair,
             Err(error) => {
                 warn!(?error, "out of mobile serials; not spawning");
@@ -1512,21 +1433,24 @@ impl World {
         };
         let hits = hits.max(1);
         let facing = Facing::walking(Direction::South);
-        self.registry.insert(entity, Body { id: body, hue });
-        self.registry.insert(entity, Position(position));
-        self.registry.insert(entity, Heading(facing));
-        self.registry.insert(entity, Facet(facet));
-        self.registry.insert(
+        self.state.registry.insert(entity, Body { id: body, hue });
+        self.state.registry.insert(entity, Position(position));
+        self.state.registry.insert(entity, Heading(facing));
+        self.state.registry.insert(entity, Facet(facet));
+        self.state.registry.insert(
             entity,
             Hitpoints {
                 current: hits,
                 max: hits,
             },
         );
-        self.registry
+        self.state
+            .registry
             .insert(entity, Notoriety::from_bits(notoriety));
-        self.registry.insert(entity, MeleeDamage { amount: damage });
-        self.registry.insert(
+        self.state
+            .registry
+            .insert(entity, MeleeDamage { amount: damage });
+        self.state.registry.insert(
             entity,
             Resistance {
                 physical: resistance.min(100),
@@ -1537,13 +1461,15 @@ impl World {
         // pace names no number and gets the wrestling formula. A non-zero value
         // pins an exact cadence — a special creature that ignores its stats.
         if swing != 0 {
-            self.registry.insert(entity, SwingSpeed { ticks: swing });
+            self.state
+                .registry
+                .insert(entity, SwingSpeed { ticks: swing });
         }
         // A brain only for a creature that needs one — something that hunts or
         // wanders. A pure prop (a shopkeeper standing still) gets none and never
         // enters `think`. `Combat` it earns when it first picks a fight.
         if sight > 0 || wander {
-            self.registry.insert(
+            self.state.registry.insert(
                 entity,
                 Brain {
                     sight,
@@ -1552,9 +1478,13 @@ impl World {
                 },
             );
         }
-        self.registry
+        self.state
+            .registry
             .insert(entity, Movement(Walker::new(position, facing)));
-        self.facet_state_mut(facet).sectors.insert(entity, position);
+        self.state
+            .facet_state_mut(facet)
+            .sectors
+            .insert(entity, position);
         self.reveal(entity);
         debug!(%serial, body, "mobile spawned");
     }
@@ -1564,10 +1494,10 @@ impl World {
         let Some(serial) = Serial::new(serial) else {
             return;
         };
-        let Some(entity) = self.registry.entity_of(serial) else {
+        let Some(entity) = self.state.registry.entity_of(serial) else {
             return;
         };
-        let Some(&Hitpoints { current, max }) = self.registry.get::<Hitpoints>(entity) else {
+        let Some(&Hitpoints { current, max }) = self.state.registry.get::<Hitpoints>(entity) else {
             return;
         };
         // Already dead — a player lying at zero, not yet a ghost. A further blow
@@ -1578,53 +1508,28 @@ impl World {
         // Armour takes its cut, of this kind of damage. One place now, so a
         // fireball and a sword swing both go through the same door.
         let resist = self
+            .state
             .registry
             .get::<Resistance>(entity)
             .map_or(0, |r| r.against(kind));
         let amount = (u32::from(amount) * u32::from(100 - resist) / 100) as u16;
         let remaining = current.saturating_sub(amount);
-        self.registry.insert(
+        self.state.registry.insert(
             entity,
             Hitpoints {
                 current: remaining,
                 max,
             },
         );
-        self.bus.send(MobileDamaged {
+        self.state.bus.send(MobileDamaged {
             entity,
             serial,
             amount,
             remaining,
         });
-        self.broadcast_health(entity);
+        self.state.broadcast_health(entity);
         if remaining == 0 {
             self.die(entity, serial);
-        }
-    }
-
-    /// Tell the mobile itself its real hit points and everyone watching it the
-    /// percentage — the two truths of the `0xA1` bar.
-    fn broadcast_health(&mut self, entity: EntityId) {
-        let Some(&Hitpoints { current, max }) = self.registry.get::<Hitpoints>(entity) else {
-            return;
-        };
-        let Some(serial) = self.registry.serial_of(entity) else {
-            return;
-        };
-        if let Some(&Client { connection, .. }) = self.registry.get::<Client>(entity) {
-            self.outbox.push(Outbound {
-                connection,
-                packet: encode_health(serial.raw(), max, current, true),
-            });
-        }
-        let scaled = encode_health(serial.raw(), max, current, false);
-        for watcher in self.watchers_of(entity) {
-            if let Some(&Client { connection, .. }) = self.registry.get::<Client>(watcher) {
-                self.outbox.push(Outbound {
-                    connection,
-                    packet: scaled.clone(),
-                });
-            }
         }
     }
 
@@ -1635,30 +1540,30 @@ impl World {
     /// put for now: ghosts, corpses and resurrection are a later slice, and
     /// despawning someone still connected is worse than leaving them standing.
     fn die(&mut self, entity: EntityId, serial: Serial) {
-        self.bus.send(MobileDied { entity, serial });
+        self.state.bus.send(MobileDied { entity, serial });
         info!(%serial, "died");
-        if self.registry.has::<Client>(entity) {
+        if self.state.registry.has::<Client>(entity) {
             return;
         }
-        let facet = self.facet_of(entity);
-        for watcher in self.watchers_of(entity) {
-            self.forget(watcher, entity, serial);
+        let facet = self.state.facet_of(entity);
+        for watcher in self.state.watchers_of(entity) {
+            self.state.forget(watcher, entity, serial);
         }
-        self.seen.remove(&entity);
-        self.facet_state_mut(facet).sectors.remove(entity);
-        self.registry.despawn(entity);
+        self.state.seen.remove(&entity);
+        self.state.facet_state_mut(facet).sectors.remove(entity);
+        self.state.registry.despawn(entity);
     }
 
     /// Set a player's war stance and tell it the settled one. See
     /// [`Command::WarMode`].
     fn war_mode(&mut self, connection: ConnectionId, war: bool) {
-        let Some(&player) = self.players.get(&connection) else {
+        let Some(&player) = self.state.players.get(&connection) else {
             return;
         };
-        if let Some(combat) = self.registry.get_mut::<Combat>(player) {
+        if let Some(combat) = self.state.registry.get_mut::<Combat>(player) {
             combat.warmode = war;
         }
-        self.send(connection, encode_war_mode(war));
+        self.state.send(connection, encode_war_mode(war));
     }
 
     /// Set a player's attack target. See [`Command::Attack`].
@@ -1666,7 +1571,7 @@ impl World {
     /// The blow itself is not struck here — this only aims. [`swings`](Self::swings)
     /// is what turns "in war mode, in reach, timer up" into damage, on the tick.
     fn attack(&mut self, connection: ConnectionId, target: u32) {
-        let Some(&player) = self.players.get(&connection) else {
+        let Some(&player) = self.state.players.get(&connection) else {
             return;
         };
         // A target that cannot be attacked — a serial of zero, an item, the
@@ -1674,22 +1579,23 @@ impl World {
         // un-highlights the client's bar.
         let valid = Serial::new(target)
             .and_then(|serial| {
-                self.registry
+                self.state
+                    .registry
                     .entity_of(serial)
                     .map(|entity| (serial, entity))
             })
             .filter(|&(_, entity)| {
                 entity != player
-                    && self.registry.has::<Hitpoints>(entity)
-                    && self.notoriety_of(entity) != Notoriety::Invulnerable
+                    && self.state.registry.has::<Hitpoints>(entity)
+                    && self.state.notoriety_of(entity) != Notoriety::Invulnerable
             });
         let Some((serial, target_entity)) = valid else {
             self.clear_target(player);
-            self.send(connection, encode_attack(0));
+            self.state.send(connection, encode_attack(0));
             return;
         };
-        let next = self.ticks + self.swing_speed(player);
-        if let Some(combat) = self.registry.get_mut::<Combat>(player) {
+        let next = self.state.ticks + self.swing_speed(player);
+        if let Some(combat) = self.state.registry.get_mut::<Combat>(player) {
             combat.target = Some(serial);
             combat.next_swing = next;
         }
@@ -1697,12 +1603,12 @@ impl World {
         // attacker grey. (Flagged on the attack, not the landed blow: close
         // enough, and it is the intent a town guard would act on.)
         if matches!(
-            self.notoriety_of(target_entity),
+            self.state.notoriety_of(target_entity),
             Notoriety::Innocent | Notoriety::Friend
         ) {
             self.flag_criminal(player);
         }
-        self.send(connection, encode_attack(target));
+        self.state.send(connection, encode_attack(target));
     }
 
     /// Strike, for every mobile whose swing is due. See [`Command::Attack`].
@@ -1713,10 +1619,11 @@ impl World {
     /// of reach it simply waits, its timer unspent, so the blow falls the instant
     /// the gap closes.
     fn swings(&mut self) {
-        let now = self.ticks;
+        let now = self.state.ticks;
         // Collected first: `damage` mutates the registry, so the query cannot be
         // held across it.
         let ready: Vec<(EntityId, Serial)> = self
+            .state
             .registry
             .query::<Combat>()
             .filter_map(|(attacker, combat)| {
@@ -1727,18 +1634,18 @@ impl World {
             .collect();
 
         for (attacker, target_serial) in ready {
-            let Some(target) = self.registry.entity_of(target_serial) else {
+            let Some(target) = self.state.registry.entity_of(target_serial) else {
                 // The target is gone — a creature killed, a player logged out.
                 self.clear_target(attacker);
                 continue;
             };
             let (Some(&Position(attacker_pos)), Some(&Position(target_pos))) = (
-                self.registry.get::<Position>(attacker),
-                self.registry.get::<Position>(target),
+                self.state.registry.get::<Position>(attacker),
+                self.state.registry.get::<Position>(target),
             ) else {
                 continue;
             };
-            if self.facet_of(attacker) != self.facet_of(target)
+            if self.state.facet_of(attacker) != self.state.facet_of(target)
                 || !in_range(attacker_pos, target_pos, MELEE_RANGE)
             {
                 continue;
@@ -1747,7 +1654,7 @@ impl World {
             self.damage(target_serial.raw(), blow, DamageType::Physical);
             self.set_next_swing(attacker, now + self.swing_speed(attacker));
             // The blow may have killed it; a dead target is no target.
-            if self.registry.entity_of(target_serial).is_none() {
+            if self.state.registry.entity_of(target_serial).is_none() {
                 self.clear_target(attacker);
             }
         }
@@ -1761,8 +1668,9 @@ impl World {
     /// a player would be, and its steps go out to watchers exactly as a player's
     /// do. This function only decides.
     fn think(&mut self) {
-        let now = self.ticks;
+        let now = self.state.ticks;
         let thinkers: Vec<EntityId> = self
+            .state
             .registry
             .query::<Brain>()
             .filter(|(_, brain)| now >= brain.next_think)
@@ -1770,7 +1678,7 @@ impl World {
             .collect();
         for creature in thinkers {
             self.think_one(creature);
-            if let Some(brain) = self.registry.get_mut::<Brain>(creature) {
+            if let Some(brain) = self.state.registry.get_mut::<Brain>(creature) {
                 brain.next_think = now + AI_THINK_TICKS;
             }
         }
@@ -1778,20 +1686,25 @@ impl World {
 
     /// One creature's beat.
     fn think_one(&mut self, creature: EntityId) {
-        let Some(serial) = self.registry.serial_of(creature) else {
+        let Some(serial) = self.state.registry.serial_of(creature) else {
             return;
         };
-        let Some(&Position(pos)) = self.registry.get::<Position>(creature) else {
+        let Some(&Position(pos)) = self.state.registry.get::<Position>(creature) else {
             return;
         };
-        let Some(&Brain { sight, wander, .. }) = self.registry.get::<Brain>(creature) else {
+        let Some(&Brain { sight, wander, .. }) = self.state.registry.get::<Brain>(creature) else {
             return;
         };
-        let facet = self.facet_of(creature);
+        let facet = self.state.facet_of(creature);
 
         // Keep after a target that is still alive and in sight — close in if out
         // of reach, and leave the hitting to `swings`.
-        if let Some(target_serial) = self.registry.get::<Combat>(creature).and_then(|c| c.target) {
+        if let Some(target_serial) = self
+            .state
+            .registry
+            .get::<Combat>(creature)
+            .and_then(|c| c.target)
+        {
             if let Some(target_pos) = self.foe_in_sight(target_serial, pos, facet, sight) {
                 if !in_range(pos, target_pos, MELEE_RANGE) {
                     if let Some(dir) = direction_toward(pos, target_pos) {
@@ -1806,8 +1719,8 @@ impl World {
         // Nothing to fight: look for prey, or wander.
         if sight > 0 {
             if let Some(prey) = self.nearest_player_in_sight(creature, pos, facet, sight) {
-                let next_swing = self.ticks + self.swing_speed(creature);
-                self.registry.insert(
+                let next_swing = self.state.ticks + self.swing_speed(creature);
+                self.state.registry.insert(
                     creature,
                     Combat {
                         warmode: true,
@@ -1818,17 +1731,18 @@ impl World {
                 return;
             }
         }
-        if wander && self.rng.below(8) < WANDER_IN_EIGHT {
+        if wander && self.state.rng.below(8) < WANDER_IN_EIGHT {
             // Walk on in the way it already faces, so it actually drifts rather
             // than spinning: a step in a new direction only *turns* (turn-as-step),
             // so picking a random heading every beat would never move. A quarter
             // of the time it does turn, to a new heading, and drifts off that way.
             let facing = self
+                .state
                 .registry
                 .get::<Heading>(creature)
                 .map_or(Direction::South, |h| h.0.direction);
-            let dir = if self.rng.below(4) == 0 {
-                Direction::from_bits(self.rng.below(8) as u8)
+            let dir = if self.state.rng.below(4) == 0 {
+                Direction::from_bits(self.state.rng.below(8) as u8)
             } else {
                 facing
             };
@@ -1839,13 +1753,14 @@ impl World {
     /// The position of `target` if it is still a live foe within `sight` of
     /// `from` on `facet`, or `None` if it has died, fled or vanished.
     fn foe_in_sight(&self, target: Serial, from: Point, facet: u8, sight: u8) -> Option<Point> {
-        let entity = self.registry.entity_of(target)?;
-        let &Position(pos) = self.registry.get::<Position>(entity)?;
+        let entity = self.state.registry.entity_of(target)?;
+        let &Position(pos) = self.state.registry.get::<Position>(entity)?;
         let alive = self
+            .state
             .registry
             .get::<Hitpoints>(entity)
             .is_some_and(|h| h.current > 0);
-        (alive && self.facet_of(entity) == facet && in_range(from, pos, u32::from(sight)))
+        (alive && self.state.facet_of(entity) == facet && in_range(from, pos, u32::from(sight)))
             .then_some(pos)
     }
 
@@ -1857,23 +1772,24 @@ impl World {
         facet: u8,
         sight: u8,
     ) -> Option<Serial> {
-        let sectors = &self.facet_state(facet).sectors;
+        let sectors = &self.state.facet_state(facet).sectors;
         let mut best: Option<(u32, Serial)> = None;
         for (id, pos) in sectors.nearby(from, u32::from(sight)) {
-            if id == creature || !self.registry.has::<Client>(id) {
+            if id == creature || !self.state.registry.has::<Client>(id) {
                 continue;
             }
             if !in_range(from, pos, u32::from(sight)) {
                 continue;
             }
             if self
+                .state
                 .registry
                 .get::<Hitpoints>(id)
                 .is_none_or(|h| h.current == 0)
             {
                 continue;
             }
-            let Some(serial) = self.registry.serial_of(id) else {
+            let Some(serial) = self.state.registry.serial_of(id) else {
                 continue;
             };
             let d = distance(from, pos);
@@ -1886,14 +1802,14 @@ impl World {
 
     /// Push a combatant's next swing out to `tick`.
     fn set_next_swing(&mut self, attacker: EntityId, tick: u64) {
-        if let Some(combat) = self.registry.get_mut::<Combat>(attacker) {
+        if let Some(combat) = self.state.registry.get_mut::<Combat>(attacker) {
             combat.next_swing = tick;
         }
     }
 
     /// Stop a combatant attacking whatever it was.
     fn clear_target(&mut self, attacker: EntityId) {
-        if let Some(combat) = self.registry.get_mut::<Combat>(attacker) {
+        if let Some(combat) = self.state.registry.get_mut::<Combat>(attacker) {
             combat.target = None;
         }
     }
@@ -1905,39 +1821,40 @@ impl World {
     /// a `0x77` carries notoriety, so everyone watching sees the attacker turn
     /// grey without anyone having to move.
     fn flag_criminal(&mut self, mobile: EntityId) {
-        let noto = self.notoriety_of(mobile);
+        let noto = self.state.notoriety_of(mobile);
         if noto != Notoriety::Innocent && noto != Notoriety::Criminal {
             return;
         }
         let already_grey = noto == Notoriety::Criminal;
-        self.registry.insert(mobile, Notoriety::Criminal);
-        self.registry.insert(
+        self.state.registry.insert(mobile, Notoriety::Criminal);
+        self.state.registry.insert(
             mobile,
             CriminalUntil {
-                tick: self.ticks + CRIMINAL_TICKS,
+                tick: self.state.ticks + CRIMINAL_TICKS,
             },
         );
         // Only the turn to grey needs redrawing; refreshing the timer changes no
         // colour.
         if !already_grey {
-            self.broadcast_move(mobile);
+            self.state.broadcast_move(mobile);
         }
     }
 
     /// Restore anyone whose criminal flag has run out to innocent, and redraw the
     /// blue for everyone watching. Runs each tick against the tick counter.
     fn expire_criminality(&mut self) {
-        let now = self.ticks;
+        let now = self.state.ticks;
         let expired: Vec<EntityId> = self
+            .state
             .registry
             .query::<CriminalUntil>()
             .filter(|(_, flag)| flag.tick <= now)
             .map(|(entity, _)| entity)
             .collect();
         for entity in expired {
-            self.registry.remove::<CriminalUntil>(entity);
-            self.registry.insert(entity, Notoriety::Innocent);
-            self.broadcast_move(entity);
+            self.state.registry.remove::<CriminalUntil>(entity);
+            self.state.registry.insert(entity, Notoriety::Innocent);
+            self.state.broadcast_move(entity);
         }
     }
 
@@ -1949,10 +1866,11 @@ impl World {
     /// now (no weapon properties yet). A mobile with neither swings at the
     /// default-dexterity wrestling pace.
     fn swing_speed(&self, mobile: EntityId) -> u64 {
-        if let Some(s) = self.registry.get::<SwingSpeed>(mobile) {
+        if let Some(s) = self.state.registry.get::<SwingSpeed>(mobile) {
             return s.ticks;
         }
         let dex = self
+            .state
             .registry
             .get::<Stats>(mobile)
             .map_or(DEFAULT_DEXTERITY, |s| s.dexterity);
@@ -1963,278 +1881,10 @@ impl World {
     /// [`MeleeDamage`], or the default. The target's resistance is applied later,
     /// in [`damage`](Self::damage), the one place all damage passes through.
     fn melee_blow(&self, attacker: EntityId) -> u16 {
-        self.registry
+        self.state
+            .registry
             .get::<MeleeDamage>(attacker)
             .map_or(SWING_DAMAGE, |d| d.amount)
-    }
-
-    /// Set a mobile's stats, and re-cap its hit points and mana to match. See
-    /// [`Command::SetStats`].
-    fn set_stats(&mut self, serial: u32, strength: u16, dexterity: u16, intelligence: u16) {
-        let Some(entity) = Serial::new(serial).and_then(|s| self.registry.entity_of(s)) else {
-            return;
-        };
-        self.registry.insert(
-            entity,
-            Stats {
-                strength,
-                dexterity,
-                intelligence,
-            },
-        );
-        // Strength caps hit points, intelligence mana; a lowered cap drags the
-        // current value down with it, a raised one leaves room to heal into.
-        if let Some(&Hitpoints { current, .. }) = self.registry.get::<Hitpoints>(entity) {
-            self.registry.insert(
-                entity,
-                Hitpoints {
-                    current: current.min(strength),
-                    max: strength,
-                },
-            );
-        }
-        if let Some(&Mana { current, .. }) = self.registry.get::<Mana>(entity) {
-            self.registry.insert(
-                entity,
-                Mana {
-                    current: current.min(intelligence),
-                    max: intelligence,
-                },
-            );
-        }
-    }
-
-    /// Set a mobile's skill value. See [`Command::SetSkill`].
-    fn set_skill(&mut self, serial: u32, skill: u8, value: u16) {
-        let Some(serial) = Serial::new(serial) else {
-            return;
-        };
-        let Some(entity) = self.registry.entity_of(serial) else {
-            return;
-        };
-        let mut skills = self
-            .registry
-            .get::<Skills>(entity)
-            .cloned()
-            .unwrap_or_default();
-        skills.set(skill, value.min(skills::SKILL_CAP));
-        self.registry.insert(entity, skills);
-    }
-
-    /// Use a skill against a difficulty: roll it, teach from it, announce it.
-    /// See [`Command::UseSkill`].
-    fn use_skill(&mut self, serial: u32, skill: u8, difficulty: u16) {
-        let Some(serial) = Serial::new(serial) else {
-            return;
-        };
-        let Some(entity) = self.registry.entity_of(serial) else {
-            return;
-        };
-        let success = self.roll_skill(entity, skill, difficulty);
-        let value = self
-            .registry
-            .get::<Skills>(entity)
-            .map_or(0, |s| s.get(skill));
-        self.bus.send(SkillUsed {
-            entity,
-            serial,
-            skill,
-            success,
-            value,
-        });
-    }
-
-    /// Roll a skill against a difficulty and teach from the attempt: returns
-    /// whether it passed, and bumps the value on a gain. The shared heart of
-    /// [`use_skill`](Self::use_skill) and [`cast_spell`](Self::cast_spell), so a
-    /// mined ore and a cast spell train the same way.
-    ///
-    /// The success draw comes before the gain draw, always, so the sequence is
-    /// fixed and the whole thing replays.
-    fn roll_skill(&mut self, entity: EntityId, skill: u8, difficulty: u16) -> bool {
-        let value = self
-            .registry
-            .get::<Skills>(entity)
-            .map_or(0, |s| s.get(skill));
-        let success = skills::success_chance(value, difficulty) >= self.rng.below(1000);
-        if value < skills::SKILL_CAP && self.rng.below(1000) < skills::gain_chance(value) {
-            let mut skills = self
-                .registry
-                .get::<Skills>(entity)
-                .cloned()
-                .unwrap_or_default();
-            skills.set(skill, value + 1);
-            self.registry.insert(entity, skills);
-        }
-        success
-    }
-
-    /// Cast a spell: pay the mana, roll the skill, announce it. See
-    /// [`Command::CastSpell`].
-    fn cast_spell(
-        &mut self,
-        serial: u32,
-        spell: u16,
-        target: u32,
-        mana: u16,
-        difficulty: u16,
-        skill: u8,
-    ) {
-        let Some(serial) = Serial::new(serial) else {
-            return;
-        };
-        let Some(caster) = self.registry.entity_of(serial) else {
-            return;
-        };
-        let have = self.registry.get::<Mana>(caster).map_or(0, |m| m.current);
-
-        // Not enough mana to pay for it — the spell fizzles, and nothing is spent.
-        if have < mana {
-            self.bus.send(SpellCast {
-                caster,
-                serial,
-                spell,
-                target,
-                success: false,
-            });
-            return;
-        }
-        if let Some(&Mana { current, max }) = self.registry.get::<Mana>(caster) {
-            self.registry.insert(
-                caster,
-                Mana {
-                    current: current - mana,
-                    max,
-                },
-            );
-        }
-        let success = self.roll_skill(caster, skill, difficulty);
-        self.bus.send(SpellCast {
-            caster,
-            serial,
-            spell,
-            target,
-            success,
-        });
-    }
-
-    /// A player says something. See [`Command::Say`].
-    fn say(&mut self, connection: ConnectionId, mode: u8, hue: u16, font: u16, text: &str) {
-        let Some(&player) = self.players.get(&connection) else {
-            return;
-        };
-        self.speak(player, mode, hue, font, text);
-    }
-
-    /// Put words over a mobile's head, for everyone in earshot, and say on the
-    /// bus that it spoke. The shared body of [`say`](Self::say) and
-    /// [`Command::Speak`].
-    fn speak(&mut self, entity: EntityId, mode: u8, hue: u16, font: u16, text: &str) {
-        let Some(serial) = self.registry.serial_of(entity) else {
-            return;
-        };
-        let Some(&Position(pos)) = self.registry.get::<Position>(entity) else {
-            return;
-        };
-        let facet = self.facet_of(entity);
-        let graphic = self
-            .registry
-            .get::<Body>(entity)
-            .map_or(NO_GRAPHIC, |b| b.id);
-        // Owned before the packet, so the immutable borrow of the name is done
-        // by the time the mutable outbox is touched.
-        let name = self
-            .registry
-            .get::<Name>(entity)
-            .map_or(String::new(), |n| n.0.clone());
-        // Latin-1 speech rides the universally-understood `0x1C`; anything ASCII
-        // cannot carry — an accent, a non-Latin script — has to go out as Unicode
-        // `0xAE`, and a player who typed it necessarily spoke `0xAD` to begin with.
-        let packet = if text.is_ascii() {
-            encode_message(serial.raw(), graphic, mode, hue, font, &name, text)
-        } else {
-            encode_unicode_message(
-                serial.raw(),
-                graphic,
-                mode,
-                hue,
-                font,
-                DEFAULT_LANGUAGE_TAG,
-                &name,
-                text,
-            )
-        };
-
-        let range = speech_range(mode);
-        let sectors = &self.facet_state(facet).sectors;
-        let listeners: Vec<EntityId> = sectors
-            .nearby(pos, range)
-            .filter(|(_, listener_pos)| in_range(pos, *listener_pos, range))
-            .map(|(id, _)| id)
-            .collect();
-        for listener in listeners {
-            if let Some(&Client { connection, .. }) = self.registry.get::<Client>(listener) {
-                self.outbox.push(Outbound {
-                    connection,
-                    packet: packet.clone(),
-                });
-            }
-        }
-        self.bus.send(MobileSpoke {
-            entity,
-            serial,
-            text: text.to_owned(),
-        });
-    }
-
-    /// Mend a mobile up toward its maximum. See [`Command::Heal`].
-    fn heal(&mut self, serial: u32, amount: u16) {
-        let Some(serial) = Serial::new(serial) else {
-            return;
-        };
-        let Some(entity) = self.registry.entity_of(serial) else {
-            return;
-        };
-        let Some(&Hitpoints { current, max }) = self.registry.get::<Hitpoints>(entity) else {
-            return;
-        };
-        let healed = current.saturating_add(amount).min(max);
-        if healed == current {
-            return;
-        }
-        self.registry.insert(
-            entity,
-            Hitpoints {
-                current: healed,
-                max,
-            },
-        );
-        self.broadcast_health(entity);
-    }
-
-    /// Trickle mana back for everyone who has any, one point each regen tick.
-    /// Runs against the tick counter, so it needs no clock and stays replayable.
-    fn regen_mana(&mut self) {
-        if !self.ticks.is_multiple_of(MANA_REGEN_TICKS) {
-            return;
-        }
-        let thirsty: Vec<EntityId> = self
-            .registry
-            .query::<Mana>()
-            .filter(|(_, mana)| mana.current < mana.max)
-            .map(|(entity, _)| entity)
-            .collect();
-        for entity in thirsty {
-            if let Some(&Mana { current, max }) = self.registry.get::<Mana>(entity) {
-                self.registry.insert(
-                    entity,
-                    Mana {
-                        current: (current + 1).min(max),
-                        max,
-                    },
-                );
-            }
-        }
     }
 
     /// Set an item's decay clock: it rots [`DECAY_TICKS`] from now. Every loose
@@ -2243,13 +1893,13 @@ impl World {
     /// is also why a container picked up and set back down does not start
     /// rotting.
     fn mark_decay(&mut self, item: EntityId) {
-        if self.registry.has::<Container>(item) {
+        if self.state.registry.has::<Container>(item) {
             return;
         }
-        self.registry.insert(
+        self.state.registry.insert(
             item,
             Decays {
-                at_tick: self.ticks + DECAY_TICKS,
+                at_tick: self.state.ticks + DECAY_TICKS,
             },
         );
     }
@@ -2260,38 +1910,39 @@ impl World {
     /// ignored rather than answered, because "use" for a door or a food is a
     /// later rule and a wrong guess is worse than silence.
     fn double_click(&mut self, connection: ConnectionId, serial: u32) {
-        let Some(&player) = self.players.get(&connection) else {
+        let Some(&player) = self.state.players.get(&connection) else {
             return;
         };
         let Some(item_serial) = Serial::new(serial) else {
             return;
         };
-        let Some(item) = self.registry.entity_of(item_serial) else {
+        let Some(item) = self.state.registry.entity_of(item_serial) else {
             return;
         };
-        let Some(&Container { gump }) = self.registry.get::<Container>(item) else {
+        let Some(&Container { gump }) = self.state.registry.get::<Container>(item) else {
             return;
         };
         // The container has to be in reach on the ground. Nesting — opening one
         // out of another already open — is a later refinement.
-        let Some(&Position(item_pos)) = self.registry.get::<Position>(item) else {
+        let Some(&Position(item_pos)) = self.state.registry.get::<Position>(item) else {
             return;
         };
-        let Some(&Position(player_pos)) = self.registry.get::<Position>(player) else {
+        let Some(&Position(player_pos)) = self.state.registry.get::<Position>(player) else {
             return;
         };
-        if self.facet_of(item) != self.facet_of(player)
+        if self.state.facet_of(item) != self.state.facet_of(player)
             || !in_range(item_pos, player_pos, ITEM_REACH)
         {
             return;
         }
-        let Some(&Client { version, .. }) = self.registry.get::<Client>(player) else {
+        let Some(&Client { version, .. }) = self.state.registry.get::<Client>(player) else {
             return;
         };
 
         let contents = self.contents_of(item_serial);
-        self.send(connection, encode_open_container(serial, gump, version));
-        self.send(
+        self.state
+            .send(connection, encode_open_container(serial, gump, version));
+        self.state.send(
             connection,
             encode_container_contents(serial, &contents, version),
         );
@@ -2300,7 +1951,8 @@ impl World {
 
     /// Everything inside a container, as the wire records `0x3C`/`0x25` need.
     fn contents_of(&self, container: Serial) -> Vec<ContainedItem> {
-        self.registry
+        self.state
+            .registry
             .query::<Contained>()
             .filter(|(_, held)| held.container == container)
             .filter_map(|(entity, _)| self.contained_record(entity))
@@ -2309,7 +1961,8 @@ impl World {
 
     /// How many items a container already holds — the next free grid slot.
     fn item_count(&self, container: Serial) -> u8 {
-        self.registry
+        self.state
+            .registry
             .query::<Contained>()
             .filter(|(_, held)| held.container == container)
             .count()
@@ -2320,10 +1973,10 @@ impl World {
     fn equip_item(&mut self, connection: ConnectionId, item: u32, layer: u8, mobile: u32) {
         // Equipping is a *drop* of the dragged item, so there has to be one, and
         // it has to be the item named.
-        let Some(held) = self.held.get(&connection).copied() else {
+        let Some(held) = self.state.held.get(&connection).copied() else {
             return;
         };
-        if self.registry.serial_of(held.entity) != Serial::new(item) {
+        if self.state.registry.serial_of(held.entity) != Serial::new(item) {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         }
@@ -2333,28 +1986,28 @@ impl World {
         }
         let (Some(wearer_serial), Some(wearer)) = (
             Serial::new(mobile),
-            Serial::new(mobile).and_then(|s| self.registry.entity_of(s)),
+            Serial::new(mobile).and_then(|s| self.state.registry.entity_of(s)),
         ) else {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         };
         // Only a mobile wears things, and only within reach of the player.
-        let Some(&player) = self.players.get(&connection) else {
+        let Some(&player) = self.state.players.get(&connection) else {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         };
         let (Some(&Position(wearer_pos)), Some(&Position(player_pos))) = (
-            self.registry.get::<Position>(wearer),
-            self.registry.get::<Position>(player),
+            self.state.registry.get::<Position>(wearer),
+            self.state.registry.get::<Position>(player),
         ) else {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         };
-        if !self.registry.has::<Body>(wearer) {
+        if !self.state.registry.has::<Body>(wearer) {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         }
-        if self.facet_of(wearer) != self.facet_of(player)
+        if self.state.facet_of(wearer) != self.state.facet_of(player)
             || !in_range(wearer_pos, player_pos, ITEM_REACH)
         {
             self.bounce(connection, held, DragCancelReason::OutOfRange);
@@ -2366,8 +2019,8 @@ impl World {
             return;
         }
 
-        self.held.remove(&connection);
-        self.registry.insert(
+        self.state.held.remove(&connection);
+        self.state.registry.insert(
             held.entity,
             Equipped {
                 mobile: wearer_serial,
@@ -2380,7 +2033,8 @@ impl World {
 
     /// Whether a mobile already wears something on a layer.
     fn layer_taken(&self, mobile: Serial, layer: u8) -> bool {
-        self.registry
+        self.state
+            .registry
             .query::<Equipped>()
             .any(|(_, worn)| worn.mobile == mobile && worn.layer == layer)
     }
@@ -2392,8 +2046,8 @@ impl World {
             return;
         };
         for watcher in self.equip_audience(mobile) {
-            if let Some(&Client { connection, .. }) = self.registry.get::<Client>(watcher) {
-                self.outbox.push(Outbound {
+            if let Some(&Client { connection, .. }) = self.state.registry.get::<Client>(watcher) {
+                self.state.outbox.push(Outbound {
                     connection,
                     packet: packet.clone(),
                 });
@@ -2404,16 +2058,16 @@ impl World {
     /// Everyone who should hear about a change to `mobile`'s outfit: those who
     /// can see it, and the mobile itself.
     fn equip_audience(&self, mobile: EntityId) -> Vec<EntityId> {
-        let mut audience = self.watchers_of(mobile);
+        let mut audience = self.state.watchers_of(mobile);
         audience.push(mobile);
         audience
     }
 
     /// Build the `0x2E` for a worn item.
     fn equip_packet(&self, item: EntityId) -> Option<Vec<u8>> {
-        let serial = self.registry.serial_of(item)?;
-        let Equipped { mobile, layer } = *self.registry.get::<Equipped>(item)?;
-        let Graphic { id, hue } = *self.registry.get::<Graphic>(item)?;
+        let serial = self.state.registry.serial_of(item)?;
+        let Equipped { mobile, layer } = *self.state.registry.get::<Equipped>(item)?;
+        let Graphic { id, hue } = *self.state.registry.get::<Graphic>(item)?;
         Some(encode_equip(serial.raw(), id, layer, mobile.raw(), hue))
     }
 
@@ -2425,8 +2079,8 @@ impl World {
     /// [`show`](Self::show) picks the packet — `0x1A` for an item, `0x78` for a
     /// mobile — so this serves both.
     fn reveal(&mut self, entity: EntityId) {
-        let facet = self.facet_of(entity);
-        let sectors = &self.facet_state(facet).sectors;
+        let facet = self.state.facet_of(entity);
+        let sectors = &self.state.facet_state(facet).sectors;
         let Some(centre) = sectors.position_of(entity) else {
             return;
         };
@@ -2436,16 +2090,16 @@ impl World {
             .filter(|id| *id != entity)
             .collect();
         for watcher in watchers {
-            self.show(watcher, entity);
+            self.state.show(watcher, entity);
         }
     }
 
     /// Lift an item onto a client's cursor. See [`Command::PickUpItem`].
     fn pick_up(&mut self, connection: ConnectionId, serial: u32, amount: u16) {
-        let Some(&player) = self.players.get(&connection) else {
+        let Some(&player) = self.state.players.get(&connection) else {
             return;
         };
-        if self.held.contains_key(&connection) {
+        if self.state.held.contains_key(&connection) {
             self.reject_drag(connection, DragCancelReason::AlreadyHolding);
             return;
         }
@@ -2453,25 +2107,25 @@ impl World {
             self.reject_drag(connection, DragCancelReason::CannotLift);
             return;
         };
-        let Some(item) = self.registry.entity_of(item_serial) else {
+        let Some(item) = self.state.registry.entity_of(item_serial) else {
             self.reject_drag(connection, DragCancelReason::CannotLift);
             return;
         };
         // Only a thing with a graphic is an item. A mobile has none, so this
         // rejects trying to pick up a person.
-        if !self.registry.has::<Graphic>(item) {
+        if !self.state.registry.has::<Graphic>(item) {
             self.reject_drag(connection, DragCancelReason::CannotLift);
             return;
         }
 
         // Where it is now decides how it is lifted and where a cancelled drag
         // will put it back.
-        if let Some(&Position(item_pos)) = self.registry.get::<Position>(item) {
-            let Some(&Position(player_pos)) = self.registry.get::<Position>(player) else {
+        if let Some(&Position(item_pos)) = self.state.registry.get::<Position>(item) {
+            let Some(&Position(player_pos)) = self.state.registry.get::<Position>(player) else {
                 return;
             };
-            let facet = self.facet_of(item);
-            if facet != self.facet_of(player) || !in_range(item_pos, player_pos, ITEM_REACH) {
+            let facet = self.state.facet_of(item);
+            if facet != self.state.facet_of(player) || !in_range(item_pos, player_pos, ITEM_REACH) {
                 self.reject_drag(connection, DragCancelReason::OutOfRange);
                 return;
             }
@@ -2480,26 +2134,26 @@ impl World {
             // keeps its serial and goes to the cursor — the client's drag and its
             // eventual drop still name it — so only the leftover is a new object.
             let total = self.amount_of(item);
-            if amount > 0 && amount < total && self.registry.has::<Stackable>(item) {
+            if amount > 0 && amount < total && self.state.registry.has::<Stackable>(item) {
                 self.spawn_leftover(item, total - amount, item_pos, facet);
                 self.set_stack_amount(item, amount);
             }
             // Off the sector grid, off every screen but the picker's — whose own
             // client already put it on the cursor, so a 0x1D there would fight it.
-            self.facet_state_mut(facet).sectors.remove(item);
-            for watcher in self.watchers_of(item) {
+            self.state.facet_state_mut(facet).sectors.remove(item);
+            for watcher in self.state.watchers_of(item) {
                 if watcher == player {
-                    if let Some(seen) = self.seen.get_mut(&player) {
+                    if let Some(seen) = self.state.seen.get_mut(&player) {
                         seen.remove(&item);
                     }
                 } else {
-                    self.forget(watcher, item, item_serial);
+                    self.state.forget(watcher, item, item_serial);
                 }
             }
-            self.registry.remove::<Position>(item);
+            self.state.registry.remove::<Position>(item);
             // Off the ground, off the decay clock.
-            self.registry.remove::<Decays>(item);
-            self.held.insert(
+            self.state.registry.remove::<Decays>(item);
+            self.state.held.insert(
                 connection,
                 HeldItem {
                     entity: item,
@@ -2509,38 +2163,38 @@ impl World {
                     },
                 },
             );
-        } else if let Some(&contained) = self.registry.get::<Contained>(item) {
+        } else if let Some(&contained) = self.state.registry.get::<Contained>(item) {
             // Out of a container. The client with the gump open removes it from
             // the gump itself; the server just drops the containment.
-            self.registry.remove::<Contained>(item);
-            self.held.insert(
+            self.state.registry.remove::<Contained>(item);
+            self.state.held.insert(
                 connection,
                 HeldItem {
                     entity: item,
                     origin: Origin::Container(contained),
                 },
             );
-        } else if let Some(&worn) = self.registry.get::<Equipped>(item) {
+        } else if let Some(&worn) = self.state.registry.get::<Equipped>(item) {
             // Off a mobile. The picker's own client drags it off the paperdoll;
             // everyone else watching the mobile is told to forget it, because
             // they knew it only as part of that mobile.
-            self.registry.remove::<Equipped>(item);
-            if let Some(mobile) = self.registry.entity_of(worn.mobile) {
+            self.state.registry.remove::<Equipped>(item);
+            if let Some(mobile) = self.state.registry.entity_of(worn.mobile) {
                 for watcher in self.equip_audience(mobile) {
                     if watcher == player {
                         continue;
                     }
                     if let Some(&Client { connection: to, .. }) =
-                        self.registry.get::<Client>(watcher)
+                        self.state.registry.get::<Client>(watcher)
                     {
-                        self.outbox.push(Outbound {
+                        self.state.outbox.push(Outbound {
                             connection: to,
                             packet: encode_remove(item_serial.raw()),
                         });
                     }
                 }
             }
-            self.held.insert(
+            self.state.held.insert(
                 connection,
                 HeldItem {
                     entity: item,
@@ -2564,13 +2218,13 @@ impl World {
         position: Point,
         container: u32,
     ) {
-        let Some(held) = self.held.get(&connection).copied() else {
+        let Some(held) = self.state.held.get(&connection).copied() else {
             // Nothing on the cursor — a stray 0x08, nothing to bounce.
             return;
         };
         // The serial has to be the thing actually held; a mismatch is a confused
         // client, and the safe answer is to give it back what it was holding.
-        if self.registry.serial_of(held.entity) != Serial::new(serial) {
+        if self.state.registry.serial_of(held.entity) != Serial::new(serial) {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         }
@@ -2581,11 +2235,11 @@ impl World {
         }
 
         // Onto the ground: within reach of the player, on the player's facet.
-        let Some(&player) = self.players.get(&connection) else {
+        let Some(&player) = self.state.players.get(&connection) else {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         };
-        let Some(&Position(player_pos)) = self.registry.get::<Position>(player) else {
+        let Some(&Position(player_pos)) = self.state.registry.get::<Position>(player) else {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         };
@@ -2594,8 +2248,8 @@ impl World {
             return;
         }
 
-        self.held.remove(&connection);
-        self.place_on_ground(held.entity, position, self.facet_of(player));
+        self.state.held.remove(&connection);
+        self.place_on_ground(held.entity, position, self.state.facet_of(player));
         debug!(serial, "dropped on the ground");
     }
 
@@ -2611,29 +2265,30 @@ impl World {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         };
-        let Some(container_entity) = self.registry.entity_of(container_serial) else {
+        let Some(container_entity) = self.state.registry.entity_of(container_serial) else {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         };
-        if !self.registry.has::<Container>(container_entity) {
+        if !self.state.registry.has::<Container>(container_entity) {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         }
-        let Some(&player) = self.players.get(&connection) else {
+        let Some(&player) = self.state.players.get(&connection) else {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         };
         // The container has to be a reachable one on the ground. Dropping into a
         // container that is itself inside another is a later refinement.
-        let Some(&Position(container_pos)) = self.registry.get::<Position>(container_entity) else {
+        let Some(&Position(container_pos)) = self.state.registry.get::<Position>(container_entity)
+        else {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         };
-        let Some(&Position(player_pos)) = self.registry.get::<Position>(player) else {
+        let Some(&Position(player_pos)) = self.state.registry.get::<Position>(player) else {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         };
-        if self.facet_of(container_entity) != self.facet_of(player)
+        if self.state.facet_of(container_entity) != self.state.facet_of(player)
             || !in_range(container_pos, player_pos, ITEM_REACH)
         {
             self.bounce(connection, held, DragCancelReason::OutOfRange);
@@ -2642,8 +2297,8 @@ impl World {
 
         // In it goes. The drop's `x`/`y` are gump coordinates, not world tiles.
         let grid = self.item_count(container_serial);
-        self.held.remove(&connection);
-        self.registry.insert(
+        self.state.held.remove(&connection);
+        self.state.registry.insert(
             held.entity,
             Contained {
                 container: container_serial,
@@ -2654,10 +2309,10 @@ impl World {
         );
         // Tell the client, whose gump is open, that the item is now inside.
         if let (Some(&Client { version, .. }), Some(record)) = (
-            self.registry.get::<Client>(player),
+            self.state.registry.get::<Client>(player),
             self.contained_record(held.entity),
         ) {
-            self.send(
+            self.state.send(
                 connection,
                 encode_add_to_container(record, container, version),
             );
@@ -2674,9 +2329,9 @@ impl World {
         position: Point,
         target_serial: u32,
     ) {
-        let target = Serial::new(target_serial).and_then(|s| self.registry.entity_of(s));
+        let target = Serial::new(target_serial).and_then(|s| self.state.registry.entity_of(s));
         match target {
-            Some(target) if self.registry.has::<Container>(target) => {
+            Some(target) if self.state.registry.has::<Container>(target) => {
                 self.drop_into_container(connection, held, position, target_serial);
             }
             Some(target) if self.can_stack(held.entity, target) => {
@@ -2690,28 +2345,28 @@ impl World {
     /// graphic and hue, and not the same entity.
     fn can_stack(&self, a: EntityId, b: EntityId) -> bool {
         a != b
-            && self.registry.has::<Stackable>(a)
-            && self.registry.has::<Stackable>(b)
-            && self.registry.get::<Graphic>(a) == self.registry.get::<Graphic>(b)
+            && self.state.registry.has::<Stackable>(a)
+            && self.state.registry.has::<Stackable>(b)
+            && self.state.registry.get::<Graphic>(a) == self.state.registry.get::<Graphic>(b)
     }
 
     /// Merge a held stack onto a stack on the ground. See [`can_stack`](Self::can_stack).
     fn merge_onto(&mut self, connection: ConnectionId, held: HeldItem, target: EntityId) {
         // Only ground stacks merge for now; merging onto a stack inside a
         // container is a later refinement, and until then it bounces.
-        let Some(&Position(target_pos)) = self.registry.get::<Position>(target) else {
+        let Some(&Position(target_pos)) = self.state.registry.get::<Position>(target) else {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         };
-        let Some(&player) = self.players.get(&connection) else {
+        let Some(&player) = self.state.players.get(&connection) else {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         };
-        let Some(&Position(player_pos)) = self.registry.get::<Position>(player) else {
+        let Some(&Position(player_pos)) = self.state.registry.get::<Position>(player) else {
             self.bounce(connection, held, DragCancelReason::Other);
             return;
         };
-        if self.facet_of(target) != self.facet_of(player)
+        if self.state.facet_of(target) != self.state.facet_of(player)
             || !in_range(target_pos, player_pos, ITEM_REACH)
         {
             self.bounce(connection, held, DragCancelReason::OutOfRange);
@@ -2723,26 +2378,26 @@ impl World {
             .amount_of(held.entity)
             .saturating_add(self.amount_of(target));
         self.set_stack_amount(target, total);
-        self.held.remove(&connection);
+        self.state.held.remove(&connection);
         // The dragged stack is gone into the other; it was on a cursor, on
         // nobody's ground, so despawning it needs no packet.
-        self.registry.despawn(held.entity);
+        self.state.registry.despawn(held.entity);
         self.redraw_ground_item(target);
         debug!(total, "stacks merged");
     }
 
     /// How many an item is: its [`Amount`], or one if it has none.
     fn amount_of(&self, item: EntityId) -> u16 {
-        self.registry.get::<Amount>(item).map_or(1, |a| a.0)
+        self.state.registry.get::<Amount>(item).map_or(1, |a| a.0)
     }
 
     /// Set a stack's size, keeping the "a single carries no `Amount`" rule that
     /// [`spawn_item`](Self::spawn_item) and the `0x1A` encoder both rely on.
     fn set_stack_amount(&mut self, item: EntityId, amount: u16) {
         if amount > 1 {
-            self.registry.insert(item, Amount(amount));
+            self.state.registry.insert(item, Amount(amount));
         } else {
-            self.registry.remove::<Amount>(item);
+            self.state.registry.remove::<Amount>(item);
         }
     }
 
@@ -2752,23 +2407,24 @@ impl World {
     /// and the copy is what the ground is left with. Straight from Sphere's
     /// `CItem::UnStackSplit`.
     fn spawn_leftover(&mut self, original: EntityId, amount: u16, position: Point, facet: u8) {
-        let Some(&Graphic { id, hue }) = self.registry.get::<Graphic>(original) else {
+        let Some(&Graphic { id, hue }) = self.state.registry.get::<Graphic>(original) else {
             return;
         };
-        let leftover = match self.registry.spawn_with_serial(SerialKind::Item) {
+        let leftover = match self.state.registry.spawn_with_serial(SerialKind::Item) {
             Ok((entity, _)) => entity,
             Err(error) => {
                 warn!(?error, "out of item serials; a split remainder is lost");
                 return;
             }
         };
-        self.registry.insert(leftover, Graphic { id, hue });
-        self.registry.insert(leftover, Stackable);
+        self.state.registry.insert(leftover, Graphic { id, hue });
+        self.state.registry.insert(leftover, Stackable);
         self.set_stack_amount(leftover, amount);
-        self.registry.insert(leftover, Position(position));
-        self.registry.insert(leftover, Facet(facet));
+        self.state.registry.insert(leftover, Position(position));
+        self.state.registry.insert(leftover, Facet(facet));
         self.mark_decay(leftover);
-        self.facet_state_mut(facet)
+        self.state
+            .facet_state_mut(facet)
             .sectors
             .insert(leftover, position);
         self.reveal(leftover);
@@ -2777,16 +2433,16 @@ impl World {
     /// Re-send a ground item to everyone already watching it — for when its
     /// amount changed and the `seen` set would otherwise suppress the redraw.
     fn redraw_ground_item(&mut self, item: EntityId) {
-        for watcher in self.watchers_of(item) {
+        for watcher in self.state.watchers_of(item) {
             let Some(&Client {
                 connection,
                 version,
-            }) = self.registry.get::<Client>(watcher)
+            }) = self.state.registry.get::<Client>(watcher)
             else {
                 continue;
             };
-            if let Some(packet) = self.draw_packet(item, version) {
-                self.outbox.push(Outbound { connection, packet });
+            if let Some(packet) = self.state.draw_packet(item, version) {
+                self.state.outbox.push(Outbound { connection, packet });
             }
         }
     }
@@ -2794,23 +2450,24 @@ impl World {
     /// Remove every ground item whose decay tick has arrived. Runs each tick,
     /// against [`ticks`](Self::ticks), so it reads no clock.
     fn decay(&mut self) {
-        let now = self.ticks;
+        let now = self.state.ticks;
         let expired: Vec<EntityId> = self
+            .state
             .registry
             .query::<Decays>()
             .filter(|(_, decays)| decays.at_tick <= now)
             .map(|(entity, _)| entity)
             .collect();
         for item in expired {
-            let Some(serial) = self.registry.serial_of(item) else {
+            let Some(serial) = self.state.registry.serial_of(item) else {
                 continue;
             };
-            let facet = self.facet_of(item);
-            for watcher in self.watchers_of(item) {
-                self.forget(watcher, item, serial);
+            let facet = self.state.facet_of(item);
+            for watcher in self.state.watchers_of(item) {
+                self.state.forget(watcher, item, serial);
             }
-            self.facet_state_mut(facet).sectors.remove(item);
-            self.registry.despawn(item);
+            self.state.facet_state_mut(facet).sectors.remove(item);
+            self.state.registry.despawn(item);
             debug!(%serial, "decayed");
         }
     }
@@ -2818,7 +2475,7 @@ impl World {
     /// Put a held item back where it was lifted and tell the client the drag is
     /// off, so it stops showing the item on the cursor.
     fn bounce(&mut self, connection: ConnectionId, held: HeldItem, reason: DragCancelReason) {
-        self.held.remove(&connection);
+        self.state.held.remove(&connection);
         self.restore(held);
         self.reject_drag(connection, reason);
     }
@@ -2831,12 +2488,12 @@ impl World {
                 self.place_on_ground(held.entity, position, facet);
             }
             Origin::Container(contained) => {
-                self.registry.insert(held.entity, contained);
+                self.state.registry.insert(held.entity, contained);
             }
             Origin::Worn(worn) => {
-                self.registry.insert(held.entity, worn);
+                self.state.registry.insert(held.entity, worn);
                 // Back on the mobile, and back on every screen that shows it.
-                if let Some(mobile) = self.registry.entity_of(worn.mobile) {
+                if let Some(mobile) = self.state.registry.entity_of(worn.mobile) {
                     self.broadcast_equip(held.entity, mobile);
                 }
             }
@@ -2845,10 +2502,10 @@ impl World {
 
     /// Build the `0x25`/`0x3C` record for one contained item.
     fn contained_record(&self, entity: EntityId) -> Option<ContainedItem> {
-        let serial = self.registry.serial_of(entity)?;
-        let Contained { x, y, grid, .. } = *self.registry.get::<Contained>(entity)?;
-        let Graphic { id, hue } = *self.registry.get::<Graphic>(entity)?;
-        let amount = self.registry.get::<Amount>(entity).map_or(1, |a| a.0);
+        let serial = self.state.registry.serial_of(entity)?;
+        let Contained { x, y, grid, .. } = *self.state.registry.get::<Contained>(entity)?;
+        let Graphic { id, hue } = *self.state.registry.get::<Graphic>(entity)?;
+        let amount = self.state.registry.get::<Amount>(entity).map_or(1, |a| a.0);
         Some(ContainedItem {
             serial: serial.raw(),
             graphic: id,
@@ -2862,16 +2519,19 @@ impl World {
 
     /// Send a `0x27`, cancelling whatever drag the client thinks it has.
     fn reject_drag(&mut self, connection: ConnectionId, reason: DragCancelReason) {
-        self.send(connection, encode_drag_cancel(reason));
+        self.state.send(connection, encode_drag_cancel(reason));
     }
 
     /// Land an item on the ground at `position` and draw it for everyone in range.
     fn place_on_ground(&mut self, item: EntityId, position: Point, facet: u8) {
-        self.registry.insert(item, Position(position));
-        self.registry.insert(item, Facet(facet));
+        self.state.registry.insert(item, Position(position));
+        self.state.registry.insert(item, Facet(facet));
         // Back on the ground, back on the decay clock.
         self.mark_decay(item);
-        self.facet_state_mut(facet).sectors.insert(item, position);
+        self.state
+            .facet_state_mut(facet)
+            .sectors
+            .insert(item, position);
         self.reveal(item);
     }
 
@@ -2879,279 +2539,52 @@ impl World {
         // A client that logs out mid-drag would otherwise leave its item nowhere —
         // off the ground and out of any container, on a cursor that is gone. Put
         // it back where it was.
-        if let Some(held) = self.held.remove(&connection) {
+        if let Some(held) = self.state.held.remove(&connection) {
             self.restore(held);
         }
 
-        let Some(entity) = self.players.remove(&connection) else {
+        let Some(entity) = self.state.players.remove(&connection) else {
             return;
         };
-        let serial = self.registry.serial_of(entity);
-        let facet = self.facet_of(entity);
+        let serial = self.state.registry.serial_of(entity);
+        let facet = self.state.facet_of(entity);
 
         // Save before despawning, and not by marking it dirty: a `touch` is a
         // promise to read the entity at the next save, and in a moment there
         // will be no entity to read. Logging out is when a save matters most —
         // it is the only moment a player's whole session is at stake — so the
         // record is taken at the one instant it still can be.
-        if let Some(record) = Self::record_of(&self.registry, entity) {
+        if let Some(record) = Self::record_of(&self.state.registry, entity) {
             self.journal.keep(record);
         }
 
         // Take it off every screen *before* despawning: once the entity is gone
         // its serial is released and there is nothing left to tell anyone about.
         if let Some(serial) = serial {
-            for watcher in self.watchers_of(entity) {
-                self.forget(watcher, entity, serial);
+            for watcher in self.state.watchers_of(entity) {
+                self.state.forget(watcher, entity, serial);
             }
         }
-        self.seen.remove(&entity);
-        self.facet_state_mut(facet).sectors.remove(entity);
-        self.registry.despawn(entity);
+        self.state.seen.remove(&entity);
+        self.state.facet_state_mut(facet).sectors.remove(entity);
+        self.state.registry.despawn(entity);
 
         if let Some(serial) = serial {
-            self.bus.send(PlayerLeft { entity, serial });
+            self.state.bus.send(PlayerLeft { entity, serial });
             info!(%serial, "left the world");
         }
-    }
-
-    // -- interest management ----------------------------------------------
-
-    /// Every player who currently has `entity` on screen.
-    fn watchers_of(&self, entity: EntityId) -> Vec<EntityId> {
-        self.seen
-            .iter()
-            .filter(|(watcher, seen)| **watcher != entity && seen.contains(&entity))
-            .map(|(watcher, _)| *watcher)
-            .collect()
-    }
-
-    /// Bring `entity`'s neighbourhood up to date, both ways.
-    ///
-    /// Whoever it can see, and whoever can see it. Both, because visibility is
-    /// symmetric here and doing one direction leaves the other end with a mobile
-    /// that walked away and never left the screen.
-    fn refresh_around(&mut self, entity: EntityId) {
-        // Only this entity's facet: two mobiles on different facets share no
-        // sector grid, so a lookup here never turns up anyone on another one.
-        let facet = self.facet_of(entity);
-        let sectors = &self.facet_state(facet).sectors;
-        let Some(centre) = sectors.position_of(entity) else {
-            return;
-        };
-
-        // Collect first. The lookup borrows the index and the sends borrow
-        // `self` mutably, and more importantly a `Vec` here is what makes the
-        // set of neighbours a snapshot rather than something that shifts while
-        // it is walked.
-        let neighbours: Vec<EntityId> = sectors
-            .nearby(centre, VIEW_RANGE)
-            .map(|(id, _)| id)
-            .filter(|id| *id != entity)
-            .collect();
-
-        for other in &neighbours {
-            self.show(entity, *other);
-            self.show(*other, entity);
-        }
-
-        // Anything this one used to see and no longer can. `nearby` says who is
-        // close; only the remembered set says who *was*.
-        let gone: Vec<EntityId> = self
-            .seen
-            .get(&entity)
-            .map(|seen| {
-                seen.iter()
-                    .filter(|id| !neighbours.contains(id))
-                    .copied()
-                    .collect()
-            })
-            .unwrap_or_default();
-        for other in gone {
-            if let Some(serial) = self.registry.serial_of(other) {
-                self.forget(entity, other, serial);
-            }
-        }
-
-        // And anyone who used to see this one and no longer can.
-        for watcher in self.watchers_of(entity) {
-            if !neighbours.contains(&watcher) {
-                if let Some(serial) = self.registry.serial_of(entity) {
-                    self.forget(watcher, entity, serial);
-                }
-            }
-        }
-
-        self.broadcast_move(entity);
-    }
-
-    /// Tell everyone already watching `entity` that it moved.
-    ///
-    /// Only those who already have it: someone seeing it for the first time gets
-    /// a `0x78` from [`World::show`], and a `0x77` for a mobile the client has
-    /// never heard of is ignored.
-    fn broadcast_move(&mut self, entity: EntityId) {
-        let Some(packet) = self.mobile_move(entity) else {
-            return;
-        };
-        for watcher in self.watchers_of(entity) {
-            let Some(&Client {
-                connection,
-                version,
-            }) = self.registry.get::<Client>(watcher)
-            else {
-                continue;
-            };
-            self.outbox.push(Outbound {
-                connection,
-                packet: packet.encode(version),
-            });
-        }
-    }
-
-    /// Draw `other` for `watcher`, if it is not already on screen.
-    fn show(&mut self, watcher: EntityId, other: EntityId) {
-        // Only players have screens. An NPC "seeing" someone is an AI question,
-        // and it does not belong in the packet path.
-        let Some(&Client {
-            connection,
-            version,
-        }) = self.registry.get::<Client>(watcher)
-        else {
-            return;
-        };
-        if self
-            .seen
-            .get(&watcher)
-            .is_some_and(|seen| seen.contains(&other))
-        {
-            return;
-        }
-        let Some(packet) = self.draw_packet(other, version) else {
-            return;
-        };
-        self.seen.entry(watcher).or_default().insert(other);
-        self.outbox.push(Outbound { connection, packet });
-    }
-
-    /// The packet that draws `entity` on a client, or `None` for something not
-    /// drawable. A mobile is a `0x78`, an item a `0x1A` — the interest system
-    /// does not care which, only that there is one packet per thing on screen.
-    fn draw_packet(&self, entity: EntityId, version: ClientVersion) -> Option<Vec<u8>> {
-        if self.registry.has::<Body>(entity) {
-            Some(self.mobile_incoming(entity)?.encode(version))
-        } else if self.registry.has::<Graphic>(entity) {
-            Some(self.world_item(entity)?.encode())
-        } else {
-            None
-        }
-    }
-
-    /// Build a `0x1A` for an entity, if it is a drawable item.
-    fn world_item(&self, entity: EntityId) -> Option<WorldItem> {
-        let serial = self.registry.serial_of(entity)?;
-        let Graphic { id, hue } = *self.registry.get::<Graphic>(entity)?;
-        let Position(position) = *self.registry.get::<Position>(entity)?;
-        // No `Amount` means a single. The encoder treats 1 and absent the same.
-        let amount = self.registry.get::<Amount>(entity).map_or(1, |a| a.0);
-        Some(WorldItem {
-            serial: serial.raw(),
-            graphic: id,
-            amount,
-            position,
-            hue,
-        })
-    }
-
-    /// Take `other` off `watcher`'s screen.
-    fn forget(&mut self, watcher: EntityId, other: EntityId, serial: openshard_entities::Serial) {
-        if let Some(seen) = self.seen.get_mut(&watcher) {
-            if !seen.remove(&other) {
-                return;
-            }
-        } else {
-            return;
-        }
-        if let Some(&Client { connection, .. }) = self.registry.get::<Client>(watcher) {
-            self.outbox.push(Outbound {
-                connection,
-                packet: encode_remove(serial.raw()),
-            });
-        }
-    }
-
-    /// A mobile's standing — the colour of its health bar. Absent reads as
-    /// [`Notoriety::Innocent`], a blue bar, the safe default.
-    fn notoriety_of(&self, entity: EntityId) -> Notoriety {
-        self.registry
-            .get::<Notoriety>(entity)
-            .copied()
-            .unwrap_or(Notoriety::Innocent)
-    }
-
-    /// Build a 0x78 for an entity, if it is a drawable mobile.
-    fn mobile_incoming(&self, entity: EntityId) -> Option<MobileIncoming> {
-        let serial = self.registry.serial_of(entity)?;
-        let Position(position) = *self.registry.get::<Position>(entity)?;
-        let Heading(facing) = *self.registry.get::<Heading>(entity)?;
-        let body = *self.registry.get::<Body>(entity)?;
-        Some(MobileIncoming {
-            serial: serial.raw(),
-            body: body.id,
-            position,
-            facing,
-            hue: body.hue,
-            flags: 0,
-            notoriety: self.notoriety_of(entity),
-            equipment: self.equipment_of(serial),
-        })
-    }
-
-    /// What a mobile is wearing, as the `0x78` equipment list.
-    fn equipment_of(&self, mobile: Serial) -> Vec<Equipment> {
-        self.registry
-            .query::<Equipped>()
-            .filter(|(_, worn)| worn.mobile == mobile)
-            .filter_map(|(item, worn)| {
-                let serial = self.registry.serial_of(item)?;
-                let Graphic { id, hue } = *self.registry.get::<Graphic>(item)?;
-                Some(Equipment {
-                    serial: serial.raw(),
-                    graphic: id,
-                    layer: worn.layer,
-                    hue,
-                })
-            })
-            .collect()
-    }
-
-    /// Build a 0x77 for an entity.
-    fn mobile_move(&self, entity: EntityId) -> Option<MobileMove> {
-        let serial = self.registry.serial_of(entity)?;
-        let Position(position) = *self.registry.get::<Position>(entity)?;
-        let Heading(facing) = *self.registry.get::<Heading>(entity)?;
-        let body = *self.registry.get::<Body>(entity)?;
-        Some(MobileMove {
-            serial: serial.raw(),
-            body: body.id,
-            position,
-            facing,
-            hue: body.hue,
-            flags: 0,
-            notoriety: self.notoriety_of(entity),
-        })
-    }
-
-    fn send(&mut self, connection: ConnectionId, packet: Vec<u8>) {
-        self.outbox.push(Outbound { connection, packet });
     }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use openshard_chat::{MobileSpoke, TALKMODE_WHISPER, TALKMODE_YELL};
     use openshard_events::Cursor;
+    use openshard_magic::{SpellCast, MANA_REGEN_TICKS};
     use openshard_movement::WALK_INTERVAL;
+    use openshard_skills::SkillUsed;
+    use openshard_state::components::Skills;
 
     pub(super) const START: (u16, u16) = (1363, 1600);
 
@@ -3197,15 +2630,19 @@ pub(crate) mod tests {
 
     /// Put an entity somewhere directly, as if it had walked there.
     pub(super) fn teleport(world: &mut World, connection: ConnectionId, point: Point) {
-        let entity = world.players[&connection];
-        world.registry.insert(entity, Position(point));
-        if let Some(Movement(mut walker)) = world.registry.get::<Movement>(entity).copied() {
+        let entity = world.state.players[&connection];
+        world.state.registry.insert(entity, Position(point));
+        if let Some(Movement(mut walker)) = world.state.registry.get::<Movement>(entity).copied() {
             walker.position = point;
-            world.registry.insert(entity, Movement(walker));
+            world.state.registry.insert(entity, Movement(walker));
         }
-        let facet = world.facet_of(entity);
-        world.facet_state_mut(facet).sectors.insert(entity, point);
-        world.refresh_around(entity);
+        let facet = world.state.facet_of(entity);
+        world
+            .state
+            .facet_state_mut(facet)
+            .sectors
+            .insert(entity, point);
+        world.state.refresh_around(entity);
     }
 
     pub(super) fn walk(sequence: u8, direction: Direction) -> WalkRequest {
@@ -3218,8 +2655,8 @@ pub(crate) mod tests {
 
     /// The serial the world gave the character a connection is driving.
     fn serial_of(world: &World, connection: ConnectionId) -> u32 {
-        let entity = world.players[&connection];
-        world.registry.serial_of(entity).unwrap().raw()
+        let entity = world.state.players[&connection];
+        world.state.registry.serial_of(entity).unwrap().raw()
     }
 
     #[test]
@@ -3230,16 +2667,22 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let connection = enter(&mut world, now);
-        let entity = world.players[&connection];
+        let entity = world.state.players[&connection];
         let serial = serial_of(&world, connection);
 
-        let facing0 = world.registry.get::<Heading>(entity).unwrap().0.direction;
+        let facing0 = world
+            .state
+            .registry
+            .get::<Heading>(entity)
+            .unwrap()
+            .0
+            .direction;
         let dir = if facing0 == Direction::North {
             Direction::South
         } else {
             Direction::North
         };
-        let from = world.registry.get::<Position>(entity).unwrap().0;
+        let from = world.state.registry.get::<Position>(entity).unwrap().0;
 
         let mut moved: Cursor<MobileMoved> = world.bus().cursor();
         let mut turned: Cursor<MobileTurned> = world.bus().cursor();
@@ -3252,7 +2695,7 @@ pub(crate) mod tests {
         assert_eq!(world.bus().read(&mut turned).count(), 1, "first step turns");
         assert_eq!(world.bus().read(&mut moved).count(), 0, "and does not move");
         assert_eq!(
-            world.registry.get::<Position>(entity).unwrap().0,
+            world.state.registry.get::<Position>(entity).unwrap().0,
             from,
             "still on the same tile"
         );
@@ -3267,7 +2710,7 @@ pub(crate) mod tests {
         assert_eq!(moves[0].from, from);
         assert_eq!(moves[0].to, step_from(from, dir).unwrap());
         assert_eq!(
-            world.registry.get::<Position>(entity).unwrap().0,
+            world.state.registry.get::<Position>(entity).unwrap().0,
             step_from(from, dir).unwrap(),
         );
     }
@@ -3295,7 +2738,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let connection = enter(&mut world, now);
-        let entity = world.players[&connection];
+        let entity = world.state.players[&connection];
         let serial = serial_of(&world, connection);
         teleport(&mut world, connection, Point::new(0, 0, 0));
 
@@ -3313,7 +2756,7 @@ pub(crate) mod tests {
             "a step off the edge is refused"
         );
         assert_eq!(
-            world.registry.get::<Position>(entity).unwrap().0,
+            world.state.registry.get::<Position>(entity).unwrap().0,
             Point::new(0, 0, 0),
             "and it did not move"
         );
@@ -3348,10 +2791,11 @@ pub(crate) mod tests {
         world.tick(now);
         // The newest ground item, by serial.
         world
+            .state
             .registry
             .query::<Position>()
-            .filter(|(entity, _)| world.registry.has::<Stackable>(*entity))
-            .filter_map(|(entity, _)| world.registry.serial_of(entity).map(|s| s.raw()))
+            .filter(|(entity, _)| world.state.registry.has::<Stackable>(*entity))
+            .filter_map(|(entity, _)| world.state.registry.serial_of(entity).map(|s| s.raw()))
             .max()
             .expect("the gold was spawned")
     }
@@ -3450,11 +2894,12 @@ pub(crate) mod tests {
     /// The serial of the one item in the world.
     fn only_item_serial(world: &World) -> u32 {
         let (entity, _) = world
+            .state
             .registry
             .query::<Graphic>()
             .next()
             .expect("an item is in the world");
-        world.registry.serial_of(entity).unwrap().raw()
+        world.state.registry.serial_of(entity).unwrap().raw()
     }
 
     #[test]
@@ -3508,6 +2953,7 @@ pub(crate) mod tests {
         let _ = packets_for(&mut world, picker);
         let serial = only_item_serial(&world);
         let item = world
+            .state
             .registry
             .entity_of(Serial::new(serial).unwrap())
             .unwrap();
@@ -3526,10 +2972,10 @@ pub(crate) mod tests {
             "the client is told the item is out of range"
         );
         assert!(
-            world.registry.has::<Position>(item),
+            world.state.registry.has::<Position>(item),
             "the item stays on the ground"
         );
-        assert!(world.held.is_empty(), "and nothing is on the cursor");
+        assert!(world.state.held.is_empty(), "and nothing is on the cursor");
     }
 
     #[test]
@@ -3541,6 +2987,7 @@ pub(crate) mod tests {
         spawn_item_at(&mut world, origin, now);
         let serial = only_item_serial(&world);
         let item = world
+            .state
             .registry
             .entity_of(Serial::new(serial).unwrap())
             .unwrap();
@@ -3567,11 +3014,11 @@ pub(crate) mod tests {
             "the drag is cancelled"
         );
         assert_eq!(
-            world.registry.get::<Position>(item).map(|p| p.0),
+            world.state.registry.get::<Position>(item).map(|p| p.0),
             Some(origin),
             "and the item is back where it was lifted"
         );
-        assert!(world.held.is_empty());
+        assert!(world.state.held.is_empty());
     }
 
     #[test]
@@ -3584,6 +3031,7 @@ pub(crate) mod tests {
         spawn_item_at(&mut world, origin, now);
         let serial = only_item_serial(&world);
         let item = world
+            .state
             .registry
             .entity_of(Serial::new(serial).unwrap())
             .unwrap();
@@ -3600,7 +3048,7 @@ pub(crate) mod tests {
         world.tick(now);
 
         assert_eq!(
-            world.registry.get::<Position>(item).map(|p| p.0),
+            world.state.registry.get::<Position>(item).map(|p| p.0),
             Some(origin),
             "the item is back on the ground, not lost with the cursor"
         );
@@ -3651,25 +3099,28 @@ pub(crate) mod tests {
         });
         world.tick(now);
         let (entity, _) = world
+            .state
             .registry
             .query::<Container>()
             .next()
             .expect("a container is in the world");
-        world.registry.serial_of(entity).unwrap().raw()
+        world.state.registry.serial_of(entity).unwrap().raw()
     }
 
     /// The serial of the one item that is not a container.
     fn loose_item_serial(world: &World) -> u32 {
         let (entity, _) = world
+            .state
             .registry
             .query::<Graphic>()
-            .find(|(entity, _)| !world.registry.has::<Container>(*entity))
+            .find(|(entity, _)| !world.state.registry.has::<Container>(*entity))
             .expect("a non-container item exists");
-        world.registry.serial_of(entity).unwrap().raw()
+        world.state.registry.serial_of(entity).unwrap().raw()
     }
 
     fn entity(world: &World, serial: u32) -> EntityId {
         world
+            .state
             .registry
             .entity_of(Serial::new(serial).unwrap())
             .unwrap()
@@ -3721,13 +3172,14 @@ pub(crate) mod tests {
         world.tick(now);
 
         let contained = world
+            .state
             .registry
             .get::<Contained>(item)
             .expect("the item is now in a container");
         assert_eq!(contained.container.raw(), container);
         assert_eq!((contained.x, contained.y), (50, 60));
         assert!(
-            !world.registry.has::<Position>(item),
+            !world.state.registry.has::<Position>(item),
             "and no longer on the ground"
         );
         assert!(
@@ -3806,7 +3258,7 @@ pub(crate) mod tests {
             });
             world.tick(now);
         }
-        assert!(world.registry.has::<Contained>(item));
+        assert!(world.state.registry.has::<Contained>(item));
 
         world.queue(Command::PickUpItem {
             connection: player,
@@ -3815,10 +3267,13 @@ pub(crate) mod tests {
         });
         world.tick(now);
         assert!(
-            !world.registry.has::<Contained>(item),
+            !world.state.registry.has::<Contained>(item),
             "lifting it out drops the containment"
         );
-        assert!(world.held.contains_key(&player), "and it is on the cursor");
+        assert!(
+            world.state.held.contains_key(&player),
+            "and it is on the cursor"
+        );
     }
 
     #[test]
@@ -3841,9 +3296,10 @@ pub(crate) mod tests {
         world.tick(now);
         // The held one is whichever item is not the target.
         let held_serial = world
+            .state
             .registry
             .query::<Graphic>()
-            .filter_map(|(e, _)| world.registry.serial_of(e).map(|s| s.raw()))
+            .filter_map(|(e, _)| world.state.registry.serial_of(e).map(|s| s.raw()))
             .find(|s| *s != target)
             .unwrap();
         let held_item = entity(&world, held_serial);
@@ -3870,7 +3326,7 @@ pub(crate) mod tests {
             "the drag is cancelled"
         );
         assert_eq!(
-            world.registry.get::<Position>(held_item).map(|p| p.0),
+            world.state.registry.get::<Position>(held_item).map(|p| p.0),
             Some(origin),
             "and the item is back on the ground where it was"
         );
@@ -3891,12 +3347,20 @@ pub(crate) mod tests {
     ) -> (u32, EntityId) {
         spawn_item_at(world, Point::new(START.0, START.1, 0), now);
         let (item, serial) = world
+            .state
             .registry
             .query::<Position>()
             .filter(|(entity, _)| {
-                world.registry.has::<Graphic>(*entity) && !world.registry.has::<Container>(*entity)
+                world.state.registry.has::<Graphic>(*entity)
+                    && !world.state.registry.has::<Container>(*entity)
             })
-            .filter_map(|(entity, _)| world.registry.serial_of(entity).map(|s| (entity, s.raw())))
+            .filter_map(|(entity, _)| {
+                world
+                    .state
+                    .registry
+                    .serial_of(entity)
+                    .map(|s| (entity, s.raw()))
+            })
             .max_by_key(|(_, serial)| *serial)
             .expect("a ground item to lift");
         world.queue(Command::PickUpItem {
@@ -3929,12 +3393,13 @@ pub(crate) mod tests {
         world.tick(now);
 
         let worn = world
+            .state
             .registry
             .get::<Equipped>(item)
             .expect("the item is now worn");
         assert_eq!(worn.mobile.raw(), me);
         assert_eq!(worn.layer, LAYER_TORSO);
-        assert_eq!(world.equipment_of(Serial::new(me).unwrap()).len(), 1);
+        assert_eq!(world.state.equipment_of(Serial::new(me).unwrap()).len(), 1);
         assert!(
             packets_for(&mut world, player).iter().any(|p| p[0] == 0x2E),
             "the wearer is told they put it on"
@@ -3992,8 +3457,11 @@ pub(crate) mod tests {
         });
         world.tick(now);
 
-        assert!(!world.registry.has::<Equipped>(item), "it comes off");
-        assert!(world.held.contains_key(&player), "and onto the cursor");
+        assert!(!world.state.registry.has::<Equipped>(item), "it comes off");
+        assert!(
+            world.state.held.contains_key(&player),
+            "and onto the cursor"
+        );
         assert!(
             packets_for(&mut world, watcher)
                 .iter()
@@ -4035,10 +3503,10 @@ pub(crate) mod tests {
             "the second is refused"
         );
         assert!(
-            world.registry.has::<Position>(second_item),
+            world.state.registry.has::<Position>(second_item),
             "and returns to where it was lifted"
         );
-        assert!(!world.registry.has::<Equipped>(second_item));
+        assert!(!world.state.registry.has::<Equipped>(second_item));
     }
 
     #[test]
@@ -4065,7 +3533,7 @@ pub(crate) mod tests {
             "refused"
         );
         assert!(
-            world.registry.has::<Position>(held_item),
+            world.state.registry.has::<Position>(held_item),
             "and bounced back"
         );
     }
@@ -4098,12 +3566,12 @@ pub(crate) mod tests {
         world.tick(now);
 
         assert_eq!(
-            world.registry.get::<Amount>(pile_item).map(|a| a.0),
+            world.state.registry.get::<Amount>(pile_item).map(|a| a.0),
             Some(150),
             "the amounts add"
         );
         assert!(
-            !world.registry.contains(loose_item),
+            !world.state.registry.contains(loose_item),
             "and the dropped pile is gone"
         );
         assert!(
@@ -4137,7 +3605,7 @@ pub(crate) mod tests {
             "dropping one onto the other is refused"
         );
         assert!(
-            world.registry.has::<Position>(held_item),
+            world.state.registry.has::<Position>(held_item),
             "and it bounces back to the ground"
         );
     }
@@ -4153,11 +3621,14 @@ pub(crate) mod tests {
         let _ = packets_for(&mut world, watcher);
 
         // Bring the decay forward rather than run twenty minutes of ticks.
-        let soon = world.ticks + 1;
-        world.registry.insert(item, Decays { at_tick: soon });
+        let soon = world.state.ticks + 1;
+        world.state.registry.insert(item, Decays { at_tick: soon });
         world.tick(now);
 
-        assert!(!world.registry.contains(item), "the item has rotted away");
+        assert!(
+            !world.state.registry.contains(item),
+            "the item has rotted away"
+        );
         assert!(
             packets_for(&mut world, watcher)
                 .iter()
@@ -4177,7 +3648,7 @@ pub(crate) mod tests {
         let container = spawn_container_at(&mut world, here, now);
         let container_item = entity(&world, container);
         assert!(
-            !world.registry.has::<Decays>(container_item),
+            !world.state.registry.has::<Decays>(container_item),
             "a fresh container has no decay clock"
         );
 
@@ -4195,9 +3666,12 @@ pub(crate) mod tests {
         });
         world.tick(now);
 
-        assert!(world.registry.has::<Position>(container_item), "back down");
         assert!(
-            !world.registry.has::<Decays>(container_item),
+            world.state.registry.has::<Position>(container_item),
+            "back down"
+        );
+        assert!(
+            !world.state.registry.has::<Decays>(container_item),
             "and still no decay clock after moving it"
         );
     }
@@ -4211,7 +3685,7 @@ pub(crate) mod tests {
         let player = enter(&mut world, now);
         let (_, item) = take_loose_item(&mut world, player, now);
         assert!(
-            !world.registry.has::<Decays>(item),
+            !world.state.registry.has::<Decays>(item),
             "a held item carries no decay clock"
         );
     }
@@ -4237,19 +3711,25 @@ pub(crate) mod tests {
         world.tick(now);
 
         // The original, still serial `pile`, is on the cursor holding 30.
-        assert!(world.held.contains_key(&player));
+        assert!(world.state.held.contains_key(&player));
         assert_eq!(world.amount_of(pile_item), 30);
-        assert!(!world.registry.has::<Position>(pile_item), "off the ground");
+        assert!(
+            !world.state.registry.has::<Position>(pile_item),
+            "off the ground"
+        );
 
         // A brand-new pile of 70 sits where the stack was.
         let (leftover, _) = world
+            .state
             .registry
             .query::<Position>()
-            .find(|(entity, _)| world.registry.has::<Stackable>(*entity) && *entity != pile_item)
+            .find(|(entity, _)| {
+                world.state.registry.has::<Stackable>(*entity) && *entity != pile_item
+            })
             .expect("a leftover pile on the ground");
         assert_eq!(world.amount_of(leftover), 70);
         assert_ne!(
-            world.registry.serial_of(leftover).unwrap().raw(),
+            world.state.registry.serial_of(leftover).unwrap().raw(),
             pile,
             "the leftover is a new object with a new serial"
         );
@@ -4284,8 +3764,8 @@ pub(crate) mod tests {
         });
         world.tick(now);
 
-        assert!(world.held.is_empty(), "the drop landed, not bounced");
-        assert!(world.registry.has::<Position>(pile_item));
+        assert!(world.state.held.is_empty(), "the drop landed, not bounced");
+        assert!(world.state.registry.has::<Position>(pile_item));
         assert_eq!(world.amount_of(pile_item), 30);
     }
 
@@ -4310,9 +3790,10 @@ pub(crate) mod tests {
         assert_eq!(world.amount_of(pile_item), 100, "the whole pile is held");
         assert_eq!(
             world
+                .state
                 .registry
                 .query::<Stackable>()
-                .filter(|(entity, _)| world.registry.has::<Position>(*entity))
+                .filter(|(entity, _)| world.state.registry.has::<Position>(*entity))
                 .count(),
             0,
             "nothing is left on the ground"
@@ -4351,10 +3832,11 @@ pub(crate) mod tests {
         world.tick(now);
         // The newest mobile that no client drives — the creature just made.
         world
+            .state
             .registry
             .query::<Body>()
-            .filter(|(entity, _)| !world.registry.has::<Client>(*entity))
-            .filter_map(|(entity, _)| world.registry.serial_of(entity).map(|s| s.raw()))
+            .filter(|(entity, _)| !world.state.registry.has::<Client>(*entity))
+            .filter_map(|(entity, _)| world.state.registry.serial_of(entity).map(|s| s.raw()))
             .max()
             .expect("a spawned creature")
     }
@@ -4393,6 +3875,7 @@ pub(crate) mod tests {
 
         assert_eq!(
             world
+                .state
                 .registry
                 .get::<Hitpoints>(mob_entity)
                 .map(|h| h.current),
@@ -4425,7 +3908,7 @@ pub(crate) mod tests {
 
         assert_eq!(world.bus().read(&mut died).count(), 1, "death is announced");
         assert!(
-            !world.registry.contains(mob_entity),
+            !world.state.registry.contains(mob_entity),
             "and the creature is removed"
         );
         assert!(
@@ -4475,7 +3958,7 @@ pub(crate) mod tests {
         let mut world = world();
         let player = enter(&mut world, now);
         let serial = serial_of(&world, player);
-        let player_entity = world.players[&player];
+        let player_entity = world.state.players[&player];
         let mut died: Cursor<MobileDied> = world.bus().cursor();
 
         world.queue(Command::Damage {
@@ -4487,11 +3970,12 @@ pub(crate) mod tests {
 
         assert_eq!(world.bus().read(&mut died).count(), 1, "death is announced");
         assert!(
-            world.registry.contains(player_entity),
+            world.state.registry.contains(player_entity),
             "but the player is still here"
         );
         assert_eq!(
             world
+                .state
                 .registry
                 .get::<Hitpoints>(player_entity)
                 .map(|h| h.current),
@@ -4555,7 +4039,13 @@ pub(crate) mod tests {
             world.tick(now);
         }
         assert!(
-            world.registry.get::<Hitpoints>(mob_entity).unwrap().current < 50,
+            world
+                .state
+                .registry
+                .get::<Hitpoints>(mob_entity)
+                .unwrap()
+                .current
+                < 50,
             "the target has taken damage"
         );
     }
@@ -4578,7 +4068,12 @@ pub(crate) mod tests {
             world.tick(now);
         }
         assert_eq!(
-            world.registry.get::<Hitpoints>(mob_entity).unwrap().current,
+            world
+                .state
+                .registry
+                .get::<Hitpoints>(mob_entity)
+                .unwrap()
+                .current,
             50,
             "a mobile at peace does not swing"
         );
@@ -4597,7 +4092,12 @@ pub(crate) mod tests {
             world.tick(now);
         }
         assert_eq!(
-            world.registry.get::<Hitpoints>(mob_entity).unwrap().current,
+            world
+                .state
+                .registry
+                .get::<Hitpoints>(mob_entity)
+                .unwrap()
+                .current,
             50,
             "a swing out of reach lands nothing"
         );
@@ -4633,7 +4133,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let player_entity = world.players[&player];
+        let player_entity = world.state.players[&player];
         // Notoriety 7 is invulnerable — a yellow, untouchable townsperson.
         let mob = spawn_mobile_full(
             &mut world,
@@ -4653,7 +4153,12 @@ pub(crate) mod tests {
         world.tick(now);
 
         assert_eq!(
-            world.registry.get::<Combat>(player_entity).unwrap().target,
+            world
+                .state
+                .registry
+                .get::<Combat>(player_entity)
+                .unwrap()
+                .target,
             None,
             "the attack is refused"
         );
@@ -4671,7 +4176,7 @@ pub(crate) mod tests {
         let mut world = world();
         let aggressor = enter(&mut world, now);
         let victim = enter_as(&mut world, ConnectionId::from_raw(2), now);
-        let aggressor_entity = world.players[&aggressor];
+        let aggressor_entity = world.state.players[&aggressor];
         let aggressor_serial = serial_of(&world, aggressor);
         let victim_serial = serial_of(&world, victim);
         let _ = packets_for(&mut world, victim);
@@ -4683,7 +4188,7 @@ pub(crate) mod tests {
         world.tick(now);
 
         assert_eq!(
-            world.notoriety_of(aggressor_entity),
+            world.state.notoriety_of(aggressor_entity),
             Notoriety::Criminal,
             "raising a hand against an innocent is a crime"
         );
@@ -4700,7 +4205,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let player_entity = world.players[&player];
+        let player_entity = world.state.players[&player];
         // A plain orange enemy.
         let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
 
@@ -4711,7 +4216,7 @@ pub(crate) mod tests {
         world.tick(now);
 
         assert_eq!(
-            world.notoriety_of(player_entity),
+            world.state.notoriety_of(player_entity),
             Notoriety::Innocent,
             "attacking what is already an enemy costs no standing"
         );
@@ -4723,7 +4228,7 @@ pub(crate) mod tests {
         let mut world = world();
         let aggressor = enter(&mut world, now);
         let victim = enter_as(&mut world, ConnectionId::from_raw(2), now);
-        let aggressor_entity = world.players[&aggressor];
+        let aggressor_entity = world.state.players[&aggressor];
         let victim_serial = serial_of(&world, victim);
 
         world.queue(Command::Attack {
@@ -4731,17 +4236,21 @@ pub(crate) mod tests {
             target: victim_serial,
         });
         world.tick(now);
-        assert_eq!(world.notoriety_of(aggressor_entity), Notoriety::Criminal);
+        assert_eq!(
+            world.state.notoriety_of(aggressor_entity),
+            Notoriety::Criminal
+        );
 
         // Bring the flag's expiry forward rather than run two minutes of ticks.
-        let soon = world.ticks + 1;
+        let soon = world.state.ticks + 1;
         world
+            .state
             .registry
             .insert(aggressor_entity, CriminalUntil { tick: soon });
         world.tick(now);
 
         assert_eq!(
-            world.notoriety_of(aggressor_entity),
+            world.state.notoriety_of(aggressor_entity),
             Notoriety::Innocent,
             "the flag lifts and they are blue again"
         );
@@ -4756,7 +4265,7 @@ pub(crate) mod tests {
         let player = enter(&mut world, now);
         let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 100, now);
         let mob_entity = entity(&world, mob);
-        world.registry.insert(
+        world.state.registry.insert(
             mob_entity,
             Resistance {
                 fire: 50,
@@ -4773,7 +4282,12 @@ pub(crate) mod tests {
         });
         world.tick(now);
         assert_eq!(
-            world.registry.get::<Hitpoints>(mob_entity).unwrap().current,
+            world
+                .state
+                .registry
+                .get::<Hitpoints>(mob_entity)
+                .unwrap()
+                .current,
             95
         );
 
@@ -4785,7 +4299,12 @@ pub(crate) mod tests {
         });
         world.tick(now);
         assert_eq!(
-            world.registry.get::<Hitpoints>(mob_entity).unwrap().current,
+            world
+                .state
+                .registry
+                .get::<Hitpoints>(mob_entity)
+                .unwrap()
+                .current,
             85
         );
     }
@@ -4813,7 +4332,12 @@ pub(crate) mod tests {
             world.tick(now);
         }
         assert_eq!(
-            world.registry.get::<Hitpoints>(mob_entity).unwrap().current,
+            world
+                .state
+                .registry
+                .get::<Hitpoints>(mob_entity)
+                .unwrap()
+                .current,
             48,
             "five damage minus half is two"
         );
@@ -4826,8 +4350,9 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let player_entity = world.players[&player];
+        let player_entity = world.state.players[&player];
         world
+            .state
             .registry
             .insert(player_entity, SwingSpeed { ticks: 5 });
         let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 100, now);
@@ -4840,7 +4365,13 @@ pub(crate) mod tests {
             world.tick(now);
         }
         assert!(
-            world.registry.get::<Hitpoints>(mob_entity).unwrap().current < 100,
+            world
+                .state
+                .registry
+                .get::<Hitpoints>(mob_entity)
+                .unwrap()
+                .current
+                < 100,
             "the quicker swing has already landed"
         );
     }
@@ -4856,7 +4387,7 @@ pub(crate) mod tests {
         let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
         let mob_entity = entity(&world, mob);
         assert!(
-            world.registry.get::<SwingSpeed>(mob_entity).is_none(),
+            world.state.registry.get::<SwingSpeed>(mob_entity).is_none(),
             "zero on spawn pins nothing"
         );
         assert_eq!(
@@ -4873,7 +4404,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let player_entity = world.players[&player];
+        let player_entity = world.state.players[&player];
         let serial = serial_of(&world, player);
 
         let slow = world.swing_speed(player_entity);
@@ -4898,7 +4429,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let player_entity = world.players[&player];
+        let player_entity = world.state.players[&player];
         // Eight hits, five a swing: dead on the second.
         let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 8, now);
         let mob_entity = entity(&world, mob);
@@ -4908,11 +4439,16 @@ pub(crate) mod tests {
             world.tick(now);
         }
         assert!(
-            !world.registry.contains(mob_entity),
+            !world.state.registry.contains(mob_entity),
             "the creature is dead and gone"
         );
         assert_eq!(
-            world.registry.get::<Combat>(player_entity).unwrap().target,
+            world
+                .state
+                .registry
+                .get::<Combat>(player_entity)
+                .unwrap()
+                .target,
             None,
             "and the attacker is no longer swinging at it"
         );
@@ -4921,6 +4457,7 @@ pub(crate) mod tests {
     /// A mobile's value in a skill, in tenths.
     fn skill_value(world: &World, entity: EntityId, skill: u8) -> u16 {
         world
+            .state
             .registry
             .get::<Skills>(entity)
             .map_or(0, |s| s.get(skill))
@@ -4931,7 +4468,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let entity = world.players[&player];
+        let entity = world.state.players[&player];
         let serial = serial_of(&world, player);
 
         world.queue(Command::SetSkill {
@@ -4978,7 +4515,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let entity = world.players[&player];
+        let entity = world.state.players[&player];
         let serial = serial_of(&world, player);
         world.queue(Command::SetSkill {
             serial,
@@ -5006,7 +4543,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let entity = world.players[&player];
+        let entity = world.state.players[&player];
         let serial = serial_of(&world, player);
         world.queue(Command::SetSkill {
             serial,
@@ -5039,7 +4576,7 @@ pub(crate) mod tests {
             let mut world = world();
             let connection = enter(&mut world, now);
             let serial = serial_of(&world, connection);
-            let entity = world.players[&connection];
+            let entity = world.state.players[&connection];
             world.queue(Command::SetSkill {
                 serial,
                 skill: 3,
@@ -5064,7 +4601,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let entity = world.players[&player];
+        let entity = world.state.players[&player];
         let serial = serial_of(&world, player);
         // Grandmaster mage, so the skill roll is a sure thing.
         world.queue(Command::SetSkill {
@@ -5090,7 +4627,7 @@ pub(crate) mod tests {
         assert_eq!(events[0].spell, 5);
         assert!(events[0].success, "a mana-full grandmaster casts it");
         assert_eq!(
-            world.registry.get::<Mana>(entity).unwrap().current,
+            world.state.registry.get::<Mana>(entity).unwrap().current,
             90,
             "ten mana is spent"
         );
@@ -5101,7 +4638,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let entity = world.players[&player];
+        let entity = world.state.players[&player];
         let serial = serial_of(&world, player);
 
         let mut cast: Cursor<SpellCast> = world.bus().cursor();
@@ -5118,7 +4655,7 @@ pub(crate) mod tests {
         let events: Vec<SpellCast> = world.bus().read(&mut cast).copied().collect();
         assert!(!events[0].success, "it fizzles");
         assert_eq!(
-            world.registry.get::<Mana>(entity).unwrap().current,
+            world.state.registry.get::<Mana>(entity).unwrap().current,
             100,
             "and no mana is spent on a fizzle"
         );
@@ -5129,7 +4666,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let entity = world.players[&player];
+        let entity = world.state.players[&player];
         let serial = serial_of(&world, player);
 
         world.queue(Command::Damage {
@@ -5145,7 +4682,12 @@ pub(crate) mod tests {
         world.tick(now);
 
         assert_eq!(
-            world.registry.get::<Hitpoints>(entity).unwrap().current,
+            world
+                .state
+                .registry
+                .get::<Hitpoints>(entity)
+                .unwrap()
+                .current,
             100,
             "healed to the maximum, no further"
         );
@@ -5156,7 +4698,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let entity = world.players[&player];
+        let entity = world.state.players[&player];
         let serial = serial_of(&world, player);
         world.queue(Command::SetSkill {
             serial,
@@ -5173,13 +4715,13 @@ pub(crate) mod tests {
             skill: 1,
         });
         world.tick(now);
-        let spent = world.registry.get::<Mana>(entity).unwrap().current;
+        let spent = world.state.registry.get::<Mana>(entity).unwrap().current;
 
         for _ in 0..MANA_REGEN_TICKS {
             world.tick(now);
         }
         assert!(
-            world.registry.get::<Mana>(entity).unwrap().current > spent,
+            world.state.registry.get::<Mana>(entity).unwrap().current > spent,
             "mana came back over time"
         );
     }
@@ -5207,10 +4749,11 @@ pub(crate) mod tests {
         });
         world.tick(now);
         world
+            .state
             .registry
             .query::<Body>()
-            .filter(|(entity, _)| !world.registry.has::<Client>(*entity))
-            .filter_map(|(entity, _)| world.registry.serial_of(entity).map(|s| s.raw()))
+            .filter(|(entity, _)| !world.state.registry.has::<Client>(*entity))
+            .filter_map(|(entity, _)| world.state.registry.serial_of(entity).map(|s| s.raw()))
             .max()
             .expect("a spawned creature")
     }
@@ -5220,7 +4763,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let player_entity = world.players[&player];
+        let player_entity = world.state.players[&player];
         // Aggressive, standing on the player's tile.
         spawn_creature(&mut world, Point::new(START.0, START.1, 0), 10, false, now);
 
@@ -5230,6 +4773,7 @@ pub(crate) mod tests {
         }
         assert!(
             world
+                .state
                 .registry
                 .get::<Hitpoints>(player_entity)
                 .unwrap()
@@ -5253,7 +4797,14 @@ pub(crate) mod tests {
             world.tick(now);
         }
         assert!(
-            world.registry.get::<Position>(mob_entity).unwrap().0.x < start.x,
+            world
+                .state
+                .registry
+                .get::<Position>(mob_entity)
+                .unwrap()
+                .0
+                .x
+                < start.x,
             "the creature closed the distance"
         );
     }
@@ -5263,7 +4814,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let player_entity = world.players[&player];
+        let player_entity = world.state.players[&player];
         // Sight 0, no wander: no brain at all.
         spawn_creature(&mut world, Point::new(START.0, START.1, 0), 0, false, now);
 
@@ -5272,6 +4823,7 @@ pub(crate) mod tests {
         }
         assert_eq!(
             world
+                .state
                 .registry
                 .get::<Hitpoints>(player_entity)
                 .unwrap()
@@ -5294,7 +4846,7 @@ pub(crate) mod tests {
             world.tick(now);
         }
         assert_ne!(
-            world.registry.get::<Position>(mob_entity).unwrap().0,
+            world.state.registry.get::<Position>(mob_entity).unwrap().0,
             start,
             "given time, a wanderer moves"
         );
@@ -5307,7 +4859,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let mut world = world();
         let player = enter(&mut world, now);
-        let entity = world.players[&player];
+        let entity = world.state.players[&player];
         let serial = serial_of(&world, player);
 
         world.queue(Command::SetStats {
@@ -5318,16 +4870,16 @@ pub(crate) mod tests {
         });
         world.tick(now);
 
-        let hp = world.registry.get::<Hitpoints>(entity).unwrap();
+        let hp = world.state.registry.get::<Hitpoints>(entity).unwrap();
         assert_eq!((hp.current, hp.max), (60, 60), "hits follow strength");
-        let mana = world.registry.get::<Mana>(entity).unwrap();
+        let mana = world.state.registry.get::<Mana>(entity).unwrap();
         assert_eq!(
             (mana.current, mana.max),
             (40, 40),
             "mana follows intelligence"
         );
         assert_eq!(
-            world.registry.get::<Stats>(entity).unwrap().dexterity,
+            world.state.registry.get::<Stats>(entity).unwrap().dexterity,
             80,
             "and dexterity is stored for what will derive from it"
         );
@@ -5579,7 +5131,7 @@ pub(crate) mod tests {
         let mut world = world();
         enter(&mut world, Instant::now());
 
-        let entity = *world.players.values().next().unwrap();
+        let entity = *world.state.players.values().next().unwrap();
         assert!(world.registry().has::<Position>(entity));
         assert!(world.registry().has::<Body>(entity));
         assert!(world.registry().has::<Name>(entity));
@@ -5612,7 +5164,7 @@ pub(crate) mod tests {
         });
         world.tick(Instant::now());
 
-        let entity = world.players[&connection];
+        let entity = world.state.players[&connection];
         let body = world.registry().get::<Body>(entity).copied().unwrap();
         assert_eq!(body.id, 0x025E, "the elf-female body the client chose");
         assert_eq!(body.hue, 0x0430);
@@ -5635,7 +5187,7 @@ pub(crate) mod tests {
         // so the world uses its default and does not send a body of zero.
         let mut world = world();
         let connection = enter(&mut world, Instant::now());
-        let entity = world.players[&connection];
+        let entity = world.state.players[&connection];
         let body = world.registry().get::<Body>(entity).copied().unwrap();
         assert_eq!(body.id, BODY_HUMAN_MALE);
         assert_eq!(body.hue, DEFAULT_HUE);
@@ -5664,7 +5216,7 @@ pub(crate) mod tests {
         });
         world.tick(Instant::now());
 
-        let entity = world.players[&connection];
+        let entity = world.state.players[&connection];
         assert_eq!(
             world.registry().serial_of(entity).unwrap().raw(),
             0x0000_0202,
@@ -5696,7 +5248,7 @@ pub(crate) mod tests {
     /// Register a mapless facet, so a test can populate more than one without
     /// client files. Its interest grid is the same no-map size facet 0 uses.
     fn add_empty_facet(world: &mut World, facet: u8) {
-        world.facets.insert(
+        world.state.facets.insert(
             facet,
             FacetState {
                 terrain: None,
@@ -5732,13 +5284,16 @@ pub(crate) mod tests {
         enter_on_facet(&mut world, here, 0, now);
         enter_on_facet(&mut world, there, 1, now);
 
-        let a = world.players[&here];
-        let b = world.players[&there];
+        let a = world.state.players[&here];
+        let b = world.state.players[&there];
         assert!(
-            !world.seen[&a].contains(&b),
+            !world.state.seen[&a].contains(&b),
             "a mobile on facet 0 must not have drawn one on facet 1"
         );
-        assert!(!world.seen[&b].contains(&a), "nor the other way round");
+        assert!(
+            !world.state.seen[&b].contains(&a),
+            "nor the other way round"
+        );
     }
 
     #[test]
@@ -5752,13 +5307,13 @@ pub(crate) mod tests {
         enter_on_facet(&mut world, here, 0, now);
         enter_on_facet(&mut world, there, 0, now);
 
-        let a = world.players[&here];
-        let b = world.players[&there];
+        let a = world.state.players[&here];
+        let b = world.state.players[&there];
         assert!(
-            world.seen[&a].contains(&b),
+            world.state.seen[&a].contains(&b),
             "same facet, same spot: they see"
         );
-        assert!(world.seen[&b].contains(&a));
+        assert!(world.state.seen[&b].contains(&a));
     }
 
     #[test]
@@ -5786,7 +5341,7 @@ pub(crate) mod tests {
         });
         world.tick(now);
 
-        let entity = world.players[&connection];
+        let entity = world.state.players[&connection];
         let Position(position) = *world.registry().get::<Position>(entity).unwrap();
         let Movement(walker) = *world.registry().get::<Movement>(entity).unwrap();
         assert_eq!(position, walker.position, "the two must not drift apart");
@@ -5921,7 +5476,7 @@ pub(crate) mod tests {
         let mut world = world();
         let now = Instant::now();
         let connection = enter(&mut world, now);
-        let entity = world.players[&connection];
+        let entity = world.state.players[&connection];
         let serial = world.registry().serial_of(entity).unwrap();
 
         let mut left: Cursor<PlayerLeft> = world.bus().cursor();
@@ -6328,8 +5883,8 @@ mod persistence_tests {
         let mut world = World::new(START).with_save_every(0);
         let now = Instant::now();
         let connection = enter(&mut world, now);
-        let entity = world.players[&connection];
-        let serial = world.registry.serial_of(entity).expect("bound");
+        let entity = world.state.players[&connection];
+        let serial = world.state.registry.serial_of(entity).expect("bound");
 
         world.take_snapshot();
         let snapshot = only_snapshot(&mut world).expect("a change");
@@ -6536,12 +6091,12 @@ mod interest_tests {
         let now = Instant::now();
         enter_as(&mut world, ALICE, now);
         enter_as(&mut world, BOB, now);
-        assert_eq!(world.seen.len(), 2);
+        assert_eq!(world.state.seen.len(), 2);
 
         world.queue(Command::Disconnect { connection: BOB });
         world.tick(now);
 
-        assert_eq!(world.seen.len(), 1, "Bob's screen outlived Bob");
+        assert_eq!(world.state.seen.len(), 1, "Bob's screen outlived Bob");
         assert_eq!(
             world.sectors().len(),
             1,
@@ -6556,7 +6111,7 @@ mod interest_tests {
         let mut world = World::new(START);
         let start = Instant::now();
         let alice = enter_as(&mut world, ALICE, start);
-        let entity = world.players[&alice];
+        let entity = world.state.players[&alice];
 
         for step in 1..=50u32 {
             world.queue(Command::Walk {

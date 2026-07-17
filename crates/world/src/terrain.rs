@@ -157,6 +157,10 @@ impl Terrain for MapTerrain {
             z,
         })
     }
+
+    fn ground_z(&self, x: u16, y: u16) -> Option<i8> {
+        self.map().land(x, y).map(|cell| cell.z)
+    }
 }
 
 #[cfg(test)]
