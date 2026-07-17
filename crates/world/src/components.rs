@@ -176,6 +176,20 @@ pub struct Hitpoints {
     pub max: u16,
 }
 
+/// Marks a mobile as temporarily a criminal: grey, and freely attackable,
+/// until the tick it wears off.
+///
+/// The consequence of an aggressive act on someone blue — the flag that stops a
+/// player attacking innocents in a town with no cost. A tick number, like
+/// [`Decays`]; when the tick counter passes it the mobile goes back to innocent.
+/// The deeper standing — murderer, the red a repeat killer earns — needs a
+/// persistent count of who you have killed, and waits for a reason to keep one.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct CriminalUntil {
+    /// The tick the flag lifts.
+    pub tick: u64,
+}
+
 /// A mobile's fighting state: whether it is in war mode, whom it is attacking,
 /// and when it may next swing.
 ///
@@ -202,6 +216,19 @@ pub struct Combat {
 pub struct MeleeDamage {
     /// The blow before resistance.
     pub amount: u16,
+}
+
+/// How many ticks a mobile waits between swings.
+///
+/// One number stands in for what UO derives from a weapon's speed and the
+/// wielder's dexterity — neither of which exists yet (there are no stats, and a
+/// weapon has no speed). Making it a component a script sets is the honest
+/// halfway house: swing speed is data now, and the derivation slots in later
+/// without moving where the number is read.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct SwingSpeed {
+    /// Ticks between blows.
+    pub ticks: u64,
 }
 
 /// A mobile's armour: how much of a blow it shrugs off, as a percentage.

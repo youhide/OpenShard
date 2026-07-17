@@ -43,8 +43,9 @@ use openshard_protocol::{
 use tracing::{debug, info, warn};
 
 use crate::components::{
-    Account, Amount, Body, Client, Combat, Contained, Container, Decays, Equipped, Facet, Graphic,
-    Heading, Hitpoints, MeleeDamage, Movement, Name, Position, Resistance, Stackable,
+    Account, Amount, Body, Client, Combat, Contained, Container, CriminalUntil, Decays, Equipped,
+    Facet, Graphic, Heading, Hitpoints, MeleeDamage, Movement, Name, Position, Resistance,
+    Stackable, SwingSpeed,
 };
 use crate::events::{
     ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
@@ -105,6 +106,9 @@ const SWING_TICKS: u64 = 20;
 /// Damage a swing deals. A flat number until the damage formula — resistances,
 /// weapon, strength — is written, and that is a script-first slice of its own.
 const SWING_DAMAGE: u16 = 5;
+/// How long a criminal flag lasts: two minutes at [`TICK_INTERVAL`], Sphere's
+/// `CRIMINAL_TIMER` default.
+const CRIMINAL_TICKS: u64 = 2 * 60 * 20;
 /// How many ticks an item lies on the ground before it decays.
 ///
 /// Twenty minutes at [`TICK_INTERVAL`] — Sphere's default `DECAY_TIME` is fifteen
@@ -242,6 +246,8 @@ pub enum Command {
         damage: u16,
         /// Its physical resistance, 0–100.
         resistance: u8,
+        /// Ticks between its swings; 0 takes the default.
+        swing: u64,
         /// Where it stands.
         position: Point,
         /// Which facet.
@@ -591,10 +597,12 @@ impl World {
             self.apply(command, now);
         }
 
-        // Strike whatever swings are due, then rot away what has lain on the
-        // ground too long. Both after the commands and both driven by the tick
-        // counter, so a fight and a decay are as replayable as everything else.
+        // Strike whatever swings are due, lift any criminal flags that have run
+        // out, then rot away what has lain on the ground too long. All after the
+        // commands and all driven by the tick counter, so a fight, a flag and a
+        // decay are as replayable as everything else.
         self.swings();
+        self.expire_criminality();
         self.decay();
 
         // Before the bus retires anything: what happened is what needs saving,
@@ -756,10 +764,11 @@ impl World {
                 notoriety,
                 damage,
                 resistance,
+                swing,
                 position,
                 facet,
             } => self.spawn_mobile(
-                body, hue, hits, notoriety, damage, resistance, position, facet,
+                body, hue, hits, notoriety, damage, resistance, swing, position, facet,
             ),
             Command::Damage { serial, amount } => self.damage(serial, amount),
             Command::WarMode { connection, war } => self.war_mode(connection, war),
@@ -909,6 +918,8 @@ impl World {
             },
         );
         self.registry.insert(entity, Resistance::default());
+        self.registry
+            .insert(entity, SwingSpeed { ticks: SWING_TICKS });
         self.registry
             .insert(entity, Movement(Walker::new(position, facing)));
         self.registry.insert(
@@ -1207,6 +1218,7 @@ impl World {
         notoriety: u8,
         damage: u16,
         resistance: u8,
+        swing: u64,
         position: Point,
         facet: u8,
     ) {
@@ -1245,6 +1257,16 @@ impl World {
                 physical: resistance.min(100),
             },
         );
+        self.registry.insert(
+            entity,
+            SwingSpeed {
+                // Zero means "use the default", so a script that does not care
+                // about pace need not name a number.
+                ticks: if swing == 0 { SWING_TICKS } else { swing },
+            },
+        );
+        // No `Combat`: a creature does not fight until something drives it, which
+        // is an `ai` question. Its swing speed waits, ready, for when it does.
         self.registry
             .insert(entity, Movement(Walker::new(position, facing)));
         self.facet_state_mut(facet).sectors.insert(entity, position);
@@ -1263,6 +1285,11 @@ impl World {
         let Some(&Hitpoints { current, max }) = self.registry.get::<Hitpoints>(entity) else {
             return;
         };
+        // Already dead — a player lying at zero, not yet a ghost. A further blow
+        // does nothing, and in particular does not announce a second death.
+        if current == 0 {
+            return;
+        }
         let remaining = current.saturating_sub(amount);
         self.registry.insert(
             entity,
@@ -1364,15 +1391,24 @@ impl World {
                     && self.registry.has::<Hitpoints>(entity)
                     && self.notoriety_of(entity) != Notoriety::Invulnerable
             });
-        let Some((serial, _)) = valid else {
+        let Some((serial, target_entity)) = valid else {
             self.clear_target(player);
             self.send(connection, encode_attack(0));
             return;
         };
-        let next = self.ticks + SWING_TICKS;
+        let next = self.ticks + self.swing_speed(player);
         if let Some(combat) = self.registry.get_mut::<Combat>(player) {
             combat.target = Some(serial);
             combat.next_swing = next;
+        }
+        // Raising a hand against someone blue or green is a crime — it turns the
+        // attacker grey. (Flagged on the attack, not the landed blow: close
+        // enough, and it is the intent a town guard would act on.)
+        if matches!(
+            self.notoriety_of(target_entity),
+            Notoriety::Innocent | Notoriety::Friend
+        ) {
+            self.flag_criminal(player);
         }
         self.send(connection, encode_attack(target));
     }
@@ -1417,7 +1453,7 @@ impl World {
             }
             let blow = self.melee_blow(attacker, target);
             self.damage(target_serial.raw(), blow);
-            self.set_next_swing(attacker, now + SWING_TICKS);
+            self.set_next_swing(attacker, now + self.swing_speed(attacker));
             // The blow may have killed it; a dead target is no target.
             if self.registry.entity_of(target_serial).is_none() {
                 self.clear_target(attacker);
@@ -1437,6 +1473,57 @@ impl World {
         if let Some(combat) = self.registry.get_mut::<Combat>(attacker) {
             combat.target = None;
         }
+    }
+
+    /// Turn a mobile grey for [`CRIMINAL_TICKS`], or push the timer out if it is
+    /// already grey. Only an innocent flags; a red murderer stays red.
+    ///
+    /// The colour change is broadcast with [`broadcast_move`](Self::broadcast_move) —
+    /// a `0x77` carries notoriety, so everyone watching sees the attacker turn
+    /// grey without anyone having to move.
+    fn flag_criminal(&mut self, mobile: EntityId) {
+        let noto = self.notoriety_of(mobile);
+        if noto != Notoriety::Innocent && noto != Notoriety::Criminal {
+            return;
+        }
+        let already_grey = noto == Notoriety::Criminal;
+        self.registry.insert(mobile, Notoriety::Criminal);
+        self.registry.insert(
+            mobile,
+            CriminalUntil {
+                tick: self.ticks + CRIMINAL_TICKS,
+            },
+        );
+        // Only the turn to grey needs redrawing; refreshing the timer changes no
+        // colour.
+        if !already_grey {
+            self.broadcast_move(mobile);
+        }
+    }
+
+    /// Restore anyone whose criminal flag has run out to innocent, and redraw the
+    /// blue for everyone watching. Runs each tick against the tick counter.
+    fn expire_criminality(&mut self) {
+        let now = self.ticks;
+        let expired: Vec<EntityId> = self
+            .registry
+            .query::<CriminalUntil>()
+            .filter(|(_, flag)| flag.tick <= now)
+            .map(|(entity, _)| entity)
+            .collect();
+        for entity in expired {
+            self.registry.remove::<CriminalUntil>(entity);
+            self.registry.insert(entity, Notoriety::Innocent);
+            self.broadcast_move(entity);
+        }
+    }
+
+    /// How many ticks `mobile` waits between swings, its [`SwingSpeed`] or the
+    /// default.
+    fn swing_speed(&self, mobile: EntityId) -> u64 {
+        self.registry
+            .get::<SwingSpeed>(mobile)
+            .map_or(SWING_TICKS, |s| s.ticks)
     }
 
     /// What a blow from `attacker` lands on `target`: the attacker's melee damage
@@ -3564,6 +3651,7 @@ pub(crate) mod tests {
             notoriety,
             damage,
             resistance,
+            swing: 0, // the default pace
             position: point,
             facet: 0,
         });
@@ -3650,6 +3738,32 @@ pub(crate) mod tests {
                 .iter()
                 .any(|p| p == &encode_remove(mob)),
             "and taken off the player's screen"
+        );
+    }
+
+    #[test]
+    fn a_dead_mobile_is_not_killed_again() {
+        // A player lies at zero hits without being despawned; a second blow must
+        // not announce a second death.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let serial = serial_of(&world, player);
+        let mut died: Cursor<MobileDied> = world.bus().cursor();
+
+        world.queue(Command::Damage {
+            serial,
+            amount: 200,
+        });
+        world.tick(now); // 100 -> 0
+        assert_eq!(world.bus().read(&mut died).count(), 1, "the killing blow");
+
+        world.queue(Command::Damage { serial, amount: 50 });
+        world.tick(now); // already dead
+        assert_eq!(
+            world.bus().read(&mut died).count(),
+            0,
+            "a second blow on a corpse announces nothing"
         );
     }
 
@@ -3851,6 +3965,88 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn attacking_an_innocent_turns_the_attacker_grey() {
+        let now = Instant::now();
+        let mut world = world();
+        let aggressor = enter(&mut world, now);
+        let victim = enter_as(&mut world, ConnectionId::from_raw(2), now);
+        let aggressor_entity = world.players[&aggressor];
+        let aggressor_serial = serial_of(&world, aggressor);
+        let victim_serial = serial_of(&world, victim);
+        let _ = packets_for(&mut world, victim);
+
+        world.queue(Command::Attack {
+            connection: aggressor,
+            target: victim_serial,
+        });
+        world.tick(now);
+
+        assert_eq!(
+            world.notoriety_of(aggressor_entity),
+            Notoriety::Criminal,
+            "raising a hand against an innocent is a crime"
+        );
+        assert!(
+            packets_for(&mut world, victim)
+                .iter()
+                .any(|p| p[0] == 0x77 && mentions(p, aggressor_serial)),
+            "and everyone watching sees them turn grey"
+        );
+    }
+
+    #[test]
+    fn attacking_an_enemy_is_not_a_crime() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let player_entity = world.players[&player];
+        // A plain orange enemy.
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+
+        world.queue(Command::Attack {
+            connection: player,
+            target: mob,
+        });
+        world.tick(now);
+
+        assert_eq!(
+            world.notoriety_of(player_entity),
+            Notoriety::Innocent,
+            "attacking what is already an enemy costs no standing"
+        );
+    }
+
+    #[test]
+    fn the_criminal_flag_lifts_when_its_time_runs_out() {
+        let now = Instant::now();
+        let mut world = world();
+        let aggressor = enter(&mut world, now);
+        let victim = enter_as(&mut world, ConnectionId::from_raw(2), now);
+        let aggressor_entity = world.players[&aggressor];
+        let victim_serial = serial_of(&world, victim);
+
+        world.queue(Command::Attack {
+            connection: aggressor,
+            target: victim_serial,
+        });
+        world.tick(now);
+        assert_eq!(world.notoriety_of(aggressor_entity), Notoriety::Criminal);
+
+        // Bring the flag's expiry forward rather than run two minutes of ticks.
+        let soon = world.ticks + 1;
+        world
+            .registry
+            .insert(aggressor_entity, CriminalUntil { tick: soon });
+        world.tick(now);
+
+        assert_eq!(
+            world.notoriety_of(aggressor_entity),
+            Notoriety::Innocent,
+            "the flag lifts and they are blue again"
+        );
+    }
+
+    #[test]
     fn armour_reduces_a_blow() {
         // Same five-damage swing, but the target's 50% physical resistance halves
         // it: two through, not five.
@@ -3876,6 +4072,49 @@ pub(crate) mod tests {
             world.registry.get::<Hitpoints>(mob_entity).unwrap().current,
             48,
             "five damage minus half is two"
+        );
+    }
+
+    #[test]
+    fn swing_speed_sets_the_cadence() {
+        // A faster swinger lands a blow in fewer ticks than the default interval
+        // would allow.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let player_entity = world.players[&player];
+        world
+            .registry
+            .insert(player_entity, SwingSpeed { ticks: 5 });
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 100, now);
+        let mob_entity = entity(&world, mob);
+        engage(&mut world, player, mob, now);
+
+        // Five is fewer than the default interval, but a full fast one.
+        const _: () = assert!(5 < SWING_TICKS);
+        for _ in 0..5 {
+            world.tick(now);
+        }
+        assert!(
+            world.registry.get::<Hitpoints>(mob_entity).unwrap().current < 100,
+            "the quicker swing has already landed"
+        );
+    }
+
+    #[test]
+    fn a_spawned_creature_carries_its_swing_speed() {
+        let now = Instant::now();
+        let mut world = world();
+        enter(&mut world, now);
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+        let mob_entity = entity(&world, mob);
+        assert_eq!(
+            world
+                .registry
+                .get::<SwingSpeed>(mob_entity)
+                .map(|s| s.ticks),
+            Some(SWING_TICKS),
+            "zero on spawn means the default pace"
         );
     }
 

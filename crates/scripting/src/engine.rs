@@ -193,6 +193,8 @@ struct MobileSpec {
     damage: u16,
     #[serde(default)]
     resistance: u8,
+    #[serde(default)]
+    swing: u64,
     x: u16,
     y: u16,
     #[serde(default)]
@@ -214,6 +216,7 @@ fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
             notoriety: spec.notoriety,
             damage: spec.damage,
             resistance: spec.resistance,
+            swing: spec.swing,
             x: spec.x,
             y: spec.y,
             z: spec.z,

@@ -185,6 +185,7 @@ fn into_world(command: ScriptCommand) -> Command {
             notoriety,
             damage,
             resistance,
+            swing,
             x,
             y,
             z,
@@ -196,6 +197,7 @@ fn into_world(command: ScriptCommand) -> Command {
             notoriety,
             damage,
             resistance,
+            swing,
             position: openshard_protocol::Point::new(x, y, z),
             facet,
         },
@@ -414,6 +416,7 @@ mod tests {
             notoriety: 5,
             damage: 5,
             resistance: 0,
+            swing: 0,
             position: openshard_protocol::Point::new(1363, 1600, 0),
             facet: 0,
         });

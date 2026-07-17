@@ -310,8 +310,9 @@ Roughly in dependency order, each script-first:
     tick: a combatant in war mode with a target within `MELEE_RANGE` on the same
     facet strikes when its timer is up, out of reach it waits with its timer
     unspent, and a killed target ends the attack. The timer is a tick count, like
-    decay — no clock in the tick. Swing speed and damage are flat constants for
-    now; the formula is the next item.
+    decay — no clock in the tick. A `SwingSpeed` component sets the cadence per
+    mobile, script-set at spawn; the stand-in for what UO derives from a weapon's
+    speed and the wielder's dexterity, neither of which exists yet.
   - [x] **Resistances and the damage formula.** A swing's damage is no longer
     flat: `melee_blow` takes the attacker's `MeleeDamage` and cuts it by the
     target's `Resistance { physical }`. Both are components a script sets when it
@@ -319,13 +320,22 @@ Roughly in dependency order, each script-first:
     hard-hitting ogre or an armoured knight is a data change, not a code one — the
     script-first part. Physical only for now; the other damage types land with
     magic.
-  - [x] **Notoriety.** Mobiles carry a `Notoriety` (the enum already in the
-    protocol), drawn as the health-bar colour in every `0x78`/`0x77` — the world
-    stopped hardcoding "innocent". A script sets it at spawn; an invulnerable
-    (yellow) mobile cannot be attacked, the first "who may hit whom" rule.
-    Criminal and murderer *flagging* — attacking an innocent turning you grey,
-    the timers behind it — is a deeper slice for when there is a reason to be
-    somewhere you should not.
+  - [x] **Notoriety and criminal flagging.** Mobiles carry a `Notoriety` (the
+    enum already in the protocol), drawn as the health-bar colour in every
+    `0x78`/`0x77` — the world stopped hardcoding "innocent". A script sets it at
+    spawn; an invulnerable (yellow) mobile cannot be attacked. Raising a hand
+    against someone blue or green turns the attacker grey — a `CriminalUntil`
+    flag, its expiry a tick count like decay, broadcast to every watcher with a
+    `0x77`. **Murderer** flagging (the red a repeat killer earns) is deferred: it
+    needs a persistent count of whom you have killed, which is a karma/reputation
+    system with nothing yet to hang it on.
+  - Deferred, on purpose, because each waits on something not built: **the other
+    damage types** (fire, cold, poison, energy) want a source of typed damage,
+    which is spells (`magic`); **weapon- and dexterity-derived swing speed and
+    damage** want stats and weapon properties; **murderer/karma** wants a
+    reputation store. The seams are in place — `Resistance` has room for more
+    types, `SwingSpeed` and `MeleeDamage` are already per-mobile — so each is a
+    fill-in, not a redesign.
 - [ ] `skills` — usage checks, gain curves
 - [ ] `magic` — spells, reagents, casting
 - [ ] `ai` — brains, aggro, wandering

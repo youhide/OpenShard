@@ -159,6 +159,8 @@ pub enum Command {
         damage: u16,
         /// Its physical resistance, 0–100.
         resistance: u8,
+        /// Ticks between its swings; 0 takes the default.
+        swing: u64,
         /// Where it stands.
         x: u16,
         /// Where it stands.
