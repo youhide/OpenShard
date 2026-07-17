@@ -1099,9 +1099,15 @@ impl World {
         }
     }
 
-    /// Set an item's decay clock: it rots [`DECAY_TICKS`] from now. Every item on
-    /// the ground has one; every item off it has none.
+    /// Set an item's decay clock: it rots [`DECAY_TICKS`] from now. Every loose
+    /// item on the ground has one; every item off it has none, and so does a
+    /// container — it and its contents stay put until someone moves them, which
+    /// is also why a container picked up and set back down does not start
+    /// rotting.
     fn mark_decay(&mut self, item: EntityId) {
+        if self.registry.has::<Container>(item) {
+            return;
+        }
         self.registry.insert(
             item,
             Decays {
@@ -1295,7 +1301,7 @@ impl World {
     }
 
     /// Lift an item onto a client's cursor. See [`Command::PickUpItem`].
-    fn pick_up(&mut self, connection: ConnectionId, serial: u32, _amount: u16) {
+    fn pick_up(&mut self, connection: ConnectionId, serial: u32, amount: u16) {
         let Some(&player) = self.players.get(&connection) else {
             return;
         };
@@ -1328,6 +1334,15 @@ impl World {
             if facet != self.facet_of(player) || !in_range(item_pos, player_pos, ITEM_REACH) {
                 self.reject_drag(connection, DragCancelReason::OutOfRange);
                 return;
+            }
+            // Taking part of a stack: leave the remainder behind as a new pile
+            // and lift the original, now reduced to what was taken. The original
+            // keeps its serial and goes to the cursor — the client's drag and its
+            // eventual drop still name it — so only the leftover is a new object.
+            let total = self.amount_of(item);
+            if amount > 0 && amount < total && self.registry.has::<Stackable>(item) {
+                self.spawn_leftover(item, total - amount, item_pos, facet);
+                self.set_stack_amount(item, amount);
             }
             // Off the sector grid, off every screen but the picker's — whose own
             // client already put it on the cursor, so a 0x1D there would fight it.
@@ -1567,7 +1582,7 @@ impl World {
         let total = self
             .amount_of(held.entity)
             .saturating_add(self.amount_of(target));
-        self.registry.insert(target, Amount(total));
+        self.set_stack_amount(target, total);
         self.held.remove(&connection);
         // The dragged stack is gone into the other; it was on a cursor, on
         // nobody's ground, so despawning it needs no packet.
@@ -1579,6 +1594,44 @@ impl World {
     /// How many an item is: its [`Amount`], or one if it has none.
     fn amount_of(&self, item: EntityId) -> u16 {
         self.registry.get::<Amount>(item).map_or(1, |a| a.0)
+    }
+
+    /// Set a stack's size, keeping the "a single carries no `Amount`" rule that
+    /// [`spawn_item`](Self::spawn_item) and the `0x1A` encoder both rely on.
+    fn set_stack_amount(&mut self, item: EntityId, amount: u16) {
+        if amount > 1 {
+            self.registry.insert(item, Amount(amount));
+        } else {
+            self.registry.remove::<Amount>(item);
+        }
+    }
+
+    /// Leave the remainder of a split stack behind, at the same spot, as a fresh
+    /// pile. A dupe with a new serial — the original goes onto the cursor keeping
+    /// its own serial, so the client's drag and its eventual drop still name it,
+    /// and the copy is what the ground is left with. Straight from Sphere's
+    /// `CItem::UnStackSplit`.
+    fn spawn_leftover(&mut self, original: EntityId, amount: u16, position: Point, facet: u8) {
+        let Some(&Graphic { id, hue }) = self.registry.get::<Graphic>(original) else {
+            return;
+        };
+        let leftover = match self.registry.spawn_with_serial(SerialKind::Item) {
+            Ok((entity, _)) => entity,
+            Err(error) => {
+                warn!(?error, "out of item serials; a split remainder is lost");
+                return;
+            }
+        };
+        self.registry.insert(leftover, Graphic { id, hue });
+        self.registry.insert(leftover, Stackable);
+        self.set_stack_amount(leftover, amount);
+        self.registry.insert(leftover, Position(position));
+        self.registry.insert(leftover, Facet(facet));
+        self.mark_decay(leftover);
+        self.facet_state_mut(facet)
+            .sectors
+            .insert(leftover, position);
+        self.reveal_item(leftover);
     }
 
     /// Re-send a ground item to everyone already watching it — for when its
@@ -2965,6 +3018,42 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_container_does_not_decay_even_after_being_moved() {
+        // A backpack is a ground item too, but it must not rot — and picking it
+        // up and setting it back down must not hand it a decay clock either.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let here = Point::new(START.0, START.1, 0);
+        let container = spawn_container_at(&mut world, here, now);
+        let container_item = entity(&world, container);
+        assert!(
+            !world.registry.has::<Decays>(container_item),
+            "a fresh container has no decay clock"
+        );
+
+        world.queue(Command::PickUpItem {
+            connection: player,
+            serial: container,
+            amount: 1,
+        });
+        world.tick(now);
+        world.queue(Command::DropItem {
+            connection: player,
+            serial: container,
+            position: here,
+            container: DROP_TO_GROUND,
+        });
+        world.tick(now);
+
+        assert!(world.registry.has::<Position>(container_item), "back down");
+        assert!(
+            !world.registry.has::<Decays>(container_item),
+            "and still no decay clock after moving it"
+        );
+    }
+
+    #[test]
     fn an_item_off_the_ground_does_not_decay() {
         // Lifting an item takes the decay clock off it: a stack on a cursor, in a
         // pack or worn does not rot.
@@ -2975,6 +3064,109 @@ pub(crate) mod tests {
         assert!(
             !world.registry.has::<Decays>(item),
             "a held item carries no decay clock"
+        );
+    }
+
+    #[test]
+    fn picking_up_part_of_a_stack_splits_it() {
+        // Take 30 of 100: the original keeps its serial and holds the 30 on the
+        // cursor, and a new pile of 70 is left on the ground where it was — the
+        // way Sphere's UnStackSplit does it.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let here = Point::new(START.0, START.1, 0);
+        let pile = spawn_gold(&mut world, here, 100, now);
+        let pile_item = entity(&world, pile);
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::PickUpItem {
+            connection: player,
+            serial: pile,
+            amount: 30,
+        });
+        world.tick(now);
+
+        // The original, still serial `pile`, is on the cursor holding 30.
+        assert!(world.held.contains_key(&player));
+        assert_eq!(world.amount_of(pile_item), 30);
+        assert!(!world.registry.has::<Position>(pile_item), "off the ground");
+
+        // A brand-new pile of 70 sits where the stack was.
+        let (leftover, _) = world
+            .registry
+            .query::<Position>()
+            .find(|(entity, _)| world.registry.has::<Stackable>(*entity) && *entity != pile_item)
+            .expect("a leftover pile on the ground");
+        assert_eq!(world.amount_of(leftover), 70);
+        assert_ne!(
+            world.registry.serial_of(leftover).unwrap().raw(),
+            pile,
+            "the leftover is a new object with a new serial"
+        );
+        assert!(
+            packets_for(&mut world, player).iter().any(|p| p[0] == 0x1A),
+            "and the player is drawn the leftover pile"
+        );
+    }
+
+    #[test]
+    fn the_split_portion_keeps_its_serial_and_can_be_dropped() {
+        // The reason the original keeps its serial: the client's cursor still
+        // names it, so the 0x08 that drops the 30 back matches the held item.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let here = Point::new(START.0, START.1, 0);
+        let pile = spawn_gold(&mut world, here, 100, now);
+        let pile_item = entity(&world, pile);
+
+        world.queue(Command::PickUpItem {
+            connection: player,
+            serial: pile,
+            amount: 30,
+        });
+        world.tick(now);
+        world.queue(Command::DropItem {
+            connection: player,
+            serial: pile, // the client drops the same serial it lifted
+            position: here,
+            container: DROP_TO_GROUND,
+        });
+        world.tick(now);
+
+        assert!(world.held.is_empty(), "the drop landed, not bounced");
+        assert!(world.registry.has::<Position>(pile_item));
+        assert_eq!(world.amount_of(pile_item), 30);
+    }
+
+    #[test]
+    fn picking_up_a_whole_stack_does_not_split_it() {
+        // Asking for the whole amount, or more, lifts the pile itself — no
+        // leftover, one object.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let here = Point::new(START.0, START.1, 0);
+        let pile = spawn_gold(&mut world, here, 100, now);
+        let pile_item = entity(&world, pile);
+
+        world.queue(Command::PickUpItem {
+            connection: player,
+            serial: pile,
+            amount: 100,
+        });
+        world.tick(now);
+
+        assert_eq!(world.amount_of(pile_item), 100, "the whole pile is held");
+        assert_eq!(
+            world
+                .registry
+                .query::<Stackable>()
+                .filter(|(entity, _)| world.registry.has::<Position>(*entity))
+                .count(),
+            0,
+            "nothing is left on the ground"
         );
     }
 

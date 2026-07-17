@@ -282,16 +282,17 @@ Roughly in dependency order, each script-first:
     list before). Lifting a worn item takes it off. A held item's origin is now
     "ground, container, *or* mobile", so every cancelled drag still undoes to
     exactly where it came from.
-  - [x] **Stacking and decay.** A `Stackable` item merges with an identical pile
-    (same graphic and hue) when dropped onto it — amounts sum, clamped, the
-    dragged one despawns, the survivor is redrawn past the `seen` set. Ground
-    items carry a `Decays { at_tick }` and rot when the tick counter reaches it;
-    lifting, containing or wearing an item takes the clock off it, and the tick's
-    `decay()` reads only its own counter, no wall clock. Containers do not decay
-    with their contents inside. Deferred with a note: **partial-stack pickup
-    (split)** — the `0x07` amount is still ignored and the whole pile is lifted,
-    because which end of a split keeps the original serial is a protocol subtlety
-    worth reading Sphere closely for, not guessing.
+  - [x] **Stacking, split and decay.** A `Stackable` item merges with an
+    identical pile (same graphic and hue) dropped onto it — amounts sum, clamped,
+    the dragged one despawns, the survivor is redrawn past the `seen` set.
+    Picking up part of a pile splits it: the `0x07` amount is honoured, and —
+    read out of Sphere's `CItem::UnStackSplit` rather than guessed — the original
+    keeps its serial and holds the taken amount on the cursor while a new dupe is
+    left on the ground with the remainder, so the client's cursor and its drop
+    still name the same object. Ground items carry a `Decays { at_tick }` and rot
+    when the tick counter reaches it; lifting, containing or wearing takes the
+    clock off, and `decay()` reads only its own counter, no wall clock.
+    Containers do not decay with their contents inside.
 - [ ] `combat` — swing timers, damage, resistances, notoriety
 - [ ] `skills` — usage checks, gain curves
 - [ ] `magic` — spells, reagents, casting
