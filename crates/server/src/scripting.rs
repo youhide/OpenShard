@@ -208,6 +208,8 @@ fn into_world(command: ScriptCommand) -> Command {
             damage,
             resistance,
             swing,
+            sight,
+            wander,
             x,
             y,
             z,
@@ -220,6 +222,8 @@ fn into_world(command: ScriptCommand) -> Command {
             damage,
             resistance,
             swing,
+            sight,
+            wander,
             position: openshard_protocol::Point::new(x, y, z),
             facet,
         },
@@ -481,6 +485,8 @@ mod tests {
             damage: 5,
             resistance: 0,
             swing: 0,
+            sight: 0,
+            wander: false,
             position: openshard_protocol::Point::new(1363, 1600, 0),
             facet: 0,
         });
@@ -630,6 +636,60 @@ mod tests {
                 .map(|h| h.current),
             Some(20),
             "thirty fire damage, unresisted, took the target from fifty to twenty"
+        );
+    }
+
+    #[test]
+    fn a_script_spawns_an_aggressive_creature_that_fights() {
+        // AI end to end: a script drops an aggressive creature on the player's
+        // tile, and the built-in brain — no further scripting — notices, and the
+        // player takes damage. Combat, movement and the brain all reused.
+        let script = TempScript::new(
+            "spawner",
+            "function onEvent(e) {\n\
+             if (e.type === 'PlayerEntered') {\n\
+                 Deno.core.ops.op_spawn_mobile({ body: 0x0009, hits: 50, damage: 8, sight: 10, x: e.x, y: e.y });\n\
+             }\n\
+             }",
+        );
+
+        let now = Instant::now();
+        let mut world = World::new((1363, 1600));
+        let mut scripts = Scripts::load(script.path(), &world).expect("script loads");
+
+        world.queue(Command::Enter {
+            connection: ConnectionId::from_raw(1),
+            version: ClientVersion::TOL,
+            account: "admin".to_owned(),
+            name: "Lord British".to_owned(),
+            serial: None,
+            position: None,
+            facet: 0,
+            appearance: None,
+        });
+        world.tick(now);
+        scripts.pump(&mut world); // the creature is spawned
+        world.tick(now);
+
+        let player = world
+            .registry()
+            .query::<openshard_world::Client>()
+            .next()
+            .map(|(e, _)| e)
+            .expect("the player");
+
+        // Give the brain time to notice and the swing time to land.
+        for _ in 0..80 {
+            world.tick(now);
+        }
+        assert!(
+            world
+                .registry()
+                .get::<openshard_world::Hitpoints>(player)
+                .unwrap()
+                .current
+                < 100,
+            "the creature the script spawned attacked the player on its own"
         );
     }
 }

@@ -185,6 +185,10 @@ pub enum Command {
         resistance: u8,
         /// Ticks between its swings; 0 takes the default.
         swing: u64,
+        /// How far it notices a foe, in tiles; 0 is passive.
+        sight: u8,
+        /// Whether it wanders when idle.
+        wander: bool,
         /// Where it stands.
         x: u16,
         /// Where it stands.

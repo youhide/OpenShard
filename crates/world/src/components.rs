@@ -215,6 +215,24 @@ impl Skills {
     }
 }
 
+/// Marks a mobile as run by the server rather than a person: it has a brain.
+///
+/// The built-in brain, deliberately simple — notice a nearby foe, chase it,
+/// swing (through the same `Combat` a player uses); wander when there is nothing
+/// to fight. What it *is* is a couple of knobs a script sets at spawn, so an
+/// aggressive ogre and a placid deer differ by data, not code. A brain a script
+/// drives itself — a per-tick hook, which the scripting benchmark exists to make
+/// affordable — is the richer path this leaves room for.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Brain {
+    /// How far, in tiles, it notices a foe. Zero never picks a fight.
+    pub sight: u8,
+    /// Whether it drifts around when it has nothing to fight.
+    pub wander: bool,
+    /// The tick it next gets to act — brains think in beats, not every tick.
+    pub next_think: u64,
+}
+
 /// A mobile's fighting state: whether it is in war mode, whom it is attacking,
 /// and when it may next swing.
 ///

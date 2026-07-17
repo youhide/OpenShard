@@ -375,7 +375,17 @@ Roughly in dependency order, each script-first:
     it is a fill-in on the item side, noted not forgotten
   - [ ] **the client cast path** — casting from a spellbook or a macro
     (`0x12`/`0xBF.0x1C`), the interactive layer, as `0x05`/`0x72` were for combat
-- [ ] `ai` — brains, aggro, wandering
+- [x] `ai` — brains, aggro, wandering
+  - [x] **A built-in brain, and room for scripted ones.** A creature spawned with
+    a `sight` or `wander` gets a `Brain`, and `think()` gives it a beat every so
+    often (not every tick): it notices the nearest player within sight and takes
+    a `Combat` aimed at them — so `swings()` attacks it with exactly the machinery
+    a player fights with — chases when out of reach, drops a target that dies or
+    flees, and drifts when idle. The decision uses the world's `Rng`, so a fight
+    replays. Aggro range and wandering are spawn data (`op_spawn_mobile` grew
+    `sight`/`wander`), the script-first knobs; a wholly script-driven brain — a
+    per-mobile `onTick` hook, which the scripting benchmark exists to make
+    affordable — is the richer path this leaves open.
 - [ ] `chat` — speech, journal routing
 - [ ] `housing`, `guilds`
 

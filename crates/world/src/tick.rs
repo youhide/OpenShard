@@ -43,16 +43,16 @@ use openshard_protocol::{
 use tracing::{debug, info, warn};
 
 use crate::components::{
-    Account, Amount, Body, Client, Combat, Contained, Container, CriminalUntil, DamageType, Decays,
-    Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name, Position,
-    Resistance, Skills, Stackable, SwingSpeed,
+    Account, Amount, Body, Brain, Client, Combat, Contained, Container, CriminalUntil, DamageType,
+    Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name,
+    Position, Resistance, Skills, Stackable, SwingSpeed,
 };
 use crate::events::{
     ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
     RefusedReason, SkillUsed, SpellCast, StepRefused,
 };
 use crate::rng::Rng;
-use crate::sectors::{in_range, Sectors, VIEW_RANGE};
+use crate::sectors::{distance, in_range, Sectors, VIEW_RANGE};
 use crate::skills;
 use crate::terrain::MapTerrain;
 
@@ -104,6 +104,13 @@ const DEFAULT_MANA: u16 = 100;
 /// Ticks between mana regenerating a point: three seconds at [`TICK_INTERVAL`].
 /// A flat rate until it derives from meditation and intelligence.
 const MANA_REGEN_TICKS: u64 = 60;
+/// Ticks between a brain's beats — half a second at [`TICK_INTERVAL`]. Creatures
+/// think in beats, not every tick: it paces their walk and spares the loop from
+/// re-deciding a thousand times a second what has not changed.
+const AI_THINK_TICKS: u64 = 10;
+/// The chance in eight, per beat, that an idle wanderer takes a step. Low enough
+/// that a field of creatures drifts rather than marches.
+const WANDER_IN_EIGHT: u32 = 3;
 /// How near, in tiles (Chebyshev), a mobile must be to land a melee blow: the
 /// next tile over, diagonals included.
 const MELEE_RANGE: u32 = 1;
@@ -263,6 +270,10 @@ pub enum Command {
         resistance: u8,
         /// Ticks between its swings; 0 takes the default.
         swing: u64,
+        /// How far it notices a foe, in tiles; 0 is passive, no brain.
+        sight: u8,
+        /// Whether it wanders when idle.
+        wander: bool,
         /// Where it stands.
         position: Point,
         /// Which facet.
@@ -397,6 +408,40 @@ struct Entering {
     position: Option<Point>,
     facet: u8,
     appearance: Option<Appearance>,
+}
+
+/// The eight-way step that most reduces the gap from `from` to `to`, or `None`
+/// when they share a tile. What a chaser walks along.
+fn direction_toward(from: Point, to: Point) -> Option<Direction> {
+    let dx = (i32::from(to.x) - i32::from(from.x)).signum();
+    let dy = (i32::from(to.y) - i32::from(from.y)).signum();
+    match (dx, dy) {
+        (0, 0) => None,
+        (0, -1) => Some(Direction::North),
+        (1, -1) => Some(Direction::NorthEast),
+        (1, 0) => Some(Direction::East),
+        (1, 1) => Some(Direction::SouthEast),
+        (0, 1) => Some(Direction::South),
+        (-1, 1) => Some(Direction::SouthWest),
+        (-1, 0) => Some(Direction::West),
+        _ => Some(Direction::NorthWest),
+    }
+}
+
+/// Everything [`World::spawn_mobile`] needs — a plain bundle, so the one function
+/// that makes a creature takes one argument instead of eleven.
+struct SpawnMobile {
+    body: u16,
+    hue: u16,
+    hits: u16,
+    notoriety: u8,
+    damage: u16,
+    resistance: u8,
+    swing: u64,
+    sight: u8,
+    wander: bool,
+    position: Point,
+    facet: u8,
 }
 
 /// Bytes for a connection, produced by a tick.
@@ -668,6 +713,7 @@ impl World {
         // out, then rot away what has lain on the ground too long. All after the
         // commands and all driven by the tick counter, so a fight, a flag and a
         // decay are as replayable as everything else.
+        self.think();
         self.swings();
         self.expire_criminality();
         self.regen_mana();
@@ -833,11 +879,23 @@ impl World {
                 damage,
                 resistance,
                 swing,
+                sight,
+                wander,
                 position,
                 facet,
-            } => self.spawn_mobile(
-                body, hue, hits, notoriety, damage, resistance, swing, position, facet,
-            ),
+            } => self.spawn_mobile(SpawnMobile {
+                body,
+                hue,
+                hits,
+                notoriety,
+                damage,
+                resistance,
+                swing,
+                sight,
+                wander,
+                position,
+                facet,
+            }),
             Command::Damage {
                 serial,
                 amount,
@@ -1308,18 +1366,20 @@ impl World {
     /// a mobile already treats "has a client" as the question, so a spawned one
     /// falls out of the machinery already there.
     #[allow(clippy::too_many_arguments)]
-    fn spawn_mobile(
-        &mut self,
-        body: u16,
-        hue: u16,
-        hits: u16,
-        notoriety: u8,
-        damage: u16,
-        resistance: u8,
-        swing: u64,
-        position: Point,
-        facet: u8,
-    ) {
+    fn spawn_mobile(&mut self, spec: SpawnMobile) {
+        let SpawnMobile {
+            body,
+            hue,
+            hits,
+            notoriety,
+            damage,
+            resistance,
+            swing,
+            sight,
+            wander,
+            position,
+            facet,
+        } = spec;
         let facet = if self.facets.contains_key(&facet) {
             facet
         } else {
@@ -1364,8 +1424,19 @@ impl World {
                 ticks: if swing == 0 { SWING_TICKS } else { swing },
             },
         );
-        // No `Combat`: a creature does not fight until something drives it, which
-        // is an `ai` question. Its swing speed waits, ready, for when it does.
+        // A brain only for a creature that needs one — something that hunts or
+        // wanders. A pure prop (a shopkeeper standing still) gets none and never
+        // enters `think`. `Combat` it earns when it first picks a fight.
+        if sight > 0 || wander {
+            self.registry.insert(
+                entity,
+                Brain {
+                    sight,
+                    wander,
+                    next_think: 0,
+                },
+            );
+        }
         self.registry
             .insert(entity, Movement(Walker::new(position, facing)));
         self.facet_state_mut(facet).sectors.insert(entity, position);
@@ -1565,6 +1636,137 @@ impl World {
                 self.clear_target(attacker);
             }
         }
+    }
+
+    /// Give every brain due a beat: chase and fight what it has, pick a fight if
+    /// it sees one, or drift. See [`Brain`].
+    ///
+    /// The interest and combat machinery does the rest — a creature that gets a
+    /// `Combat` from here is attacked-with by [`swings`](Self::swings) exactly as
+    /// a player would be, and its steps go out to watchers exactly as a player's
+    /// do. This function only decides.
+    fn think(&mut self) {
+        let now = self.ticks;
+        let thinkers: Vec<EntityId> = self
+            .registry
+            .query::<Brain>()
+            .filter(|(_, brain)| now >= brain.next_think)
+            .map(|(entity, _)| entity)
+            .collect();
+        for creature in thinkers {
+            self.think_one(creature);
+            if let Some(brain) = self.registry.get_mut::<Brain>(creature) {
+                brain.next_think = now + AI_THINK_TICKS;
+            }
+        }
+    }
+
+    /// One creature's beat.
+    fn think_one(&mut self, creature: EntityId) {
+        let Some(serial) = self.registry.serial_of(creature) else {
+            return;
+        };
+        let Some(&Position(pos)) = self.registry.get::<Position>(creature) else {
+            return;
+        };
+        let Some(&Brain { sight, wander, .. }) = self.registry.get::<Brain>(creature) else {
+            return;
+        };
+        let facet = self.facet_of(creature);
+
+        // Keep after a target that is still alive and in sight — close in if out
+        // of reach, and leave the hitting to `swings`.
+        if let Some(target_serial) = self.registry.get::<Combat>(creature).and_then(|c| c.target) {
+            if let Some(target_pos) = self.foe_in_sight(target_serial, pos, facet, sight) {
+                if !in_range(pos, target_pos, MELEE_RANGE) {
+                    if let Some(dir) = direction_toward(pos, target_pos) {
+                        self.step(serial.raw(), dir.to_bits());
+                    }
+                }
+                return;
+            }
+            self.clear_target(creature);
+        }
+
+        // Nothing to fight: look for prey, or wander.
+        if sight > 0 {
+            if let Some(prey) = self.nearest_player_in_sight(creature, pos, facet, sight) {
+                let next_swing = self.ticks + self.swing_speed(creature);
+                self.registry.insert(
+                    creature,
+                    Combat {
+                        warmode: true,
+                        target: Some(prey),
+                        next_swing,
+                    },
+                );
+                return;
+            }
+        }
+        if wander && self.rng.below(8) < WANDER_IN_EIGHT {
+            // Walk on in the way it already faces, so it actually drifts rather
+            // than spinning: a step in a new direction only *turns* (turn-as-step),
+            // so picking a random heading every beat would never move. A quarter
+            // of the time it does turn, to a new heading, and drifts off that way.
+            let facing = self
+                .registry
+                .get::<Heading>(creature)
+                .map_or(Direction::South, |h| h.0.direction);
+            let dir = if self.rng.below(4) == 0 {
+                Direction::from_bits(self.rng.below(8) as u8)
+            } else {
+                facing
+            };
+            self.step(serial.raw(), dir.to_bits());
+        }
+    }
+
+    /// The position of `target` if it is still a live foe within `sight` of
+    /// `from` on `facet`, or `None` if it has died, fled or vanished.
+    fn foe_in_sight(&self, target: Serial, from: Point, facet: u8, sight: u8) -> Option<Point> {
+        let entity = self.registry.entity_of(target)?;
+        let &Position(pos) = self.registry.get::<Position>(entity)?;
+        let alive = self
+            .registry
+            .get::<Hitpoints>(entity)
+            .is_some_and(|h| h.current > 0);
+        (alive && self.facet_of(entity) == facet && in_range(from, pos, u32::from(sight)))
+            .then_some(pos)
+    }
+
+    /// The nearest living player within `sight` of a creature, if any.
+    fn nearest_player_in_sight(
+        &self,
+        creature: EntityId,
+        from: Point,
+        facet: u8,
+        sight: u8,
+    ) -> Option<Serial> {
+        let sectors = &self.facet_state(facet).sectors;
+        let mut best: Option<(u32, Serial)> = None;
+        for (id, pos) in sectors.nearby(from, u32::from(sight)) {
+            if id == creature || !self.registry.has::<Client>(id) {
+                continue;
+            }
+            if !in_range(from, pos, u32::from(sight)) {
+                continue;
+            }
+            if self
+                .registry
+                .get::<Hitpoints>(id)
+                .is_none_or(|h| h.current == 0)
+            {
+                continue;
+            }
+            let Some(serial) = self.registry.serial_of(id) else {
+                continue;
+            };
+            let d = distance(from, pos);
+            if best.is_none_or(|(best_d, _)| d < best_d) {
+                best = Some((d, serial));
+            }
+        }
+        best.map(|(_, serial)| serial)
     }
 
     /// Push a combatant's next swing out to `tick`.
@@ -3911,6 +4113,8 @@ pub(crate) mod tests {
             damage,
             resistance,
             swing: 0, // the default pace
+            sight: 0, // passive by default; tests that want a brain set it
+            wander: false,
             position: point,
             facet: 0,
         });
@@ -4716,6 +4920,122 @@ pub(crate) mod tests {
         assert!(
             world.registry.get::<Mana>(entity).unwrap().current > spent,
             "mana came back over time"
+        );
+    }
+
+    /// Spawn a creature with a brain (sight, wander) and return its serial.
+    fn spawn_creature(
+        world: &mut World,
+        point: Point,
+        sight: u8,
+        wander: bool,
+        now: Instant,
+    ) -> u32 {
+        world.queue(Command::SpawnMobile {
+            body: 0x0190,
+            hue: 0,
+            hits: 50,
+            notoriety: 5,
+            damage: SWING_DAMAGE,
+            resistance: 0,
+            swing: 0,
+            sight,
+            wander,
+            position: point,
+            facet: 0,
+        });
+        world.tick(now);
+        world
+            .registry
+            .query::<Body>()
+            .filter(|(entity, _)| !world.registry.has::<Client>(*entity))
+            .filter_map(|(entity, _)| world.registry.serial_of(entity).map(|s| s.raw()))
+            .max()
+            .expect("a spawned creature")
+    }
+
+    #[test]
+    fn an_aggressive_creature_attacks_a_nearby_player() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let player_entity = world.players[&player];
+        // Aggressive, standing on the player's tile.
+        spawn_creature(&mut world, Point::new(START.0, START.1, 0), 10, false, now);
+
+        // A beat to notice, a swing interval to strike.
+        for _ in 0..(AI_THINK_TICKS + SWING_TICKS + 2) {
+            world.tick(now);
+        }
+        assert!(
+            world
+                .registry
+                .get::<Hitpoints>(player_entity)
+                .unwrap()
+                .current
+                < DEFAULT_HITPOINTS,
+            "the creature noticed the player and hit them"
+        );
+    }
+
+    #[test]
+    fn an_aggressive_creature_chases_a_player() {
+        let now = Instant::now();
+        let mut world = world();
+        enter(&mut world, now); // a player at START to be chased
+        let start = Point::new(START.0 + 4, START.1, 0);
+        let mob = spawn_creature(&mut world, start, 10, false, now);
+        let mob_entity = entity(&world, mob);
+
+        // Several beats: it turns, then walks toward the player.
+        for _ in 0..(5 * AI_THINK_TICKS) {
+            world.tick(now);
+        }
+        assert!(
+            world.registry.get::<Position>(mob_entity).unwrap().0.x < start.x,
+            "the creature closed the distance"
+        );
+    }
+
+    #[test]
+    fn a_passive_creature_ignores_players() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let player_entity = world.players[&player];
+        // Sight 0, no wander: no brain at all.
+        spawn_creature(&mut world, Point::new(START.0, START.1, 0), 0, false, now);
+
+        for _ in 0..(SWING_TICKS + AI_THINK_TICKS + 5) {
+            world.tick(now);
+        }
+        assert_eq!(
+            world
+                .registry
+                .get::<Hitpoints>(player_entity)
+                .unwrap()
+                .current,
+            DEFAULT_HITPOINTS,
+            "a passive creature never lifts a finger"
+        );
+    }
+
+    #[test]
+    fn a_wandering_creature_drifts() {
+        let now = Instant::now();
+        let mut world = world();
+        let start = Point::new(START.0, START.1, 0);
+        // Wanders, sees nothing to fight.
+        let mob = spawn_creature(&mut world, start, 0, true, now);
+        let mob_entity = entity(&world, mob);
+
+        for _ in 0..(15 * AI_THINK_TICKS) {
+            world.tick(now);
+        }
+        assert_ne!(
+            world.registry.get::<Position>(mob_entity).unwrap().0,
+            start,
+            "given time, a wanderer moves"
         );
     }
 

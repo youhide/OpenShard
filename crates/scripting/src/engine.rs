@@ -198,6 +198,10 @@ struct MobileSpec {
     resistance: u8,
     #[serde(default)]
     swing: u64,
+    #[serde(default)]
+    sight: u8,
+    #[serde(default)]
+    wander: bool,
     x: u16,
     y: u16,
     #[serde(default)]
@@ -220,6 +224,8 @@ fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
             damage: spec.damage,
             resistance: spec.resistance,
             swing: spec.swing,
+            sight: spec.sight,
+            wander: spec.wander,
             x: spec.x,
             y: spec.y,
             z: spec.z,
