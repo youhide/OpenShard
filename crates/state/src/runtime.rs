@@ -450,6 +450,24 @@ impl WorldState {
     pub fn send(&mut self, connection: ConnectionId, packet: Vec<u8>) {
         self.outbox.push(Outbound { connection, packet });
     }
+
+    /// Draw a newly placed or changed `entity` to everyone in range who does not
+    /// already have it — a fresh item, a spawned creature, an equipped mobile.
+    pub fn reveal(&mut self, entity: EntityId) {
+        let facet = self.facet_of(entity);
+        let sectors = &self.facet_state(facet).sectors;
+        let Some(centre) = sectors.position_of(entity) else {
+            return;
+        };
+        let watchers: Vec<EntityId> = sectors
+            .nearby(centre, VIEW_RANGE)
+            .map(|(id, _)| id)
+            .filter(|id| *id != entity)
+            .collect();
+        for watcher in watchers {
+            self.show(watcher, entity);
+        }
+    }
 }
 
 impl std::fmt::Debug for WorldState {

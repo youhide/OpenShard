@@ -47,7 +47,7 @@ use openshard_state::components::{
     Resistance, Stackable, Stats, SwingSpeed,
 };
 use openshard_state::rng::Rng;
-use openshard_state::sectors::{distance, in_range, Sectors, VIEW_RANGE};
+use openshard_state::sectors::{distance, in_range, Sectors};
 use openshard_state::{FacetState, HeldItem, Origin, Outbound, WorldState};
 
 use openshard_chat as chat;
@@ -1346,7 +1346,7 @@ impl World {
             serial,
             position,
         });
-        self.reveal(entity);
+        self.state.reveal(entity);
         debug!(%serial, graphic, position = %position, "item on the ground");
         Some(entity)
     }
@@ -1454,7 +1454,7 @@ impl World {
             .facet_state_mut(facet)
             .sectors
             .insert(entity, position);
-        self.reveal(entity);
+        self.state.reveal(entity);
         debug!(%serial, body, "mobile spawned");
     }
 
@@ -1789,22 +1789,6 @@ impl World {
     /// but the players around it still need telling once, when it appears.
     /// [`show`](Self::show) picks the packet — `0x1A` for an item, `0x78` for a
     /// mobile — so this serves both.
-    fn reveal(&mut self, entity: EntityId) {
-        let facet = self.state.facet_of(entity);
-        let sectors = &self.state.facet_state(facet).sectors;
-        let Some(centre) = sectors.position_of(entity) else {
-            return;
-        };
-        let watchers: Vec<EntityId> = sectors
-            .nearby(centre, VIEW_RANGE)
-            .map(|(id, _)| id)
-            .filter(|id| *id != entity)
-            .collect();
-        for watcher in watchers {
-            self.state.show(watcher, entity);
-        }
-    }
-
     /// Lift an item onto a client's cursor. See [`Command::PickUpItem`].
     fn pick_up(&mut self, connection: ConnectionId, serial: u32, amount: u16) {
         let Some(&player) = self.state.players.get(&connection) else {
@@ -2138,7 +2122,7 @@ impl World {
             .facet_state_mut(facet)
             .sectors
             .insert(leftover, position);
-        self.reveal(leftover);
+        self.state.reveal(leftover);
     }
 
     /// Re-send a ground item to everyone already watching it — for when its
@@ -2243,7 +2227,7 @@ impl World {
             .facet_state_mut(facet)
             .sectors
             .insert(item, position);
-        self.reveal(item);
+        self.state.reveal(item);
     }
 
     fn disconnect(&mut self, connection: ConnectionId) {
@@ -5613,6 +5597,7 @@ mod interest_tests {
     use super::tests::*;
     use super::*;
     use openshard_movement::WALK_INTERVAL;
+    use openshard_state::sectors::VIEW_RANGE;
 
     const ALICE: ConnectionId = ConnectionId::from_raw(1);
     const BOB: ConnectionId = ConnectionId::from_raw(2);
