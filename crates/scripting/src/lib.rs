@@ -86,6 +86,11 @@ pub enum Event {
         /// Its wire identity, now released.
         serial: Serial,
     },
+    /// A mobile died — combat's headline event, for loot, notoriety and quests.
+    MobileDied {
+        /// Its wire identity.
+        serial: Serial,
+    },
 }
 
 /// What a script asks the world to do.
@@ -138,6 +143,30 @@ pub enum Command {
         z: i8,
         /// Which facet.
         facet: u8,
+    },
+    /// Put a mobile in the world — a creature to fight or an NPC to stand there.
+    SpawnMobile {
+        /// The body graphic.
+        body: u16,
+        /// Its hue.
+        hue: u16,
+        /// Its starting and maximum hit points.
+        hits: u16,
+        /// Where it stands.
+        x: u16,
+        /// Where it stands.
+        y: u16,
+        /// Where it stands.
+        z: i8,
+        /// Which facet.
+        facet: u8,
+    },
+    /// Deal damage to a mobile.
+    Damage {
+        /// Whom.
+        serial: Serial,
+        /// How much.
+        amount: u16,
     },
 }
 

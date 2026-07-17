@@ -72,7 +72,7 @@ impl Host {
             Event::PlayerLeft { serial } => {
                 self.entities.remove(&serial);
             }
-            Event::StepRefused { .. } => {}
+            Event::StepRefused { .. } | Event::MobileDied { .. } => {}
         }
     }
 }
@@ -179,9 +179,58 @@ fn op_spawn_container(state: &mut OpState, #[serde] spec: ContainerSpec) {
         });
 }
 
+/// What a script passes to spawn a mobile.
+#[derive(serde::Deserialize)]
+struct MobileSpec {
+    body: u16,
+    #[serde(default)]
+    hue: u16,
+    #[serde(default = "one")]
+    hits: u16,
+    x: u16,
+    y: u16,
+    #[serde(default)]
+    z: i8,
+    #[serde(default)]
+    facet: u8,
+}
+
+/// Put a creature or NPC in the world.
+#[op2]
+fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
+    state
+        .borrow_mut::<Host>()
+        .outbox
+        .push(Command::SpawnMobile {
+            body: spec.body,
+            hue: spec.hue,
+            hits: spec.hits,
+            x: spec.x,
+            y: spec.y,
+            z: spec.z,
+            facet: spec.facet,
+        });
+}
+
+/// Deal damage to a mobile. A fast op: the swing already decided the number.
+#[op2(fast)]
+fn op_damage(state: &mut OpState, serial: u32, amount: u32) {
+    state.borrow_mut::<Host>().outbox.push(Command::Damage {
+        serial,
+        amount: amount.min(u32::from(u16::MAX)) as u16,
+    });
+}
+
 extension!(
     openshard_ops,
-    ops = [op_position, op_move, op_spawn_item, op_spawn_container],
+    ops = [
+        op_position,
+        op_move,
+        op_spawn_item,
+        op_spawn_container,
+        op_spawn_mobile,
+        op_damage
+    ],
     docs = "OpenShard's script-facing ops: read entity state, enqueue commands.",
 );
 

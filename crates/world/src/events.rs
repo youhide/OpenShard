@@ -103,3 +103,35 @@ pub struct PlayerLeft {
     /// Its wire identity, now released.
     pub serial: Serial,
 }
+
+/// A mobile took damage.
+///
+/// Emitted whenever hit points fall — the hook combat gives everything that
+/// cares without combat having to know who does: a health bar redraw, an
+/// aggression tracker, a script that heals its pet. This is the crate boundary
+/// the architecture is built on — combat says what happened and moves on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct MobileDamaged {
+    /// The mobile.
+    pub entity: EntityId,
+    /// Its wire identity.
+    pub serial: Serial,
+    /// How much it lost.
+    pub amount: u16,
+    /// What it has left.
+    pub remaining: u16,
+}
+
+/// A mobile died — its hit points reached zero.
+///
+/// The event the whole "systems emit, they do not call" rule is named for:
+/// combat emits this, and loot, notoriety, guild war scores and quests read it,
+/// none of them wired into combat. What death *does* — a corpse, a ghost, a
+/// resurrection — is not decided here.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct MobileDied {
+    /// The mobile.
+    pub entity: EntityId,
+    /// Its wire identity.
+    pub serial: Serial,
+}

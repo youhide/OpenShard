@@ -294,6 +294,20 @@ Roughly in dependency order, each script-first:
     clock off, and `decay()` reads only its own counter, no wall clock.
     Containers do not decay with their contents inside.
 - [ ] `combat` — swing timers, damage, resistances, notoriety
+  - [x] **Hit points, damage and death.** Mobiles carry `Hitpoints`; scripts
+    spawn creatures (`op_spawn_mobile` → `Command::SpawnMobile`, an entity with a
+    body and no client, drawn through the same interest machinery as a player)
+    and damage them (`op_damage` → `Command::Damage`). A blow lowers hits and
+    redraws the `0xA1` bar — the mobile itself sees the real numbers, everyone
+    else a percentage, so a stranger's exact health never crosses the wire. At
+    zero it emits `MobileDied`, which the server delivers to scripts, so loot,
+    notoriety and quests hang off death without combat knowing they exist — the
+    "systems emit, they do not call" rule made concrete. A creature is removed on
+    death; a player stays (ghosts and corpses are a later slice).
+  - [ ] the interactive layer: war mode (`0x72`), attack request (`0x05`), and
+    swing timers that turn "in war, in range" into damage on the tick
+  - [ ] resistances and the damage formula (script-first)
+  - [ ] notoriety — who may hit whom, and the health-bar colour
 - [ ] `skills` — usage checks, gain curves
 - [ ] `magic` — spells, reagents, casting
 - [ ] `ai` — brains, aggro, wandering

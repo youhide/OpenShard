@@ -17,7 +17,7 @@ use openshard_events::Cursor;
 use openshard_scripting::{
     Command as ScriptCommand, DenoEngine, Event as ScriptEvent, ScriptEngine,
 };
-use openshard_world::events::{MobileMoved, PlayerEntered, PlayerLeft, StepRefused};
+use openshard_world::events::{MobileDied, MobileMoved, PlayerEntered, PlayerLeft, StepRefused};
 use openshard_world::{Command, World};
 use tracing::{error, info, warn};
 
@@ -28,6 +28,7 @@ pub struct Scripts {
     moved: Cursor<MobileMoved>,
     refused: Cursor<StepRefused>,
     left: Cursor<PlayerLeft>,
+    died: Cursor<MobileDied>,
 }
 
 impl Scripts {
@@ -65,6 +66,7 @@ impl Scripts {
             moved: world.bus().cursor(),
             refused: world.bus().cursor(),
             left: world.bus().cursor(),
+            died: world.bus().cursor(),
             engine,
         })
     }
@@ -108,6 +110,11 @@ impl Scripts {
             }
             for e in bus.read(&mut self.left) {
                 events.push(ScriptEvent::PlayerLeft {
+                    serial: e.serial.raw(),
+                });
+            }
+            for e in bus.read(&mut self.died) {
+                events.push(ScriptEvent::MobileDied {
                     serial: e.serial.raw(),
                 });
             }
@@ -171,6 +178,22 @@ fn into_world(command: ScriptCommand) -> Command {
             position: openshard_protocol::Point::new(x, y, z),
             facet,
         },
+        ScriptCommand::SpawnMobile {
+            body,
+            hue,
+            hits,
+            x,
+            y,
+            z,
+            facet,
+        } => Command::SpawnMobile {
+            body,
+            hue,
+            hits,
+            position: openshard_protocol::Point::new(x, y, z),
+            facet,
+        },
+        ScriptCommand::Damage { serial, amount } => Command::Damage { serial, amount },
     }
 }
 
@@ -358,5 +381,56 @@ mod tests {
             .drain_outbound()
             .any(|out| out.packet.first() == Some(&0x24));
         assert!(opened, "the container gump opens for the player");
+    }
+
+    #[test]
+    fn a_script_reacts_to_a_death_by_dropping_loot() {
+        // Combat's headline path, end to end: a creature dies, the world emits
+        // MobileDied, the script hears it and drops loot — combat and loot
+        // decoupled through the bus, exactly as the architecture intends.
+        let script = TempScript::new(
+            "loot",
+            "function onEvent(e) {\n\
+             if (e.type === 'MobileDied') {\n\
+                 Deno.core.ops.op_spawn_item({ graphic: 0x0EED, x: 1363, y: 1600 });\n\
+             }\n\
+             }",
+        );
+
+        let now = Instant::now();
+        let mut world = World::new((1363, 1600));
+        let mut scripts = Scripts::load(script.path(), &world).expect("script loads");
+
+        world.queue(Command::SpawnMobile {
+            body: 0x0190,
+            hue: 0,
+            hits: 5,
+            position: openshard_protocol::Point::new(1363, 1600, 0),
+            facet: 0,
+        });
+        world.tick(now);
+        let mob = world
+            .registry()
+            .query::<openshard_world::Hitpoints>()
+            .filter_map(|(entity, _)| world.registry().serial_of(entity).map(|s| s.raw()))
+            .next()
+            .expect("the creature exists");
+
+        world.queue(Command::Damage {
+            serial: mob,
+            amount: 100,
+        });
+        world.tick(now); // the creature dies, MobileDied is emitted
+        scripts.pump(&mut world); // the script hears it and queues the loot
+        world.tick(now); // the loot spawns
+
+        assert!(
+            world
+                .registry()
+                .query::<openshard_world::Graphic>()
+                .next()
+                .is_some(),
+            "the script dropped an item when the creature died"
+        );
     }
 }

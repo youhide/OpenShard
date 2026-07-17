@@ -41,10 +41,11 @@ pub mod uop;
 
 pub use components::{
     Account, Amount, Body, Client, Contained, Container, Decays, Equipped, Facet, Graphic, Heading,
-    Movement, Name, Position, Stackable,
+    Hitpoints, Movement, Name, Position, Stackable,
 };
 pub use events::{
-    ItemSpawned, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
+    ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
+    RefusedReason, StepRefused,
 };
 pub use map::{LandCell, Map, MapError, StaticItem, BLOCK_SIZE};
 pub use sectors::{distance, in_range, Sectors, SECTOR_SIZE, VIEW_RANGE};

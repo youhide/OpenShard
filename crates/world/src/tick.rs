@@ -34,20 +34,21 @@ use openshard_movement::{step_from, OpenWorld, Terrain, Walk, Walker};
 use openshard_persistence::{CharacterRecord, Journal, Snapshot};
 use openshard_protocol::{
     encode_add_to_container, encode_container_contents, encode_drag_cancel, encode_equip,
-    encode_light_level, encode_login_complete, encode_map_change, encode_open_container,
-    encode_remove, encode_walk_ack, encode_walk_reject, ClientVersion, ContainedItem, Direction,
-    DragCancelReason, Equipment, Facing, MobileIncoming, MobileMove, Notoriety, PlayerStart,
-    PlayerUpdate, Point, WalkRequest, WorldItem, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
-    DROP_TO_GROUND,
+    encode_health, encode_light_level, encode_login_complete, encode_map_change,
+    encode_open_container, encode_remove, encode_walk_ack, encode_walk_reject, ClientVersion,
+    ContainedItem, Direction, DragCancelReason, Equipment, Facing, MobileIncoming, MobileMove,
+    Notoriety, PlayerStart, PlayerUpdate, Point, WalkRequest, WorldItem, DEFAULT_MAP_HEIGHT,
+    DEFAULT_MAP_WIDTH, DROP_TO_GROUND,
 };
 use tracing::{debug, info, warn};
 
 use crate::components::{
     Account, Amount, Body, Client, Contained, Container, Decays, Equipped, Facet, Graphic, Heading,
-    Movement, Name, Position, Stackable,
+    Hitpoints, Movement, Name, Position, Stackable,
 };
 use crate::events::{
-    ItemSpawned, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
+    ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
+    RefusedReason, StepRefused,
 };
 use crate::sectors::{in_range, Sectors, VIEW_RANGE};
 use crate::terrain::MapTerrain;
@@ -89,6 +90,11 @@ const ITEM_REACH: u32 = 3;
 /// are the backpack, the bank box and other slots that are not "worn" and cannot
 /// be equipped by dragging an item onto them.
 const MAX_WEARABLE_LAYER: u8 = 25;
+/// The hit points a character starts with when nothing else says otherwise.
+///
+/// A placeholder, not a design: real starting hits come from stats, and stats
+/// are a later slice. Enough that a new character is not born dead.
+const DEFAULT_HITPOINTS: u16 = 100;
 /// How many ticks an item lies on the ground before it decays.
 ///
 /// Twenty minutes at [`TICK_INTERVAL`] — Sphere's default `DECAY_TIME` is fifteen
@@ -208,6 +214,28 @@ pub enum Command {
         position: Point,
         /// Which facet.
         facet: u8,
+    },
+    /// The server puts a mobile in the world — a script decree. A creature to
+    /// fight, a shopkeeper to stand there: an entity with a body and hit points
+    /// but no client driving it.
+    SpawnMobile {
+        /// The body graphic (a creature id, or a human body).
+        body: u16,
+        /// Its hue.
+        hue: u16,
+        /// Its starting and maximum hit points.
+        hits: u16,
+        /// Where it stands.
+        position: Point,
+        /// Which facet.
+        facet: u8,
+    },
+    /// Deal damage to a mobile — a script or another mobile's blow.
+    Damage {
+        /// Whom, by wire serial.
+        serial: u32,
+        /// How much.
+        amount: u16,
     },
     /// A client double-clicked an object (`0x06`) — for now, to open a container.
     DoubleClick {
@@ -688,6 +716,14 @@ impl World {
                 position,
                 facet,
             } => self.spawn_container(graphic, gump, hue, position, facet),
+            Command::SpawnMobile {
+                body,
+                hue,
+                hits,
+                position,
+                facet,
+            } => self.spawn_mobile(body, hue, hits, position, facet),
+            Command::Damage { serial, amount } => self.damage(serial, amount),
             Command::DoubleClick { connection, serial } => self.double_click(connection, serial),
             Command::EquipItem {
                 connection,
@@ -817,6 +853,13 @@ impl World {
         self.registry.insert(entity, Name(name.clone()));
         self.registry.insert(entity, Account(account));
         self.registry.insert(entity, Facet(facet));
+        self.registry.insert(
+            entity,
+            Hitpoints {
+                current: DEFAULT_HITPOINTS,
+                max: DEFAULT_HITPOINTS,
+            },
+        );
         self.registry
             .insert(entity, Movement(Walker::new(position, facing)));
         self.registry.insert(
@@ -1080,7 +1123,7 @@ impl World {
             serial,
             position,
         });
-        self.reveal_item(entity);
+        self.reveal(entity);
         debug!(%serial, graphic, position = %position, "item on the ground");
         Some(entity)
     }
@@ -1097,6 +1140,125 @@ impl World {
             // ground clutter decays.
             self.registry.remove::<Decays>(entity);
         }
+    }
+
+    /// Put a mobile in the world. See [`Command::SpawnMobile`].
+    ///
+    /// The same bundle a player is built from — a body, a position, a facing, a
+    /// walker, hit points — minus the [`Client`]. That absence is the whole
+    /// difference between a creature and a person; everything that draws or moves
+    /// a mobile already treats "has a client" as the question, so a spawned one
+    /// falls out of the machinery already there.
+    fn spawn_mobile(&mut self, body: u16, hue: u16, hits: u16, position: Point, facet: u8) {
+        let facet = if self.facets.contains_key(&facet) {
+            facet
+        } else {
+            warn!(facet, "unloaded facet; spawning the mobile on the default");
+            self.default_facet
+        };
+        let (entity, serial) = match self.registry.spawn_with_serial(SerialKind::Mobile) {
+            Ok(pair) => pair,
+            Err(error) => {
+                warn!(?error, "out of mobile serials; not spawning");
+                return;
+            }
+        };
+        let hits = hits.max(1);
+        let facing = Facing::walking(Direction::South);
+        self.registry.insert(entity, Body { id: body, hue });
+        self.registry.insert(entity, Position(position));
+        self.registry.insert(entity, Heading(facing));
+        self.registry.insert(entity, Facet(facet));
+        self.registry.insert(
+            entity,
+            Hitpoints {
+                current: hits,
+                max: hits,
+            },
+        );
+        self.registry
+            .insert(entity, Movement(Walker::new(position, facing)));
+        self.facet_state_mut(facet).sectors.insert(entity, position);
+        self.reveal(entity);
+        debug!(%serial, body, "mobile spawned");
+    }
+
+    /// Deal damage to a mobile. See [`Command::Damage`].
+    fn damage(&mut self, serial: u32, amount: u16) {
+        let Some(serial) = Serial::new(serial) else {
+            return;
+        };
+        let Some(entity) = self.registry.entity_of(serial) else {
+            return;
+        };
+        let Some(&Hitpoints { current, max }) = self.registry.get::<Hitpoints>(entity) else {
+            return;
+        };
+        let remaining = current.saturating_sub(amount);
+        self.registry.insert(
+            entity,
+            Hitpoints {
+                current: remaining,
+                max,
+            },
+        );
+        self.bus.send(MobileDamaged {
+            entity,
+            serial,
+            amount,
+            remaining,
+        });
+        self.broadcast_health(entity);
+        if remaining == 0 {
+            self.die(entity, serial);
+        }
+    }
+
+    /// Tell the mobile itself its real hit points and everyone watching it the
+    /// percentage — the two truths of the `0xA1` bar.
+    fn broadcast_health(&mut self, entity: EntityId) {
+        let Some(&Hitpoints { current, max }) = self.registry.get::<Hitpoints>(entity) else {
+            return;
+        };
+        let Some(serial) = self.registry.serial_of(entity) else {
+            return;
+        };
+        if let Some(&Client { connection, .. }) = self.registry.get::<Client>(entity) {
+            self.outbox.push(Outbound {
+                connection,
+                packet: encode_health(serial.raw(), max, current, true),
+            });
+        }
+        let scaled = encode_health(serial.raw(), max, current, false);
+        for watcher in self.watchers_of(entity) {
+            if let Some(&Client { connection, .. }) = self.registry.get::<Client>(watcher) {
+                self.outbox.push(Outbound {
+                    connection,
+                    packet: scaled.clone(),
+                });
+            }
+        }
+    }
+
+    /// A mobile's hit points reached zero. See [`Command::Damage`].
+    ///
+    /// Emits [`MobileDied`] for whoever cares — loot, notoriety, a script — and
+    /// then, for a creature, takes it off the world. A *player* who dies stays
+    /// put for now: ghosts, corpses and resurrection are a later slice, and
+    /// despawning someone still connected is worse than leaving them standing.
+    fn die(&mut self, entity: EntityId, serial: Serial) {
+        self.bus.send(MobileDied { entity, serial });
+        info!(%serial, "died");
+        if self.registry.has::<Client>(entity) {
+            return;
+        }
+        let facet = self.facet_of(entity);
+        for watcher in self.watchers_of(entity) {
+            self.forget(watcher, entity, serial);
+        }
+        self.seen.remove(&entity);
+        self.facet_state_mut(facet).sectors.remove(entity);
+        self.registry.despawn(entity);
     }
 
     /// Set an item's decay clock: it rots [`DECAY_TICKS`] from now. Every loose
@@ -1279,24 +1441,26 @@ impl World {
         Some(encode_equip(serial.raw(), id, layer, mobile.raw(), hue))
     }
 
-    /// Draw a freshly placed item for every player who can see its tile.
+    /// Draw a freshly placed entity for every player who can see its tile.
     ///
-    /// The item's own half of [`refresh_around`](Self::refresh_around): an item
-    /// does not move, so it never runs that, but the players around it still need
-    /// telling once, when it appears.
-    fn reveal_item(&mut self, item: EntityId) {
-        let facet = self.facet_of(item);
+    /// The standing-still half of [`refresh_around`](Self::refresh_around): a
+    /// dropped item or a spawned creature does not move, so it never runs that,
+    /// but the players around it still need telling once, when it appears.
+    /// [`show`](Self::show) picks the packet — `0x1A` for an item, `0x78` for a
+    /// mobile — so this serves both.
+    fn reveal(&mut self, entity: EntityId) {
+        let facet = self.facet_of(entity);
         let sectors = &self.facet_state(facet).sectors;
-        let Some(centre) = sectors.position_of(item) else {
+        let Some(centre) = sectors.position_of(entity) else {
             return;
         };
         let watchers: Vec<EntityId> = sectors
             .nearby(centre, VIEW_RANGE)
             .map(|(id, _)| id)
-            .filter(|id| *id != item)
+            .filter(|id| *id != entity)
             .collect();
         for watcher in watchers {
-            self.show(watcher, item);
+            self.show(watcher, entity);
         }
     }
 
@@ -1631,7 +1795,7 @@ impl World {
         self.facet_state_mut(facet)
             .sectors
             .insert(leftover, position);
-        self.reveal_item(leftover);
+        self.reveal(leftover);
     }
 
     /// Re-send a ground item to everyone already watching it — for when its
@@ -1732,7 +1896,7 @@ impl World {
         // Back on the ground, back on the decay clock.
         self.mark_decay(item);
         self.facet_state_mut(facet).sectors.insert(item, position);
-        self.reveal_item(item);
+        self.reveal(item);
     }
 
     fn disconnect(&mut self, connection: ConnectionId) {
@@ -3167,6 +3331,132 @@ pub(crate) mod tests {
                 .count(),
             0,
             "nothing is left on the ground"
+        );
+    }
+
+    /// Spawn a creature at `point` with `hits` and return its serial.
+    fn spawn_mobile_at(world: &mut World, point: Point, hits: u16, now: Instant) -> u32 {
+        world.queue(Command::SpawnMobile {
+            body: 0x0190,
+            hue: 0,
+            hits,
+            position: point,
+            facet: 0,
+        });
+        world.tick(now);
+        // The newest mobile that no client drives — the creature just made.
+        world
+            .registry
+            .query::<Body>()
+            .filter(|(entity, _)| !world.registry.has::<Client>(*entity))
+            .filter_map(|(entity, _)| world.registry.serial_of(entity).map(|s| s.raw()))
+            .max()
+            .expect("a spawned creature")
+    }
+
+    #[test]
+    fn a_spawned_creature_is_drawn_to_nearby_players() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let _ = packets_for(&mut world, player);
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+
+        assert!(
+            packets_for(&mut world, player)
+                .iter()
+                .any(|p| p[0] == 0x78 && mentions(p, mob)),
+            "the creature is drawn to the player"
+        );
+    }
+
+    #[test]
+    fn damage_lowers_hits_and_updates_the_bar() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+        let mob_entity = entity(&world, mob);
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::Damage {
+            serial: mob,
+            amount: 20,
+        });
+        world.tick(now);
+
+        assert_eq!(
+            world
+                .registry
+                .get::<Hitpoints>(mob_entity)
+                .map(|h| h.current),
+            Some(30),
+            "50 minus 20"
+        );
+        assert!(
+            packets_for(&mut world, player).iter().any(|p| p[0] == 0xA1),
+            "the health bar is redrawn"
+        );
+    }
+
+    #[test]
+    fn a_creature_dies_at_zero_hits() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 10, now);
+        let mob_entity = entity(&world, mob);
+        let _ = packets_for(&mut world, player);
+        let mut died: Cursor<MobileDied> = world.bus().cursor();
+
+        // Overkill: it dies once, not into the negatives.
+        world.queue(Command::Damage {
+            serial: mob,
+            amount: 100,
+        });
+        world.tick(now);
+
+        assert_eq!(world.bus().read(&mut died).count(), 1, "death is announced");
+        assert!(
+            !world.registry.contains(mob_entity),
+            "and the creature is removed"
+        );
+        assert!(
+            packets_for(&mut world, player)
+                .iter()
+                .any(|p| p == &encode_remove(mob)),
+            "and taken off the player's screen"
+        );
+    }
+
+    #[test]
+    fn a_player_who_dies_stays_in_the_world() {
+        // Ghosts and corpses are a later slice; for now death is announced but a
+        // connected player is not yanked out of the world.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let serial = serial_of(&world, player);
+        let player_entity = world.players[&player];
+        let mut died: Cursor<MobileDied> = world.bus().cursor();
+
+        world.queue(Command::Damage {
+            serial,
+            amount: 500,
+        });
+        world.tick(now);
+
+        assert_eq!(world.bus().read(&mut died).count(), 1, "death is announced");
+        assert!(
+            world.registry.contains(player_entity),
+            "but the player is still here"
+        );
+        assert_eq!(
+            world
+                .registry
+                .get::<Hitpoints>(player_entity)
+                .map(|h| h.current),
+            Some(0),
         );
     }
 

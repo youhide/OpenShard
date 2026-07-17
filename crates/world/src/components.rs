@@ -164,6 +164,18 @@ pub struct Client {
     pub version: ClientVersion,
 }
 
+/// A mobile's hit points: how much it has, and how much it can have.
+///
+/// The thing combat spends. A mobile is alive while `current > 0` and dead at
+/// zero. Only mobiles carry it — an item on the ground has no health to lose.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Hitpoints {
+    /// How much it has now.
+    pub current: u16,
+    /// The most it can have.
+    pub max: u16,
+}
+
 /// A mobile that can walk: its position, facing, sequence and pace.
 ///
 /// Wraps [`Walker`] rather than replacing [`Position`]: the walk state and the
