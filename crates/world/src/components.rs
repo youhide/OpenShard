@@ -176,6 +176,23 @@ pub struct Hitpoints {
     pub max: u16,
 }
 
+/// A mobile's fighting state: whether it is in war mode, whom it is attacking,
+/// and when it may next swing.
+///
+/// Players carry it from the moment they enter; a creature gets one when it
+/// starts fighting (which is an `ai` question, not here). `next_swing` is a tick
+/// number, like [`Decays`], so the swing timer is checked against the tick
+/// counter and never a clock.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Combat {
+    /// Whether swings are allowed at all.
+    pub warmode: bool,
+    /// The mobile being attacked, if any.
+    pub target: Option<Serial>,
+    /// The tick at or after which the next swing may land.
+    pub next_swing: u64,
+}
+
 /// A mobile that can walk: its position, facing, sequence and pace.
 ///
 /// Wraps [`Walker`] rather than replacing [`Position`]: the walk state and the

@@ -67,7 +67,7 @@ mod version;
 mod world;
 
 pub use codec::{CodecError, CodecResult, PacketReader, PacketWriter};
-pub use combat::encode_health;
+pub use combat::{encode_attack, encode_health, encode_war_mode, AttackRequest, WarModeRequest};
 pub use containers::{
     encode_add_to_container, encode_container_contents, encode_open_container, ContainedItem,
     DoubleClick,

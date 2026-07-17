@@ -1,6 +1,65 @@
-//! Combat packets: what the client is told about a mobile's health.
+//! Combat packets: war mode, attacking, and a mobile's health.
 
 use crate::codec::PacketWriter;
+use crate::login::{expect_id, LoginDecodeError};
+
+/// `0x72` — enter or leave war mode. 5 bytes, the same shape both ways.
+///
+/// The client sends its desired stance and the server sends back the settled
+/// one. The trailing `00 32 00` is fixed padding Sphere sends verbatim; only the
+/// first byte, the war flag, means anything.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WarModeRequest {
+    /// True for war, false for peace.
+    pub war: bool,
+}
+
+impl WarModeRequest {
+    /// The packet id.
+    pub const ID: u8 = 0x72;
+
+    /// Decode a whole `0x72` packet.
+    pub fn decode(bytes: &[u8]) -> Result<Self, LoginDecodeError> {
+        let mut reader = expect_id(bytes, Self::ID)?;
+        Ok(Self {
+            war: reader.u8()? != 0,
+        })
+    }
+}
+
+/// `0x72` — tell the client the settled war stance.
+pub fn encode_war_mode(war: bool) -> Vec<u8> {
+    vec![WarModeRequest::ID, u8::from(war), 0x00, 0x32, 0x00]
+}
+
+/// `0x05` — the client asks to attack a mobile. 5 bytes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AttackRequest {
+    /// Whom to attack, by serial.
+    pub target: u32,
+}
+
+impl AttackRequest {
+    /// The packet id.
+    pub const ID: u8 = 0x05;
+
+    /// Decode a whole `0x05` packet.
+    pub fn decode(bytes: &[u8]) -> Result<Self, LoginDecodeError> {
+        let mut reader = expect_id(bytes, Self::ID)?;
+        Ok(Self {
+            target: reader.u32()?,
+        })
+    }
+}
+
+/// `0xAA` — set the client's attack target, the mobile whose bar it highlights.
+/// A serial of zero clears it.
+pub fn encode_attack(serial: u32) -> Vec<u8> {
+    let mut writer = PacketWriter::with_capacity(5);
+    writer.u8(0xAA);
+    writer.u32(serial);
+    writer.into_bytes()
+}
 
 /// `0xA1` — update a mobile's health bar. 9 bytes.
 ///
@@ -69,5 +128,33 @@ mod tests {
     fn a_zero_max_does_not_divide_by_zero() {
         let packet = encode_health(1, 0, 0, false);
         assert_eq!(u16::from_be_bytes([packet[7], packet[8]]), 0);
+    }
+
+    #[test]
+    fn war_mode_round_trips() {
+        assert!(
+            WarModeRequest::decode(&[0x72, 0x01, 0, 0x32, 0])
+                .unwrap()
+                .war
+        );
+        assert!(
+            !WarModeRequest::decode(&[0x72, 0x00, 0, 0x32, 0])
+                .unwrap()
+                .war
+        );
+        assert_eq!(encode_war_mode(true), vec![0x72, 0x01, 0x00, 0x32, 0x00]);
+        assert_eq!(encode_war_mode(false), vec![0x72, 0x00, 0x00, 0x32, 0x00]);
+    }
+
+    #[test]
+    fn an_attack_request_is_a_serial() {
+        let bytes = [0x05, 0x00, 0x00, 0x00, 0x2A];
+        assert_eq!(AttackRequest::decode(&bytes).unwrap().target, 0x2A);
+    }
+
+    #[test]
+    fn setting_the_attack_target_is_five_bytes() {
+        let packet = encode_attack(0x0000_002A);
+        assert_eq!(packet, vec![0xAA, 0x00, 0x00, 0x00, 0x2A]);
     }
 }

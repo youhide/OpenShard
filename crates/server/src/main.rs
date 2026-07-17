@@ -32,8 +32,9 @@ use openshard_persistence::{
     AccountRecord, CharacterRecord, MemoryStore, PgStore, Snapshot, SqliteStore, Store,
 };
 use openshard_protocol::{
-    encode_login_denied, huffman, CharacterPlay, CreateCharacter, DoubleClick, DropItem,
-    EquipItemRequest, GameServerLogin, PickUpItem, Point, StartLocation, WalkRequest,
+    encode_login_denied, huffman, AttackRequest, CharacterPlay, CreateCharacter, DoubleClick,
+    DropItem, EquipItemRequest, GameServerLogin, PickUpItem, Point, StartLocation, WalkRequest,
+    WarModeRequest,
 };
 use openshard_world::{Appearance, Command, Map, MapTerrain, TileData, World, TICK_INTERVAL};
 use std::sync::Arc;
@@ -635,6 +636,34 @@ fn dispatch(
                 item: equip.item,
                 layer: equip.layer,
                 mobile: equip.mobile,
+            });
+            true
+        }
+        Some(WarModeRequest::ID) => {
+            if !session.in_world {
+                return true;
+            }
+            let Ok(request) = WarModeRequest::decode(packet) else {
+                warn!(%id, "malformed 0x72");
+                return false;
+            };
+            world.queue(Command::WarMode {
+                connection: id,
+                war: request.war,
+            });
+            true
+        }
+        Some(AttackRequest::ID) => {
+            if !session.in_world {
+                return true;
+            }
+            let Ok(request) = AttackRequest::decode(packet) else {
+                warn!(%id, "malformed 0x05");
+                return false;
+            };
+            world.queue(Command::Attack {
+                connection: id,
+                target: request.target,
             });
             true
         }

@@ -304,8 +304,14 @@ Roughly in dependency order, each script-first:
     notoriety and quests hang off death without combat knowing they exist — the
     "systems emit, they do not call" rule made concrete. A creature is removed on
     death; a player stays (ghosts and corpses are a later slice).
-  - [ ] the interactive layer: war mode (`0x72`), attack request (`0x05`), and
-    swing timers that turn "in war, in range" into damage on the tick
+  - [x] **The interactive layer.** A player toggles war mode (`0x72`, echoed
+    back settled) and picks a target (`0x05` → `0xAA`); a `Combat` component
+    holds the stance, the target and the next-swing tick. `swings()` runs each
+    tick: a combatant in war mode with a target within `MELEE_RANGE` on the same
+    facet strikes when its timer is up, out of reach it waits with its timer
+    unspent, and a killed target ends the attack. The timer is a tick count, like
+    decay — no clock in the tick. Swing speed and damage are flat constants for
+    now; the formula is the next item.
   - [ ] resistances and the damage formula (script-first)
   - [ ] notoriety — who may hit whom, and the health-bar colour
 - [ ] `skills` — usage checks, gain curves

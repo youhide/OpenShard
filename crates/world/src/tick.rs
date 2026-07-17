@@ -33,18 +33,18 @@ use openshard_gateway::ConnectionId;
 use openshard_movement::{step_from, OpenWorld, Terrain, Walk, Walker};
 use openshard_persistence::{CharacterRecord, Journal, Snapshot};
 use openshard_protocol::{
-    encode_add_to_container, encode_container_contents, encode_drag_cancel, encode_equip,
-    encode_health, encode_light_level, encode_login_complete, encode_map_change,
-    encode_open_container, encode_remove, encode_walk_ack, encode_walk_reject, ClientVersion,
-    ContainedItem, Direction, DragCancelReason, Equipment, Facing, MobileIncoming, MobileMove,
-    Notoriety, PlayerStart, PlayerUpdate, Point, WalkRequest, WorldItem, DEFAULT_MAP_HEIGHT,
-    DEFAULT_MAP_WIDTH, DROP_TO_GROUND,
+    encode_add_to_container, encode_attack, encode_container_contents, encode_drag_cancel,
+    encode_equip, encode_health, encode_light_level, encode_login_complete, encode_map_change,
+    encode_open_container, encode_remove, encode_walk_ack, encode_walk_reject, encode_war_mode,
+    ClientVersion, ContainedItem, Direction, DragCancelReason, Equipment, Facing, MobileIncoming,
+    MobileMove, Notoriety, PlayerStart, PlayerUpdate, Point, WalkRequest, WorldItem,
+    DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, DROP_TO_GROUND,
 };
 use tracing::{debug, info, warn};
 
 use crate::components::{
-    Account, Amount, Body, Client, Contained, Container, Decays, Equipped, Facet, Graphic, Heading,
-    Hitpoints, Movement, Name, Position, Stackable,
+    Account, Amount, Body, Client, Combat, Contained, Container, Decays, Equipped, Facet, Graphic,
+    Heading, Hitpoints, Movement, Name, Position, Stackable,
 };
 use crate::events::{
     ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
@@ -95,6 +95,16 @@ const MAX_WEARABLE_LAYER: u8 = 25;
 /// A placeholder, not a design: real starting hits come from stats, and stats
 /// are a later slice. Enough that a new character is not born dead.
 const DEFAULT_HITPOINTS: u16 = 100;
+/// How near, in tiles (Chebyshev), a mobile must be to land a melee blow: the
+/// next tile over, diagonals included.
+const MELEE_RANGE: u32 = 1;
+/// Ticks between swings — one second at [`TICK_INTERVAL`]. A placeholder for a
+/// weapon's real speed, which comes from its tiledata and the wielder's dexterity
+/// once stats land, and is the kind of number a script will own.
+const SWING_TICKS: u64 = 20;
+/// Damage a swing deals. A flat number until the damage formula — resistances,
+/// weapon, strength — is written, and that is a script-first slice of its own.
+const SWING_DAMAGE: u16 = 5;
 /// How many ticks an item lies on the ground before it decays.
 ///
 /// Twenty minutes at [`TICK_INTERVAL`] — Sphere's default `DECAY_TIME` is fifteen
@@ -236,6 +246,20 @@ pub enum Command {
         serial: u32,
         /// How much.
         amount: u16,
+    },
+    /// A client toggled war mode (`0x72`).
+    WarMode {
+        /// Which connection.
+        connection: ConnectionId,
+        /// True for war, false for peace.
+        war: bool,
+    },
+    /// A client asked to attack a mobile (`0x05`).
+    Attack {
+        /// Which connection.
+        connection: ConnectionId,
+        /// The target's serial.
+        target: u32,
     },
     /// A client double-clicked an object (`0x06`) — for now, to open a container.
     DoubleClick {
@@ -560,8 +584,10 @@ impl World {
             self.apply(command, now);
         }
 
-        // Rot away what has lain on the ground too long. After the commands, so
-        // an item dropped this tick is not aged by the same tick that placed it.
+        // Strike whatever swings are due, then rot away what has lain on the
+        // ground too long. Both after the commands and both driven by the tick
+        // counter, so a fight and a decay are as replayable as everything else.
+        self.swings();
         self.decay();
 
         // Before the bus retires anything: what happened is what needs saving,
@@ -724,6 +750,8 @@ impl World {
                 facet,
             } => self.spawn_mobile(body, hue, hits, position, facet),
             Command::Damage { serial, amount } => self.damage(serial, amount),
+            Command::WarMode { connection, war } => self.war_mode(connection, war),
+            Command::Attack { connection, target } => self.attack(connection, target),
             Command::DoubleClick { connection, serial } => self.double_click(connection, serial),
             Command::EquipItem {
                 connection,
@@ -860,6 +888,7 @@ impl World {
                 max: DEFAULT_HITPOINTS,
             },
         );
+        self.registry.insert(entity, Combat::default());
         self.registry
             .insert(entity, Movement(Walker::new(position, facing)));
         self.registry.insert(
@@ -1259,6 +1288,109 @@ impl World {
         self.seen.remove(&entity);
         self.facet_state_mut(facet).sectors.remove(entity);
         self.registry.despawn(entity);
+    }
+
+    /// Set a player's war stance and tell it the settled one. See
+    /// [`Command::WarMode`].
+    fn war_mode(&mut self, connection: ConnectionId, war: bool) {
+        let Some(&player) = self.players.get(&connection) else {
+            return;
+        };
+        if let Some(combat) = self.registry.get_mut::<Combat>(player) {
+            combat.warmode = war;
+        }
+        self.send(connection, encode_war_mode(war));
+    }
+
+    /// Set a player's attack target. See [`Command::Attack`].
+    ///
+    /// The blow itself is not struck here — this only aims. [`swings`](Self::swings)
+    /// is what turns "in war mode, in reach, timer up" into damage, on the tick.
+    fn attack(&mut self, connection: ConnectionId, target: u32) {
+        let Some(&player) = self.players.get(&connection) else {
+            return;
+        };
+        // A target that is not a living mobile — a serial of zero, an item, the
+        // attacker itself — clears the aim and un-highlights the client's bar.
+        let valid = Serial::new(target)
+            .and_then(|serial| {
+                self.registry
+                    .entity_of(serial)
+                    .map(|entity| (serial, entity))
+            })
+            .filter(|&(_, entity)| entity != player && self.registry.has::<Hitpoints>(entity));
+        let Some((serial, _)) = valid else {
+            self.clear_target(player);
+            self.send(connection, encode_attack(0));
+            return;
+        };
+        let next = self.ticks + SWING_TICKS;
+        if let Some(combat) = self.registry.get_mut::<Combat>(player) {
+            combat.target = Some(serial);
+            combat.next_swing = next;
+        }
+        self.send(connection, encode_attack(target));
+    }
+
+    /// Strike, for every mobile whose swing is due. See [`Command::Attack`].
+    ///
+    /// The interactive half of combat, run each tick against the tick counter so
+    /// it reads no clock. A swing lands when the attacker is in war mode, has a
+    /// target within [`MELEE_RANGE`] on the same facet, and its timer is up; out
+    /// of reach it simply waits, its timer unspent, so the blow falls the instant
+    /// the gap closes.
+    fn swings(&mut self) {
+        let now = self.ticks;
+        // Collected first: `damage` mutates the registry, so the query cannot be
+        // held across it.
+        let ready: Vec<(EntityId, Serial)> = self
+            .registry
+            .query::<Combat>()
+            .filter_map(|(attacker, combat)| {
+                (combat.warmode && now >= combat.next_swing)
+                    .then(|| combat.target.map(|target| (attacker, target)))
+                    .flatten()
+            })
+            .collect();
+
+        for (attacker, target_serial) in ready {
+            let Some(target) = self.registry.entity_of(target_serial) else {
+                // The target is gone — a creature killed, a player logged out.
+                self.clear_target(attacker);
+                continue;
+            };
+            let (Some(&Position(attacker_pos)), Some(&Position(target_pos))) = (
+                self.registry.get::<Position>(attacker),
+                self.registry.get::<Position>(target),
+            ) else {
+                continue;
+            };
+            if self.facet_of(attacker) != self.facet_of(target)
+                || !in_range(attacker_pos, target_pos, MELEE_RANGE)
+            {
+                continue;
+            }
+            self.damage(target_serial.raw(), SWING_DAMAGE);
+            self.set_next_swing(attacker, now + SWING_TICKS);
+            // The blow may have killed it; a dead target is no target.
+            if self.registry.entity_of(target_serial).is_none() {
+                self.clear_target(attacker);
+            }
+        }
+    }
+
+    /// Push a combatant's next swing out to `tick`.
+    fn set_next_swing(&mut self, attacker: EntityId, tick: u64) {
+        if let Some(combat) = self.registry.get_mut::<Combat>(attacker) {
+            combat.next_swing = tick;
+        }
+    }
+
+    /// Stop a combatant attacking whatever it was.
+    fn clear_target(&mut self, attacker: EntityId) {
+        if let Some(combat) = self.registry.get_mut::<Combat>(attacker) {
+            combat.target = None;
+        }
     }
 
     /// Set an item's decay clock: it rots [`DECAY_TICKS`] from now. Every loose
@@ -3457,6 +3589,135 @@ pub(crate) mod tests {
                 .get::<Hitpoints>(player_entity)
                 .map(|h| h.current),
             Some(0),
+        );
+    }
+
+    /// Put a player in war mode, aimed at `target`, in one tick.
+    fn engage(world: &mut World, player: ConnectionId, target: u32, now: Instant) {
+        world.queue(Command::WarMode {
+            connection: player,
+            war: true,
+        });
+        world.queue(Command::Attack {
+            connection: player,
+            target,
+        });
+        world.tick(now);
+    }
+
+    #[test]
+    fn war_mode_and_attack_are_confirmed_to_the_client() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::WarMode {
+            connection: player,
+            war: true,
+        });
+        world.queue(Command::Attack {
+            connection: player,
+            target: mob,
+        });
+        world.tick(now);
+
+        let packets = packets_for(&mut world, player);
+        assert!(
+            packets.iter().any(|p| p == &[0x72, 0x01, 0x00, 0x32, 0x00]),
+            "war mode is confirmed"
+        );
+        assert!(
+            packets.iter().any(|p| p[0] == 0xAA && mentions(p, mob)),
+            "and the target is set"
+        );
+    }
+
+    #[test]
+    fn a_player_in_war_mode_swings_at_an_adjacent_target() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+        let mob_entity = entity(&world, mob);
+        engage(&mut world, player, mob, now);
+
+        // One swing interval later, a blow has landed.
+        for _ in 0..SWING_TICKS {
+            world.tick(now);
+        }
+        assert!(
+            world.registry.get::<Hitpoints>(mob_entity).unwrap().current < 50,
+            "the target has taken damage"
+        );
+    }
+
+    #[test]
+    fn no_swing_without_war_mode() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+        let mob_entity = entity(&world, mob);
+
+        // Aim, but stay at peace.
+        world.queue(Command::Attack {
+            connection: player,
+            target: mob,
+        });
+        world.tick(now);
+        for _ in 0..(SWING_TICKS + 1) {
+            world.tick(now);
+        }
+        assert_eq!(
+            world.registry.get::<Hitpoints>(mob_entity).unwrap().current,
+            50,
+            "a mobile at peace does not swing"
+        );
+    }
+
+    #[test]
+    fn no_swing_out_of_reach() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        // Well outside melee range, but on screen.
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 5, START.1, 0), 50, now);
+        let mob_entity = entity(&world, mob);
+        engage(&mut world, player, mob, now);
+        for _ in 0..(SWING_TICKS + 1) {
+            world.tick(now);
+        }
+        assert_eq!(
+            world.registry.get::<Hitpoints>(mob_entity).unwrap().current,
+            50,
+            "a swing out of reach lands nothing"
+        );
+    }
+
+    #[test]
+    fn killing_the_target_ends_the_attack() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let player_entity = world.players[&player];
+        // Eight hits, five a swing: dead on the second.
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 8, now);
+        let mob_entity = entity(&world, mob);
+        engage(&mut world, player, mob, now);
+
+        for _ in 0..(2 * SWING_TICKS) {
+            world.tick(now);
+        }
+        assert!(
+            !world.registry.contains(mob_entity),
+            "the creature is dead and gone"
+        );
+        assert_eq!(
+            world.registry.get::<Combat>(player_entity).unwrap().target,
+            None,
+            "and the attacker is no longer swinging at it"
         );
     }
 

@@ -40,8 +40,8 @@ pub mod tiledata;
 pub mod uop;
 
 pub use components::{
-    Account, Amount, Body, Client, Contained, Container, Decays, Equipped, Facet, Graphic, Heading,
-    Hitpoints, Movement, Name, Position, Stackable,
+    Account, Amount, Body, Client, Combat, Contained, Container, Decays, Equipped, Facet, Graphic,
+    Heading, Hitpoints, Movement, Name, Position, Stackable,
 };
 pub use events::{
     ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
