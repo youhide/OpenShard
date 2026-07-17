@@ -1212,6 +1212,13 @@ version = "0.0.1"
 [[package]]
 name = "openshard-items"
 version = "0.0.1"
+dependencies = [
+ "openshard-entities",
+ "openshard-gateway",
+ "openshard-protocol",
+ "openshard-state",
+ "tracing",
+]
 
 [[package]]
 name = "openshard-login"
@@ -1319,6 +1326,7 @@ dependencies = [
  "openshard-entities",
  "openshard-events",
  "openshard-gateway",
+ "openshard-items",
  "openshard-magic",
  "openshard-movement",
  "openshard-persistence",

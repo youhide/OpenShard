@@ -81,15 +81,16 @@ drives it; the systems that mutate it are moving out into the domain crates
 below, each becoming a `fn(&mut WorldState)`. Until a system moves it still lives
 in `world::tick`, so that file shrinks rather than the design changing under it.
 
-**Systems being extracted from `world::tick` into their own crates.** Each
-becomes a set of `fn(&mut WorldState)` and owns its domain events. Done: `chat`
-(`say`/`speak`, `MobileSpoke`), `skills` (skill/stat checks, the gain curve,
-`SkillUsed`, the shared `roll_skill`), `magic` (`cast_spell`/`heal`/`regen_mana`,
-`SpellCast`), and `combat` (`damage`/`die`/`swings`/`attack`/criminal flagging,
-the swing formula, `MobileDamaged`/`MobileDied`). `items` and `ai` follow — `ai`
-last, since it drives combat and movement. The drawing/interest substrate they
-share (`show`, `forget`, `broadcast_move`, `refresh_around`, `mobile_incoming`,
-…) lives on `WorldState`.
+**Systems extracted from `world::tick` into their own crates.** Each is a set of
+`fn(&mut WorldState)` owning its domain events: `chat` (`say`/`speak`,
+`MobileSpoke`), `skills` (skill/stat checks, the gain curve, `SkillUsed`, the
+shared `roll_skill`), `magic` (`cast_spell`/`heal`/`regen_mana`, `SpellCast`),
+`combat` (`damage`/`die`/`swings`/`attack`/criminal flagging, the swing formula,
+`MobileDamaged`/`MobileDied`), and `items` (spawn/drag/stack/decay/containers/
+equip, `ItemSpawned`). Only `ai` is left — it drives combat and movement, so it
+waits on `step` moving onto `WorldState`. The drawing/interest substrate they all
+share (`show`, `forget`, `broadcast_move`, `refresh_around`, `reveal`,
+`mobile_incoming`, …) lives on `WorldState`.
 
 **Stubs** — declared so the dependency graph is visible.
 
