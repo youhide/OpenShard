@@ -103,6 +103,23 @@ pub enum Command {
         /// Which way (0–7).
         direction: u8,
     },
+    /// Put an item on the ground for the world to draw to everyone in range.
+    SpawnItem {
+        /// The tiledata graphic id.
+        graphic: u16,
+        /// Its hue, or 0 for none.
+        hue: u16,
+        /// How many, for a stackable item; 0 or 1 is a single.
+        amount: u16,
+        /// Where it lies.
+        x: u16,
+        /// Where it lies.
+        y: u16,
+        /// Where it lies.
+        z: i8,
+        /// Which facet.
+        facet: u8,
+    },
 }
 
 /// Why a script call failed.

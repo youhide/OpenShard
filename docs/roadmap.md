@@ -246,6 +246,16 @@ Roughly in dependency order, each script-first:
   pace, terrain the only judge — which is the first thing a script command lands
   on. `crates/server/src/scripting.rs` is the whole seam.
 - [ ] `items` — containers, stacking, equipment layers, decay
+  - [x] **On the ground and visible.** A script drops an item
+    (`op_spawn_item` → `Command::SpawnItem`) and every client in range is sent
+    the `0x1A` that draws it; walking up to one draws it, walking away sends the
+    `0x1D`, exactly as for a mobile. Items are entities like anything else — a
+    `Graphic` and a `Position`, drawn through the same `seen`/interest machinery
+    as bodies. A stack carries an `Amount`. The `WorldItem` (`0x1A`) encoder is
+    ported from Sphere's `PacketItemWorld`, flag bits and all.
+  - [ ] containers (`0x24`/`0x3C`/`0x25`), pick up and drop (`0x07`/`0x08`)
+  - [ ] equipment layers (`0x2E`, worn items on the `0x78`)
+  - [ ] stacking rules and decay (script-first, off the tick)
 - [ ] `combat` — swing timers, damage, resistances, notoriety
 - [ ] `skills` — usage checks, gain curves
 - [ ] `magic` — spells, reagents, casting

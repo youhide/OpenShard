@@ -35,13 +35,16 @@ use openshard_persistence::{CharacterRecord, Journal, Snapshot};
 use openshard_protocol::{
     encode_light_level, encode_login_complete, encode_map_change, encode_remove, encode_walk_ack,
     encode_walk_reject, ClientVersion, Direction, Facing, MobileIncoming, MobileMove, Notoriety,
-    PlayerStart, PlayerUpdate, Point, WalkRequest, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
+    PlayerStart, PlayerUpdate, Point, WalkRequest, WorldItem, DEFAULT_MAP_HEIGHT,
+    DEFAULT_MAP_WIDTH,
 };
 use tracing::{debug, info, warn};
 
-use crate::components::{Account, Body, Client, Facet, Heading, Movement, Name, Position};
+use crate::components::{
+    Account, Amount, Body, Client, Facet, Graphic, Heading, Movement, Name, Position,
+};
 use crate::events::{
-    MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
+    ItemSpawned, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
 };
 use crate::sectors::{Sectors, VIEW_RANGE};
 use crate::terrain::MapTerrain;
@@ -148,6 +151,24 @@ pub enum Command {
         serial: u32,
         /// Which way: the low three bits of a facing byte (0 N, clockwise).
         direction: u8,
+    },
+    /// The server puts an item on the ground — a script decree.
+    ///
+    /// Creates a new item entity on its own serial and draws it for everyone who
+    /// can see the tile. The item's *rules* — whether it stacks, when it decays,
+    /// what it does when used — are not here; this is only "a thing now lies at
+    /// this spot", the item counterpart of a mobile entering.
+    SpawnItem {
+        /// The tiledata graphic id.
+        graphic: u16,
+        /// Its hue, or 0 for none.
+        hue: u16,
+        /// How many, for a stackable item; 0 or 1 is a single.
+        amount: u16,
+        /// Where it lies.
+        position: Point,
+        /// Which facet.
+        facet: u8,
     },
     /// A connection went away.
     Disconnect {
@@ -538,6 +559,13 @@ impl World {
                 request,
             } => self.walk(connection, request, now),
             Command::Step { serial, direction } => self.step(serial, direction),
+            Command::SpawnItem {
+                graphic,
+                hue,
+                amount,
+                position,
+                facet,
+            } => self.spawn_item(graphic, hue, amount, position, facet),
             Command::Disconnect { connection } => self.disconnect(connection),
         }
     }
@@ -869,6 +897,59 @@ impl World {
         self.refresh_around(entity);
     }
 
+    /// Put an item on the ground. See [`Command::SpawnItem`].
+    fn spawn_item(&mut self, graphic: u16, hue: u16, amount: u16, position: Point, facet: u8) {
+        let facet = if self.facets.contains_key(&facet) {
+            facet
+        } else {
+            warn!(facet, "unloaded facet; spawning the item on the default");
+            self.default_facet
+        };
+        let (entity, serial) = match self.registry.spawn_with_serial(SerialKind::Item) {
+            Ok(pair) => pair,
+            Err(error) => {
+                warn!(?error, "out of item serials; not spawning");
+                return;
+            }
+        };
+        self.registry.insert(entity, Graphic { id: graphic, hue });
+        self.registry.insert(entity, Position(position));
+        self.registry.insert(entity, Facet(facet));
+        // Only a real stack carries an amount; a single item stays a bare graphic.
+        if amount > 1 {
+            self.registry.insert(entity, Amount(amount));
+        }
+        self.facet_state_mut(facet).sectors.insert(entity, position);
+        self.bus.send(ItemSpawned {
+            entity,
+            serial,
+            position,
+        });
+        self.reveal_item(entity);
+        debug!(%serial, graphic, position = %position, "item on the ground");
+    }
+
+    /// Draw a freshly placed item for every player who can see its tile.
+    ///
+    /// The item's own half of [`refresh_around`](Self::refresh_around): an item
+    /// does not move, so it never runs that, but the players around it still need
+    /// telling once, when it appears.
+    fn reveal_item(&mut self, item: EntityId) {
+        let facet = self.facet_of(item);
+        let sectors = &self.facet_state(facet).sectors;
+        let Some(centre) = sectors.position_of(item) else {
+            return;
+        };
+        let watchers: Vec<EntityId> = sectors
+            .nearby(centre, VIEW_RANGE)
+            .map(|(id, _)| id)
+            .filter(|id| *id != item)
+            .collect();
+        for watcher in watchers {
+            self.show(watcher, item);
+        }
+    }
+
     fn disconnect(&mut self, connection: ConnectionId) {
         let Some(entity) = self.players.remove(&connection) else {
             return;
@@ -1014,14 +1095,40 @@ impl World {
         {
             return;
         }
-        let Some(incoming) = self.mobile_incoming(other) else {
+        let Some(packet) = self.draw_packet(other, version) else {
             return;
         };
         self.seen.entry(watcher).or_default().insert(other);
-        self.outbox.push(Outbound {
-            connection,
-            packet: incoming.encode(version),
-        });
+        self.outbox.push(Outbound { connection, packet });
+    }
+
+    /// The packet that draws `entity` on a client, or `None` for something not
+    /// drawable. A mobile is a `0x78`, an item a `0x1A` — the interest system
+    /// does not care which, only that there is one packet per thing on screen.
+    fn draw_packet(&self, entity: EntityId, version: ClientVersion) -> Option<Vec<u8>> {
+        if self.registry.has::<Body>(entity) {
+            Some(self.mobile_incoming(entity)?.encode(version))
+        } else if self.registry.has::<Graphic>(entity) {
+            Some(self.world_item(entity)?.encode())
+        } else {
+            None
+        }
+    }
+
+    /// Build a `0x1A` for an entity, if it is a drawable item.
+    fn world_item(&self, entity: EntityId) -> Option<WorldItem> {
+        let serial = self.registry.serial_of(entity)?;
+        let Graphic { id, hue } = *self.registry.get::<Graphic>(entity)?;
+        let Position(position) = *self.registry.get::<Position>(entity)?;
+        // No `Amount` means a single. The encoder treats 1 and absent the same.
+        let amount = self.registry.get::<Amount>(entity).map_or(1, |a| a.0);
+        Some(WorldItem {
+            serial: serial.raw(),
+            graphic: id,
+            amount,
+            position,
+            hue,
+        })
     }
 
     /// Take `other` off `watcher`'s screen.
@@ -1253,6 +1360,111 @@ pub(crate) mod tests {
             Point::new(0, 0, 0),
             "and it did not move"
         );
+    }
+
+    /// The graphic of a gold coin — a real item id, used only so the tests read
+    /// like the thing they describe.
+    const GOLD: u16 = 0x0EED;
+
+    fn spawn_item_at(world: &mut World, point: Point, now: Instant) {
+        world.queue(Command::SpawnItem {
+            graphic: GOLD,
+            hue: 0,
+            amount: 1,
+            position: point,
+            facet: 0,
+        });
+        world.tick(now);
+    }
+
+    #[test]
+    fn a_spawned_item_is_drawn_to_a_player_in_range() {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        let _ = packets_for(&mut world, connection); // the login burst
+
+        spawn_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+
+        let packets = packets_for(&mut world, connection);
+        assert!(
+            packets.iter().any(|p| p[0] == 0x1A),
+            "the player standing on the tile is told about the item"
+        );
+    }
+
+    #[test]
+    fn an_item_out_of_range_is_not_drawn() {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        let _ = packets_for(&mut world, connection);
+
+        // Well past the view range.
+        spawn_item_at(&mut world, Point::new(START.0 + 50, START.1, 0), now);
+
+        let packets = packets_for(&mut world, connection);
+        assert!(
+            !packets.iter().any(|p| p[0] == 0x1A),
+            "an item across the map is not drawn"
+        );
+    }
+
+    #[test]
+    fn walking_into_range_draws_an_item_and_out_of_range_forgets_it() {
+        // The seen set at work, for items: an item is drawn exactly once when it
+        // comes into range and removed with 0x1D when it leaves.
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+
+        // Put the player far away and the item back at the start, out of range.
+        teleport(&mut world, connection, Point::new(START.0 + 50, START.1, 0));
+        spawn_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+        let _ = packets_for(&mut world, connection);
+
+        // Come into range: the item is drawn.
+        teleport(&mut world, connection, Point::new(START.0, START.1, 0));
+        let arriving = packets_for(&mut world, connection);
+        assert!(
+            arriving.iter().any(|p| p[0] == 0x1A),
+            "walking up to the item draws it"
+        );
+
+        // Leave again: the item is taken off the screen with 0x1D.
+        teleport(&mut world, connection, Point::new(START.0 + 50, START.1, 0));
+        let leaving = packets_for(&mut world, connection);
+        assert!(
+            leaving.iter().any(|p| p[0] == 0x1D),
+            "walking away forgets the item"
+        );
+    }
+
+    #[test]
+    fn a_stacked_item_keeps_its_amount_when_drawn() {
+        // A pile of gold is one entity with an amount, and the amount rides the
+        // 0x1A that draws it — the packet sets the serial's top bit for it.
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        let _ = packets_for(&mut world, connection);
+
+        world.queue(Command::SpawnItem {
+            graphic: GOLD,
+            hue: 0,
+            amount: 500,
+            position: Point::new(START.0, START.1, 0),
+            facet: 0,
+        });
+        world.tick(now);
+
+        let packets = packets_for(&mut world, connection);
+        let item = packets
+            .iter()
+            .find(|p| p[0] == 0x1A)
+            .expect("the item was drawn");
+        // The amount bit on the serial says a stack; a single item would not set it.
+        assert_ne!(item[3] & 0x80, 0, "the stack sets the amount flag");
     }
 
     #[test]

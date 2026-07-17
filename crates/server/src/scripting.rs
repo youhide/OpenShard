@@ -139,6 +139,21 @@ impl Scripts {
 fn into_world(command: ScriptCommand) -> Command {
     match command {
         ScriptCommand::Move { serial, direction } => Command::Step { serial, direction },
+        ScriptCommand::SpawnItem {
+            graphic,
+            hue,
+            amount,
+            x,
+            y,
+            z,
+            facet,
+        } => Command::SpawnItem {
+            graphic,
+            hue,
+            amount,
+            position: openshard_protocol::Point::new(x, y, z),
+            facet,
+        },
     }
 }
 
@@ -232,6 +247,48 @@ mod tests {
             "the script walked the mobile north (from y={} to y={})",
             start.1,
             pos.y
+        );
+    }
+
+    #[test]
+    fn a_script_spawns_an_item_the_player_sees() {
+        // The other command, end to end: on entering, the script drops an item
+        // on the player's own tile, and the next tick the client is sent the
+        // 0x1A that draws it.
+        let script = TempScript::new(
+            "dropper",
+            "function onEvent(e) {\n\
+             if (e.type === 'PlayerEntered') {\n\
+                 Deno.core.ops.op_spawn_item({ graphic: 0x0EED, x: e.x, y: e.y, z: e.z });\n\
+             }\n\
+             }",
+        );
+
+        let now = Instant::now();
+        let mut world = World::new((1363, 1600));
+        let mut scripts = Scripts::load(script.path(), &world).expect("script loads");
+
+        world.queue(Command::Enter {
+            connection: ConnectionId::from_raw(1),
+            version: ClientVersion::TOL,
+            account: "admin".to_owned(),
+            name: "Lord British".to_owned(),
+            serial: None,
+            position: None,
+            facet: 0,
+            appearance: None,
+        });
+        world.tick(now); // PlayerEntered
+        let _ = world.drain_outbound().count(); // the login burst
+        scripts.pump(&mut world); // script drops an item, queues SpawnItem
+        world.tick(now); // the item spawns and is drawn
+
+        let drew_item = world
+            .drain_outbound()
+            .any(|out| out.packet.first() == Some(&0x1A));
+        assert!(
+            drew_item,
+            "the player was sent the 0x1A for the dropped item"
         );
     }
 }

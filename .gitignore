@@ -27,3 +27,4 @@ dist/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+CLAUDE.md

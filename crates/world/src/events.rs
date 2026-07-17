@@ -24,6 +24,21 @@ pub struct PlayerEntered {
     pub position: Point,
 }
 
+/// An item appeared in the world.
+///
+/// Emitted when the server puts a thing on the ground — the item counterpart of
+/// [`PlayerEntered`]. What a script or persistence does with it is their affair;
+/// the world's part is only to say it happened.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ItemSpawned {
+    /// The entity.
+    pub entity: EntityId,
+    /// Its wire identity.
+    pub serial: Serial,
+    /// Where it lies.
+    pub position: Point,
+}
+
 /// A mobile took a step.
 ///
 /// Emitted for the step, not for the turn: a turn changes no tile, and a

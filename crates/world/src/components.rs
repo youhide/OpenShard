@@ -40,6 +40,31 @@ pub struct Body {
     pub hue: u16,
 }
 
+/// The graphic an item is drawn as: its tiledata id and hue.
+///
+/// The item counterpart of [`Body`]. An entity carries one or the other — a
+/// mobile a `Body`, a thing on the ground a `Graphic` — and that is what the
+/// interest system reads to decide which packet draws it: `0x78` for a body,
+/// `0x1A` for a graphic. Kept in `world` and not in a gameplay crate for the
+/// same reason `Body` is: drawing a thing in the world is the world's job, and
+/// the crate that owns item *rules* (stacking, decay, containment) builds on
+/// this rather than the other way round.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Graphic {
+    /// The tiledata id.
+    pub id: u16,
+    /// Its colour, or 0 for none.
+    pub hue: u16,
+}
+
+/// How many of a stackable item this entity is: a pile of 500 gold is one entity
+/// with `Amount(500)`, not 500 entities.
+///
+/// Separate from [`Graphic`] because most items are single and storing a `1` on
+/// every one of them is a column of ones. An item with no `Amount` is a single.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Amount(pub u16);
+
 /// What something is called.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Name(pub String);

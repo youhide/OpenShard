@@ -105,9 +105,47 @@ fn op_move(state: &mut OpState, serial: u32, direction: u32) {
     });
 }
 
+/// What a script passes to spawn an item — a plain object, so the JS reads
+/// `op_spawn_item({ graphic, x, y })` rather than seven positional arguments,
+/// most of which have sensible defaults.
+#[derive(serde::Deserialize)]
+struct SpawnSpec {
+    graphic: u16,
+    #[serde(default)]
+    hue: u16,
+    #[serde(default = "one")]
+    amount: u16,
+    x: u16,
+    y: u16,
+    #[serde(default)]
+    z: i8,
+    #[serde(default)]
+    facet: u8,
+}
+
+/// The default stack size: a single item.
+fn one() -> u16 {
+    1
+}
+
+/// Put an item on the ground. Enqueues a command; the world creates the entity
+/// and draws it on the tick that applies it.
+#[op2]
+fn op_spawn_item(state: &mut OpState, #[serde] spec: SpawnSpec) {
+    state.borrow_mut::<Host>().outbox.push(Command::SpawnItem {
+        graphic: spec.graphic,
+        hue: spec.hue,
+        amount: spec.amount,
+        x: spec.x,
+        y: spec.y,
+        z: spec.z,
+        facet: spec.facet,
+    });
+}
+
 extension!(
     openshard_ops,
-    ops = [op_position, op_move],
+    ops = [op_position, op_move, op_spawn_item],
     docs = "OpenShard's script-facing ops: read entity state, enqueue commands.",
 );
 
@@ -450,6 +488,42 @@ mod tests {
     }
 
     #[test]
+    fn a_hook_can_spawn_an_item() {
+        // The other command a script can emit: put a thing on the ground. The
+        // spec object's defaults mean a hook names only what it cares about.
+        let mut engine = DenoEngine::new();
+        engine
+            .load(
+                "function onEvent(e) {\n\
+                 if (e.type === 'PlayerEntered') {\n\
+                     Deno.core.ops.op_spawn_item({ graphic: 0x0EED, x: e.serial & 0xFFFF, y: 100 });\n\
+                 }\n\
+                 }",
+            )
+            .unwrap();
+        engine
+            .deliver(&Event::PlayerEntered {
+                serial: 42,
+                x: 0,
+                y: 0,
+                z: 0,
+            })
+            .unwrap();
+        assert_eq!(
+            engine.take_commands(),
+            vec![Command::SpawnItem {
+                graphic: 0x0EED,
+                hue: 0,
+                amount: 1,
+                x: 42,
+                y: 100,
+                z: 0,
+                facet: 0,
+            }]
+        );
+    }
+
+    #[test]
     fn an_event_hook_receives_a_typed_object() {
         // `onEvent` gets the event as a plain object it can switch on.
         let mut engine = DenoEngine::new();
@@ -570,6 +644,7 @@ mod tests {
         fn direction(&self) -> u8 {
             match self {
                 Command::Move { direction, .. } => *direction,
+                other => panic!("expected a Move, got {other:?}"),
             }
         }
     }

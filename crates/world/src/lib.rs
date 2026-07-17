@@ -39,9 +39,11 @@ pub mod tick;
 pub mod tiledata;
 pub mod uop;
 
-pub use components::{Account, Body, Client, Facet, Heading, Movement, Name, Position};
+pub use components::{
+    Account, Amount, Body, Client, Facet, Graphic, Heading, Movement, Name, Position,
+};
 pub use events::{
-    MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
+    ItemSpawned, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
 };
 pub use map::{LandCell, Map, MapError, StaticItem, BLOCK_SIZE};
 pub use sectors::{distance, in_range, Sectors, SECTOR_SIZE, VIEW_RANGE};
