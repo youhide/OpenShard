@@ -44,7 +44,7 @@ use tracing::{debug, info, warn};
 
 use crate::components::{
     Account, Amount, Body, Client, Combat, Contained, Container, Decays, Equipped, Facet, Graphic,
-    Heading, Hitpoints, Movement, Name, Position, Stackable,
+    Heading, Hitpoints, MeleeDamage, Movement, Name, Position, Resistance, Stackable,
 };
 use crate::events::{
     ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
@@ -235,6 +235,13 @@ pub enum Command {
         hue: u16,
         /// Its starting and maximum hit points.
         hits: u16,
+        /// Its standing — the health-bar colour — as a wire byte (1 innocent, 5
+        /// enemy, 7 invulnerable). Zero, or anything unknown, is innocent.
+        notoriety: u8,
+        /// How hard it hits in melee, before the target's armour.
+        damage: u16,
+        /// Its physical resistance, 0–100.
+        resistance: u8,
         /// Where it stands.
         position: Point,
         /// Which facet.
@@ -746,9 +753,14 @@ impl World {
                 body,
                 hue,
                 hits,
+                notoriety,
+                damage,
+                resistance,
                 position,
                 facet,
-            } => self.spawn_mobile(body, hue, hits, position, facet),
+            } => self.spawn_mobile(
+                body, hue, hits, notoriety, damage, resistance, position, facet,
+            ),
             Command::Damage { serial, amount } => self.damage(serial, amount),
             Command::WarMode { connection, war } => self.war_mode(connection, war),
             Command::Attack { connection, target } => self.attack(connection, target),
@@ -889,6 +901,14 @@ impl World {
             },
         );
         self.registry.insert(entity, Combat::default());
+        self.registry.insert(entity, Notoriety::Innocent);
+        self.registry.insert(
+            entity,
+            MeleeDamage {
+                amount: SWING_DAMAGE,
+            },
+        );
+        self.registry.insert(entity, Resistance::default());
         self.registry
             .insert(entity, Movement(Walker::new(position, facing)));
         self.registry.insert(
@@ -1178,7 +1198,18 @@ impl World {
     /// difference between a creature and a person; everything that draws or moves
     /// a mobile already treats "has a client" as the question, so a spawned one
     /// falls out of the machinery already there.
-    fn spawn_mobile(&mut self, body: u16, hue: u16, hits: u16, position: Point, facet: u8) {
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_mobile(
+        &mut self,
+        body: u16,
+        hue: u16,
+        hits: u16,
+        notoriety: u8,
+        damage: u16,
+        resistance: u8,
+        position: Point,
+        facet: u8,
+    ) {
         let facet = if self.facets.contains_key(&facet) {
             facet
         } else {
@@ -1203,6 +1234,15 @@ impl World {
             Hitpoints {
                 current: hits,
                 max: hits,
+            },
+        );
+        self.registry
+            .insert(entity, Notoriety::from_bits(notoriety));
+        self.registry.insert(entity, MeleeDamage { amount: damage });
+        self.registry.insert(
+            entity,
+            Resistance {
+                physical: resistance.min(100),
             },
         );
         self.registry
@@ -1310,15 +1350,20 @@ impl World {
         let Some(&player) = self.players.get(&connection) else {
             return;
         };
-        // A target that is not a living mobile — a serial of zero, an item, the
-        // attacker itself — clears the aim and un-highlights the client's bar.
+        // A target that cannot be attacked — a serial of zero, an item, the
+        // attacker itself, or an invulnerable mobile — clears the aim and
+        // un-highlights the client's bar.
         let valid = Serial::new(target)
             .and_then(|serial| {
                 self.registry
                     .entity_of(serial)
                     .map(|entity| (serial, entity))
             })
-            .filter(|&(_, entity)| entity != player && self.registry.has::<Hitpoints>(entity));
+            .filter(|&(_, entity)| {
+                entity != player
+                    && self.registry.has::<Hitpoints>(entity)
+                    && self.notoriety_of(entity) != Notoriety::Invulnerable
+            });
         let Some((serial, _)) = valid else {
             self.clear_target(player);
             self.send(connection, encode_attack(0));
@@ -1370,7 +1415,8 @@ impl World {
             {
                 continue;
             }
-            self.damage(target_serial.raw(), SWING_DAMAGE);
+            let blow = self.melee_blow(attacker, target);
+            self.damage(target_serial.raw(), blow);
             self.set_next_swing(attacker, now + SWING_TICKS);
             // The blow may have killed it; a dead target is no target.
             if self.registry.entity_of(target_serial).is_none() {
@@ -1391,6 +1437,26 @@ impl World {
         if let Some(combat) = self.registry.get_mut::<Combat>(attacker) {
             combat.target = None;
         }
+    }
+
+    /// What a blow from `attacker` lands on `target`: the attacker's melee damage
+    /// less the fraction the target's physical resistance shrugs off.
+    ///
+    /// The whole formula, for now — one damage type, one subtraction. The point
+    /// of putting it here rather than a flat number is that both inputs are set
+    /// on the entities, so a script that spawns a hard-hitting ogre or an
+    /// armoured knight changes the maths without changing the code.
+    fn melee_blow(&self, attacker: EntityId, target: EntityId) -> u16 {
+        let base = self
+            .registry
+            .get::<MeleeDamage>(attacker)
+            .map_or(SWING_DAMAGE, |d| d.amount);
+        let resist = self
+            .registry
+            .get::<Resistance>(target)
+            .map_or(0, |r| r.physical)
+            .min(100);
+        (u32::from(base) * u32::from(100 - resist) / 100) as u16
     }
 
     /// Set an item's decay clock: it rots [`DECAY_TICKS`] from now. Every loose
@@ -2236,6 +2302,15 @@ impl World {
         }
     }
 
+    /// A mobile's standing — the colour of its health bar. Absent reads as
+    /// [`Notoriety::Innocent`], a blue bar, the safe default.
+    fn notoriety_of(&self, entity: EntityId) -> Notoriety {
+        self.registry
+            .get::<Notoriety>(entity)
+            .copied()
+            .unwrap_or(Notoriety::Innocent)
+    }
+
     /// Build a 0x78 for an entity, if it is a drawable mobile.
     fn mobile_incoming(&self, entity: EntityId) -> Option<MobileIncoming> {
         let serial = self.registry.serial_of(entity)?;
@@ -2249,7 +2324,7 @@ impl World {
             facing,
             hue: body.hue,
             flags: 0,
-            notoriety: Notoriety::Innocent,
+            notoriety: self.notoriety_of(entity),
             equipment: self.equipment_of(serial),
         })
     }
@@ -2285,7 +2360,7 @@ impl World {
             facing,
             hue: body.hue,
             flags: 0,
-            notoriety: Notoriety::Innocent,
+            notoriety: self.notoriety_of(entity),
         })
     }
 
@@ -3466,12 +3541,29 @@ pub(crate) mod tests {
         );
     }
 
-    /// Spawn a creature at `point` with `hits` and return its serial.
+    /// Spawn a creature at `point` with `hits` and return its serial. An orange
+    /// enemy, no armour — the plain punching bag most combat tests want.
     fn spawn_mobile_at(world: &mut World, point: Point, hits: u16, now: Instant) -> u32 {
+        spawn_mobile_full(world, point, hits, 5, SWING_DAMAGE, 0, now)
+    }
+
+    /// Spawn a creature with every combat field spelled out, and return its serial.
+    fn spawn_mobile_full(
+        world: &mut World,
+        point: Point,
+        hits: u16,
+        notoriety: u8,
+        damage: u16,
+        resistance: u8,
+        now: Instant,
+    ) -> u32 {
         world.queue(Command::SpawnMobile {
             body: 0x0190,
             hue: 0,
             hits,
+            notoriety,
+            damage,
+            resistance,
             position: point,
             facet: 0,
         });
@@ -3693,6 +3785,97 @@ pub(crate) mod tests {
             world.registry.get::<Hitpoints>(mob_entity).unwrap().current,
             50,
             "a swing out of reach lands nothing"
+        );
+    }
+
+    #[test]
+    fn a_creatures_notoriety_colours_its_health_bar() {
+        // Spawn an orange enemy and read the notoriety byte out of the 0x78 that
+        // draws it — the health-bar colour on the wire.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let _ = packets_for(&mut world, player);
+        let mob = spawn_mobile_full(
+            &mut world,
+            Point::new(START.0, START.1, 0),
+            50,
+            5,
+            5,
+            0,
+            now,
+        );
+
+        let drawn = packets_for(&mut world, player)
+            .into_iter()
+            .find(|p| p[0] == 0x78 && mentions(p, mob))
+            .expect("the creature is drawn");
+        assert_eq!(drawn[18], 0x05, "the notoriety byte is Enemy/orange");
+    }
+
+    #[test]
+    fn an_invulnerable_mobile_cannot_be_attacked() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let player_entity = world.players[&player];
+        // Notoriety 7 is invulnerable — a yellow, untouchable townsperson.
+        let mob = spawn_mobile_full(
+            &mut world,
+            Point::new(START.0, START.1, 0),
+            50,
+            7,
+            5,
+            0,
+            now,
+        );
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::Attack {
+            connection: player,
+            target: mob,
+        });
+        world.tick(now);
+
+        assert_eq!(
+            world.registry.get::<Combat>(player_entity).unwrap().target,
+            None,
+            "the attack is refused"
+        );
+        assert!(
+            packets_for(&mut world, player)
+                .iter()
+                .any(|p| p == &[0xAA, 0, 0, 0, 0]),
+            "and the client's target is cleared"
+        );
+    }
+
+    #[test]
+    fn armour_reduces_a_blow() {
+        // Same five-damage swing, but the target's 50% physical resistance halves
+        // it: two through, not five.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let mob = spawn_mobile_full(
+            &mut world,
+            Point::new(START.0, START.1, 0),
+            50,
+            5,
+            5,
+            50,
+            now,
+        );
+        let mob_entity = entity(&world, mob);
+        engage(&mut world, player, mob, now);
+
+        for _ in 0..SWING_TICKS {
+            world.tick(now);
+        }
+        assert_eq!(
+            world.registry.get::<Hitpoints>(mob_entity).unwrap().current,
+            48,
+            "five damage minus half is two"
         );
     }
 

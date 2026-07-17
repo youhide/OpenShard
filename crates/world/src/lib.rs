@@ -41,7 +41,7 @@ pub mod uop;
 
 pub use components::{
     Account, Amount, Body, Client, Combat, Contained, Container, Decays, Equipped, Facet, Graphic,
-    Heading, Hitpoints, Movement, Name, Position, Stackable,
+    Heading, Hitpoints, MeleeDamage, Movement, Name, Position, Resistance, Stackable,
 };
 pub use events::{
     ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,

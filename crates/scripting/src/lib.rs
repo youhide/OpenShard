@@ -152,6 +152,13 @@ pub enum Command {
         hue: u16,
         /// Its starting and maximum hit points.
         hits: u16,
+        /// Its standing (health-bar colour) as a wire byte: 1 innocent, 5 enemy,
+        /// 7 invulnerable.
+        notoriety: u8,
+        /// How hard it hits in melee, before the target's armour.
+        damage: u16,
+        /// Its physical resistance, 0–100.
+        resistance: u8,
         /// Where it stands.
         x: u16,
         /// Where it stands.

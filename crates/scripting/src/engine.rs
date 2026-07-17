@@ -187,6 +187,12 @@ struct MobileSpec {
     hue: u16,
     #[serde(default = "one")]
     hits: u16,
+    #[serde(default)]
+    notoriety: u8,
+    #[serde(default)]
+    damage: u16,
+    #[serde(default)]
+    resistance: u8,
     x: u16,
     y: u16,
     #[serde(default)]
@@ -205,6 +211,9 @@ fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
             body: spec.body,
             hue: spec.hue,
             hits: spec.hits,
+            notoriety: spec.notoriety,
+            damage: spec.damage,
+            resistance: spec.resistance,
             x: spec.x,
             y: spec.y,
             z: spec.z,

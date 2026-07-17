@@ -193,6 +193,27 @@ pub struct Combat {
     pub next_swing: u64,
 }
 
+/// How hard a mobile hits in melee — the base a swing deals before the target's
+/// armour takes its cut.
+///
+/// A mobile-level number for now: a creature's natural blow. Weapon-derived
+/// damage is a later refinement that sets this from what the mobile wields.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct MeleeDamage {
+    /// The blow before resistance.
+    pub amount: u16,
+}
+
+/// A mobile's armour: how much of a blow it shrugs off, as a percentage.
+///
+/// Physical only for now — the one damage type melee deals. Fire, cold, poison
+/// and energy are the same idea with more fields, and land when magic does.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Resistance {
+    /// Percent of physical damage absorbed, 0–100.
+    pub physical: u8,
+}
+
 /// A mobile that can walk: its position, facing, sequence and pace.
 ///
 /// Wraps [`Walker`] rather than replacing [`Position`]: the walk state and the

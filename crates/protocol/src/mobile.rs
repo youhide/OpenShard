@@ -52,6 +52,21 @@ impl Notoriety {
         }
     }
 
+    /// Read a notoriety from its wire byte. Anything unrecognised — including the
+    /// `0x00` a caller uses for "unset" — reads as [`Innocent`](Self::Innocent),
+    /// the safe default a blue health bar.
+    pub const fn from_bits(bits: u8) -> Self {
+        match bits {
+            0x02 => Self::Friend,
+            0x03 => Self::Neutral,
+            0x04 => Self::Criminal,
+            0x05 => Self::Enemy,
+            0x06 => Self::Murderer,
+            0x07 => Self::Invulnerable,
+            _ => Self::Innocent,
+        }
+    }
+
     /// What to actually send to `version`.
     ///
     /// A client older than 4.0.0 has no yellow bar and renders `0x07` as
@@ -396,6 +411,24 @@ mod tests {
         assert_eq!(Notoriety::Enemy.to_bits(), 0x05);
         assert_eq!(Notoriety::Murderer.to_bits(), 0x06);
         assert_eq!(Notoriety::Invulnerable.to_bits(), 0x07);
+    }
+
+    #[test]
+    fn notoriety_reads_back_from_its_byte_and_defaults_to_blue() {
+        for noto in [
+            Notoriety::Innocent,
+            Notoriety::Friend,
+            Notoriety::Neutral,
+            Notoriety::Criminal,
+            Notoriety::Enemy,
+            Notoriety::Murderer,
+            Notoriety::Invulnerable,
+        ] {
+            assert_eq!(Notoriety::from_bits(noto.to_bits()), noto);
+        }
+        // Unset or nonsense reads as the safe blue.
+        assert_eq!(Notoriety::from_bits(0), Notoriety::Innocent);
+        assert_eq!(Notoriety::from_bits(0xFF), Notoriety::Innocent);
     }
 
     #[test]

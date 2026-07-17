@@ -293,7 +293,7 @@ Roughly in dependency order, each script-first:
     when the tick counter reaches it; lifting, containing or wearing takes the
     clock off, and `decay()` reads only its own counter, no wall clock.
     Containers do not decay with their contents inside.
-- [ ] `combat` — swing timers, damage, resistances, notoriety
+- [x] `combat` — swing timers, damage, resistances, notoriety
   - [x] **Hit points, damage and death.** Mobiles carry `Hitpoints`; scripts
     spawn creatures (`op_spawn_mobile` → `Command::SpawnMobile`, an entity with a
     body and no client, drawn through the same interest machinery as a player)
@@ -312,8 +312,20 @@ Roughly in dependency order, each script-first:
     unspent, and a killed target ends the attack. The timer is a tick count, like
     decay — no clock in the tick. Swing speed and damage are flat constants for
     now; the formula is the next item.
-  - [ ] resistances and the damage formula (script-first)
-  - [ ] notoriety — who may hit whom, and the health-bar colour
+  - [x] **Resistances and the damage formula.** A swing's damage is no longer
+    flat: `melee_blow` takes the attacker's `MeleeDamage` and cuts it by the
+    target's `Resistance { physical }`. Both are components a script sets when it
+    spawns a mobile (`op_spawn_mobile` grew `damage` and `resistance`), so a
+    hard-hitting ogre or an armoured knight is a data change, not a code one — the
+    script-first part. Physical only for now; the other damage types land with
+    magic.
+  - [x] **Notoriety.** Mobiles carry a `Notoriety` (the enum already in the
+    protocol), drawn as the health-bar colour in every `0x78`/`0x77` — the world
+    stopped hardcoding "innocent". A script sets it at spawn; an invulnerable
+    (yellow) mobile cannot be attacked, the first "who may hit whom" rule.
+    Criminal and murderer *flagging* — attacking an innocent turning you grey,
+    the timers behind it — is a deeper slice for when there is a reason to be
+    somewhere you should not.
 - [ ] `skills` — usage checks, gain curves
 - [ ] `magic` — spells, reagents, casting
 - [ ] `ai` — brains, aggro, wandering
