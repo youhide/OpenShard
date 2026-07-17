@@ -33,30 +33,30 @@ use openshard_gateway::ConnectionId;
 use openshard_movement::{step_from, OpenWorld, Terrain, Walk, Walker};
 use openshard_persistence::{CharacterRecord, Journal, Snapshot};
 use openshard_protocol::{
-    encode_add_to_container, encode_attack, encode_container_contents, encode_drag_cancel,
-    encode_equip, encode_light_level, encode_login_complete, encode_map_change,
-    encode_open_container, encode_remove, encode_walk_ack, encode_walk_reject, encode_war_mode,
-    ClientVersion, ContainedItem, Direction, DragCancelReason, Facing, Notoriety, PlayerStart,
-    PlayerUpdate, Point, WalkRequest, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, DROP_TO_GROUND,
+    encode_add_to_container, encode_container_contents, encode_drag_cancel, encode_equip,
+    encode_light_level, encode_login_complete, encode_map_change, encode_open_container,
+    encode_remove, encode_walk_ack, encode_walk_reject, ClientVersion, ContainedItem, Direction,
+    DragCancelReason, Facing, Notoriety, PlayerStart, PlayerUpdate, Point, WalkRequest,
+    DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, DROP_TO_GROUND,
 };
 use tracing::{debug, info, warn};
 
 use openshard_state::components::{
-    Account, Amount, Body, Brain, Client, Combat, Contained, Container, CriminalUntil, DamageType,
-    Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name,
-    Position, Resistance, Stackable, Stats, SwingSpeed,
+    Account, Amount, Body, Brain, Client, Combat, Contained, Container, DamageType, Decays,
+    Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name, Position,
+    Resistance, Stackable, Stats, SwingSpeed,
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::{distance, in_range, Sectors, VIEW_RANGE};
 use openshard_state::{FacetState, HeldItem, Origin, Outbound, WorldState};
 
 use openshard_chat as chat;
+use openshard_combat as combat;
 use openshard_magic as magic;
 use openshard_skills as skills;
 
 use crate::events::{
-    ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
-    RefusedReason, StepRefused,
+    ItemSpawned, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
 };
 use crate::terrain::MapTerrain;
 
@@ -114,46 +114,6 @@ const AI_THINK_TICKS: u64 = 10;
 /// The chance in eight, per beat, that an idle wanderer takes a step. Low enough
 /// that a field of creatures drifts rather than marches.
 const WANDER_IN_EIGHT: u32 = 3;
-/// How near, in tiles (Chebyshev), a mobile must be to land a melee blow: the
-/// next tile over, diagonals included.
-const MELEE_RANGE: u32 = 1;
-/// Sphere's `SpeedScaleFactor` for the pre-AoS (era-1) swing formula — the
-/// numerator that, divided by dexterity and weapon speed, gives the swing time
-/// (`CResourceCalc.cpp`). One of Sphere's hard-won numbers; taken verbatim.
-const SPEED_SCALE_FACTOR: u64 = 15000;
-/// The base swing speed of bare hands — Sphere's wrestling value. A real weapon's
-/// speed (from its tiledata) will replace it once equipment carries properties;
-/// until then every mobile swings wrestling-fast, modulated by dexterity alone.
-const WRESTLING_SPEED: u64 = 50;
-/// Ticks between swings for a bare-handed mobile of default dexterity — what the
-/// old flat swing constant stood in for, now the [`swing_ticks`] formula's output
-/// for the common case. At `dex 100`, wrestling: 1.5s, thirty ticks. A name the
-/// tests pace against; production reads [`swing_ticks`] per mobile.
-#[cfg(test)]
-const WRESTLING_SWING_TICKS: u64 = swing_ticks(DEFAULT_DEXTERITY, WRESTLING_SPEED);
-
-/// Ticks between swings for a mobile of dexterity `dex` wielding a weapon of base
-/// speed `base`, Sphere's pre-AoS formula (`CResourceCalc.cpp`, combat era 1):
-/// the whole swing takes `(SpeedScaleFactor * 10) / ((dex + 100) * base)` tenths
-/// of a second, floored at one tenth. At [`TICK_INTERVAL`] a tenth is two ticks,
-/// so the count is that doubled. Higher dexterity or a faster weapon → fewer
-/// ticks between blows.
-const fn swing_ticks(dex: u16, base: u64) -> u64 {
-    let base = if base == 0 { 1 } else { base };
-    let denom = (dex as u64 + 100) * base;
-    let tenths = (SPEED_SCALE_FACTOR * 10) / denom;
-    if tenths == 0 {
-        2
-    } else {
-        tenths * 2
-    }
-}
-/// Damage a swing deals. A flat number until the damage formula — resistances,
-/// weapon, strength — is written, and that is a script-first slice of its own.
-const SWING_DAMAGE: u16 = 5;
-/// How long a criminal flag lasts: two minutes at [`TICK_INTERVAL`], Sphere's
-/// `CRIMINAL_TIMER` default.
-const CRIMINAL_TICKS: u64 = 2 * 60 * 20;
 /// The seed the world's roll generator starts from.
 ///
 /// Fixed, so a fresh world's rolls are reproducible in a test and a replay. A
@@ -719,8 +679,8 @@ impl World {
         // commands and all driven by the tick counter, so a fight, a flag and a
         // decay are as replayable as everything else.
         self.think();
-        self.swings();
-        self.expire_criminality();
+        combat::swings(&mut self.state);
+        combat::expire_criminality(&mut self.state);
         magic::regen_mana(&mut self.state);
         self.decay();
 
@@ -920,7 +880,12 @@ impl World {
                 serial,
                 amount,
                 damage_type,
-            } => self.damage(serial, amount, DamageType::from_u8(damage_type)),
+            } => combat::damage(
+                &mut self.state,
+                serial,
+                amount,
+                DamageType::from_u8(damage_type),
+            ),
             Command::CastSpell {
                 serial,
                 spell,
@@ -954,8 +919,12 @@ impl World {
                 skill,
                 difficulty,
             } => skills::use_skill(&mut self.state, serial, skill, difficulty),
-            Command::WarMode { connection, war } => self.war_mode(connection, war),
-            Command::Attack { connection, target } => self.attack(connection, target),
+            Command::WarMode { connection, war } => {
+                combat::war_mode(&mut self.state, connection, war)
+            }
+            Command::Attack { connection, target } => {
+                combat::attack(&mut self.state, connection, target)
+            }
             Command::Say {
                 connection,
                 mode,
@@ -1091,7 +1060,7 @@ impl World {
         self.state.registry.insert(
             entity,
             MeleeDamage {
-                amount: SWING_DAMAGE,
+                amount: combat::SWING_DAMAGE,
             },
         );
         self.state.registry.insert(entity, Resistance::default());
@@ -1489,177 +1458,6 @@ impl World {
         debug!(%serial, body, "mobile spawned");
     }
 
-    /// Deal damage to a mobile. See [`Command::Damage`].
-    fn damage(&mut self, serial: u32, amount: u16, kind: DamageType) {
-        let Some(serial) = Serial::new(serial) else {
-            return;
-        };
-        let Some(entity) = self.state.registry.entity_of(serial) else {
-            return;
-        };
-        let Some(&Hitpoints { current, max }) = self.state.registry.get::<Hitpoints>(entity) else {
-            return;
-        };
-        // Already dead — a player lying at zero, not yet a ghost. A further blow
-        // does nothing, and in particular does not announce a second death.
-        if current == 0 {
-            return;
-        }
-        // Armour takes its cut, of this kind of damage. One place now, so a
-        // fireball and a sword swing both go through the same door.
-        let resist = self
-            .state
-            .registry
-            .get::<Resistance>(entity)
-            .map_or(0, |r| r.against(kind));
-        let amount = (u32::from(amount) * u32::from(100 - resist) / 100) as u16;
-        let remaining = current.saturating_sub(amount);
-        self.state.registry.insert(
-            entity,
-            Hitpoints {
-                current: remaining,
-                max,
-            },
-        );
-        self.state.bus.send(MobileDamaged {
-            entity,
-            serial,
-            amount,
-            remaining,
-        });
-        self.state.broadcast_health(entity);
-        if remaining == 0 {
-            self.die(entity, serial);
-        }
-    }
-
-    /// A mobile's hit points reached zero. See [`Command::Damage`].
-    ///
-    /// Emits [`MobileDied`] for whoever cares — loot, notoriety, a script — and
-    /// then, for a creature, takes it off the world. A *player* who dies stays
-    /// put for now: ghosts, corpses and resurrection are a later slice, and
-    /// despawning someone still connected is worse than leaving them standing.
-    fn die(&mut self, entity: EntityId, serial: Serial) {
-        self.state.bus.send(MobileDied { entity, serial });
-        info!(%serial, "died");
-        if self.state.registry.has::<Client>(entity) {
-            return;
-        }
-        let facet = self.state.facet_of(entity);
-        for watcher in self.state.watchers_of(entity) {
-            self.state.forget(watcher, entity, serial);
-        }
-        self.state.seen.remove(&entity);
-        self.state.facet_state_mut(facet).sectors.remove(entity);
-        self.state.registry.despawn(entity);
-    }
-
-    /// Set a player's war stance and tell it the settled one. See
-    /// [`Command::WarMode`].
-    fn war_mode(&mut self, connection: ConnectionId, war: bool) {
-        let Some(&player) = self.state.players.get(&connection) else {
-            return;
-        };
-        if let Some(combat) = self.state.registry.get_mut::<Combat>(player) {
-            combat.warmode = war;
-        }
-        self.state.send(connection, encode_war_mode(war));
-    }
-
-    /// Set a player's attack target. See [`Command::Attack`].
-    ///
-    /// The blow itself is not struck here — this only aims. [`swings`](Self::swings)
-    /// is what turns "in war mode, in reach, timer up" into damage, on the tick.
-    fn attack(&mut self, connection: ConnectionId, target: u32) {
-        let Some(&player) = self.state.players.get(&connection) else {
-            return;
-        };
-        // A target that cannot be attacked — a serial of zero, an item, the
-        // attacker itself, or an invulnerable mobile — clears the aim and
-        // un-highlights the client's bar.
-        let valid = Serial::new(target)
-            .and_then(|serial| {
-                self.state
-                    .registry
-                    .entity_of(serial)
-                    .map(|entity| (serial, entity))
-            })
-            .filter(|&(_, entity)| {
-                entity != player
-                    && self.state.registry.has::<Hitpoints>(entity)
-                    && self.state.notoriety_of(entity) != Notoriety::Invulnerable
-            });
-        let Some((serial, target_entity)) = valid else {
-            self.clear_target(player);
-            self.state.send(connection, encode_attack(0));
-            return;
-        };
-        let next = self.state.ticks + self.swing_speed(player);
-        if let Some(combat) = self.state.registry.get_mut::<Combat>(player) {
-            combat.target = Some(serial);
-            combat.next_swing = next;
-        }
-        // Raising a hand against someone blue or green is a crime — it turns the
-        // attacker grey. (Flagged on the attack, not the landed blow: close
-        // enough, and it is the intent a town guard would act on.)
-        if matches!(
-            self.state.notoriety_of(target_entity),
-            Notoriety::Innocent | Notoriety::Friend
-        ) {
-            self.flag_criminal(player);
-        }
-        self.state.send(connection, encode_attack(target));
-    }
-
-    /// Strike, for every mobile whose swing is due. See [`Command::Attack`].
-    ///
-    /// The interactive half of combat, run each tick against the tick counter so
-    /// it reads no clock. A swing lands when the attacker is in war mode, has a
-    /// target within [`MELEE_RANGE`] on the same facet, and its timer is up; out
-    /// of reach it simply waits, its timer unspent, so the blow falls the instant
-    /// the gap closes.
-    fn swings(&mut self) {
-        let now = self.state.ticks;
-        // Collected first: `damage` mutates the registry, so the query cannot be
-        // held across it.
-        let ready: Vec<(EntityId, Serial)> = self
-            .state
-            .registry
-            .query::<Combat>()
-            .filter_map(|(attacker, combat)| {
-                (combat.warmode && now >= combat.next_swing)
-                    .then(|| combat.target.map(|target| (attacker, target)))
-                    .flatten()
-            })
-            .collect();
-
-        for (attacker, target_serial) in ready {
-            let Some(target) = self.state.registry.entity_of(target_serial) else {
-                // The target is gone — a creature killed, a player logged out.
-                self.clear_target(attacker);
-                continue;
-            };
-            let (Some(&Position(attacker_pos)), Some(&Position(target_pos))) = (
-                self.state.registry.get::<Position>(attacker),
-                self.state.registry.get::<Position>(target),
-            ) else {
-                continue;
-            };
-            if self.state.facet_of(attacker) != self.state.facet_of(target)
-                || !in_range(attacker_pos, target_pos, MELEE_RANGE)
-            {
-                continue;
-            }
-            let blow = self.melee_blow(attacker);
-            self.damage(target_serial.raw(), blow, DamageType::Physical);
-            self.set_next_swing(attacker, now + self.swing_speed(attacker));
-            // The blow may have killed it; a dead target is no target.
-            if self.state.registry.entity_of(target_serial).is_none() {
-                self.clear_target(attacker);
-            }
-        }
-    }
-
     /// Give every brain due a beat: chase and fight what it has, pick a fight if
     /// it sees one, or drift. See [`Brain`].
     ///
@@ -1706,20 +1504,20 @@ impl World {
             .and_then(|c| c.target)
         {
             if let Some(target_pos) = self.foe_in_sight(target_serial, pos, facet, sight) {
-                if !in_range(pos, target_pos, MELEE_RANGE) {
+                if !in_range(pos, target_pos, combat::MELEE_RANGE) {
                     if let Some(dir) = direction_toward(pos, target_pos) {
                         self.step(serial.raw(), dir.to_bits());
                     }
                 }
                 return;
             }
-            self.clear_target(creature);
+            combat::clear_target(&mut self.state, creature);
         }
 
         // Nothing to fight: look for prey, or wander.
         if sight > 0 {
             if let Some(prey) = self.nearest_player_in_sight(creature, pos, facet, sight) {
-                let next_swing = self.state.ticks + self.swing_speed(creature);
+                let next_swing = self.state.ticks + combat::swing_speed(&self.state, creature);
                 self.state.registry.insert(
                     creature,
                     Combat {
@@ -1798,93 +1596,6 @@ impl World {
             }
         }
         best.map(|(_, serial)| serial)
-    }
-
-    /// Push a combatant's next swing out to `tick`.
-    fn set_next_swing(&mut self, attacker: EntityId, tick: u64) {
-        if let Some(combat) = self.state.registry.get_mut::<Combat>(attacker) {
-            combat.next_swing = tick;
-        }
-    }
-
-    /// Stop a combatant attacking whatever it was.
-    fn clear_target(&mut self, attacker: EntityId) {
-        if let Some(combat) = self.state.registry.get_mut::<Combat>(attacker) {
-            combat.target = None;
-        }
-    }
-
-    /// Turn a mobile grey for [`CRIMINAL_TICKS`], or push the timer out if it is
-    /// already grey. Only an innocent flags; a red murderer stays red.
-    ///
-    /// The colour change is broadcast with [`broadcast_move`](Self::broadcast_move) —
-    /// a `0x77` carries notoriety, so everyone watching sees the attacker turn
-    /// grey without anyone having to move.
-    fn flag_criminal(&mut self, mobile: EntityId) {
-        let noto = self.state.notoriety_of(mobile);
-        if noto != Notoriety::Innocent && noto != Notoriety::Criminal {
-            return;
-        }
-        let already_grey = noto == Notoriety::Criminal;
-        self.state.registry.insert(mobile, Notoriety::Criminal);
-        self.state.registry.insert(
-            mobile,
-            CriminalUntil {
-                tick: self.state.ticks + CRIMINAL_TICKS,
-            },
-        );
-        // Only the turn to grey needs redrawing; refreshing the timer changes no
-        // colour.
-        if !already_grey {
-            self.state.broadcast_move(mobile);
-        }
-    }
-
-    /// Restore anyone whose criminal flag has run out to innocent, and redraw the
-    /// blue for everyone watching. Runs each tick against the tick counter.
-    fn expire_criminality(&mut self) {
-        let now = self.state.ticks;
-        let expired: Vec<EntityId> = self
-            .state
-            .registry
-            .query::<CriminalUntil>()
-            .filter(|(_, flag)| flag.tick <= now)
-            .map(|(entity, _)| entity)
-            .collect();
-        for entity in expired {
-            self.state.registry.remove::<CriminalUntil>(entity);
-            self.state.registry.insert(entity, Notoriety::Innocent);
-            self.state.broadcast_move(entity);
-        }
-    }
-
-    /// How many ticks `mobile` waits between swings.
-    ///
-    /// An explicit [`SwingSpeed`] wins — a script pinning an exact cadence, a
-    /// special creature. Otherwise the pace is derived from the mobile's
-    /// dexterity through Sphere's [`swing_ticks`] formula, wrestling speed for
-    /// now (no weapon properties yet). A mobile with neither swings at the
-    /// default-dexterity wrestling pace.
-    fn swing_speed(&self, mobile: EntityId) -> u64 {
-        if let Some(s) = self.state.registry.get::<SwingSpeed>(mobile) {
-            return s.ticks;
-        }
-        let dex = self
-            .state
-            .registry
-            .get::<Stats>(mobile)
-            .map_or(DEFAULT_DEXTERITY, |s| s.dexterity);
-        swing_ticks(dex, WRESTLING_SPEED)
-    }
-
-    /// The base damage a blow from `attacker` carries, before armour — its
-    /// [`MeleeDamage`], or the default. The target's resistance is applied later,
-    /// in [`damage`](Self::damage), the one place all damage passes through.
-    fn melee_blow(&self, attacker: EntityId) -> u16 {
-        self.state
-            .registry
-            .get::<MeleeDamage>(attacker)
-            .map_or(SWING_DAMAGE, |d| d.amount)
     }
 
     /// Set an item's decay clock: it rots [`DECAY_TICKS`] from now. Every loose
@@ -2580,13 +2291,18 @@ impl World {
 pub(crate) mod tests {
     use super::*;
     use openshard_chat::{MobileSpoke, TALKMODE_WHISPER, TALKMODE_YELL};
+    use openshard_combat::{swing_ticks, MobileDied, WRESTLING_SPEED};
     use openshard_events::Cursor;
     use openshard_magic::{SpellCast, MANA_REGEN_TICKS};
     use openshard_movement::WALK_INTERVAL;
     use openshard_skills::SkillUsed;
-    use openshard_state::components::Skills;
+    use openshard_state::components::{CriminalUntil, Skills};
 
     pub(super) const START: (u16, u16) = (1363, 1600);
+
+    /// Ticks a bare-handed, default-dexterity mobile waits between swings — the
+    /// pace the combat tests reckon against. `dex 100`, wrestling: thirty ticks.
+    const WRESTLING_SWING_TICKS: u64 = swing_ticks(100, WRESTLING_SPEED);
 
     pub(super) fn world() -> World {
         World::new(START)
@@ -3803,7 +3519,7 @@ pub(crate) mod tests {
     /// Spawn a creature at `point` with `hits` and return its serial. An orange
     /// enemy, no armour — the plain punching bag most combat tests want.
     fn spawn_mobile_at(world: &mut World, point: Point, hits: u16, now: Instant) -> u32 {
-        spawn_mobile_full(world, point, hits, 5, SWING_DAMAGE, 0, now)
+        spawn_mobile_full(world, point, hits, 5, combat::SWING_DAMAGE, 0, now)
     }
 
     /// Spawn a creature with every combat field spelled out, and return its serial.
@@ -4391,7 +4107,7 @@ pub(crate) mod tests {
             "zero on spawn pins nothing"
         );
         assert_eq!(
-            world.swing_speed(mob_entity),
+            combat::swing_speed(&world.state, mob_entity),
             WRESTLING_SWING_TICKS,
             "and the derived pace is the wrestling default"
         );
@@ -4407,7 +4123,7 @@ pub(crate) mod tests {
         let player_entity = world.state.players[&player];
         let serial = serial_of(&world, player);
 
-        let slow = world.swing_speed(player_entity);
+        let slow = combat::swing_speed(&world.state, player_entity);
         world.queue(Command::SetStats {
             serial,
             strength: DEFAULT_HITPOINTS,
@@ -4415,7 +4131,7 @@ pub(crate) mod tests {
             intelligence: DEFAULT_MANA,
         });
         world.tick(now);
-        let fast = world.swing_speed(player_entity);
+        let fast = combat::swing_speed(&world.state, player_entity);
 
         assert_eq!(
             slow, WRESTLING_SWING_TICKS,
@@ -4739,7 +4455,7 @@ pub(crate) mod tests {
             hue: 0,
             hits: 50,
             notoriety: 5,
-            damage: SWING_DAMAGE,
+            damage: combat::SWING_DAMAGE,
             resistance: 0,
             swing: 0,
             sight,

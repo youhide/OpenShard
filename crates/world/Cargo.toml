@@ -17,6 +17,7 @@ openshard-gateway.workspace = true
 openshard-events.workspace = true
 openshard-movement.workspace = true
 openshard-chat.workspace = true
+openshard-combat.workspace = true
 openshard-magic.workspace = true
 openshard-persistence.workspace = true
 openshard-protocol.workspace = true

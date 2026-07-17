@@ -84,11 +84,12 @@ in `world::tick`, so that file shrinks rather than the design changing under it.
 **Systems being extracted from `world::tick` into their own crates.** Each
 becomes a set of `fn(&mut WorldState)` and owns its domain events. Done: `chat`
 (`say`/`speak`, `MobileSpoke`), `skills` (skill/stat checks, the gain curve,
-`SkillUsed`; its `roll_skill` is shared), and `magic` (`cast_spell`/`heal`/
-`regen_mana`, `SpellCast`). `combat`, `items`, `ai` follow — `combat` and `items`
-after the rest of the drawing/interest substrate (`show`, `forget`,
-`broadcast_move`, …) moves onto `WorldState` (its `watchers_of` and
-`broadcast_health` are there already).
+`SkillUsed`, the shared `roll_skill`), `magic` (`cast_spell`/`heal`/`regen_mana`,
+`SpellCast`), and `combat` (`damage`/`die`/`swings`/`attack`/criminal flagging,
+the swing formula, `MobileDamaged`/`MobileDied`). `items` and `ai` follow — `ai`
+last, since it drives combat and movement. The drawing/interest substrate they
+share (`show`, `forget`, `broadcast_move`, `refresh_around`, `mobile_incoming`,
+…) lives on `WorldState`.
 
 **Stubs** — declared so the dependency graph is visible.
 

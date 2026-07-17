@@ -104,23 +104,8 @@ pub struct PlayerLeft {
     pub serial: Serial,
 }
 
-/// A mobile took damage.
-///
-/// Emitted whenever hit points fall — the hook combat gives everything that
-/// cares without combat having to know who does: a health bar redraw, an
-/// aggression tracker, a script that heals its pet. This is the crate boundary
-/// the architecture is built on — combat says what happened and moves on.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct MobileDamaged {
-    /// The mobile.
-    pub entity: EntityId,
-    /// Its wire identity.
-    pub serial: Serial,
-    /// How much it lost.
-    pub amount: u16,
-    /// What it has left.
-    pub remaining: u16,
-}
+// `MobileDamaged` and `MobileDied` moved to `openshard-combat` with the combat
+// system that emits them. `world` re-exports both.
 
 // `SkillUsed` moved to `openshard-skills` with the skill system that emits it.
 // `world` re-exports it.
@@ -130,17 +115,3 @@ pub struct MobileDamaged {
 
 // `MobileSpoke` moved to `openshard-chat` with the speech system that emits it —
 // "domain events live with the crate that owns the rule". `world` re-exports it.
-
-/// A mobile died — its hit points reached zero.
-///
-/// The event the whole "systems emit, they do not call" rule is named for:
-/// combat emits this, and loot, notoriety, guild war scores and quests read it,
-/// none of them wired into combat. What death *does* — a corpse, a ghost, a
-/// resurrection — is not decided here.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct MobileDied {
-    /// The mobile.
-    pub entity: EntityId,
-    /// Its wire identity.
-    pub serial: Serial,
-}

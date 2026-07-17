@@ -41,11 +41,11 @@ pub mod uop;
 // `openshard-state` so the gameplay systems can live in their own crates above
 // it. Re-exported here so `openshard_world::Position` and friends keep resolving.
 pub use events::{
-    ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
-    RefusedReason, StepRefused,
+    ItemSpawned, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
 };
 pub use map::{LandCell, Map, MapError, StaticItem, BLOCK_SIZE};
 pub use openshard_chat::MobileSpoke;
+pub use openshard_combat::{MobileDamaged, MobileDied};
 pub use openshard_magic::SpellCast;
 pub use openshard_skills::SkillUsed;
 pub use openshard_state::components;

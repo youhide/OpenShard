@@ -1169,6 +1169,12 @@ dependencies = [
 [[package]]
 name = "openshard-combat"
 version = "0.0.1"
+dependencies = [
+ "openshard-entities",
+ "openshard-gateway",
+ "openshard-protocol",
+ "openshard-state",
+]
 
 [[package]]
 name = "openshard-config"
@@ -1309,6 +1315,7 @@ name = "openshard-world"
 version = "0.0.1"
 dependencies = [
  "openshard-chat",
+ "openshard-combat",
  "openshard-entities",
  "openshard-events",
  "openshard-gateway",
