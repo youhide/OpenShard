@@ -17,7 +17,9 @@ use openshard_events::Cursor;
 use openshard_scripting::{
     Command as ScriptCommand, DenoEngine, Event as ScriptEvent, ScriptEngine,
 };
-use openshard_world::events::{MobileDied, MobileMoved, PlayerEntered, PlayerLeft, StepRefused};
+use openshard_world::events::{
+    MobileDied, MobileMoved, PlayerEntered, PlayerLeft, SkillUsed, StepRefused,
+};
 use openshard_world::{Command, World};
 use tracing::{error, info, warn};
 
@@ -29,6 +31,7 @@ pub struct Scripts {
     refused: Cursor<StepRefused>,
     left: Cursor<PlayerLeft>,
     died: Cursor<MobileDied>,
+    used: Cursor<SkillUsed>,
 }
 
 impl Scripts {
@@ -67,6 +70,7 @@ impl Scripts {
             refused: world.bus().cursor(),
             left: world.bus().cursor(),
             died: world.bus().cursor(),
+            used: world.bus().cursor(),
             engine,
         })
     }
@@ -116,6 +120,14 @@ impl Scripts {
             for e in bus.read(&mut self.died) {
                 events.push(ScriptEvent::MobileDied {
                     serial: e.serial.raw(),
+                });
+            }
+            for e in bus.read(&mut self.used) {
+                events.push(ScriptEvent::SkillUsed {
+                    serial: e.serial.raw(),
+                    skill: e.skill,
+                    success: e.success,
+                    value: e.value,
                 });
             }
         }
@@ -202,6 +214,24 @@ fn into_world(command: ScriptCommand) -> Command {
             facet,
         },
         ScriptCommand::Damage { serial, amount } => Command::Damage { serial, amount },
+        ScriptCommand::SetSkill {
+            serial,
+            skill,
+            value,
+        } => Command::SetSkill {
+            serial,
+            skill,
+            value,
+        },
+        ScriptCommand::UseSkill {
+            serial,
+            skill,
+            difficulty,
+        } => Command::UseSkill {
+            serial,
+            skill,
+            difficulty,
+        },
     }
 }
 
@@ -443,6 +473,54 @@ mod tests {
                 .next()
                 .is_some(),
             "the script dropped an item when the creature died"
+        );
+    }
+
+    #[test]
+    fn a_script_uses_a_skill_and_rewards_the_success() {
+        // A skill round-trip: the script trains and uses a skill, the world rolls
+        // it and emits SkillUsed, and the script — hearing the success — grants
+        // the reward. Combat's death-loot pattern, for skills.
+        let script = TempScript::new(
+            "miner",
+            "function onEvent(e) {\n\
+             if (e.type === 'PlayerEntered') {\n\
+                 Deno.core.ops.op_set_skill(e.serial, 1, 1000);\n\
+                 Deno.core.ops.op_use_skill(e.serial, 1, 0);\n\
+             }\n\
+             if (e.type === 'SkillUsed' && e.success) {\n\
+                 Deno.core.ops.op_spawn_item({ graphic: 0x19B9, x: 1363, y: 1600 });\n\
+             }\n\
+             }",
+        );
+
+        let now = Instant::now();
+        let mut world = World::new((1363, 1600));
+        let mut scripts = Scripts::load(script.path(), &world).expect("script loads");
+
+        world.queue(Command::Enter {
+            connection: ConnectionId::from_raw(1),
+            version: ClientVersion::TOL,
+            account: "admin".to_owned(),
+            name: "Lord British".to_owned(),
+            serial: None,
+            position: None,
+            facet: 0,
+            appearance: None,
+        });
+        world.tick(now); // PlayerEntered
+        scripts.pump(&mut world); // set + use the skill queued
+        world.tick(now); // the skill is used, SkillUsed emitted
+        scripts.pump(&mut world); // the script hears the success, queues the ore
+        world.tick(now); // the ore spawns
+
+        assert!(
+            world
+                .registry()
+                .query::<openshard_world::Graphic>()
+                .next()
+                .is_some(),
+            "the successful skill use produced its reward"
         );
     }
 }

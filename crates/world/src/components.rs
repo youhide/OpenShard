@@ -12,6 +12,8 @@
 //! `Components` grab-bag every crate imports from would be an inheritance tree
 //! with extra steps.
 
+use std::collections::HashMap;
+
 use openshard_entities::Serial;
 use openshard_gateway::ConnectionId;
 use openshard_movement::Walker;
@@ -188,6 +190,29 @@ pub struct Hitpoints {
 pub struct CriminalUntil {
     /// The tick the flag lifts.
     pub tick: u64,
+}
+
+/// What a mobile is trained in: each skill it has, by id, as a value in tenths
+/// (so 75.5 is stored as 755, and [`SKILL_CAP`](crate::skills::SKILL_CAP) is
+/// 1000).
+///
+/// Sparse on purpose — a mobile knows the handful of skills it has been given,
+/// not all fifty-odd at zero. An id it has never trained reads as zero.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct Skills {
+    values: HashMap<u8, u16>,
+}
+
+impl Skills {
+    /// The value of `skill`, in tenths; zero if the mobile has never had it.
+    pub fn get(&self, skill: u8) -> u16 {
+        self.values.get(&skill).copied().unwrap_or(0)
+    }
+
+    /// Set `skill` to `value` tenths.
+    pub fn set(&mut self, skill: u8, value: u16) {
+        self.values.insert(skill, value);
+    }
 }
 
 /// A mobile's fighting state: whether it is in war mode, whom it is attacking,

@@ -122,6 +122,26 @@ pub struct MobileDamaged {
     pub remaining: u16,
 }
 
+/// A mobile used a skill: the check resolved, and any gain is already applied.
+///
+/// What the *use* accomplishes is not decided here — whether the ore comes out
+/// of the rock, whether the lockpick turns — only whether the roll passed and
+/// where the skill stands now. A script reads this and grants the reward, the
+/// same decoupling combat's `MobileDied` has.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SkillUsed {
+    /// The mobile.
+    pub entity: EntityId,
+    /// Its wire identity.
+    pub serial: Serial,
+    /// Which skill, by id.
+    pub skill: u8,
+    /// Whether the check succeeded.
+    pub success: bool,
+    /// The skill's value now, in tenths, after any gain.
+    pub value: u16,
+}
+
 /// A mobile died — its hit points reached zero.
 ///
 /// The event the whole "systems emit, they do not call" rule is named for:

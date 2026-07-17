@@ -72,7 +72,7 @@ impl Host {
             Event::PlayerLeft { serial } => {
                 self.entities.remove(&serial);
             }
-            Event::StepRefused { .. } | Event::MobileDied { .. } => {}
+            Event::StepRefused { .. } | Event::MobileDied { .. } | Event::SkillUsed { .. } => {}
         }
     }
 }
@@ -233,6 +233,28 @@ fn op_damage(state: &mut OpState, serial: u32, amount: u32) {
     });
 }
 
+/// Set a mobile's skill value, in tenths.
+#[op2(fast)]
+fn op_set_skill(state: &mut OpState, serial: u32, skill: u32, value: u32) {
+    state.borrow_mut::<Host>().outbox.push(Command::SetSkill {
+        serial,
+        skill: skill as u8,
+        value: value.min(u32::from(u16::MAX)) as u16,
+    });
+}
+
+/// Use a skill against a difficulty (0–100). The result comes back as a
+/// `SkillUsed` event, not a return value: the roll and any gain happen on the
+/// tick, not in the op.
+#[op2(fast)]
+fn op_use_skill(state: &mut OpState, serial: u32, skill: u32, difficulty: u32) {
+    state.borrow_mut::<Host>().outbox.push(Command::UseSkill {
+        serial,
+        skill: skill as u8,
+        difficulty: difficulty.min(100) as u16,
+    });
+}
+
 extension!(
     openshard_ops,
     ops = [
@@ -241,7 +263,9 @@ extension!(
         op_spawn_item,
         op_spawn_container,
         op_spawn_mobile,
-        op_damage
+        op_damage,
+        op_set_skill,
+        op_use_skill
     ],
     docs = "OpenShard's script-facing ops: read entity state, enqueue commands.",
 );

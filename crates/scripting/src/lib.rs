@@ -91,6 +91,18 @@ pub enum Event {
         /// Its wire identity.
         serial: Serial,
     },
+    /// A skill was used: the check is resolved and any gain applied. A script
+    /// reads this to grant what the use was *for* — the ore, the pick's turn.
+    SkillUsed {
+        /// Whose, by wire identity.
+        serial: Serial,
+        /// Which skill, by id.
+        skill: u8,
+        /// Whether the check passed.
+        success: bool,
+        /// The skill's value now, in tenths.
+        value: u16,
+    },
 }
 
 /// What a script asks the world to do.
@@ -176,6 +188,25 @@ pub enum Command {
         serial: Serial,
         /// How much.
         amount: u16,
+    },
+    /// Set a mobile's skill value, in tenths.
+    SetSkill {
+        /// Whose.
+        serial: Serial,
+        /// Which skill, by id.
+        skill: u8,
+        /// The value in tenths.
+        value: u16,
+    },
+    /// Use a skill against a difficulty (0–100): roll, gain, and report back
+    /// through a [`SkillUsed`](Event::SkillUsed) event.
+    UseSkill {
+        /// Whose.
+        serial: Serial,
+        /// Which skill, by id.
+        skill: u8,
+        /// The difficulty, 0–100.
+        difficulty: u16,
     },
 }
 

@@ -44,14 +44,16 @@ use tracing::{debug, info, warn};
 
 use crate::components::{
     Account, Amount, Body, Client, Combat, Contained, Container, CriminalUntil, Decays, Equipped,
-    Facet, Graphic, Heading, Hitpoints, MeleeDamage, Movement, Name, Position, Resistance,
+    Facet, Graphic, Heading, Hitpoints, MeleeDamage, Movement, Name, Position, Resistance, Skills,
     Stackable, SwingSpeed,
 };
 use crate::events::{
     ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
-    RefusedReason, StepRefused,
+    RefusedReason, SkillUsed, StepRefused,
 };
+use crate::rng::Rng;
 use crate::sectors::{in_range, Sectors, VIEW_RANGE};
+use crate::skills;
 use crate::terrain::MapTerrain;
 
 /// How often the world ticks.
@@ -109,6 +111,13 @@ const SWING_DAMAGE: u16 = 5;
 /// How long a criminal flag lasts: two minutes at [`TICK_INTERVAL`], Sphere's
 /// `CRIMINAL_TIMER` default.
 const CRIMINAL_TICKS: u64 = 2 * 60 * 20;
+/// The seed the world's roll generator starts from.
+///
+/// Fixed, so a fresh world's rolls are reproducible in a test and a replay. A
+/// live shard that wanted unpredictable rolls would seed from the clock at
+/// startup and save the seed with the world; that is an additive change, and one
+/// value, not a redesign.
+const DEFAULT_SEED: u64 = 0x0DEE_5340_0000_0001;
 /// How many ticks an item lies on the ground before it decays.
 ///
 /// Twenty minutes at [`TICK_INTERVAL`] — Sphere's default `DECAY_TIME` is fifteen
@@ -259,6 +268,26 @@ pub enum Command {
         serial: u32,
         /// How much.
         amount: u16,
+    },
+    /// Set a mobile's skill value — a script configuring a character. `value` is
+    /// in tenths, capped at [`SKILL_CAP`](crate::skills::SKILL_CAP).
+    SetSkill {
+        /// Whose, by wire serial.
+        serial: u32,
+        /// Which skill, by id.
+        skill: u8,
+        /// The value in tenths.
+        value: u16,
+    },
+    /// Use a skill against a difficulty (0–100): roll it, gain from it, and say
+    /// what happened with a [`SkillUsed`](crate::events::SkillUsed) event.
+    UseSkill {
+        /// Whose, by wire serial.
+        serial: u32,
+        /// Which skill, by id.
+        skill: u8,
+        /// The difficulty, 0–100.
+        difficulty: u16,
     },
     /// A client toggled war mode (`0x72`).
     WarMode {
@@ -422,6 +451,9 @@ pub struct World {
     inbox: Vec<Command>,
     /// Packets the last tick produced.
     outbox: Vec<Outbound>,
+    /// The generator behind every roll — a swing landing, a skill gaining. Part
+    /// of the world so replay is exact; advanced only inside the tick.
+    rng: Rng,
     /// How many ticks have run.
     ticks: u64,
 }
@@ -467,6 +499,7 @@ impl World {
             turned: Cursor::default(),
             inbox: Vec::new(),
             outbox: Vec::new(),
+            rng: Rng::new(DEFAULT_SEED),
             ticks: 0,
         }
     }
@@ -771,6 +804,16 @@ impl World {
                 body, hue, hits, notoriety, damage, resistance, swing, position, facet,
             ),
             Command::Damage { serial, amount } => self.damage(serial, amount),
+            Command::SetSkill {
+                serial,
+                skill,
+                value,
+            } => self.set_skill(serial, skill, value),
+            Command::UseSkill {
+                serial,
+                skill,
+                difficulty,
+            } => self.use_skill(serial, skill, difficulty),
             Command::WarMode { connection, war } => self.war_mode(connection, war),
             Command::Attack { connection, target } => self.attack(connection, target),
             Command::DoubleClick { connection, serial } => self.double_click(connection, serial),
@@ -1544,6 +1587,62 @@ impl World {
             .map_or(0, |r| r.physical)
             .min(100);
         (u32::from(base) * u32::from(100 - resist) / 100) as u16
+    }
+
+    /// Set a mobile's skill value. See [`Command::SetSkill`].
+    fn set_skill(&mut self, serial: u32, skill: u8, value: u16) {
+        let Some(serial) = Serial::new(serial) else {
+            return;
+        };
+        let Some(entity) = self.registry.entity_of(serial) else {
+            return;
+        };
+        let mut skills = self
+            .registry
+            .get::<Skills>(entity)
+            .cloned()
+            .unwrap_or_default();
+        skills.set(skill, value.min(skills::SKILL_CAP));
+        self.registry.insert(entity, skills);
+    }
+
+    /// Use a skill against a difficulty: roll it, teach from it, announce it.
+    /// See [`Command::UseSkill`].
+    fn use_skill(&mut self, serial: u32, skill: u8, difficulty: u16) {
+        let Some(serial) = Serial::new(serial) else {
+            return;
+        };
+        let Some(entity) = self.registry.entity_of(serial) else {
+            return;
+        };
+        let value = self
+            .registry
+            .get::<Skills>(entity)
+            .map_or(0, |s| s.get(skill));
+
+        // The success roll, then the gain roll — two draws, so the order is
+        // fixed and the whole thing replays the same.
+        let success = skills::success_chance(value, difficulty) >= self.rng.below(1000);
+
+        let mut value = value;
+        if value < skills::SKILL_CAP && self.rng.below(1000) < skills::gain_chance(value) {
+            value += 1;
+            let mut skills = self
+                .registry
+                .get::<Skills>(entity)
+                .cloned()
+                .unwrap_or_default();
+            skills.set(skill, value);
+            self.registry.insert(entity, skills);
+        }
+
+        self.bus.send(SkillUsed {
+            entity,
+            serial,
+            skill,
+            success,
+            value,
+        });
     }
 
     /// Set an item's decay clock: it rots [`DECAY_TICKS`] from now. Every loose
@@ -4141,6 +4240,147 @@ pub(crate) mod tests {
             None,
             "and the attacker is no longer swinging at it"
         );
+    }
+
+    /// A mobile's value in a skill, in tenths.
+    fn skill_value(world: &World, entity: EntityId, skill: u8) -> u16 {
+        world
+            .registry
+            .get::<Skills>(entity)
+            .map_or(0, |s| s.get(skill))
+    }
+
+    #[test]
+    fn setting_a_skill_stores_it() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let entity = world.players[&player];
+        let serial = serial_of(&world, player);
+
+        world.queue(Command::SetSkill {
+            serial,
+            skill: 1,
+            value: 755,
+        });
+        world.tick(now);
+        assert_eq!(skill_value(&world, entity, 1), 755);
+    }
+
+    #[test]
+    fn using_a_skill_announces_the_outcome() {
+        // A grandmaster (100.0) at a trivial task always succeeds, and the event
+        // carries the result for a script to reward.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let serial = serial_of(&world, player);
+        world.queue(Command::SetSkill {
+            serial,
+            skill: 1,
+            value: 1000,
+        });
+        world.tick(now);
+
+        let mut used: Cursor<SkillUsed> = world.bus().cursor();
+        world.queue(Command::UseSkill {
+            serial,
+            skill: 1,
+            difficulty: 0,
+        });
+        world.tick(now);
+
+        let events: Vec<SkillUsed> = world.bus().read(&mut used).copied().collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].skill, 1);
+        assert!(events[0].success, "a sure thing succeeds");
+    }
+
+    #[test]
+    fn a_skill_gains_from_use() {
+        // From nothing, thirty percent a use — over fifty tries the value climbs.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let entity = world.players[&player];
+        let serial = serial_of(&world, player);
+        world.queue(Command::SetSkill {
+            serial,
+            skill: 1,
+            value: 0,
+        });
+        world.tick(now);
+
+        for _ in 0..50 {
+            world.queue(Command::UseSkill {
+                serial,
+                skill: 1,
+                difficulty: 0,
+            });
+            world.tick(now);
+        }
+        assert!(
+            skill_value(&world, entity, 1) > 0,
+            "practice taught something"
+        );
+    }
+
+    #[test]
+    fn a_capped_skill_does_not_gain() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let entity = world.players[&player];
+        let serial = serial_of(&world, player);
+        world.queue(Command::SetSkill {
+            serial,
+            skill: 1,
+            value: skills::SKILL_CAP,
+        });
+        world.tick(now);
+
+        for _ in 0..30 {
+            world.queue(Command::UseSkill {
+                serial,
+                skill: 1,
+                difficulty: 0,
+            });
+            world.tick(now);
+        }
+        assert_eq!(
+            skill_value(&world, entity, 1),
+            skills::SKILL_CAP,
+            "there is nothing left to learn at the cap"
+        );
+    }
+
+    #[test]
+    fn skill_rolls_are_replayable() {
+        // The whole reason the generator lives in the world: the same commands
+        // from the same start reach the same skill, roll for roll.
+        fn run() -> u16 {
+            let now = Instant::now();
+            let mut world = world();
+            let connection = enter(&mut world, now);
+            let serial = serial_of(&world, connection);
+            let entity = world.players[&connection];
+            world.queue(Command::SetSkill {
+                serial,
+                skill: 3,
+                value: 400,
+            });
+            world.tick(now);
+            for _ in 0..40 {
+                world.queue(Command::UseSkill {
+                    serial,
+                    skill: 3,
+                    difficulty: 40,
+                });
+                world.tick(now);
+            }
+            skill_value(&world, entity, 3)
+        }
+        assert_eq!(run(), run(), "two identical runs land on the same value");
     }
 
     #[test]

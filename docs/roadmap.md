@@ -336,7 +336,25 @@ Roughly in dependency order, each script-first:
     reputation store. The seams are in place — `Resistance` has room for more
     types, `SwingSpeed` and `MeleeDamage` are already per-mobile — so each is a
     fill-in, not a redesign.
-- [ ] `skills` — usage checks, gain curves
+- [x] `skills` — usage checks, gain curves
+  - [x] **The check and the gain.** A mobile carries `Skills` (a sparse map of id
+    → tenths). A script sets one (`op_set_skill`) and uses it against a difficulty
+    (`op_use_skill`); the world rolls success on an S-curve of the gap between
+    skill and difficulty — ported straight from Sphere's `Calc_GetSCurve`, 50% at
+    parity, 75% ten points ahead — and rolls a gain that falls as the skill
+    rises. The result comes back as a `SkillUsed` event the server delivers to
+    scripts, so the reward — the ore, the pick's turn — is the script's to grant,
+    combat's `MobileDied` decoupling again.
+  - [x] **A seeded generator in the world.** A roll is randomness inside a tick,
+    and the tick must replay. So `Rng` (xorshift64\*) is a plain field the world
+    owns, seeded once from a fixed default and advanced only by the tick — two
+    identical runs reach the same skill, roll for roll (there is a test that
+    asserts exactly this). A live shard that wanted unpredictable rolls seeds
+    from the clock and saves the seed; additive, one value.
+  - [ ] **stats** (str/dex/int) and stat gain from skill use — the next
+    foundation, and what unblocks combat's weapon/dexterity-derived numbers
+  - [ ] Sphere's per-skill `AdvRate` gain tables and the "learn only from a
+    challenge" `GainRadius` — data-driven config, a refinement on the flat curve
 - [ ] `magic` — spells, reagents, casting
 - [ ] `ai` — brains, aggro, wandering
 - [ ] `chat` — speech, journal routing
