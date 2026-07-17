@@ -355,7 +355,26 @@ Roughly in dependency order, each script-first:
     foundation, and what unblocks combat's weapon/dexterity-derived numbers
   - [ ] Sphere's per-skill `AdvRate` gain tables and the "learn only from a
     challenge" `GainRadius` — data-driven config, a refinement on the flat curve
-- [ ] `magic` — spells, reagents, casting
+- [x] `magic` — spells, reagents, casting
+  - [x] **Mana, casting, and the effect seam.** A mobile carries `Mana` (spent by
+    casting, trickling back on a tick-counter regen). `Command::CastSpell` is the
+    gate every spell passes: it checks the mana, rolls the casting skill (through
+    the same `roll_skill` a mined ore uses, so casting trains Magery), spends the
+    mana, and emits `SpellCast { caster, spell, target, success }`. What the spell
+    *does* — a fireball's damage, a heal, a summon — is not here: a script reads
+    `SpellCast` and gives it its effect, `MobileDied`'s decoupling a third time.
+    `Command::Heal` mends toward the maximum; `op_cast_spell`/`op_heal`/typed
+    `op_damage` are the script's hands.
+  - [x] **Typed damage and resistances** (the piece combat deferred). `damage`
+    now takes a `DamageType` — physical, fire, cold, poison, energy — and cuts it
+    by the target's `Resistance` *for that type*, in the one place all damage
+    passes through, so a fireball and a sword swing share the door. Melee is
+    physical; a spell picks its element.
+  - [ ] **reagents** — a spell consuming items from the caster's pack: it wants
+    the container/inventory search that pick-up-from-a-container half-built, so
+    it is a fill-in on the item side, noted not forgotten
+  - [ ] **the client cast path** — casting from a spellbook or a macro
+    (`0x12`/`0xBF.0x1C`), the interactive layer, as `0x05`/`0x72` were for combat
 - [ ] `ai` — brains, aggro, wandering
 - [ ] `chat` — speech, journal routing
 - [ ] `housing`, `guilds`

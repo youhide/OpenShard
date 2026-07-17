@@ -72,7 +72,10 @@ impl Host {
             Event::PlayerLeft { serial } => {
                 self.entities.remove(&serial);
             }
-            Event::StepRefused { .. } | Event::MobileDied { .. } | Event::SkillUsed { .. } => {}
+            Event::StepRefused { .. }
+            | Event::MobileDied { .. }
+            | Event::SkillUsed { .. }
+            | Event::SpellCast { .. } => {}
         }
     }
 }
@@ -224,12 +227,45 @@ fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
         });
 }
 
-/// Deal damage to a mobile. A fast op: the swing already decided the number.
+/// Deal damage to a mobile, of a kind (0 physical, 1 fire, …).
 #[op2(fast)]
-fn op_damage(state: &mut OpState, serial: u32, amount: u32) {
+fn op_damage(state: &mut OpState, serial: u32, amount: u32, damage_type: u32) {
     state.borrow_mut::<Host>().outbox.push(Command::Damage {
         serial,
         amount: amount.min(u32::from(u16::MAX)) as u16,
+        damage_type: damage_type.min(u32::from(u8::MAX)) as u8,
+    });
+}
+
+/// Heal a mobile, up to its maximum.
+#[op2(fast)]
+fn op_heal(state: &mut OpState, serial: u32, amount: u32) {
+    state.borrow_mut::<Host>().outbox.push(Command::Heal {
+        serial,
+        amount: amount.min(u32::from(u16::MAX)) as u16,
+    });
+}
+
+/// Cast a spell. The outcome comes back as a `SpellCast` event, not a return —
+/// the mana and skill roll happen on the tick.
+#[op2(fast)]
+#[allow(clippy::too_many_arguments)]
+fn op_cast_spell(
+    state: &mut OpState,
+    serial: u32,
+    spell: u32,
+    target: u32,
+    mana: u32,
+    difficulty: u32,
+    skill: u32,
+) {
+    state.borrow_mut::<Host>().outbox.push(Command::CastSpell {
+        serial,
+        spell: spell.min(u32::from(u16::MAX)) as u16,
+        target,
+        mana: mana.min(u32::from(u16::MAX)) as u16,
+        difficulty: difficulty.min(100) as u16,
+        skill: skill.min(u32::from(u8::MAX)) as u8,
     });
 }
 
@@ -264,6 +300,8 @@ extension!(
         op_spawn_container,
         op_spawn_mobile,
         op_damage,
+        op_heal,
+        op_cast_spell,
         op_set_skill,
         op_use_skill
     ],

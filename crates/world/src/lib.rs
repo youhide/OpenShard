@@ -42,13 +42,13 @@ pub mod tiledata;
 pub mod uop;
 
 pub use components::{
-    Account, Amount, Body, Client, Combat, Contained, Container, CriminalUntil, Decays, Equipped,
-    Facet, Graphic, Heading, Hitpoints, MeleeDamage, Movement, Name, Position, Resistance, Skills,
-    Stackable, SwingSpeed,
+    Account, Amount, Body, Client, Combat, Contained, Container, CriminalUntil, DamageType, Decays,
+    Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name, Position,
+    Resistance, Skills, Stackable, SwingSpeed,
 };
 pub use events::{
     ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
-    RefusedReason, SkillUsed, StepRefused,
+    RefusedReason, SkillUsed, SpellCast, StepRefused,
 };
 pub use map::{LandCell, Map, MapError, StaticItem, BLOCK_SIZE};
 pub use sectors::{distance, in_range, Sectors, SECTOR_SIZE, VIEW_RANGE};

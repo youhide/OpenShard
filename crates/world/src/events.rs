@@ -142,6 +142,24 @@ pub struct SkillUsed {
     pub value: u16,
 }
 
+/// A spell was cast: the mana was paid and the skill rolled. What the spell
+/// *does* is a script's to decide — this only says who cast what at whom, and
+/// whether it took. A fireball's damage, a heal's mending, a summon's creature
+/// all hang off this event, none of them known to the casting machinery.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SpellCast {
+    /// The caster.
+    pub caster: EntityId,
+    /// Its wire identity.
+    pub serial: Serial,
+    /// Which spell, by id.
+    pub spell: u16,
+    /// The target's serial, or zero for a spell that needs none.
+    pub target: u32,
+    /// Whether the cast succeeded (mana paid and the skill check passed).
+    pub success: bool,
+}
+
 /// A mobile died — its hit points reached zero.
 ///
 /// The event the whole "systems emit, they do not call" rule is named for:

@@ -43,13 +43,13 @@ use openshard_protocol::{
 use tracing::{debug, info, warn};
 
 use crate::components::{
-    Account, Amount, Body, Client, Combat, Contained, Container, CriminalUntil, Decays, Equipped,
-    Facet, Graphic, Heading, Hitpoints, MeleeDamage, Movement, Name, Position, Resistance, Skills,
-    Stackable, SwingSpeed,
+    Account, Amount, Body, Client, Combat, Contained, Container, CriminalUntil, DamageType, Decays,
+    Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name, Position,
+    Resistance, Skills, Stackable, SwingSpeed,
 };
 use crate::events::{
     ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
-    RefusedReason, SkillUsed, StepRefused,
+    RefusedReason, SkillUsed, SpellCast, StepRefused,
 };
 use crate::rng::Rng;
 use crate::sectors::{in_range, Sectors, VIEW_RANGE};
@@ -98,6 +98,12 @@ const MAX_WEARABLE_LAYER: u8 = 25;
 /// A placeholder, not a design: real starting hits come from stats, and stats
 /// are a later slice. Enough that a new character is not born dead.
 const DEFAULT_HITPOINTS: u16 = 100;
+/// The mana a character starts with. A placeholder, like [`DEFAULT_HITPOINTS`];
+/// real mana comes from intelligence, once stats exist.
+const DEFAULT_MANA: u16 = 100;
+/// Ticks between mana regenerating a point: three seconds at [`TICK_INTERVAL`].
+/// A flat rate until it derives from meditation and intelligence.
+const MANA_REGEN_TICKS: u64 = 60;
 /// How near, in tiles (Chebyshev), a mobile must be to land a melee blow: the
 /// next tile over, diagonals included.
 const MELEE_RANGE: u32 = 1;
@@ -266,7 +272,35 @@ pub enum Command {
     Damage {
         /// Whom, by wire serial.
         serial: u32,
-        /// How much.
+        /// How much, before armour.
+        amount: u16,
+        /// What kind, as a wire byte (0 physical, 1 fire, …). The target's
+        /// resistance to that kind takes its cut.
+        damage_type: u8,
+    },
+    /// Cast a spell: pay mana, roll the casting skill, and say what happened with
+    /// a [`SpellCast`](crate::events::SpellCast). The spell's *effect* is a
+    /// script's — this is only the mana-and-skill gate every spell passes.
+    CastSpell {
+        /// The caster's serial.
+        serial: u32,
+        /// Which spell, by id.
+        spell: u16,
+        /// The target's serial, or zero for a spell that needs none.
+        target: u32,
+        /// The mana it costs.
+        mana: u16,
+        /// The casting difficulty, 0–100.
+        difficulty: u16,
+        /// The skill it rolls (Magery, and its id is the caller's to name).
+        skill: u8,
+    },
+    /// Heal a mobile — a spell's or a script's mending. Raises hit points toward
+    /// the maximum and never past it.
+    Heal {
+        /// Whom.
+        serial: u32,
+        /// By how much.
         amount: u16,
     },
     /// Set a mobile's skill value — a script configuring a character. `value` is
@@ -636,6 +670,7 @@ impl World {
         // decay are as replayable as everything else.
         self.swings();
         self.expire_criminality();
+        self.regen_mana();
         self.decay();
 
         // Before the bus retires anything: what happened is what needs saving,
@@ -803,7 +838,20 @@ impl World {
             } => self.spawn_mobile(
                 body, hue, hits, notoriety, damage, resistance, swing, position, facet,
             ),
-            Command::Damage { serial, amount } => self.damage(serial, amount),
+            Command::Damage {
+                serial,
+                amount,
+                damage_type,
+            } => self.damage(serial, amount, DamageType::from_u8(damage_type)),
+            Command::CastSpell {
+                serial,
+                spell,
+                target,
+                mana,
+                difficulty,
+                skill,
+            } => self.cast_spell(serial, spell, target, mana, difficulty, skill),
+            Command::Heal { serial, amount } => self.heal(serial, amount),
             Command::SetSkill {
                 serial,
                 skill,
@@ -950,6 +998,13 @@ impl World {
             Hitpoints {
                 current: DEFAULT_HITPOINTS,
                 max: DEFAULT_HITPOINTS,
+            },
+        );
+        self.registry.insert(
+            entity,
+            Mana {
+                current: DEFAULT_MANA,
+                max: DEFAULT_MANA,
             },
         );
         self.registry.insert(entity, Combat::default());
@@ -1298,6 +1353,7 @@ impl World {
             entity,
             Resistance {
                 physical: resistance.min(100),
+                ..Default::default()
             },
         );
         self.registry.insert(
@@ -1318,7 +1374,7 @@ impl World {
     }
 
     /// Deal damage to a mobile. See [`Command::Damage`].
-    fn damage(&mut self, serial: u32, amount: u16) {
+    fn damage(&mut self, serial: u32, amount: u16, kind: DamageType) {
         let Some(serial) = Serial::new(serial) else {
             return;
         };
@@ -1333,6 +1389,13 @@ impl World {
         if current == 0 {
             return;
         }
+        // Armour takes its cut, of this kind of damage. One place now, so a
+        // fireball and a sword swing both go through the same door.
+        let resist = self
+            .registry
+            .get::<Resistance>(entity)
+            .map_or(0, |r| r.against(kind));
+        let amount = (u32::from(amount) * u32::from(100 - resist) / 100) as u16;
         let remaining = current.saturating_sub(amount);
         self.registry.insert(
             entity,
@@ -1494,8 +1557,8 @@ impl World {
             {
                 continue;
             }
-            let blow = self.melee_blow(attacker, target);
-            self.damage(target_serial.raw(), blow);
+            let blow = self.melee_blow(attacker);
+            self.damage(target_serial.raw(), blow, DamageType::Physical);
             self.set_next_swing(attacker, now + self.swing_speed(attacker));
             // The blow may have killed it; a dead target is no target.
             if self.registry.entity_of(target_serial).is_none() {
@@ -1569,24 +1632,13 @@ impl World {
             .map_or(SWING_TICKS, |s| s.ticks)
     }
 
-    /// What a blow from `attacker` lands on `target`: the attacker's melee damage
-    /// less the fraction the target's physical resistance shrugs off.
-    ///
-    /// The whole formula, for now — one damage type, one subtraction. The point
-    /// of putting it here rather than a flat number is that both inputs are set
-    /// on the entities, so a script that spawns a hard-hitting ogre or an
-    /// armoured knight changes the maths without changing the code.
-    fn melee_blow(&self, attacker: EntityId, target: EntityId) -> u16 {
-        let base = self
-            .registry
+    /// The base damage a blow from `attacker` carries, before armour — its
+    /// [`MeleeDamage`], or the default. The target's resistance is applied later,
+    /// in [`damage`](Self::damage), the one place all damage passes through.
+    fn melee_blow(&self, attacker: EntityId) -> u16 {
+        self.registry
             .get::<MeleeDamage>(attacker)
-            .map_or(SWING_DAMAGE, |d| d.amount);
-        let resist = self
-            .registry
-            .get::<Resistance>(target)
-            .map_or(0, |r| r.physical)
-            .min(100);
-        (u32::from(base) * u32::from(100 - resist) / 100) as u16
+            .map_or(SWING_DAMAGE, |d| d.amount)
     }
 
     /// Set a mobile's skill value. See [`Command::SetSkill`].
@@ -1615,27 +1667,11 @@ impl World {
         let Some(entity) = self.registry.entity_of(serial) else {
             return;
         };
+        let success = self.roll_skill(entity, skill, difficulty);
         let value = self
             .registry
             .get::<Skills>(entity)
             .map_or(0, |s| s.get(skill));
-
-        // The success roll, then the gain roll — two draws, so the order is
-        // fixed and the whole thing replays the same.
-        let success = skills::success_chance(value, difficulty) >= self.rng.below(1000);
-
-        let mut value = value;
-        if value < skills::SKILL_CAP && self.rng.below(1000) < skills::gain_chance(value) {
-            value += 1;
-            let mut skills = self
-                .registry
-                .get::<Skills>(entity)
-                .cloned()
-                .unwrap_or_default();
-            skills.set(skill, value);
-            self.registry.insert(entity, skills);
-        }
-
         self.bus.send(SkillUsed {
             entity,
             serial,
@@ -1643,6 +1679,130 @@ impl World {
             success,
             value,
         });
+    }
+
+    /// Roll a skill against a difficulty and teach from the attempt: returns
+    /// whether it passed, and bumps the value on a gain. The shared heart of
+    /// [`use_skill`](Self::use_skill) and [`cast_spell`](Self::cast_spell), so a
+    /// mined ore and a cast spell train the same way.
+    ///
+    /// The success draw comes before the gain draw, always, so the sequence is
+    /// fixed and the whole thing replays.
+    fn roll_skill(&mut self, entity: EntityId, skill: u8, difficulty: u16) -> bool {
+        let value = self
+            .registry
+            .get::<Skills>(entity)
+            .map_or(0, |s| s.get(skill));
+        let success = skills::success_chance(value, difficulty) >= self.rng.below(1000);
+        if value < skills::SKILL_CAP && self.rng.below(1000) < skills::gain_chance(value) {
+            let mut skills = self
+                .registry
+                .get::<Skills>(entity)
+                .cloned()
+                .unwrap_or_default();
+            skills.set(skill, value + 1);
+            self.registry.insert(entity, skills);
+        }
+        success
+    }
+
+    /// Cast a spell: pay the mana, roll the skill, announce it. See
+    /// [`Command::CastSpell`].
+    fn cast_spell(
+        &mut self,
+        serial: u32,
+        spell: u16,
+        target: u32,
+        mana: u16,
+        difficulty: u16,
+        skill: u8,
+    ) {
+        let Some(serial) = Serial::new(serial) else {
+            return;
+        };
+        let Some(caster) = self.registry.entity_of(serial) else {
+            return;
+        };
+        let have = self.registry.get::<Mana>(caster).map_or(0, |m| m.current);
+
+        // Not enough mana to pay for it — the spell fizzles, and nothing is spent.
+        if have < mana {
+            self.bus.send(SpellCast {
+                caster,
+                serial,
+                spell,
+                target,
+                success: false,
+            });
+            return;
+        }
+        if let Some(&Mana { current, max }) = self.registry.get::<Mana>(caster) {
+            self.registry.insert(
+                caster,
+                Mana {
+                    current: current - mana,
+                    max,
+                },
+            );
+        }
+        let success = self.roll_skill(caster, skill, difficulty);
+        self.bus.send(SpellCast {
+            caster,
+            serial,
+            spell,
+            target,
+            success,
+        });
+    }
+
+    /// Mend a mobile up toward its maximum. See [`Command::Heal`].
+    fn heal(&mut self, serial: u32, amount: u16) {
+        let Some(serial) = Serial::new(serial) else {
+            return;
+        };
+        let Some(entity) = self.registry.entity_of(serial) else {
+            return;
+        };
+        let Some(&Hitpoints { current, max }) = self.registry.get::<Hitpoints>(entity) else {
+            return;
+        };
+        let healed = current.saturating_add(amount).min(max);
+        if healed == current {
+            return;
+        }
+        self.registry.insert(
+            entity,
+            Hitpoints {
+                current: healed,
+                max,
+            },
+        );
+        self.broadcast_health(entity);
+    }
+
+    /// Trickle mana back for everyone who has any, one point each regen tick.
+    /// Runs against the tick counter, so it needs no clock and stays replayable.
+    fn regen_mana(&mut self) {
+        if !self.ticks.is_multiple_of(MANA_REGEN_TICKS) {
+            return;
+        }
+        let thirsty: Vec<EntityId> = self
+            .registry
+            .query::<Mana>()
+            .filter(|(_, mana)| mana.current < mana.max)
+            .map(|(entity, _)| entity)
+            .collect();
+        for entity in thirsty {
+            if let Some(&Mana { current, max }) = self.registry.get::<Mana>(entity) {
+                self.registry.insert(
+                    entity,
+                    Mana {
+                        current: (current + 1).min(max),
+                        max,
+                    },
+                );
+            }
+        }
     }
 
     /// Set an item's decay clock: it rots [`DECAY_TICKS`] from now. Every loose
@@ -3793,6 +3953,7 @@ pub(crate) mod tests {
         world.queue(Command::Damage {
             serial: mob,
             amount: 20,
+            damage_type: 0,
         });
         world.tick(now);
 
@@ -3824,6 +3985,7 @@ pub(crate) mod tests {
         world.queue(Command::Damage {
             serial: mob,
             amount: 100,
+            damage_type: 0,
         });
         world.tick(now);
 
@@ -3853,11 +4015,16 @@ pub(crate) mod tests {
         world.queue(Command::Damage {
             serial,
             amount: 200,
+            damage_type: 0,
         });
         world.tick(now); // 100 -> 0
         assert_eq!(world.bus().read(&mut died).count(), 1, "the killing blow");
 
-        world.queue(Command::Damage { serial, amount: 50 });
+        world.queue(Command::Damage {
+            serial,
+            amount: 50,
+            damage_type: 0,
+        });
         world.tick(now); // already dead
         assert_eq!(
             world.bus().read(&mut died).count(),
@@ -3880,6 +4047,7 @@ pub(crate) mod tests {
         world.queue(Command::Damage {
             serial,
             amount: 500,
+            damage_type: 0,
         });
         world.tick(now);
 
@@ -4146,6 +4314,49 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn resistance_is_by_damage_type() {
+        // Fifty percent fire resistance halves a fireball but does nothing to a
+        // sword: resistance is per type, applied in one place for every source.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 100, now);
+        let mob_entity = entity(&world, mob);
+        world.registry.insert(
+            mob_entity,
+            Resistance {
+                fire: 50,
+                ..Default::default()
+            },
+        );
+        let _ = packets_for(&mut world, player);
+
+        // 10 fire, halved to 5.
+        world.queue(Command::Damage {
+            serial: mob,
+            amount: 10,
+            damage_type: 1, // fire
+        });
+        world.tick(now);
+        assert_eq!(
+            world.registry.get::<Hitpoints>(mob_entity).unwrap().current,
+            95
+        );
+
+        // 10 physical, unresisted.
+        world.queue(Command::Damage {
+            serial: mob,
+            amount: 10,
+            damage_type: 0, // physical
+        });
+        world.tick(now);
+        assert_eq!(
+            world.registry.get::<Hitpoints>(mob_entity).unwrap().current,
+            85
+        );
+    }
+
+    #[test]
     fn armour_reduces_a_blow() {
         // Same five-damage swing, but the target's 50% physical resistance halves
         // it: two through, not five.
@@ -4381,6 +4592,131 @@ pub(crate) mod tests {
             skill_value(&world, entity, 3)
         }
         assert_eq!(run(), run(), "two identical runs land on the same value");
+    }
+
+    #[test]
+    fn casting_a_spell_pays_mana_and_announces_it() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let entity = world.players[&player];
+        let serial = serial_of(&world, player);
+        // Grandmaster mage, so the skill roll is a sure thing.
+        world.queue(Command::SetSkill {
+            serial,
+            skill: 1,
+            value: 1000,
+        });
+        world.tick(now);
+
+        let mut cast: Cursor<SpellCast> = world.bus().cursor();
+        world.queue(Command::CastSpell {
+            serial,
+            spell: 5,
+            target: 0,
+            mana: 10,
+            difficulty: 0,
+            skill: 1,
+        });
+        world.tick(now);
+
+        let events: Vec<SpellCast> = world.bus().read(&mut cast).copied().collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].spell, 5);
+        assert!(events[0].success, "a mana-full grandmaster casts it");
+        assert_eq!(
+            world.registry.get::<Mana>(entity).unwrap().current,
+            90,
+            "ten mana is spent"
+        );
+    }
+
+    #[test]
+    fn a_spell_beyond_the_mana_fizzles() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let entity = world.players[&player];
+        let serial = serial_of(&world, player);
+
+        let mut cast: Cursor<SpellCast> = world.bus().cursor();
+        world.queue(Command::CastSpell {
+            serial,
+            spell: 1,
+            target: 0,
+            mana: 200, // more than the 100 on hand
+            difficulty: 0,
+            skill: 1,
+        });
+        world.tick(now);
+
+        let events: Vec<SpellCast> = world.bus().read(&mut cast).copied().collect();
+        assert!(!events[0].success, "it fizzles");
+        assert_eq!(
+            world.registry.get::<Mana>(entity).unwrap().current,
+            100,
+            "and no mana is spent on a fizzle"
+        );
+    }
+
+    #[test]
+    fn healing_raises_hits_but_not_past_max() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let entity = world.players[&player];
+        let serial = serial_of(&world, player);
+
+        world.queue(Command::Damage {
+            serial,
+            amount: 60,
+            damage_type: 0,
+        });
+        world.tick(now); // 100 -> 40
+        world.queue(Command::Heal {
+            serial,
+            amount: 1000,
+        });
+        world.tick(now);
+
+        assert_eq!(
+            world.registry.get::<Hitpoints>(entity).unwrap().current,
+            100,
+            "healed to the maximum, no further"
+        );
+    }
+
+    #[test]
+    fn mana_trickles_back() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let entity = world.players[&player];
+        let serial = serial_of(&world, player);
+        world.queue(Command::SetSkill {
+            serial,
+            skill: 1,
+            value: 1000,
+        });
+        world.tick(now);
+        world.queue(Command::CastSpell {
+            serial,
+            spell: 1,
+            target: 0,
+            mana: 20,
+            difficulty: 0,
+            skill: 1,
+        });
+        world.tick(now);
+        let spent = world.registry.get::<Mana>(entity).unwrap().current;
+
+        for _ in 0..MANA_REGEN_TICKS {
+            world.tick(now);
+        }
+        assert!(
+            world.registry.get::<Mana>(entity).unwrap().current > spent,
+            "mana came back over time"
+        );
     }
 
     #[test]

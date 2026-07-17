@@ -256,14 +256,77 @@ pub struct SwingSpeed {
     pub ticks: u64,
 }
 
-/// A mobile's armour: how much of a blow it shrugs off, as a percentage.
-///
-/// Physical only for now — the one damage type melee deals. Fire, cold, poison
-/// and energy are the same idea with more fields, and land when magic does.
+/// What kind of harm a blow does. Melee is [`Physical`](Self::Physical); a spell
+/// picks its element.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum DamageType {
+    /// A weapon or a fist.
+    #[default]
+    Physical,
+    /// Fire.
+    Fire,
+    /// Cold.
+    Cold,
+    /// Poison.
+    Poison,
+    /// Energy.
+    Energy,
+}
+
+impl DamageType {
+    /// Read a damage type from a wire byte; anything unknown is physical.
+    pub const fn from_u8(byte: u8) -> Self {
+        match byte {
+            1 => Self::Fire,
+            2 => Self::Cold,
+            3 => Self::Poison,
+            4 => Self::Energy,
+            _ => Self::Physical,
+        }
+    }
+}
+
+/// A mobile's armour: how much of each kind of blow it shrugs off, as a
+/// percentage. Zero everywhere is no protection.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Resistance {
     /// Percent of physical damage absorbed, 0–100.
     pub physical: u8,
+    /// Percent of fire damage absorbed.
+    pub fire: u8,
+    /// Percent of cold damage absorbed.
+    pub cold: u8,
+    /// Percent of poison damage absorbed.
+    pub poison: u8,
+    /// Percent of energy damage absorbed.
+    pub energy: u8,
+}
+
+impl Resistance {
+    /// The percentage that resists `kind` of damage, capped at 100.
+    pub fn against(&self, kind: DamageType) -> u8 {
+        let value = match kind {
+            DamageType::Physical => self.physical,
+            DamageType::Fire => self.fire,
+            DamageType::Cold => self.cold,
+            DamageType::Poison => self.poison,
+            DamageType::Energy => self.energy,
+        };
+        value.min(100)
+    }
+}
+
+/// A mobile's mana: what casting spends, and how much it can hold.
+///
+/// The hit-points of magic. A spell that costs more than `current` fizzles; a
+/// cast draws it down; it trickles back over time. Only mobiles that cast carry
+/// it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Mana {
+    /// What it has now.
+    pub current: u16,
+    /// The most it can have.
+    pub max: u16,
 }
 
 /// A mobile that can walk: its position, facing, sequence and pace.

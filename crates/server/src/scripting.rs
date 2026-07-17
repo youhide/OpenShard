@@ -18,7 +18,7 @@ use openshard_scripting::{
     Command as ScriptCommand, DenoEngine, Event as ScriptEvent, ScriptEngine,
 };
 use openshard_world::events::{
-    MobileDied, MobileMoved, PlayerEntered, PlayerLeft, SkillUsed, StepRefused,
+    MobileDied, MobileMoved, PlayerEntered, PlayerLeft, SkillUsed, SpellCast, StepRefused,
 };
 use openshard_world::{Command, World};
 use tracing::{error, info, warn};
@@ -32,6 +32,7 @@ pub struct Scripts {
     left: Cursor<PlayerLeft>,
     died: Cursor<MobileDied>,
     used: Cursor<SkillUsed>,
+    cast: Cursor<SpellCast>,
 }
 
 impl Scripts {
@@ -71,6 +72,7 @@ impl Scripts {
             left: world.bus().cursor(),
             died: world.bus().cursor(),
             used: world.bus().cursor(),
+            cast: world.bus().cursor(),
             engine,
         })
     }
@@ -128,6 +130,14 @@ impl Scripts {
                     skill: e.skill,
                     success: e.success,
                     value: e.value,
+                });
+            }
+            for e in bus.read(&mut self.cast) {
+                events.push(ScriptEvent::SpellCast {
+                    serial: e.serial.raw(),
+                    spell: e.spell,
+                    target: e.target,
+                    success: e.success,
                 });
             }
         }
@@ -213,7 +223,31 @@ fn into_world(command: ScriptCommand) -> Command {
             position: openshard_protocol::Point::new(x, y, z),
             facet,
         },
-        ScriptCommand::Damage { serial, amount } => Command::Damage { serial, amount },
+        ScriptCommand::Damage {
+            serial,
+            amount,
+            damage_type,
+        } => Command::Damage {
+            serial,
+            amount,
+            damage_type,
+        },
+        ScriptCommand::Heal { serial, amount } => Command::Heal { serial, amount },
+        ScriptCommand::CastSpell {
+            serial,
+            spell,
+            target,
+            mana,
+            difficulty,
+            skill,
+        } => Command::CastSpell {
+            serial,
+            spell,
+            target,
+            mana,
+            difficulty,
+            skill,
+        },
         ScriptCommand::SetSkill {
             serial,
             skill,
@@ -461,6 +495,7 @@ mod tests {
         world.queue(Command::Damage {
             serial: mob,
             amount: 100,
+            damage_type: 0,
         });
         world.tick(now); // the creature dies, MobileDied is emitted
         scripts.pump(&mut world); // the script hears it and queues the loot
@@ -521,6 +556,80 @@ mod tests {
                 .next()
                 .is_some(),
             "the successful skill use produced its reward"
+        );
+    }
+
+    #[test]
+    fn a_script_casts_a_spell_and_deals_its_damage() {
+        // The whole magic loop: the script trains Magery, spawns a target and
+        // casts at it; the world pays mana and rolls the skill; the script hears
+        // the success and deals the spell's fire damage.
+        let script = TempScript::new(
+            "mage",
+            "function onEvent(e) {\n\
+             if (e.type === 'PlayerEntered') {\n\
+                 Deno.core.ops.op_set_skill(e.serial, 1, 1000);\n\
+                 Deno.core.ops.op_spawn_mobile({ body: 0x0190, hits: 50, x: e.x, y: e.y });\n\
+             }\n\
+             if (e.type === 'SpellCast' && e.success) {\n\
+                 Deno.core.ops.op_damage(e.target, 30, 1);\n\
+             }\n\
+             }",
+        );
+
+        let now = Instant::now();
+        let mut world = World::new((1363, 1600));
+        let mut scripts = Scripts::load(script.path(), &world).expect("script loads");
+
+        world.queue(Command::Enter {
+            connection: ConnectionId::from_raw(1),
+            version: ClientVersion::TOL,
+            account: "admin".to_owned(),
+            name: "Lord British".to_owned(),
+            serial: None,
+            position: None,
+            facet: 0,
+            appearance: None,
+        });
+        world.tick(now); // PlayerEntered
+        scripts.pump(&mut world); // train + spawn the target queued
+        world.tick(now); // skill set, target spawned
+
+        // The caster and the target.
+        let caster = world
+            .registry()
+            .query::<openshard_world::Client>()
+            .next()
+            .map(|(e, _)| world.registry().serial_of(e).unwrap().raw())
+            .expect("the player");
+        let (target_entity, target) = world
+            .registry()
+            .query::<openshard_world::Hitpoints>()
+            .find(|(e, _)| !world.registry().has::<openshard_world::Client>(*e))
+            .map(|(e, _)| (e, world.registry().serial_of(e).unwrap().raw()))
+            .expect("the spawned target");
+
+        // Cast at it (as a client or AI would); the script's SpellCast handler
+        // deals the damage on success.
+        world.queue(Command::CastSpell {
+            serial: caster,
+            spell: 18, // a fireball, say
+            target,
+            mana: 10,
+            difficulty: 0,
+            skill: 1,
+        });
+        world.tick(now); // mana paid, skill rolled, SpellCast emitted
+        scripts.pump(&mut world); // the script hears success, queues the damage
+        world.tick(now); // the fire lands
+
+        assert_eq!(
+            world
+                .registry()
+                .get::<openshard_world::Hitpoints>(target_entity)
+                .map(|h| h.current),
+            Some(20),
+            "thirty fire damage, unresisted, took the target from fifty to twenty"
         );
     }
 }

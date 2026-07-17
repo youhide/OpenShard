@@ -103,6 +103,18 @@ pub enum Event {
         /// The skill's value now, in tenths.
         value: u16,
     },
+    /// A spell was cast: mana paid, skill rolled. The script reads this and gives
+    /// the spell its effect — damage, a heal, a summon.
+    SpellCast {
+        /// The caster's wire identity.
+        serial: Serial,
+        /// Which spell, by id.
+        spell: u16,
+        /// The target's serial, or 0 for none.
+        target: u32,
+        /// Whether the cast took.
+        success: bool,
+    },
 }
 
 /// What a script asks the world to do.
@@ -182,12 +194,39 @@ pub enum Command {
         /// Which facet.
         facet: u8,
     },
-    /// Deal damage to a mobile.
+    /// Deal damage to a mobile, of a kind (0 physical, 1 fire, 2 cold, 3 poison,
+    /// 4 energy) the target's resistance to that kind reduces.
     Damage {
         /// Whom.
         serial: Serial,
-        /// How much.
+        /// How much, before resistance.
         amount: u16,
+        /// The damage type as a wire byte.
+        damage_type: u8,
+    },
+    /// Heal a mobile, up to its maximum.
+    Heal {
+        /// Whom.
+        serial: Serial,
+        /// By how much.
+        amount: u16,
+    },
+    /// Cast a spell: the world pays mana and rolls the skill, and reports back
+    /// with a [`SpellCast`](Event::SpellCast) event for the script to give the
+    /// spell its effect.
+    CastSpell {
+        /// The caster.
+        serial: Serial,
+        /// Which spell, by id.
+        spell: u16,
+        /// The target's serial, or 0 for none.
+        target: u32,
+        /// The mana cost.
+        mana: u16,
+        /// The casting difficulty, 0–100.
+        difficulty: u16,
+        /// The skill id it rolls (Magery).
+        skill: u8,
     },
     /// Set a mobile's skill value, in tenths.
     SetSkill {
