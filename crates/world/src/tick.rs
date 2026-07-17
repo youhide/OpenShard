@@ -428,7 +428,7 @@ impl World {
 
     /// Every `save_every` ticks, hand what changed to whoever is collecting.
     fn offer_snapshot(&mut self) {
-        if self.save_every == 0 || self.ticks % self.save_every != 0 {
+        if self.save_every == 0 || !self.ticks.is_multiple_of(self.save_every) {
             return;
         }
         self.take_snapshot();

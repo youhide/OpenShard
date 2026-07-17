@@ -12,3 +12,12 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+deno_core.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# The benchmark hosts the isolate inside a Tokio runtime, as the real shard does
+# under `#[tokio::main]`, so V8's background GC/compilation tasks are honoured and
+# the numbers are representative. The library itself needs no async.
+tokio.workspace = true

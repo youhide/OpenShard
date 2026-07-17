@@ -1,0 +1,576 @@
+//! The `deno_core` backend for [`ScriptEngine`](crate::ScriptEngine).
+//!
+//! One [`JsRuntime`], one V8 isolate, owned by value — no static, no singleton,
+//! the same rule the rest of the engine lives by. Everything V8 is in this file;
+//! nothing above [`crate`] sees a `v8::` type.
+//!
+//! # Why `execute_script` and not ES modules
+//!
+//! Loading an ES module in `deno_core` is asynchronous: it drives an event loop
+//! to resolve imports. A tick never awaits, and load/reload for the spike needs
+//! nothing an event loop offers — there are no imports to resolve yet. So a
+//! script is *evaluated* with [`JsRuntime::execute_script`], which is fully
+//! synchronous, and the hot path ([`DenoEngine::tick`]) calls the captured hook
+//! through raw V8 with no future in sight. Real module resolution is a later,
+//! additive change (§6/§7) that does not touch this seam.
+//!
+//! # How a hook is found
+//!
+//! The script is wrapped so its body runs inside an arrow that returns whatever
+//! `onTick` / `onEvent` it defined. Evaluating the wrapper yields that object;
+//! the two functions are captured as `v8::Global` handles and called later.
+//! Re-evaluating rebinds them in the same isolate — that is the whole of hot
+//! reload.
+
+use std::collections::HashMap;
+use std::path::Path;
+use std::time::SystemTime;
+
+use deno_core::{extension, op2, v8, JsRuntime, OpState, RuntimeOptions};
+
+use crate::{Command, Event, ScriptEngine, ScriptError, Serial};
+
+/// Where a mobile is, as far as a script can see — the read model the engine
+/// keeps up to date from the events it is handed, so a hook reads it without a
+/// round-trip into the world.
+#[derive(Clone, Copy, Debug, Default)]
+struct View {
+    x: u16,
+    y: u16,
+    z: i8,
+}
+
+/// The Rust state the ops reach, stored in the runtime's [`OpState`].
+///
+/// Reads come out of `entities`; writes go into `outbox`. That asymmetry is the
+/// engine's whole contract with a script in one struct: look at the world
+/// directly, change it only by asking.
+#[derive(Default)]
+struct Host {
+    entities: HashMap<Serial, View>,
+    outbox: Vec<Command>,
+}
+
+impl Host {
+    /// Fold a domain event into the read model. The same event the script's
+    /// handler sees also keeps this current — there is no second bookkeeping
+    /// path to forget.
+    fn apply(&mut self, event: &Event) {
+        match *event {
+            Event::PlayerEntered { serial, x, y, z } => {
+                self.entities.insert(serial, View { x, y, z });
+            }
+            Event::MobileMoved {
+                serial,
+                x,
+                y,
+                z,
+                facing: _,
+            } => {
+                self.entities.insert(serial, View { x, y, z });
+            }
+            Event::PlayerLeft { serial } => {
+                self.entities.remove(&serial);
+            }
+            Event::StepRefused { .. } => {}
+        }
+    }
+}
+
+/// Read a mobile's position: `[x, y, z]`, or `null` if the script asked about a
+/// serial the engine has never been told about.
+///
+/// A direct read — the "look at the world" half of the contract. Not a fast op
+/// because it returns a structured value; that cost is measured in the
+/// benchmark and is the honest cost of a hook that reads state.
+#[op2]
+#[serde]
+fn op_position(state: &mut OpState, serial: u32) -> Option<[i32; 3]> {
+    state
+        .borrow::<Host>()
+        .entities
+        .get(&serial)
+        .map(|v| [v.x as i32, v.y as i32, v.z as i32])
+}
+
+/// Enqueue a move for the world to apply on its next tick.
+///
+/// The "change it only by asking" half. A fast op: no allocation, no return
+/// value, just a push onto the outbox the engine drains after the hooks run.
+#[op2(fast)]
+fn op_move(state: &mut OpState, serial: u32, direction: u32) {
+    state.borrow_mut::<Host>().outbox.push(Command::Move {
+        serial,
+        direction: direction as u8,
+    });
+}
+
+extension!(
+    openshard_ops,
+    ops = [op_position, op_move],
+    docs = "OpenShard's script-facing ops: read entity state, enqueue commands.",
+);
+
+/// A `deno_core`-backed [`ScriptEngine`].
+pub struct DenoEngine {
+    runtime: JsRuntime,
+    on_tick: Option<v8::Global<v8::Function>>,
+    on_event: Option<v8::Global<v8::Function>>,
+    /// The path the script was loaded from, and the mtime seen then. Only set by
+    /// [`load_file`](Self::load_file); drives [`reload_if_changed`](Self::reload_if_changed).
+    watched: Option<(std::path::PathBuf, SystemTime)>,
+}
+
+impl std::fmt::Debug for DenoEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DenoEngine")
+            .field("on_tick", &self.on_tick.is_some())
+            .field("on_event", &self.on_event.is_some())
+            .field("watched", &self.watched.as_ref().map(|(p, _)| p))
+            .finish()
+    }
+}
+
+impl Default for DenoEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DenoEngine {
+    /// A fresh isolate with the ops installed and no script loaded yet.
+    pub fn new() -> Self {
+        let runtime = JsRuntime::new(RuntimeOptions {
+            extensions: vec![openshard_ops::init()],
+            ..Default::default()
+        });
+        runtime.op_state().borrow_mut().put(Host::default());
+        Self {
+            runtime,
+            on_tick: None,
+            on_event: None,
+            watched: None,
+        }
+    }
+
+    /// Load a script from a file and remember it for [`reload_if_changed`](Self::reload_if_changed).
+    pub fn load_file(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> std::io::Result<Result<(), ScriptError>> {
+        let path = path.as_ref();
+        let source = std::fs::read_to_string(path)?;
+        let mtime = std::fs::metadata(path)?.modified()?;
+        let loaded = self.load(&source);
+        if loaded.is_ok() {
+            self.watched = Some((path.to_path_buf(), mtime));
+        }
+        Ok(loaded)
+    }
+
+    /// Reload the watched file if it has changed on disk since it was loaded.
+    ///
+    /// Returns `Ok(true)` if a reload happened. This is hot reload as a poll: the
+    /// caller ticks it between world ticks — no watcher thread, no dependency, no
+    /// shared state, and iterating on a hook is save-the-file, not bounce-the-shard.
+    pub fn reload_if_changed(&mut self) -> std::io::Result<Result<bool, ScriptError>> {
+        let Some((path, seen)) = self.watched.clone() else {
+            return Ok(Ok(false));
+        };
+        let mtime = std::fs::metadata(&path)?.modified()?;
+        if mtime == seen {
+            return Ok(Ok(false));
+        }
+        let source = std::fs::read_to_string(&path)?;
+        match self.load(&source) {
+            Ok(()) => {
+                self.watched = Some((path, mtime));
+                Ok(Ok(true))
+            }
+            Err(e) => Ok(Err(e)),
+        }
+    }
+
+    /// The captured hook of a given kind, cloned so the isolate can be borrowed
+    /// mutably for the call without the borrow checker seeing the handle and the
+    /// runtime as one borrow.
+    fn hook(&self, which: Hook) -> Option<v8::Global<v8::Function>> {
+        match which {
+            Hook::Tick => self.on_tick.clone(),
+            Hook::Event => self.on_event.clone(),
+        }
+    }
+}
+
+/// Which exported function a call is for — only used to name it in an error.
+#[derive(Clone, Copy)]
+enum Hook {
+    Tick,
+    Event,
+}
+
+impl Hook {
+    const fn name(self) -> &'static str {
+        match self {
+            Hook::Tick => "onTick",
+            Hook::Event => "onEvent",
+        }
+    }
+}
+
+/// Wrap a script so evaluating it yields the object of hooks it defined. The
+/// body runs inside an arrow; `typeof` is the one reference that is safe on a
+/// name the script never declared, so an absent hook comes back `undefined`.
+fn wrap(source: &str) -> String {
+    format!(
+        "(()=>{{\n{source}\n;return{{\
+         onTick:typeof onTick===\"function\"?onTick:undefined,\
+         onEvent:typeof onEvent===\"function\"?onEvent:undefined\
+         }};}})()"
+    )
+}
+
+/// Pull a named function property off the hooks object, as a `Global`.
+fn capture(
+    scope: &mut v8::PinScope<'_, '_>,
+    obj: v8::Local<'_, v8::Object>,
+    name: &str,
+) -> Option<v8::Global<v8::Function>> {
+    let key = v8::String::new(scope, name)?;
+    let value = obj.get(scope, key.into())?;
+    let function: v8::Local<'_, v8::Function> = value.try_into().ok()?;
+    Some(v8::Global::new(scope, function))
+}
+
+impl ScriptEngine for DenoEngine {
+    fn load(&mut self, source: &str) -> Result<(), ScriptError> {
+        let result = self
+            .runtime
+            .execute_script("[openshard:script]", wrap(source))
+            .map_err(|e| ScriptError::Evaluate(e.to_string()))?;
+
+        let context = self.runtime.main_context();
+        let isolate = self.runtime.v8_isolate();
+        v8::scope_with_context!(scope, isolate, context);
+        let value = v8::Local::new(scope, result);
+        let obj: v8::Local<'_, v8::Object> = value.try_into().map_err(|_| {
+            ScriptError::Evaluate("script did not evaluate to an object".to_owned())
+        })?;
+        // Replace, never merge: a reload that dropped a hook should lose it, not
+        // keep calling the stale one.
+        self.on_tick = capture(scope, obj, "onTick");
+        self.on_event = capture(scope, obj, "onEvent");
+        Ok(())
+    }
+
+    fn deliver(&mut self, event: &Event) -> Result<(), ScriptError> {
+        // Fold into the read model first, borrow dropped before any JS runs so
+        // the op that reads `Host` can borrow it in turn.
+        self.runtime
+            .op_state()
+            .borrow_mut()
+            .borrow_mut::<Host>()
+            .apply(event);
+
+        let Some(func) = self.hook(Hook::Event) else {
+            return Ok(());
+        };
+        let event = *event;
+        let context = self.runtime.main_context();
+        let isolate = self.runtime.v8_isolate();
+        v8::scope_with_context!(scope, isolate, context);
+        v8::tc_scope!(let tc, scope);
+        // Sparse path — events are rare next to ticks — so a serde round-trip
+        // into a plain object is fine and keeps the shape readable from JS as
+        // `e.type`, `e.serial`, ….
+        let arg =
+            deno_core::serde_v8::to_v8(tc, event).unwrap_or_else(|_| v8::undefined(tc).into());
+        let f = v8::Local::new(tc, &func);
+        let recv = v8::undefined(tc).into();
+        if f.call(tc, recv, &[arg]).is_none() {
+            let message = tc
+                .exception()
+                .map(|e| e.to_rust_string_lossy(tc))
+                .unwrap_or_else(|| "unknown error".to_owned());
+            return Err(ScriptError::Hook {
+                hook: Hook::Event.name(),
+                message,
+            });
+        }
+        Ok(())
+    }
+
+    fn tick(&mut self, entity: Serial) -> Result<(), ScriptError> {
+        let Some(func) = self.hook(Hook::Tick) else {
+            return Ok(());
+        };
+        let context = self.runtime.main_context();
+        let isolate = self.runtime.v8_isolate();
+        v8::scope_with_context!(scope, isolate, context);
+        v8::tc_scope!(let tc, scope);
+        let arg = v8::Integer::new_from_unsigned(tc, entity).into();
+        let f = v8::Local::new(tc, &func);
+        let recv = v8::undefined(tc).into();
+        if f.call(tc, recv, &[arg]).is_none() {
+            let message = tc
+                .exception()
+                .map(|e| e.to_rust_string_lossy(tc))
+                .unwrap_or_else(|| "unknown error".to_owned());
+            return Err(ScriptError::Hook {
+                hook: Hook::Tick.name(),
+                message,
+            });
+        }
+        Ok(())
+    }
+
+    fn take_commands(&mut self) -> Vec<Command> {
+        std::mem::take(
+            &mut self
+                .runtime
+                .op_state()
+                .borrow_mut()
+                .borrow_mut::<Host>()
+                .outbox,
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_script_with_no_hooks_loads_and_ticks_to_nothing() {
+        // The empty case has to be silent, not a panic: a script may only care
+        // about events, or only be a stub during development.
+        let mut engine = DenoEngine::new();
+        engine.load("const answer = 42;").unwrap();
+        engine.tick(1).unwrap();
+        assert!(engine.take_commands().is_empty());
+    }
+
+    #[test]
+    fn a_tick_hook_reads_position_and_enqueues_a_command() {
+        // The whole seam in one test: an event feeds the read model, the hook
+        // reads it through an op, and acts by enqueuing — never touching state.
+        let mut engine = DenoEngine::new();
+        engine
+            .load(
+                "function onTick(serial) {\n\
+                 const p = Deno.core.ops.op_position(serial);\n\
+                 if (p !== null && p[0] === 100) Deno.core.ops.op_move(serial, 2);\n\
+                 }",
+            )
+            .unwrap();
+
+        engine
+            .deliver(&Event::PlayerEntered {
+                serial: 7,
+                x: 100,
+                y: 200,
+                z: 0,
+            })
+            .unwrap();
+        engine.tick(7).unwrap();
+
+        assert_eq!(
+            engine.take_commands(),
+            vec![Command::Move {
+                serial: 7,
+                direction: 2
+            }]
+        );
+        // Drained, not duplicated.
+        assert!(engine.take_commands().is_empty());
+    }
+
+    #[test]
+    fn a_moved_event_updates_what_a_hook_sees() {
+        // The read model tracks the world: after a move, the op reports the new
+        // tile, not the one the mobile entered on.
+        let mut engine = DenoEngine::new();
+        engine
+            .load(
+                "function onTick(serial) {\n\
+                 const p = Deno.core.ops.op_position(serial);\n\
+                 Deno.core.ops.op_move(serial, p[0] & 7);\n\
+                 }",
+            )
+            .unwrap();
+        engine
+            .deliver(&Event::PlayerEntered {
+                serial: 1,
+                x: 0,
+                y: 0,
+                z: 0,
+            })
+            .unwrap();
+        engine
+            .deliver(&Event::MobileMoved {
+                serial: 1,
+                x: 5,
+                y: 0,
+                z: 0,
+                facing: 1,
+            })
+            .unwrap();
+        engine.tick(1).unwrap();
+        assert_eq!(
+            engine.take_commands(),
+            vec![Command::Move {
+                serial: 1,
+                direction: 5
+            }]
+        );
+    }
+
+    #[test]
+    fn a_left_event_removes_the_entity_from_the_read_model() {
+        let mut engine = DenoEngine::new();
+        engine
+            .load(
+                "function onTick(serial) {\n\
+                 if (Deno.core.ops.op_position(serial) === null) Deno.core.ops.op_move(serial, 0);\n\
+                 }",
+            )
+            .unwrap();
+        engine
+            .deliver(&Event::PlayerEntered {
+                serial: 3,
+                x: 1,
+                y: 1,
+                z: 0,
+            })
+            .unwrap();
+        engine.deliver(&Event::PlayerLeft { serial: 3 }).unwrap();
+        engine.tick(3).unwrap();
+        // Gone, so the hook saw `null` and reacted.
+        assert_eq!(engine.take_commands().len(), 1);
+    }
+
+    #[test]
+    fn an_event_hook_receives_a_typed_object() {
+        // `onEvent` gets the event as a plain object it can switch on.
+        let mut engine = DenoEngine::new();
+        engine
+            .load(
+                "function onEvent(e) {\n\
+                 if (e.type === \"StepRefused\" && e.reason === 2) Deno.core.ops.op_move(e.serial, 4);\n\
+                 }",
+            )
+            .unwrap();
+        engine
+            .deliver(&Event::StepRefused {
+                serial: 9,
+                reason: 2,
+            })
+            .unwrap();
+        assert_eq!(
+            engine.take_commands(),
+            vec![Command::Move {
+                serial: 9,
+                direction: 4
+            }]
+        );
+    }
+
+    #[test]
+    fn reloading_rebinds_the_hook_in_the_live_isolate() {
+        // Hot reload's core claim: the second load replaces the first hook's
+        // behaviour without a new isolate.
+        let mut engine = DenoEngine::new();
+        engine
+            .load("function onTick(s) { Deno.core.ops.op_move(s, 1); }")
+            .unwrap();
+        engine.tick(1).unwrap();
+        assert_eq!(
+            engine.take_commands()[0],
+            Command::Move {
+                serial: 1,
+                direction: 1
+            }
+        );
+
+        engine
+            .load("function onTick(s) { Deno.core.ops.op_move(s, 6); }")
+            .unwrap();
+        engine.tick(1).unwrap();
+        assert_eq!(
+            engine.take_commands()[0],
+            Command::Move {
+                serial: 1,
+                direction: 6
+            }
+        );
+    }
+
+    #[test]
+    fn reloading_a_script_that_drops_a_hook_stops_calling_it() {
+        // Replace, not merge: after a reload with no `onTick`, ticking is silent.
+        let mut engine = DenoEngine::new();
+        engine
+            .load("function onTick(s) { Deno.core.ops.op_move(s, 1); }")
+            .unwrap();
+        engine.load("const x = 1;").unwrap();
+        engine.tick(1).unwrap();
+        assert!(engine.take_commands().is_empty());
+    }
+
+    #[test]
+    fn a_throwing_hook_is_an_error_not_a_crash() {
+        // A script bug drops that call, it does not take the shard down.
+        let mut engine = DenoEngine::new();
+        engine
+            .load("function onTick() { throw new Error(\"boom\"); }")
+            .unwrap();
+        let err = engine.tick(1).unwrap_err();
+        assert!(matches!(err, ScriptError::Hook { hook: "onTick", .. }));
+    }
+
+    #[test]
+    fn a_syntax_error_is_reported_by_load() {
+        let mut engine = DenoEngine::new();
+        assert!(matches!(
+            engine.load("function ("),
+            Err(ScriptError::Evaluate(_))
+        ));
+    }
+
+    #[test]
+    fn reload_if_changed_picks_up_a_file_edit() {
+        use std::io::Write;
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("openshard-hotreload-{}.js", std::process::id()));
+        std::fs::write(&path, "function onTick(s){Deno.core.ops.op_move(s,1);}").unwrap();
+
+        let mut engine = DenoEngine::new();
+        engine.load_file(&path).unwrap().unwrap();
+        engine.tick(1).unwrap();
+        assert_eq!(engine.take_commands()[0].direction(), 1);
+
+        // No change yet: nothing reloads.
+        assert!(!engine.reload_if_changed().unwrap().unwrap());
+
+        // An edit with a distinct mtime; sleep so the filesystem clock ticks.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"function onTick(s){Deno.core.ops.op_move(s,7);}")
+            .unwrap();
+        f.sync_all().unwrap();
+
+        assert!(engine.reload_if_changed().unwrap().unwrap());
+        engine.tick(1).unwrap();
+        assert_eq!(engine.take_commands()[0].direction(), 7);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    impl Command {
+        fn direction(&self) -> u8 {
+            match self {
+                Command::Move { direction, .. } => *direction,
+            }
+        }
+    }
+}

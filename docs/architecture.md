@@ -210,7 +210,7 @@ The tick is deterministic and single-threaded per world region. Async lives at
 the edges — network, database, HTTP — never inside the simulation. That boundary
 is what makes replay and debugging tractable.
 
-## Scripting (planned)
+## Scripting (spike done)
 
 Gameplay is not hardcoded. NPCs, items, quests, regions, commands, skills,
 crafting and spells are TypeScript, hot-reloadable without a restart.
@@ -219,8 +219,24 @@ crafting and spells are TypeScript, hot-reloadable without a restart.
 for hot gameplay code. A Node sidecar was considered and rejected — IPC latency
 lands inside the tick.
 
-This is the largest open technical risk in the project. The `ScriptEngine`
-boundary should stay narrow enough that the runtime is replaceable.
+This was the largest open technical risk in the project, and the spike has
+retired it. `crates/scripting` embeds one `JsRuntime` in a single V8 isolate
+behind [`ScriptEngine`], a four-method trait with nothing V8-shaped in its
+signatures — so the runtime stays replaceable. A script is one more consumer of
+the same seam every system uses: domain events arrive through `deliver`, the
+engine keeps a small read model from them, and a script acts only by enqueuing a
+`Command` the tick applies in order. It never writes the world directly. Ops are
+declared with `deno_core::extension!` and `#[op2]`, and every op called from a
+hook is synchronous — a tick never awaits.
+
+The benchmark is the point: a hook call costs on the order of a couple of hundred
+nanoseconds, so ten thousand mobiles each firing a hook per tick spend a low
+single-digit-millisecond slice of the 50ms budget. It fits. Numbers and method
+are in `docs/roadmap.md` §5.
+
+`ScriptEngine::load` doubles as hot reload — re-evaluating rebinds the hooks in
+the live isolate — and `DenoEngine::reload_if_changed` polls a watched file's
+mtime so iterating on a hook is save-the-file, not bounce-the-shard.
 
 ## Persistence (planned)
 

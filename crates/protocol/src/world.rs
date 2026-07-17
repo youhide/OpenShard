@@ -262,7 +262,7 @@ impl CreateCharacter {
     /// Whether the character is female. Odd sex/race values are female on every
     /// client — Sphere notes this rule holds across versions.
     pub const fn is_female(&self) -> bool {
-        self.sex_race % 2 != 0
+        !self.sex_race.is_multiple_of(2)
     }
 
     /// The chosen race, read with the Stygian Abyss encoding.

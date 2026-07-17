@@ -187,24 +187,52 @@ and on logout, through the same journal the tick already feeds.
   a later, additive change and does not touch the shape — `PgStore` is one
   connection behind an async mutex, the same shape as SQLite's, because a
   transaction borrows the client and saves are off the tick either way.
-- **`tokio-postgres` is pinned below its latest.** From 0.7.13 on it pulls a
-  crypto stack (RustCrypto 0.11, `rand` 0.10) that wants Rust 1.85, above this
-  workspace's 1.82. `Cargo.lock` holds it at 0.7.12 with `postgres-protocol`
-  0.6.7; a bare `cargo update` will try to walk past that and break the MSRV. See
-  the `Cargo.lock` note in `CLAUDE.md`.
+- **`tokio-postgres` used to be pinned, and no longer is.** From 0.7.13 it pulls
+  a crypto stack (RustCrypto 0.11, `rand` 0.10) that wanted Rust 1.85 — above the
+  1.82 MSRV of the time — so the lock held it at 0.7.12. The scripting spike (§5)
+  raised the MSRV to 1.88, which cleared the constraint, and the pin was dropped;
+  the crate floats on `"0.7"` again. See the `Cargo.lock` note in `CLAUDE.md`.
 
-## 5. Scripting
+## 5. Scripting — spike done
 
-The largest open technical risk. Prove it before building gameplay on top.
+The largest open technical risk. Proven before building gameplay on top, and it
+holds. The engine is `crates/scripting`; `engine.rs` explains the seam.
 
-- [ ] `deno_core` embedded, one V8 isolate
-- [ ] `ScriptEngine` trait — narrow enough that the runtime stays replaceable
-- [ ] Entity and event bindings exposed to TypeScript
-- [ ] Hot reload without a restart
-- [ ] **Benchmark**: script call overhead inside a tick at realistic entity counts
+- [x] `deno_core` embedded, one V8 isolate — `DenoEngine`, one `JsRuntime`
+- [x] `ScriptEngine` trait — four methods, nothing V8-shaped in a signature, so
+  the runtime stays replaceable
+- [x] Entity and event bindings exposed to TypeScript — domain events in through
+  `deliver`, a read model a hook reads through `op_position`, commands out
+  through `op_move`; ops declared with `extension!` and `#[op2]`, all synchronous
+- [x] Hot reload without a restart — `load` rebinds the hooks in the live
+  isolate; `reload_if_changed` polls a watched file's mtime
+- [x] **Benchmark** — `examples/benchmark.rs`, numbers below
 
-If the numbers do not hold, this is where the design has to change — which is
-why it comes before gameplay depends on it.
+### The numbers
+
+The question was whether a per-entity hook fits the tick. The budget is
+`TICK_INTERVAL`: **50ms at 20Hz**. Measured on an Apple-silicon dev machine, V8
+hosted in a Tokio runtime, release build, warmed up so the JIT has tiered the
+hook. `cargo run -p openshard-scripting --example benchmark --release`.
+
+| Hook | per call | 10k mobiles/tick | share of a 50ms tick |
+|---|---|---|---|
+| empty (`onTick(){}`) — pure Rust↔V8 crossing | ~170 ns | ~1.7 ms | ~3% |
+| read + maybe move — `op_position`, then conditionally `op_move` | ~490 ns | ~4.9 ms | ~10% |
+
+The realistic hook — the one a gameplay rule looks like: read the mobile's tile
+through an op, decide, and on a condition enqueue a step — costs about half a
+microsecond a call. Ten thousand mobiles each firing it every tick spend roughly
+a tenth of the budget. **It fits, with room.**
+
+Two honest caveats. The ceiling is *script* time only; a real tick also moves
+mobiles, runs interest management and writes packets, so the script share is a
+slice of the 50ms, not all of it — the per-call nanoseconds are the number that
+travels, not the "calls per tick" ceiling. And the crossing cost is per call, so
+a design that calls one hook over a batch of entities will always beat one that
+crosses per entity; that is a knob for §6, not a problem for the spike.
+
+The design does not have to change. Gameplay can depend on it.
 
 ## 6. Gameplay
 

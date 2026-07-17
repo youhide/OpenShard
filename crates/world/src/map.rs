@@ -233,7 +233,7 @@ impl Map {
             bytes.truncate(size * BLOCK_BYTES);
         }
 
-        if bytes.len() % BLOCK_BYTES != 0 || bytes.is_empty() {
+        if !bytes.len().is_multiple_of(BLOCK_BYTES) || bytes.is_empty() {
             return Err(MapError::NotABlockMap {
                 path: map_path.to_owned(),
                 size: bytes.len(),

@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.0.1"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/hideOut/OpenShard"
 authors = ["OpenShard contributors"]
@@ -50,6 +50,7 @@ openshard-world = { path = "crates/world", version = "0.0.1" }
 
 # External
 anyhow = "1"
+deno_core = "0.408"
 async-trait = "0.1"
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
