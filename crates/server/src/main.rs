@@ -33,8 +33,8 @@ use openshard_persistence::{
 };
 use openshard_protocol::{
     encode_login_denied, huffman, AttackRequest, CharacterPlay, CreateCharacter, DoubleClick,
-    DropItem, EquipItemRequest, GameServerLogin, PickUpItem, Point, StartLocation, WalkRequest,
-    WarModeRequest,
+    DropItem, EquipItemRequest, GameServerLogin, PickUpItem, Point, StartLocation, TalkRequest,
+    UnicodeTalkRequest, WalkRequest, WarModeRequest,
 };
 use openshard_world::{Appearance, Command, Map, MapTerrain, TileData, World, TICK_INTERVAL};
 use std::sync::Arc;
@@ -664,6 +664,42 @@ fn dispatch(
             world.queue(Command::Attack {
                 connection: id,
                 target: request.target,
+            });
+            true
+        }
+        Some(TalkRequest::ID) => {
+            if !session.in_world {
+                return true;
+            }
+            let Ok(talk) = TalkRequest::decode(packet) else {
+                warn!(%id, "malformed 0x03");
+                return false;
+            };
+            world.queue(Command::Say {
+                connection: id,
+                mode: talk.mode,
+                hue: talk.hue,
+                font: talk.font,
+                text: talk.text,
+            });
+            true
+        }
+        Some(UnicodeTalkRequest::ID) => {
+            // What a modern client actually sends when you type. Same `Say` as the
+            // ASCII 0x03 once the words are out.
+            if !session.in_world {
+                return true;
+            }
+            let Ok(talk) = UnicodeTalkRequest::decode(packet) else {
+                warn!(%id, "malformed 0xAD");
+                return false;
+            };
+            world.queue(Command::Say {
+                connection: id,
+                mode: talk.mode,
+                hue: talk.hue,
+                font: talk.font,
+                text: talk.text,
             });
             true
         }

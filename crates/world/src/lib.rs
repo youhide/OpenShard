@@ -44,11 +44,11 @@ pub mod uop;
 pub use components::{
     Account, Amount, Body, Brain, Client, Combat, Contained, Container, CriminalUntil, DamageType,
     Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name,
-    Position, Resistance, Skills, Stackable, SwingSpeed,
+    Position, Resistance, Skills, Stackable, Stats, SwingSpeed,
 };
 pub use events::{
-    ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
-    RefusedReason, SkillUsed, SpellCast, StepRefused,
+    ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileSpoke, MobileTurned, PlayerEntered,
+    PlayerLeft, RefusedReason, SkillUsed, SpellCast, StepRefused,
 };
 pub use map::{LandCell, Map, MapError, StaticItem, BLOCK_SIZE};
 pub use sectors::{distance, in_range, Sectors, SECTOR_SIZE, VIEW_RANGE};

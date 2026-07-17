@@ -160,6 +160,23 @@ pub struct SpellCast {
     pub success: bool,
 }
 
+/// A mobile said something.
+///
+/// The hook chat hangs everything off: a GM command, an NPC that answers its
+/// name, a keyword that starts a quest. Combat's decoupling once more — the
+/// speaker only says it happened; whoever cares reads the words. Carries an owned
+/// `String`, so unlike most events it is not `Copy`; the bus never needed it to
+/// be.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct MobileSpoke {
+    /// The speaker.
+    pub entity: EntityId,
+    /// Its wire identity.
+    pub serial: Serial,
+    /// What was said.
+    pub text: String,
+}
+
 /// A mobile died — its hit points reached zero.
 ///
 /// The event the whole "systems emit, they do not call" rule is named for:

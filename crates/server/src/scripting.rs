@@ -18,7 +18,8 @@ use openshard_scripting::{
     Command as ScriptCommand, DenoEngine, Event as ScriptEvent, ScriptEngine,
 };
 use openshard_world::events::{
-    MobileDied, MobileMoved, PlayerEntered, PlayerLeft, SkillUsed, SpellCast, StepRefused,
+    MobileDied, MobileMoved, MobileSpoke, PlayerEntered, PlayerLeft, SkillUsed, SpellCast,
+    StepRefused,
 };
 use openshard_world::{Command, World};
 use tracing::{error, info, warn};
@@ -33,6 +34,7 @@ pub struct Scripts {
     died: Cursor<MobileDied>,
     used: Cursor<SkillUsed>,
     cast: Cursor<SpellCast>,
+    spoke: Cursor<MobileSpoke>,
 }
 
 impl Scripts {
@@ -73,6 +75,7 @@ impl Scripts {
             died: world.bus().cursor(),
             used: world.bus().cursor(),
             cast: world.bus().cursor(),
+            spoke: world.bus().cursor(),
             engine,
         })
     }
@@ -138,6 +141,12 @@ impl Scripts {
                     spell: e.spell,
                     target: e.target,
                     success: e.success,
+                });
+            }
+            for e in bus.read(&mut self.spoke) {
+                events.push(ScriptEvent::MobileSpoke {
+                    serial: e.serial.raw(),
+                    text: e.text.clone(),
                 });
             }
         }
@@ -252,6 +261,17 @@ fn into_world(command: ScriptCommand) -> Command {
             difficulty,
             skill,
         },
+        ScriptCommand::SetStats {
+            serial,
+            strength,
+            dexterity,
+            intelligence,
+        } => Command::SetStats {
+            serial,
+            strength,
+            dexterity,
+            intelligence,
+        },
         ScriptCommand::SetSkill {
             serial,
             skill,
@@ -270,6 +290,7 @@ fn into_world(command: ScriptCommand) -> Command {
             skill,
             difficulty,
         },
+        ScriptCommand::Speak { serial, hue, text } => Command::Speak { serial, hue, text },
     }
 }
 
@@ -691,5 +712,55 @@ mod tests {
                 < 100,
             "the creature the script spawned attacked the player on its own"
         );
+    }
+
+    #[test]
+    fn a_script_answers_a_spoken_keyword() {
+        // Chat as a gameplay hook: a player says a word, the script hears it off
+        // the bus and answers. The words round-trip through the world twice.
+        let script = TempScript::new(
+            "greeter",
+            "function onEvent(e) {\n\
+             if (e.type === 'MobileSpoke' && e.text === 'ping') {\n\
+                 Deno.core.ops.op_say(e.serial, 'pong', 0);\n\
+             }\n\
+             }",
+        );
+
+        let now = Instant::now();
+        let mut world = World::new((1363, 1600));
+        let mut scripts = Scripts::load(script.path(), &world).expect("script loads");
+
+        let connection = ConnectionId::from_raw(1);
+        world.queue(Command::Enter {
+            connection,
+            version: ClientVersion::TOL,
+            account: "admin".to_owned(),
+            name: "Lord British".to_owned(),
+            serial: None,
+            position: None,
+            facet: 0,
+            appearance: None,
+        });
+        world.tick(now);
+        scripts.pump(&mut world);
+        let _ = world.drain_outbound().count();
+
+        world.queue(Command::Say {
+            connection,
+            mode: 0,
+            hue: 0,
+            font: 3,
+            text: "ping".to_owned(),
+        });
+        world.tick(now); // the player says it, MobileSpoke emitted
+        let _ = world.drain_outbound().count(); // the "ping" bubble
+        scripts.pump(&mut world); // the script hears it, queues the answer
+        world.tick(now); // the answer is spoken
+
+        let answered = world.drain_outbound().any(|out| {
+            out.packet.first() == Some(&0x1C) && out.packet.windows(4).any(|w| w == b"pong")
+        });
+        assert!(answered, "the script answered the keyword");
     }
 }

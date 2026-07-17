@@ -54,6 +54,104 @@ pub struct Config {
     /// The gameplay script the shard runs.
     #[serde(default)]
     pub scripting: ScriptingConfig,
+    /// The rules knobs — combat era, timers, ranges — an operator tunes without a
+    /// rebuild. The Sphere `sphere.ini` equivalents, validated at load.
+    #[serde(default)]
+    pub gameplay: GameplayConfig,
+}
+
+/// The gameplay rules an operator tunes: the numbers that were compile-time
+/// constants until an operator needed one different.
+///
+/// # Why these live in config and the packet lengths do not
+///
+/// A wire format is not a choice — get the `0x1A` layout wrong and no client
+/// draws the item, so it is code, pinned by a test. These are choices: how fast a
+/// blow lands, how long an item lies before it rots, how far a whisper carries.
+/// SphereServer exposes exactly this set in `sphere.ini` (`CombatEra`,
+/// `SpeedScaleFactor`, `DecayTimer`, `DistanceWhisper`…) for the same reason —
+/// two shards running the same binary want different feels.
+///
+/// Times are in **seconds**, not ticks: an operator thinks in seconds, and the
+/// world converts to its tick counter at construction, so the tick stays the only
+/// place that knows the rate.
+///
+/// Note this is a different axis from a client's `Era` in `openshard-protocol`:
+/// that is which *packets* a client version understands, never branched on for
+/// rules; this is which *rules* the shard runs, never seen on the wire.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GameplayConfig {
+    /// Which swing-speed formula combat uses, Sphere's `m_iCombatSpeedEra`:
+    /// `0` Sphere-custom pre-AoS, `1` pre-AoS, `2` AoS, `3` SE, `4` ML. The eras
+    /// differ in how dexterity and weapon speed become a swing interval.
+    #[serde(default = "default_combat_era")]
+    pub combat_era: u8,
+    /// Sphere's `SpeedScaleFactor`: the numerator of the swing formula. Larger is
+    /// slower. The pre-AoS default is 15000; AoS uses 40000, SE 80000.
+    #[serde(default = "default_speed_scale_factor")]
+    pub speed_scale_factor: u64,
+    /// The ceiling any one skill trains to, in tenths (so `1000` is 100.0).
+    #[serde(default = "default_skill_cap")]
+    pub skill_cap: u16,
+    /// How long an item lies on the ground before it rots, in seconds.
+    #[serde(default = "default_decay_seconds")]
+    pub decay_seconds: u64,
+    /// How long a criminal flag lasts after a grey act, in seconds.
+    #[serde(default = "default_criminal_seconds")]
+    pub criminal_seconds: u64,
+    /// How far normal speech carries, in tiles. Sphere's `DistanceTalk`.
+    #[serde(default = "default_distance_talk")]
+    pub distance_talk: u32,
+    /// How far a whisper carries, in tiles. Sphere's `DistanceWhisper`.
+    #[serde(default = "default_distance_whisper")]
+    pub distance_whisper: u32,
+    /// How far a yell carries, in tiles. Sphere's `DistanceYell`.
+    #[serde(default = "default_distance_yell")]
+    pub distance_yell: u32,
+}
+
+/// The highest combat era [`GameplayConfig::combat_era`] accepts — Sphere's ML.
+const MAX_COMBAT_ERA: u8 = 4;
+
+fn default_combat_era() -> u8 {
+    1
+}
+fn default_speed_scale_factor() -> u64 {
+    15000
+}
+fn default_skill_cap() -> u16 {
+    1000
+}
+fn default_decay_seconds() -> u64 {
+    20 * 60
+}
+fn default_criminal_seconds() -> u64 {
+    2 * 60
+}
+fn default_distance_talk() -> u32 {
+    18
+}
+fn default_distance_whisper() -> u32 {
+    3
+}
+fn default_distance_yell() -> u32 {
+    31
+}
+
+impl Default for GameplayConfig {
+    fn default() -> Self {
+        Self {
+            combat_era: default_combat_era(),
+            speed_scale_factor: default_speed_scale_factor(),
+            skill_cap: default_skill_cap(),
+            decay_seconds: default_decay_seconds(),
+            criminal_seconds: default_criminal_seconds(),
+            distance_talk: default_distance_talk(),
+            distance_whisper: default_distance_whisper(),
+            distance_yell: default_distance_yell(),
+        }
+    }
 }
 
 /// Where to find the client's data files.
@@ -254,6 +352,13 @@ pub enum ConfigError {
     },
     /// An account has no name.
     EmptyAccountName,
+    /// `gameplay.combat_era` is outside the range of formulas Sphere defines.
+    UnknownCombatEra {
+        /// The value given.
+        era: u8,
+    },
+    /// `gameplay.speed_scale_factor` is zero, which the swing formula divides by.
+    ZeroSpeedScaleFactor,
 }
 
 impl fmt::Display for ConfigError {
@@ -277,6 +382,14 @@ impl fmt::Display for ConfigError {
                 "two accounts are named {name:?}; names are case-insensitive"
             ),
             Self::EmptyAccountName => f.write_str("an account has an empty name"),
+            Self::UnknownCombatEra { era } => write!(
+                f,
+                "gameplay.combat_era is {era}; it must be 0 to {MAX_COMBAT_ERA} \
+                 (0 Sphere pre-AoS, 1 pre-AoS, 2 AoS, 3 SE, 4 ML)",
+            ),
+            Self::ZeroSpeedScaleFactor => {
+                f.write_str("gameplay.speed_scale_factor must not be zero")
+            }
         }
     }
 }
@@ -335,6 +448,18 @@ impl Config {
                 });
             }
             seen.push(key);
+        }
+
+        // A combat era outside the table would silently fall through to a default
+        // formula, giving a feel the operator did not ask for; name it instead.
+        if self.gameplay.combat_era > MAX_COMBAT_ERA {
+            return Err(ConfigError::UnknownCombatEra {
+                era: self.gameplay.combat_era,
+            });
+        }
+        // The swing formula divides by this; zero would panic mid-tick.
+        if self.gameplay.speed_scale_factor == 0 {
+            return Err(ConfigError::ZeroSpeedScaleFactor);
         }
         Ok(())
     }
@@ -420,6 +545,33 @@ database = ""
 #
 #   main = "scripts/main.js"
 main = ""
+
+[gameplay]
+# The rules knobs — the SphereServer sphere.ini equivalents. Every value here has
+# a working default; uncomment one only to change the shard's feel.
+
+# Which swing-speed formula combat uses (Sphere's CombatEra):
+#   0 Sphere pre-AoS   1 pre-AoS   2 AoS   3 SE   4 ML
+# The eras differ in how dexterity and weapon speed become a swing interval.
+combat_era = 1
+
+# The swing formula's numerator (Sphere's SpeedScaleFactor). Larger is slower.
+# Pre-AoS is 15000; AoS uses 40000, SE 80000.
+speed_scale_factor = 15000
+
+# The ceiling any one skill trains to, in tenths (1000 = 100.0).
+skill_cap = 1000
+
+# How long an item lies on the ground before it rots, in seconds.
+decay_seconds = 1200
+
+# How long a criminal flag lasts after a grey act, in seconds.
+criminal_seconds = 120
+
+# How far speech carries, in tiles: normal, a whisper, a yell.
+distance_talk = 18
+distance_whisper = 3
+distance_yell = 31
 
 # Development accounts, in plaintext, until there is a database.
 [[accounts]]
@@ -761,5 +913,49 @@ mod tests {
         let error = Config::load("/nonexistent/openshard.toml").unwrap_err();
         assert!(error.to_string().contains("openshard.toml"));
         assert!(matches!(error, ConfigError::Read { .. }));
+    }
+
+    #[test]
+    fn gameplay_defaults_to_the_pre_aos_feel() {
+        // A config from before [gameplay] existed still parses and means the same
+        // numbers the constants used to hold.
+        let g = config(MINIMAL).gameplay;
+        assert_eq!(g.combat_era, 1);
+        assert_eq!(g.speed_scale_factor, 15000);
+        assert_eq!(g.skill_cap, 1000);
+        assert_eq!(
+            (g.distance_talk, g.distance_whisper, g.distance_yell),
+            (18, 3, 31)
+        );
+    }
+
+    #[test]
+    fn the_shipped_config_names_the_gameplay_knobs_and_validates() {
+        let default: Config = toml::from_str(DEFAULT_TOML).unwrap();
+        default.validate().expect("the shipped config is valid");
+        assert_eq!(default.gameplay.decay_seconds, 1200);
+        assert_eq!(default.gameplay.criminal_seconds, 120);
+    }
+
+    #[test]
+    fn an_unknown_combat_era_is_refused() {
+        let mut config = config(MINIMAL);
+        config.gameplay.combat_era = 5;
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::UnknownCombatEra { era: 5 })
+        ));
+    }
+
+    #[test]
+    fn a_zero_speed_scale_factor_is_refused() {
+        // The swing formula divides by it — a zero would panic mid-tick, so the
+        // shard refuses to start instead.
+        let mut config = config(MINIMAL);
+        config.gameplay.speed_scale_factor = 0;
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::ZeroSpeedScaleFactor)
+        ));
     }
 }

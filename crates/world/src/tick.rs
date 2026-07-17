@@ -35,21 +35,22 @@ use openshard_persistence::{CharacterRecord, Journal, Snapshot};
 use openshard_protocol::{
     encode_add_to_container, encode_attack, encode_container_contents, encode_drag_cancel,
     encode_equip, encode_health, encode_light_level, encode_login_complete, encode_map_change,
-    encode_open_container, encode_remove, encode_walk_ack, encode_walk_reject, encode_war_mode,
-    ClientVersion, ContainedItem, Direction, DragCancelReason, Equipment, Facing, MobileIncoming,
-    MobileMove, Notoriety, PlayerStart, PlayerUpdate, Point, WalkRequest, WorldItem,
-    DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, DROP_TO_GROUND,
+    encode_message, encode_open_container, encode_remove, encode_unicode_message, encode_walk_ack,
+    encode_walk_reject, encode_war_mode, ClientVersion, ContainedItem, Direction, DragCancelReason,
+    Equipment, Facing, MobileIncoming, MobileMove, Notoriety, PlayerStart, PlayerUpdate, Point,
+    WalkRequest, WorldItem, DEFAULT_LANGUAGE_TAG, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
+    DROP_TO_GROUND, NO_GRAPHIC,
 };
 use tracing::{debug, info, warn};
 
 use crate::components::{
     Account, Amount, Body, Brain, Client, Combat, Contained, Container, CriminalUntil, DamageType,
     Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name,
-    Position, Resistance, Skills, Stackable, SwingSpeed,
+    Position, Resistance, Skills, Stackable, Stats, SwingSpeed,
 };
 use crate::events::{
-    ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
-    RefusedReason, SkillUsed, SpellCast, StepRefused,
+    ItemSpawned, MobileDamaged, MobileDied, MobileMoved, MobileSpoke, MobileTurned, PlayerEntered,
+    PlayerLeft, RefusedReason, SkillUsed, SpellCast, StepRefused,
 };
 use crate::rng::Rng;
 use crate::sectors::{distance, in_range, Sectors, VIEW_RANGE};
@@ -93,14 +94,14 @@ const ITEM_REACH: u32 = 3;
 /// are the backpack, the bank box and other slots that are not "worn" and cannot
 /// be equipped by dragging an item onto them.
 const MAX_WEARABLE_LAYER: u8 = 25;
-/// The hit points a character starts with when nothing else says otherwise.
-///
-/// A placeholder, not a design: real starting hits come from stats, and stats
-/// are a later slice. Enough that a new character is not born dead.
+/// The strength a character starts with, and so — hit points deriving from
+/// strength — its starting hit points. A placeholder for what character creation
+/// will set.
 const DEFAULT_HITPOINTS: u16 = 100;
-/// The mana a character starts with. A placeholder, like [`DEFAULT_HITPOINTS`];
-/// real mana comes from intelligence, once stats exist.
+/// The intelligence a character starts with, and so its starting mana.
 const DEFAULT_MANA: u16 = 100;
+/// The dexterity a character starts with.
+const DEFAULT_DEXTERITY: u16 = 100;
 /// Ticks between mana regenerating a point: three seconds at [`TICK_INTERVAL`].
 /// A flat rate until it derives from meditation and intelligence.
 const MANA_REGEN_TICKS: u64 = 60;
@@ -111,13 +112,66 @@ const AI_THINK_TICKS: u64 = 10;
 /// The chance in eight, per beat, that an idle wanderer takes a step. Low enough
 /// that a field of creatures drifts rather than marches.
 const WANDER_IN_EIGHT: u32 = 3;
+/// The talk mode of a whisper — heard only by those right beside the speaker.
+/// Sphere's `TALKMODE_WHISPER`; the client sends it for `;`-prefixed speech.
+const TALKMODE_WHISPER: u8 = 8;
+/// The talk mode of a yell — carried two screens off. Sphere's `TALKMODE_YELL`,
+/// the client's `!`-prefixed speech.
+const TALKMODE_YELL: u8 = 9;
+/// How far a whisper carries, in tiles. Sphere's `DISTANCEWHISPER`.
+const WHISPER_RANGE: u32 = 3;
+/// How far normal speech carries — the client's default view, so you hear anyone
+/// on your screen. Sphere's `DISTANCETALK` (`UO_MAP_VIEW_SIZE_DEFAULT`).
+const SAY_RANGE: u32 = 18;
+/// How far a yell carries. Sphere's `DISTANCEYELL` (`UO_MAP_VIEW_RADAR`).
+const YELL_RANGE: u32 = 31;
+
+/// How far speech in `mode` carries, in tiles. A whisper is heard only right up
+/// close, a yell two screens off, everything else across the screen — Sphere's
+/// three `DISTANCE*` defaults, chosen by the mode byte the client sends.
+const fn speech_range(mode: u8) -> u32 {
+    match mode {
+        TALKMODE_WHISPER => WHISPER_RANGE,
+        TALKMODE_YELL => YELL_RANGE,
+        _ => SAY_RANGE,
+    }
+}
+/// A middling font the client renders speech in when the speaker names none.
+const DEFAULT_FONT: u16 = 3;
 /// How near, in tiles (Chebyshev), a mobile must be to land a melee blow: the
 /// next tile over, diagonals included.
 const MELEE_RANGE: u32 = 1;
-/// Ticks between swings — one second at [`TICK_INTERVAL`]. A placeholder for a
-/// weapon's real speed, which comes from its tiledata and the wielder's dexterity
-/// once stats land, and is the kind of number a script will own.
-const SWING_TICKS: u64 = 20;
+/// Sphere's `SpeedScaleFactor` for the pre-AoS (era-1) swing formula — the
+/// numerator that, divided by dexterity and weapon speed, gives the swing time
+/// (`CResourceCalc.cpp`). One of Sphere's hard-won numbers; taken verbatim.
+const SPEED_SCALE_FACTOR: u64 = 15000;
+/// The base swing speed of bare hands — Sphere's wrestling value. A real weapon's
+/// speed (from its tiledata) will replace it once equipment carries properties;
+/// until then every mobile swings wrestling-fast, modulated by dexterity alone.
+const WRESTLING_SPEED: u64 = 50;
+/// Ticks between swings for a bare-handed mobile of default dexterity — what the
+/// old flat swing constant stood in for, now the [`swing_ticks`] formula's output
+/// for the common case. At `dex 100`, wrestling: 1.5s, thirty ticks. A name the
+/// tests pace against; production reads [`swing_ticks`] per mobile.
+#[cfg(test)]
+const WRESTLING_SWING_TICKS: u64 = swing_ticks(DEFAULT_DEXTERITY, WRESTLING_SPEED);
+
+/// Ticks between swings for a mobile of dexterity `dex` wielding a weapon of base
+/// speed `base`, Sphere's pre-AoS formula (`CResourceCalc.cpp`, combat era 1):
+/// the whole swing takes `(SpeedScaleFactor * 10) / ((dex + 100) * base)` tenths
+/// of a second, floored at one tenth. At [`TICK_INTERVAL`] a tenth is two ticks,
+/// so the count is that doubled. Higher dexterity or a faster weapon → fewer
+/// ticks between blows.
+const fn swing_ticks(dex: u16, base: u64) -> u64 {
+    let base = if base == 0 { 1 } else { base };
+    let denom = (dex as u64 + 100) * base;
+    let tenths = (SPEED_SCALE_FACTOR * 10) / denom;
+    if tenths == 0 {
+        2
+    } else {
+        tenths * 2
+    }
+}
 /// Damage a swing deals. A flat number until the damage formula — resistances,
 /// weapon, strength — is written, and that is a script-first slice of its own.
 const SWING_DAMAGE: u16 = 5;
@@ -314,6 +368,18 @@ pub enum Command {
         /// By how much.
         amount: u16,
     },
+    /// Set a mobile's stats — a script building a character or a monster.
+    /// Strength and intelligence re-cap hit points and mana as they change.
+    SetStats {
+        /// Whose, by wire serial.
+        serial: u32,
+        /// Strength.
+        strength: u16,
+        /// Dexterity.
+        dexterity: u16,
+        /// Intelligence.
+        intelligence: u16,
+    },
     /// Set a mobile's skill value — a script configuring a character. `value` is
     /// in tenths, capped at [`SKILL_CAP`](crate::skills::SKILL_CAP).
     SetSkill {
@@ -347,6 +413,28 @@ pub enum Command {
         connection: ConnectionId,
         /// The target's serial.
         target: u32,
+    },
+    /// A client said something (`0x03`).
+    Say {
+        /// Which connection.
+        connection: ConnectionId,
+        /// How it is said (mode byte).
+        mode: u8,
+        /// The colour.
+        hue: u16,
+        /// The font.
+        font: u16,
+        /// The words.
+        text: String,
+    },
+    /// A mobile speaks by decree — a script's NPC, or a keyword answer.
+    Speak {
+        /// Who, by wire serial.
+        serial: u32,
+        /// The colour.
+        hue: u16,
+        /// The words.
+        text: String,
     },
     /// A client double-clicked an object (`0x06`) — for now, to open a container.
     DoubleClick {
@@ -910,6 +998,12 @@ impl World {
                 skill,
             } => self.cast_spell(serial, spell, target, mana, difficulty, skill),
             Command::Heal { serial, amount } => self.heal(serial, amount),
+            Command::SetStats {
+                serial,
+                strength,
+                dexterity,
+                intelligence,
+            } => self.set_stats(serial, strength, dexterity, intelligence),
             Command::SetSkill {
                 serial,
                 skill,
@@ -922,6 +1016,18 @@ impl World {
             } => self.use_skill(serial, skill, difficulty),
             Command::WarMode { connection, war } => self.war_mode(connection, war),
             Command::Attack { connection, target } => self.attack(connection, target),
+            Command::Say {
+                connection,
+                mode,
+                hue,
+                font,
+                text,
+            } => self.say(connection, mode, hue, font, &text),
+            Command::Speak { serial, hue, text } => {
+                if let Some(entity) = Serial::new(serial).and_then(|s| self.registry.entity_of(s)) {
+                    self.speak(entity, 0, hue, DEFAULT_FONT, &text);
+                }
+            }
             Command::DoubleClick { connection, serial } => self.double_click(connection, serial),
             Command::EquipItem {
                 connection,
@@ -1051,6 +1157,17 @@ impl World {
         self.registry.insert(entity, Name(name.clone()));
         self.registry.insert(entity, Account(account));
         self.registry.insert(entity, Facet(facet));
+        // Strength caps hit points, intelligence caps mana — the first derived
+        // numbers. Character creation will choose the stats; until it does, the
+        // defaults reproduce the flat hundreds the world had before.
+        self.registry.insert(
+            entity,
+            Stats {
+                strength: DEFAULT_HITPOINTS,
+                dexterity: DEFAULT_DEXTERITY,
+                intelligence: DEFAULT_MANA,
+            },
+        );
         self.registry.insert(
             entity,
             Hitpoints {
@@ -1074,8 +1191,8 @@ impl World {
             },
         );
         self.registry.insert(entity, Resistance::default());
-        self.registry
-            .insert(entity, SwingSpeed { ticks: SWING_TICKS });
+        // No explicit `SwingSpeed`: a player swings at the pace their dexterity
+        // dictates, through `swing_speed`.
         self.registry
             .insert(entity, Movement(Walker::new(position, facing)));
         self.registry.insert(
@@ -1416,14 +1533,12 @@ impl World {
                 ..Default::default()
             },
         );
-        self.registry.insert(
-            entity,
-            SwingSpeed {
-                // Zero means "use the default", so a script that does not care
-                // about pace need not name a number.
-                ticks: if swing == 0 { SWING_TICKS } else { swing },
-            },
-        );
+        // Zero means "derive from dexterity", so a script that does not care about
+        // pace names no number and gets the wrestling formula. A non-zero value
+        // pins an exact cadence — a special creature that ignores its stats.
+        if swing != 0 {
+            self.registry.insert(entity, SwingSpeed { ticks: swing });
+        }
         // A brain only for a creature that needs one — something that hunts or
         // wanders. A pure prop (a shopkeeper standing still) gets none and never
         // enters `think`. `Combat` it earns when it first picks a fight.
@@ -1826,12 +1941,22 @@ impl World {
         }
     }
 
-    /// How many ticks `mobile` waits between swings, its [`SwingSpeed`] or the
-    /// default.
+    /// How many ticks `mobile` waits between swings.
+    ///
+    /// An explicit [`SwingSpeed`] wins — a script pinning an exact cadence, a
+    /// special creature. Otherwise the pace is derived from the mobile's
+    /// dexterity through Sphere's [`swing_ticks`] formula, wrestling speed for
+    /// now (no weapon properties yet). A mobile with neither swings at the
+    /// default-dexterity wrestling pace.
     fn swing_speed(&self, mobile: EntityId) -> u64 {
-        self.registry
-            .get::<SwingSpeed>(mobile)
-            .map_or(SWING_TICKS, |s| s.ticks)
+        if let Some(s) = self.registry.get::<SwingSpeed>(mobile) {
+            return s.ticks;
+        }
+        let dex = self
+            .registry
+            .get::<Stats>(mobile)
+            .map_or(DEFAULT_DEXTERITY, |s| s.dexterity);
+        swing_ticks(dex, WRESTLING_SPEED)
     }
 
     /// The base damage a blow from `attacker` carries, before armour — its
@@ -1841,6 +1966,42 @@ impl World {
         self.registry
             .get::<MeleeDamage>(attacker)
             .map_or(SWING_DAMAGE, |d| d.amount)
+    }
+
+    /// Set a mobile's stats, and re-cap its hit points and mana to match. See
+    /// [`Command::SetStats`].
+    fn set_stats(&mut self, serial: u32, strength: u16, dexterity: u16, intelligence: u16) {
+        let Some(entity) = Serial::new(serial).and_then(|s| self.registry.entity_of(s)) else {
+            return;
+        };
+        self.registry.insert(
+            entity,
+            Stats {
+                strength,
+                dexterity,
+                intelligence,
+            },
+        );
+        // Strength caps hit points, intelligence mana; a lowered cap drags the
+        // current value down with it, a raised one leaves room to heal into.
+        if let Some(&Hitpoints { current, .. }) = self.registry.get::<Hitpoints>(entity) {
+            self.registry.insert(
+                entity,
+                Hitpoints {
+                    current: current.min(strength),
+                    max: strength,
+                },
+            );
+        }
+        if let Some(&Mana { current, .. }) = self.registry.get::<Mana>(entity) {
+            self.registry.insert(
+                entity,
+                Mana {
+                    current: current.min(intelligence),
+                    max: intelligence,
+                },
+            );
+        }
     }
 
     /// Set a mobile's skill value. See [`Command::SetSkill`].
@@ -1954,6 +2115,75 @@ impl World {
             spell,
             target,
             success,
+        });
+    }
+
+    /// A player says something. See [`Command::Say`].
+    fn say(&mut self, connection: ConnectionId, mode: u8, hue: u16, font: u16, text: &str) {
+        let Some(&player) = self.players.get(&connection) else {
+            return;
+        };
+        self.speak(player, mode, hue, font, text);
+    }
+
+    /// Put words over a mobile's head, for everyone in earshot, and say on the
+    /// bus that it spoke. The shared body of [`say`](Self::say) and
+    /// [`Command::Speak`].
+    fn speak(&mut self, entity: EntityId, mode: u8, hue: u16, font: u16, text: &str) {
+        let Some(serial) = self.registry.serial_of(entity) else {
+            return;
+        };
+        let Some(&Position(pos)) = self.registry.get::<Position>(entity) else {
+            return;
+        };
+        let facet = self.facet_of(entity);
+        let graphic = self
+            .registry
+            .get::<Body>(entity)
+            .map_or(NO_GRAPHIC, |b| b.id);
+        // Owned before the packet, so the immutable borrow of the name is done
+        // by the time the mutable outbox is touched.
+        let name = self
+            .registry
+            .get::<Name>(entity)
+            .map_or(String::new(), |n| n.0.clone());
+        // Latin-1 speech rides the universally-understood `0x1C`; anything ASCII
+        // cannot carry — an accent, a non-Latin script — has to go out as Unicode
+        // `0xAE`, and a player who typed it necessarily spoke `0xAD` to begin with.
+        let packet = if text.is_ascii() {
+            encode_message(serial.raw(), graphic, mode, hue, font, &name, text)
+        } else {
+            encode_unicode_message(
+                serial.raw(),
+                graphic,
+                mode,
+                hue,
+                font,
+                DEFAULT_LANGUAGE_TAG,
+                &name,
+                text,
+            )
+        };
+
+        let range = speech_range(mode);
+        let sectors = &self.facet_state(facet).sectors;
+        let listeners: Vec<EntityId> = sectors
+            .nearby(pos, range)
+            .filter(|(_, listener_pos)| in_range(pos, *listener_pos, range))
+            .map(|(id, _)| id)
+            .collect();
+        for listener in listeners {
+            if let Some(&Client { connection, .. }) = self.registry.get::<Client>(listener) {
+                self.outbox.push(Outbound {
+                    connection,
+                    packet: packet.clone(),
+                });
+            }
+        }
+        self.bus.send(MobileSpoke {
+            entity,
+            serial,
+            text: text.to_owned(),
         });
     }
 
@@ -4321,7 +4551,7 @@ pub(crate) mod tests {
         engage(&mut world, player, mob, now);
 
         // One swing interval later, a blow has landed.
-        for _ in 0..SWING_TICKS {
+        for _ in 0..WRESTLING_SWING_TICKS {
             world.tick(now);
         }
         assert!(
@@ -4344,7 +4574,7 @@ pub(crate) mod tests {
             target: mob,
         });
         world.tick(now);
-        for _ in 0..(SWING_TICKS + 1) {
+        for _ in 0..(WRESTLING_SWING_TICKS + 1) {
             world.tick(now);
         }
         assert_eq!(
@@ -4363,7 +4593,7 @@ pub(crate) mod tests {
         let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 5, START.1, 0), 50, now);
         let mob_entity = entity(&world, mob);
         engage(&mut world, player, mob, now);
-        for _ in 0..(SWING_TICKS + 1) {
+        for _ in 0..(WRESTLING_SWING_TICKS + 1) {
             world.tick(now);
         }
         assert_eq!(
@@ -4579,7 +4809,7 @@ pub(crate) mod tests {
         let mob_entity = entity(&world, mob);
         engage(&mut world, player, mob, now);
 
-        for _ in 0..SWING_TICKS {
+        for _ in 0..WRESTLING_SWING_TICKS {
             world.tick(now);
         }
         assert_eq!(
@@ -4605,7 +4835,7 @@ pub(crate) mod tests {
         engage(&mut world, player, mob, now);
 
         // Five is fewer than the default interval, but a full fast one.
-        const _: () = assert!(5 < SWING_TICKS);
+        const _: () = assert!(5 < WRESTLING_SWING_TICKS);
         for _ in 0..5 {
             world.tick(now);
         }
@@ -4616,20 +4846,51 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_spawned_creature_carries_its_swing_speed() {
+    fn a_spawned_creature_derives_its_swing_speed() {
+        // Spawned with `swing == 0`, a creature carries no explicit `SwingSpeed`;
+        // its pace is derived from dexterity through Sphere's formula — the
+        // wrestling default here, since it has no stats set.
         let now = Instant::now();
         let mut world = world();
         enter(&mut world, now);
         let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
         let mob_entity = entity(&world, mob);
-        assert_eq!(
-            world
-                .registry
-                .get::<SwingSpeed>(mob_entity)
-                .map(|s| s.ticks),
-            Some(SWING_TICKS),
-            "zero on spawn means the default pace"
+        assert!(
+            world.registry.get::<SwingSpeed>(mob_entity).is_none(),
+            "zero on spawn pins nothing"
         );
+        assert_eq!(
+            world.swing_speed(mob_entity),
+            WRESTLING_SWING_TICKS,
+            "and the derived pace is the wrestling default"
+        );
+    }
+
+    #[test]
+    fn dexterity_quickens_the_swing() {
+        // Sphere's era-1 formula: a nimbler mobile swings sooner. Raising
+        // dexterity above the default shortens the interval `swing_speed` reports.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let player_entity = world.players[&player];
+        let serial = serial_of(&world, player);
+
+        let slow = world.swing_speed(player_entity);
+        world.queue(Command::SetStats {
+            serial,
+            strength: DEFAULT_HITPOINTS,
+            dexterity: 200,
+            intelligence: DEFAULT_MANA,
+        });
+        world.tick(now);
+        let fast = world.swing_speed(player_entity);
+
+        assert_eq!(
+            slow, WRESTLING_SWING_TICKS,
+            "default dexterity, default pace"
+        );
+        assert!(fast < slow, "more dexterity swings sooner: {fast} < {slow}");
     }
 
     #[test]
@@ -4643,7 +4904,7 @@ pub(crate) mod tests {
         let mob_entity = entity(&world, mob);
         engage(&mut world, player, mob, now);
 
-        for _ in 0..(2 * SWING_TICKS) {
+        for _ in 0..(2 * WRESTLING_SWING_TICKS) {
             world.tick(now);
         }
         assert!(
@@ -4964,7 +5225,7 @@ pub(crate) mod tests {
         spawn_creature(&mut world, Point::new(START.0, START.1, 0), 10, false, now);
 
         // A beat to notice, a swing interval to strike.
-        for _ in 0..(AI_THINK_TICKS + SWING_TICKS + 2) {
+        for _ in 0..(AI_THINK_TICKS + WRESTLING_SWING_TICKS + 2) {
             world.tick(now);
         }
         assert!(
@@ -5006,7 +5267,7 @@ pub(crate) mod tests {
         // Sight 0, no wander: no brain at all.
         spawn_creature(&mut world, Point::new(START.0, START.1, 0), 0, false, now);
 
-        for _ in 0..(SWING_TICKS + AI_THINK_TICKS + 5) {
+        for _ in 0..(WRESTLING_SWING_TICKS + AI_THINK_TICKS + 5) {
             world.tick(now);
         }
         assert_eq!(
@@ -5036,6 +5297,243 @@ pub(crate) mod tests {
             world.registry.get::<Position>(mob_entity).unwrap().0,
             start,
             "given time, a wanderer moves"
+        );
+    }
+
+    #[test]
+    fn stats_recap_hits_and_mana() {
+        // Strength caps hit points, intelligence mana; lowering a stat below the
+        // current value drags it down.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let entity = world.players[&player];
+        let serial = serial_of(&world, player);
+
+        world.queue(Command::SetStats {
+            serial,
+            strength: 60,
+            dexterity: 80,
+            intelligence: 40,
+        });
+        world.tick(now);
+
+        let hp = world.registry.get::<Hitpoints>(entity).unwrap();
+        assert_eq!((hp.current, hp.max), (60, 60), "hits follow strength");
+        let mana = world.registry.get::<Mana>(entity).unwrap();
+        assert_eq!(
+            (mana.current, mana.max),
+            (40, 40),
+            "mana follows intelligence"
+        );
+        assert_eq!(
+            world.registry.get::<Stats>(entity).unwrap().dexterity,
+            80,
+            "and dexterity is stored for what will derive from it"
+        );
+    }
+
+    #[test]
+    fn speech_reaches_nearby_players_and_the_speaker() {
+        let now = Instant::now();
+        let mut world = world();
+        let speaker = enter(&mut world, now);
+        let listener = enter_as(&mut world, ConnectionId::from_raw(2), now);
+        let _ = packets_for(&mut world, speaker);
+        let _ = packets_for(&mut world, listener);
+
+        world.queue(Command::Say {
+            connection: speaker,
+            mode: 0,
+            hue: 0x0384,
+            font: 3,
+            text: "hail".to_owned(),
+        });
+        world.tick(now);
+
+        // Drain once — both players' packets came out of the same tick.
+        let all: Vec<Outbound> = world.drain_outbound().collect();
+        assert!(
+            all.iter()
+                .any(|o| o.connection == speaker && o.packet[0] == 0x1C),
+            "the speaker sees their own words"
+        );
+        assert!(
+            all.iter()
+                .any(|o| o.connection == listener && o.packet[0] == 0x1C),
+            "and so does the player beside them"
+        );
+    }
+
+    #[test]
+    fn speech_does_not_carry_out_of_earshot() {
+        let now = Instant::now();
+        let mut world = world();
+        let speaker = enter(&mut world, now);
+        let listener = enter_as(&mut world, ConnectionId::from_raw(2), now);
+        // Move the listener well past speech range.
+        teleport(&mut world, listener, Point::new(START.0 + 40, START.1, 0));
+        let _ = packets_for(&mut world, listener);
+
+        world.queue(Command::Say {
+            connection: speaker,
+            mode: 0,
+            hue: 0,
+            font: 3,
+            text: "hail".to_owned(),
+        });
+        world.tick(now);
+
+        assert!(
+            !packets_for(&mut world, listener)
+                .iter()
+                .any(|p| p[0] == 0x1C),
+            "a shout across a field is not heard"
+        );
+    }
+
+    #[test]
+    fn a_whisper_carries_only_to_those_right_beside() {
+        // Ten tiles is within normal earshot but far past a whisper's three, so
+        // the same listener who would hear a word spoken hears nothing whispered.
+        let now = Instant::now();
+        let mut world = world();
+        let speaker = enter(&mut world, now);
+        let listener = enter_as(&mut world, ConnectionId::from_raw(2), now);
+        teleport(&mut world, listener, Point::new(START.0 + 10, START.1, 0));
+        let _ = packets_for(&mut world, listener);
+
+        world.queue(Command::Say {
+            connection: speaker,
+            mode: TALKMODE_WHISPER,
+            hue: 0,
+            font: 3,
+            text: "psst".to_owned(),
+        });
+        world.tick(now);
+
+        assert!(
+            !packets_for(&mut world, listener)
+                .iter()
+                .any(|p| p[0] == 0x1C),
+            "a whisper does not reach ten tiles off"
+        );
+    }
+
+    #[test]
+    fn a_yell_carries_past_normal_earshot() {
+        // Twenty-five tiles is beyond the normal eighteen but inside a yell's
+        // thirty-one, so only shouting reaches this listener.
+        let now = Instant::now();
+        let mut world = world();
+        let speaker = enter(&mut world, now);
+        let listener = enter_as(&mut world, ConnectionId::from_raw(2), now);
+        teleport(&mut world, listener, Point::new(START.0 + 25, START.1, 0));
+        let _ = packets_for(&mut world, listener);
+
+        // Said normally, it does not reach.
+        world.queue(Command::Say {
+            connection: speaker,
+            mode: 0,
+            hue: 0,
+            font: 3,
+            text: "here".to_owned(),
+        });
+        world.tick(now);
+        assert!(
+            !packets_for(&mut world, listener)
+                .iter()
+                .any(|p| p[0] == 0x1C),
+            "normal speech stops short of twenty-five tiles"
+        );
+
+        // Yelled, it does.
+        world.queue(Command::Say {
+            connection: speaker,
+            mode: TALKMODE_YELL,
+            hue: 0,
+            font: 3,
+            text: "here".to_owned(),
+        });
+        world.tick(now);
+        assert!(
+            packets_for(&mut world, listener)
+                .iter()
+                .any(|p| p[0] == 0x1C),
+            "but a yell carries that far"
+        );
+    }
+
+    #[test]
+    fn accented_speech_goes_out_as_unicode() {
+        // A Brazilian player types "olá": Latin-1 `0x1C` would lose the accent, so
+        // the world reaches for Unicode `0xAE` instead. Pure-ASCII speech (the
+        // test above) stays on `0x1C`, universally understood.
+        let now = Instant::now();
+        let mut world = world();
+        let speaker = enter(&mut world, now);
+
+        world.queue(Command::Say {
+            connection: speaker,
+            mode: 0,
+            hue: 0,
+            font: 3,
+            text: "olá".to_owned(),
+        });
+        world.tick(now);
+
+        let packets = packets_for(&mut world, speaker);
+        assert!(
+            packets.iter().any(|p| p[0] == 0xAE),
+            "accented speech takes the Unicode path"
+        );
+        assert!(
+            !packets.iter().any(|p| p[0] == 0x1C),
+            "and not the ASCII one, which would mangle it"
+        );
+    }
+
+    #[test]
+    fn speaking_puts_the_words_on_the_bus() {
+        let now = Instant::now();
+        let mut world = world();
+        let speaker = enter(&mut world, now);
+        let mut spoke: Cursor<MobileSpoke> = world.bus().cursor();
+
+        world.queue(Command::Say {
+            connection: speaker,
+            mode: 0,
+            hue: 0,
+            font: 3,
+            text: "hello world".to_owned(),
+        });
+        world.tick(now);
+
+        let events: Vec<MobileSpoke> = world.bus().read(&mut spoke).cloned().collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].text, "hello world");
+    }
+
+    #[test]
+    fn a_creature_can_be_made_to_speak() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::Speak {
+            serial: mob,
+            hue: 0,
+            text: "grrr".to_owned(),
+        });
+        world.tick(now);
+
+        assert!(
+            packets_for(&mut world, player)
+                .iter()
+                .any(|p| p[0] == 0x1C && mentions(p, mob)),
+            "the player hears the creature the script gave a voice"
         );
     }
 

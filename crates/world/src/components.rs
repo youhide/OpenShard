@@ -166,6 +166,22 @@ pub struct Client {
     pub version: ClientVersion,
 }
 
+/// A mobile's three stats: strength, dexterity, intelligence.
+///
+/// The numbers everything derived hangs off. Strength sets how many hit points a
+/// mobile can have, intelligence how much mana; dexterity will pace its swings
+/// and its stamina once those derive rather than sit as constants. A script sets
+/// them (character creation, a monster's build); the maxima follow.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Stats {
+    /// Raw might — the cap on hit points.
+    pub strength: u16,
+    /// Quickness — the cap on stamina, and the pace of a swing, to come.
+    pub dexterity: u16,
+    /// Wits — the cap on mana.
+    pub intelligence: u16,
+}
+
 /// A mobile's hit points: how much it has, and how much it can have.
 ///
 /// The thing combat spends. A mobile is alive while `current > 0` and dead at

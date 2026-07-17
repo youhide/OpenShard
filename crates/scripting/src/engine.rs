@@ -56,26 +56,36 @@ impl Host {
     /// handler sees also keeps this current — there is no second bookkeeping
     /// path to forget.
     fn apply(&mut self, event: &Event) {
-        match *event {
+        // By reference, not by value: an `Event` is no longer `Copy` (speech
+        // carries a `String`), and the read model only needs the position-bearing
+        // events anyway.
+        match event {
             Event::PlayerEntered { serial, x, y, z } => {
-                self.entities.insert(serial, View { x, y, z });
+                self.entities.insert(
+                    *serial,
+                    View {
+                        x: *x,
+                        y: *y,
+                        z: *z,
+                    },
+                );
             }
             Event::MobileMoved {
-                serial,
-                x,
-                y,
-                z,
-                facing: _,
+                serial, x, y, z, ..
             } => {
-                self.entities.insert(serial, View { x, y, z });
+                self.entities.insert(
+                    *serial,
+                    View {
+                        x: *x,
+                        y: *y,
+                        z: *z,
+                    },
+                );
             }
             Event::PlayerLeft { serial } => {
-                self.entities.remove(&serial);
+                self.entities.remove(serial);
             }
-            Event::StepRefused { .. }
-            | Event::MobileDied { .. }
-            | Event::SkillUsed { .. }
-            | Event::SpellCast { .. } => {}
+            _ => {}
         }
     }
 }
@@ -285,6 +295,24 @@ fn op_set_skill(state: &mut OpState, serial: u32, skill: u32, value: u32) {
     });
 }
 
+/// Set a mobile's stats; strength re-caps hits, intelligence re-caps mana.
+#[op2(fast)]
+fn op_set_stats(
+    state: &mut OpState,
+    serial: u32,
+    strength: u32,
+    dexterity: u32,
+    intelligence: u32,
+) {
+    let clamp = |v: u32| v.min(u32::from(u16::MAX)) as u16;
+    state.borrow_mut::<Host>().outbox.push(Command::SetStats {
+        serial,
+        strength: clamp(strength),
+        dexterity: clamp(dexterity),
+        intelligence: clamp(intelligence),
+    });
+}
+
 /// Use a skill against a difficulty (0–100). The result comes back as a
 /// `SkillUsed` event, not a return value: the roll and any gain happen on the
 /// tick, not in the op.
@@ -294,6 +322,16 @@ fn op_use_skill(state: &mut OpState, serial: u32, skill: u32, difficulty: u32) {
         serial,
         skill: skill as u8,
         difficulty: difficulty.min(100) as u16,
+    });
+}
+
+/// Make a mobile speak — an NPC's line, a keyword answer.
+#[op2(fast)]
+fn op_say(state: &mut OpState, serial: u32, #[string] text: String, hue: u32) {
+    state.borrow_mut::<Host>().outbox.push(Command::Speak {
+        serial,
+        hue: hue.min(u32::from(u16::MAX)) as u16,
+        text,
     });
 }
 
@@ -308,8 +346,10 @@ extension!(
         op_damage,
         op_heal,
         op_cast_spell,
+        op_set_stats,
         op_set_skill,
-        op_use_skill
+        op_use_skill,
+        op_say
     ],
     docs = "OpenShard's script-facing ops: read entity state, enqueue commands.",
 );
@@ -478,7 +518,9 @@ impl ScriptEngine for DenoEngine {
         let Some(func) = self.hook(Hook::Event) else {
             return Ok(());
         };
-        let event = *event;
+        // Cloned, not copied: an `Event` owns its words now. Cheap on the sparse
+        // event path, and V8 needs an owned value to serialise anyway.
+        let event = event.clone();
         let context = self.runtime.main_context();
         let isolate = self.runtime.v8_isolate();
         v8::scope_with_context!(scope, isolate, context);
@@ -685,6 +727,39 @@ mod tests {
                 y: 100,
                 z: 0,
                 facet: 0,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_hook_can_set_stats() {
+        // A script fitting out a fresh mobile hands the world all three stats in
+        // one op; the tick is what turns strength into hit points.
+        let mut engine = DenoEngine::new();
+        engine
+            .load(
+                "function onEvent(e) {\n\
+                 if (e.type === 'PlayerEntered') {\n\
+                     Deno.core.ops.op_set_stats(e.serial, 60, 80, 40);\n\
+                 }\n\
+                 }",
+            )
+            .unwrap();
+        engine
+            .deliver(&Event::PlayerEntered {
+                serial: 7,
+                x: 0,
+                y: 0,
+                z: 0,
+            })
+            .unwrap();
+        assert_eq!(
+            engine.take_commands(),
+            vec![Command::SetStats {
+                serial: 7,
+                strength: 60,
+                dexterity: 80,
+                intelligence: 40,
             }]
         );
     }

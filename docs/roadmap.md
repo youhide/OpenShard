@@ -311,8 +311,12 @@ Roughly in dependency order, each script-first:
     facet strikes when its timer is up, out of reach it waits with its timer
     unspent, and a killed target ends the attack. The timer is a tick count, like
     decay — no clock in the tick. A `SwingSpeed` component sets the cadence per
-    mobile, script-set at spawn; the stand-in for what UO derives from a weapon's
-    speed and the wielder's dexterity, neither of which exists yet.
+    mobile as an explicit override, but with no override the pace is now *derived*
+    from the wielder's dexterity through Sphere's pre-AoS formula
+    (`CResourceCalc.cpp`, era 1): swing tenths = `(15000 · 10) / ((dex + 100) ·
+    base)`, wrestling base 50, so a `dex 100` mobile swings every 1.5s and a
+    nimbler one sooner. Weapon `base` is still wrestling for everyone — the one
+    input left, waiting on weapon tiledata properties.
   - [x] **Resistances and the damage formula.** A swing's damage is no longer
     flat: `melee_blow` takes the attacker's `MeleeDamage` and cuts it by the
     target's `Resistance { physical }`. Both are components a script sets when it
@@ -331,11 +335,11 @@ Roughly in dependency order, each script-first:
     system with nothing yet to hang it on.
   - Deferred, on purpose, because each waits on something not built: **the other
     damage types** (fire, cold, poison, energy) want a source of typed damage,
-    which is spells (`magic`); **weapon- and dexterity-derived swing speed and
-    damage** want stats and weapon properties; **murderer/karma** wants a
-    reputation store. The seams are in place — `Resistance` has room for more
-    types, `SwingSpeed` and `MeleeDamage` are already per-mobile — so each is a
-    fill-in, not a redesign.
+    which is spells (`magic`); **weapon-derived swing speed and damage** want
+    weapon *properties* (the dexterity half is done above; the weapon `base` still
+    needs tiledata); **murderer/karma** wants a reputation store. The seams are in
+    place — `Resistance` has room for more types, `SwingSpeed` and `MeleeDamage`
+    are already per-mobile — so each is a fill-in, not a redesign.
 - [x] `skills` — usage checks, gain curves
   - [x] **The check and the gain.** A mobile carries `Skills` (a sparse map of id
     → tenths). A script sets one (`op_set_skill`) and uses it against a difficulty
@@ -351,8 +355,17 @@ Roughly in dependency order, each script-first:
     identical runs reach the same skill, roll for roll (there is a test that
     asserts exactly this). A live shard that wanted unpredictable rolls seeds
     from the clock and saves the seed; additive, one value.
-  - [ ] **stats** (str/dex/int) and stat gain from skill use — the next
-    foundation, and what unblocks combat's weapon/dexterity-derived numbers
+  - [x] **stats** (str/dex/int), the foundation combat's weapon/dexterity-derived
+    numbers were waiting on. A mobile carries `Stats { strength, dexterity,
+    intelligence }`; `enter` gives a character the classic 100/100/100 and derives
+    its `Hitpoints.max` from strength and `Mana.max` from intelligence, the UO
+    identity where those bars *are* the stats. `Command::SetStats` (op `op_set_stats`)
+    re-caps both when a stat changes, dragging a current value down under a lowered
+    cap and leaving room to heal into a raised one. Dexterity is stored now and
+    read next, by the swing speed below.
+  - [ ] **stat gain from skill use** — a skill that trains also nudges its
+    governing stat; wants Sphere's per-skill stat map, so it rides with the
+    `AdvRate` tables below
   - [ ] Sphere's per-skill `AdvRate` gain tables and the "learn only from a
     challenge" `GainRadius` — data-driven config, a refinement on the flat curve
 - [x] `magic` — spells, reagents, casting
@@ -386,7 +399,34 @@ Roughly in dependency order, each script-first:
     `sight`/`wander`), the script-first knobs; a wholly script-driven brain — a
     per-mobile `onTick` hook, which the scripting benchmark exists to make
     affordable — is the richer path this leaves open.
-- [ ] `chat` — speech, journal routing
+- [x] `chat` — speech, journal routing
+  - [x] **Speech, heard and answered.** A player says something (`0x03`), and the
+    world puts it over their head for everyone within `SPEECH_RANGE` (`0x1C`,
+    ported from Sphere's `PacketMessageASCII`) and on the bus as `MobileSpoke`.
+    That event is the hook: a script reads the words and answers — a keyword, an
+    NPC's line, a command — through `op_say`/`Command::Speak`, and the answer
+    goes back out as another `0x1C`. Combat's decoupling for the fourth time; the
+    round-trip is tested end to end. This is why the script `Event` and `Command`
+    stopped being `Copy`: speech carries an owned `String`, and the bus never
+    required `Copy` — only the enums had assumed it.
+  - [x] **The Unicode talk packet** (`0xAD`), which is what a modern client
+    actually sends when you type — the plain UTF-16 form and the keyword-encoded
+    one, ported from Sphere. The classic `0x03` alone left live chat silent for
+    every ClassicUO client; this is the fix.
+  - [x] **The Unicode reply** (`0xAE`, ported from Sphere's `PacketMessageUNICODE`).
+    Speech chooses its encoder by content: pure-ASCII stays on `0x1C`, universally
+    understood, but text Latin-1 cannot carry — an accent, a non-Latin script —
+    goes out as big-endian UTF-16 `0xAE`, so a player who types "olá" gets the
+    accent back intact. A player could only have typed such text through `0xAD` to
+    begin with, so the content test doubles as the client-capability one, sidestepping
+    that the game connection never states its version.
+  - [x] speech *modes* widening or narrowing the range: a whisper (`;`, mode 8)
+    carries three tiles, a yell (`!`, mode 9) thirty-one, everything else the
+    eighteen-tile screen — Sphere's `DISTANCEWHISPER`/`DISTANCETALK`/`DISTANCEYELL`
+    defaults, chosen by the mode byte the client already sends. `speak` picks the
+    range; the rest of the path is unchanged.
+  - [ ] the guarded/GM command layer (`/`-prefixed speech, privilege-gated) — a
+    system of its own, waiting on accounts carrying a privilege level
 - [ ] `housing`, `guilds`
 
 The bridge is event-driven today: the server calls the script's `onEvent`, not a

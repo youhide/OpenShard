@@ -63,6 +63,7 @@ mod login;
 mod mobile;
 mod packet;
 mod seed;
+mod speech;
 mod version;
 mod world;
 
@@ -90,6 +91,10 @@ pub use packet::{
     SEED_LENGTH_NEW, SEED_LENGTH_OLD,
 };
 pub use seed::{Seed, SeedReader, SEED_COMMAND};
+pub use speech::{
+    encode_message, encode_unicode_message, TalkRequest, UnicodeTalkRequest, DEFAULT_LANGUAGE_TAG,
+    NO_GRAPHIC, SYSTEM_SERIAL,
+};
 pub use version::{ClientVersion, Era, ParseVersionError};
 pub use world::{
     encode_light_level, encode_login_complete, encode_map_change, encode_walk_ack,

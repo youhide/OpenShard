@@ -47,7 +47,9 @@ pub type Serial = u32;
 /// script is another reader of the same bus. The engine both forwards each to
 /// the script's handler and updates its own read model from it, which is what
 /// lets a hook read a mobile's position without asking the world.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize)]
+// Not `Copy`: `MobileSpoke` carries the words, an owned `String`. The engine
+// clones an event to hand it to V8, which is the sparse path anyway.
+#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize)]
 #[serde(tag = "type")]
 pub enum Event {
     /// A character entered the world.
@@ -115,6 +117,13 @@ pub enum Event {
         /// Whether the cast took.
         success: bool,
     },
+    /// A mobile spoke: the hook for chat commands, keyword answers, NPC dialogue.
+    MobileSpoke {
+        /// The speaker's wire identity.
+        serial: Serial,
+        /// What was said.
+        text: String,
+    },
 }
 
 /// What a script asks the world to do.
@@ -122,7 +131,9 @@ pub enum Event {
 /// A script never touches the world directly; it enqueues one of these and the
 /// tick applies it, in order, on the tick's thread. The vocabulary is small on
 /// purpose — the spike proves the path, gameplay (§6) fills it in.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+// Not `Copy`: `Speak` carries an owned `String`. Commands are drained by value,
+// so `Clone` is all the engine asks of them.
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Command {
     /// Move a mobile one step in a direction (0–7, N clockwise), the world to
     /// validate it exactly as it validates a client's step.
@@ -232,6 +243,17 @@ pub enum Command {
         /// The skill id it rolls (Magery).
         skill: u8,
     },
+    /// Set a mobile's stats; strength and intelligence re-cap hits and mana.
+    SetStats {
+        /// Whose.
+        serial: Serial,
+        /// Strength.
+        strength: u16,
+        /// Dexterity.
+        dexterity: u16,
+        /// Intelligence.
+        intelligence: u16,
+    },
     /// Set a mobile's skill value, in tenths.
     SetSkill {
         /// Whose.
@@ -250,6 +272,15 @@ pub enum Command {
         skill: u8,
         /// The difficulty, 0–100.
         difficulty: u16,
+    },
+    /// Make a mobile speak — an NPC's line, a keyword answer.
+    Speak {
+        /// Who.
+        serial: Serial,
+        /// The colour.
+        hue: u16,
+        /// The words.
+        text: String,
     },
 }
 

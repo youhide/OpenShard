@@ -321,6 +321,18 @@ impl PacketWriter {
         }
         self.bytes.push(0);
     }
+
+    /// Write a big-endian UTF-16 string followed by a NUL code unit.
+    ///
+    /// The Unicode counterpart of [`null_terminated_string`](Self::null_terminated_string),
+    /// for the packets (`0xAE` speech) whose whole point is text ASCII cannot
+    /// carry — an accent, a non-Latin script.
+    pub fn null_terminated_string_utf16(&mut self, value: &str) {
+        for unit in value.encode_utf16() {
+            self.u16(unit);
+        }
+        self.u16(0);
+    }
 }
 
 /// Narrow a character to one Latin-1 byte, substituting `?` when it does not fit.
