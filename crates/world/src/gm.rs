@@ -13,9 +13,9 @@
 //! themselves, the same "emit, don't reimplement" the rest of the world follows.
 
 use openshard_entities::EntityId;
-use openshard_protocol::{encode_message, Point};
-use openshard_state::components::{Client, Movement, Position, Stats};
-use openshard_state::WorldState;
+use openshard_protocol::{encode_message, encode_target_cursor, Point};
+use openshard_state::components::{Client, Position, Stats};
+use openshard_state::{TargetPurpose, WorldState};
 
 use openshard_items as items;
 use openshard_skills as skills;
@@ -44,7 +44,8 @@ pub fn run(state: &mut WorldState, actor: EntityId, rest: &str) {
 
     match command.to_lowercase().as_str() {
         "where" => where_am_i(state, actor),
-        "tele" | "go" => teleport(state, actor, &args),
+        "tele" => teleport_cursor(state, actor),
+        "go" => go_to(state, actor, &args),
         "add" => add_item(state, actor, &args),
         "set" => set_stat(state, actor, &args),
         "admin" => crate::admin::open_menu(state, actor),
@@ -65,15 +66,14 @@ fn where_am_i(state: &mut WorldState, actor: EntityId) {
     );
 }
 
-/// `.tele <x> <y> [z]` — move the actor there, landing on the ground when no z is
-/// given. The move goes through the same interest refresh a walk does, so every
-/// screen it should appear on and leave is updated.
-fn teleport(state: &mut WorldState, actor: EntityId, args: &[&str]) {
+/// `.go <x> <y> [z]` — jump to coordinates, landing on the ground when no z is
+/// given. Sphere's `.go`. The instant teleport with a cursor is `.tele`.
+fn go_to(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     let (Some(x), Some(y)) = (
         args.first().and_then(parse_u16),
         args.get(1).and_then(parse_u16),
     ) else {
-        notify(state, actor, "Usage: .tele <x> <y> [z]");
+        notify(state, actor, "Usage: .go <x> <y> [z]");
         return;
     };
     let facet = state.facet_of(actor);
@@ -85,18 +85,33 @@ fn teleport(state: &mut WorldState, actor: EntityId, args: &[&str]) {
             .or_else(|| state.registry.get::<Position>(actor).map(|p| p.0.z))
             .unwrap_or(0),
     };
-    let to = Point::new(x, y, z);
+    state.teleport(actor, Point::new(x, y, z));
+    notify(state, actor, &format!("Went to {x}, {y}, {z}."));
+}
 
-    state.registry.insert(actor, Position(to));
-    // The walker carries its own copy of the position; leave it in step or the
-    // next walk starts from the old tile.
-    if let Some(Movement(mut walker)) = state.registry.get::<Movement>(actor).copied() {
-        walker.position = to;
-        state.registry.insert(actor, Movement(walker));
-    }
-    state.facet_state_mut(facet).sectors.insert(actor, to);
-    state.refresh_around(actor);
-    notify(state, actor, &format!("Teleported to {x}, {y}, {z}."));
+/// `.tele` — Sphere's cursor teleport: raise a targeting cursor, and jump to the
+/// spot the game master clicks. The click comes back as a `0x6C` the world routes
+/// to [`crate::gm::teleport_to`].
+fn teleport_cursor(state: &mut WorldState, actor: EntityId) {
+    let Some(&Client { connection, .. }) = state.registry.get::<Client>(actor) else {
+        return;
+    };
+    let serial = state.registry.serial_of(actor).map_or(0, |s| s.raw());
+    // Remember this game master is targeting for a teleport, so the click knows
+    // what it is for.
+    state.pending_targets.insert(actor, TargetPurpose::Teleport);
+    state.send(connection, encode_target_cursor(serial));
+}
+
+/// Finish a `.tele`: the game master clicked a spot; jump there. Called from the
+/// world's `0x6C` handler with the clicked location.
+pub(crate) fn teleport_to(state: &mut WorldState, actor: EntityId, to: Point) {
+    state.teleport(actor, to);
+    notify(
+        state,
+        actor,
+        &format!("Teleported to {}, {}, {}.", to.x, to.y, to.z),
+    );
 }
 
 /// `.add <graphic> [amount]` — drop an item at the actor's feet. Hex (`0x1bf2`)

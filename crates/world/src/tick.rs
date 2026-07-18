@@ -40,8 +40,9 @@ use openshard_protocol::{
 use tracing::{debug, info, warn};
 
 use openshard_state::components::{
-    Access, Account, Body, Brain, Client, Combat, DamageType, Facet, Heading, Hitpoints, Mana,
-    MeleeDamage, Movement, Name, Position, Resistance, Scripted, SpawnedBy, Stats, SwingSpeed,
+    Access, Account, Body, Brain, Client, Combat, Container, DamageType, Decoration, Door, Facet,
+    Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name, Position, Resistance, Scripted,
+    SpawnedBy, Stats, SwingSpeed,
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
@@ -153,6 +154,37 @@ pub struct Appearance {
     pub hue: u16,
 }
 
+/// One door in a [`Command::Decorate`] batch. The closed/open graphics and the
+/// hinge offset are already resolved by whoever places it (the pack does the
+/// door-family arithmetic); the world only stores and toggles.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DecorDoor {
+    /// The shut graphic.
+    pub closed: u16,
+    /// The open graphic.
+    pub open: u16,
+    /// East/west hinge swing.
+    pub offset_x: i16,
+    /// North/south hinge swing.
+    pub offset_y: i16,
+    /// Where it sits, shut.
+    pub position: Point,
+}
+
+/// One container in a [`Command::Decorate`] batch — a town chest or crate that
+/// opens onto a gump.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DecorContainer {
+    /// The item graphic.
+    pub graphic: u16,
+    /// The gump the client opens for it.
+    pub gump: u16,
+    /// Its hue, or 0.
+    pub hue: u16,
+    /// Where.
+    pub position: Point,
+}
+
 /// Something for the world to do, from outside the world.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Command {
@@ -210,6 +242,14 @@ pub enum Command {
         /// The decoded response: which gump, which button, and any fields.
         response: openshard_protocol::GumpResponse,
     },
+    /// A client answered a targeting cursor — a `0x6C`. Routed to whatever raised
+    /// the cursor; today that is the `.tele` command.
+    TargetResponse {
+        /// Which connection answered.
+        connection: ConnectionId,
+        /// The decoded response: what was clicked, or a cancel.
+        response: openshard_protocol::TargetResponse,
+    },
     /// The script pack registers a spawn region — an area the tick then keeps
     /// populated. See [`crate::spawner`].
     RegisterSpawner {
@@ -219,6 +259,22 @@ pub enum Command {
     /// Remove every spawn region and despawn the creatures they were maintaining —
     /// what the admin menu's "Clear spawns" does.
     ClearSpawners,
+    /// Place a batch of decoration: script-added statics — signs, furniture — on
+    /// top of the static art the map already draws, plus the interactive kinds:
+    /// doors that open on double-click and containers that open onto a gump. See
+    /// [`Decoration`], [`Door`] and [`Container`].
+    Decorate {
+        /// Which facet.
+        facet: u8,
+        /// The plain statics to place, as `(graphic, hue, position)`.
+        statics: Vec<(u16, u16, Point)>,
+        /// The doors to place.
+        doors: Vec<DecorDoor>,
+        /// The containers to place.
+        containers: Vec<DecorContainer>,
+    },
+    /// Remove every script-placed decoration.
+    ClearDecorations,
     /// The server moves a mobile one step — a script or AI decree, not a client
     /// request.
     ///
@@ -579,6 +635,7 @@ impl World {
                 ticks: 0,
                 outbox: Vec::new(),
                 open_containers: HashMap::new(),
+                pending_targets: HashMap::new(),
                 gameplay: Gameplay::default(),
             },
             journal: Journal::new(),
@@ -754,6 +811,7 @@ impl World {
         combat::decay_murders(&mut self.state);
         magic::regen_mana(&mut self.state);
         items::decay(&mut self.state);
+        items::close_doors(&mut self.state);
         self.maintain_spawners();
 
         // Before the bus retires anything: what happened is what needs saving,
@@ -916,8 +974,19 @@ impl World {
                 connection,
                 response,
             } => self.handle_admin_gump(connection, response),
+            Command::TargetResponse {
+                connection,
+                response,
+            } => self.handle_target(connection, response),
             Command::RegisterSpawner { spawner } => self.spawners.push(spawner),
             Command::ClearSpawners => self.clear_spawners(),
+            Command::Decorate {
+                facet,
+                statics,
+                doors,
+                containers,
+            } => self.decorate(facet, &statics, &doors, &containers),
+            Command::ClearDecorations => self.clear_decorations(),
             Command::Step { serial, direction } => self.step(serial, direction),
             Command::SpawnItem {
                 graphic,
@@ -1619,6 +1688,30 @@ impl World {
         Some(entity)
     }
 
+    /// Act on a targeting cursor's answer. Looks up what the cursor was raised for
+    /// and, if the click was not cancelled, does it. A cancel just clears the
+    /// pending target.
+    fn handle_target(
+        &mut self,
+        connection: ConnectionId,
+        response: openshard_protocol::TargetResponse,
+    ) {
+        let Some(&actor) = self.state.players.get(&connection) else {
+            return;
+        };
+        let Some(purpose) = self.state.pending_targets.remove(&actor) else {
+            return; // no cursor was up for this mobile
+        };
+        if response.cancelled {
+            return;
+        }
+        match purpose {
+            openshard_state::TargetPurpose::Teleport => {
+                crate::gm::teleport_to(&mut self.state, actor, response.location);
+            }
+        }
+    }
+
     /// Act on an admin-gump button. The gump crate reads the response and gates it
     /// (game-master only); the acting — registering or clearing spawn regions,
     /// which only the tick can touch — is here.
@@ -1731,6 +1824,117 @@ impl World {
         }
     }
 
+    /// Place a batch of decoration: script-added statics the shard puts on top of
+    /// the map's art, plus the interactive kinds — doors and containers. Each is an
+    /// item — a `Graphic` and a `Position`, drawn to clients through the same
+    /// `0x1A`/interest path as any item — but marked [`Decoration`], so it never
+    /// decays and cannot be picked up. A door also carries [`Door`] (toggled by
+    /// double-click) and a container [`Container`] (opened by double-click). See
+    /// [`crate::gm`] and `items::pick_up`.
+    fn decorate(
+        &mut self,
+        facet: u8,
+        statics: &[(u16, u16, Point)],
+        doors: &[DecorDoor],
+        containers: &[DecorContainer],
+    ) {
+        let facet = if self.state.facets.contains_key(&facet) {
+            facet
+        } else {
+            self.state.default_facet
+        };
+        // A closure that spawns one decoration item at a tile and reveals it,
+        // returning the entity so the caller can hang a `Door` or `Container` on
+        // it. `None` when the serial pool is empty.
+        for &(graphic, hue, position) in statics {
+            if self
+                .place_decoration(facet, graphic, hue, position)
+                .is_none()
+            {
+                return;
+            }
+        }
+        for door in doors {
+            let Some(entity) = self.place_decoration(facet, door.closed, 0, door.position) else {
+                return;
+            };
+            self.state.registry.insert(
+                entity,
+                Door {
+                    closed: door.closed,
+                    open: door.open,
+                    offset_x: door.offset_x,
+                    offset_y: door.offset_y,
+                    is_open: false,
+                    close_at: 0,
+                },
+            );
+        }
+        for container in containers {
+            let Some(entity) =
+                self.place_decoration(facet, container.graphic, container.hue, container.position)
+            else {
+                return;
+            };
+            self.state.registry.insert(
+                entity,
+                Container {
+                    gump: container.gump,
+                },
+            );
+        }
+    }
+
+    /// Spawn one decoration item — a `Graphic`, `Position`, `Facet` and the
+    /// [`Decoration`] marker — index it and draw it to everyone in range. Returns
+    /// its entity, or `None` if the item-serial pool is empty (the caller stops the
+    /// batch).
+    fn place_decoration(
+        &mut self,
+        facet: u8,
+        graphic: u16,
+        hue: u16,
+        position: Point,
+    ) -> Option<EntityId> {
+        let Ok((entity, _serial)) = self.state.registry.spawn_with_serial(SerialKind::Item) else {
+            warn!("out of item serials; stopping decoration");
+            return None;
+        };
+        self.state
+            .registry
+            .insert(entity, Graphic { id: graphic, hue });
+        self.state.registry.insert(entity, Position(position));
+        self.state.registry.insert(entity, Facet(facet));
+        self.state.registry.insert(entity, Decoration);
+        self.state
+            .facet_state_mut(facet)
+            .sectors
+            .insert(entity, position);
+        self.state.reveal(entity);
+        Some(entity)
+    }
+
+    /// Remove every script-placed decoration — "Clear deco".
+    fn clear_decorations(&mut self) {
+        let placed: Vec<EntityId> = self
+            .state
+            .registry
+            .query::<Decoration>()
+            .map(|(entity, _)| entity)
+            .collect();
+        for entity in placed {
+            let serial = self.state.registry.serial_of(entity);
+            let facet = self.state.facet_of(entity);
+            if let Some(serial) = serial {
+                for watcher in self.state.watchers_of(entity) {
+                    self.state.forget(watcher, entity, serial);
+                }
+            }
+            self.state.facet_state_mut(facet).sectors.remove(entity);
+            self.state.registry.despawn(entity);
+        }
+    }
+
     /// Give every brain due a beat. The deciding is [`ai::think_one`]'s; the world
     /// only applies the one thing a brain cannot do itself — a step — since it
     /// owns movement. A creature that gets a `Combat` from the brain is fought by
@@ -1813,6 +2017,8 @@ impl World {
         let Some(entity) = self.state.players.remove(&connection) else {
             return;
         };
+        // Forget any targeting cursor it had up: a gone mobile clicks nothing.
+        self.state.pending_targets.remove(&entity);
         let serial = self.state.registry.serial_of(entity);
         let facet = self.state.facet_of(entity);
 
@@ -4974,11 +5180,11 @@ pub(crate) mod tests {
         let gm = enter_gm(&mut world, now);
         let entity = world.state.players[&gm];
 
-        // Teleport.
+        // Teleport by coordinates — Sphere's `.go`.
         gm_say(
             &mut world,
             gm,
-            &format!(".tele {} {}", START.0 + 5, START.1 + 7),
+            &format!(".go {} {}", START.0 + 5, START.1 + 7),
             now,
         );
         let Position(at) = *world.registry().get::<Position>(entity).unwrap();
@@ -5011,6 +5217,71 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn tele_raises_a_cursor_and_the_click_teleports() {
+        let now = Instant::now();
+        let mut world = world();
+        let gm = enter_gm(&mut world, now);
+        let entity = world.state.players[&gm];
+        let _ = packets_for(&mut world, gm);
+
+        // `.tele` raises a targeting cursor and does not move the GM yet.
+        gm_say(&mut world, gm, ".tele", now);
+        assert!(
+            packets_for(&mut world, gm).iter().any(|p| p[0] == 0x6C),
+            "a targeting cursor is sent"
+        );
+        let before = *world.registry().get::<Position>(entity).unwrap();
+        assert_eq!(
+            before.0.x, START.0,
+            "the GM has not moved on raising the cursor"
+        );
+
+        // The click comes back as a 0x6C response; the GM jumps to the spot.
+        let target = Point::new(START.0 + 9, START.1 + 3, before.0.z);
+        world.queue(Command::TargetResponse {
+            connection: gm,
+            response: openshard_protocol::TargetResponse {
+                cursor_id: 0,
+                serial: 0,
+                location: target,
+                graphic: 0,
+                cancelled: false,
+            },
+        });
+        world.tick(now);
+        let Position(at) = *world.registry().get::<Position>(entity).unwrap();
+        assert_eq!(
+            (at.x, at.y),
+            (target.x, target.y),
+            "the click teleported the GM"
+        );
+    }
+
+    #[test]
+    fn a_cancelled_tele_does_not_move() {
+        let now = Instant::now();
+        let mut world = world();
+        let gm = enter_gm(&mut world, now);
+        let entity = world.state.players[&gm];
+
+        gm_say(&mut world, gm, ".tele", now);
+        let before = *world.registry().get::<Position>(entity).unwrap();
+        world.queue(Command::TargetResponse {
+            connection: gm,
+            response: openshard_protocol::TargetResponse {
+                cursor_id: 0,
+                serial: 0,
+                location: Point::new(START.0 + 9, START.1 + 3, before.0.z),
+                graphic: 0,
+                cancelled: true,
+            },
+        });
+        world.tick(now);
+        let after = *world.registry().get::<Position>(entity).unwrap();
+        assert_eq!(before.0, after.0, "a right-clicked cursor moves nobody");
+    }
+
+    #[test]
     fn admin_opens_a_gump_for_a_game_master() {
         let now = Instant::now();
         let mut world = world();
@@ -5039,6 +5310,226 @@ pub(crate) mod tests {
             packets_for(&mut world, gm).iter().any(|p| p[0] == 0x1C),
             "the button is acted on"
         );
+    }
+
+    #[test]
+    fn decorate_places_statics_and_clear_removes_them() {
+        use openshard_state::components::Decoration;
+        let now = Instant::now();
+        let mut world = world();
+        let _gm = enter_gm(&mut world, now);
+
+        world.queue(Command::Decorate {
+            facet: 0,
+            statics: vec![
+                (0x07C1, 0, Point::new(START.0 + 1, START.1, 0)),
+                (0x08DA, 0, Point::new(START.0 + 2, START.1, 0)),
+            ],
+            doors: Vec::new(),
+            containers: Vec::new(),
+        });
+        world.tick(now);
+        assert_eq!(
+            world.registry().query::<Decoration>().count(),
+            2,
+            "both decorations were placed"
+        );
+        // Decoration never decays.
+        let decor = world.registry().query::<Decoration>().next().unwrap().0;
+        assert!(
+            !world.registry().has::<Decays>(decor),
+            "decoration does not rot"
+        );
+
+        world.queue(Command::ClearDecorations);
+        world.tick(now);
+        assert_eq!(
+            world.registry().query::<Decoration>().count(),
+            0,
+            "clear removed the decoration"
+        );
+    }
+
+    #[test]
+    fn decoration_cannot_be_picked_up() {
+        use openshard_state::components::Decoration;
+        let now = Instant::now();
+        let mut world = world();
+        let gm = enter_gm(&mut world, now);
+        world.queue(Command::Decorate {
+            facet: 0,
+            statics: vec![(0x07C1, 0, Point::new(START.0, START.1, 0))],
+            doors: Vec::new(),
+            containers: Vec::new(),
+        });
+        world.tick(now);
+        let decor = world.registry().query::<Decoration>().next().unwrap().0;
+        let serial = world.registry().serial_of(decor).unwrap().raw();
+        let _ = packets_for(&mut world, gm);
+
+        world.queue(Command::PickUpItem {
+            connection: gm,
+            serial,
+            amount: 1,
+        });
+        world.tick(now);
+
+        assert!(
+            !world.state.held.contains_key(&gm),
+            "a town's fittings are not loot"
+        );
+        assert!(
+            packets_for(&mut world, gm).iter().any(|p| p[0] == 0x27),
+            "the lift is refused with a drag-cancel"
+        );
+    }
+
+    #[test]
+    fn a_door_opens_and_closes_on_double_click() {
+        let now = Instant::now();
+        let mut world = world();
+        let gm = enter_gm(&mut world, now);
+        // A metal door one tile from the GM, well within reach.
+        let at = Point::new(START.0 + 1, START.1, 0);
+        world.queue(Command::Decorate {
+            facet: 0,
+            statics: Vec::new(),
+            doors: vec![DecorDoor {
+                closed: 0x0675,
+                open: 0x0676,
+                offset_x: -1,
+                offset_y: 1,
+                position: at,
+            }],
+            containers: Vec::new(),
+        });
+        world.tick(now);
+        let door = world.registry().query::<Door>().next().unwrap().0;
+        let serial = world.registry().serial_of(door).unwrap().raw();
+
+        // Double-click opens it: the graphic becomes the open art and it hops by
+        // the hinge offset.
+        world.queue(Command::DoubleClick {
+            connection: gm,
+            serial,
+        });
+        world.tick(now);
+        assert_eq!(
+            world.registry().get::<Graphic>(door).unwrap().id,
+            0x0676,
+            "the door drew open"
+        );
+        assert_eq!(
+            world.registry().get::<Position>(door).unwrap().0,
+            Point::new(START.0, START.1 + 1, 0),
+            "it swung aside by its hinge offset"
+        );
+        assert!(world.registry().get::<Door>(door).unwrap().is_open);
+
+        // Double-clicking again shuts it and returns it to its frame.
+        world.queue(Command::DoubleClick {
+            connection: gm,
+            serial,
+        });
+        world.tick(now);
+        assert_eq!(world.registry().get::<Graphic>(door).unwrap().id, 0x0675);
+        assert_eq!(world.registry().get::<Position>(door).unwrap().0, at);
+        assert!(!world.registry().get::<Door>(door).unwrap().is_open);
+    }
+
+    #[test]
+    fn an_open_door_swings_shut_on_its_own() {
+        let now = Instant::now();
+        let mut world = world();
+        let gm = enter_gm(&mut world, now);
+        let at = Point::new(START.0 + 1, START.1, 0);
+        world.queue(Command::Decorate {
+            facet: 0,
+            statics: Vec::new(),
+            doors: vec![DecorDoor {
+                closed: 0x0675,
+                open: 0x0676,
+                offset_x: -1,
+                offset_y: 1,
+                position: at,
+            }],
+            containers: Vec::new(),
+        });
+        world.tick(now);
+        let door = world.registry().query::<Door>().next().unwrap().0;
+        let serial = world.registry().serial_of(door).unwrap().raw();
+
+        world.queue(Command::DoubleClick {
+            connection: gm,
+            serial,
+        });
+        world.tick(now);
+        assert!(world.registry().get::<Door>(door).unwrap().is_open);
+
+        // Run past the auto-close delay: the door closes itself, untouched.
+        let close_at = world.registry().get::<Door>(door).unwrap().close_at;
+        while world.state.ticks < close_at {
+            world.tick(now);
+        }
+        assert!(
+            !world.registry().get::<Door>(door).unwrap().is_open,
+            "the door swung shut on its own"
+        );
+        assert_eq!(world.registry().get::<Position>(door).unwrap().0, at);
+    }
+
+    #[test]
+    fn a_decoration_container_opens_on_double_click() {
+        let now = Instant::now();
+        let mut world = world();
+        let gm = enter_gm(&mut world, now);
+        world.queue(Command::Decorate {
+            facet: 0,
+            statics: Vec::new(),
+            doors: Vec::new(),
+            containers: vec![DecorContainer {
+                graphic: 0x0E42,
+                gump: 0x49,
+                hue: 0,
+                position: Point::new(START.0 + 1, START.1, 0),
+            }],
+        });
+        world.tick(now);
+        // The one container that is decoration — the GM also wears a backpack,
+        // which is a container too.
+        let chest = world
+            .registry()
+            .query::<Container>()
+            .map(|(entity, _)| entity)
+            .find(|&entity| world.registry().has::<Decoration>(entity))
+            .expect("a decoration container is on the ground");
+        let serial = world.registry().serial_of(chest).unwrap().raw();
+        let _ = packets_for(&mut world, gm);
+
+        world.queue(Command::DoubleClick {
+            connection: gm,
+            serial,
+        });
+        world.tick(now);
+        assert!(
+            packets_for(&mut world, gm).iter().any(|p| p[0] == 0x24),
+            "the container gump opened"
+        );
+    }
+
+    #[test]
+    fn the_deco_button_emits_the_pack_verb() {
+        let now = Instant::now();
+        let mut world = world();
+        let gm = enter_gm(&mut world, now);
+        let mut actions: Cursor<AdminMenuAction> = world.bus().cursor();
+
+        world.queue(admin_response(gm, 20)); // Decorate Britain
+        world.tick(now);
+
+        let events: Vec<AdminMenuAction> = world.bus().read(&mut actions).cloned().collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].action, "decorate:britain");
     }
 
     #[test]

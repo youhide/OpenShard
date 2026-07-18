@@ -371,6 +371,44 @@ fn into_world(command: ScriptCommand) -> Command {
             ),
         },
         ScriptCommand::ClearSpawners => Command::ClearSpawners,
+        ScriptCommand::Decorate {
+            facet,
+            statics,
+            doors,
+            containers,
+        } => Command::Decorate {
+            facet,
+            statics: statics
+                .into_iter()
+                .map(|s| {
+                    (
+                        s.graphic,
+                        s.hue,
+                        openshard_protocol::Point::new(s.x, s.y, s.z),
+                    )
+                })
+                .collect(),
+            doors: doors
+                .into_iter()
+                .map(|d| openshard_world::DecorDoor {
+                    closed: d.closed,
+                    open: d.open,
+                    offset_x: d.offset_x,
+                    offset_y: d.offset_y,
+                    position: openshard_protocol::Point::new(d.x, d.y, d.z),
+                })
+                .collect(),
+            containers: containers
+                .into_iter()
+                .map(|c| openshard_world::DecorContainer {
+                    graphic: c.graphic,
+                    gump: c.gump,
+                    hue: c.hue,
+                    position: openshard_protocol::Point::new(c.x, c.y, c.z),
+                })
+                .collect(),
+        },
+        ScriptCommand::ClearDecorations => Command::ClearDecorations,
     }
 }
 

@@ -440,6 +440,117 @@ fn op_clear_spawners(state: &mut OpState) {
         .push(Command::ClearSpawners);
 }
 
+/// One placed decoration in a [`DecorSpec`].
+#[derive(serde::Deserialize)]
+struct DecorStaticSpec {
+    graphic: u16,
+    #[serde(default)]
+    hue: u16,
+    x: u16,
+    y: u16,
+    #[serde(default)]
+    z: i8,
+}
+
+/// One placed door in a [`DecorSpec`].
+#[derive(serde::Deserialize)]
+struct DecorDoorSpec {
+    closed: u16,
+    open: u16,
+    #[serde(default)]
+    offset_x: i16,
+    #[serde(default)]
+    offset_y: i16,
+    x: u16,
+    y: u16,
+    #[serde(default)]
+    z: i8,
+}
+
+/// One placed container in a [`DecorSpec`].
+#[derive(serde::Deserialize)]
+struct DecorContainerSpec {
+    graphic: u16,
+    gump: u16,
+    #[serde(default)]
+    hue: u16,
+    x: u16,
+    y: u16,
+    #[serde(default)]
+    z: i8,
+}
+
+/// A batch of decoration:
+/// `op_decorate({ facet, statics: [...], doors: [...], containers: [...] })`.
+#[derive(serde::Deserialize)]
+struct DecorSpec {
+    #[serde(default)]
+    facet: u8,
+    #[serde(default)]
+    statics: Vec<DecorStaticSpec>,
+    #[serde(default)]
+    doors: Vec<DecorDoorSpec>,
+    #[serde(default)]
+    containers: Vec<DecorContainerSpec>,
+}
+
+/// Place a batch of decoration the shard adds on top of the map's art: plain
+/// statics, openable doors, and openable containers.
+#[op2]
+fn op_decorate(state: &mut OpState, #[serde] spec: DecorSpec) {
+    let statics = spec
+        .statics
+        .into_iter()
+        .map(|s| crate::DecorStatic {
+            graphic: s.graphic,
+            hue: s.hue,
+            x: s.x,
+            y: s.y,
+            z: s.z,
+        })
+        .collect();
+    let doors = spec
+        .doors
+        .into_iter()
+        .map(|d| crate::DecorDoor {
+            closed: d.closed,
+            open: d.open,
+            offset_x: d.offset_x,
+            offset_y: d.offset_y,
+            x: d.x,
+            y: d.y,
+            z: d.z,
+        })
+        .collect();
+    let containers = spec
+        .containers
+        .into_iter()
+        .map(|c| crate::DecorContainer {
+            graphic: c.graphic,
+            gump: c.gump,
+            hue: c.hue,
+            x: c.x,
+            y: c.y,
+            z: c.z,
+        })
+        .collect();
+    state.borrow_mut::<Host>().outbox.push(Command::Decorate {
+        facet: spec.facet,
+        statics,
+        doors,
+        containers,
+    });
+}
+
+/// Remove every script-placed decoration.
+#[op2(fast)]
+fn op_clear_decorations(state: &mut OpState) {
+    state
+        .borrow_mut::<Host>()
+        .outbox
+        .push(Command::ClearDecorations);
+}
+
 extension!(
     openshard_ops,
     ops = [
@@ -457,7 +568,9 @@ extension!(
         op_use_skill,
         op_say,
         op_register_spawner,
-        op_clear_spawners
+        op_clear_spawners,
+        op_decorate,
+        op_clear_decorations
     ],
     docs = "OpenShard's script-facing ops: read entity state, enqueue commands.",
 );
@@ -881,6 +994,101 @@ mod tests {
                     swing: 0,
                     sight: 8,
                     wander: false,
+                }],
+            }]
+        );
+    }
+
+    #[test]
+    fn a_hook_can_decorate() {
+        // The pack places a batch of statics on top of the map's art.
+        let mut engine = DenoEngine::new();
+        engine
+            .load(
+                "function onEvent(e) {\n\
+                 if (e.type === 'AdminAction' && e.action === 'decorate:britain') {\n\
+                     Deno.core.ops.op_decorate({ statics: [\n\
+                         { graphic: 0x07C1, x: 1436, y: 1559, z: 30 },\n\
+                         { graphic: 0x08DA, x: 1424, y: 1715, z: 20 }] });\n\
+                 }\n\
+                 }",
+            )
+            .unwrap();
+        engine
+            .deliver(&Event::AdminAction {
+                serial: 1,
+                action: "decorate:britain".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(
+            engine.take_commands(),
+            vec![Command::Decorate {
+                facet: 0,
+                statics: vec![
+                    crate::DecorStatic {
+                        graphic: 0x07C1,
+                        hue: 0,
+                        x: 1436,
+                        y: 1559,
+                        z: 30
+                    },
+                    crate::DecorStatic {
+                        graphic: 0x08DA,
+                        hue: 0,
+                        x: 1424,
+                        y: 1715,
+                        z: 20
+                    },
+                ],
+                doors: vec![],
+                containers: vec![],
+            }]
+        );
+    }
+
+    #[test]
+    fn a_hook_can_place_doors_and_containers() {
+        // The same op carries the interactive decoration: a door (its graphics and
+        // hinge offset already resolved) and a container with its gump.
+        let mut engine = DenoEngine::new();
+        engine
+            .load(
+                "function onEvent(e) {\n\
+                 if (e.type === 'AdminAction' && e.action === 'decorate:britain') {\n\
+                     Deno.core.ops.op_decorate({\n\
+                         doors: [{ closed: 0x0675, open: 0x0676, offset_x: -1, offset_y: 1, x: 1411, y: 1621, z: 30 }],\n\
+                         containers: [{ graphic: 0x0E42, gump: 0x49, x: 1500, y: 1600, z: 0 }] });\n\
+                 }\n\
+                 }",
+            )
+            .unwrap();
+        engine
+            .deliver(&Event::AdminAction {
+                serial: 1,
+                action: "decorate:britain".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(
+            engine.take_commands(),
+            vec![Command::Decorate {
+                facet: 0,
+                statics: vec![],
+                doors: vec![crate::DecorDoor {
+                    closed: 0x0675,
+                    open: 0x0676,
+                    offset_x: -1,
+                    offset_y: 1,
+                    x: 1411,
+                    y: 1621,
+                    z: 30,
+                }],
+                containers: vec![crate::DecorContainer {
+                    graphic: 0x0E42,
+                    gump: 0x49,
+                    hue: 0,
+                    x: 1500,
+                    y: 1600,
+                    z: 0,
                 }],
             }]
         );

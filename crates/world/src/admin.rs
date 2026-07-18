@@ -21,6 +21,8 @@ pub const ADMIN_GUMP: u32 = 0x00AD_0001;
 const BTN_POPULATE_BRITAIN: u32 = 10;
 const BTN_POPULATE_CEMETERY: u32 = 11;
 const BTN_CLEAR: u32 = 12;
+const BTN_DECORATE_BRITAIN: u32 = 20;
+const BTN_CLEAR_DECO: u32 = 21;
 
 /// Open the admin menu for `actor`. The caller has already checked the authority
 /// (the `.admin` command is game-master-gated), so this only draws.
@@ -28,23 +30,30 @@ pub fn open_menu(state: &mut WorldState, actor: EntityId) {
     let Some(&Client { connection, .. }) = state.registry.get::<Client>(actor) else {
         return;
     };
-    // A small tabbed window. Page 0 is always drawn (title + the tab buttons);
-    // each further page is a tab's contents. Only the Spawn tab has anything yet.
+    // A tabbed window: page 0 is always drawn (the title and the tab buttons that
+    // switch pages), and each further page is a tab's contents.
     let layout = "\
 { resizepic 0 0 5054 320 260 }\
 { page 0 }\
 { text 120 12 2100 0 }\
 { button 18 44 4005 4007 0 1 0 }{ text 52 46 1153 1 }\
+{ button 130 44 4005 4007 0 2 0 }{ text 164 46 1153 5 }\
 { page 1 }\
 { button 30 92 4005 4007 1 0 10 }{ text 66 94 1153 2 }\
 { button 30 124 4005 4007 1 0 11 }{ text 66 126 1153 3 }\
-{ button 30 168 4017 4019 1 0 12 }{ text 66 170 33 4 }";
+{ button 30 168 4017 4019 1 0 12 }{ text 66 170 33 4 }\
+{ page 2 }\
+{ button 30 92 4005 4007 1 0 20 }{ text 66 94 1153 6 }\
+{ button 30 136 4017 4019 1 0 21 }{ text 66 138 33 7 }";
     let lines = [
         "Admin".to_owned(),
         "Spawn".to_owned(),
         "Populate Britain".to_owned(),
         "Populate cemetery".to_owned(),
         "Clear spawns".to_owned(),
+        "Deco".to_owned(),
+        "Decorate Britain".to_owned(),
+        "Clear deco".to_owned(),
     ];
     // The context serial is the game master's own — a non-zero value the client
     // keys the open gump on and echoes back. A zero here can leave some clients
@@ -83,6 +92,8 @@ pub fn button_action(
         BTN_POPULATE_BRITAIN => "populate:britain",
         BTN_POPULATE_CEMETERY => "populate:cemetery",
         BTN_CLEAR => "clear",
+        BTN_DECORATE_BRITAIN => "decorate:britain",
+        BTN_CLEAR_DECO => "clear:deco",
         _ => return None, // the close box, or a button we do not know
     };
     Some((actor, verb))

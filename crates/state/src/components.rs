@@ -147,6 +147,44 @@ pub struct Name(pub String);
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Account(pub String);
 
+/// Marks an item as script-placed decoration: a sign, a piece of furniture, an
+/// ankh — the things a shard adds on top of the static art the client's map
+/// already draws.
+///
+/// It sets the item apart from loose clutter: decoration never decays and cannot
+/// be picked up (a town's fittings are not loot), and clearing decoration finds
+/// its items by this. Placed through `op_decorate`; the client draws it as an
+/// ordinary `0x1A` item.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Decoration;
+
+/// Marks an item as a door: a decoration that opens and closes on double-click.
+///
+/// A UO door is two graphics and a small position shift. Closed it draws
+/// `closed`; opened it draws `open` (always `closed + 1` in the client's art) and
+/// hops one tile off its frame by `(offset_x, offset_y)` — the hinge swing. The
+/// same double-click toggles it back. `open_at` is the tick the door auto-closes
+/// on, mirroring the real client's self-closing door; `0` means it is shut.
+///
+/// The graphic and offset are the client's, computed once from ServUO's door
+/// tables when the pack places the door, so the engine stays a generic toggle and
+/// knows nothing about door *families*.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Door {
+    /// The graphic drawn while shut.
+    pub closed: u16,
+    /// The graphic drawn while open.
+    pub open: u16,
+    /// How far the door hops east/west when it swings open.
+    pub offset_x: i16,
+    /// How far it hops north/south.
+    pub offset_y: i16,
+    /// Whether the door is currently open.
+    pub is_open: bool,
+    /// The tick it auto-closes on when open; `0` when shut.
+    pub close_at: u64,
+}
+
 /// Which spawn region put this mobile here — an index into the world's spawner
 /// list.
 ///

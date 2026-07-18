@@ -346,6 +346,76 @@ pub enum Command {
     },
     /// Remove every spawn region and the creatures they were maintaining.
     ClearSpawners,
+    /// Place decoration: script-added statics — signs, furniture — the shard puts
+    /// on top of the static art the client's map already draws. In a batch,
+    /// because a city is many at once.
+    Decorate {
+        /// Which facet.
+        facet: u8,
+        /// The plain statics to place.
+        statics: Vec<DecorStatic>,
+        /// The doors to place — decoration that opens on double-click.
+        doors: Vec<DecorDoor>,
+        /// The containers to place — decoration that opens onto a gump.
+        containers: Vec<DecorContainer>,
+    },
+    /// Remove every script-placed decoration.
+    ClearDecorations,
+}
+
+/// One placed decoration — a graphic at a tile. The batch a
+/// [`Decorate`](Command::Decorate) carries.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DecorStatic {
+    /// The tiledata graphic id.
+    pub graphic: u16,
+    /// Its hue, or 0.
+    pub hue: u16,
+    /// Where.
+    pub x: u16,
+    /// Where.
+    pub y: u16,
+    /// Where.
+    pub z: i8,
+}
+
+/// One placed door — a decoration that opens and closes. The pack computes the
+/// closed/open graphics and the hinge offset from the door's facing; the engine
+/// only toggles.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DecorDoor {
+    /// The shut graphic (open is `closed + 1`, but carried explicitly).
+    pub closed: u16,
+    /// The open graphic.
+    pub open: u16,
+    /// East/west hinge swing.
+    pub offset_x: i16,
+    /// North/south hinge swing.
+    pub offset_y: i16,
+    /// Where.
+    pub x: u16,
+    /// Where.
+    pub y: u16,
+    /// Where.
+    pub z: i8,
+}
+
+/// One placed container — a decoration that opens onto a gump, like a town chest
+/// or crate.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DecorContainer {
+    /// The item graphic.
+    pub graphic: u16,
+    /// The gump the client opens for it (from the client's container table).
+    pub gump: u16,
+    /// Its hue, or 0.
+    pub hue: u16,
+    /// Where.
+    pub x: u16,
+    /// Where.
+    pub y: u16,
+    /// Where.
+    pub z: i8,
 }
 
 /// One creature a spawn region may put down — the template a

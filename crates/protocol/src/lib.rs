@@ -67,6 +67,7 @@ mod mobile;
 mod packet;
 mod seed;
 mod speech;
+mod target;
 mod version;
 mod world;
 
@@ -104,6 +105,7 @@ pub use speech::{
     encode_message, encode_unicode_message, TalkRequest, UnicodeTalkRequest, DEFAULT_LANGUAGE_TAG,
     NO_GRAPHIC, SYSTEM_SERIAL,
 };
+pub use target::{encode_target_cursor, TargetResponse};
 pub use version::{ClientVersion, Era, ParseVersionError};
 pub use world::{
     encode_light_level, encode_login_complete, encode_map_change, encode_walk_ack,

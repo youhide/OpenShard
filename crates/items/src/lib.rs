@@ -18,11 +18,11 @@ use openshard_protocol::{
     Point, DROP_TO_GROUND, PAPERDOLL_CAN_LIFT, PAPERDOLL_WARMODE,
 };
 use openshard_state::components::{
-    Amount, Body, Client, Combat, Contained, Container, Decays, Equipped, Facet, Graphic, Name,
-    Position, Stackable,
+    Amount, Body, Client, Combat, Contained, Container, Decays, Decoration, Door, Equipped, Facet,
+    Graphic, Name, Position, Stackable,
 };
 use openshard_state::sectors::in_range;
-use openshard_state::{HeldItem, Origin, Outbound, WorldState};
+use openshard_state::{HeldItem, Origin, Outbound, WorldState, TICKS_PER_SECOND};
 use tracing::{debug, warn};
 
 /// How near, in tiles, a mobile must be to reach an item on the ground or set one
@@ -167,9 +167,9 @@ pub fn mark_decay(state: &mut WorldState, item: EntityId) {
 
 /// Handle a double-click. See `Command::DoubleClick`.
 ///
-/// A container opens its gump; a mobile shows its paperdoll. Anything else is
-/// ignored rather than answered — "use" for a door or a piece of food is a later
-/// rule, and a wrong guess is worse than silence.
+/// A door toggles open or shut; a container opens its gump; a mobile shows its
+/// paperdoll. Anything else is ignored rather than answered — "use" for a piece
+/// of food is a later rule, and a wrong guess is worse than silence.
 pub fn double_click(state: &mut WorldState, connection: ConnectionId, serial: u32) {
     let Some(&player) = state.players.get(&connection) else {
         return;
@@ -181,13 +181,132 @@ pub fn double_click(state: &mut WorldState, connection: ConnectionId, serial: u3
         return;
     };
 
-    // A container opens its gump; a mobile shows its paperdoll; anything else is
-    // a "use" rule not written yet, and a wrong guess is worse than silence.
-    if state.registry.has::<Container>(target) {
+    // A door toggles; a container opens its gump; a mobile shows its paperdoll;
+    // anything else is a "use" rule not written yet, and a wrong guess is worse
+    // than silence. A door is checked before Container because it is neither — it
+    // is its own interaction.
+    if state.registry.has::<Door>(target) {
+        toggle_door(state, player, target, target_serial);
+    } else if state.registry.has::<Container>(target) {
         open_container(state, connection, player, target, target_serial);
     } else if state.registry.has::<Body>(target) {
         open_paperdoll(state, connection, player, target, target_serial);
     }
+}
+
+/// How long a door stays open before it swings shut on its own, in ticks —
+/// roughly the classic client's self-closing delay.
+const DOOR_OPEN_TICKS: u64 = 20 * TICKS_PER_SECOND;
+
+/// Open or close a door the player double-clicked, if it is in reach.
+///
+/// The toggle is the whole mechanic: swap the graphic between the door's shut and
+/// open art, and hop it one tile by its hinge offset (and back when it shuts), so
+/// the client draws the leaf swinging aside. Opening also arms the auto-close
+/// tick; closing disarms it.
+pub fn toggle_door(state: &mut WorldState, player: EntityId, door: EntityId, serial: Serial) {
+    let Some(&Position(at)) = state.registry.get::<Position>(door) else {
+        return;
+    };
+    let Some(&Position(player_pos)) = state.registry.get::<Position>(player) else {
+        return;
+    };
+    if state.facet_of(door) != state.facet_of(player) || !in_range(at, player_pos, ITEM_REACH) {
+        return;
+    }
+    let Some(is_open) = state.registry.get::<Door>(door).map(|d| d.is_open) else {
+        return;
+    };
+    set_door(state, door, serial, !is_open);
+}
+
+/// Put a door into the open or closed state, redrawing it for everyone who can see
+/// it. Shared by the double-click toggle and the tick's auto-close; neither
+/// checks reach here — the caller does when a player is involved.
+///
+/// The move is pushed to every watcher as a fresh `0x1A` after a forget, because
+/// the door both changed graphic and changed tile, and a client only redraws what
+/// it was told to forget.
+fn set_door(state: &mut WorldState, door: EntityId, serial: Serial, open: bool) {
+    let Some(&Position(at)) = state.registry.get::<Position>(door) else {
+        return;
+    };
+    let Some(&Door {
+        closed,
+        open: open_id,
+        offset_x,
+        offset_y,
+        is_open,
+        ..
+    }) = state.registry.get::<Door>(door)
+    else {
+        return;
+    };
+    if is_open == open {
+        return; // already there — nothing to redraw
+    }
+
+    // Opening hops the leaf aside by its offset; closing hops it back. The x/y are
+    // world tiles and the offset is a small signed step, so saturate at the edges
+    // rather than wrap.
+    let (graphic, moved, close_at) = if open {
+        (
+            open_id,
+            shift(at, offset_x, offset_y),
+            state.ticks + DOOR_OPEN_TICKS,
+        )
+    } else {
+        (closed, shift(at, -offset_x, -offset_y), 0)
+    };
+
+    for watcher in state.watchers_of(door) {
+        state.forget(watcher, door, serial);
+    }
+    let facet = state.facet_of(door);
+    state.registry.insert(
+        door,
+        Graphic {
+            id: graphic,
+            hue: 0,
+        },
+    );
+    state.registry.insert(door, Position(moved));
+    state.registry.insert(
+        door,
+        Door {
+            closed,
+            open: open_id,
+            offset_x,
+            offset_y,
+            is_open: open,
+            close_at,
+        },
+    );
+    state.facet_state_mut(facet).sectors.insert(door, moved);
+    state.reveal(door);
+}
+
+/// Swing shut every door whose auto-close tick has arrived. Driven by the tick
+/// counter, like decay, so a door closes on the same tick in a replay. See
+/// [`Door`].
+pub fn close_doors(state: &mut WorldState) {
+    let now = state.ticks;
+    let due: Vec<(EntityId, Serial)> = state
+        .registry
+        .query::<Door>()
+        .filter(|(_, door)| door.is_open && door.close_at != 0 && door.close_at <= now)
+        .filter_map(|(entity, _)| state.registry.serial_of(entity).map(|s| (entity, s)))
+        .collect();
+    for (door, serial) in due {
+        set_door(state, door, serial, false);
+    }
+}
+
+/// A tile stepped by a small signed offset, clamped at the map edge.
+fn shift(at: Point, dx: i16, dy: i16) -> Point {
+    let x = (i32::from(at.x) + i32::from(dx)).clamp(0, i32::from(u16::MAX)) as u16;
+    let y = (i32::from(at.y) + i32::from(dy)).clamp(0, i32::from(u16::MAX)) as u16;
+    Point::new(x, y, at.z)
 }
 
 /// Open a container onto the acting client, if it may reach it.
@@ -594,6 +713,11 @@ pub fn pick_up(state: &mut WorldState, connection: ConnectionId, serial: u32, am
     // Only a thing with a graphic is an item. A mobile has none, so this
     // rejects trying to pick up a person.
     if !state.registry.has::<Graphic>(item) {
+        reject_drag(state, connection, DragCancelReason::CannotLift);
+        return;
+    }
+    // A town's fittings are not loot: script-placed decoration cannot be lifted.
+    if state.registry.has::<Decoration>(item) {
         reject_drag(state, connection, DragCancelReason::CannotLift);
         return;
     }

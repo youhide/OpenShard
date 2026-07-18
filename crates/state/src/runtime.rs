@@ -20,11 +20,12 @@ use openshard_gateway::ConnectionId;
 use openshard_movement::Terrain;
 use openshard_protocol::{
     encode_health, encode_remove, ClientVersion, Equipment, MobileIncoming, MobileMove, Notoriety,
-    Point, WorldItem,
+    PlayerUpdate, Point, WorldItem,
 };
 
 use crate::components::{
-    Amount, Body, Client, Contained, Equipped, Facet, Graphic, Heading, Hitpoints, Position,
+    Amount, Body, Client, Contained, Equipped, Facet, Graphic, Heading, Hitpoints, Movement,
+    Position,
 };
 use crate::rng::Rng;
 use crate::sectors::{Sectors, VIEW_RANGE};
@@ -210,8 +211,18 @@ pub struct WorldState {
     /// an item consumed as a reagent, one decaying inside — can be pushed to the
     /// clients looking at it. A connection's opens are cleared on logout.
     pub open_containers: HashMap<Serial, HashSet<ConnectionId>>,
+    /// Mobiles that have a targeting cursor up, and what the click is for. A `.tele`
+    /// raises one; the `0x6C` answer looks here to know what to do with the spot.
+    pub pending_targets: HashMap<EntityId, TargetPurpose>,
     /// The tunable rules — swing era, speech ranges, timers — the systems read.
     pub gameplay: Gameplay,
+}
+
+/// What a raised targeting cursor is waiting to do with the click.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TargetPurpose {
+    /// Teleport the targeter to the clicked spot — the cursor `.tele`.
+    Teleport,
 }
 
 impl WorldState {
@@ -300,6 +311,48 @@ impl WorldState {
 /// with the world — who to draw, who to forget, who to redraw on a move. Shared
 /// by every system that changes what a mobile looks like or where it stands.
 impl WorldState {
+    /// Move a mobile to `to` at once — a teleport, not a walk. Sets its position
+    /// everywhere the world tracks it, tells its own client to jump there, and
+    /// refreshes what it and everyone around it can see.
+    ///
+    /// The own-client `0x20` is the part a plain position write forgets: without
+    /// it the client keeps drawing its character at the old tile while the new
+    /// neighbours appear around where it used to stand — the "teleport did not
+    /// refresh" bug. A walk does not need this because the client predicts its own
+    /// step; a decree does, because the client was not expecting to move.
+    pub fn teleport(&mut self, entity: EntityId, to: Point) {
+        let facet = self.facet_of(entity);
+        self.registry.insert(entity, Position(to));
+        // Keep the walker's own copy in step, or the next walk starts from the old
+        // tile.
+        if let Some(Movement(mut walker)) = self.registry.get::<Movement>(entity).copied() {
+            walker.position = to;
+            self.registry.insert(entity, Movement(walker));
+        }
+        self.facet_state_mut(facet).sectors.insert(entity, to);
+
+        if let Some(&Client { connection, .. }) = self.registry.get::<Client>(entity) {
+            let serial = self.registry.serial_of(entity).map_or(0, |s| s.raw());
+            let body = self.registry.get::<Body>(entity);
+            let facing = self.registry.get::<Heading>(entity).map(|h| h.0);
+            if let (Some(body), Some(facing)) = (body, facing) {
+                self.send(
+                    connection,
+                    PlayerUpdate {
+                        serial,
+                        body: body.id,
+                        hue: body.hue,
+                        flags: 0,
+                        position: to,
+                        facing,
+                    }
+                    .encode(),
+                );
+            }
+        }
+        self.refresh_around(entity);
+    }
+
     /// Bring `entity`'s neighbourhood up to date, both ways.
     ///
     /// Whoever it can see, and whoever can see it. Both, because visibility is

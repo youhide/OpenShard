@@ -30,10 +30,12 @@ pub mod sectors;
 
 pub use components::{
     Access, Account, Amount, Body, Brain, Client, Combat, Contained, Container, CriminalUntil,
-    DamageType, Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement,
-    MurderDecay, Murders, Name, Position, Resistance, Scripted, Skills, SpawnedBy, Stackable,
-    Stats, SwingSpeed,
+    DamageType, Decays, Decoration, Door, Equipped, Facet, Graphic, Heading, Hitpoints, Mana,
+    MeleeDamage, Movement, MurderDecay, Murders, Name, Position, Resistance, Scripted, Skills,
+    SpawnedBy, Stackable, Stats, SwingSpeed,
 };
 pub use rng::Rng;
-pub use runtime::{FacetState, Gameplay, HeldItem, Origin, Outbound, WorldState, TICKS_PER_SECOND};
+pub use runtime::{
+    FacetState, Gameplay, HeldItem, Origin, Outbound, TargetPurpose, WorldState, TICKS_PER_SECOND,
+};
 pub use sectors::{distance, in_range, Sectors, SECTOR_SIZE, VIEW_RANGE};

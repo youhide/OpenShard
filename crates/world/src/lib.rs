@@ -63,6 +63,6 @@ pub use openshard_state::{
     Murders, Name, Position, Resistance, Scripted, Skills, Stackable, Stats, SwingSpeed,
 };
 pub use terrain::{MapTerrain, MAX_STEP_UP, PLAYER_HEIGHT};
-pub use tick::{Appearance, Command, World, TICK_INTERVAL};
+pub use tick::{Appearance, Command, DecorContainer, DecorDoor, World, TICK_INTERVAL};
 pub use tiledata::{LandTile, StaticTile, TileData, TileDataError, TileDataFormat, TileFlags};
 pub use uop::UopError;

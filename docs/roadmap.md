@@ -490,11 +490,36 @@ Roughly in dependency order, each script-first:
     master's `.`-prefixed speech is split off in the `Command::Say` handler and
     run as a command instead of reaching anyone's screen; an ordinary player
     saying `.hello` just talks, so there is no leak and no surprise. The commands
-    — `.where`, `.tele`, `.add`, `.set` — lean on the systems that own their rules
-    (`items` spawns, `skills` re-caps the stat) rather than reaching into the
-    registry, and answer the actor privately with a `0x1C` system line. The gate
-    lives in the world, not the `gm` module, so a command function may assume its
-    caller cleared it. The vocabulary grows one verb at a time in `world::gm`.
+    — `.where`, `.go`, `.tele`, `.add`, `.set`, `.admin` — lean on the systems
+    that own their rules (`items` spawns, `skills` re-caps the stat) rather than
+    reaching into the registry, and answer the actor privately with a `0x1C`
+    system line. `.go <x> <y>` jumps to coordinates; `.tele` raises a targeting
+    cursor (`0x6C`) and jumps to the tile clicked — Sphere's split, and the
+    teleport pushes a `0x20` to the mover's own client so the screen refreshes on
+    the spot rather than a step late. The gate lives in the world, not the `gm`
+    module, so a command function may assume its caller cleared it. The vocabulary
+    grows one verb at a time in `world::gm`.
+  - [x] **The `.admin` gump and a pack-driven world.** `.admin` opens a staff-only
+    gump (`0xB0`, answered on `0xB1`, re-checked GM+ on the button, not only on
+    open) whose buttons populate cities and lay down decoration. The *data* lives
+    in the community pack (`scripting.main`), not the engine: a button emits an
+    `AdminAction` event the pack reads, and the pack answers with `op_register_spawner`
+    and `op_decorate` — so spawns and scenery are edited in a hot-reloaded script,
+    no rebuild. **Spawners** are tick-maintained regions (`maintain_spawners`): a
+    region holds creature templates, a max count and a respawn delay in ticks, and
+    a `SpawnedBy` marker lets it refill as its creatures die — replayable, like
+    decay. **Decoration** is what a shard adds on top of the map's static art, in
+    three kinds, all marked `Decoration` (never decays, never lifts): plain
+    statics (walls, signs, furniture), **doors** that toggle open/shut on
+    double-click and swing closed on their own (`Door`, a two-graphic-plus-hinge
+    toggle in `items`, auto-closed by the tick), and **containers** that open onto
+    a gump (town chests, crates, barrels — reusing the `Container` open path,
+    placed empty). The whole of Britain is migrated from ServUO's `britain.cfg`
+    (door graphics/offsets from its door tables, container gumps from the client's
+    own `containers.cfg`), resolved to raw graphics *at pack time* so the engine
+    stays a generic toggle/open and knows nothing of door or container families.
+    Still deferred: container **loot tables**, door **keys/locks**, and the
+    furniture/addon *behaviours* (a real armoire versus a scenery one).
 - [ ] `housing`, `guilds`
 
 The bridge is event-driven today: the server calls the script's `onEvent`, not a

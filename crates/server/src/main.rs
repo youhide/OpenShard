@@ -34,8 +34,8 @@ use openshard_persistence::{
 use openshard_protocol::{
     encode_login_denied, huffman, AccessLevel, AttackRequest, CastSpellRequest, CharacterPlay,
     ClientVersion, CreateCharacter, DoubleClick, DropItem, EquipItemRequest, GameServerLogin,
-    GumpResponse, PickUpItem, Point, StartLocation, TalkRequest, UnicodeTalkRequest, WalkRequest,
-    WarModeRequest,
+    GumpResponse, PickUpItem, Point, StartLocation, TalkRequest, TargetResponse,
+    UnicodeTalkRequest, WalkRequest, WarModeRequest,
 };
 use openshard_world::{
     Appearance, Command, Gameplay, Map, MapTerrain, TileData, World, TICK_INTERVAL,
@@ -650,6 +650,20 @@ fn dispatch(
                 return false;
             };
             world.queue(Command::GumpResponse {
+                connection: id,
+                response,
+            });
+            true
+        }
+        Some(TargetResponse::ID) => {
+            if !session.in_world {
+                return true;
+            }
+            let Ok(response) = TargetResponse::decode(packet) else {
+                warn!(%id, "malformed 0x6C");
+                return false;
+            };
+            world.queue(Command::TargetResponse {
                 connection: id,
                 response,
             });
