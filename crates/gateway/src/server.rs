@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use openshard_protocol::ClientVersion;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -62,6 +63,11 @@ pub enum ServerEvent {
         address: SocketAddr,
         /// Send bytes back through this.
         outbox: mpsc::UnboundedSender<Vec<u8>>,
+        /// Tell the framer the client's version through this, once the server has
+        /// resolved it (a game connection carries none of its own). Needed for the
+        /// handful of client packets whose length changed across eras — the drop
+        /// packet, today. See [`Connection::set_version`].
+        control: mpsc::UnboundedSender<ClientVersion>,
     },
     /// The connection produced something.
     Received {
@@ -149,12 +155,14 @@ async fn serve(
 
     let (mut reader, mut writer) = stream.into_split();
     let (outbox, mut outgoing) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (control, control_rx) = mpsc::unbounded_channel::<ClientVersion>();
 
     if events
         .send(ServerEvent::Connected {
             id,
             address,
             outbox,
+            control,
         })
         .is_err()
     {
@@ -170,7 +178,7 @@ async fn serve(
         }
     });
 
-    let reason = read_loop(id, &mut reader, &events).await;
+    let reason = read_loop(id, &mut reader, &events, control_rx).await;
 
     writes.abort();
     let _ = events.send(ServerEvent::Disconnected { id, reason });
@@ -178,19 +186,40 @@ async fn serve(
 }
 
 /// Read until the socket closes or the client breaks the protocol.
+///
+/// Also listens on `control` for the client version the server resolves out of
+/// band (a game connection sends none itself), so the framer can size the packets
+/// whose length changed across eras. The two are raced: a version and a read are
+/// both things that can happen next, and neither may block the other.
 async fn read_loop(
     id: ConnectionId,
     reader: &mut tokio::net::tcp::OwnedReadHalf,
     events: &mpsc::UnboundedSender<ServerEvent>,
+    mut control: mpsc::UnboundedReceiver<ClientVersion>,
 ) -> Option<String> {
     let mut connection = Connection::new();
     let mut buffer = [0u8; 4096];
+    // Once the server drops the control end, stop selecting on it: a closed
+    // channel's `recv` is ready instantly and forever, which would spin the loop
+    // and never read the socket. The guard disables that branch for good.
+    let mut control_open = true;
 
     loop {
-        let count = match reader.read(&mut buffer).await {
-            Ok(0) => return None, // clean close
-            Ok(count) => count,
-            Err(error) => return Some(error.to_string()),
+        let count = tokio::select! {
+            // A version update only sets state; it yields no event, so loop back
+            // to keep waiting on the socket.
+            version = control.recv(), if control_open => {
+                match version {
+                    Some(version) => connection.set_version(version),
+                    None => control_open = false,
+                }
+                continue;
+            }
+            read = reader.read(&mut buffer) => match read {
+                Ok(0) => return None, // clean close
+                Ok(count) => count,
+                Err(error) => return Some(error.to_string()),
+            },
         };
         connection.receive(&buffer[..count]);
 

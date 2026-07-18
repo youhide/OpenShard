@@ -1,7 +1,7 @@
 //! One client connection, as a state machine that has never heard of a socket.
 
 use openshard_protocol::{
-    frame_client_packet, Frame, FrameError, Seed, SeedReader, MAX_PACKET_SIZE,
+    frame_client_packet, ClientVersion, Frame, FrameError, Seed, SeedReader, MAX_PACKET_SIZE,
 };
 
 /// Something a connection produced.
@@ -120,6 +120,17 @@ pub struct Connection {
     seed_reader: SeedReader,
     /// Bytes received but not yet consumed by the handshake or the framer.
     inbox: Vec<u8>,
+    /// The client's version, once the server has resolved it and told us.
+    ///
+    /// `None` until then, which frames the drop packet (`0x08`) in its older,
+    /// shorter form — see [`frame_client_packet`]. A game connection carries no
+    /// version of its own (only the auth key does), so the server learns it from
+    /// the paired login connection and pushes it down with [`set_version`]. A
+    /// `0x08` cannot arrive before that, because a client must be in the world to
+    /// drag an item.
+    ///
+    /// [`set_version`]: Connection::set_version
+    version: Option<ClientVersion>,
 }
 
 impl Default for Connection {
@@ -135,7 +146,15 @@ impl Connection {
             state: State::Handshake,
             seed_reader: SeedReader::new(),
             inbox: Vec::new(),
+            version: None,
         }
+    }
+
+    /// Tell the framer which client this is, so it can size the packets whose
+    /// length changed across eras. Idempotent; the server may call it more than
+    /// once with the same version.
+    pub fn set_version(&mut self, version: ClientVersion) {
+        self.version = Some(version);
     }
 
     /// Hand over bytes that arrived. Never fails; [`Connection::poll`] reports.
@@ -183,7 +202,7 @@ impl Connection {
     }
 
     fn poll_packet(&mut self) -> Result<Option<Event>, ConnectionError> {
-        match frame_client_packet(&self.inbox)? {
+        match frame_client_packet(&self.inbox, self.version)? {
             Frame::Incomplete { .. } => Ok(None),
             Frame::Complete(length) => {
                 // `drain` memmoves the tail down. A ring buffer would not, but a
@@ -307,6 +326,55 @@ mod tests {
         assert_eq!(events[1], Event::Packet(vec![0xAD, 0x00, 0x05, 0xAA, 0xBB]));
         assert_eq!(events[2], Event::Packet(vec![0x73, 0x00]));
         assert_eq!(connection.buffered(), 0);
+    }
+
+    #[test]
+    fn the_drop_packet_is_framed_by_the_set_version() {
+        // The item-drop disconnect: a modern client's 0x08 is fifteen bytes, and
+        // a framer that thinks it is fourteen leaves a stray byte that reframes as
+        // "unknown packet 0xFF". With the version set, the whole fifteen frame.
+        let drop15: Vec<u8> = {
+            let mut p = vec![0x08];
+            p.extend_from_slice(&0x4000_002Au32.to_be_bytes()); // serial
+            p.extend_from_slice(&1000u16.to_be_bytes()); // x
+            p.extend_from_slice(&2000u16.to_be_bytes()); // y
+            p.push(5); // z
+            p.push(0); // grid slot (the fifteenth-byte difference)
+            p.extend_from_slice(&0xFFFF_FFFFu32.to_be_bytes()); // drop to ground
+            p
+        };
+        assert_eq!(drop15.len(), 15);
+
+        // Version unknown: 0x08 frames as fourteen, so a fifteen-byte drop leaves
+        // one byte over — and that byte, 0xFF (the low byte of the ground
+        // target), reframes as an unknown packet and drops the connection. This
+        // is the exact bug, reproduced.
+        let mut legacy = Connection::new();
+        legacy.receive(&modern_seed());
+        drain(&mut legacy).unwrap();
+        legacy.receive(&drop15);
+        assert_eq!(
+            legacy.poll().unwrap(),
+            Some(Event::Packet(drop15[..14].to_vec())),
+            "the framer takes only fourteen"
+        );
+        assert_eq!(
+            legacy.poll(),
+            Err(ConnectionError::Frame(FrameError::UnknownPacket(0xFF))),
+            "the stranded byte is the disconnect the user saw"
+        );
+
+        // Version set to a grid-capable client: the whole fifteen frame cleanly.
+        let mut modern = Connection::new();
+        modern.receive(&modern_seed());
+        drain(&mut modern).unwrap();
+        modern.set_version(ClientVersion::new(7, 0, 45, 65));
+        modern.receive(&drop15);
+        assert_eq!(
+            drain(&mut modern).unwrap(),
+            vec![Event::Packet(drop15.clone())]
+        );
+        assert_eq!(modern.buffered(), 0, "nothing left over");
     }
 
     #[test]

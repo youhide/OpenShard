@@ -123,21 +123,23 @@ impl PickUpItem {
     }
 }
 
-/// `0x08` — the client asks to put the dragged item down. 14 bytes.
+/// `0x08` — the client asks to put the dragged item down. 14 or 15 bytes.
 ///
-/// # The grid byte, and why this is the short form
+/// # The grid byte
 ///
 /// Where the item goes is [`container`](Self::container): a real item serial
 /// drops it *into* that container, a mobile serial equips it, and
 /// [`DROP_TO_GROUND`] (`0xFFFFFFFF`) drops it at [`position`](Self::position) on
 /// the ground.
 ///
-/// Newer clients (SA and up, and the enhanced client) slip a one-byte *grid
-/// index* in before the container serial, making the packet fifteen bytes. The
-/// game connection here defaults to the older dialect and frames `0x08` at
-/// fourteen, so this decodes the no-grid form; a client that sends the grid byte
-/// would need a version-gated length, which is a change to the framing table and
-/// this decoder together, not one of them alone.
+/// Clients from 6.0.1.7 on (SA, the enhanced client, and every modern 2D client
+/// including ClassicUO) slip a one-byte *grid index* in before the container
+/// serial, making the packet fifteen bytes. The framer version-gates the length
+/// on `Feature::ItemGrid`, so a slice reaching this decoder is either exactly
+/// fourteen or exactly fifteen bytes — and the length alone says which, so this
+/// reads the grid byte when it is there without needing the version again. The
+/// grid slot is discarded: the server places a ground drop by the cursor
+/// `x`/`y`/`z`, not the client's paperdoll grid cell.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DropItem {
     /// The item being dropped.
@@ -153,13 +155,22 @@ impl DropItem {
     /// The packet id.
     pub const ID: u8 = 0x08;
 
-    /// Decode a whole `0x08` packet, no-grid form.
+    /// The byte length of the grid-carrying form.
+    const GRID_FORM_LEN: usize = 15;
+
+    /// Decode a whole `0x08` packet, whichever form the framer delivered.
     pub fn decode(bytes: &[u8]) -> Result<Self, LoginDecodeError> {
         let mut reader = expect_id(bytes, Self::ID)?;
         let serial = reader.u32()?;
         let x = reader.u16()?;
         let y = reader.u16()?;
         let z = reader.u8()? as i8;
+        // The fifteen-byte form carries a grid-slot index here; read past it. The
+        // length is the only signal, and it is enough — the framer already chose
+        // it by version.
+        if bytes.len() >= Self::GRID_FORM_LEN {
+            let _grid = reader.u8()?;
+        }
         let container = reader.u32()?;
         Ok(Self {
             serial,
@@ -345,6 +356,31 @@ mod tests {
         assert_eq!(drop.serial, 0x4000_002A);
         assert_eq!(drop.position, Point::new(1000, 2000, 5));
         assert!(drop.to_ground());
+    }
+
+    #[test]
+    fn the_fifteen_byte_grid_form_reads_past_the_grid_slot() {
+        // The modern (6.0.1.7+) drop: a grid-index byte sits between z and the
+        // container serial. The bug was reading the container one byte early, so
+        // a ground drop's 0xFFFFFFFF decoded as 0x00FFFFFF and bounced. Here the
+        // grid byte is skipped and the container reads whole.
+        let mut bytes = vec![0x08];
+        bytes.extend_from_slice(&0x4000_002Au32.to_be_bytes());
+        bytes.extend_from_slice(&1000u16.to_be_bytes());
+        bytes.extend_from_slice(&2000u16.to_be_bytes());
+        bytes.push(5);
+        bytes.push(0x00); // grid slot
+        bytes.extend_from_slice(&DROP_TO_GROUND.to_be_bytes());
+        assert_eq!(bytes.len(), 15);
+
+        let drop = DropItem::decode(&bytes).unwrap();
+        assert_eq!(drop.serial, 0x4000_002A);
+        assert_eq!(drop.position, Point::new(1000, 2000, 5));
+        assert_eq!(drop.container, DROP_TO_GROUND);
+        assert!(
+            drop.to_ground(),
+            "the grid byte must not shift the container"
+        );
     }
 
     #[test]

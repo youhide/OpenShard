@@ -18,6 +18,9 @@
 
 use std::fmt;
 
+use crate::feature::Feature;
+use crate::version::ClientVersion;
+
 /// How long a packet is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum PacketLength {
@@ -120,13 +123,30 @@ pub enum Frame {
 /// `None` means unknown, which is fatal for a connection: without a length there
 /// is no way to find where the next packet starts.
 ///
+/// `version` is the connection's negotiated client version, once known. Almost
+/// every length is the same for every client and ignores it; the exception is the
+/// drop packet, whose body grew a byte across an era with no change of id, so the
+/// framer cannot tell the two forms apart without it. `None` — the state before a
+/// game login resolves the version — takes the older, shorter form; a client
+/// cannot drag an item before it is in the world, so a real `0x08` never arrives
+/// while the version is still unknown.
+///
 /// Ported from Sphere's `network/receive.h`. Server-to-client packets are not
 /// here — the server knows the length of what it writes.
 // The column alignment is load-bearing: this is a lookup table that gets read
 // against Sphere's, and rustfmt would reflow it into an unscannable list.
 #[rustfmt::skip]
-pub const fn client_packet_length(id: u8) -> Option<PacketLength> {
+pub fn client_packet_length(id: u8, version: Option<ClientVersion>) -> Option<PacketLength> {
     use PacketLength::{Fixed, Variable};
+    // The drop packet slipped a one-byte grid-location index in before the
+    // container serial in 6.0.1.7 (`Feature::ItemGrid`): fifteen bytes for a
+    // grid-capable client, fourteen for an older one. Same id, so only the
+    // version tells them apart — and framing it wrong desynchronises the whole
+    // client-to-server stream, one stray byte at a time.
+    if id == 0x08 {
+        let grid = version.is_some_and(|v| v.supports(Feature::ItemGrid));
+        return Some(Fixed(if grid { 15 } else { 14 }));
+    }
     Some(match id {
         0x00 => Fixed(104),  // create character
         0x02 => Fixed(7),    // movement request
@@ -134,7 +154,6 @@ pub const fn client_packet_length(id: u8) -> Option<PacketLength> {
         0x05 => Fixed(5),    // attack request
         0x06 => Fixed(5),    // double click
         0x07 => Fixed(7),    // pick up item
-        0x08 => Fixed(14),   // drop item
         0x09 => Fixed(5),    // single click
         0x12 => Variable,    // text command
         0x13 => Fixed(10),   // equip item
@@ -209,28 +228,35 @@ pub const fn client_packet_length(id: u8) -> Option<PacketLength> {
 /// the caller decides what to do with it. That keeps framing testable in
 /// isolation from any socket.
 ///
+/// `version` is the connection's client version once known, `None` before a game
+/// login resolves it. It only changes the length of the drop packet — see
+/// [`client_packet_length`].
+///
 /// ```
 /// use openshard_protocol::{frame_client_packet, Frame};
 ///
 /// // 0x73 ping is 2 bytes.
-/// assert_eq!(frame_client_packet(&[0x73, 0x00]), Ok(Frame::Complete(2)));
+/// assert_eq!(frame_client_packet(&[0x73, 0x00], None), Ok(Frame::Complete(2)));
 ///
 /// // Half a packet: wait for more.
 /// assert_eq!(
-///     frame_client_packet(&[0x73]),
+///     frame_client_packet(&[0x73], None),
 ///     Ok(Frame::Incomplete { needed: 2 }),
 /// );
 ///
 /// // 0xAD talk is variable; the u16 at offset 1 is the total length.
 /// let talk = [0xAD, 0x00, 0x05, 0xAA, 0xBB];
-/// assert_eq!(frame_client_packet(&talk), Ok(Frame::Complete(5)));
+/// assert_eq!(frame_client_packet(&talk, None), Ok(Frame::Complete(5)));
 /// ```
-pub fn frame_client_packet(buffer: &[u8]) -> Result<Frame, FrameError> {
+pub fn frame_client_packet(
+    buffer: &[u8],
+    version: Option<ClientVersion>,
+) -> Result<Frame, FrameError> {
     let Some(&id) = buffer.first() else {
         return Ok(Frame::Incomplete { needed: 1 });
     };
 
-    let length = client_packet_length(id).ok_or(FrameError::UnknownPacket(id))?;
+    let length = client_packet_length(id, version).ok_or(FrameError::UnknownPacket(id))?;
 
     match length {
         PacketLength::Fixed(size) => {
@@ -274,7 +300,7 @@ mod tests {
     #[test]
     fn known_packets_have_plausible_lengths() {
         for id in 0..=u8::MAX {
-            let Some(length) = client_packet_length(id) else {
+            let Some(length) = client_packet_length(id, None) else {
                 continue;
             };
             match length {
@@ -294,24 +320,78 @@ mod tests {
     fn spot_checks_against_spheres_table() {
         // A handful pinned by hand from Sphere's receive.h/receive.cpp. If the
         // table is ever regenerated, these are what catch a shift.
-        assert_eq!(client_packet_length(0x00), Some(PacketLength::Fixed(104)));
-        assert_eq!(client_packet_length(0x02), Some(PacketLength::Fixed(7)));
-        assert_eq!(client_packet_length(0x03), Some(PacketLength::Variable));
-        assert_eq!(client_packet_length(0x5D), Some(PacketLength::Fixed(73)));
-        assert_eq!(client_packet_length(0x80), Some(PacketLength::Fixed(62)));
-        assert_eq!(client_packet_length(0x91), Some(PacketLength::Fixed(65)));
-        assert_eq!(client_packet_length(0xBD), Some(PacketLength::Variable));
-        assert_eq!(client_packet_length(0xBF), Some(PacketLength::Variable));
-        assert_eq!(client_packet_length(0xD9), Some(PacketLength::Fixed(268)));
-        assert_eq!(client_packet_length(0xF8), Some(PacketLength::Fixed(106)));
+        assert_eq!(
+            client_packet_length(0x00, None),
+            Some(PacketLength::Fixed(104))
+        );
+        assert_eq!(
+            client_packet_length(0x02, None),
+            Some(PacketLength::Fixed(7))
+        );
+        assert_eq!(
+            client_packet_length(0x03, None),
+            Some(PacketLength::Variable)
+        );
+        assert_eq!(
+            client_packet_length(0x5D, None),
+            Some(PacketLength::Fixed(73))
+        );
+        assert_eq!(
+            client_packet_length(0x80, None),
+            Some(PacketLength::Fixed(62))
+        );
+        assert_eq!(
+            client_packet_length(0x91, None),
+            Some(PacketLength::Fixed(65))
+        );
+        assert_eq!(
+            client_packet_length(0xBD, None),
+            Some(PacketLength::Variable)
+        );
+        assert_eq!(
+            client_packet_length(0xBF, None),
+            Some(PacketLength::Variable)
+        );
+        assert_eq!(
+            client_packet_length(0xD9, None),
+            Some(PacketLength::Fixed(268))
+        );
+        assert_eq!(
+            client_packet_length(0xF8, None),
+            Some(PacketLength::Fixed(106))
+        );
+    }
+
+    #[test]
+    fn the_drop_packet_length_follows_the_client_version() {
+        // The bug this guards: a modern client sends a fifteen-byte 0x08 with a
+        // grid-index byte, and framing it as fourteen leaves a stray byte that
+        // desynchronises the whole stream.
+        let modern = ClientVersion::new(7, 0, 45, 65);
+        let ancient = ClientVersion::new(5, 0, 0, 0); // before ItemGrid (6.0.1.7)
+        assert_eq!(
+            client_packet_length(0x08, Some(modern)),
+            Some(PacketLength::Fixed(15)),
+            "a grid-capable client sends fifteen"
+        );
+        assert_eq!(
+            client_packet_length(0x08, Some(ancient)),
+            Some(PacketLength::Fixed(14)),
+            "a pre-6.0.1.7 client sends fourteen"
+        );
+        assert_eq!(
+            client_packet_length(0x08, None),
+            Some(PacketLength::Fixed(14)),
+            "before a version is known, the older form — a real 0x08 never arrives that early"
+        );
     }
 
     #[test]
     fn unknown_ids_are_unknown() {
         // 0x01 and 0x04 have no client-to-server meaning.
-        assert_eq!(client_packet_length(0x01), None);
-        assert_eq!(client_packet_length(0x04), None);
-        assert_eq!(client_packet_length(0xFF), None);
+        assert_eq!(client_packet_length(0x01, None), None);
+        assert_eq!(client_packet_length(0x04, None), None);
+        assert_eq!(client_packet_length(0xFF, None), None);
     }
 
     #[test]
@@ -319,9 +399,9 @@ mod tests {
         // 0xEF arrives before framing starts and can turn up as a lone byte in
         // its own TCP segment. In the table it would look like a permanently
         // truncated 21-byte packet, and the gateway would wait forever.
-        assert_eq!(client_packet_length(0xEF), None);
+        assert_eq!(client_packet_length(0xEF, None), None);
         assert_eq!(
-            frame_client_packet(&[0xEF]),
+            frame_client_packet(&[0xEF], None),
             Err(FrameError::UnknownPacket(0xEF)),
             "the gateway must read the seed before it starts framing"
         );
@@ -329,21 +409,27 @@ mod tests {
 
     #[test]
     fn frames_a_fixed_packet() {
-        assert_eq!(frame_client_packet(&[0x73, 0x00]), Ok(Frame::Complete(2)));
+        assert_eq!(
+            frame_client_packet(&[0x73, 0x00], None),
+            Ok(Frame::Complete(2))
+        );
     }
 
     #[test]
     fn a_fixed_packet_with_trailing_bytes_reports_only_its_own_length() {
         // TCP delivers whatever it likes; two packets often arrive together.
         let buffer = [0x73, 0x00, 0x73, 0x00];
-        assert_eq!(frame_client_packet(&buffer), Ok(Frame::Complete(2)));
-        assert_eq!(frame_client_packet(&buffer[2..]), Ok(Frame::Complete(2)));
+        assert_eq!(frame_client_packet(&buffer, None), Ok(Frame::Complete(2)));
+        assert_eq!(
+            frame_client_packet(&buffer[2..], None),
+            Ok(Frame::Complete(2))
+        );
     }
 
     #[test]
     fn an_empty_buffer_is_incomplete_not_an_error() {
         assert_eq!(
-            frame_client_packet(&[]),
+            frame_client_packet(&[], None),
             Ok(Frame::Incomplete { needed: 1 })
         );
     }
@@ -351,7 +437,7 @@ mod tests {
     #[test]
     fn a_partial_fixed_packet_asks_for_its_full_length() {
         assert_eq!(
-            frame_client_packet(&[0x00, 0x01, 0x02]),
+            frame_client_packet(&[0x00, 0x01, 0x02], None),
             Ok(Frame::Incomplete { needed: 104 })
         );
     }
@@ -359,7 +445,7 @@ mod tests {
     #[test]
     fn a_variable_packet_without_its_length_field_asks_for_three() {
         assert_eq!(
-            frame_client_packet(&[0xAD, 0x00]),
+            frame_client_packet(&[0xAD, 0x00], None),
             Ok(Frame::Incomplete { needed: 3 })
         );
     }
@@ -367,9 +453,9 @@ mod tests {
     #[test]
     fn frames_a_variable_packet() {
         let talk = [0xAD, 0x00, 0x05, 0xAA, 0xBB];
-        assert_eq!(frame_client_packet(&talk), Ok(Frame::Complete(5)));
+        assert_eq!(frame_client_packet(&talk, None), Ok(Frame::Complete(5)));
         assert_eq!(
-            frame_client_packet(&talk[..4]),
+            frame_client_packet(&talk[..4], None),
             Ok(Frame::Incomplete { needed: 5 })
         );
     }
@@ -379,7 +465,7 @@ mod tests {
         // There is no way to skip a packet of unknown length: the stream is
         // desynchronised from here on, so the connection has to go.
         assert_eq!(
-            frame_client_packet(&[0x01, 0x00, 0x00]),
+            frame_client_packet(&[0x01, 0x00, 0x00], None),
             Err(FrameError::UnknownPacket(0x01))
         );
     }
@@ -391,7 +477,7 @@ mod tests {
         for claimed in 0u16..3 {
             let [high, low] = claimed.to_be_bytes();
             assert_eq!(
-                frame_client_packet(&[0xAD, high, low, 0x00]),
+                frame_client_packet(&[0xAD, high, low, 0x00], None),
                 Err(FrameError::BadLength {
                     id: 0xAD,
                     claimed: claimed as usize
@@ -405,7 +491,7 @@ mod tests {
     fn an_oversized_length_is_rejected_before_anything_allocates() {
         let [high, low] = u16::MAX.to_be_bytes();
         assert_eq!(
-            frame_client_packet(&[0xBF, high, low]),
+            frame_client_packet(&[0xBF, high, low], None),
             Err(FrameError::BadLength {
                 id: 0xBF,
                 claimed: u16::MAX as usize
@@ -421,7 +507,7 @@ mod tests {
         let mut buffer = vec![0xBF, high, low];
         buffer.resize(MAX_PACKET_SIZE, 0);
         assert_eq!(
-            frame_client_packet(&buffer),
+            frame_client_packet(&buffer, None),
             Ok(Frame::Complete(MAX_PACKET_SIZE))
         );
     }
@@ -431,12 +517,12 @@ mod tests {
         // The property the read loop depends on: a Complete frame is never zero
         // bytes, or the caller spins.
         for id in 0..=u8::MAX {
-            if client_packet_length(id).is_none() {
+            if client_packet_length(id, None).is_none() {
                 continue;
             }
             let mut buffer = vec![id, 0x46, 0x50];
             buffer.resize(MAX_PACKET_SIZE, 0);
-            match frame_client_packet(&buffer) {
+            match frame_client_packet(&buffer, None) {
                 Ok(Frame::Complete(size)) => {
                     assert!(size > 0, "0x{id:02X} framed a zero-length packet")
                 }

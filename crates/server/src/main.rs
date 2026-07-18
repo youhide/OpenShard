@@ -33,8 +33,8 @@ use openshard_persistence::{
 };
 use openshard_protocol::{
     encode_login_denied, huffman, AccessLevel, AttackRequest, CastSpellRequest, CharacterPlay,
-    CreateCharacter, DoubleClick, DropItem, EquipItemRequest, GameServerLogin, PickUpItem, Point,
-    StartLocation, TalkRequest, UnicodeTalkRequest, WalkRequest, WarModeRequest,
+    ClientVersion, CreateCharacter, DoubleClick, DropItem, EquipItemRequest, GameServerLogin,
+    PickUpItem, Point, StartLocation, TalkRequest, UnicodeTalkRequest, WalkRequest, WarModeRequest,
 };
 use openshard_world::{
     Appearance, Command, Gameplay, Map, MapTerrain, TileData, World, TICK_INTERVAL,
@@ -399,6 +399,14 @@ async fn run_shard(
                 for snapshot in world.drain_saves() {
                     let _ = saves.send(snapshot);
                 }
+                // Keep the in-memory character list current with logouts, so a
+                // re-login this run finds a character where it left, not where it
+                // was at boot. The store gets the same record via the snapshot
+                // above; this is the copy a re-login can read before that lands.
+                for record in world.drain_departed() {
+                    let key = (record.account.to_lowercase(), record.name.to_lowercase());
+                    saved.insert(key, record);
+                }
                 // Feed the script this tick's events and queue its commands for
                 // the next one. After the drains, so a command a script emits is
                 // applied by a tick and leaves through this same path.
@@ -464,6 +472,7 @@ fn handle(
             id,
             address,
             outbox,
+            control,
         } => {
             info!(%id, %address, "connected");
             if relay_is_unreachable(address, advertised) {
@@ -483,6 +492,7 @@ fn handle(
                     in_world: false,
                     game: false,
                     outbox,
+                    control,
                 },
             );
         }
@@ -587,6 +597,12 @@ fn dispatch(
                 None => (None, None, None),
             };
             session.in_world = true;
+            // Tell the gateway framer this client's version now, before any
+            // in-world packet whose length depends on it (the drop packet). The
+            // game connection never stated its version; this is the auth-key-linked
+            // one the login carried across. Character select is the last quiet
+            // moment before world traffic starts.
+            let _ = session.control.send(session.login.version());
             world.queue(Command::Enter {
                 connection: id,
                 version: session.login.version(),
@@ -921,6 +937,12 @@ struct Session {
     /// set in `handle`.
     game: bool,
     outbox: mpsc::UnboundedSender<Vec<u8>>,
+    /// Tells the gateway framer this connection's client version. A game
+    /// connection sends no version of its own, so the framer defaults to the older
+    /// dialect until this carries the real one across — needed for the packets
+    /// whose length changed across eras (the drop packet). Sent at character
+    /// select, well before any in-world packet that depends on it.
+    control: mpsc::UnboundedSender<ClientVersion>,
 }
 
 impl Session {
@@ -1021,12 +1043,14 @@ mod tests {
 
     fn session(game: bool) -> (Session, mpsc::UnboundedReceiver<Vec<u8>>) {
         let (outbox, wire) = mpsc::unbounded_channel();
+        let (control, _control_rx) = mpsc::unbounded_channel();
         (
             Session {
                 login: LoginSession::new(),
                 in_world: false,
                 game,
                 outbox,
+                control,
             },
             wire,
         )

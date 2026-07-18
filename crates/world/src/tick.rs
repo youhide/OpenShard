@@ -501,6 +501,12 @@ pub struct World {
     save_every: u64,
     /// Snapshots the tick has taken and nobody has collected yet.
     saves: Vec<Snapshot>,
+    /// Characters that left this tick, with the state they left in. The server
+    /// drains these to keep its in-memory character list current, so a re-login in
+    /// the same run finds the character where it logged out — not where it was at
+    /// boot. The store gets the same record through the journal; this is the
+    /// immediate copy, because a re-login can beat the next deferred save.
+    departed: Vec<CharacterRecord>,
     /// Read to find out what to mark dirty. See `mark_dirty`.
     entered: Cursor<PlayerEntered>,
     /// Read to find out what to mark dirty. See `mark_dirty`.
@@ -552,6 +558,7 @@ impl World {
             journal: Journal::new(),
             save_every: SAVE_EVERY_TICKS,
             saves: Vec::new(),
+            departed: Vec::new(),
             entered: Cursor::default(),
             moved: Cursor::default(),
             turned: Cursor::default(),
@@ -649,6 +656,19 @@ impl World {
     /// answer being "write it to a disk in Frankfurt".
     pub fn drain_saves(&mut self) -> std::vec::Drain<'_, Snapshot> {
         self.saves.drain(..)
+    }
+
+    /// Take the records of characters that logged out since the last call.
+    ///
+    /// The server keeps an in-memory character list — where each stored character
+    /// was, so playing one spawns it back at its spot — seeded from the store at
+    /// boot. Without this it would go stale the moment a character moved and logged
+    /// out, and a re-login in the same run would rewind to the boot position. These
+    /// are the fresh records to fold in; the store gets the same data through the
+    /// journal, but a re-login can beat that deferred write, so this is the copy
+    /// that closes the gap.
+    pub fn drain_departed(&mut self) -> std::vec::Drain<'_, CharacterRecord> {
+        self.departed.drain(..)
     }
 
     /// How many entities are waiting to be saved.
@@ -1631,6 +1651,10 @@ impl World {
         // it is the only moment a player's whole session is at stake — so the
         // record is taken at the one instant it still can be.
         if let Some(record) = Self::record_of(&self.state.registry, entity) {
+            // The journal copy is for the store; the departed copy is for the
+            // server's in-memory character list, which a re-login reads before the
+            // deferred store save has necessarily landed.
+            self.departed.push(record.clone());
             self.journal.keep(record);
         }
 
@@ -5101,6 +5125,31 @@ pub(crate) mod tests {
             "a dead serial resolves to nothing"
         );
         assert_eq!(world.bus().read(&mut left).count(), 1);
+    }
+
+    #[test]
+    fn a_departing_character_carries_where_it_walked_to() {
+        // The re-login rewind bug: the world must hand the server the character's
+        // *current* position on logout, so the server's cache tracks the move and
+        // a re-login this run spawns it where it left — not where it logged in.
+        let mut world = world();
+        let now = Instant::now();
+        let connection = enter(&mut world, now);
+        let entity = world.state.players[&connection];
+        let start = world.registry().get::<Position>(entity).unwrap().0;
+        let walked_to = Point::new(start.x + 9, start.y + 4, start.z);
+        teleport(&mut world, connection, walked_to);
+
+        world.queue(Command::Disconnect { connection });
+        world.tick(now);
+
+        let departed: Vec<_> = world.drain_departed().collect();
+        assert_eq!(departed.len(), 1, "one character left");
+        assert_eq!(
+            (departed[0].x, departed[0].y),
+            (walked_to.x, walked_to.y),
+            "the logout record carries the moved position, not the login one"
+        );
     }
 
     #[test]

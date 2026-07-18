@@ -543,7 +543,7 @@ mod tests {
         };
         let bytes = play.encode();
         assert_eq!(
-            client_packet_length(CharacterPlay::ID),
+            client_packet_length(CharacterPlay::ID, None),
             Some(PacketLength::Fixed(73))
         );
         assert_eq!(bytes.len(), 73, "the table and the encoder must agree");
@@ -601,7 +601,7 @@ mod tests {
         assert_eq!(bytes[0], CreateCharacter::ID_HIGH_SEAS);
         assert_eq!(bytes.len(), 106, "the 0xF8 form is 106 bytes, four skills");
         assert_eq!(
-            client_packet_length(CreateCharacter::ID_HIGH_SEAS),
+            client_packet_length(CreateCharacter::ID_HIGH_SEAS, None),
             Some(PacketLength::Fixed(106)),
             "the table and the encoder must agree"
         );
@@ -615,7 +615,7 @@ mod tests {
         assert_eq!(bytes[0], CreateCharacter::ID_CLASSIC);
         assert_eq!(bytes.len(), 104, "the 0x00 form is 104 bytes, three skills");
         assert_eq!(
-            client_packet_length(CreateCharacter::ID_CLASSIC),
+            client_packet_length(CreateCharacter::ID_CLASSIC, None),
             Some(PacketLength::Fixed(104))
         );
         assert_eq!(CreateCharacter::decode(&bytes).unwrap(), create);
@@ -747,7 +747,7 @@ mod tests {
         };
         let bytes = request.encode();
         assert_eq!(
-            client_packet_length(WalkRequest::ID),
+            client_packet_length(WalkRequest::ID, None),
             Some(PacketLength::Fixed(7))
         );
         assert_eq!(bytes.len(), 7);

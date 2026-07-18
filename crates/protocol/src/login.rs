@@ -610,7 +610,7 @@ mod tests {
         let bytes = login.encode();
 
         assert_eq!(
-            client_packet_length(AccountLogin::ID),
+            client_packet_length(AccountLogin::ID, None),
             Some(PacketLength::Fixed(62))
         );
         assert_eq!(bytes.len(), 62, "the table and the encoder must agree");
@@ -767,7 +767,7 @@ mod tests {
         let bytes = select.encode();
         assert_eq!(bytes.len(), 3);
         assert_eq!(
-            client_packet_length(SelectShard::ID),
+            client_packet_length(SelectShard::ID, None),
             Some(PacketLength::Fixed(3))
         );
         assert_eq!(SelectShard::decode(&bytes).unwrap(), select);
@@ -845,7 +845,7 @@ mod tests {
         };
         let bytes = login.encode();
         assert_eq!(
-            client_packet_length(GameServerLogin::ID),
+            client_packet_length(GameServerLogin::ID, None),
             Some(PacketLength::Fixed(65))
         );
         assert_eq!(bytes.len(), 65);
@@ -922,7 +922,7 @@ mod tests {
         };
         let bytes = report.encode();
         assert_eq!(
-            client_packet_length(ClientVersionReport::ID),
+            client_packet_length(ClientVersionReport::ID, None),
             Some(PacketLength::Variable)
         );
         assert_eq!(declared_length(&bytes), bytes.len());
