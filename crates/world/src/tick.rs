@@ -70,6 +70,12 @@ pub const TICK_INTERVAL: Duration = Duration::from_millis(50);
 
 /// A human male body.
 const BODY_HUMAN_MALE: u16 = 0x0190;
+/// The graphic, container gump, and paperdoll layer of a starting backpack.
+/// Layer 0x15 is UO's `Layer.Backpack`; the gump `0x003C` is the bag window the
+/// client draws when it is opened.
+const BACKPACK_GRAPHIC: u16 = 0x0E75;
+const BACKPACK_GUMP: u16 = 0x003C;
+const BACKPACK_LAYER: u8 = 0x15;
 /// The skin hue a character gets when nothing else chose one — the same one
 /// Sphere hands a body with no stored colour.
 const DEFAULT_HUE: u16 = 0x83EA;
@@ -1158,6 +1164,20 @@ impl World {
             .insert(entity, position);
         self.state.seen.insert(entity, HashSet::new());
 
+        // Every character wears a backpack. Without it the paperdoll's bag is dead
+        // and there is nowhere to put anything picked up. Equipped before the
+        // packets go out so it rides in the `0x78` that tells the client — and
+        // everyone watching — what this mobile is wearing. Equipment is not saved
+        // yet, so a fresh one is worn each login and `disconnect` despawns it.
+        items::equip_new_container(
+            &mut self.state,
+            serial,
+            BACKPACK_GRAPHIC,
+            BACKPACK_GUMP,
+            0,
+            BACKPACK_LAYER,
+        );
+
         // The order is the client's, not ours. 0x1B must come first — until it
         // lands there is no body to attach anything to — and 0x55 must come
         // last, because it is what tells the client to start drawing. What is
@@ -1193,6 +1213,14 @@ impl World {
         // login-complete that starts the client drawing, so the numbers are there
         // the moment the paperdoll can be opened.
         self.send_status(connection, entity);
+        // The player's own `0x78`, so its client learns its equipment — and the
+        // serial of the backpack it must be able to double-click open. The client
+        // draws its body from `0x1B`, but its worn items come from here; `reveal`
+        // sends this mobile to *others*, never to itself, so this is the one place
+        // it hears about its own paperdoll.
+        if let Some(mine) = self.state.mobile_incoming(entity) {
+            self.state.send(connection, mine.encode(version));
+        }
         self.state.send(connection, encode_login_complete());
 
         self.state.bus.send(PlayerEntered {
@@ -1667,6 +1695,12 @@ impl World {
         }
         self.state.seen.remove(&entity);
         self.state.facet_state_mut(facet).sectors.remove(entity);
+        // The character's worn items — its backpack and whatever is in it — are
+        // not saved yet, so they go with it rather than orphaning on a serial that
+        // is about to be released and reused.
+        if let Some(serial) = serial {
+            items::despawn_belongings(&mut self.state, serial);
+        }
         self.state.registry.despawn(entity);
 
         if let Some(serial) = serial {
@@ -2022,12 +2056,14 @@ pub(crate) mod tests {
 
     /// The serial of the one item in the world.
     fn only_item_serial(world: &World) -> u32 {
+        // The one spawned test item — never a worn backpack, which every character
+        // now carries (an item with a `Graphic`, worn via `Equipped`).
         let (entity, _) = world
             .state
             .registry
             .query::<Graphic>()
-            .next()
-            .expect("an item is in the world");
+            .find(|(entity, _)| !world.state.registry.has::<Equipped>(*entity))
+            .expect("a loose item is in the world");
         world.state.registry.serial_of(entity).unwrap().raw()
     }
 
@@ -2227,12 +2263,14 @@ pub(crate) mod tests {
             facet: 0,
         });
         world.tick(now);
+        // The ground container just spawned — not a worn backpack, which is also a
+        // container now that every character has one.
         let (entity, _) = world
             .state
             .registry
             .query::<Container>()
-            .next()
-            .expect("a container is in the world");
+            .find(|(entity, _)| world.state.registry.has::<Position>(*entity))
+            .expect("a container is on the ground");
         world.state.registry.serial_of(entity).unwrap().raw()
     }
 
@@ -2272,6 +2310,161 @@ pub(crate) mod tests {
         let packets = packets_for(&mut world, player);
         assert!(packets.iter().any(|p| p[0] == 0x24), "the gump opens");
         assert!(packets.iter().any(|p| p[0] == 0x3C), "the contents follow");
+    }
+
+    /// The serial of the backpack a connection's character is wearing.
+    fn backpack_serial(world: &World, connection: ConnectionId) -> u32 {
+        let owner = world
+            .registry()
+            .serial_of(world.state.players[&connection])
+            .unwrap();
+        world
+            .registry()
+            .query::<Equipped>()
+            .find(|(_, worn)| worn.mobile == owner && worn.layer == BACKPACK_LAYER)
+            .and_then(|(item, _)| world.registry().serial_of(item))
+            .expect("a character wears a backpack")
+            .raw()
+    }
+
+    #[test]
+    fn entering_the_world_equips_a_backpack_and_tells_the_client() {
+        // A fresh character has a bag: worn on the backpack layer, a real
+        // container, and named to the client in a 0x78 about itself so the client
+        // knows the serial to double-click open.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+
+        let pack = backpack_serial(&world, player);
+        let pack_entity = entity(&world, pack);
+        assert!(
+            world.registry().has::<Container>(pack_entity),
+            "the bag is a container"
+        );
+        assert!(
+            !world.registry().has::<Position>(pack_entity),
+            "a worn bag is off the ground"
+        );
+        assert!(
+            packets_for(&mut world, player).iter().any(|p| p[0] == 0x78),
+            "the client is told its own equipment"
+        );
+    }
+
+    #[test]
+    fn double_clicking_your_own_backpack_opens_it() {
+        // The bag is worn, not on the ground, so the old ground-only open would
+        // have refused it. Your own pack is always in reach.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let pack = backpack_serial(&world, player);
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::DoubleClick {
+            connection: player,
+            serial: pack,
+        });
+        world.tick(now);
+
+        let packets = packets_for(&mut world, player);
+        assert!(packets.iter().any(|p| p[0] == 0x24), "the bag gump opens");
+        assert!(packets.iter().any(|p| p[0] == 0x3C), "its contents follow");
+    }
+
+    #[test]
+    fn dropping_an_item_into_your_worn_backpack_stores_it() {
+        // The bug the user hit: a worn bag has no `Position`, so the drop-into
+        // reach check bounced the item and the client's cursor desynced. The
+        // wearer's tile has to stand in for the bag's.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let pack = backpack_serial(&world, player);
+        let here = world
+            .registry()
+            .get::<Position>(world.state.players[&player])
+            .unwrap()
+            .0;
+        spawn_item_at(&mut world, here, now);
+        let item_serial = loose_item_serial(&world);
+        let item = entity(&world, item_serial);
+
+        world.queue(Command::PickUpItem {
+            connection: player,
+            serial: item_serial,
+            amount: 1,
+        });
+        world.tick(now);
+        world.queue(Command::DropItem {
+            connection: player,
+            serial: item_serial,
+            position: Point::new(0, 0, 0),
+            container: pack,
+        });
+        world.tick(now);
+
+        assert!(
+            world.state.registry.has::<Contained>(item),
+            "the item is now inside the worn bag"
+        );
+        assert_eq!(
+            world
+                .registry()
+                .get::<Contained>(item)
+                .unwrap()
+                .container
+                .raw(),
+            pack
+        );
+        assert!(
+            !world.state.held.contains_key(&player),
+            "and off the cursor, not bounced"
+        );
+    }
+
+    #[test]
+    fn double_clicking_yourself_opens_the_paperdoll() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let serial = world
+            .registry()
+            .serial_of(world.state.players[&player])
+            .unwrap()
+            .raw();
+        let _ = packets_for(&mut world, player);
+
+        world.queue(Command::DoubleClick {
+            connection: player,
+            serial,
+        });
+        world.tick(now);
+
+        assert!(
+            packets_for(&mut world, player).iter().any(|p| p[0] == 0x88),
+            "double-clicking a mobile opens its paperdoll"
+        );
+    }
+
+    #[test]
+    fn logging_out_despawns_the_backpack() {
+        // Equipment is not persisted yet, so it must not outlive its wearer as an
+        // orphan equipped on a serial about to be reused.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let pack = backpack_serial(&world, player);
+        let pack_entity = entity(&world, pack);
+
+        world.queue(Command::Disconnect { connection: player });
+        world.tick(now);
+
+        assert!(
+            !world.registry().contains(pack_entity),
+            "the bag went with the character"
+        );
     }
 
     #[test]
@@ -2423,11 +2616,13 @@ pub(crate) mod tests {
             facet: 0,
         });
         world.tick(now);
-        // The held one is whichever item is not the target.
+        // The held one is whichever loose item is not the target — not the worn
+        // backpack, which is also an item with a graphic now.
         let held_serial = world
             .state
             .registry
             .query::<Graphic>()
+            .filter(|(e, _)| !world.state.registry.has::<Equipped>(*e))
             .filter_map(|(e, _)| world.state.registry.serial_of(e).map(|s| s.raw()))
             .find(|s| *s != target)
             .unwrap();
@@ -2528,7 +2723,8 @@ pub(crate) mod tests {
             .expect("the item is now worn");
         assert_eq!(worn.mobile.raw(), me);
         assert_eq!(worn.layer, LAYER_TORSO);
-        assert_eq!(world.state.equipment_of(Serial::new(me).unwrap()).len(), 1);
+        // Two worn things now: the torso item and the backpack every character has.
+        assert_eq!(world.state.equipment_of(Serial::new(me).unwrap()).len(), 2);
         assert!(
             packets_for(&mut world, player).iter().any(|p| p[0] == 0x2E),
             "the wearer is told they put it on"
@@ -4714,9 +4910,10 @@ pub(crate) mod tests {
         let ids: Vec<u8> = world.drain_outbound().map(|out| out.packet[0]).collect();
         assert_eq!(
             ids,
-            vec![0x1B, 0xBF, 0x20, 0x4F, 0x11, 0x55],
+            vec![0x1B, 0xBF, 0x20, 0x4F, 0x11, 0x78, 0x55],
             "0x1B first or there is no body; 0x55 last or the client draws early; \
-             0x11 status before it, or the client thinks it has zero stamina and cannot run"
+             0x11 status and the 0x78 of the player's own equipment before it, or the \
+             client has no stamina and no backpack serial to open"
         );
     }
 
@@ -5590,8 +5787,19 @@ mod interest_tests {
         enter_as(&mut world, ALICE, now);
         enter_as(&mut world, BOB, now);
 
+        // Bob is drawn his own equipment in a 0x78 about himself now, so count
+        // only the ones that are about Alice.
+        let alice = world
+            .registry()
+            .serial_of(world.state.players[&ALICE])
+            .unwrap()
+            .raw()
+            .to_be_bytes();
         let to_bob = packets_for(&mut world, BOB);
-        let drawn = to_bob.iter().filter(|p| p[0] == 0x78).count();
+        let drawn = to_bob
+            .iter()
+            .filter(|p| p[0] == 0x78 && p.windows(4).any(|w| w == alice))
+            .count();
         assert_eq!(drawn, 1, "Bob should be drawn Alice, exactly once");
     }
 

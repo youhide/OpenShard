@@ -104,6 +104,27 @@ pub fn encode_remove(serial: u32) -> Vec<u8> {
     writer.into_bytes()
 }
 
+/// The flag bit on a `0x88` paperdoll meaning the mobile is in war mode.
+pub const PAPERDOLL_WARMODE: u8 = 0x01;
+/// The flag bit meaning the beholder may lift items off this paperdoll — set for
+/// your own, so the client lets you drag your equipment.
+pub const PAPERDOLL_CAN_LIFT: u8 = 0x02;
+
+/// `0x88` — open a mobile's paperdoll. 66 bytes.
+///
+/// The reply to double-clicking a mobile. `text` is the title shown across the
+/// top (the name, plus any honorific), clamped to 60 bytes. `flags` is
+/// [`PAPERDOLL_WARMODE`] and/or [`PAPERDOLL_CAN_LIFT`]. Ported from Sphere's
+/// `PacketPaperdoll`/ServUO's `DisplayPaperdoll`.
+pub fn encode_open_paperdoll(serial: u32, text: &str, flags: u8) -> Vec<u8> {
+    let mut writer = PacketWriter::with_capacity(66);
+    writer.u8(0x88);
+    writer.u32(serial);
+    writer.fixed_string(text, 60);
+    writer.u8(flags);
+    writer.into_bytes()
+}
+
 /// `0x11` — a mobile's full status: the paperdoll numbers. Variable length.
 ///
 /// The one packet that carries **stamina**, and the reason it exists here at all:
@@ -593,6 +614,20 @@ mod tests {
             followers: 0,
             followers_max: 5,
         }
+    }
+
+    #[test]
+    fn a_paperdoll_is_sixty_six_bytes_with_its_title() {
+        let bytes = encode_open_paperdoll(0x0001_2345, "Lord British", PAPERDOLL_CAN_LIFT);
+        assert_eq!(bytes.len(), 66, "id + serial + 60-byte title + flags");
+        assert_eq!(bytes[0], 0x88);
+        assert_eq!(
+            u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]),
+            0x0001_2345
+        );
+        assert_eq!(bytes[65], PAPERDOLL_CAN_LIFT);
+        // The title is where the client draws the name across the top.
+        assert!(bytes[5..].starts_with(b"Lord British"));
     }
 
     #[test]

@@ -14,11 +14,12 @@ use openshard_entities::{EntityId, Serial, SerialKind};
 use openshard_gateway::ConnectionId;
 use openshard_protocol::{
     encode_add_to_container, encode_container_contents, encode_drag_cancel, encode_equip,
-    encode_open_container, encode_remove, ContainedItem, DragCancelReason, Point, DROP_TO_GROUND,
+    encode_open_container, encode_open_paperdoll, encode_remove, ContainedItem, DragCancelReason,
+    Point, DROP_TO_GROUND, PAPERDOLL_CAN_LIFT, PAPERDOLL_WARMODE,
 };
 use openshard_state::components::{
-    Amount, Body, Client, Contained, Container, Decays, Equipped, Facet, Graphic, Position,
-    Stackable,
+    Amount, Body, Client, Combat, Contained, Container, Decays, Equipped, Facet, Graphic, Name,
+    Position, Stackable,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{HeldItem, Origin, Outbound, WorldState};
@@ -118,6 +119,36 @@ pub fn spawn_container(
         state.registry.remove::<Decays>(entity);
     }
 }
+
+/// Give a mobile a container to *wear* — a backpack, a bank box — rather than one
+/// on the ground. It is an item like any other, but worn: an [`Equipped`] instead
+/// of a [`Position`], so it is off the sector grid and off every screen except as
+/// part of its wearer's `0x78`, and it never decays. Returns the item's entity, or
+/// `None` if the item-serial pool is empty.
+///
+/// This is how a fresh character gets its backpack: without one the paperdoll's
+/// bag is dead and there is nowhere to put anything picked up.
+pub fn equip_new_container(
+    state: &mut WorldState,
+    mobile: Serial,
+    graphic: u16,
+    gump: u16,
+    hue: u16,
+    layer: u8,
+) -> Option<EntityId> {
+    let (entity, serial) = match state.registry.spawn_with_serial(SerialKind::Item) {
+        Ok(pair) => pair,
+        Err(error) => {
+            warn!(?error, "out of item serials; not equipping a container");
+            return None;
+        }
+    };
+    state.registry.insert(entity, Graphic { id: graphic, hue });
+    state.registry.insert(entity, Container { gump });
+    state.registry.insert(entity, Equipped { mobile, layer });
+    debug!(%serial, graphic, layer, "container equipped");
+    Some(entity)
+}
 /// Set an item's decay clock: it rots `gameplay.decay_ticks` from now. Every
 /// loose item on the ground has one; every item off it has none, and so does a
 /// container — it and its contents stay put until someone moves them, which is
@@ -134,53 +165,136 @@ pub fn mark_decay(state: &mut WorldState, item: EntityId) {
     );
 }
 
-/// Open a container onto a client's screen. See `Command::DoubleClick`.
+/// Handle a double-click. See `Command::DoubleClick`.
 ///
-/// Only containers do anything yet — a double-click on anything else is
-/// ignored rather than answered, because "use" for a door or a food is a
-/// later rule and a wrong guess is worse than silence.
+/// A container opens its gump; a mobile shows its paperdoll. Anything else is
+/// ignored rather than answered — "use" for a door or a piece of food is a later
+/// rule, and a wrong guess is worse than silence.
 pub fn double_click(state: &mut WorldState, connection: ConnectionId, serial: u32) {
     let Some(&player) = state.players.get(&connection) else {
         return;
     };
-    let Some(item_serial) = Serial::new(serial) else {
+    let Some(target_serial) = Serial::new(serial) else {
         return;
     };
-    let Some(item) = state.registry.entity_of(item_serial) else {
-        return;
-    };
-    let Some(&Container { gump }) = state.registry.get::<Container>(item) else {
-        return;
-    };
-    // The container has to be in reach on the ground. Nesting — opening one
-    // out of another already open — is a later refinement.
-    let Some(&Position(item_pos)) = state.registry.get::<Position>(item) else {
-        return;
-    };
-    let Some(&Position(player_pos)) = state.registry.get::<Position>(player) else {
-        return;
-    };
-    if state.facet_of(item) != state.facet_of(player) || !in_range(item_pos, player_pos, ITEM_REACH)
-    {
-        return;
-    }
-    let Some(&Client { version, .. }) = state.registry.get::<Client>(player) else {
+    let Some(target) = state.registry.entity_of(target_serial) else {
         return;
     };
 
-    let contents = contents_of(state, item_serial);
-    state.send(connection, encode_open_container(serial, gump, version));
+    // A container opens its gump; a mobile shows its paperdoll; anything else is
+    // a "use" rule not written yet, and a wrong guess is worse than silence.
+    if state.registry.has::<Container>(target) {
+        open_container(state, connection, player, target, target_serial);
+    } else if state.registry.has::<Body>(target) {
+        open_paperdoll(state, connection, player, target, target_serial);
+    }
+}
+
+/// Open a container onto the acting client, if it may reach it.
+///
+/// The container is reachable when it is on the ground within [`ITEM_REACH`], or
+/// worn on the player itself (its backpack), or worn on another mobile in reach.
+/// A worn container has no `Position` of its own — its wearer's stands in.
+fn open_container(
+    state: &mut WorldState,
+    connection: ConnectionId,
+    player: EntityId,
+    container: EntityId,
+    container_serial: Serial,
+) {
+    let Some(&Container { gump }) = state.registry.get::<Container>(container) else {
+        return;
+    };
+    if !container_in_reach(state, container, player) {
+        return;
+    }
+
+    let Some(&Client { version, .. }) = state.registry.get::<Client>(player) else {
+        return;
+    };
+    let contents = contents_of(state, container_serial);
     state.send(
         connection,
-        encode_container_contents(serial, &contents, version),
+        encode_open_container(container_serial.raw(), gump, version),
+    );
+    state.send(
+        connection,
+        encode_container_contents(container_serial.raw(), &contents, version),
     );
     // Remember it is open, so a later change to its contents can be pushed here.
     state
         .open_containers
-        .entry(item_serial)
+        .entry(container_serial)
         .or_default()
         .insert(connection);
-    debug!(%item_serial, items = contents.len(), "container opened");
+    debug!(%container_serial, items = contents.len(), "container opened");
+}
+
+/// Whether `player` may reach `container` to open it or drop into it.
+///
+/// A container sits in one of two places, and the reach check has to handle both:
+/// on the ground it stands on its own tile, and worn it has no `Position` of its
+/// own — its wearer's tile stands in. Your own backpack (worn on you) is always in
+/// reach; another mobile's worn container is reachable only within [`ITEM_REACH`]
+/// of that mobile, on the same facet. The whole reason a worn backpack could not be
+/// opened or filled before this: its reach was measured against a `Position` it
+/// does not have.
+fn container_in_reach(state: &WorldState, container: EntityId, player: EntityId) -> bool {
+    let Some(&Position(player_pos)) = state.registry.get::<Position>(player) else {
+        return false;
+    };
+    // Where the container effectively is: its own ground tile, or its wearer's.
+    let anchor = if let Some(&Position(pos)) = state.registry.get::<Position>(container) {
+        Some((state.facet_of(container), pos))
+    } else if let Some(&Equipped { mobile, .. }) = state.registry.get::<Equipped>(container) {
+        if Some(mobile) == state.registry.serial_of(player) {
+            return true; // one's own worn pack is always in reach
+        }
+        state.registry.entity_of(mobile).and_then(|wearer| {
+            Some((
+                state.facet_of(wearer),
+                state.registry.get::<Position>(wearer)?.0,
+            ))
+        })
+    } else {
+        None
+    };
+    let Some((facet, at)) = anchor else {
+        return false;
+    };
+    facet == state.facet_of(player) && in_range(at, player_pos, ITEM_REACH)
+}
+
+/// Send the acting client a mobile's paperdoll — the reply to double-clicking a
+/// mobile. The `can lift` bit is set for one's own, so the client lets you drag
+/// your own equipment off it.
+fn open_paperdoll(
+    state: &mut WorldState,
+    connection: ConnectionId,
+    player: EntityId,
+    mobile: EntityId,
+    mobile_serial: Serial,
+) {
+    let name = state
+        .registry
+        .get::<Name>(mobile)
+        .map_or(String::new(), |n| n.0.clone());
+    let mut flags = 0u8;
+    if state
+        .registry
+        .get::<Combat>(mobile)
+        .is_some_and(|combat| combat.warmode)
+    {
+        flags |= PAPERDOLL_WARMODE;
+    }
+    if mobile == player {
+        flags |= PAPERDOLL_CAN_LIFT;
+    }
+    state.send(
+        connection,
+        encode_open_paperdoll(mobile_serial.raw(), &name, flags),
+    );
+    debug!(%mobile_serial, "paperdoll opened");
 }
 
 /// Everything inside a container, as the wire records `0x3C`/`0x25` need.
@@ -389,6 +503,36 @@ pub fn equip_item(
     );
     broadcast_equip(state, held.entity, wearer);
     debug!(item, layer, "equipped");
+}
+
+/// Despawn everything a mobile carries — its worn items and whatever those hold.
+///
+/// Called when the mobile itself is leaving and its belongings are not persisted
+/// yet, so they must not outlive it as orphans equipped on a serial that is about
+/// to be released. One level deep — a backpack of loose items — which is all a
+/// character has until nested containers and inventory persistence land.
+pub fn despawn_belongings(state: &mut WorldState, mobile: Serial) {
+    let worn: Vec<(EntityId, Serial)> = state
+        .registry
+        .query::<Equipped>()
+        .filter(|(_, worn)| worn.mobile == mobile)
+        .filter_map(|(item, _)| Some((item, state.registry.serial_of(item)?)))
+        .collect();
+    let worn_serials: Vec<Serial> = worn.iter().map(|(_, serial)| *serial).collect();
+
+    let inside: Vec<EntityId> = state
+        .registry
+        .query::<Contained>()
+        .filter(|(_, held)| worn_serials.contains(&held.container))
+        .map(|(item, _)| item)
+        .collect();
+    for item in inside {
+        state.registry.despawn(item);
+    }
+    for (item, serial) in worn {
+        state.open_containers.remove(&serial);
+        state.registry.despawn(item);
+    }
 }
 
 /// Whether a mobile already wears something on a layer.
@@ -612,19 +756,11 @@ pub fn drop_into_container(
         bounce(state, connection, held, DragCancelReason::Other);
         return;
     };
-    // The container has to be a reachable one on the ground. Dropping into a
-    // container that is itself inside another is a later refinement.
-    let Some(&Position(container_pos)) = state.registry.get::<Position>(container_entity) else {
-        bounce(state, connection, held, DragCancelReason::Other);
-        return;
-    };
-    let Some(&Position(player_pos)) = state.registry.get::<Position>(player) else {
-        bounce(state, connection, held, DragCancelReason::Other);
-        return;
-    };
-    if state.facet_of(container_entity) != state.facet_of(player)
-        || !in_range(container_pos, player_pos, ITEM_REACH)
-    {
+    // The container must be in reach — on the ground near the player, or worn on
+    // them (their backpack) or on a mobile beside them. A worn pack has no
+    // `Position` of its own; `container_in_reach` handles that. Dropping into a
+    // container nested in another is a later refinement.
+    if !container_in_reach(state, container_entity, player) {
         bounce(state, connection, held, DragCancelReason::OutOfRange);
         return;
     }
