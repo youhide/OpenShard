@@ -36,7 +36,9 @@ use openshard_protocol::{
     DropItem, EquipItemRequest, GameServerLogin, PickUpItem, Point, StartLocation, TalkRequest,
     UnicodeTalkRequest, WalkRequest, WarModeRequest,
 };
-use openshard_world::{Appearance, Command, Map, MapTerrain, TileData, World, TICK_INTERVAL};
+use openshard_world::{
+    Appearance, Command, Gameplay, Map, MapTerrain, TileData, World, TICK_INTERVAL,
+};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -163,6 +165,22 @@ fn is_postgres_url(target: &str) -> bool {
     lower.starts_with("postgres://") || lower.starts_with("postgresql://")
 }
 
+/// Turn the validated `[gameplay]` config into the world's runtime rules,
+/// converting the operator's seconds into the tick counts the systems run on.
+fn gameplay_of(config: &Config) -> Gameplay {
+    let g = &config.gameplay;
+    Gameplay::new(
+        g.combat_era,
+        g.speed_scale_factor,
+        g.skill_cap,
+        g.decay_seconds,
+        g.criminal_seconds,
+        g.distance_talk,
+        g.distance_whisper,
+        g.distance_yell,
+    )
+}
+
 /// Load the client's map, if it is configured.
 ///
 /// Blocking, and on purpose: this reads over a hundred megabytes and takes a
@@ -170,13 +188,14 @@ fn is_postgres_url(target: &str) -> bool {
 /// walk in exists.
 fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> {
     let start = (config.world.start.x, config.world.start.y);
+    let gameplay = gameplay_of(config);
     let dir = config.world.client_files.trim();
     if dir.is_empty() {
         warn!(
             "world.client_files is empty: running with no map. Every step will be allowed — \
              players walk through walls and across water. Set it to a client install."
         );
-        return Ok(World::new(start));
+        return Ok(World::new(start).with_gameplay(gameplay));
     }
 
     let dir = Path::new(dir);
@@ -185,7 +204,7 @@ fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> {
     // a map, so it is read once and each facet's terrain gets a copy.
     let tiles = TileData::load(dir.join("tiledata.mul"))?;
 
-    let mut world = World::new(start);
+    let mut world = World::new(start).with_gameplay(gameplay);
     for &facet in &config.world.facets {
         let map = Map::load_facet(dir, facet)?;
         // The start is only checked against facet 0, where new characters spawn.

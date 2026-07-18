@@ -50,6 +50,7 @@ pub use openshard_items::ItemSpawned;
 pub use openshard_magic::SpellCast;
 pub use openshard_skills::SkillUsed;
 pub use openshard_state::components;
+pub use openshard_state::Gameplay;
 pub use openshard_state::Outbound;
 pub use openshard_state::{distance, in_range, sectors, Sectors, SECTOR_SIZE, VIEW_RANGE};
 pub use openshard_state::{

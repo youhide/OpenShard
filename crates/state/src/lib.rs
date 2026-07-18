@@ -34,5 +34,5 @@ pub use components::{
     Position, Resistance, Skills, Stackable, Stats, SwingSpeed,
 };
 pub use rng::Rng;
-pub use runtime::{FacetState, HeldItem, Origin, Outbound, WorldState};
+pub use runtime::{FacetState, Gameplay, HeldItem, Origin, Outbound, WorldState, TICKS_PER_SECOND};
 pub use sectors::{distance, in_range, Sectors, SECTOR_SIZE, VIEW_RANGE};

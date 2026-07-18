@@ -92,7 +92,7 @@ pub fn set_skill(state: &mut WorldState, serial: u32, skill: u8, value: u16) {
         .get::<Skills>(entity)
         .cloned()
         .unwrap_or_default();
-    skills.set(skill, value.min(SKILL_CAP));
+    skills.set(skill, value.min(state.gameplay.skill_cap));
     state.registry.insert(entity, skills);
 }
 
@@ -130,7 +130,7 @@ pub fn roll_skill(state: &mut WorldState, entity: EntityId, skill: u8, difficult
         .get::<Skills>(entity)
         .map_or(0, |s| s.get(skill));
     let success = curves::success_chance(value, difficulty) >= state.rng.below(1000);
-    if value < SKILL_CAP && state.rng.below(1000) < curves::gain_chance(value) {
+    if value < state.gameplay.skill_cap && state.rng.below(1000) < curves::gain_chance(value) {
         let mut skills = state
             .registry
             .get::<Skills>(entity)

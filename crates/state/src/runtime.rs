@@ -32,6 +32,76 @@ use crate::sectors::{Sectors, VIEW_RANGE};
 /// A character's height above the ground when the facet has no map to ask.
 const Z_WITHOUT_A_MAP: i8 = 0;
 
+/// Ticks in one second — the reciprocal of the world's 50ms tick interval. The
+/// world defines the interval; this is the whole-number rate config uses to turn
+/// operator-facing seconds into the tick counts timers run on. If one moves, the
+/// other must.
+pub const TICKS_PER_SECOND: u64 = 20;
+
+/// The gameplay rules an operator tuned, in the form the systems read them: the
+/// [`GameplayConfig`](../../openshard_config) knobs, with the second-valued ones
+/// already converted to ticks. A plain value the [`WorldState`] carries so any
+/// system can reach the number it needs — combat the swing era, chat the speech
+/// ranges, items the decay timer — without a config crate below them.
+#[derive(Clone, Copy, Debug)]
+pub struct Gameplay {
+    /// Which swing-speed formula combat uses (Sphere's `CombatEra`, 0–4).
+    pub combat_era: u8,
+    /// The swing formula's numerator (Sphere's `SpeedScaleFactor`).
+    pub speed_scale_factor: u64,
+    /// The ceiling any one skill trains to, in tenths.
+    pub skill_cap: u16,
+    /// How long an item lies on the ground before it rots, in ticks.
+    pub decay_ticks: u64,
+    /// How long a criminal flag lasts, in ticks.
+    pub criminal_ticks: u64,
+    /// How far normal speech carries, in tiles.
+    pub distance_talk: u32,
+    /// How far a whisper carries, in tiles.
+    pub distance_whisper: u32,
+    /// How far a yell carries, in tiles.
+    pub distance_yell: u32,
+}
+
+impl Gameplay {
+    /// Build the runtime rules from operator values, converting the two
+    /// second-valued timers to ticks. The defaults an operator does not override
+    /// are what [`Default`] gives — the numbers the systems used as constants.
+    // One argument past clippy's limit, and every one is a distinct config knob;
+    // a struct would only move the same list one call up.
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn new(
+        combat_era: u8,
+        speed_scale_factor: u64,
+        skill_cap: u16,
+        decay_seconds: u64,
+        criminal_seconds: u64,
+        distance_talk: u32,
+        distance_whisper: u32,
+        distance_yell: u32,
+    ) -> Self {
+        Self {
+            combat_era,
+            speed_scale_factor,
+            skill_cap,
+            decay_ticks: decay_seconds * TICKS_PER_SECOND,
+            criminal_ticks: criminal_seconds * TICKS_PER_SECOND,
+            distance_talk,
+            distance_whisper,
+            distance_yell,
+        }
+    }
+}
+
+impl Default for Gameplay {
+    /// The pre-AoS feel the systems were built with — the values that were
+    /// compile-time constants before an operator could tune them.
+    fn default() -> Self {
+        Self::new(1, 15000, 1000, 20 * 60, 2 * 60, 18, 3, 31)
+    }
+}
+
 /// Bytes for a connection, produced by a tick.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Outbound {
@@ -136,6 +206,8 @@ pub struct WorldState {
     pub ticks: u64,
     /// Packets the last tick produced.
     pub outbox: Vec<Outbound>,
+    /// The tunable rules — swing era, speech ranges, timers — the systems read.
+    pub gameplay: Gameplay,
 }
 
 impl WorldState {

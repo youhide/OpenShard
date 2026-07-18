@@ -82,9 +82,11 @@ pub struct Config {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GameplayConfig {
-    /// Which swing-speed formula combat uses, Sphere's `m_iCombatSpeedEra`:
-    /// `0` Sphere-custom pre-AoS, `1` pre-AoS, `2` AoS, `3` SE, `4` ML. The eras
-    /// differ in how dexterity and weapon speed become a swing interval.
+    /// Which swing-speed formula combat uses, Sphere's `m_iCombatSpeedEra`.
+    /// `1` (pre-AoS) and `2` (AoS) are implemented — they turn dexterity and a
+    /// weapon's base speed into a swing interval. Sphere's `0`, `3` and `4` need
+    /// weapon weight or ML-format speeds the shard has no data for yet, so they
+    /// are rejected rather than silently run as `1`.
     #[serde(default = "default_combat_era")]
     pub combat_era: u8,
     /// Sphere's `SpeedScaleFactor`: the numerator of the swing formula. Larger is
@@ -111,8 +113,11 @@ pub struct GameplayConfig {
     pub distance_yell: u32,
 }
 
-/// The highest combat era [`GameplayConfig::combat_era`] accepts — Sphere's ML.
-const MAX_COMBAT_ERA: u8 = 4;
+/// Whether combat [`combat_era`](GameplayConfig::combat_era) is one the swing
+/// formula implements: pre-AoS (`1`) or AoS (`2`).
+const fn combat_era_is_implemented(era: u8) -> bool {
+    matches!(era, 1 | 2)
+}
 
 fn default_combat_era() -> u8 {
     1
@@ -352,7 +357,7 @@ pub enum ConfigError {
     },
     /// An account has no name.
     EmptyAccountName,
-    /// `gameplay.combat_era` is outside the range of formulas Sphere defines.
+    /// `gameplay.combat_era` names an era the swing formula does not implement.
     UnknownCombatEra {
         /// The value given.
         era: u8,
@@ -384,8 +389,9 @@ impl fmt::Display for ConfigError {
             Self::EmptyAccountName => f.write_str("an account has an empty name"),
             Self::UnknownCombatEra { era } => write!(
                 f,
-                "gameplay.combat_era is {era}; it must be 0 to {MAX_COMBAT_ERA} \
-                 (0 Sphere pre-AoS, 1 pre-AoS, 2 AoS, 3 SE, 4 ML)",
+                "gameplay.combat_era is {era}; only 1 (pre-AoS) and 2 (AoS) are \
+                 implemented — Sphere's 0, 3 and 4 need weapon properties the \
+                 shard has no data for yet",
             ),
             Self::ZeroSpeedScaleFactor => {
                 f.write_str("gameplay.speed_scale_factor must not be zero")
@@ -450,9 +456,9 @@ impl Config {
             seen.push(key);
         }
 
-        // A combat era outside the table would silently fall through to a default
-        // formula, giving a feel the operator did not ask for; name it instead.
-        if self.gameplay.combat_era > MAX_COMBAT_ERA {
+        // An unimplemented era would silently fall through to era 1, giving a feel
+        // the operator did not ask for; name it instead.
+        if !combat_era_is_implemented(self.gameplay.combat_era) {
             return Err(ConfigError::UnknownCombatEra {
                 era: self.gameplay.combat_era,
             });
@@ -550,13 +556,13 @@ main = ""
 # The rules knobs — the SphereServer sphere.ini equivalents. Every value here has
 # a working default; uncomment one only to change the shard's feel.
 
-# Which swing-speed formula combat uses (Sphere's CombatEra):
-#   0 Sphere pre-AoS   1 pre-AoS   2 AoS   3 SE   4 ML
-# The eras differ in how dexterity and weapon speed become a swing interval.
+# Which swing-speed formula combat uses (Sphere's CombatEra). Implemented:
+#   1 pre-AoS      2 AoS
+# Sphere's 0, 3 and 4 need weapon weight or ML-format speeds not built yet.
 combat_era = 1
 
 # The swing formula's numerator (Sphere's SpeedScaleFactor). Larger is slower.
-# Pre-AoS is 15000; AoS uses 40000, SE 80000.
+# Pre-AoS is 15000; AoS uses 40000.
 speed_scale_factor = 15000
 
 # The ceiling any one skill trains to, in tenths (1000 = 100.0).

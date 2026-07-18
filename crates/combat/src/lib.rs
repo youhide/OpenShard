@@ -25,10 +25,6 @@ use openshard_state::WorldState;
 /// How near, in tiles (Chebyshev), a mobile must be to land a melee blow: the
 /// next tile over, diagonals included.
 pub const MELEE_RANGE: u32 = 1;
-/// Sphere's `SpeedScaleFactor` for the pre-AoS (era-1) swing formula — the
-/// numerator that, divided by dexterity and weapon speed, gives the swing time
-/// (`CResourceCalc.cpp`). One of Sphere's hard-won numbers; taken verbatim.
-const SPEED_SCALE_FACTOR: u64 = 15000;
 /// The base swing speed of bare hands — Sphere's wrestling value. A real weapon's
 /// speed (from its tiledata) will replace it once equipment carries properties;
 /// until then every mobile swings wrestling-fast, modulated by dexterity alone.
@@ -38,9 +34,6 @@ const DEFAULT_DEXTERITY: u16 = 100;
 /// Damage a swing deals. A flat number until the damage formula — resistances,
 /// weapon, strength — is written, and that is a script-first slice of its own.
 pub const SWING_DAMAGE: u16 = 5;
-/// How long a criminal flag lasts: two minutes at the tick rate, Sphere's
-/// `CRIMINAL_TIMER` default.
-const CRIMINAL_TICKS: u64 = 2 * 60 * 20;
 
 /// A mobile took damage.
 ///
@@ -75,21 +68,45 @@ pub struct MobileDied {
 }
 
 /// Ticks between swings for a mobile of dexterity `dex` wielding a weapon of base
-/// speed `base`, Sphere's pre-AoS formula (`CResourceCalc.cpp`, combat era 1):
-/// the whole swing takes `(SpeedScaleFactor * 10) / ((dex + 100) * base)` tenths
-/// of a second, floored at one tenth. At the 50ms tick a tenth is two ticks, so
-/// the count is that doubled. Higher dexterity or a faster weapon → fewer ticks
-/// between blows.
+/// speed `base`, under combat `era` with scale factor `scale` — Sphere's
+/// `Calc_CombatAttackSpeed` (`CResourceCalc.cpp`).
+///
+/// Both implemented eras start from `(dex + 100) * base` and divide the scale by
+/// it, so higher dexterity or a faster weapon means fewer ticks; they differ in
+/// the floor and the halving AoS added:
+///
+/// - **Era 1 (pre-AoS):** the swing takes `(scale * 10) / ((dex + 100) * base)`
+///   tenths of a second, floored at one tenth.
+/// - **Era 2 (AoS):** the same, halved, floored at 1.2s (twelve tenths).
+///
+/// At the 50ms tick a tenth of a second is two ticks, so the result is doubled.
+/// Eras 0, 3 and 4 need weapon weight or ML-format speeds the shard has no data
+/// for yet, so [config validation](openshard_config) accepts only 1 and 2; an
+/// unknown era here falls back to era 1.
 #[must_use]
-pub const fn swing_ticks(dex: u16, base: u64) -> u64 {
+pub const fn swing_ticks(dex: u16, base: u64, era: u8, scale: u64) -> u64 {
     let base = if base == 0 { 1 } else { base };
     let denom = (dex as u64 + 100) * base;
-    let tenths = (SPEED_SCALE_FACTOR * 10) / denom;
-    if tenths == 0 {
-        2
-    } else {
-        tenths * 2
-    }
+    let tenths = match era {
+        2 => {
+            let t = ((scale * 10) / denom) / 2;
+            if t < 12 {
+                12
+            } else {
+                t
+            }
+        }
+        // Era 1 and the fallback.
+        _ => {
+            let t = (scale * 10) / denom;
+            if t == 0 {
+                1
+            } else {
+                t
+            }
+        }
+    };
+    tenths * 2
 }
 
 /// Deal damage to a mobile, of a kind its resistance to that kind reduces.
@@ -286,7 +303,7 @@ pub fn flag_criminal(state: &mut WorldState, mobile: EntityId) {
     state.registry.insert(
         mobile,
         CriminalUntil {
-            tick: state.ticks + CRIMINAL_TICKS,
+            tick: state.ticks + state.gameplay.criminal_ticks,
         },
     );
     // Only the turn to grey needs redrawing; refreshing the timer changes no
@@ -328,7 +345,12 @@ pub fn swing_speed(state: &WorldState, mobile: EntityId) -> u64 {
         .registry
         .get::<Stats>(mobile)
         .map_or(DEFAULT_DEXTERITY, |s| s.dexterity);
-    swing_ticks(dex, WRESTLING_SPEED)
+    swing_ticks(
+        dex,
+        WRESTLING_SPEED,
+        state.gameplay.combat_era,
+        state.gameplay.speed_scale_factor,
+    )
 }
 
 /// The base damage a blow from `attacker` carries, before armour — its

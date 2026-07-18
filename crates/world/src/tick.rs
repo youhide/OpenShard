@@ -45,7 +45,7 @@ use openshard_state::components::{
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
-use openshard_state::{FacetState, Outbound, WorldState};
+use openshard_state::{FacetState, Gameplay, Outbound, WorldState};
 
 use openshard_ai as ai;
 use openshard_chat as chat;
@@ -492,6 +492,7 @@ impl World {
                 rng: Rng::new(DEFAULT_SEED),
                 ticks: 0,
                 outbox: Vec::new(),
+                gameplay: Gameplay::default(),
             },
             journal: Journal::new(),
             save_every: SAVE_EVERY_TICKS,
@@ -511,6 +512,15 @@ impl World {
     /// says so, not one that keeps a journal nobody ever collects.
     pub const fn with_save_every(mut self, ticks: u64) -> Self {
         self.save_every = ticks;
+        self
+    }
+
+    /// Set the tunable gameplay rules. The server builds these from the
+    /// `[gameplay]` config; a test or the default takes [`Gameplay::default`],
+    /// the pre-AoS numbers the systems were written with.
+    #[must_use]
+    pub const fn with_gameplay(mut self, gameplay: Gameplay) -> Self {
+        self.state.gameplay = gameplay;
         self
     }
 
@@ -1441,9 +1451,10 @@ pub(crate) mod tests {
 
     pub(super) const START: (u16, u16) = (1363, 1600);
 
-    /// Ticks a bare-handed, default-dexterity mobile waits between swings — the
-    /// pace the combat tests reckon against. `dex 100`, wrestling: thirty ticks.
-    const WRESTLING_SWING_TICKS: u64 = swing_ticks(100, WRESTLING_SPEED);
+    /// Ticks a bare-handed, default-dexterity mobile waits between swings under
+    /// the default rules — the pace the combat tests reckon against. `dex 100`,
+    /// wrestling, era 1, scale 15000: thirty ticks.
+    const WRESTLING_SWING_TICKS: u64 = swing_ticks(100, WRESTLING_SPEED, 1, 15000);
 
     pub(super) fn world() -> World {
         World::new(START)
@@ -2491,6 +2502,35 @@ pub(crate) mod tests {
                 .iter()
                 .any(|p| p == &encode_remove(serial)),
             "and left every screen"
+        );
+    }
+
+    #[test]
+    fn gameplay_config_reaches_the_systems() {
+        // The [gameplay] knobs flow through WorldState to the systems: a five-second
+        // decay here gives a spawned item a clock of a hundred ticks, not the
+        // twenty-minute default's twenty-four thousand.
+        let now = Instant::now();
+        let gameplay = Gameplay::new(2, 40000, 700, 5, 60, 18, 3, 31);
+        let mut world = World::new(START).with_gameplay(gameplay);
+        world.queue(Command::SpawnItem {
+            graphic: 0x0EED,
+            hue: 0,
+            amount: 1,
+            stackable: false,
+            position: Point::new(START.0, START.1, 0),
+            facet: 0,
+        });
+        world.tick(now);
+
+        let serial = loose_item_serial(&world);
+        let item = entity(&world, serial);
+        let decay = world.state.registry.get::<Decays>(item).unwrap();
+        assert!(
+            decay.at_tick > world.state.ticks && decay.at_tick <= world.state.ticks + 100,
+            "the five-second decay reached mark_decay (at_tick {}, now {})",
+            decay.at_tick,
+            world.state.ticks
         );
     }
 

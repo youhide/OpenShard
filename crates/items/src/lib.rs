@@ -31,9 +31,6 @@ const ITEM_REACH: u32 = 3;
 /// The highest layer an item can be worn on: 1–25 are the body; higher numbers
 /// are the backpack and bank, not "worn".
 const MAX_WEARABLE_LAYER: u8 = 25;
-/// How many ticks an item lies on the ground before it decays — twenty minutes
-/// at the tick rate, a stand-in for Sphere's per-item `DECAY_TIME` table.
-const DECAY_TICKS: u64 = 20 * 60 * 20;
 
 /// An item appeared in the world.
 ///
@@ -121,11 +118,10 @@ pub fn spawn_container(
         state.registry.remove::<Decays>(entity);
     }
 }
-/// Set an item's decay clock: it rots [`DECAY_TICKS`] from now. Every loose
-/// item on the ground has one; every item off it has none, and so does a
-/// container — it and its contents stay put until someone moves them, which
-/// is also why a container picked up and set back down does not start
-/// rotting.
+/// Set an item's decay clock: it rots `gameplay.decay_ticks` from now. Every
+/// loose item on the ground has one; every item off it has none, and so does a
+/// container — it and its contents stay put until someone moves them, which is
+/// also why a container picked up and set back down does not start rotting.
 pub fn mark_decay(state: &mut WorldState, item: EntityId) {
     if state.registry.has::<Container>(item) {
         return;
@@ -133,7 +129,7 @@ pub fn mark_decay(state: &mut WorldState, item: EntityId) {
     state.registry.insert(
         item,
         Decays {
-            at_tick: state.ticks + DECAY_TICKS,
+            at_tick: state.ticks + state.gameplay.decay_ticks,
         },
     );
 }

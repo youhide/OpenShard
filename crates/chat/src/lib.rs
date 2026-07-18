@@ -19,7 +19,7 @@ use openshard_protocol::{
 };
 use openshard_state::components::{Body, Client, Name, Position};
 use openshard_state::sectors::in_range;
-use openshard_state::{Outbound, WorldState};
+use openshard_state::{Gameplay, Outbound, WorldState};
 
 /// A mobile said something.
 ///
@@ -44,25 +44,19 @@ pub const TALKMODE_WHISPER: u8 = 8;
 /// The talk mode of a yell — carried two screens off. Sphere's `TALKMODE_YELL`,
 /// the client's `!`-prefixed speech.
 pub const TALKMODE_YELL: u8 = 9;
-/// How far a whisper carries, in tiles. Sphere's `DISTANCEWHISPER`.
-pub const WHISPER_RANGE: u32 = 3;
-/// How far normal speech carries — the client's default view, so you hear anyone
-/// on your screen. Sphere's `DISTANCETALK` (`UO_MAP_VIEW_SIZE_DEFAULT`).
-pub const SAY_RANGE: u32 = 18;
-/// How far a yell carries. Sphere's `DISTANCEYELL` (`UO_MAP_VIEW_RADAR`).
-pub const YELL_RANGE: u32 = 31;
 /// A middling font the client renders speech in when the speaker names none.
 pub const DEFAULT_FONT: u16 = 3;
 
 /// How far speech in `mode` carries, in tiles. A whisper is heard only right up
-/// close, a yell two screens off, everything else across the screen — Sphere's
-/// three `DISTANCE*` defaults, chosen by the mode byte the client sends.
+/// close, a yell two screens off, everything else across the screen — the
+/// operator's three `distance_*` ranges, chosen by the mode byte the client
+/// sends.
 #[must_use]
-pub const fn speech_range(mode: u8) -> u32 {
+pub const fn speech_range(mode: u8, gameplay: &Gameplay) -> u32 {
     match mode {
-        TALKMODE_WHISPER => WHISPER_RANGE,
-        TALKMODE_YELL => YELL_RANGE,
-        _ => SAY_RANGE,
+        TALKMODE_WHISPER => gameplay.distance_whisper,
+        TALKMODE_YELL => gameplay.distance_yell,
+        _ => gameplay.distance_talk,
     }
 }
 
@@ -119,7 +113,7 @@ pub fn speak(state: &mut WorldState, entity: EntityId, mode: u8, hue: u16, font:
         )
     };
 
-    let range = speech_range(mode);
+    let range = speech_range(mode, &state.gameplay);
     let sectors = &state.facet_state(facet).sectors;
     let listeners: Vec<EntityId> = sectors
         .nearby(pos, range)
