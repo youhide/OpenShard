@@ -597,6 +597,15 @@ fn dispatch(
             });
             true
         }
+        Some(0x34) => {
+            // Status request (opening the paperdoll). The full 10 bytes are a
+            // magic word, a request type and a serial; we only ever answer with
+            // this connection's own status, so none of it needs decoding.
+            if session.in_world {
+                world.queue(Command::RequestStatus { connection: id });
+            }
+            true
+        }
         Some(PickUpItem::ID) => {
             if !session.in_world {
                 return true;

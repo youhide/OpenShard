@@ -87,7 +87,9 @@ pub use login::{
     SelectShard, ShardEntry, StartLocation, WrongPacket, ACCOUNT_NAME_LENGTH,
     CHARACTER_NAME_LENGTH, MAX_SHARDS, MIN_CHARACTER_SLOTS, PASSWORD_LENGTH, SHARD_NAME_LENGTH,
 };
-pub use mobile::{encode_remove, Equipment, MobileIncoming, MobileMove, Notoriety, StatusFlags};
+pub use mobile::{
+    encode_remove, Equipment, MobileIncoming, MobileMove, MobileStatus, Notoriety, StatusFlags,
+};
 pub use packet::{
     client_packet_length, frame_client_packet, Frame, FrameError, PacketLength, MAX_PACKET_SIZE,
     SEED_LENGTH_NEW, SEED_LENGTH_OLD,

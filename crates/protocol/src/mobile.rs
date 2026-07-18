@@ -104,6 +104,131 @@ pub fn encode_remove(serial: u32) -> Vec<u8> {
     writer.into_bytes()
 }
 
+/// `0x11` — a mobile's full status: the paperdoll numbers. Variable length.
+///
+/// The one packet that carries **stamina**, and the reason it exists here at all:
+/// a client reads its own stamina from this, and a mobile the client believes has
+/// zero stamina *cannot run* — it falls back to a walk with no error to show for
+/// it. A shard that never sends `0x11` has players who can only ever walk. Weight
+/// is the same trap the other way: a client that thinks it is over its
+/// `max_weight` also refuses to run, so both are sent, and honest.
+///
+/// The packet grew a tail with each era and clients reject the wrong length
+/// outright, so the shape is chosen by [`ClientVersion::status_packet_version`],
+/// not a feature flag. Ported from ServUO's `MobileStatus` for the case a mobile
+/// asks about *itself* (`WriteAttr`, raw current/max, not the normalised form a
+/// stranger sees). Types 3 (pre-AoS), 4 (AoS), 5 (ML) and 6 (HS+) are built here;
+/// an older client is served the type-3 body, the oldest shape a modern install
+/// still round-trips.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct MobileStatus {
+    /// Whose status.
+    pub serial: u32,
+    /// The name shown on the bar, clamped to 30 bytes.
+    pub name: String,
+    /// Current and maximum hit points.
+    pub hits: u16,
+    /// Maximum hit points.
+    pub hits_max: u16,
+    /// Whether the body is female — a bit the client draws the paperdoll from.
+    pub female: bool,
+    /// Strength.
+    pub strength: u16,
+    /// Dexterity. In UO this is also the stamina cap.
+    pub dexterity: u16,
+    /// Intelligence.
+    pub intelligence: u16,
+    /// Current stamina. Zero here is what stops a client running.
+    pub stamina: u16,
+    /// Maximum stamina.
+    pub stamina_max: u16,
+    /// Current mana.
+    pub mana: u16,
+    /// Maximum mana.
+    pub mana_max: u16,
+    /// Gold in the pack, shown on the status bar.
+    pub gold: u32,
+    /// Physical resistance (pre-AoS: armour rating).
+    pub armor: u16,
+    /// Carried weight. Kept under `max_weight` or the client refuses to run.
+    pub weight: u16,
+    /// The weight the character can carry before it is overloaded.
+    pub max_weight: u16,
+    /// The sum of the three stats a character may train to.
+    pub stat_cap: u16,
+    /// Pets currently following.
+    pub followers: u8,
+    /// The most pets that may follow.
+    pub followers_max: u8,
+}
+
+impl MobileStatus {
+    /// The packet id.
+    pub const ID: u8 = 0x11;
+
+    /// Encode a whole 0x11 packet for the given client.
+    pub fn encode(&self, version: ClientVersion) -> Vec<u8> {
+        // The version function returns 1..=6; only 3..=6 have distinct wire
+        // shapes here. Anything older is served the oldest one a modern file set
+        // still understands. `type` is ServUO's, and it drives the tail length.
+        let kind = version.status_packet_version().clamp(3, 6);
+
+        let mut writer = PacketWriter::with_capacity(121);
+        writer.u8(Self::ID);
+        writer.u16(0); // length, patched below
+        writer.u32(self.serial);
+        writer.fixed_string(&self.name, 30);
+        writer.u16(self.hits);
+        writer.u16(self.hits_max);
+        writer.bool(false); // the beholder may not rename us
+        writer.u8(kind);
+
+        writer.bool(self.female);
+        writer.u16(self.strength);
+        writer.u16(self.dexterity);
+        writer.u16(self.intelligence);
+        writer.u16(self.stamina);
+        writer.u16(self.stamina_max);
+        writer.u16(self.mana);
+        writer.u16(self.mana_max);
+        writer.u32(self.gold);
+        writer.u16(self.armor);
+        writer.u16(self.weight);
+
+        if kind >= 5 {
+            writer.u16(self.max_weight);
+            writer.u8(1); // race id + 1; human is 0, so 1
+        }
+
+        writer.u16(self.stat_cap);
+        writer.u8(self.followers);
+        writer.u8(self.followers_max);
+
+        if kind >= 4 {
+            // Resistances, luck, weapon damage, tithing — all zero until the
+            // systems that set them exist. The client only needs the shape.
+            for _ in 0..5 {
+                writer.u16(0); // fire, cold, poison, energy, luck
+            }
+            writer.u16(0); // damage min
+            writer.u16(0); // damage max
+            writer.u32(0); // tithing points
+        }
+
+        if kind >= 6 {
+            // The AoS extended-status block: 15 shorts (0..=14). Zeroed.
+            for _ in 0..=14 {
+                writer.u16(0);
+            }
+        }
+
+        let mut bytes = writer.into_bytes();
+        let length = u16::try_from(bytes.len()).expect("a status packet fits its u16 length");
+        bytes[1..3].copy_from_slice(&length.to_be_bytes());
+        bytes
+    }
+}
+
 /// `0x77` — move a mobile the client already knows about. 17 bytes.
 ///
 /// Sphere's comment is worth keeping: this cannot move the client's *own*
@@ -444,6 +569,65 @@ mod tests {
 
         let modern = ClientVersion::AOS;
         assert_eq!(Notoriety::Invulnerable.for_client(modern), 0x07);
+    }
+
+    fn a_status() -> MobileStatus {
+        MobileStatus {
+            serial: 0x0001_2345,
+            name: "Lord British".to_owned(),
+            hits: 100,
+            hits_max: 100,
+            female: false,
+            strength: 100,
+            dexterity: 90,
+            intelligence: 80,
+            stamina: 90,
+            stamina_max: 90,
+            mana: 80,
+            mana_max: 80,
+            gold: 1234,
+            armor: 0,
+            weight: 14,
+            max_weight: 390,
+            stat_cap: 225,
+            followers: 0,
+            followers_max: 5,
+        }
+    }
+
+    #[test]
+    fn a_status_packet_declares_its_own_length() {
+        // The client rejects a 0x11 whose length word does not match its bytes,
+        // and reads past the end of a short one — so the two must always agree.
+        for version in [
+            ClientVersion::new(3, 0, 8, 10), // type 3
+            ClientVersion::new(4, 0, 0, 0),  // type 4
+            ClientVersion::new(5, 0, 0, 0),  // type 5
+            ClientVersion::TOL,              // type 6
+        ] {
+            let bytes = a_status().encode(version);
+            assert_eq!(bytes[0], 0x11);
+            let declared = u16::from_be_bytes([bytes[1], bytes[2]]) as usize;
+            assert_eq!(declared, bytes.len(), "length mismatch for {version}");
+        }
+    }
+
+    #[test]
+    fn the_modern_status_is_the_hundred_and_twenty_one_byte_shape() {
+        // ServUO's `EnsureCapacity(121)` for a type-6 self status. Off by a byte
+        // and a High Seas client desyncs on the next packet.
+        assert_eq!(a_status().encode(ClientVersion::TOL).len(), 121);
+    }
+
+    #[test]
+    fn stamina_rides_in_the_status_and_is_not_zero() {
+        // The whole reason this packet is sent: a zero here is a mobile the client
+        // will not let run. The bytes are at a fixed offset for a self status.
+        let bytes = a_status().encode(ClientVersion::TOL);
+        // id(1) len(2) serial(4) name(30) hits(2) hitsmax(2) rename(1) type(1)
+        // female(1) str(2) dex(2) int(2) => stamina starts at byte 50.
+        let stamina = u16::from_be_bytes([bytes[50], bytes[51]]);
+        assert_eq!(stamina, 90, "the client reads run-eligibility from here");
     }
 
     #[test]

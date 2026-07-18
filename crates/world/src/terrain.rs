@@ -98,7 +98,7 @@ impl MapTerrain {
     /// real surface it stands on first, because on a slope the top of that
     /// surface is higher than its feet, and the reach starts from the top.
     pub fn surface_at(&self, x: u16, y: u16, from_z: i32) -> Option<i32> {
-        self.check(x, y, from_z, from_z, from_z)
+        self.check(x, y, from_z, from_z)
     }
 
     /// The surface a mobile at `(x, y, loc_z)` is standing *on*: its base z and
@@ -154,16 +154,23 @@ impl MapTerrain {
     }
 
     /// Whether a mobile standing on the surface described by `(start_z,
-    /// start_top)` and currently at height `p_z` may step onto `(x, y)`, and the
-    /// height it lands at. Ported from ServUO/RunUO's `MovementImpl.Check`.
+    /// start_top)` may step onto `(x, y)`, and the height it lands at.
     ///
-    /// The two heights are not the same: `start_top` (the top of what you stand
-    /// on) plus a step is how *high* you can reach, while `p_z` (your feet) is
-    /// what a landing height is judged *close to* — of several surfaces you could
-    /// step onto, you take the one nearest your current height, not the highest.
-    /// Picking the highest is what put the server a unit above the client on
-    /// every slope and rubber-banded the walk.
-    pub fn check(&self, x: u16, y: u16, start_z: i32, start_top: i32, p_z: i32) -> Option<i32> {
+    /// A blend of the two reference engines, because the shard serves the 2D
+    /// client and each got one half right for it:
+    ///
+    /// - **Reach** is ServUO/RunUO's: a step reaches `start_top + 2` — the top of
+    ///   the surface underfoot plus a step, not the feet. Starting from the feet
+    ///   refuses steps up a slope the client took, which is what rubber-banded
+    ///   every hillside before this.
+    /// - **Selection** is Sphere's `GetFixPoint`: among the surfaces in reach,
+    ///   stand on the **highest**, not the one nearest the current height. This is
+    ///   how a staircase is climbed — a stair tile carries both the floor below
+    ///   and the step above, and the client takes the step. ServUO's nearest-z
+    ///   rule keeps you on the floor and the client, climbing, rubber-bands back
+    ///   down. On bare ground the two rules agree — there is only one surface —
+    ///   so this costs the slope fix nothing.
+    pub fn check(&self, x: u16, y: u16, start_z: i32, start_top: i32) -> Option<i32> {
         // Off the map is not walkable — and reading a corner off the edge below
         // would fold a neighbour's height in as if it were real ground.
         self.map.land(x, y)?;
@@ -175,18 +182,6 @@ impl MapTerrain {
         let mut new_z = 0;
         let mut move_ok = false;
 
-        // Among reachable surfaces, keep the one whose standing height is closest
-        // to where the mobile is now — and on a tie the *lower* one, exactly as
-        // ServUO's `cmp` decides. Preferring the higher instead puts the server a
-        // step above the client wherever two surfaces are equidistant.
-        let closer = |our_z: i32, move_ok: bool, new_z: i32| -> bool {
-            if !move_ok {
-                return true;
-            }
-            let cmp = (our_z - p_z).abs() - (new_z - p_z).abs();
-            !(cmp > 0 || (cmp == 0 && our_z > new_z))
-        };
-
         for item in self.map.statics_at(x, y) {
             let tile = self.tiles.static_tile(item.tile);
             if !tile.flags.is_platform() {
@@ -197,7 +192,8 @@ impl MapTerrain {
             let climbable = tile.flags.is_climbable();
             // `item_top` is the edge a step must reach; `our_z` where you stand.
             let (item_top, our_z) = platform_surface(base, height, climbable);
-            if !closer(our_z, move_ok, new_z) {
+            // Keep the highest surface in reach: the stair over the floor.
+            if move_ok && our_z <= new_z {
                 continue;
             }
             let test_top = check_top.max(our_z + PLAYER_HEIGHT);
@@ -220,13 +216,15 @@ impl MapTerrain {
         }
 
         // The ground itself: reachable if a step reaches its lowest corner, and
-        // you stand at its centre — the average, never the raw corner.
-        if self.land_is_ground(x, y) && step_top >= land_z {
-            let our_z = land_center;
-            if closer(our_z, move_ok, new_z) && !self.is_obstructed(x, y, our_z) {
-                new_z = our_z;
-                move_ok = true;
-            }
+        // you stand at its centre — the average, never the raw corner. Taken only
+        // if nothing higher already won.
+        if self.land_is_ground(x, y)
+            && step_top >= land_z
+            && (!move_ok || land_center > new_z)
+            && !self.is_obstructed(x, y, land_center)
+        {
+            new_z = land_center;
+            move_ok = true;
         }
 
         move_ok.then_some(new_z)
@@ -316,7 +314,7 @@ impl Terrain for MapTerrain {
         // on a slope those differ, and starting from the feet refuses steps up the
         // slope the client took. `start_surface` is what the client reaches from.
         let (start_z, start_top) = self.start_surface(from.x, from.y, from_z);
-        let landing = self.check(to.x, to.y, start_z, start_top, from_z)?;
+        let landing = self.check(to.x, to.y, start_z, start_top)?;
         let z = i8::try_from(landing).ok()?;
         Some(Point {
             x: to.x,
@@ -390,6 +388,59 @@ mod tests {
     fn sphere_constants_are_what_sphere_says() {
         assert_eq!(MAX_STEP_UP, 2, "CCharStatus.cpp: `+ m_zClimbHeight + 2`");
         assert_eq!(PLAYER_HEIGHT, 16, "uofiles_macros.h");
+    }
+
+    #[test]
+    fn a_stack_of_surfaces_is_climbed_to_the_highest_in_reach() {
+        // The rule that lets a staircase be climbed, and the one ServUO gets wrong
+        // for the 2D client: a stair tile carries the floor below *and* the step
+        // above, and stepping onto it must land on the step, not the floor. Find
+        // real tiles with two platform surfaces both within a generous reach and
+        // assert `check` returns the higher one — Sphere's `GetFixPoint`.
+        let Some(t) = real_terrain() else {
+            return;
+        };
+
+        let mut checked = 0;
+        for y in 1580..1610u16 {
+            for x in 1490..1552u16 {
+                // Collect the standing heights of the platform statics here.
+                let mut stands: Vec<i32> = t
+                    .map()
+                    .statics_at(x, y)
+                    .filter_map(|item| {
+                        let tile = t.tiles().static_tile(item.tile);
+                        tile.flags.is_platform().then(|| {
+                            platform_surface(
+                                i32::from(item.z),
+                                i32::from(tile.height),
+                                tile.flags.is_climbable(),
+                            )
+                            .1
+                        })
+                    })
+                    .collect();
+                if stands.len() < 2 {
+                    continue;
+                }
+                stands.sort_unstable();
+                let (&low, &high) = (stands.first().unwrap(), stands.last().unwrap());
+                if low == high || t.is_obstructed(x, y, high) {
+                    continue;
+                }
+                // Reach from a vantage that clears the highest surface, so both are
+                // in reach and the choice is purely which one you stand on.
+                let start_top = high;
+                if let Some(landed) = t.check(x, y, high, start_top) {
+                    assert_eq!(
+                        landed, high,
+                        "({x},{y}) has surfaces {stands:?}; a step onto it must climb to the top",
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 10, "only {checked} stacked-surface tiles tested");
     }
 
     #[test]

@@ -34,8 +34,8 @@ use openshard_movement::{step_from, OpenWorld, Terrain, Walk, Walker};
 use openshard_persistence::{CharacterRecord, Journal, Snapshot};
 use openshard_protocol::{
     encode_light_level, encode_login_complete, encode_map_change, encode_walk_ack,
-    encode_walk_reject, ClientVersion, Direction, Facing, Notoriety, PlayerStart, PlayerUpdate,
-    Point, WalkRequest, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
+    encode_walk_reject, ClientVersion, Direction, Facing, MobileStatus, Notoriety, PlayerStart,
+    PlayerUpdate, Point, WalkRequest, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
 };
 use tracing::{debug, info, warn};
 
@@ -94,6 +94,22 @@ const DEFAULT_HITPOINTS: u16 = 100;
 const DEFAULT_MANA: u16 = 100;
 /// The dexterity a character starts with.
 const DEFAULT_DEXTERITY: u16 = 100;
+/// A body's own weight in stones, before anything it carries — Sphere's and
+/// ServUO's `BodyWeight`. Sent on the status bar; kept well under the carry cap so
+/// the client never thinks it is overloaded and refuses to run.
+const BODY_WEIGHT: u16 = 14;
+/// The sum of the three stats a character may train to — the classic 225.
+const STAT_CAP: u16 = 225;
+/// How many pets may follow a character. Only the shape matters until pets do.
+const MAX_FOLLOWERS: u8 = 5;
+
+/// The weight a character can carry before it is overloaded, from its strength.
+///
+/// UO's `40 + floor(3.5 * str)`. Only the *ceiling* is sent on the status bar,
+/// and only so the client can see it is not over it; nothing enforces it yet.
+const fn max_weight(strength: u16) -> u16 {
+    40 + strength * 7 / 2
+}
 /// Ticks between a brain's beats — half a second at [`TICK_INTERVAL`]. Creatures
 /// think in beats, not every tick: it paces their walk and spares the loop from
 /// re-deciding a thousand times a second what has not changed.
@@ -167,6 +183,13 @@ pub enum Command {
         connection: ConnectionId,
         /// The request.
         request: WalkRequest,
+    },
+    /// A client asked for its own status again — a `0x34`, sent when the paperdoll
+    /// opens. The status went out at world entry; this resends it so a paperdoll
+    /// opened much later is not stale.
+    RequestStatus {
+        /// Which connection asked.
+        connection: ConnectionId,
     },
     /// The server moves a mobile one step — a script or AI decree, not a client
     /// request.
@@ -828,6 +851,11 @@ impl World {
                 connection,
                 request,
             } => self.walk(connection, request, now),
+            Command::RequestStatus { connection } => {
+                if let Some(&entity) = self.state.players.get(&connection) {
+                    self.send_status(connection, entity);
+                }
+            }
             Command::Step { serial, direction } => self.step(serial, direction),
             Command::SpawnItem {
                 graphic,
@@ -1128,6 +1156,11 @@ impl World {
             .encode(),
         );
         self.state.send(connection, encode_light_level(LIGHT_DAY));
+        // The status bar, stamina and all. Without it the client believes it has
+        // zero stamina and refuses to run — see `MobileStatus`. Sent before the
+        // login-complete that starts the client drawing, so the numbers are there
+        // the moment the paperdoll can be opened.
+        self.send_status(connection, entity);
         self.state.send(connection, encode_login_complete());
 
         self.state.bus.send(PlayerEntered {
@@ -1141,6 +1174,66 @@ impl World {
         // directions, because arriving is symmetric: the newcomer has an empty
         // screen and everyone nearby has a gap where it now stands.
         self.state.refresh_around(entity);
+    }
+
+    /// Send a player its own `0x11` status — the paperdoll numbers, and the only
+    /// packet that carries stamina. A client with no status believes it has zero
+    /// stamina and will only ever walk, so this goes out on world entry and again
+    /// whenever the client asks (`0x34`). Reads the mobile's own components;
+    /// stamina tracks dexterity, as it does in UO, until a stamina system exists.
+    fn send_status(&mut self, connection: ConnectionId, entity: EntityId) {
+        let Some(Client { version, .. }) = self.state.registry.get::<Client>(entity).copied()
+        else {
+            return;
+        };
+        let Some(serial) = self.state.registry.serial_of(entity) else {
+            return;
+        };
+        let name = self
+            .state
+            .registry
+            .get::<Name>(entity)
+            .map_or_else(String::new, |n| n.0.clone());
+        let stats = self.state.registry.get::<Stats>(entity).copied();
+        let hits = self.state.registry.get::<Hitpoints>(entity).copied();
+        let mana = self.state.registry.get::<Mana>(entity).copied();
+        let (strength, dexterity, intelligence) = stats
+            .map_or((DEFAULT_HITPOINTS, DEFAULT_DEXTERITY, DEFAULT_MANA), |s| {
+                (s.strength, s.dexterity, s.intelligence)
+            });
+        let (hits_now, hits_max) = hits.map_or((DEFAULT_HITPOINTS, DEFAULT_HITPOINTS), |h| {
+            (h.current, h.max)
+        });
+        let (mana_now, mana_max) =
+            mana.map_or((DEFAULT_MANA, DEFAULT_MANA), |m| (m.current, m.max));
+
+        let status = MobileStatus {
+            serial: serial.raw(),
+            name,
+            hits: hits_now,
+            hits_max,
+            female: false,
+            strength,
+            dexterity,
+            intelligence,
+            // Stamina is dexterity's pool and starts full — anything less than max
+            // here needlessly slows the first run out of the gate.
+            stamina: dexterity,
+            stamina_max: dexterity,
+            mana: mana_now,
+            mana_max,
+            gold: 0,
+            armor: 0,
+            // A body's own weight, well under the cap: an overloaded client will
+            // not run either, so this is deliberately light until an inventory
+            // weight system replaces it.
+            weight: BODY_WEIGHT,
+            max_weight: max_weight(strength),
+            stat_cap: STAT_CAP,
+            followers: 0,
+            followers_max: MAX_FOLLOWERS,
+        };
+        self.state.send(connection, status.encode(version));
     }
 
     fn walk(&mut self, connection: ConnectionId, request: WalkRequest, now: Instant) {
@@ -4460,8 +4553,46 @@ pub(crate) mod tests {
         let ids: Vec<u8> = world.drain_outbound().map(|out| out.packet[0]).collect();
         assert_eq!(
             ids,
-            vec![0x1B, 0xBF, 0x20, 0x4F, 0x55],
-            "0x1B first or there is no body; 0x55 last or the client draws early"
+            vec![0x1B, 0xBF, 0x20, 0x4F, 0x11, 0x55],
+            "0x1B first or there is no body; 0x55 last or the client draws early; \
+             0x11 status before it, or the client thinks it has zero stamina and cannot run"
+        );
+    }
+
+    #[test]
+    fn entering_sends_a_status_with_running_stamina() {
+        // The fix for "cannot run": the client reads stamina from the 0x11, and a
+        // zero there means walk-only. This is the byte that lets a player run.
+        let mut world = world();
+        enter(&mut world, Instant::now());
+
+        let status = world
+            .drain_outbound()
+            .map(|out| out.packet)
+            .find(|p| p[0] == 0x11)
+            .expect("a status packet on world entry");
+        let stamina = u16::from_be_bytes([status[50], status[51]]);
+        assert!(
+            stamina > 0,
+            "stamina is zero; the client will refuse to run"
+        );
+    }
+
+    #[test]
+    fn a_status_request_is_answered_with_a_status() {
+        // Opening the paperdoll (0x34) after entry resends the status.
+        let mut world = world();
+        let connection = enter(&mut world, Instant::now());
+        let _ = world.drain_outbound().count();
+
+        world.queue(Command::RequestStatus { connection });
+        world.tick(Instant::now());
+
+        assert!(
+            packets_for(&mut world, connection)
+                .iter()
+                .any(|p| p[0] == 0x11),
+            "a 0x34 should be answered with a 0x11"
         );
     }
 
