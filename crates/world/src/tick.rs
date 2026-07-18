@@ -34,14 +34,14 @@ use openshard_movement::{step_from, OpenWorld, Terrain, Walk, Walker};
 use openshard_persistence::{CharacterRecord, Journal, Snapshot};
 use openshard_protocol::{
     encode_light_level, encode_login_complete, encode_map_change, encode_walk_ack,
-    encode_walk_reject, ClientVersion, Direction, Facing, MobileStatus, Notoriety, PlayerStart,
-    PlayerUpdate, Point, WalkRequest, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
+    encode_walk_reject, AccessLevel, ClientVersion, Direction, Facing, MobileStatus, Notoriety,
+    PlayerStart, PlayerUpdate, Point, WalkRequest, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
 };
 use tracing::{debug, info, warn};
 
 use openshard_state::components::{
-    Account, Body, Brain, Client, Combat, DamageType, Facet, Heading, Hitpoints, Mana, MeleeDamage,
-    Movement, Name, Position, Resistance, Scripted, Stats, SwingSpeed,
+    Access, Account, Body, Brain, Client, Combat, DamageType, Facet, Heading, Hitpoints, Mana,
+    MeleeDamage, Movement, Name, Position, Resistance, Scripted, Stats, SwingSpeed,
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
@@ -58,6 +58,7 @@ use crate::events::{
     MobileMoved, MobileSpawned, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason,
     SpellRequested, StepRefused,
 };
+use crate::gm;
 use crate::terrain::MapTerrain;
 
 /// How often the world ticks.
@@ -176,6 +177,10 @@ pub enum Command {
         /// How the character looks: chosen at creation, or restored from the save.
         /// `None` falls back to the default body.
         appearance: Option<Appearance>,
+        /// The staff authority the account plays with — what privileged commands
+        /// its characters may run. Re-derived from the account each login, never
+        /// saved with the character.
+        access: AccessLevel,
     },
     /// A client asked to take a step.
     Walk {
@@ -456,6 +461,7 @@ struct Entering {
     position: Option<Point>,
     facet: u8,
     appearance: Option<Appearance>,
+    access: AccessLevel,
 }
 
 /// Everything [`World::spawn_mobile`] needs — a plain bundle, so the one function
@@ -837,6 +843,7 @@ impl World {
                 position,
                 facet,
                 appearance,
+                access,
             } => self.enter(Entering {
                 connection,
                 version,
@@ -846,6 +853,7 @@ impl World {
                 position,
                 facet,
                 appearance,
+                access,
             }),
             Command::Walk {
                 connection,
@@ -970,7 +978,7 @@ impl World {
                 hue,
                 font,
                 text,
-            } => chat::say(&mut self.state, connection, mode, hue, font, &text),
+            } => self.say(connection, mode, hue, font, text),
             Command::Speak { serial, hue, text } => {
                 if let Some(entity) =
                     Serial::new(serial).and_then(|s| self.state.registry.entity_of(s))
@@ -1018,6 +1026,7 @@ impl World {
             position,
             facet,
             appearance,
+            access,
         } = entering;
         if self.state.players.contains_key(&connection) {
             warn!(%connection, "already in the world");
@@ -1073,6 +1082,9 @@ impl World {
         self.state.registry.insert(entity, Name(name.clone()));
         self.state.registry.insert(entity, Account(account));
         self.state.registry.insert(entity, Facet(facet));
+        // The account's authority, re-derived each login and never saved with the
+        // character — so it is what the GM command gate reads.
+        self.state.registry.insert(entity, Access(access));
         // Strength caps hit points, intelligence caps mana — the first derived
         // numbers. Character creation will choose the stats; until it does, the
         // defaults reproduce the flat hundreds the world had before.
@@ -1234,6 +1246,28 @@ impl World {
             followers_max: MAX_FOLLOWERS,
         };
         self.state.send(connection, status.encode(version));
+    }
+
+    /// A player's speech, with staff commands split off the front. A
+    /// `.`-prefixed line from a game master runs as a command and never reaches
+    /// anyone's screen; from an ordinary player it is just speech, so a player can
+    /// still say ".hello" out loud. The authority gate lives here, not in `gm`,
+    /// so the command module can assume a call is already cleared.
+    fn say(&mut self, connection: ConnectionId, mode: u8, hue: u16, font: u16, text: String) {
+        if let Some(rest) = text.strip_prefix(gm::COMMAND_PREFIX) {
+            if let Some(&actor) = self.state.players.get(&connection) {
+                let is_gm = self
+                    .state
+                    .registry
+                    .get::<Access>(actor)
+                    .is_some_and(|access| access.0 >= AccessLevel::GameMaster);
+                if is_gm {
+                    gm::run(&mut self.state, actor, rest);
+                    return;
+                }
+            }
+        }
+        chat::say(&mut self.state, connection, mode, hue, font, &text);
     }
 
     fn walk(&mut self, connection: ConnectionId, request: WalkRequest, now: Instant) {
@@ -1666,6 +1700,25 @@ pub(crate) mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            access: AccessLevel::Player,
+        });
+        world.tick(now);
+        connection
+    }
+
+    /// Enter as a game master — the authority the `.`-command tests need.
+    pub(super) fn enter_gm(world: &mut World, now: Instant) -> ConnectionId {
+        let connection = connection();
+        world.queue(Command::Enter {
+            connection,
+            version: ClientVersion::TOL,
+            account: "admin".to_owned(),
+            name: "Lord British".to_owned(),
+            serial: None,
+            position: None,
+            facet: 0,
+            appearance: None,
+            access: AccessLevel::GameMaster,
         });
         world.tick(now);
         connection
@@ -4498,6 +4551,89 @@ pub(crate) mod tests {
         assert_eq!(events[0].text, "hello world");
     }
 
+    fn gm_say(world: &mut World, connection: ConnectionId, text: &str, now: Instant) {
+        world.queue(Command::Say {
+            connection,
+            mode: 0,
+            hue: 0,
+            font: 3,
+            text: text.to_owned(),
+        });
+        world.tick(now);
+    }
+
+    #[test]
+    fn a_gm_dot_command_is_run_not_spoken() {
+        // `.where` from a game master answers privately and is never put over
+        // their head — a command is not speech.
+        let now = Instant::now();
+        let mut world = world();
+        let gm = enter_gm(&mut world, now);
+        let _ = packets_for(&mut world, gm);
+        let mut spoke: Cursor<MobileSpoke> = world.bus().cursor();
+
+        gm_say(&mut world, gm, ".where", now);
+
+        assert_eq!(
+            world.bus().read(&mut spoke).count(),
+            0,
+            "no one heard a command"
+        );
+        assert!(
+            packets_for(&mut world, gm).iter().any(|p| p[0] == 0x1C),
+            "the GM got a private system answer"
+        );
+    }
+
+    #[test]
+    fn a_players_dot_text_is_ordinary_speech() {
+        // A non-GM saying ".hello" just talks: no command, no privilege leak, and
+        // the words go on the bus like any other speech.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let mut spoke: Cursor<MobileSpoke> = world.bus().cursor();
+
+        gm_say(&mut world, player, ".hello", now);
+
+        let events: Vec<MobileSpoke> = world.bus().read(&mut spoke).cloned().collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].text, ".hello",
+            "a player's dot-text is spoken verbatim"
+        );
+    }
+
+    #[test]
+    fn a_gm_can_teleport_add_and_set() {
+        let now = Instant::now();
+        let mut world = world();
+        let gm = enter_gm(&mut world, now);
+        let entity = world.state.players[&gm];
+
+        // Teleport.
+        gm_say(
+            &mut world,
+            gm,
+            &format!(".tele {} {}", START.0 + 5, START.1 + 7),
+            now,
+        );
+        let Position(at) = *world.registry().get::<Position>(entity).unwrap();
+        assert_eq!((at.x, at.y), (START.0 + 5, START.1 + 7), "the GM moved");
+
+        // Add an item at the GM's feet — the GM's own screen is drawn the 0x1A.
+        let _ = packets_for(&mut world, gm);
+        gm_say(&mut world, gm, ".add 0x0eed 5", now);
+        assert!(
+            packets_for(&mut world, gm).iter().any(|p| p[0] == 0x1A),
+            "the spawned item was drawn"
+        );
+
+        // Set a stat, through the skills system that owns the cap.
+        gm_say(&mut world, gm, ".set str 73", now);
+        assert_eq!(world.registry().get::<Stats>(entity).unwrap().strength, 73);
+    }
+
     #[test]
     fn a_creature_can_be_made_to_speak() {
         let now = Instant::now();
@@ -4536,6 +4672,7 @@ pub(crate) mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            access: AccessLevel::Player,
         });
 
         assert_eq!(world.player_count(), 0, "queued, not applied");
@@ -4631,6 +4768,7 @@ pub(crate) mod tests {
                 body: 0x025E,
                 hue: 0x0430,
             }),
+            access: AccessLevel::Player,
         });
         world.tick(Instant::now());
 
@@ -4683,6 +4821,7 @@ pub(crate) mod tests {
                 body: 0x0191,
                 hue: 0x83EA,
             }),
+            access: AccessLevel::Player,
         });
         world.tick(Instant::now());
 
@@ -4737,6 +4876,7 @@ pub(crate) mod tests {
             position: None,
             facet,
             appearance: None,
+            access: AccessLevel::Player,
         });
         world.tick(now);
     }
@@ -4991,6 +5131,7 @@ pub(crate) mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            access: AccessLevel::Player,
         });
         assert_eq!(world.player_count(), 0);
         world.tick(now);

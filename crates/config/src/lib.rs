@@ -24,6 +24,7 @@
 //!     name = "admin"
 //!     password = "hunter2"
 //!     characters = ["Lord British"]
+//!     access = "gamemaster"
 //! "#).unwrap();
 //!
 //! config.validate().unwrap();
@@ -314,6 +315,12 @@ pub struct AccountConfig {
     /// Character names on this account.
     #[serde(default)]
     pub characters: Vec<String>,
+    /// The staff authority this account plays with: `"player"` (the default),
+    /// `"gamemaster"`/`"gm"`, or `"administrator"`/`"admin"`. Parsed into an
+    /// `AccessLevel` by the binary; an unrecognised value there is logged and
+    /// treated as `player`, never a silent grant.
+    #[serde(default)]
+    pub access: String,
 }
 
 /// The widest a shard name can be. The 0xA8 field is 32 bytes.

@@ -31,6 +31,7 @@
 //! Both are settled by arithmetic and pinned by tests against real files.
 
 pub mod events;
+pub mod gm;
 pub mod map;
 pub mod terrain;
 pub mod tick;

@@ -332,7 +332,7 @@ fn into_world(command: ScriptCommand) -> Command {
 mod tests {
     use super::*;
     use openshard_gateway::ConnectionId;
-    use openshard_protocol::ClientVersion;
+    use openshard_protocol::{AccessLevel, ClientVersion};
     use openshard_world::Position;
     use std::time::Instant;
 
@@ -403,6 +403,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            access: AccessLevel::Player,
         });
         world.tick(now); // emits PlayerEntered
         scripts.pump(&mut world); // script hears it, queues two Steps
@@ -448,6 +449,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            access: AccessLevel::Player,
         });
         world.tick(now); // PlayerEntered
         let _ = world.drain_outbound().count(); // the login burst
@@ -489,6 +491,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            access: AccessLevel::Player,
         });
         world.tick(now);
         scripts.pump(&mut world); // spawns the container
@@ -671,6 +674,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            access: AccessLevel::Player,
         });
         world.tick(now); // PlayerEntered
         scripts.pump(&mut world); // set + use the skill queued
@@ -719,6 +723,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            access: AccessLevel::Player,
         });
         world.tick(now); // PlayerEntered
         scripts.pump(&mut world); // train + spawn the target queued
@@ -793,6 +798,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            access: AccessLevel::Player,
         });
         world.tick(now); // PlayerEntered
         scripts.pump(&mut world); // train magery queued
@@ -857,6 +863,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            access: AccessLevel::Player,
         });
         world.tick(now);
         scripts.pump(&mut world); // the creature is spawned
@@ -911,6 +918,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            access: AccessLevel::Player,
         });
         world.tick(now);
         scripts.pump(&mut world);

@@ -32,9 +32,9 @@ use openshard_persistence::{
     AccountRecord, CharacterRecord, MemoryStore, PgStore, Snapshot, SqliteStore, Store,
 };
 use openshard_protocol::{
-    encode_login_denied, huffman, AttackRequest, CastSpellRequest, CharacterPlay, CreateCharacter,
-    DoubleClick, DropItem, EquipItemRequest, GameServerLogin, PickUpItem, Point, StartLocation,
-    TalkRequest, UnicodeTalkRequest, WalkRequest, WarModeRequest,
+    encode_login_denied, huffman, AccessLevel, AttackRequest, CastSpellRequest, CharacterPlay,
+    CreateCharacter, DoubleClick, DropItem, EquipItemRequest, GameServerLogin, PickUpItem, Point,
+    StartLocation, TalkRequest, UnicodeTalkRequest, WalkRequest, WarModeRequest,
 };
 use openshard_world::{
     Appearance, Command, Gameplay, Map, MapTerrain, TileData, World, TICK_INTERVAL,
@@ -301,6 +301,15 @@ async fn run_shard(
         for character in &account.characters {
             accounts = accounts.with_character(&account.name, character);
         }
+        // An unparseable access level is logged and left a player — authority is
+        // never granted by a typo.
+        match account.access.parse::<AccessLevel>() {
+            Ok(AccessLevel::Player) => {}
+            Ok(level) => accounts = accounts.with_access(&account.name, level),
+            Err(error) => {
+                warn!(account = account.name, %error, "unknown access level; treating as player")
+            }
+        }
     }
 
     // Bring the world back from the database: reserve every stored serial so a new
@@ -508,7 +517,14 @@ fn handle(
                         }
                         return;
                     }
-                    if !dispatch(session, world, &packet, id, saved) {
+                    // The account's authority, looked up where the store is in
+                    // reach and passed to the world so the GM command gate has it.
+                    // A player by default; only the store grants more.
+                    let access = session
+                        .login
+                        .account()
+                        .map_or(AccessLevel::Player, |a| login.accounts.access_level(a));
+                    if !dispatch(session, world, &packet, id, saved, access) {
                         sessions.remove(&id);
                         return;
                     }
@@ -544,6 +560,7 @@ fn dispatch(
     packet: &[u8],
     id: ConnectionId,
     saved: &HashMap<(String, String), CharacterRecord>,
+    access: AccessLevel,
 ) -> bool {
     match packet.first().copied() {
         Some(CharacterPlay::ID) => {
@@ -579,6 +596,7 @@ fn dispatch(
                 position,
                 facet,
                 appearance,
+                access,
             });
             true
         }
@@ -865,6 +883,7 @@ fn create_character(
     };
 
     session.in_world = true;
+    let access = login.accounts.access_level(&account);
     world.queue(Command::Enter {
         connection: id,
         version: session.login.version(),
@@ -880,6 +899,7 @@ fn create_character(
             body: create.body(),
             hue: create.skin_hue,
         }),
+        access,
     });
     true
 }

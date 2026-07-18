@@ -482,8 +482,19 @@ Roughly in dependency order, each script-first:
     eighteen-tile screen — Sphere's `DISTANCEWHISPER`/`DISTANCETALK`/`DISTANCEYELL`
     defaults, chosen by the mode byte the client already sends. `speak` picks the
     range; the rest of the path is unchanged.
-  - [ ] the guarded/GM command layer (`/`-prefixed speech, privilege-gated) — a
-    system of its own, waiting on accounts carrying a privilege level
+  - [x] **the guarded staff-command layer** (`.`-prefixed speech, Sphere's
+    convention). An account carries an `AccessLevel` — `player`, `gamemaster`,
+    `administrator` — set in `[[accounts]]` config (`access = "gm"`), looked up at
+    login and carried into the world as an `Access` component, re-derived each
+    login so a demotion takes effect and never saved with the character. A game
+    master's `.`-prefixed speech is split off in the `Command::Say` handler and
+    run as a command instead of reaching anyone's screen; an ordinary player
+    saying `.hello` just talks, so there is no leak and no surprise. The commands
+    — `.where`, `.tele`, `.add`, `.set` — lean on the systems that own their rules
+    (`items` spawns, `skills` re-caps the stat) rather than reaching into the
+    registry, and answer the actor privately with a `0x1C` system line. The gate
+    lives in the world, not the `gm` module, so a command function may assume its
+    caller cleared it. The vocabulary grows one verb at a time in `world::gm`.
 - [ ] `housing`, `guilds`
 
 The bridge is event-driven today: the server calls the script's `onEvent`, not a

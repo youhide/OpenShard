@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use openshard_entities::Serial;
 use openshard_gateway::ConnectionId;
 use openshard_movement::Walker;
-use openshard_protocol::{ClientVersion, Facing, Point};
+use openshard_protocol::{AccessLevel, ClientVersion, Facing, Point};
 
 /// Where a mobile or item is.
 ///
@@ -146,6 +146,15 @@ pub struct Name(pub String);
 /// remembers whose character it is. An NPC has no account and no `Client`.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Account(pub String);
+
+/// A mobile's staff authority — what privileged commands it may run.
+///
+/// Set on world entry from the account's configured level, not saved with the
+/// character: authority is a property of who is logged in, re-derived each login,
+/// so a demoted account loses it the next time it plays. A mobile with no `Access`
+/// is a [`AccessLevel::Player`], the same as the default the level carries.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Access(pub AccessLevel);
 
 /// Which facet a mobile is on: 0 Felucca, 1 Trammel, and so on.
 ///

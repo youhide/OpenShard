@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use openshard_protocol::{
-    CharacterEntry, DenyReason, ACCOUNT_NAME_LENGTH, CHARACTER_NAME_LENGTH, MIN_CHARACTER_SLOTS,
-    PASSWORD_LENGTH,
+    AccessLevel, CharacterEntry, DenyReason, ACCOUNT_NAME_LENGTH, CHARACTER_NAME_LENGTH,
+    MIN_CHARACTER_SLOTS, PASSWORD_LENGTH,
 };
 
 /// Somewhere accounts live.
@@ -45,6 +45,16 @@ pub trait Accounts {
     /// dev store keeps it in memory for the life of the process, which is enough
     /// for a freshly created character to show up in the list on reconnect.
     fn create_character(&mut self, account: &str, name: &str) -> Result<u32, DenyReason>;
+
+    /// The authority the account's characters play with — what staff commands
+    /// they may run. Defaults to [`AccessLevel::Player`] so a store that has no
+    /// notion of staff grants none, which is the safe direction to be wrong in.
+    /// An unknown account is a player, not an error: this is asked after login,
+    /// about an account already verified, and the answer only ever *withholds*
+    /// authority.
+    fn access_level(&self, _account: &str) -> AccessLevel {
+        AccessLevel::Player
+    }
 }
 
 /// Compare two strings without leaking their contents through timing.
@@ -78,6 +88,8 @@ pub struct DevAccount {
     pub blocked: bool,
     /// The characters on this account.
     pub characters: Vec<CharacterEntry>,
+    /// The authority this account's characters play with.
+    pub access: AccessLevel,
 }
 
 /// An in-memory account store, for development only.
@@ -110,8 +122,17 @@ impl DevAccounts {
                 password: password.to_owned(),
                 blocked: false,
                 characters: Vec::new(),
+                access: AccessLevel::Player,
             },
         );
+        self
+    }
+
+    /// Grant an existing account an access level. Ignored if there is no account.
+    pub fn with_access(mut self, account: &str, access: AccessLevel) -> Self {
+        if let Some(entry) = self.accounts.get_mut(&account.to_lowercase()) {
+            entry.access = access;
+        }
         self
     }
 
@@ -162,6 +183,12 @@ impl Accounts for DevAccounts {
             .get(&account.to_lowercase())
             .map(|entry| entry.characters.clone())
             .unwrap_or_default()
+    }
+
+    fn access_level(&self, account: &str) -> AccessLevel {
+        self.accounts
+            .get(&account.to_lowercase())
+            .map_or(AccessLevel::Player, |entry| entry.access)
     }
 
     fn create_character(&mut self, account: &str, name: &str) -> Result<u32, DenyReason> {
@@ -289,6 +316,26 @@ mod tests {
     #[test]
     fn an_unknown_account_has_no_characters() {
         assert_eq!(store().characters("nobody"), vec![]);
+    }
+
+    #[test]
+    fn access_defaults_to_player_and_is_grantable() {
+        let store = DevAccounts::new()
+            .with_account("admin", "p")
+            .with_access("admin", AccessLevel::GameMaster)
+            .with_account("plain", "p");
+        assert_eq!(store.access_level("admin"), AccessLevel::GameMaster);
+        assert_eq!(
+            store.access_level("ADMIN"),
+            AccessLevel::GameMaster,
+            "case-insensitive"
+        );
+        assert_eq!(store.access_level("plain"), AccessLevel::Player);
+        assert_eq!(
+            store.access_level("nobody"),
+            AccessLevel::Player,
+            "unknown is a player, not an error"
+        );
     }
 
     #[test]

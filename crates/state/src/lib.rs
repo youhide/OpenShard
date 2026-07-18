@@ -29,9 +29,10 @@ pub mod runtime;
 pub mod sectors;
 
 pub use components::{
-    Account, Amount, Body, Brain, Client, Combat, Contained, Container, CriminalUntil, DamageType,
-    Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, MurderDecay,
-    Murders, Name, Position, Resistance, Scripted, Skills, Stackable, Stats, SwingSpeed,
+    Access, Account, Amount, Body, Brain, Client, Combat, Contained, Container, CriminalUntil,
+    DamageType, Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement,
+    MurderDecay, Murders, Name, Position, Resistance, Scripted, Skills, Stackable, Stats,
+    SwingSpeed,
 };
 pub use rng::Rng;
 pub use runtime::{FacetState, Gameplay, HeldItem, Origin, Outbound, WorldState, TICKS_PER_SECOND};
