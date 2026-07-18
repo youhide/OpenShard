@@ -197,6 +197,81 @@ pub fn item_count(state: &WorldState, container: Serial) -> u8 {
         .min(u8::MAX as usize) as u8
 }
 
+/// How many of `graphic` a container holds, counting stack amounts.
+#[must_use]
+pub fn count_in_container(state: &WorldState, container: Serial, graphic: u16) -> u32 {
+    state
+        .registry
+        .query::<Contained>()
+        .filter(|(_, held)| held.container == container)
+        .filter(|(entity, _)| {
+            state
+                .registry
+                .get::<Graphic>(*entity)
+                .is_some_and(|g| g.id == graphic)
+        })
+        .map(|(entity, _)| u32::from(state.registry.get::<Amount>(entity).map_or(1, |a| a.0)))
+        .sum()
+}
+
+/// Take `count` of `graphic` out of a container, all or nothing.
+///
+/// The container/inventory search reagents are built on: a spell needs its
+/// reagents *and* consumes them, so this both checks and takes in one pass —
+/// returns `false` and touches nothing if the container is short, else removes
+/// exactly `count` (whole items, then a partial stack) and returns `true`. A
+/// stack it empties is despawned; a stack it dips into loses that much
+/// [`Amount`]. (A container open on a client is not live-redrawn yet — reagents
+/// come from a closed pack; the gump refreshes when reopened.)
+pub fn take_from_container(
+    state: &mut WorldState,
+    container: Serial,
+    graphic: u16,
+    count: u16,
+) -> bool {
+    if count == 0 {
+        return true;
+    }
+    let matches: Vec<(EntityId, u16)> = state
+        .registry
+        .query::<Contained>()
+        .filter(|(_, held)| held.container == container)
+        .filter(|(entity, _)| {
+            state
+                .registry
+                .get::<Graphic>(*entity)
+                .is_some_and(|g| g.id == graphic)
+        })
+        .map(|(entity, _)| {
+            (
+                entity,
+                state.registry.get::<Amount>(entity).map_or(1, |a| a.0),
+            )
+        })
+        .collect();
+    let total: u32 = matches.iter().map(|(_, amount)| u32::from(*amount)).sum();
+    if total < u32::from(count) {
+        return false;
+    }
+
+    let mut remaining = count;
+    for (entity, amount) in matches {
+        if remaining == 0 {
+            break;
+        }
+        if amount <= remaining {
+            // The whole item goes: a contained item is on no sector grid and no
+            // screen, so despawning it is all it takes.
+            remaining -= amount;
+            state.registry.despawn(entity);
+        } else {
+            set_stack_amount(state, entity, amount - remaining);
+            remaining = 0;
+        }
+    }
+    true
+}
+
 /// Wear a client's held item on a mobile. See `Command::EquipItem`.
 pub fn equip_item(
     state: &mut WorldState,

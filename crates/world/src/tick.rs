@@ -41,7 +41,7 @@ use tracing::{debug, info, warn};
 
 use openshard_state::components::{
     Account, Body, Brain, Client, Combat, DamageType, Facet, Heading, Hitpoints, Mana, MeleeDamage,
-    Movement, Name, Position, Resistance, Stats, SwingSpeed,
+    Movement, Name, Position, Resistance, Scripted, Stats, SwingSpeed,
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
@@ -55,7 +55,7 @@ use openshard_magic as magic;
 use openshard_skills as skills;
 
 use crate::events::{
-    MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
+    MobileMoved, MobileSpawned, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
 };
 use crate::terrain::MapTerrain;
 
@@ -271,6 +271,12 @@ pub enum Command {
         difficulty: u16,
         /// The skill it rolls (Magery, and its id is the caller's to name).
         skill: u8,
+        /// The container to draw reagents from, or zero for a spell that needs
+        /// none. The caster's pack, in the usual case.
+        pack: u32,
+        /// The reagents the spell consumes, as `(graphic, count)`. All must be in
+        /// the pack or the spell fizzles, spending nothing.
+        reagents: Vec<(u16, u16)>,
     },
     /// Heal a mobile — a spell's or a script's mending. Raises hit points toward
     /// the maximum and never past it.
@@ -393,6 +399,12 @@ pub enum Command {
     Disconnect {
         /// Which connection.
         connection: ConnectionId,
+    },
+    /// Hand a mobile's brain to the script: the built-in `ai` stops driving it and
+    /// its `onTick` takes over. A script controls a creature it spawned.
+    Control {
+        /// The mobile, by wire serial.
+        serial: u32,
     },
 }
 
@@ -869,14 +881,20 @@ impl World {
                 mana,
                 difficulty,
                 skill,
+                pack,
+                reagents,
             } => magic::cast_spell(
                 &mut self.state,
-                serial,
-                spell,
-                target,
-                mana,
-                difficulty,
-                skill,
+                magic::Cast {
+                    serial,
+                    spell,
+                    target,
+                    mana,
+                    difficulty,
+                    skill,
+                    pack,
+                    reagents: &reagents,
+                },
             ),
             Command::Heal { serial, amount } => magic::heal(&mut self.state, serial, amount),
             Command::SetStats {
@@ -936,6 +954,7 @@ impl World {
                 container,
             } => items::drop_item(&mut self.state, connection, serial, position, container),
             Command::Disconnect { connection } => self.disconnect(connection),
+            Command::Control { serial } => self.control(serial),
         }
     }
 
@@ -1366,6 +1385,13 @@ impl World {
             .sectors
             .insert(entity, position);
         self.state.reveal(entity);
+        // Say who and where, so a script can take control of it: the mobile
+        // counterpart of `PlayerEntered`, and how `op_control` learns a serial.
+        self.state.bus.send(MobileSpawned {
+            entity,
+            serial,
+            position,
+        });
         debug!(%serial, body, "mobile spawned");
     }
 
@@ -1383,6 +1409,11 @@ impl World {
             .map(|(entity, _)| entity)
             .collect();
         for creature in thinkers {
+            // A script-controlled mobile is driven by its `onTick`, not here; the
+            // built-in brain stays out of its way.
+            if self.state.registry.has::<Scripted>(creature) {
+                continue;
+            }
             if let Some(dir) = ai::think_one(&mut self.state, creature) {
                 if let Some(serial) = self.state.registry.serial_of(creature) {
                     self.step(serial.raw(), dir);
@@ -1391,6 +1422,25 @@ impl World {
             if let Some(brain) = self.state.registry.get_mut::<Brain>(creature) {
                 brain.next_think = now + AI_THINK_TICKS;
             }
+        }
+    }
+
+    /// The wire serials of every mobile a script has taken control of. The server
+    /// reads this each tick and calls each one's `onTick`.
+    #[must_use]
+    pub fn scripted(&self) -> Vec<Serial> {
+        self.state
+            .registry
+            .query::<Scripted>()
+            .filter_map(|(entity, _)| self.state.registry.serial_of(entity))
+            .collect()
+    }
+
+    /// Hand a mobile's brain to the script: it stops thinking on its own and its
+    /// `onTick` drives it instead. See [`Command::Control`].
+    fn control(&mut self, serial: u32) {
+        if let Some(entity) = Serial::new(serial).and_then(|s| self.state.registry.entity_of(s)) {
+            self.state.registry.insert(entity, Scripted);
         }
     }
 
@@ -3102,6 +3152,54 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn five_innocent_kills_turn_the_killer_red() {
+        // Murderer flagging: the tally of killed innocents is persistent, and the
+        // fifth turns the killer red for good.
+        let now = Instant::now();
+        let mut world = world();
+        let killer = enter(&mut world, now);
+        let killer_entity = world.state.players[&killer];
+
+        for kill in 1..=5 {
+            // A blue, one-hit victim on the killer's tile.
+            let victim = spawn_mobile_full(
+                &mut world,
+                Point::new(START.0, START.1, 0),
+                1,
+                Notoriety::Innocent.to_bits(),
+                0,
+                0,
+                now,
+            );
+            engage(&mut world, killer, victim, now);
+            for _ in 0..=WRESTLING_SWING_TICKS {
+                world.tick(now);
+            }
+            assert!(
+                world
+                    .state
+                    .registry
+                    .entity_of(Serial::new(victim).unwrap())
+                    .is_none(),
+                "the innocent is dead"
+            );
+            if kill < 5 {
+                assert_ne!(
+                    world.state.notoriety_of(killer_entity),
+                    Notoriety::Murderer,
+                    "still short of the murder threshold after {kill} kills"
+                );
+            }
+        }
+
+        assert_eq!(
+            world.state.notoriety_of(killer_entity),
+            Notoriety::Murderer,
+            "the fifth innocent killed makes a murderer"
+        );
+    }
+
+    #[test]
     fn attacking_an_enemy_is_not_a_crime() {
         let now = Instant::now();
         let mut world = world();
@@ -3520,6 +3618,8 @@ pub(crate) mod tests {
             mana: 10,
             difficulty: 0,
             skill: 1,
+            pack: 0,
+            reagents: Vec::new(),
         });
         world.tick(now);
 
@@ -3531,6 +3631,89 @@ pub(crate) mod tests {
             world.state.registry.get::<Mana>(entity).unwrap().current,
             90,
             "ten mana is spent"
+        );
+    }
+
+    #[test]
+    fn reagents_are_consumed_on_a_cast_and_a_short_pack_fizzles() {
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let entity = world.state.players[&player];
+        let serial = serial_of(&world, player);
+        world.queue(Command::SetSkill {
+            serial,
+            skill: 1,
+            value: 1000,
+        });
+        world.tick(now);
+
+        // A pack with three of one reagent.
+        const REAGENT: u16 = 0x0F7A;
+        let pack = spawn_container_at(&mut world, Point::new(START.0, START.1, 0), now);
+        let container = openshard_entities::Serial::new(pack).unwrap();
+        for _ in 0..3 {
+            let (item, _) = world
+                .state
+                .registry
+                .spawn_with_serial(openshard_entities::SerialKind::Item)
+                .unwrap();
+            world.state.registry.insert(
+                item,
+                Graphic {
+                    id: REAGENT,
+                    hue: 0,
+                },
+            );
+            world.state.registry.insert(
+                item,
+                Contained {
+                    container,
+                    x: 0,
+                    y: 0,
+                    grid: 0,
+                },
+            );
+        }
+
+        let spell = |reagents: Vec<(u16, u16)>| Command::CastSpell {
+            serial,
+            spell: 5,
+            target: 0,
+            mana: 10,
+            difficulty: 0,
+            skill: 1,
+            pack,
+            reagents,
+        };
+        let mut cast: Cursor<SpellCast> = world.bus().cursor();
+
+        // First cast needs two; the pack has three, so it takes them and casts.
+        world.queue(spell(vec![(REAGENT, 2)]));
+        world.tick(now);
+        let first: Vec<SpellCast> = world.bus().read(&mut cast).copied().collect();
+        assert!(first[0].success, "the stocked pack lets it cast");
+        assert_eq!(
+            openshard_items::count_in_container(&world.state, container, REAGENT),
+            1,
+            "two of the three reagents were consumed"
+        );
+
+        // One left; a second cast needing two fizzles and spends nothing.
+        let mana = world.state.registry.get::<Mana>(entity).unwrap().current;
+        world.queue(spell(vec![(REAGENT, 2)]));
+        world.tick(now);
+        let second: Vec<SpellCast> = world.bus().read(&mut cast).copied().collect();
+        assert!(!second[0].success, "one reagent left is not enough");
+        assert_eq!(
+            world.state.registry.get::<Mana>(entity).unwrap().current,
+            mana,
+            "a fizzle spends no mana"
+        );
+        assert_eq!(
+            openshard_items::count_in_container(&world.state, container, REAGENT),
+            1,
+            "and consumes no reagent"
         );
     }
 
@@ -3550,6 +3733,8 @@ pub(crate) mod tests {
             mana: 200, // more than the 100 on hand
             difficulty: 0,
             skill: 1,
+            pack: 0,
+            reagents: Vec::new(),
         });
         world.tick(now);
 
@@ -3614,6 +3799,8 @@ pub(crate) mod tests {
             mana: 20,
             difficulty: 0,
             skill: 1,
+            pack: 0,
+            reagents: Vec::new(),
         });
         world.tick(now);
         let spent = world.state.registry.get::<Mana>(entity).unwrap().current;

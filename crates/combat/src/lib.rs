@@ -16,8 +16,8 @@ use openshard_entities::{EntityId, Serial};
 use openshard_gateway::ConnectionId;
 use openshard_protocol::{encode_attack, encode_war_mode, Notoriety};
 use openshard_state::components::{
-    Client, Combat, CriminalUntil, DamageType, Hitpoints, MeleeDamage, Position, Resistance, Stats,
-    SwingSpeed,
+    Client, Combat, CriminalUntil, DamageType, Hitpoints, MeleeDamage, Murders, Position,
+    Resistance, Stats, SwingSpeed,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::WorldState;
@@ -263,14 +263,47 @@ pub fn swings(state: &mut WorldState) {
         {
             continue;
         }
+        // The victim's standing has to be read before the blow — a moment later it
+        // is dead and gone, and killing a blue is what a murder is.
+        let victim_was_blue = matches!(
+            state.notoriety_of(target),
+            Notoriety::Innocent | Notoriety::Friend
+        );
         let blow = melee_blow(state, attacker);
         damage(state, target_serial.raw(), blow, DamageType::Physical);
         set_next_swing(state, attacker, now + swing_speed(state, attacker));
         // The blow may have killed it; a dead target is no target.
         if state.registry.entity_of(target_serial).is_none() {
+            if victim_was_blue {
+                record_murder(state, attacker);
+            }
             clear_target(state, attacker);
         }
     }
+}
+
+/// Sphere's murder count threshold: the fifth innocent killed makes you red.
+const MURDER_THRESHOLD: u16 = 5;
+
+/// Tally a killed innocent against `killer`, and turn it red once the tally
+/// reaches the threshold. Unlike the grey criminal flag this reputation does not
+/// lapse — a murderer stays a murderer.
+fn record_murder(state: &mut WorldState, killer: EntityId) {
+    let count = state.registry.get::<Murders>(killer).map_or(0, |m| m.0) + 1;
+    state.registry.insert(killer, Murders(count));
+    if count >= MURDER_THRESHOLD && state.notoriety_of(killer) != Notoriety::Murderer {
+        state.registry.insert(killer, Notoriety::Murderer);
+        state.broadcast_move(killer);
+    }
+}
+
+/// Whether a mobile's murder tally has passed the threshold — a murderer whether
+/// or not a grey flag is currently painted over the red.
+fn is_murderer(state: &WorldState, entity: EntityId) -> bool {
+    state
+        .registry
+        .get::<Murders>(entity)
+        .is_some_and(|m| m.0 >= MURDER_THRESHOLD)
 }
 
 /// Push a combatant's next swing out to `tick`.
@@ -313,8 +346,12 @@ pub fn flag_criminal(state: &mut WorldState, mobile: EntityId) {
     }
 }
 
-/// Restore anyone whose criminal flag has run out to innocent, and redraw the
-/// blue for everyone watching. Runs each tick against the tick counter.
+/// Restore anyone whose criminal flag has run out to their base standing, and
+/// redraw it for everyone watching. Runs each tick against the tick counter.
+///
+/// Base standing, not always innocent: a murderer wears grey while its criminal
+/// flag lasts, but the red underneath does not lapse, so a lapsing flag uncovers
+/// it rather than washing it blue.
 pub fn expire_criminality(state: &mut WorldState) {
     let now = state.ticks;
     let expired: Vec<EntityId> = state
@@ -325,7 +362,12 @@ pub fn expire_criminality(state: &mut WorldState) {
         .collect();
     for entity in expired {
         state.registry.remove::<CriminalUntil>(entity);
-        state.registry.insert(entity, Notoriety::Innocent);
+        let base = if is_murderer(state, entity) {
+            Notoriety::Murderer
+        } else {
+            Notoriety::Innocent
+        };
+        state.registry.insert(entity, base);
         state.broadcast_move(entity);
     }
 }

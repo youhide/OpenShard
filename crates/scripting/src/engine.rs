@@ -60,7 +60,7 @@ impl Host {
         // carries a `String`), and the read model only needs the position-bearing
         // events anyway.
         match event {
-            Event::PlayerEntered { serial, x, y, z } => {
+            Event::PlayerEntered { serial, x, y, z } | Event::MobileSpawned { serial, x, y, z } => {
                 self.entities.insert(
                     *serial,
                     View {
@@ -262,26 +262,39 @@ fn op_heal(state: &mut OpState, serial: u32, amount: u32) {
     });
 }
 
-/// Cast a spell. The outcome comes back as a `SpellCast` event, not a return —
-/// the mana and skill roll happen on the tick.
-#[op2(fast)]
-#[allow(clippy::too_many_arguments)]
-fn op_cast_spell(
-    state: &mut OpState,
+/// What a script passes to cast a spell — a plain object, so reagents can be a
+/// list and the fields that default (target, difficulty, pack, reagents) can be
+/// left off.
+#[derive(serde::Deserialize)]
+struct CastSpec {
     serial: u32,
-    spell: u32,
+    spell: u16,
+    #[serde(default)]
     target: u32,
-    mana: u32,
-    difficulty: u32,
-    skill: u32,
-) {
+    mana: u16,
+    #[serde(default)]
+    difficulty: u16,
+    skill: u8,
+    #[serde(default)]
+    pack: u32,
+    /// `(graphic, count)` pairs the spell consumes from `pack`.
+    #[serde(default)]
+    reagents: Vec<(u16, u16)>,
+}
+
+/// Cast a spell. The outcome comes back as a `SpellCast` event, not a return —
+/// the mana, reagents and skill roll happen on the tick.
+#[op2]
+fn op_cast_spell(state: &mut OpState, #[serde] spec: CastSpec) {
     state.borrow_mut::<Host>().outbox.push(Command::CastSpell {
-        serial,
-        spell: spell.min(u32::from(u16::MAX)) as u16,
-        target,
-        mana: mana.min(u32::from(u16::MAX)) as u16,
-        difficulty: difficulty.min(100) as u16,
-        skill: skill.min(u32::from(u8::MAX)) as u8,
+        serial: spec.serial,
+        spell: spec.spell,
+        target: spec.target,
+        mana: spec.mana,
+        difficulty: spec.difficulty.min(100),
+        skill: spec.skill,
+        pack: spec.pack,
+        reagents: spec.reagents,
     });
 }
 
@@ -335,6 +348,16 @@ fn op_say(state: &mut OpState, serial: u32, #[string] text: String, hue: u32) {
     });
 }
 
+/// Take control of a mobile: from now on its `onTick` runs it, not the built-in
+/// brain. The world starts handing it to this script each tick.
+#[op2(fast)]
+fn op_control(state: &mut OpState, serial: u32) {
+    state
+        .borrow_mut::<Host>()
+        .outbox
+        .push(Command::Control { serial });
+}
+
 extension!(
     openshard_ops,
     ops = [
@@ -346,6 +369,7 @@ extension!(
         op_damage,
         op_heal,
         op_cast_spell,
+        op_control,
         op_set_stats,
         op_set_skill,
         op_use_skill,

@@ -330,16 +330,21 @@ Roughly in dependency order, each script-first:
     spawn; an invulnerable (yellow) mobile cannot be attacked. Raising a hand
     against someone blue or green turns the attacker grey — a `CriminalUntil`
     flag, its expiry a tick count like decay, broadcast to every watcher with a
-    `0x77`. **Murderer** flagging (the red a repeat killer earns) is deferred: it
-    needs a persistent count of whom you have killed, which is a karma/reputation
-    system with nothing yet to hang it on.
+    `0x77`. **And murderer flagging is real** — the red a repeat killer earns. A
+    `Murders` count tallies innocents killed (attributed in `swings`, where the
+    killer and the blue victim are both known); the fifth turns the killer red for
+    good. Unlike the lapsing grey flag it is persistent, so `expire_criminality`
+    now restores a mobile's *base* standing — murderer if the tally stands, else
+    innocent — rather than always washing it blue. Attribution is melee-only for
+    now (a script's `op_damage` names no killer); Sphere's short-term/long-term
+    decay of old kills is a later refinement.
   - Deferred, on purpose, because each waits on something not built: **the other
     damage types** (fire, cold, poison, energy) want a source of typed damage,
     which is spells (`magic`); **weapon-derived swing speed and damage** want
     weapon *properties* (the dexterity half is done above; the weapon `base` still
-    needs tiledata); **murderer/karma** wants a reputation store. The seams are in
-    place — `Resistance` has room for more types, `SwingSpeed` and `MeleeDamage`
-    are already per-mobile — so each is a fill-in, not a redesign.
+    needs tiledata). The seams are in place — `Resistance` has room for more
+    types, `SwingSpeed` and `MeleeDamage` are already per-mobile — so each is a
+    fill-in, not a redesign.
 - [x] `skills` — usage checks, gain curves
   - [x] **The check and the gain.** A mobile carries `Skills` (a sparse map of id
     → tenths). A script sets one (`op_set_skill`) and uses it against a difficulty
@@ -383,9 +388,15 @@ Roughly in dependency order, each script-first:
     by the target's `Resistance` *for that type*, in the one place all damage
     passes through, so a fireball and a sword swing share the door. Melee is
     physical; a spell picks its element.
-  - [ ] **reagents** — a spell consuming items from the caster's pack: it wants
-    the container/inventory search that pick-up-from-a-container half-built, so
-    it is a fill-in on the item side, noted not forgotten
+  - [x] **reagents** — a spell consumes items from a pack. `items` grew the
+    container search the deferral named — `count_in_container` and an
+    all-or-nothing `take_from_container` — and `cast_spell` grew a second gate
+    beside mana: a `Cast` now carries a `pack` and a `(graphic, count)` reagent
+    list, and the spell fizzles spending *nothing* unless the pack holds every
+    reagent, then consumes them. Reagents-as-data: the script names them per
+    spell, the world enforces them. (A pack open on a client is not live-redrawn
+    on a consume yet — reagents come from a closed pack; the gump refreshes when
+    reopened.)
   - [ ] **the client cast path** — casting from a spellbook or a macro
     (`0x12`/`0xBF.0x1C`), the interactive layer, as `0x05`/`0x72` were for combat
 - [x] `ai` — brains, aggro, wandering

@@ -199,14 +199,22 @@ pub struct Hitpoints {
 ///
 /// The consequence of an aggressive act on someone blue — the flag that stops a
 /// player attacking innocents in a town with no cost. A tick number, like
-/// [`Decays`]; when the tick counter passes it the mobile goes back to innocent.
-/// The deeper standing — murderer, the red a repeat killer earns — needs a
-/// persistent count of who you have killed, and waits for a reason to keep one.
+/// [`Decays`]; when the tick counter passes it the mobile goes back to innocent
+/// (or to murderer, if it has become one — see [`Murders`]).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CriminalUntil {
     /// The tick the flag lifts.
     pub tick: u64,
 }
+
+/// How many innocents a mobile has killed — the tally that turns it red.
+///
+/// The deeper standing [`CriminalUntil`] left for later: a persistent count, not
+/// a lapsing timer. Once it passes the murder threshold the mobile is a murderer
+/// and stays one; the grey criminal flag comes and goes, this does not. (Sphere's
+/// short-term/long-term split, where old kills decay, is a later refinement.)
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Murders(pub u16);
 
 /// What a mobile is trained in: each skill it has, by id, as a value in tenths
 /// (so 75.5 is stored as 755, and the skill cap is 1000).
@@ -247,6 +255,16 @@ pub struct Brain {
     /// The tick it next gets to act — brains think in beats, not every tick.
     pub next_think: u64,
 }
+
+/// Marks a mobile whose brain is a script's `onTick`, not the built-in one.
+///
+/// The richer path [`Brain`] leaves room for, now real: the tick's built-in
+/// thinking skips a mobile carrying this, and the server calls its `onTick`
+/// every tick instead — the per-mobile hook the scripting benchmark sized. A
+/// script takes control of a mobile it spawned, then drives it from JavaScript;
+/// the built-in `ai` stays out of its way.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Scripted;
 
 /// A mobile's fighting state: whether it is in war mode, whom it is attacking,
 /// and when it may next swing.

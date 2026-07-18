@@ -17,7 +17,7 @@ use openshard_events::Cursor;
 use openshard_scripting::{
     Command as ScriptCommand, DenoEngine, Event as ScriptEvent, ScriptEngine,
 };
-use openshard_world::events::{MobileMoved, PlayerEntered, PlayerLeft, StepRefused};
+use openshard_world::events::{MobileMoved, MobileSpawned, PlayerEntered, PlayerLeft, StepRefused};
 use openshard_world::{Command, MobileDied, MobileSpoke, SkillUsed, SpellCast, World};
 use tracing::{error, info, warn};
 
@@ -25,6 +25,7 @@ use tracing::{error, info, warn};
 pub struct Scripts {
     engine: DenoEngine,
     entered: Cursor<PlayerEntered>,
+    spawned: Cursor<MobileSpawned>,
     moved: Cursor<MobileMoved>,
     refused: Cursor<StepRefused>,
     left: Cursor<PlayerLeft>,
@@ -66,6 +67,7 @@ impl Scripts {
         // event from here on and none from before it existed.
         Some(Self {
             entered: world.bus().cursor(),
+            spawned: world.bus().cursor(),
             moved: world.bus().cursor(),
             refused: world.bus().cursor(),
             left: world.bus().cursor(),
@@ -93,6 +95,14 @@ impl Scripts {
             let bus = world.bus();
             for e in bus.read(&mut self.entered) {
                 events.push(ScriptEvent::PlayerEntered {
+                    serial: e.serial.raw(),
+                    x: e.position.x,
+                    y: e.position.y,
+                    z: e.position.z,
+                });
+            }
+            for e in bus.read(&mut self.spawned) {
+                events.push(ScriptEvent::MobileSpawned {
                     serial: e.serial.raw(),
                     x: e.position.x,
                     y: e.position.y,
@@ -151,6 +161,16 @@ impl Scripts {
         for event in &events {
             if let Err(error) = self.engine.deliver(event) {
                 warn!(%error, "gameplay script event handler threw");
+            }
+        }
+
+        // Then the per-mobile beat: every mobile a script has taken control of
+        // gets its `onTick`, the read model already brought current by the events
+        // above. This is the hook the scripting benchmark sized — one call per
+        // controlled mobile per tick.
+        for serial in world.scripted() {
+            if let Err(error) = self.engine.tick(serial.raw()) {
+                warn!(%error, serial = serial.raw(), "gameplay script onTick threw");
             }
         }
 
@@ -250,6 +270,8 @@ fn into_world(command: ScriptCommand) -> Command {
             mana,
             difficulty,
             skill,
+            pack,
+            reagents,
         } => Command::CastSpell {
             serial,
             spell,
@@ -257,6 +279,8 @@ fn into_world(command: ScriptCommand) -> Command {
             mana,
             difficulty,
             skill,
+            pack,
+            reagents,
         },
         ScriptCommand::SetStats {
             serial,
@@ -288,6 +312,7 @@ fn into_world(command: ScriptCommand) -> Command {
             difficulty,
         },
         ScriptCommand::Speak { serial, hue, text } => Command::Speak { serial, hue, text },
+        ScriptCommand::Control { serial } => Command::Control { serial },
     }
 }
 
@@ -536,6 +561,73 @@ mod tests {
     }
 
     #[test]
+    fn a_script_drives_a_controlled_mobile_from_its_on_tick() {
+        // The per-mobile hook end to end: a mobile spawns, the script takes control
+        // of it, and from then on its onTick walks it — a fully script-driven brain,
+        // with the built-in ai standing aside.
+        let script = TempScript::new(
+            "shepherd",
+            "function onEvent(e) {\n\
+             if (e.type === 'MobileSpawned') Deno.core.ops.op_control(e.serial);\n\
+             }\n\
+             function onTick(s) { Deno.core.ops.op_move(s, 4); }",
+        );
+
+        let now = Instant::now();
+        let mut world = World::new((1363, 1600));
+        let mut scripts = Scripts::load(script.path(), &world).expect("script loads");
+
+        // A pure creature: no brain of its own (sight 0, no wander), so nothing but
+        // the script's onTick can move it.
+        world.queue(Command::SpawnMobile {
+            body: 0x0190,
+            hue: 0,
+            hits: 5,
+            notoriety: 5,
+            damage: 0,
+            resistance: 0,
+            swing: 0,
+            sight: 0,
+            wander: false,
+            position: openshard_protocol::Point::new(1363, 1600, 0),
+            facet: 0,
+        });
+        world.tick(now); // the mobile spawns, MobileSpawned emitted
+
+        let mob = world
+            .registry()
+            .query::<openshard_world::Body>()
+            .map(|(entity, _)| entity)
+            .next()
+            .expect("the creature exists");
+        let start_y = world
+            .registry()
+            .get::<openshard_world::Position>(mob)
+            .unwrap()
+            .0
+            .y;
+
+        scripts.pump(&mut world); // onEvent hears the spawn and queues Control
+        world.tick(now); // Control applies — the mobile is now scripted
+                         // A few beats of the seam: onTick walks it south each tick.
+        for _ in 0..4 {
+            scripts.pump(&mut world);
+            world.tick(now);
+        }
+
+        let end_y = world
+            .registry()
+            .get::<openshard_world::Position>(mob)
+            .unwrap()
+            .0
+            .y;
+        assert!(
+            end_y > start_y,
+            "the script's onTick walked the mobile south (from {start_y} to {end_y})"
+        );
+    }
+
+    #[test]
     fn a_script_uses_a_skill_and_rewards_the_success() {
         // A skill round-trip: the script trains and uses a skill, the world rolls
         // it and emits SkillUsed, and the script — hearing the success — grants
@@ -642,6 +734,8 @@ mod tests {
             mana: 10,
             difficulty: 0,
             skill: 1,
+            pack: 0,
+            reagents: Vec::new(),
         });
         world.tick(now); // mana paid, skill rolled, SpellCast emitted
         scripts.pump(&mut world); // the script hears success, queues the damage

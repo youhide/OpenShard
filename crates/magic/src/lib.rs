@@ -11,6 +11,7 @@
 //! mana back on the tick counter, so it needs no clock and stays replayable.
 
 use openshard_entities::{EntityId, Serial};
+use openshard_items::{count_in_container, take_from_container};
 use openshard_state::components::{Hitpoints, Mana};
 use openshard_state::WorldState;
 
@@ -35,26 +36,55 @@ pub struct SpellCast {
     pub success: bool,
 }
 
-/// Cast a spell: pay the mana, roll the skill, announce it.
-pub fn cast_spell(
-    state: &mut WorldState,
-    serial: u32,
-    spell: u16,
-    target: u32,
-    mana: u16,
-    difficulty: u16,
-    skill: u8,
-) {
+/// Everything a cast needs — a plain bundle, so [`cast_spell`] takes one argument
+/// and the reagents can ride along by reference.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Cast<'a> {
+    /// The caster's serial.
+    pub serial: u32,
+    /// Which spell, by id.
+    pub spell: u16,
+    /// The target's serial, or zero for a spell that needs none.
+    pub target: u32,
+    /// The mana it costs.
+    pub mana: u16,
+    /// The casting difficulty, 0–100.
+    pub difficulty: u16,
+    /// The skill it rolls (Magery).
+    pub skill: u8,
+    /// The container reagents come out of, or zero for a spell that needs none.
+    pub pack: u32,
+    /// The reagents the spell consumes, as `(graphic, count)`.
+    pub reagents: &'a [(u16, u16)],
+}
+
+/// Cast a spell: check the mana and reagents, spend them, roll the skill, and
+/// announce it.
+///
+/// Two gates before anything is spent, both fizzling the spell without cost if
+/// they fail: the caster must have the mana, and its pack must hold every
+/// reagent. Reagents are all-or-nothing across the whole list — a spell short one
+/// of five consumes none of them — checked first, then consumed once mana is also
+/// known good, so a fizzle never eats half a reagent list or the mana.
+pub fn cast_spell(state: &mut WorldState, cast: Cast<'_>) {
+    let Cast {
+        serial,
+        spell,
+        target,
+        mana,
+        difficulty,
+        skill,
+        pack,
+        reagents,
+    } = cast;
     let Some(serial) = Serial::new(serial) else {
         return;
     };
     let Some(caster) = state.registry.entity_of(serial) else {
         return;
     };
-    let have = state.registry.get::<Mana>(caster).map_or(0, |m| m.current);
 
-    // Not enough mana to pay for it — the spell fizzles, and nothing is spent.
-    if have < mana {
+    let fizzle = |state: &mut WorldState| {
         state.bus.send(SpellCast {
             caster,
             serial,
@@ -62,8 +92,17 @@ pub fn cast_spell(
             target,
             success: false,
         });
+    };
+
+    let have = state.registry.get::<Mana>(caster).map_or(0, |m| m.current);
+    // Not enough mana, or the pack is short a reagent — the spell fizzles, and
+    // nothing is spent either way.
+    if have < mana || !has_reagents(state, pack, reagents) {
+        fizzle(state);
         return;
     }
+
+    consume_reagents(state, pack, reagents);
     if let Some(&Mana { current, max }) = state.registry.get::<Mana>(caster) {
         state.registry.insert(
             caster,
@@ -81,6 +120,27 @@ pub fn cast_spell(
         target,
         success,
     });
+}
+
+/// Whether `pack` holds every reagent the spell needs. A zero pack with any
+/// reagent required is short by definition.
+fn has_reagents(state: &WorldState, pack: u32, reagents: &[(u16, u16)]) -> bool {
+    let Some(pack) = Serial::new(pack) else {
+        return reagents.is_empty();
+    };
+    reagents
+        .iter()
+        .all(|&(graphic, count)| count_in_container(state, pack, graphic) >= u32::from(count))
+}
+
+/// Take every reagent out of the pack. Only called once [`has_reagents`] has
+/// confirmed they are all there, so each take succeeds.
+fn consume_reagents(state: &mut WorldState, pack: u32, reagents: &[(u16, u16)]) {
+    if let Some(pack) = Serial::new(pack) {
+        for &(graphic, count) in reagents {
+            take_from_container(state, pack, graphic, count);
+        }
+    }
 }
 
 /// Mend a mobile up toward its maximum, and redraw the bar for it and everyone

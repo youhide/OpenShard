@@ -13,5 +13,6 @@ workspace = true
 
 [dependencies]
 openshard-entities.workspace = true
+openshard-items.workspace = true
 openshard-skills.workspace = true
 openshard-state.workspace = true

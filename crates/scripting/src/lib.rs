@@ -63,6 +63,17 @@ pub enum Event {
         /// Where it appeared.
         z: i8,
     },
+    /// A creature or NPC appeared — the mobile a script can take control of.
+    MobileSpawned {
+        /// Its wire identity.
+        serial: Serial,
+        /// Where it appeared.
+        x: u16,
+        /// Where it appeared.
+        y: u16,
+        /// Where it appeared.
+        z: i8,
+    },
     /// A mobile took a step.
     MobileMoved {
         /// Its wire identity.
@@ -242,6 +253,10 @@ pub enum Command {
         difficulty: u16,
         /// The skill id it rolls (Magery).
         skill: u8,
+        /// The container to draw reagents from, or 0 for none.
+        pack: u32,
+        /// The reagents the spell consumes, as `(graphic, count)`.
+        reagents: Vec<(u16, u16)>,
     },
     /// Set a mobile's stats; strength and intelligence re-cap hits and mana.
     SetStats {
@@ -281,6 +296,12 @@ pub enum Command {
         hue: u16,
         /// The words.
         text: String,
+    },
+    /// Take control of a mobile's brain: the built-in `ai` stops driving it and
+    /// this script's `onTick` runs it each tick instead.
+    Control {
+        /// The mobile.
+        serial: Serial,
     },
 }
 
