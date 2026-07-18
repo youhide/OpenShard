@@ -55,8 +55,8 @@ pub use openshard_state::Outbound;
 pub use openshard_state::{distance, in_range, sectors, Sectors, SECTOR_SIZE, VIEW_RANGE};
 pub use openshard_state::{
     Account, Amount, Body, Brain, Client, Combat, Contained, Container, CriminalUntil, DamageType,
-    Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, Murders,
-    Name, Position, Resistance, Scripted, Skills, Stackable, Stats, SwingSpeed,
+    Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, MurderDecay,
+    Murders, Name, Position, Resistance, Scripted, Skills, Stackable, Stats, SwingSpeed,
 };
 pub use terrain::{MapTerrain, MAX_STEP_DOWN, MAX_STEP_UP, PLAYER_HEIGHT};
 pub use tick::{Appearance, Command, World, TICK_INTERVAL};

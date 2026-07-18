@@ -210,11 +210,23 @@ pub struct CriminalUntil {
 /// How many innocents a mobile has killed — the tally that turns it red.
 ///
 /// The deeper standing [`CriminalUntil`] left for later: a persistent count, not
-/// a lapsing timer. Once it passes the murder threshold the mobile is a murderer
-/// and stays one; the grey criminal flag comes and goes, this does not. (Sphere's
-/// short-term/long-term split, where old kills decay, is a later refinement.)
+/// a lapsing timer. Once it passes the murder threshold the mobile is a murderer;
+/// the grey criminal flag comes and goes, this only fades slowly, one kill at a
+/// time, on a [`MurderDecay`] clock.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Murders(pub u16);
+
+/// When a mobile's murder count next drops by one.
+///
+/// A tick number, like [`Decays`]: old kills age off rather than staying forever,
+/// so a reformed killer eventually washes blue again. One count fades per fire,
+/// and the clock reschedules until the tally is empty. (Sphere's separate
+/// short-term and long-term counts are a finer model this stands in for.)
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct MurderDecay {
+    /// The tick the next count fades.
+    pub at_tick: u64,
+}
 
 /// What a mobile is trained in: each skill it has, by id, as a value in tenths
 /// (so 75.5 is stored as 755, and the skill cap is 1000).

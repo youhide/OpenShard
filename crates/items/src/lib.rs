@@ -174,6 +174,12 @@ pub fn double_click(state: &mut WorldState, connection: ConnectionId, serial: u3
         connection,
         encode_container_contents(serial, &contents, version),
     );
+    // Remember it is open, so a later change to its contents can be pushed here.
+    state
+        .open_containers
+        .entry(item_serial)
+        .or_default()
+        .insert(connection);
     debug!(%item_serial, items = contents.len(), "container opened");
 }
 
@@ -263,13 +269,58 @@ pub fn take_from_container(
             // The whole item goes: a contained item is on no sector grid and no
             // screen, so despawning it is all it takes.
             remaining -= amount;
+            let serial = state.registry.serial_of(entity);
             state.registry.despawn(entity);
+            if let Some(serial) = serial {
+                tell_watchers_removed(state, container, serial);
+            }
         } else {
             set_stack_amount(state, entity, amount - remaining);
             remaining = 0;
+            tell_watchers_updated(state, container, entity);
         }
     }
     true
+}
+
+/// Tell every client with `container` open that `item` has left it — a `0x1D`,
+/// the same "forget that" the interest system draws with, so a reagent consumed
+/// out of an open pack disappears from the gump live.
+fn tell_watchers_removed(state: &mut WorldState, container: Serial, item: Serial) {
+    let watchers: Vec<ConnectionId> = state
+        .open_containers
+        .get(&container)
+        .map(|w| w.iter().copied().collect())
+        .unwrap_or_default();
+    for connection in watchers {
+        state.send(connection, encode_remove(item.raw()));
+    }
+}
+
+/// Tell every client with `container` open that an item in it changed — a dipped
+/// stack's new amount — by re-sending its `0x25` record.
+fn tell_watchers_updated(state: &mut WorldState, container: Serial, entity: EntityId) {
+    let Some(record) = contained_record(state, entity) else {
+        return;
+    };
+    let watchers: Vec<ConnectionId> = state
+        .open_containers
+        .get(&container)
+        .map(|w| w.iter().copied().collect())
+        .unwrap_or_default();
+    for connection in watchers {
+        let version = state
+            .players
+            .get(&connection)
+            .and_then(|&player| state.registry.get::<Client>(player))
+            .map(|client| client.version);
+        if let Some(version) = version {
+            state.send(
+                connection,
+                encode_add_to_container(record, container.raw(), version),
+            );
+        }
+    }
 }
 
 /// Wear a client's held item on a mobile. See `Command::EquipItem`.

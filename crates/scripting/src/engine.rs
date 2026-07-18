@@ -245,11 +245,12 @@ fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
 
 /// Deal damage to a mobile, of a kind (0 physical, 1 fire, …).
 #[op2(fast)]
-fn op_damage(state: &mut OpState, serial: u32, amount: u32, damage_type: u32) {
+fn op_damage(state: &mut OpState, serial: u32, amount: u32, damage_type: u32, by: u32) {
     state.borrow_mut::<Host>().outbox.push(Command::Damage {
         serial,
         amount: amount.min(u32::from(u16::MAX)) as u16,
         damage_type: damage_type.min(u32::from(u8::MAX)) as u8,
+        by,
     });
 }
 

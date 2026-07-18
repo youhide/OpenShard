@@ -257,10 +257,12 @@ fn into_world(command: ScriptCommand) -> Command {
             serial,
             amount,
             damage_type,
+            by,
         } => Command::Damage {
             serial,
             amount,
             damage_type,
+            by,
         },
         ScriptCommand::Heal { serial, amount } => Command::Heal { serial, amount },
         ScriptCommand::CastSpell {
@@ -545,6 +547,7 @@ mod tests {
             serial: mob,
             amount: 100,
             damage_type: 0,
+            by: 0,
         });
         world.tick(now); // the creature dies, MobileDied is emitted
         scripts.pump(&mut world); // the script hears it and queues the loot
@@ -688,7 +691,7 @@ mod tests {
                  Deno.core.ops.op_spawn_mobile({ body: 0x0190, hits: 50, x: e.x, y: e.y });\n\
              }\n\
              if (e.type === 'SpellCast' && e.success) {\n\
-                 Deno.core.ops.op_damage(e.target, 30, 1);\n\
+                 Deno.core.ops.op_damage(e.target, 30, 1, e.serial);\n\
              }\n\
              }",
         );

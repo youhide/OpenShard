@@ -335,9 +335,13 @@ Roughly in dependency order, each script-first:
     killer and the blue victim are both known); the fifth turns the killer red for
     good. Unlike the lapsing grey flag it is persistent, so `expire_criminality`
     now restores a mobile's *base* standing — murderer if the tally stands, else
-    innocent — rather than always washing it blue. Attribution is melee-only for
-    now (a script's `op_damage` names no killer); Sphere's short-term/long-term
-    decay of old kills is a later refinement.
+    innocent — rather than always washing it blue. Attribution is *not*
+    melee-only: `damage` takes an `attacker`, and a script's `op_damage`/spell
+    carries a `by` serial, so a fireball that kills a blue is a murder the same as
+    a sword; unattributed damage kills without blame. And old kills fade — a
+    `MurderDecay` clock ages one count off at a time, washing a reformed killer
+    back to blue once it drops below the threshold. (Sphere's separate short- and
+    long-term counts are a finer model this stands in for.)
   - Deferred, on purpose, because each waits on something not built: **the other
     damage types** (fire, cold, poison, energy) want a source of typed damage,
     which is spells (`magic`); **weapon-derived swing speed and damage** want
@@ -394,9 +398,10 @@ Roughly in dependency order, each script-first:
     beside mana: a `Cast` now carries a `pack` and a `(graphic, count)` reagent
     list, and the spell fizzles spending *nothing* unless the pack holds every
     reagent, then consumes them. Reagents-as-data: the script names them per
-    spell, the world enforces them. (A pack open on a client is not live-redrawn
-    on a consume yet — reagents come from a closed pack; the gump refreshes when
-    reopened.)
+    spell, the world enforces them. A pack open on a client redraws live too:
+    `WorldState` remembers who has each container open (`double_click` records it,
+    logout clears it), and a consumed reagent is pushed to those watchers — a
+    `0x1D` for an item burned whole, a re-sent `0x25` for a dipped stack.
   - [ ] **the client cast path** — casting from a spellbook or a macro
     (`0x12`/`0xBF.0x1C`), the interactive layer, as `0x05`/`0x72` were for combat
 - [x] `ai` — brains, aggro, wandering

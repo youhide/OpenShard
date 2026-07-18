@@ -229,6 +229,9 @@ pub enum Command {
         amount: u16,
         /// The damage type as a wire byte.
         damage_type: u8,
+        /// Who dealt it, or 0 for unattributed — a spell's caster, so a kill is
+        /// blamed the same as a melee blow.
+        by: u32,
     },
     /// Heal a mobile, up to its maximum.
     Heal {

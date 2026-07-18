@@ -206,6 +206,10 @@ pub struct WorldState {
     pub ticks: u64,
     /// Packets the last tick produced.
     pub outbox: Vec<Outbound>,
+    /// Which connections have each container open, so a change to its contents —
+    /// an item consumed as a reagent, one decaying inside — can be pushed to the
+    /// clients looking at it. A connection's opens are cleared on logout.
+    pub open_containers: HashMap<Serial, HashSet<ConnectionId>>,
     /// The tunable rules — swing era, speech ranges, timers — the systems read.
     pub gameplay: Gameplay,
 }

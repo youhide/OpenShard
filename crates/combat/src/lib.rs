@@ -16,8 +16,8 @@ use openshard_entities::{EntityId, Serial};
 use openshard_gateway::ConnectionId;
 use openshard_protocol::{encode_attack, encode_war_mode, Notoriety};
 use openshard_state::components::{
-    Client, Combat, CriminalUntil, DamageType, Hitpoints, MeleeDamage, Murders, Position,
-    Resistance, Stats, SwingSpeed,
+    Client, Combat, CriminalUntil, DamageType, Hitpoints, MeleeDamage, MurderDecay, Murders,
+    Position, Resistance, Stats, SwingSpeed,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::WorldState;
@@ -110,7 +110,19 @@ pub const fn swing_ticks(dex: u16, base: u64, era: u8, scale: u64) -> u64 {
 }
 
 /// Deal damage to a mobile, of a kind its resistance to that kind reduces.
-pub fn damage(state: &mut WorldState, serial: u32, amount: u16, kind: DamageType) {
+///
+/// `attacker` is who dealt it, if anyone — the melee swinger, or the caster a
+/// script names on a spell's damage. It is the whole of murder attribution: a
+/// lethal blow that leaves a blue mobile dead tallies against the attacker, so a
+/// fireball counts the same as a sword. Unattributed damage (a script's raw
+/// `op_damage` with no `by`, an environmental hazard) kills without blame.
+pub fn damage(
+    state: &mut WorldState,
+    serial: u32,
+    amount: u16,
+    kind: DamageType,
+    attacker: Option<Serial>,
+) {
     let Some(serial) = Serial::new(serial) else {
         return;
     };
@@ -125,6 +137,12 @@ pub fn damage(state: &mut WorldState, serial: u32, amount: u16, kind: DamageType
     if current == 0 {
         return;
     }
+    // The victim's standing has to be read before it dies — killing a blue is
+    // what a murder is.
+    let victim_was_blue = matches!(
+        state.notoriety_of(entity),
+        Notoriety::Innocent | Notoriety::Friend
+    );
     // Armour takes its cut, of this kind of damage. One place now, so a fireball
     // and a sword swing both go through the same door.
     let resist = state
@@ -148,6 +166,11 @@ pub fn damage(state: &mut WorldState, serial: u32, amount: u16, kind: DamageType
     });
     state.broadcast_health(entity);
     if remaining == 0 {
+        if victim_was_blue {
+            if let Some(killer) = attacker.and_then(|s| state.registry.entity_of(s)) {
+                record_murder(state, killer);
+            }
+        }
         die(state, entity, serial);
     }
 }
@@ -263,20 +286,14 @@ pub fn swings(state: &mut WorldState) {
         {
             continue;
         }
-        // The victim's standing has to be read before the blow — a moment later it
-        // is dead and gone, and killing a blue is what a murder is.
-        let victim_was_blue = matches!(
-            state.notoriety_of(target),
-            Notoriety::Innocent | Notoriety::Friend
-        );
         let blow = melee_blow(state, attacker);
-        damage(state, target_serial.raw(), blow, DamageType::Physical);
+        // The attacker's serial rides along so a lethal blow can be blamed —
+        // `damage` is the one place murder is tallied, melee or spell alike.
+        let by = state.registry.serial_of(attacker);
+        damage(state, target_serial.raw(), blow, DamageType::Physical, by);
         set_next_swing(state, attacker, now + swing_speed(state, attacker));
         // The blow may have killed it; a dead target is no target.
         if state.registry.entity_of(target_serial).is_none() {
-            if victim_was_blue {
-                record_murder(state, attacker);
-            }
             clear_target(state, attacker);
         }
     }
@@ -284,16 +301,67 @@ pub fn swings(state: &mut WorldState) {
 
 /// Sphere's murder count threshold: the fifth innocent killed makes you red.
 const MURDER_THRESHOLD: u16 = 5;
+/// How long one murder count takes to fade — Sphere's short-term default, eight
+/// hours at the tick rate. A reformed killer washes blue eventually, not never.
+const MURDER_DECAY_TICKS: u64 = 8 * 3600 * 20;
 
-/// Tally a killed innocent against `killer`, and turn it red once the tally
-/// reaches the threshold. Unlike the grey criminal flag this reputation does not
-/// lapse — a murderer stays a murderer.
+/// Tally a killed innocent against `killer`, turn it red once the tally reaches
+/// the threshold, and start the slow fade if it is not already running.
 fn record_murder(state: &mut WorldState, killer: EntityId) {
     let count = state.registry.get::<Murders>(killer).map_or(0, |m| m.0) + 1;
     state.registry.insert(killer, Murders(count));
+    if !state.registry.has::<MurderDecay>(killer) {
+        state.registry.insert(
+            killer,
+            MurderDecay {
+                at_tick: state.ticks + MURDER_DECAY_TICKS,
+            },
+        );
+    }
     if count >= MURDER_THRESHOLD && state.notoriety_of(killer) != Notoriety::Murderer {
         state.registry.insert(killer, Notoriety::Murderer);
         state.broadcast_move(killer);
+    }
+}
+
+/// Age murder counts off, one per fire. Runs each tick against the tick counter,
+/// like decay and criminal expiry: a mobile whose [`MurderDecay`] is due loses a
+/// murder, reschedules if any remain, and — if the loss drops it below the
+/// threshold — washes back from red to blue (unless a grey flag still covers it,
+/// which [`expire_criminality`] will resolve).
+pub fn decay_murders(state: &mut WorldState) {
+    let now = state.ticks;
+    let due: Vec<EntityId> = state
+        .registry
+        .query::<MurderDecay>()
+        .filter(|(_, decay)| decay.at_tick <= now)
+        .map(|(entity, _)| entity)
+        .collect();
+    for entity in due {
+        let was_murderer = is_murderer(state, entity);
+        let count = state.registry.get::<Murders>(entity).map_or(0, |m| m.0);
+        let count = count.saturating_sub(1);
+        if count == 0 {
+            state.registry.remove::<Murders>(entity);
+            state.registry.remove::<MurderDecay>(entity);
+        } else {
+            state.registry.insert(entity, Murders(count));
+            state.registry.insert(
+                entity,
+                MurderDecay {
+                    at_tick: now + MURDER_DECAY_TICKS,
+                },
+            );
+        }
+        // Dropped below the line: no longer a murderer. Only repaint if a grey
+        // flag is not currently the colour shown — that one lifts on its own timer.
+        if was_murderer
+            && !is_murderer(state, entity)
+            && state.notoriety_of(entity) == Notoriety::Murderer
+        {
+            state.registry.insert(entity, Notoriety::Innocent);
+            state.broadcast_move(entity);
+        }
     }
 }
 

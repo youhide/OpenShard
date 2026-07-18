@@ -254,6 +254,10 @@ pub enum Command {
         /// What kind, as a wire byte (0 physical, 1 fire, …). The target's
         /// resistance to that kind takes its cut.
         damage_type: u8,
+        /// Who dealt it, by wire serial, or zero for unattributed damage — the
+        /// caster a script blames a spell's damage on, so killing a blue with it
+        /// is a murder the same as a sword.
+        by: u32,
     },
     /// Cast a spell: pay mana, roll the casting skill, and say what happened with
     /// a [`SpellCast`](openshard_magic::SpellCast). The spell's *effect* is a
@@ -504,6 +508,7 @@ impl World {
                 rng: Rng::new(DEFAULT_SEED),
                 ticks: 0,
                 outbox: Vec::new(),
+                open_containers: HashMap::new(),
                 gameplay: Gameplay::default(),
             },
             journal: Journal::new(),
@@ -661,6 +666,7 @@ impl World {
         self.think();
         combat::swings(&mut self.state);
         combat::expire_criminality(&mut self.state);
+        combat::decay_murders(&mut self.state);
         magic::regen_mana(&mut self.state);
         items::decay(&mut self.state);
 
@@ -868,11 +874,13 @@ impl World {
                 serial,
                 amount,
                 damage_type,
+                by,
             } => combat::damage(
                 &mut self.state,
                 serial,
                 amount,
                 DamageType::from_u8(damage_type),
+                openshard_entities::Serial::new(by),
             ),
             Command::CastSpell {
                 serial,
@@ -1451,6 +1459,11 @@ impl World {
         if let Some(held) = self.state.held.remove(&connection) {
             items::restore(&mut self.state, held);
         }
+        // Forget any containers it had open; a gone connection watches nothing.
+        self.state.open_containers.retain(|_, watchers| {
+            watchers.remove(&connection);
+            !watchers.is_empty()
+        });
 
         let Some(entity) = self.state.players.remove(&connection) else {
             return;
@@ -1496,7 +1509,8 @@ pub(crate) mod tests {
     use openshard_protocol::{encode_remove, DROP_TO_GROUND};
     use openshard_skills::SkillUsed;
     use openshard_state::components::{
-        Amount, Contained, Container, CriminalUntil, Decays, Equipped, Graphic, Skills, Stackable,
+        Amount, Contained, Container, CriminalUntil, Decays, Equipped, Graphic, MurderDecay,
+        Murders, Skills, Stackable,
     };
 
     pub(super) const START: (u16, u16) = (1363, 1600);
@@ -2821,6 +2835,7 @@ pub(crate) mod tests {
             serial: mob,
             amount: 20,
             damage_type: 0,
+            by: 0,
         });
         world.tick(now);
 
@@ -2854,6 +2869,7 @@ pub(crate) mod tests {
             serial: mob,
             amount: 100,
             damage_type: 0,
+            by: 0,
         });
         world.tick(now);
 
@@ -2884,6 +2900,7 @@ pub(crate) mod tests {
             serial,
             amount: 200,
             damage_type: 0,
+            by: 0,
         });
         world.tick(now); // 100 -> 0
         assert_eq!(world.bus().read(&mut died).count(), 1, "the killing blow");
@@ -2892,6 +2909,7 @@ pub(crate) mod tests {
             serial,
             amount: 50,
             damage_type: 0,
+            by: 0,
         });
         world.tick(now); // already dead
         assert_eq!(
@@ -2916,6 +2934,7 @@ pub(crate) mod tests {
             serial,
             amount: 500,
             damage_type: 0,
+            by: 0,
         });
         world.tick(now);
 
@@ -3200,6 +3219,137 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn murder_counts_fade_and_wash_the_killer_blue() {
+        // The count is persistent, not permanent: old kills age off one at a time,
+        // and once the killer drops below the threshold it goes back to innocent.
+        let now = Instant::now();
+        let mut world = world();
+        let killer = enter(&mut world, now);
+        let killer_entity = world.state.players[&killer];
+        let killer_serial = serial_of(&world, killer);
+
+        for _ in 0..5 {
+            let victim = spawn_mobile_full(
+                &mut world,
+                Point::new(START.0 + 5, START.1, 0),
+                1,
+                Notoriety::Innocent.to_bits(),
+                0,
+                0,
+                now,
+            );
+            world.queue(Command::Damage {
+                serial: victim,
+                amount: 100,
+                damage_type: 0,
+                by: killer_serial,
+            });
+            world.tick(now);
+        }
+        assert_eq!(
+            world.state.notoriety_of(killer_entity),
+            Notoriety::Murderer,
+            "five kills, red"
+        );
+
+        // Bring the decay forward rather than run eight hours of ticks: one count
+        // fades, dropping to four — below the threshold — and the killer washes
+        // blue.
+        let soon = world.state.ticks + 1;
+        world
+            .state
+            .registry
+            .insert(killer_entity, MurderDecay { at_tick: soon });
+        world.tick(now);
+
+        assert_eq!(
+            world
+                .state
+                .registry
+                .get::<Murders>(killer_entity)
+                .map(|m| m.0),
+            Some(4),
+            "one murder aged off"
+        );
+        assert_eq!(
+            world.state.notoriety_of(killer_entity),
+            Notoriety::Innocent,
+            "below the threshold, no longer a murderer"
+        );
+    }
+
+    #[test]
+    fn an_attributed_spell_kill_is_a_murder_too() {
+        // Attribution is not melee-only: damage that names its dealer — a script's
+        // spell blaming its caster — tallies a murder just as a swing does.
+        let now = Instant::now();
+        let mut world = world();
+        let killer = enter(&mut world, now);
+        let killer_entity = world.state.players[&killer];
+        let killer_serial = serial_of(&world, killer);
+
+        for _ in 0..5 {
+            let victim = spawn_mobile_full(
+                &mut world,
+                Point::new(START.0 + 5, START.1, 0),
+                1,
+                Notoriety::Innocent.to_bits(),
+                0,
+                0,
+                now,
+            );
+            world.queue(Command::Damage {
+                serial: victim,
+                amount: 100,
+                damage_type: 0,
+                by: killer_serial,
+            });
+            world.tick(now);
+        }
+
+        assert_eq!(
+            world.state.notoriety_of(killer_entity),
+            Notoriety::Murderer,
+            "five innocents killed by attributed spell damage is murder"
+        );
+    }
+
+    #[test]
+    fn unattributed_damage_kills_without_blame() {
+        // The other side of it: damage with no dealer named (a script's raw
+        // op_damage, an environmental hazard) kills but pins no murder.
+        let now = Instant::now();
+        let mut world = world();
+        let bystander = enter(&mut world, now);
+        let bystander_entity = world.state.players[&bystander];
+
+        for _ in 0..5 {
+            let victim = spawn_mobile_full(
+                &mut world,
+                Point::new(START.0 + 5, START.1, 0),
+                1,
+                Notoriety::Innocent.to_bits(),
+                0,
+                0,
+                now,
+            );
+            world.queue(Command::Damage {
+                serial: victim,
+                amount: 100,
+                damage_type: 0,
+                by: 0,
+            });
+            world.tick(now);
+        }
+
+        assert_ne!(
+            world.state.notoriety_of(bystander_entity),
+            Notoriety::Murderer,
+            "nobody was blamed for unattributed kills"
+        );
+    }
+
+    #[test]
     fn attacking_an_enemy_is_not_a_crime() {
         let now = Instant::now();
         let mut world = world();
@@ -3278,6 +3428,7 @@ pub(crate) mod tests {
             serial: mob,
             amount: 10,
             damage_type: 1, // fire
+            by: 0,
         });
         world.tick(now);
         assert_eq!(
@@ -3295,6 +3446,7 @@ pub(crate) mod tests {
             serial: mob,
             amount: 10,
             damage_type: 0, // physical
+            by: 0,
         });
         world.tick(now);
         assert_eq!(
@@ -3718,6 +3870,77 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn consuming_a_reagent_redraws_an_open_pack() {
+        // A pack the player has open updates live: a reagent burned out of it
+        // vanishes from the gump, a `0x1D` pushed to the watcher.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now);
+        let serial = serial_of(&world, player);
+        world.queue(Command::SetSkill {
+            serial,
+            skill: 1,
+            value: 1000,
+        });
+        world.tick(now);
+
+        // A container on the player's tile, one reagent inside.
+        const REAGENT: u16 = 0x0F7A;
+        let pack = spawn_container_at(&mut world, Point::new(START.0, START.1, 0), now);
+        let container = openshard_entities::Serial::new(pack).unwrap();
+        let (_, item_serial) = world
+            .state
+            .registry
+            .spawn_with_serial(openshard_entities::SerialKind::Item)
+            .unwrap();
+        let item = world.state.registry.entity_of(item_serial).unwrap();
+        world.state.registry.insert(
+            item,
+            Graphic {
+                id: REAGENT,
+                hue: 0,
+            },
+        );
+        world.state.registry.insert(
+            item,
+            Contained {
+                container,
+                x: 0,
+                y: 0,
+                grid: 0,
+            },
+        );
+
+        // Open it, then clear what has been sent so far.
+        world.queue(Command::DoubleClick {
+            connection: player,
+            serial: pack,
+        });
+        world.tick(now);
+        let _ = packets_for(&mut world, player);
+
+        // Cast, burning the reagent out of the open pack.
+        world.queue(Command::CastSpell {
+            serial,
+            spell: 5,
+            target: 0,
+            mana: 10,
+            difficulty: 0,
+            skill: 1,
+            pack,
+            reagents: vec![(REAGENT, 1)],
+        });
+        world.tick(now);
+
+        assert!(
+            packets_for(&mut world, player)
+                .iter()
+                .any(|p| p == &encode_remove(item_serial.raw())),
+            "the watcher is told the reagent left the pack"
+        );
+    }
+
+    #[test]
     fn a_spell_beyond_the_mana_fizzles() {
         let now = Instant::now();
         let mut world = world();
@@ -3759,6 +3982,7 @@ pub(crate) mod tests {
             serial,
             amount: 60,
             damage_type: 0,
+            by: 0,
         });
         world.tick(now); // 100 -> 40
         world.queue(Command::Heal {
