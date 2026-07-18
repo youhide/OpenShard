@@ -74,6 +74,14 @@ pub enum Event {
         /// Where it appeared.
         z: i8,
     },
+    /// A client asked to cast a spell — the hook a script turns into a real cast,
+    /// looking up the spell's mana and reagents from its own data.
+    SpellRequested {
+        /// The caster's wire identity.
+        serial: Serial,
+        /// Which spell, zero-based.
+        spell: u16,
+    },
     /// A mobile took a step.
     MobileMoved {
         /// Its wire identity.

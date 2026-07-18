@@ -52,6 +52,7 @@
 //! byte codec are written. Individual packet types are not; see
 //! `docs/roadmap.md`.
 
+mod casting;
 mod codec;
 mod combat;
 mod containers;
@@ -67,6 +68,7 @@ mod speech;
 mod version;
 mod world;
 
+pub use casting::CastSpellRequest;
 pub use codec::{CodecError, CodecResult, PacketReader, PacketWriter};
 pub use combat::{encode_attack, encode_health, encode_war_mode, AttackRequest, WarModeRequest};
 pub use containers::{

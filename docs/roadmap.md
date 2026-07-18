@@ -402,8 +402,14 @@ Roughly in dependency order, each script-first:
     `WorldState` remembers who has each container open (`double_click` records it,
     logout clears it), and a consumed reagent is pushed to those watchers — a
     `0x1D` for an item burned whole, a re-sent `0x25` for a dipped stack.
-  - [ ] **the client cast path** — casting from a spellbook or a macro
-    (`0x12`/`0xBF.0x1C`), the interactive layer, as `0x05`/`0x72` were for combat
+  - [x] **the client cast path** — a spellbook cast (`0xBF.0x1C`, read from
+    ServUO's `PacketHandlers.CastSpell`) decodes to a `RequestCast`, which the
+    world turns into a `SpellRequested` event, delivered to the script. The engine
+    never learns what a spell costs: the script owns the spell's mana and reagents
+    (Sphere-scriptpack style) and does the actual `op_cast_spell` off the request —
+    the interactive layer for casting, the same shape `0x05`/`0x72` gave combat.
+    (The older `0x12` text-command form is a fill-in; a modern client sends the
+    `0xBF`.)
 - [x] `ai` — brains, aggro, wandering
   - [x] **A built-in brain, and room for scripted ones.** A creature spawned with
     a `sight` or `wander` gets a `Brain`, and `think()` gives it a beat every so

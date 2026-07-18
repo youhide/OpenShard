@@ -32,9 +32,9 @@ use openshard_persistence::{
     AccountRecord, CharacterRecord, MemoryStore, PgStore, Snapshot, SqliteStore, Store,
 };
 use openshard_protocol::{
-    encode_login_denied, huffman, AttackRequest, CharacterPlay, CreateCharacter, DoubleClick,
-    DropItem, EquipItemRequest, GameServerLogin, PickUpItem, Point, StartLocation, TalkRequest,
-    UnicodeTalkRequest, WalkRequest, WarModeRequest,
+    encode_login_denied, huffman, AttackRequest, CastSpellRequest, CharacterPlay, CreateCharacter,
+    DoubleClick, DropItem, EquipItemRequest, GameServerLogin, PickUpItem, Point, StartLocation,
+    TalkRequest, UnicodeTalkRequest, WalkRequest, WarModeRequest,
 };
 use openshard_world::{
     Appearance, Command, Gameplay, Map, MapTerrain, TileData, World, TICK_INTERVAL,
@@ -720,6 +720,25 @@ fn dispatch(
                 font: talk.font,
                 text: talk.text,
             });
+            true
+        }
+        Some(CastSpellRequest::ID) => {
+            // `0xBF` is a whole family of extended commands; only the cast
+            // subcommand is one we act on, and `decode` says which it is.
+            if !session.in_world {
+                return true;
+            }
+            match CastSpellRequest::decode(packet) {
+                Ok(Some(cast)) => world.queue(Command::RequestCast {
+                    connection: id,
+                    spell: cast.spell,
+                }),
+                Ok(None) => {} // some other 0xBF — not ours to handle
+                Err(_) => {
+                    warn!(%id, "malformed 0xBF cast");
+                    return false;
+                }
+            }
             true
         }
         _ => true,

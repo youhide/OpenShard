@@ -17,7 +17,9 @@ use openshard_events::Cursor;
 use openshard_scripting::{
     Command as ScriptCommand, DenoEngine, Event as ScriptEvent, ScriptEngine,
 };
-use openshard_world::events::{MobileMoved, MobileSpawned, PlayerEntered, PlayerLeft, StepRefused};
+use openshard_world::events::{
+    MobileMoved, MobileSpawned, PlayerEntered, PlayerLeft, SpellRequested, StepRefused,
+};
 use openshard_world::{Command, MobileDied, MobileSpoke, SkillUsed, SpellCast, World};
 use tracing::{error, info, warn};
 
@@ -26,6 +28,7 @@ pub struct Scripts {
     engine: DenoEngine,
     entered: Cursor<PlayerEntered>,
     spawned: Cursor<MobileSpawned>,
+    cast_requested: Cursor<SpellRequested>,
     moved: Cursor<MobileMoved>,
     refused: Cursor<StepRefused>,
     left: Cursor<PlayerLeft>,
@@ -68,6 +71,7 @@ impl Scripts {
         Some(Self {
             entered: world.bus().cursor(),
             spawned: world.bus().cursor(),
+            cast_requested: world.bus().cursor(),
             moved: world.bus().cursor(),
             refused: world.bus().cursor(),
             left: world.bus().cursor(),
@@ -107,6 +111,12 @@ impl Scripts {
                     x: e.position.x,
                     y: e.position.y,
                     z: e.position.z,
+                });
+            }
+            for e in bus.read(&mut self.cast_requested) {
+                events.push(ScriptEvent::SpellRequested {
+                    serial: e.serial.raw(),
+                    spell: e.spell,
                 });
             }
             for e in bus.read(&mut self.moved) {
@@ -751,6 +761,72 @@ mod tests {
                 .map(|h| h.current),
             Some(20),
             "thirty fire damage, unresisted, took the target from fifty to twenty"
+        );
+    }
+
+    #[test]
+    fn a_client_cast_request_is_handed_to_the_script() {
+        // The client cast path, end to end: a spellbook asks to cast (a `0xBF`,
+        // here queued as the `RequestCast` it decodes to), the world says so with
+        // `SpellRequested`, and the script — which owns the spell's mana and
+        // reagents — casts it. The engine never learns what a spell costs.
+        let script = TempScript::new(
+            "spellbook",
+            "function onEvent(e) {\n\
+             if (e.type === 'PlayerEntered') Deno.core.ops.op_set_skill(e.serial, 1, 1000);\n\
+             if (e.type === 'SpellRequested')\n\
+                 Deno.core.ops.op_cast_spell({ serial: e.serial, spell: e.spell, mana: 10, skill: 1 });\n\
+             }",
+        );
+
+        let now = Instant::now();
+        let mut world = World::new((1363, 1600));
+        let mut scripts = Scripts::load(script.path(), &world).expect("script loads");
+        let connection = ConnectionId::from_raw(1);
+
+        world.queue(Command::Enter {
+            connection,
+            version: ClientVersion::TOL,
+            account: "admin".to_owned(),
+            name: "Lord British".to_owned(),
+            serial: None,
+            position: None,
+            facet: 0,
+            appearance: None,
+        });
+        world.tick(now); // PlayerEntered
+        scripts.pump(&mut world); // train magery queued
+        world.tick(now); // the skill is set
+
+        let caster = world
+            .registry()
+            .query::<openshard_world::Client>()
+            .map(|(e, _)| e)
+            .next()
+            .expect("the player");
+        let mana_before = world
+            .registry()
+            .get::<openshard_world::Mana>(caster)
+            .unwrap()
+            .current;
+
+        // The client asks to cast (what a decoded `0xBF.0x1C` becomes).
+        world.queue(Command::RequestCast {
+            connection,
+            spell: 4,
+        });
+        world.tick(now); // SpellRequested emitted
+        scripts.pump(&mut world); // the script hears it and queues the cast
+        world.tick(now); // the cast is applied
+
+        let mana_after = world
+            .registry()
+            .get::<openshard_world::Mana>(caster)
+            .unwrap()
+            .current;
+        assert!(
+            mana_after < mana_before,
+            "the script cast the spell the client requested (mana {mana_before} -> {mana_after})"
         );
     }
 

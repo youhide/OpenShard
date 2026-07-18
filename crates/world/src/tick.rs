@@ -55,7 +55,8 @@ use openshard_magic as magic;
 use openshard_skills as skills;
 
 use crate::events::{
-    MobileMoved, MobileSpawned, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason, StepRefused,
+    MobileMoved, MobileSpawned, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason,
+    SpellRequested, StepRefused,
 };
 use crate::terrain::MapTerrain;
 
@@ -409,6 +410,14 @@ pub enum Command {
     Control {
         /// The mobile, by wire serial.
         serial: u32,
+    },
+    /// A client asked to cast a spell (from its spellbook or a macro). The world
+    /// only says it happened, via [`SpellRequested`]; a script does the casting.
+    RequestCast {
+        /// Which connection asked.
+        connection: ConnectionId,
+        /// Which spell, zero-based.
+        spell: u16,
     },
 }
 
@@ -963,6 +972,7 @@ impl World {
             } => items::drop_item(&mut self.state, connection, serial, position, container),
             Command::Disconnect { connection } => self.disconnect(connection),
             Command::Control { serial } => self.control(serial),
+            Command::RequestCast { connection, spell } => self.request_cast(connection, spell),
         }
     }
 
@@ -1450,6 +1460,23 @@ impl World {
         if let Some(entity) = Serial::new(serial).and_then(|s| self.state.registry.entity_of(s)) {
             self.state.registry.insert(entity, Scripted);
         }
+    }
+
+    /// A client asked to cast a spell: say so on the bus for a script to act on.
+    /// The world does not cast — it does not know what the spell costs or does.
+    /// See [`Command::RequestCast`].
+    fn request_cast(&mut self, connection: ConnectionId, spell: u16) {
+        let Some(&entity) = self.state.players.get(&connection) else {
+            return;
+        };
+        let Some(serial) = self.state.registry.serial_of(entity) else {
+            return;
+        };
+        self.state.bus.send(SpellRequested {
+            entity,
+            serial,
+            spell,
+        });
     }
 
     fn disconnect(&mut self, connection: ConnectionId) {

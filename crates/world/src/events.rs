@@ -27,6 +27,22 @@ pub struct PlayerEntered {
 // `ItemSpawned` moved to `openshard-items` with the item system that emits it.
 // `world` re-exports it.
 
+/// A client asked to cast a spell — from its spellbook or a macro.
+///
+/// The request off the wire, no more: what the spell *costs* and *does* — mana,
+/// reagents, damage — is a script's, read off this event, the same script-first
+/// decoupling `MobileSpoke` and `SkillUsed` have. The world hears "this mobile
+/// wants spell N" and says so; a script turns that into an actual cast.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SpellRequested {
+    /// The would-be caster.
+    pub entity: EntityId,
+    /// Its wire identity.
+    pub serial: Serial,
+    /// Which spell, zero-based.
+    pub spell: u16,
+}
+
 /// A creature or NPC appeared in the world.
 ///
 /// The mobile counterpart of [`PlayerEntered`], for the mobiles no client drives
