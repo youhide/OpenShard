@@ -19,12 +19,36 @@ pub const MAX_STEP_UP: i32 = 2;
 /// and does not.
 pub const PLAYER_HEIGHT: i32 = 16;
 
-/// A drop longer than this is a cliff, not a step.
+/// For a walkable static of `height` based at `base`, the point a mobile steps
+/// *onto* and the point it *stands* at — `(reach, stand)`.
 ///
-/// Not a Sphere constant — Sphere lets you fall and takes the damage out of you,
-/// which needs a combat system to be worth anything. Until then, refusing the
-/// step keeps a player out of geometry they cannot climb back out of.
-pub const MAX_STEP_DOWN: i32 = 20;
+/// They differ only for a `climbable` bridge (a stair): you step onto its low
+/// *base* — the near edge of the ramp — and standing on it lifts you half way up.
+/// Checking the base rather than the top is what lets a staircase be climbed one
+/// step at a time, where checking the top makes each riser a wall taller than a
+/// step. A solid platform (a floor, a table) has no such trick: both are its top.
+/// Mirrors ServUO's `Movement.Check` (`itemTop = itemZ`, `ourZ = itemZ +
+/// CalcHeight` for a bridge).
+const fn platform_surface(base: i32, height: i32, climbable: bool) -> (i32, i32) {
+    if climbable {
+        (base, base + height / 2)
+    } else {
+        let top = base + height;
+        (top, top)
+    }
+}
+
+/// The average of two corner heights, floored toward negative infinity — RunUO's
+/// `FloorAverage`. A plain `(a + b) / 2` truncates toward zero, which rounds a
+/// negative slope the wrong way and disagrees with the client by a unit.
+const fn floor_average(a: i32, b: i32) -> i32 {
+    let sum = a + b;
+    if sum < 0 {
+        (sum - 1) / 2
+    } else {
+        sum / 2
+    }
+}
 
 /// The real world: ground heights, walls, water.
 ///
@@ -64,54 +88,198 @@ impl MapTerrain {
         &self.tiles
     }
 
-    /// The height a mobile would stand at, and whether it can stand there at all.
+    /// The height a mobile would stand at on `(x, y)`, reachable from `from_z`.
     ///
-    /// Walks every surface on the tile — the ground and each static — and takes
-    /// the highest one that is reachable from `from_z`. That is what makes a
-    /// bridge walkable while the water under it is not.
+    /// A convenience over [`check`](Self::check) for callers that have only a
+    /// single z and no picture of the tile they are standing on — the map's own
+    /// walkability tests. It reaches from `from_z` as both the current z and the
+    /// top of the surface underfoot, which is the flat-ground case. A *walking*
+    /// mobile does not go through here: [`can_step`](Self::can_step) computes the
+    /// real surface it stands on first, because on a slope the top of that
+    /// surface is higher than its feet, and the reach starts from the top.
     pub fn surface_at(&self, x: u16, y: u16, from_z: i32) -> Option<i32> {
-        let land = self.map.land(x, y)?;
-        let land_flags = self.tiles.land(land.tile).flags;
+        self.check(x, y, from_z, from_z, from_z)
+    }
 
-        let mut best: Option<i32> = None;
-        let mut consider = |z: i32| {
-            // Reachable means: not more than two units up, and not off a cliff.
-            if z > from_z + MAX_STEP_UP || z < from_z - MAX_STEP_DOWN {
-                return;
-            }
-            if best.is_none_or(|current| z > current) {
-                best = Some(z);
-            }
-        };
+    /// The surface a mobile at `(x, y, loc_z)` is standing *on*: its base z and
+    /// its top. Ported from ServUO/RunUO's `MovementImpl.GetStartZ`.
+    ///
+    /// The client reaches its next step not from where its feet are but from the
+    /// *top* of what it stands on — a sloped land tile's highest corner, a stair's
+    /// full height. The server has to start from the same place or it refuses
+    /// steps up a slope the client took: `start_top` is that place. Returns
+    /// `(start_z, start_top)` — the base you stand on, and the top the next step
+    /// reaches from.
+    fn start_surface(&self, x: u16, y: u16, loc_z: i32) -> (i32, i32) {
+        let (land_z, land_center, land_top) = self.land_heights(x, y);
+        let mut z_low = loc_z;
+        let mut z_top = loc_z;
+        let mut z_center = 0;
+        let mut is_set = false;
 
-        // The ground, unless it is water we cannot swim in or is flagged
-        // impassable outright.
-        let land_is_ground = if land_flags.is_water() {
-            self.swimming
-        } else {
-            !land_flags.is_blocking()
-        };
-        if land_is_ground {
-            consider(i32::from(land.z));
+        // The ground, if you are at or above the height you would stand on it.
+        if self.land_is_ground(x, y) && loc_z >= land_center {
+            z_low = land_z;
+            z_center = land_center;
+            z_top = land_top;
+            is_set = true;
         }
+
+        // Then the tallest static surface at or below your feet: what you are
+        // really standing on if you climbed onto something.
+        for item in self.map.statics_at(x, y) {
+            let tile = self.tiles.static_tile(item.tile);
+            if !tile.flags.is_platform() {
+                continue;
+            }
+            let base = i32::from(item.z);
+            let height = i32::from(tile.height);
+            let (_, calc_top) = platform_surface(base, height, tile.flags.is_climbable());
+            if (!is_set || calc_top >= z_center) && loc_z >= calc_top {
+                z_low = base;
+                z_center = calc_top;
+                let top = base + height;
+                if !is_set || top > z_top {
+                    z_top = top;
+                }
+                is_set = true;
+            }
+        }
+
+        if !is_set {
+            (loc_z, loc_z)
+        } else {
+            (z_low, z_top.max(loc_z))
+        }
+    }
+
+    /// Whether a mobile standing on the surface described by `(start_z,
+    /// start_top)` and currently at height `p_z` may step onto `(x, y)`, and the
+    /// height it lands at. Ported from ServUO/RunUO's `MovementImpl.Check`.
+    ///
+    /// The two heights are not the same: `start_top` (the top of what you stand
+    /// on) plus a step is how *high* you can reach, while `p_z` (your feet) is
+    /// what a landing height is judged *close to* — of several surfaces you could
+    /// step onto, you take the one nearest your current height, not the highest.
+    /// Picking the highest is what put the server a unit above the client on
+    /// every slope and rubber-banded the walk.
+    pub fn check(&self, x: u16, y: u16, start_z: i32, start_top: i32, p_z: i32) -> Option<i32> {
+        // Off the map is not walkable — and reading a corner off the edge below
+        // would fold a neighbour's height in as if it were real ground.
+        self.map.land(x, y)?;
+        let (land_z, land_center, _) = self.land_heights(x, y);
+        // How high a step reaches, and the headroom a body needs above its feet.
+        let step_top = start_top + MAX_STEP_UP;
+        let check_top = start_z + PLAYER_HEIGHT;
+
+        let mut new_z = 0;
+        let mut move_ok = false;
+
+        // Among reachable surfaces, keep the one whose standing height is closest
+        // to where the mobile is now — and on a tie the *lower* one, exactly as
+        // ServUO's `cmp` decides. Preferring the higher instead puts the server a
+        // step above the client wherever two surfaces are equidistant.
+        let closer = |our_z: i32, move_ok: bool, new_z: i32| -> bool {
+            if !move_ok {
+                return true;
+            }
+            let cmp = (our_z - p_z).abs() - (new_z - p_z).abs();
+            !(cmp > 0 || (cmp == 0 && our_z > new_z))
+        };
 
         for item in self.map.statics_at(x, y) {
             let tile = self.tiles.static_tile(item.tile);
             if !tile.flags.is_platform() {
                 continue;
             }
-            // Sphere halves the height of stairs: you end up standing half way
-            // up a step, not on top of it. Without this every staircase is a
-            // wall of two-unit risers you cannot climb.
-            let height = if tile.flags.is_climbable() {
-                i32::from(tile.height) / 2
-            } else {
-                i32::from(tile.height)
-            };
-            consider(i32::from(item.z) + height);
+            let base = i32::from(item.z);
+            let height = i32::from(tile.height);
+            let climbable = tile.flags.is_climbable();
+            // `item_top` is the edge a step must reach; `our_z` where you stand.
+            let (item_top, our_z) = platform_surface(base, height, climbable);
+            if !closer(our_z, move_ok, new_z) {
+                continue;
+            }
+            let test_top = check_top.max(our_z + PLAYER_HEIGHT);
+            if step_top >= item_top {
+                // A low static the ground pokes through is not something you climb
+                // onto: the land under it wins. ServUO's `landCheck` guard.
+                let land_check = base + MAX_STEP_UP.min(height);
+                if self.land_is_ground(x, y)
+                    && land_check < land_center
+                    && land_center > our_z
+                    && test_top > land_z
+                {
+                    continue;
+                }
+                if !self.is_obstructed(x, y, our_z) {
+                    new_z = our_z;
+                    move_ok = true;
+                }
+            }
         }
 
-        best
+        // The ground itself: reachable if a step reaches its lowest corner, and
+        // you stand at its centre — the average, never the raw corner.
+        if self.land_is_ground(x, y) && step_top >= land_z {
+            let our_z = land_center;
+            if closer(our_z, move_ok, new_z) && !self.is_obstructed(x, y, our_z) {
+                new_z = our_z;
+                move_ok = true;
+            }
+        }
+
+        move_ok.then_some(new_z)
+    }
+
+    /// Whether the land at `(x, y)` is something a mobile can stand on: not water
+    /// it cannot swim in, and not flagged impassable.
+    fn land_is_ground(&self, x: u16, y: u16) -> bool {
+        let Some(land) = self.map.land(x, y) else {
+            return false;
+        };
+        let flags = self.tiles.land(land.tile).flags;
+        if flags.is_water() {
+            self.swimming
+        } else {
+            !flags.is_blocking()
+        }
+    }
+
+    /// The land tile's `(lowest corner, floor-average, highest corner)` — RunUO's
+    /// `GetAverageZ`, which returns all three. The step check reaches the lowest,
+    /// stands on the average, and never looks at the raw stored corner alone.
+    fn land_heights(&self, x: u16, y: u16) -> (i32, i32, i32) {
+        let own = self.map.land(x, y).map_or(0, |c| i32::from(c.z));
+        // A missing neighbour (the map's edge) reads as this tile's own height, so
+        // the edge is flat rather than a cliff into z = 0.
+        let z = |nx: u16, ny: u16| self.map.land(nx, ny).map_or(own, |c| i32::from(c.z));
+        let top = own;
+        let left = z(x, y.wrapping_add(1));
+        let right = z(x.wrapping_add(1), y);
+        let bottom = z(x.wrapping_add(1), y.wrapping_add(1));
+        let min = top.min(left).min(right).min(bottom);
+        let max = top.max(left).max(right).max(bottom);
+        // Average the pair spanning the *gentler* slope — the one whose corners
+        // are closer — so a mobile stands level along the shallow axis.
+        let avg = if (top - bottom).abs() > (left - right).abs() {
+            floor_average(left, right)
+        } else {
+            floor_average(top, bottom)
+        };
+        (min, avg, max)
+    }
+
+    /// The height a mobile stands at on the land tile at `(x, y)` — the *average*
+    /// of the tile's four corners, not the raw south-west corner the map stores.
+    ///
+    /// UO land tiles are sloped diamonds; you stand at the middle of one. The
+    /// client (ClassicUO, and RunUO/ServUO before it) derives this `GetAverageZ`,
+    /// and the server has to agree: the walk ack carries no z, so each side
+    /// computes its own, and any mismatch on a slope rubber-bands every step — the
+    /// terrain "blocks" for no visible reason. Ported from RunUO's `Map.GetAverageZ`.
+    fn average_land_z(&self, x: u16, y: u16) -> i32 {
+        self.land_heights(x, y).1
     }
 
     /// Whether anything on this tile would be in a mobile's way at `z`.
@@ -144,12 +312,11 @@ impl MapTerrain {
 impl Terrain for MapTerrain {
     fn can_step(&self, from: Point, to: Point) -> Option<Point> {
         let from_z = i32::from(from.z);
-        let landing = self.surface_at(to.x, to.y, from_z)?;
-        if self.is_obstructed(to.x, to.y, landing) {
-            return None;
-        }
-        // `surface_at` already refused anything out of reach, so this cannot
-        // truncate a legal step: the range is `from_z - 20 ..= from_z + 2`.
+        // Reach the next tile from the top of what we stand on, not from our feet:
+        // on a slope those differ, and starting from the feet refuses steps up the
+        // slope the client took. `start_surface` is what the client reaches from.
+        let (start_z, start_top) = self.start_surface(from.x, from.y, from_z);
+        let landing = self.check(to.x, to.y, start_z, start_top, from_z)?;
         let z = i8::try_from(landing).ok()?;
         Some(Point {
             x: to.x,
@@ -159,13 +326,40 @@ impl Terrain for MapTerrain {
     }
 
     fn ground_z(&self, x: u16, y: u16) -> Option<i8> {
-        self.map().land(x, y).map(|cell| cell.z)
+        // The average, not the raw corner, so a character spawns at the same
+        // height the client will compute for the tile — see `average_land_z`.
+        self.map().land(x, y)?;
+        i8::try_from(self.average_land_z(x, y)).ok()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openshard_protocol::Direction;
+
+    #[test]
+    fn a_stair_is_stepped_onto_at_its_base_not_its_top() {
+        // The bug the ramps in a city hit: a ten-high stair based level with your
+        // feet. You step onto its base (0 — within a step) and stand half way up
+        // (5). Checking the *standing* height, 5, against the two-unit limit
+        // refused it; the base is what makes the whole staircase climbable.
+        assert_eq!(platform_surface(0, 10, true), (0, 5));
+        // A solid platform of the same height is stepped onto at its top, which is
+        // out of reach from the ground — you cannot step onto a tall table.
+        assert_eq!(platform_surface(0, 10, false), (10, 10));
+    }
+
+    #[test]
+    fn the_land_average_floors_toward_negative_infinity() {
+        // RunUO's FloorAverage, the rule the client rounds a slope by: a plain
+        // truncating divide would round -3 and -4 to -3 (toward zero); the client
+        // and this floor both give -4.
+        assert_eq!(floor_average(4, 6), 5);
+        assert_eq!(floor_average(-3, -4), -4);
+        assert_eq!(floor_average(0, -1), -1);
+        assert_eq!(floor_average(-10, 10), 0);
+    }
 
     /// Point `OPENSHARD_CLIENT` at a UO client install to run these.
     ///
@@ -234,6 +428,63 @@ mod tests {
     }
 
     #[test]
+    fn a_step_up_a_land_slope_and_back_agree_on_the_height() {
+        // The invariant the ramp rubber-band broke, on the geometry it broke on:
+        // bare sloped land, no statics stacked on it. A mobile reaches its next
+        // tile from the *top* of the surface it stands on, not from its feet, so a
+        // step up a slope and the same step back down are mutually consistent —
+        // A→B→A lands you back at A's own standing height. The old check reached
+        // from the feet and stood at the average, an asymmetry that put the server
+        // a unit off the client on every hillside and snapped the walk back.
+        //
+        // Only pure land is a fair test: where statics stack (a stair), the height
+        // you land at genuinely depends on the height you came from — the client
+        // does the same — so reversibility there is not an invariant at all.
+        let Some(terrain) = real_terrain() else {
+            return;
+        };
+        let bare = |x: u16, y: u16| terrain.map().statics_at(x, y).next().is_none();
+
+        let mut checked = 0;
+        let mut slopes = 0; // steps that actually change height — the ones at risk
+        for y in 1600..1900u16 {
+            for x in 1350..1600u16 {
+                if terrain.map().land(x, y).is_none() || !bare(x, y) {
+                    continue;
+                }
+                let a = Point::new(x, y, terrain.average_land_z(x, y) as i8);
+                for dir in Direction::ALL {
+                    let (dx, dy) = dir.step();
+                    let (bx, by) = ((i32::from(x) + dx) as u16, (i32::from(y) + dy) as u16);
+                    if terrain.map().land(bx, by).is_none() || !bare(bx, by) {
+                        continue;
+                    }
+                    let Some(b) = terrain.can_step(a, Point::new(bx, by, a.z)) else {
+                        continue;
+                    };
+                    let Some(returned) = terrain.can_step(b, Point::new(a.x, a.y, b.z)) else {
+                        continue;
+                    };
+                    assert_eq!(
+                        returned.z, a.z,
+                        "A={a:?} -{dir:?}-> B={b:?} -> back landed at z={}, not A's z={}",
+                        returned.z, a.z
+                    );
+                    checked += 1;
+                    if b.z != a.z {
+                        slopes += 1;
+                    }
+                }
+            }
+        }
+        assert!(checked > 1000, "only {checked} reversible land steps found");
+        assert!(
+            slopes > 20,
+            "only {slopes} height-changing steps — no slopes tested"
+        );
+    }
+
+    #[test]
     fn standing_on_the_ground_you_are_on_is_always_allowed() {
         // The z you ask from matters: `surface_at(x, y, 0)` on ground at z=10 is
         // correctly None, because ten is more than a two-unit step up. Asking
@@ -248,6 +499,15 @@ mod tests {
                 let cell = terrain.map().land(x, y).unwrap();
                 let flags = terrain.tiles().land(cell.tile).flags;
                 if flags.is_blocking() || flags.is_water() {
+                    continue;
+                }
+                // `surface_at` is obstruction-aware now — it is the whole movement
+                // check — so a walkable land tile with a wall standing on it is
+                // rightly not standable. Skip those: this test is about *reach*
+                // from your own height, not about walls. A tile where a body would
+                // stand clear is the case it means to protect.
+                let stand = terrain.average_land_z(x, y);
+                if terrain.is_obstructed(x, y, stand) {
                     continue;
                 }
                 assert!(

@@ -59,7 +59,7 @@ pub use openshard_state::{
     Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, MurderDecay,
     Murders, Name, Position, Resistance, Scripted, Skills, Stackable, Stats, SwingSpeed,
 };
-pub use terrain::{MapTerrain, MAX_STEP_DOWN, MAX_STEP_UP, PLAYER_HEIGHT};
+pub use terrain::{MapTerrain, MAX_STEP_UP, PLAYER_HEIGHT};
 pub use tick::{Appearance, Command, World, TICK_INTERVAL};
 pub use tiledata::{LandTile, StaticTile, TileData, TileDataError, TileDataFormat, TileFlags};
 pub use uop::UopError;
