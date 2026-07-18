@@ -76,6 +76,15 @@ arrived. The channel is where async stops and the tick begins.
 - [x] UOP containers — the map is in `map0LegacyMUL.uop`, not `map0.mul`
 - [x] `map*.mul` / `statics*.mul` — column-major blocks, 2.9M statics
 - [x] `MapTerrain` — real heights, walls, water, the two-unit step limit
+- [x] **The movement check matches the 2D client**, a blend of both references:
+  ServUO/RunUO's `GetStartZ`+`Check` for *reach* (a step reaches the top of the
+  surface underfoot plus two, not the feet — the fix for slope rubber-band) and
+  Sphere's `GetFixPoint` for *selection* (stand on the highest surface in reach,
+  not the nearest — the fix for climbing building stairs). See the note below.
+- [x] `MobileStatus` (`0x11`) — the status bar, and the only packet carrying
+  **stamina**; without it the client sees zero stamina and silently refuses to
+  run. Sent on world entry and answered on `0x34`. Versioned 3–6 by
+  `status_packet_version` (type 6 is the 121-byte High Seas shape).
 - [x] `WalkPace` — a token bucket; a client can no longer walk as fast as it sends
 - [x] `World::tick` — a fixed 20Hz timestep; commands in, events and packets out
 - [x] Core components: `Position`, `Heading`, `Body`, `Name`, `Client`, `Movement`
@@ -114,6 +123,32 @@ at `15 - 200 = -185`, refused instantly, with none of the burst tolerance the
 buffer exists to give. Either the constant means something undocumented or the
 check does not do what it says. `movement::WalkPace` is a token bucket instead:
 the same intent, stated plainly.
+
+### The walk check is one part ServUO, one part Sphere
+
+The client draws z it computes itself — the walk ack carries none — so the server
+has to land a step on the *same* height the client does or every step
+rubber-bands. Neither reference alone matches the 2D client; the working check
+takes one half from each.
+
+- **Reach is ServUO's `GetStartZ`+`Check`.** A step reaches `start_top + 2`, where
+  `start_top` is the top of the surface the mobile stands on — a sloped land
+  tile's highest corner, a stair's full height — not its feet. Reaching from the
+  feet (`from_z + 2`) refuses steps up a slope the client took: measured against a
+  real facet, that was 10,620 steps around Britain the server blocked and the
+  client allowed. Land reachability is the tile's *lowest* corner and you stand at
+  its `GetAverageZ` centre, floored toward negative infinity.
+- **Selection is Sphere's `GetFixPoint`.** Among the surfaces in reach, stand on
+  the **highest**, not — as ServUO's `Check` does — the one nearest the current
+  height. A stair tile carries the floor below it and the step above; ServUO's
+  nearest-z keeps you on the floor while the client climbs, so building stairs
+  "drop" you and you cannot get in. The highest-in-reach rule climbs them.
+
+The two rules agree on bare ground — one surface, so highest *is* nearest — which
+is why the ServUO half tested clean on open terrain and the divergence only
+surfaced on stacked geometry (stairs, house floors). The whole of it is
+`MapTerrain::check` / `start_surface`, ported with the arithmetic audited as
+everywhere else.
 
 ### The tick
 
