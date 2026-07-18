@@ -143,6 +143,15 @@ pub enum Event {
         /// What was said.
         text: String,
     },
+    /// A game master pressed a button in the `.admin` menu. The engine only
+    /// carries the verb across; the pack decides what it does — which spawn set to
+    /// register, what to clear. This is how staff tools reach the script pack.
+    AdminAction {
+        /// The game master's wire identity.
+        serial: Serial,
+        /// The action the button asked for, e.g. `"populate:britain"`.
+        action: String,
+    },
 }
 
 /// What a script asks the world to do.
@@ -314,6 +323,55 @@ pub enum Command {
         /// The mobile.
         serial: Serial,
     },
+    /// Register a spawn region the world keeps populated. The pack builds these
+    /// from its own spawn data — a town's animals, a graveyard's undead — and the
+    /// tick maintains them: a creature dies, another takes its place.
+    RegisterSpawner {
+        /// West edge.
+        x: u16,
+        /// North edge.
+        y: u16,
+        /// Width in tiles.
+        width: u16,
+        /// Height in tiles.
+        height: u16,
+        /// Which facet.
+        facet: u8,
+        /// The most live creatures the region keeps.
+        max_count: u16,
+        /// Ticks to wait after a spawn before the next.
+        respawn_delay: u64,
+        /// The creatures it may put down; each spawn picks one.
+        creatures: Vec<SpawnCreature>,
+    },
+    /// Remove every spawn region and the creatures they were maintaining.
+    ClearSpawners,
+}
+
+/// One creature a spawn region may put down — the template a
+/// [`RegisterSpawner`](Command::RegisterSpawner) carries, mirroring the fields of
+/// [`SpawnMobile`](Command::SpawnMobile) minus the position, which the region
+/// supplies.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct SpawnCreature {
+    /// The body graphic.
+    pub body: u16,
+    /// Its hue.
+    pub hue: u16,
+    /// Starting and maximum hit points.
+    pub hits: u16,
+    /// Health-bar colour, as a wire byte.
+    pub notoriety: u8,
+    /// Melee damage before the target's resistance.
+    pub damage: u16,
+    /// Physical resistance, 0–100.
+    pub resistance: u8,
+    /// Ticks between swings; 0 takes the default.
+    pub swing: u64,
+    /// How far it notices a foe; 0 is passive.
+    pub sight: u8,
+    /// Whether it wanders when idle.
+    pub wander: bool,
 }
 
 /// Why a script call failed.

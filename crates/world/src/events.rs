@@ -123,6 +123,20 @@ pub struct PlayerLeft {
     pub serial: Serial,
 }
 
+/// A game master pressed a button in the `.admin` menu.
+///
+/// The engine carries the verb across; the script pack decides what it does —
+/// which spawn set to register, what to clear. Emitted on the bus so a script
+/// reads it like any other domain event, which is how a staff tool reaches the
+/// pack. Carries an owned `String`, so it is `Clone`, not `Copy`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct AdminMenuAction {
+    /// The game master's wire identity.
+    pub serial: Serial,
+    /// The action the button asked for, e.g. `"populate:britain"`.
+    pub action: String,
+}
+
 // `MobileDamaged` and `MobileDied` moved to `openshard-combat` with the combat
 // system that emits them. `world` re-exports both.
 

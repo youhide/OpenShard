@@ -47,6 +47,7 @@ pub fn run(state: &mut WorldState, actor: EntityId, rest: &str) {
         "tele" | "go" => teleport(state, actor, &args),
         "add" => add_item(state, actor, &args),
         "set" => set_stat(state, actor, &args),
+        "admin" => crate::admin::open_menu(state, actor),
         other => notify(state, actor, &format!("Unknown command '{other}'.")),
     }
 }
@@ -161,7 +162,7 @@ fn set_stat(state: &mut WorldState, actor: EntityId, args: &[&str]) {
 
 /// Send the actor a private system line — the reply to a command, seen by no one
 /// else. A mobile with no client (a scripted GM, say) simply gets no reply.
-fn notify(state: &mut WorldState, actor: EntityId, text: &str) {
+pub(crate) fn notify(state: &mut WorldState, actor: EntityId, text: &str) {
     let Some(&Client { connection, .. }) = state.registry.get::<Client>(actor) else {
         return;
     };

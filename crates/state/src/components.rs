@@ -147,6 +147,16 @@ pub struct Name(pub String);
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Account(pub String);
 
+/// Which spawn region put this mobile here — an index into the world's spawner
+/// list.
+///
+/// The region counts its live creatures by this to know when to refill. A
+/// creature dies and is despawned, the component goes with it, the count drops,
+/// and the region spawns another. Absent on players and on script- or GM-spawned
+/// mobiles, which no region maintains.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct SpawnedBy(pub u32);
+
 /// A mobile's staff authority — what privileged commands it may run.
 ///
 /// Set on world entry from the account's configured level, not saved with the

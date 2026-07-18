@@ -30,9 +30,11 @@
 //!
 //! Both are settled by arithmetic and pinned by tests against real files.
 
+pub mod admin;
 pub mod events;
 pub mod gm;
 pub mod map;
+pub mod spawner;
 pub mod terrain;
 pub mod tick;
 pub mod tiledata;
@@ -42,8 +44,8 @@ pub mod uop;
 // `openshard-state` so the gameplay systems can live in their own crates above
 // it. Re-exported here so `openshard_world::Position` and friends keep resolving.
 pub use events::{
-    MobileMoved, MobileSpawned, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason,
-    SpellRequested, StepRefused,
+    AdminMenuAction, MobileMoved, MobileSpawned, MobileTurned, PlayerEntered, PlayerLeft,
+    RefusedReason, SpellRequested, StepRefused,
 };
 pub use map::{LandCell, Map, MapError, StaticItem, BLOCK_SIZE};
 pub use openshard_chat::MobileSpoke;

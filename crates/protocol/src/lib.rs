@@ -59,6 +59,7 @@ mod combat;
 mod containers;
 mod direction;
 mod feature;
+mod gump;
 pub mod huffman;
 mod items;
 mod login;
@@ -79,6 +80,7 @@ pub use containers::{
 };
 pub use direction::{Direction, Facing, RUNNING_BIT};
 pub use feature::{Feature, FeatureSet};
+pub use gump::{encode_gump_display, GumpResponse};
 pub use items::{
     encode_drag_cancel, encode_equip, DragCancelReason, DropItem, EquipItemRequest, PickUpItem,
     WorldItem, DROP_TO_GROUND,

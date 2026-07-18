@@ -359,6 +359,87 @@ fn op_control(state: &mut OpState, serial: u32) {
         .push(Command::Control { serial });
 }
 
+/// One creature template inside a [`SpawnerSpec`]. Mirrors [`MobileSpec`] minus
+/// the position, which the region supplies.
+#[derive(serde::Deserialize)]
+struct CreatureSpec {
+    body: u16,
+    #[serde(default)]
+    hue: u16,
+    #[serde(default = "one")]
+    hits: u16,
+    #[serde(default)]
+    notoriety: u8,
+    #[serde(default)]
+    damage: u16,
+    #[serde(default)]
+    resistance: u8,
+    #[serde(default)]
+    swing: u64,
+    #[serde(default)]
+    sight: u8,
+    #[serde(default)]
+    wander: bool,
+}
+
+/// A spawn region, from the script: `op_register_spawner({ x, y, width, height,
+/// maxCount, respawnDelay, creatures: [...] })`.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpawnerSpec {
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    #[serde(default)]
+    facet: u8,
+    max_count: u16,
+    respawn_delay: u64,
+    creatures: Vec<CreatureSpec>,
+}
+
+/// Register a spawn region the world will keep populated.
+#[op2]
+fn op_register_spawner(state: &mut OpState, #[serde] spec: SpawnerSpec) {
+    let creatures = spec
+        .creatures
+        .into_iter()
+        .map(|c| crate::SpawnCreature {
+            body: c.body,
+            hue: c.hue,
+            hits: c.hits,
+            notoriety: c.notoriety,
+            damage: c.damage,
+            resistance: c.resistance,
+            swing: c.swing,
+            sight: c.sight,
+            wander: c.wander,
+        })
+        .collect();
+    state
+        .borrow_mut::<Host>()
+        .outbox
+        .push(Command::RegisterSpawner {
+            x: spec.x,
+            y: spec.y,
+            width: spec.width,
+            height: spec.height,
+            facet: spec.facet,
+            max_count: spec.max_count,
+            respawn_delay: spec.respawn_delay,
+            creatures,
+        });
+}
+
+/// Remove every spawn region and the creatures they were maintaining.
+#[op2(fast)]
+fn op_clear_spawners(state: &mut OpState) {
+    state
+        .borrow_mut::<Host>()
+        .outbox
+        .push(Command::ClearSpawners);
+}
+
 extension!(
     openshard_ops,
     ops = [
@@ -374,7 +455,9 @@ extension!(
         op_set_stats,
         op_set_skill,
         op_use_skill,
-        op_say
+        op_say,
+        op_register_spawner,
+        op_clear_spawners
     ],
     docs = "OpenShard's script-facing ops: read entity state, enqueue commands.",
 );
@@ -752,6 +835,53 @@ mod tests {
                 y: 100,
                 z: 0,
                 facet: 0,
+            }]
+        );
+    }
+
+    #[test]
+    fn an_admin_action_can_register_a_spawner() {
+        // The pack-driven spawn path: a staff button emits AdminAction, and the
+        // pack turns the verb into a spawn region through op_register_spawner.
+        let mut engine = DenoEngine::new();
+        engine
+            .load(
+                "function onEvent(e) {\n\
+                 if (e.type === 'AdminAction' && e.action === 'populate:cemetery') {\n\
+                     Deno.core.ops.op_register_spawner({ x: 1349, y: 1455, width: 40, height: 40,\n\
+                         maxCount: 4, respawnDelay: 60,\n\
+                         creatures: [{ body: 0x0032, hits: 34, notoriety: 6, sight: 8 }] });\n\
+                 }\n\
+                 }",
+            )
+            .unwrap();
+        engine
+            .deliver(&Event::AdminAction {
+                serial: 1,
+                action: "populate:cemetery".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(
+            engine.take_commands(),
+            vec![Command::RegisterSpawner {
+                x: 1349,
+                y: 1455,
+                width: 40,
+                height: 40,
+                facet: 0,
+                max_count: 4,
+                respawn_delay: 60,
+                creatures: vec![crate::SpawnCreature {
+                    body: 0x0032,
+                    hue: 0,
+                    hits: 34,
+                    notoriety: 6,
+                    damage: 0,
+                    resistance: 0,
+                    swing: 0,
+                    sight: 8,
+                    wander: false,
+                }],
             }]
         );
     }

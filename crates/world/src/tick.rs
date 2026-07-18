@@ -41,7 +41,7 @@ use tracing::{debug, info, warn};
 
 use openshard_state::components::{
     Access, Account, Body, Brain, Client, Combat, DamageType, Facet, Heading, Hitpoints, Mana,
-    MeleeDamage, Movement, Name, Position, Resistance, Scripted, Stats, SwingSpeed,
+    MeleeDamage, Movement, Name, Position, Resistance, Scripted, SpawnedBy, Stats, SwingSpeed,
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
@@ -55,8 +55,8 @@ use openshard_magic as magic;
 use openshard_skills as skills;
 
 use crate::events::{
-    MobileMoved, MobileSpawned, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason,
-    SpellRequested, StepRefused,
+    AdminMenuAction, MobileMoved, MobileSpawned, MobileTurned, PlayerEntered, PlayerLeft,
+    RefusedReason, SpellRequested, StepRefused,
 };
 use crate::gm;
 use crate::terrain::MapTerrain;
@@ -202,6 +202,23 @@ pub enum Command {
         /// Which connection asked.
         connection: ConnectionId,
     },
+    /// A client answered a gump — a `0xB1`. The world routes it to whatever opened
+    /// the gump; today that is only the `.admin` menu.
+    GumpResponse {
+        /// Which connection answered.
+        connection: ConnectionId,
+        /// The decoded response: which gump, which button, and any fields.
+        response: openshard_protocol::GumpResponse,
+    },
+    /// The script pack registers a spawn region — an area the tick then keeps
+    /// populated. See [`crate::spawner`].
+    RegisterSpawner {
+        /// The region to add.
+        spawner: crate::spawner::Spawner,
+    },
+    /// Remove every spawn region and despawn the creatures they were maintaining —
+    /// what the admin menu's "Clear spawns" does.
+    ClearSpawners,
     /// The server moves a mobile one step — a script or AI decree, not a client
     /// request.
     ///
@@ -521,6 +538,9 @@ pub struct World {
     turned: Cursor<MobileTurned>,
     /// Commands waiting for the next tick.
     inbox: Vec<Command>,
+    /// The spawn regions the tick keeps populated. Registered by the script pack,
+    /// maintained here. Transient for now — not saved, re-registered on start.
+    spawners: Vec<crate::spawner::Spawner>,
 }
 
 impl std::fmt::Debug for World {
@@ -569,6 +589,7 @@ impl World {
             moved: Cursor::default(),
             turned: Cursor::default(),
             inbox: Vec::new(),
+            spawners: Vec::new(),
         }
     }
 
@@ -733,6 +754,7 @@ impl World {
         combat::decay_murders(&mut self.state);
         magic::regen_mana(&mut self.state);
         items::decay(&mut self.state);
+        self.maintain_spawners();
 
         // Before the bus retires anything: what happened is what needs saving,
         // and reading it after `update` would read it a tick late.
@@ -890,6 +912,12 @@ impl World {
                     self.send_status(connection, entity);
                 }
             }
+            Command::GumpResponse {
+                connection,
+                response,
+            } => self.handle_admin_gump(connection, response),
+            Command::RegisterSpawner { spawner } => self.spawners.push(spawner),
+            Command::ClearSpawners => self.clear_spawners(),
             Command::Step { serial, direction } => self.step(serial, direction),
             Command::SpawnItem {
                 graphic,
@@ -928,19 +956,21 @@ impl World {
                 wander,
                 position,
                 facet,
-            } => self.spawn_mobile(SpawnMobile {
-                body,
-                hue,
-                hits,
-                notoriety,
-                damage,
-                resistance,
-                swing,
-                sight,
-                wander,
-                position,
-                facet,
-            }),
+            } => {
+                self.spawn_mobile(SpawnMobile {
+                    body,
+                    hue,
+                    hits,
+                    notoriety,
+                    damage,
+                    resistance,
+                    swing,
+                    sight,
+                    wander,
+                    position,
+                    facet,
+                });
+            }
             Command::Damage {
                 serial,
                 amount,
@@ -1496,7 +1526,7 @@ impl World {
     /// a mobile already treats "has a client" as the question, so a spawned one
     /// falls out of the machinery already there.
     #[allow(clippy::too_many_arguments)]
-    fn spawn_mobile(&mut self, spec: SpawnMobile) {
+    fn spawn_mobile(&mut self, spec: SpawnMobile) -> Option<EntityId> {
         let SpawnMobile {
             body,
             hue,
@@ -1520,7 +1550,7 @@ impl World {
             Ok(pair) => pair,
             Err(error) => {
                 warn!(?error, "out of mobile serials; not spawning");
-                return;
+                return None;
             }
         };
         let hits = hits.max(1);
@@ -1586,6 +1616,119 @@ impl World {
             position,
         });
         debug!(%serial, body, "mobile spawned");
+        Some(entity)
+    }
+
+    /// Act on an admin-gump button. The gump crate reads the response and gates it
+    /// (game-master only); the acting — registering or clearing spawn regions,
+    /// which only the tick can touch — is here.
+    fn handle_admin_gump(
+        &mut self,
+        connection: ConnectionId,
+        response: openshard_protocol::GumpResponse,
+    ) {
+        let Some((actor, verb)) = crate::admin::button_action(&self.state, connection, &response)
+        else {
+            return;
+        };
+        // The engine holds no spawn data: it emits the verb, and the script pack —
+        // where a shard's spawns are edited without a rebuild — decides what it
+        // means, registering regions through `op_register_spawner` or clearing them.
+        if let Some(serial) = self.state.registry.serial_of(actor) {
+            self.state.bus.send(AdminMenuAction {
+                serial,
+                action: verb.to_owned(),
+            });
+        }
+        gm::notify(&mut self.state, actor, &format!("Admin: {verb}."));
+    }
+
+    /// Keep every spawn region at its ceiling. Once per tick, but cheap: a region
+    /// not yet due to respawn is a single counter check, and only a due one that
+    /// is short a creature does the work of counting and spawning. One creature
+    /// per region per pass, so a wiped region refills at its own pace rather than
+    /// snapping back full in a tick. Deterministic — the picks draw on the world's
+    /// seeded rng, so a replay repopulates the same.
+    fn maintain_spawners(&mut self) {
+        let now = self.state.ticks;
+        for index in 0..self.spawners.len() {
+            if now < self.spawners[index].next_spawn {
+                continue;
+            }
+            let id = index as u32;
+            let live = self
+                .state
+                .registry
+                .query::<SpawnedBy>()
+                .filter(|(_, owner)| owner.0 == id)
+                .count() as u16;
+            let spawner = &self.spawners[index];
+            if spawner.creatures.is_empty() || live >= spawner.max_count {
+                continue;
+            }
+
+            // Pick a creature and a tile with the tick's rng.
+            let area = spawner.area;
+            let which = self.state.rng.below(spawner.creatures.len() as u32) as usize;
+            let creature = spawner.creatures[which].clone();
+            let delay = spawner.respawn_delay;
+            let facet = area.facet;
+            let dx = self.state.rng.below(u32::from(area.width.max(1)));
+            let dy = self.state.rng.below(u32::from(area.height.max(1)));
+            let x = area.x.wrapping_add(dx as u16);
+            let y = area.y.wrapping_add(dy as u16);
+
+            // Stand it on the ground the client will compute, or a flat default
+            // where there is no map.
+            let z = self
+                .state
+                .facet_state(facet)
+                .terrain
+                .as_ref()
+                .and_then(|terrain| terrain.ground_z(x, y))
+                .unwrap_or(0);
+
+            if let Some(entity) = self.spawn_mobile(SpawnMobile {
+                body: creature.body,
+                hue: creature.hue,
+                hits: creature.hits,
+                notoriety: creature.notoriety,
+                damage: creature.damage,
+                resistance: creature.resistance,
+                swing: creature.swing,
+                sight: creature.sight,
+                wander: creature.wander,
+                position: Point::new(x, y, z),
+                facet,
+            }) {
+                self.state.registry.insert(entity, SpawnedBy(id));
+            }
+            self.spawners[index].next_spawn = now + delay;
+        }
+    }
+
+    /// Drop every spawn region and despawn the creatures they were maintaining —
+    /// "Clear spawns". A creature belongs to a region by its [`SpawnedBy`]; taking
+    /// it off every screen before despawning, so no client is left drawing a ghost.
+    fn clear_spawners(&mut self) {
+        self.spawners.clear();
+        let owned: Vec<EntityId> = self
+            .state
+            .registry
+            .query::<SpawnedBy>()
+            .map(|(entity, _)| entity)
+            .collect();
+        for entity in owned {
+            let serial = self.state.registry.serial_of(entity);
+            let facet = self.state.facet_of(entity);
+            if let Some(serial) = serial {
+                for watcher in self.state.watchers_of(entity) {
+                    self.state.forget(watcher, entity, serial);
+                }
+            }
+            self.state.facet_state_mut(facet).sectors.remove(entity);
+            self.state.registry.despawn(entity);
+        }
     }
 
     /// Give every brain due a beat. The deciding is [`ai::think_one`]'s; the world
@@ -4852,6 +4995,133 @@ pub(crate) mod tests {
         // Set a stat, through the skills system that owns the cap.
         gm_say(&mut world, gm, ".set str 73", now);
         assert_eq!(world.registry().get::<Stats>(entity).unwrap().strength, 73);
+    }
+
+    fn admin_response(connection: ConnectionId, button: u32) -> Command {
+        Command::GumpResponse {
+            connection,
+            response: openshard_protocol::GumpResponse {
+                serial: 0,
+                gump_id: crate::admin::ADMIN_GUMP,
+                button,
+                switches: Vec::new(),
+                text_entries: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn admin_opens_a_gump_for_a_game_master() {
+        let now = Instant::now();
+        let mut world = world();
+        let gm = enter_gm(&mut world, now);
+        let _ = packets_for(&mut world, gm);
+
+        gm_say(&mut world, gm, ".admin", now);
+
+        assert!(
+            packets_for(&mut world, gm).iter().any(|p| p[0] == 0xB0),
+            "the admin gump is sent"
+        );
+    }
+
+    #[test]
+    fn an_admin_button_from_a_game_master_is_answered() {
+        let now = Instant::now();
+        let mut world = world();
+        let gm = enter_gm(&mut world, now);
+        let _ = packets_for(&mut world, gm);
+
+        world.queue(admin_response(gm, 10)); // Populate Britain
+        world.tick(now);
+
+        assert!(
+            packets_for(&mut world, gm).iter().any(|p| p[0] == 0x1C),
+            "the button is acted on"
+        );
+    }
+
+    #[test]
+    fn the_populate_button_emits_an_admin_action_for_the_pack() {
+        // The engine holds no spawn data now: the button emits a verb the script
+        // pack acts on. Here we assert the verb reaches the bus; the pack turning
+        // it into spawners is a scripting test.
+        let now = Instant::now();
+        let mut world = world();
+        let gm = enter_gm(&mut world, now);
+        let mut actions: Cursor<AdminMenuAction> = world.bus().cursor();
+
+        world.queue(admin_response(gm, 10)); // Populate Britain
+        world.tick(now);
+
+        let events: Vec<AdminMenuAction> = world.bus().read(&mut actions).cloned().collect();
+        assert_eq!(events.len(), 1, "one admin action was emitted");
+        assert_eq!(events[0].action, "populate:britain");
+    }
+
+    #[test]
+    fn an_admin_button_from_a_non_staff_client_is_ignored() {
+        // The gump id is not a secret, so a plain player could forge a 0xB1 for
+        // it. The gate must be on the response, not only the .admin that opened it.
+        let now = Instant::now();
+        let mut world = world();
+        let player = enter(&mut world, now); // ordinary Player access
+        let _ = packets_for(&mut world, player);
+
+        world.queue(admin_response(player, 12)); // Clear
+        world.tick(now);
+
+        assert!(
+            !packets_for(&mut world, player).iter().any(|p| p[0] == 0x1C),
+            "a non-staff forged response does nothing"
+        );
+    }
+
+    #[test]
+    fn a_spawner_fills_to_its_ceiling_and_clear_empties_it() {
+        use crate::spawner::{CreatureTemplate, SpawnArea, Spawner};
+        let now = Instant::now();
+        let mut world = world();
+        let creature = CreatureTemplate {
+            body: 0x0009,
+            hue: 0,
+            hits: 10,
+            notoriety: 3,
+            damage: 0,
+            resistance: 0,
+            swing: 0,
+            sight: 0,
+            wander: false,
+        };
+        let area = SpawnArea {
+            x: START.0,
+            y: START.1,
+            width: 3,
+            height: 3,
+            facet: 0,
+        };
+        world.queue(Command::RegisterSpawner {
+            spawner: Spawner::new(area, vec![creature], 3, 0),
+        });
+
+        // One creature per region per pass, so a few ticks fill it to the ceiling
+        // and no further.
+        for _ in 0..6 {
+            world.tick(now);
+        }
+        assert_eq!(
+            world.registry().query::<SpawnedBy>().count(),
+            3,
+            "the region filled to its ceiling and stopped"
+        );
+
+        world.queue(Command::ClearSpawners);
+        world.tick(now);
+        assert_eq!(
+            world.registry().query::<SpawnedBy>().count(),
+            0,
+            "clear removed the region and its creatures"
+        );
     }
 
     #[test]

@@ -18,7 +18,8 @@ use openshard_scripting::{
     Command as ScriptCommand, DenoEngine, Event as ScriptEvent, ScriptEngine,
 };
 use openshard_world::events::{
-    MobileMoved, MobileSpawned, PlayerEntered, PlayerLeft, SpellRequested, StepRefused,
+    AdminMenuAction, MobileMoved, MobileSpawned, PlayerEntered, PlayerLeft, SpellRequested,
+    StepRefused,
 };
 use openshard_world::{Command, MobileDied, MobileSpoke, SkillUsed, SpellCast, World};
 use tracing::{error, info, warn};
@@ -36,6 +37,7 @@ pub struct Scripts {
     used: Cursor<SkillUsed>,
     cast: Cursor<SpellCast>,
     spoke: Cursor<MobileSpoke>,
+    admin: Cursor<AdminMenuAction>,
 }
 
 impl Scripts {
@@ -79,6 +81,7 @@ impl Scripts {
             used: world.bus().cursor(),
             cast: world.bus().cursor(),
             spoke: world.bus().cursor(),
+            admin: world.bus().cursor(),
             engine,
         })
     }
@@ -164,6 +167,12 @@ impl Scripts {
                 events.push(ScriptEvent::MobileSpoke {
                     serial: e.serial.raw(),
                     text: e.text.clone(),
+                });
+            }
+            for e in bus.read(&mut self.admin) {
+                events.push(ScriptEvent::AdminAction {
+                    serial: e.serial.raw(),
+                    action: e.action.clone(),
                 });
             }
         }
@@ -325,6 +334,43 @@ fn into_world(command: ScriptCommand) -> Command {
         },
         ScriptCommand::Speak { serial, hue, text } => Command::Speak { serial, hue, text },
         ScriptCommand::Control { serial } => Command::Control { serial },
+        ScriptCommand::RegisterSpawner {
+            x,
+            y,
+            width,
+            height,
+            facet,
+            max_count,
+            respawn_delay,
+            creatures,
+        } => Command::RegisterSpawner {
+            spawner: openshard_world::spawner::Spawner::new(
+                openshard_world::spawner::SpawnArea {
+                    x,
+                    y,
+                    width,
+                    height,
+                    facet,
+                },
+                creatures
+                    .into_iter()
+                    .map(|c| openshard_world::spawner::CreatureTemplate {
+                        body: c.body,
+                        hue: c.hue,
+                        hits: c.hits,
+                        notoriety: c.notoriety,
+                        damage: c.damage,
+                        resistance: c.resistance,
+                        swing: c.swing,
+                        sight: c.sight,
+                        wander: c.wander,
+                    })
+                    .collect(),
+                max_count,
+                respawn_delay,
+            ),
+        },
+        ScriptCommand::ClearSpawners => Command::ClearSpawners,
     }
 }
 
