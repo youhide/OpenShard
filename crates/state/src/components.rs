@@ -125,7 +125,7 @@ pub struct Stackable;
 /// When an item on the ground will rot away, as a tick number.
 ///
 /// A tick count and not an `Instant` on purpose: the tick already counts itself,
-/// so decay is checked against [`World::ticks`](crate::World::ticks) and stays as
+/// so decay is checked against the world's tick counter and stays as
 /// deterministic and replayable as everything else the tick does — no clock read
 /// inside it. An item carries this only while it is on the ground; lifting it,
 /// putting it in a container or wearing it takes the clock off it.
@@ -209,8 +209,7 @@ pub struct CriminalUntil {
 }
 
 /// What a mobile is trained in: each skill it has, by id, as a value in tenths
-/// (so 75.5 is stored as 755, and [`SKILL_CAP`](crate::skills::SKILL_CAP) is
-/// 1000).
+/// (so 75.5 is stored as 755, and the skill cap is 1000).
 ///
 /// Sparse on purpose — a mobile knows the handful of skills it has been given,
 /// not all fifty-odd at zero. An id it has never trained reads as zero.

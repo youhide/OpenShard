@@ -47,7 +47,7 @@ pub struct ItemSpawned {
     pub position: Point,
 }
 
-/// Put an item on the ground. See [`Command::SpawnItem`].
+/// Put an item on the ground. See `Command::SpawnItem`.
 ///
 /// Returns the entity so `spawn_container` can make
 /// the same thing and then say it holds others.
@@ -98,7 +98,7 @@ pub fn spawn_item(
     Some(entity)
 }
 
-/// Put a container on the ground. See [`Command::SpawnContainer`].
+/// Put a container on the ground. See `Command::SpawnContainer`.
 ///
 /// A container is an ordinary ground item that also carries a [`Container`],
 /// which is the only thing that makes it openable. So it is spawned exactly
@@ -134,7 +134,7 @@ pub fn mark_decay(state: &mut WorldState, item: EntityId) {
     );
 }
 
-/// Open a container onto a client's screen. See [`Command::DoubleClick`].
+/// Open a container onto a client's screen. See `Command::DoubleClick`.
 ///
 /// Only containers do anything yet — a double-click on anything else is
 /// ignored rather than answered, because "use" for a door or a food is a
@@ -197,7 +197,7 @@ pub fn item_count(state: &WorldState, container: Serial) -> u8 {
         .min(u8::MAX as usize) as u8
 }
 
-/// Wear a client's held item on a mobile. See [`Command::EquipItem`].
+/// Wear a client's held item on a mobile. See `Command::EquipItem`.
 pub fn equip_item(
     state: &mut WorldState,
     connection: ConnectionId,
@@ -304,7 +304,7 @@ pub fn equip_packet(state: &WorldState, item: EntityId) -> Option<Vec<u8>> {
     let Graphic { id, hue } = *state.registry.get::<Graphic>(item)?;
     Some(encode_equip(serial.raw(), id, layer, mobile.raw(), hue))
 }
-/// Lift an item onto a client's cursor. See [`Command::PickUpItem`].
+/// Lift an item onto a client's cursor. See `Command::PickUpItem`.
 pub fn pick_up(state: &mut WorldState, connection: ConnectionId, serial: u32, amount: u16) {
     let Some(&player) = state.players.get(&connection) else {
         return;
@@ -419,7 +419,7 @@ pub fn pick_up(state: &mut WorldState, connection: ConnectionId, serial: u32, am
     debug!(%item_serial, "lifted onto the cursor");
 }
 
-/// Put a client's held item down. See [`Command::DropItem`].
+/// Put a client's held item down. See `Command::DropItem`.
 pub fn drop_item(
     state: &mut WorldState,
     connection: ConnectionId,
@@ -462,7 +462,7 @@ pub fn drop_item(
     debug!(serial, "dropped on the ground");
 }
 
-/// Put a held item into a container. See [`Command::DropItem`].
+/// Put a held item into a container. See `Command::DropItem`.
 pub fn drop_into_container(
     state: &mut WorldState,
     connection: ConnectionId,

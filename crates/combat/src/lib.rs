@@ -81,7 +81,7 @@ pub struct MobileDied {
 ///
 /// At the 50ms tick a tenth of a second is two ticks, so the result is doubled.
 /// Eras 0, 3 and 4 need weapon weight or ML-format speeds the shard has no data
-/// for yet, so [config validation](openshard_config) accepts only 1 and 2; an
+/// for yet, so config validation accepts only 1 and 2; an
 /// unknown era here falls back to era 1.
 #[must_use]
 pub const fn swing_ticks(dex: u16, base: u64, era: u8, scale: u64) -> u64 {
@@ -287,7 +287,7 @@ pub fn clear_target(state: &mut WorldState, attacker: EntityId) {
     }
 }
 
-/// Turn a mobile grey for [`CRIMINAL_TICKS`], or push the timer out if it is
+/// Turn a mobile grey for `gameplay.criminal_ticks`, or push the timer out if it is
 /// already grey. Only an innocent flags; a red murderer stays red.
 ///
 /// The colour change is broadcast with `broadcast_move` — a `0x77` carries

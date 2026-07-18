@@ -59,8 +59,8 @@ pub trait Store: Send + Sync {
     /// # Must be atomic
     ///
     /// All of it or none of it. The snapshot is a consistent picture of one
-    /// tick, and half of it is a world that never existed — see
-    /// [`crate::journal`]. A backend that cannot do a transaction is not a
+    /// tick, and half of it is a world that never existed — see the `journal`
+    /// module. A backend that cannot do a transaction is not a
     /// backend that can implement this.
     async fn save(&self, snapshot: &Snapshot) -> Result<(), StoreError>;
 

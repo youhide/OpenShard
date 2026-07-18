@@ -19,7 +19,7 @@ use crate::connection::{Connection, ConnectionError, Event};
 
 /// Identifies a connection for the lifetime of the process.
 ///
-/// Not a [`openshard_entities::Serial`] and not an account: a client has one of
+/// Not an entity `Serial` and not an account: a client has one of
 /// these before it has said anything at all.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct ConnectionId(u64);

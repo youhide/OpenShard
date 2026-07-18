@@ -256,7 +256,7 @@ pub enum Command {
         damage_type: u8,
     },
     /// Cast a spell: pay mana, roll the casting skill, and say what happened with
-    /// a [`SpellCast`](crate::events::SpellCast). The spell's *effect* is a
+    /// a [`SpellCast`](openshard_magic::SpellCast). The spell's *effect* is a
     /// script's — this is only the mana-and-skill gate every spell passes.
     CastSpell {
         /// The caster's serial.
@@ -303,7 +303,7 @@ pub enum Command {
         value: u16,
     },
     /// Use a skill against a difficulty (0–100): roll it, gain from it, and say
-    /// what happened with a [`SkillUsed`](crate::events::SkillUsed) event.
+    /// what happened with a [`SkillUsed`](openshard_skills::SkillUsed) event.
     UseSkill {
         /// Whose, by wire serial.
         serial: u32,

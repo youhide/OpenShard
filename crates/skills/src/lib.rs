@@ -1,6 +1,6 @@
 //! Skills and stats: usage checks, the gain curve, and the stat foundation.
 //!
-//! A gameplay system in its own crate, like [`chat`](openshard_chat). The
+//! A gameplay system in its own crate, like `chat`. The
 //! functions here operate on the shared [`WorldState`]: set a skill or a stat,
 //! use a skill against a difficulty, roll it. A use resolves the check, applies
 //! any gain, and emits [`SkillUsed`] — what the use *accomplishes* (the ore, the
