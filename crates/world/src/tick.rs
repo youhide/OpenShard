@@ -44,9 +44,10 @@ use openshard_state::components::{
     Movement, Name, Position, Resistance, Stats, SwingSpeed,
 };
 use openshard_state::rng::Rng;
-use openshard_state::sectors::{distance, in_range, Sectors};
+use openshard_state::sectors::Sectors;
 use openshard_state::{FacetState, Outbound, WorldState};
 
+use openshard_ai as ai;
 use openshard_chat as chat;
 use openshard_combat as combat;
 use openshard_items as items;
@@ -96,9 +97,6 @@ const DEFAULT_DEXTERITY: u16 = 100;
 /// think in beats, not every tick: it paces their walk and spares the loop from
 /// re-deciding a thousand times a second what has not changed.
 const AI_THINK_TICKS: u64 = 10;
-/// The chance in eight, per beat, that an idle wanderer takes a step. Low enough
-/// that a field of creatures drifts rather than marches.
-const WANDER_IN_EIGHT: u32 = 3;
 /// The seed the world's roll generator starts from.
 ///
 /// Fixed, so a fresh world's rolls are reproducible in a test and a replay. A
@@ -410,24 +408,6 @@ struct Entering {
     position: Option<Point>,
     facet: u8,
     appearance: Option<Appearance>,
-}
-
-/// The eight-way step that most reduces the gap from `from` to `to`, or `None`
-/// when they share a tile. What a chaser walks along.
-fn direction_toward(from: Point, to: Point) -> Option<Direction> {
-    let dx = (i32::from(to.x) - i32::from(from.x)).signum();
-    let dy = (i32::from(to.y) - i32::from(from.y)).signum();
-    match (dx, dy) {
-        (0, 0) => None,
-        (0, -1) => Some(Direction::North),
-        (1, -1) => Some(Direction::NorthEast),
-        (1, 0) => Some(Direction::East),
-        (1, 1) => Some(Direction::SouthEast),
-        (0, 1) => Some(Direction::South),
-        (-1, 1) => Some(Direction::SouthWest),
-        (-1, 0) => Some(Direction::West),
-        _ => Some(Direction::NorthWest),
-    }
 }
 
 /// Everything [`World::spawn_mobile`] needs — a plain bundle, so the one function
@@ -1379,13 +1359,10 @@ impl World {
         debug!(%serial, body, "mobile spawned");
     }
 
-    /// Give every brain due a beat: chase and fight what it has, pick a fight if
-    /// it sees one, or drift. See [`Brain`].
-    ///
-    /// The interest and combat machinery does the rest — a creature that gets a
-    /// `Combat` from here is attacked-with by [`swings`](Self::swings) exactly as
-    /// a player would be, and its steps go out to watchers exactly as a player's
-    /// do. This function only decides.
+    /// Give every brain due a beat. The deciding is [`ai::think_one`]'s; the world
+    /// only applies the one thing a brain cannot do itself — a step — since it
+    /// owns movement. A creature that gets a `Combat` from the brain is fought by
+    /// `combat::swings` exactly as a player would be.
     fn think(&mut self) {
         let now = self.state.ticks;
         let thinkers: Vec<EntityId> = self
@@ -1396,127 +1373,15 @@ impl World {
             .map(|(entity, _)| entity)
             .collect();
         for creature in thinkers {
-            self.think_one(creature);
+            if let Some(dir) = ai::think_one(&mut self.state, creature) {
+                if let Some(serial) = self.state.registry.serial_of(creature) {
+                    self.step(serial.raw(), dir);
+                }
+            }
             if let Some(brain) = self.state.registry.get_mut::<Brain>(creature) {
                 brain.next_think = now + AI_THINK_TICKS;
             }
         }
-    }
-
-    /// One creature's beat.
-    fn think_one(&mut self, creature: EntityId) {
-        let Some(serial) = self.state.registry.serial_of(creature) else {
-            return;
-        };
-        let Some(&Position(pos)) = self.state.registry.get::<Position>(creature) else {
-            return;
-        };
-        let Some(&Brain { sight, wander, .. }) = self.state.registry.get::<Brain>(creature) else {
-            return;
-        };
-        let facet = self.state.facet_of(creature);
-
-        // Keep after a target that is still alive and in sight — close in if out
-        // of reach, and leave the hitting to `swings`.
-        if let Some(target_serial) = self
-            .state
-            .registry
-            .get::<Combat>(creature)
-            .and_then(|c| c.target)
-        {
-            if let Some(target_pos) = self.foe_in_sight(target_serial, pos, facet, sight) {
-                if !in_range(pos, target_pos, combat::MELEE_RANGE) {
-                    if let Some(dir) = direction_toward(pos, target_pos) {
-                        self.step(serial.raw(), dir.to_bits());
-                    }
-                }
-                return;
-            }
-            combat::clear_target(&mut self.state, creature);
-        }
-
-        // Nothing to fight: look for prey, or wander.
-        if sight > 0 {
-            if let Some(prey) = self.nearest_player_in_sight(creature, pos, facet, sight) {
-                let next_swing = self.state.ticks + combat::swing_speed(&self.state, creature);
-                self.state.registry.insert(
-                    creature,
-                    Combat {
-                        warmode: true,
-                        target: Some(prey),
-                        next_swing,
-                    },
-                );
-                return;
-            }
-        }
-        if wander && self.state.rng.below(8) < WANDER_IN_EIGHT {
-            // Walk on in the way it already faces, so it actually drifts rather
-            // than spinning: a step in a new direction only *turns* (turn-as-step),
-            // so picking a random heading every beat would never move. A quarter
-            // of the time it does turn, to a new heading, and drifts off that way.
-            let facing = self
-                .state
-                .registry
-                .get::<Heading>(creature)
-                .map_or(Direction::South, |h| h.0.direction);
-            let dir = if self.state.rng.below(4) == 0 {
-                Direction::from_bits(self.state.rng.below(8) as u8)
-            } else {
-                facing
-            };
-            self.step(serial.raw(), dir.to_bits());
-        }
-    }
-
-    /// The position of `target` if it is still a live foe within `sight` of
-    /// `from` on `facet`, or `None` if it has died, fled or vanished.
-    fn foe_in_sight(&self, target: Serial, from: Point, facet: u8, sight: u8) -> Option<Point> {
-        let entity = self.state.registry.entity_of(target)?;
-        let &Position(pos) = self.state.registry.get::<Position>(entity)?;
-        let alive = self
-            .state
-            .registry
-            .get::<Hitpoints>(entity)
-            .is_some_and(|h| h.current > 0);
-        (alive && self.state.facet_of(entity) == facet && in_range(from, pos, u32::from(sight)))
-            .then_some(pos)
-    }
-
-    /// The nearest living player within `sight` of a creature, if any.
-    fn nearest_player_in_sight(
-        &self,
-        creature: EntityId,
-        from: Point,
-        facet: u8,
-        sight: u8,
-    ) -> Option<Serial> {
-        let sectors = &self.state.facet_state(facet).sectors;
-        let mut best: Option<(u32, Serial)> = None;
-        for (id, pos) in sectors.nearby(from, u32::from(sight)) {
-            if id == creature || !self.state.registry.has::<Client>(id) {
-                continue;
-            }
-            if !in_range(from, pos, u32::from(sight)) {
-                continue;
-            }
-            if self
-                .state
-                .registry
-                .get::<Hitpoints>(id)
-                .is_none_or(|h| h.current == 0)
-            {
-                continue;
-            }
-            let Some(serial) = self.state.registry.serial_of(id) else {
-                continue;
-            };
-            let d = distance(from, pos);
-            if best.is_none_or(|(best_d, _)| d < best_d) {
-                best = Some((d, serial));
-            }
-        }
-        best.map(|(_, serial)| serial)
     }
 
     fn disconnect(&mut self, connection: ConnectionId) {

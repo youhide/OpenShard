@@ -1155,6 +1155,12 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 [[package]]
 name = "openshard-ai"
 version = "0.0.1"
+dependencies = [
+ "openshard-combat",
+ "openshard-entities",
+ "openshard-protocol",
+ "openshard-state",
+]
 
 [[package]]
 name = "openshard-chat"
@@ -1321,6 +1327,7 @@ dependencies = [
 name = "openshard-world"
 version = "0.0.1"
 dependencies = [
+ "openshard-ai",
  "openshard-chat",
  "openshard-combat",
  "openshard-entities",

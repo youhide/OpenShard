@@ -81,16 +81,23 @@ drives it; the systems that mutate it are moving out into the domain crates
 below, each becoming a `fn(&mut WorldState)`. Until a system moves it still lives
 in `world::tick`, so that file shrinks rather than the design changing under it.
 
-**Systems extracted from `world::tick` into their own crates.** Each is a set of
-`fn(&mut WorldState)` owning its domain events: `chat` (`say`/`speak`,
-`MobileSpoke`), `skills` (skill/stat checks, the gain curve, `SkillUsed`, the
-shared `roll_skill`), `magic` (`cast_spell`/`heal`/`regen_mana`, `SpellCast`),
-`combat` (`damage`/`die`/`swings`/`attack`/criminal flagging, the swing formula,
-`MobileDamaged`/`MobileDied`), and `items` (spawn/drag/stack/decay/containers/
-equip, `ItemSpawned`). Only `ai` is left — it drives combat and movement, so it
-waits on `step` moving onto `WorldState`. The drawing/interest substrate they all
-share (`show`, `forget`, `broadcast_move`, `refresh_around`, `reveal`,
-`mobile_incoming`, …) lives on `WorldState`.
+**The gameplay systems, extracted from `world::tick` into their own crates.**
+Each is a set of `fn(&mut WorldState)` owning its domain events:
+
+| Crate | System | Events |
+|---|---|---|
+| `chat` | `say`/`speak`, speech ranges | `MobileSpoke` |
+| `skills` | skill/stat checks, the gain curve, the shared `roll_skill` | `SkillUsed` |
+| `magic` | `cast_spell`/`heal`/`regen_mana` | `SpellCast` |
+| `combat` | `damage`/`die`/`swings`/`attack`, criminal flagging, the swing formula | `MobileDamaged`, `MobileDied` |
+| `items` | spawn/drag/stack/decay/containers/equip | `ItemSpawned` |
+| `ai` | `think_one` — a brain decides a step; the world applies it | — |
+
+The drawing/interest substrate they share (`show`, `forget`, `broadcast_move`,
+`refresh_around`, `reveal`, `mobile_incoming`, …) lives on `WorldState`, in the
+`state` crate below them. `world` keeps the tick that sequences the systems, the
+client's file formats, and the persistence journal — the orchestration, not the
+rules.
 
 **Stubs** — declared so the dependency graph is visible.
 
