@@ -84,7 +84,15 @@ impl World {
     /// spawner on a region — it re-places it, with a reset timer — and after a
     /// restart the regions come from the store, not from here, so their timers hold.
     pub(super) fn register_spawner(&mut self, mut spawner: crate::spawner::Spawner) {
-        self.spawners.retain(|s| s.area != spawner.area);
+        // A region already standing over this box wins, and keeps its timer. That
+        // timer may have come from the database with hours still to wait, and the
+        // boot re-populate (or a second staff click) must not reset it — a hard
+        // reset is Clear, then Populate. This is also what lets the pack's
+        // `populate` run on every boot, to re-place the townsfolk it does not save,
+        // without stacking a second spawner or resetting the restored ones.
+        if self.spawners.iter().any(|s| s.area == spawner.area) {
+            return;
+        }
         spawner.id = self.next_spawner_id;
         self.next_spawner_id += 1;
         self.spawners.push(spawner);

@@ -44,7 +44,8 @@ use tokio_postgres::{Client, NoTls, Row};
 
 use crate::journal::Snapshot;
 use crate::record::{
-    AccountRecord, CharacterRecord, ItemLocation, ItemRecord, SpawnerRecord, SCHEMA_VERSION,
+    AccountRecord, CharacterRecord, DecorationRecord, ItemLocation, ItemRecord, MobileRecord,
+    SpawnerRecord, SCHEMA_VERSION,
 };
 use crate::store::{Store, StoreError};
 
@@ -89,9 +90,19 @@ CREATE TABLE IF NOT EXISTS items (
     z        INTEGER NOT NULL,
     parent   BIGINT NOT NULL,
     grid     INTEGER NOT NULL,
-    layer    INTEGER NOT NULL
+    layer    INTEGER NOT NULL,
+    price    BIGINT,
+    name     TEXT
 );
 CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
+CREATE TABLE IF NOT EXISTS mobiles (
+    serial BIGINT PRIMARY KEY,
+    data   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS decorations (
+    serial BIGINT PRIMARY KEY,
+    data   TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS spawners (
     id             BIGINT PRIMARY KEY,
     facet          INTEGER NOT NULL,
@@ -227,6 +238,34 @@ impl Store for PgStore {
                 .await
                 .map_err(database)?;
         }
+        // The mobiles sweep runs BEFORE the inventories: it clears every item
+        // owned by any previously saved mobile (a dead vendor's crate must not
+        // linger), and the same snapshot re-writes the live mobiles' inventories
+        // right after — the world side always sweeps the two together.
+        if let Some(mobiles) = &snapshot.mobiles {
+            transaction
+                .execute(
+                    "DELETE FROM items WHERE owner IN (SELECT serial FROM mobiles)",
+                    &[],
+                )
+                .await
+                .map_err(database)?;
+            transaction
+                .execute("DELETE FROM mobiles", &[])
+                .await
+                .map_err(database)?;
+            for mobile in mobiles {
+                let data = serde_json::to_string(mobile)
+                    .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+                transaction
+                    .execute(
+                        "INSERT INTO mobiles (serial, data) VALUES ($1, $2)",
+                        &[&i64::from(mobile.serial), &data],
+                    )
+                    .await
+                    .map_err(database)?;
+            }
+        }
         for inventory in &snapshot.inventories {
             transaction
                 .execute(
@@ -293,6 +332,24 @@ impl Store for PgStore {
                     .map_err(database)?;
             }
         }
+        // A decoration sweep replaces the whole set.
+        if let Some(decorations) = &snapshot.decorations {
+            transaction
+                .execute("DELETE FROM decorations", &[])
+                .await
+                .map_err(database)?;
+            for decoration in decorations {
+                let data = serde_json::to_string(decoration)
+                    .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+                transaction
+                    .execute(
+                        "INSERT INTO decorations (serial, data) VALUES ($1, $2)",
+                        &[&i64::from(decoration.serial), &data],
+                    )
+                    .await
+                    .map_err(database)?;
+            }
+        }
         transaction.commit().await.map_err(database)?;
         Ok(())
     }
@@ -315,12 +372,40 @@ impl Store for PgStore {
         let rows = client
             .query(
                 "SELECT serial, owner, graphic, hue, amount, stackable, gump, \
-                 loc_kind, facet, x, y, z, parent, grid, layer FROM items",
+                 loc_kind, facet, x, y, z, parent, grid, layer, price, name FROM items",
                 &[],
             )
             .await
             .map_err(database)?;
         rows.iter().filter_map(item_from_row).collect()
+    }
+
+    async fn mobiles(&self) -> Result<Vec<MobileRecord>, StoreError> {
+        let client = self.client.lock().await;
+        let rows = client
+            .query("SELECT data FROM mobiles", &[])
+            .await
+            .map_err(database)?;
+        rows.iter()
+            .map(|row| {
+                serde_json::from_str(row.get::<_, &str>(0))
+                    .map_err(|e| StoreError::Corrupt(e.to_string()))
+            })
+            .collect()
+    }
+
+    async fn decorations(&self) -> Result<Vec<DecorationRecord>, StoreError> {
+        let client = self.client.lock().await;
+        let rows = client
+            .query("SELECT data FROM decorations", &[])
+            .await
+            .map_err(database)?;
+        rows.iter()
+            .map(|row| {
+                serde_json::from_str(row.get::<_, &str>(0))
+                    .map_err(|e| StoreError::Corrupt(e.to_string()))
+            })
+            .collect()
     }
 
     async fn spawners(&self) -> Result<Vec<SpawnerRecord>, StoreError> {
@@ -431,14 +516,15 @@ async fn insert_item(
         .execute(
             "INSERT INTO items \
              (serial, owner, graphic, hue, amount, stackable, gump, \
-              loc_kind, facet, x, y, z, parent, grid, layer) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) \
+              loc_kind, facet, x, y, z, parent, grid, layer, price, name) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) \
              ON CONFLICT (serial) DO UPDATE SET \
              owner = EXCLUDED.owner, graphic = EXCLUDED.graphic, hue = EXCLUDED.hue, \
              amount = EXCLUDED.amount, stackable = EXCLUDED.stackable, gump = EXCLUDED.gump, \
              loc_kind = EXCLUDED.loc_kind, \
              facet = EXCLUDED.facet, x = EXCLUDED.x, y = EXCLUDED.y, z = EXCLUDED.z, \
-             parent = EXCLUDED.parent, grid = EXCLUDED.grid, layer = EXCLUDED.layer",
+             parent = EXCLUDED.parent, grid = EXCLUDED.grid, layer = EXCLUDED.layer, \
+             price = EXCLUDED.price, name = EXCLUDED.name",
             &[
                 &i64::from(item.serial),
                 &i64::from(item.owner),
@@ -455,6 +541,8 @@ async fn insert_item(
                 &parent,
                 &grid,
                 &layer,
+                &item.price.map(i64::from),
+                &item.name,
             ],
         )
         .await
@@ -499,6 +587,11 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
                 .get::<_, Option<i32>>(6)
                 .map(|g| u16::try_from(g).map_err(|_| corrupt("gump")))
                 .transpose()?,
+            price: row
+                .get::<_, Option<i64>>(15)
+                .map(|p| u32::try_from(p).map_err(|_| corrupt("price")))
+                .transpose()?,
+            name: row.get(16),
             location,
         }))
     }
@@ -577,6 +670,8 @@ mod tests {
             inventories: vec![],
             ground: None,
             spawners: None,
+            mobiles: None,
+            decorations: None,
         }
     }
 
@@ -735,6 +830,8 @@ mod tests {
             inventories: vec![],
             ground: None,
             spawners: None,
+            mobiles: None,
+            decorations: None,
         };
         let error = store.save(&future).await.expect_err("must refuse");
         assert!(matches!(error, StoreError::SchemaMismatch { .. }));

@@ -129,6 +129,35 @@ pub(crate) async fn run_shard(
         Err(error) => error!(%error, "could not read saved items; starting with none"),
     }
 
+    // Bring back the world's NPC mobiles — townsfolk, vendors, creatures — each
+    // exactly as saved. After the items, so each mobile's gear and stock is
+    // already filed under its serial for `restore_mobiles` to equip. This is the
+    // whole-world model: the pack seeds a fresh world once (a staff Populate),
+    // and from then on the save is the truth — nothing respawns at boot.
+    match store.mobiles().await {
+        Ok(mobiles) => {
+            if !mobiles.is_empty() {
+                info!(mobiles = mobiles.len(), "restored the world's mobiles");
+            }
+            world.restore_mobiles(mobiles);
+        }
+        Err(error) => error!(%error, "could not read saved mobiles; starting with none"),
+    }
+
+    // And the placed decoration, door state and all.
+    match store.decorations().await {
+        Ok(decorations) => {
+            if !decorations.is_empty() {
+                info!(
+                    decorations = decorations.len(),
+                    "restored the world's decoration"
+                );
+            }
+            world.restore_decorations(decorations);
+        }
+        Err(error) => error!(%error, "could not read saved decorations; starting with none"),
+    }
+
     // Bring back the spawn regions with their respawn timers, so a populated area
     // stays populated across a restart and a rare spawn keeps its remaining wait
     // rather than popping again the moment the shard comes up.

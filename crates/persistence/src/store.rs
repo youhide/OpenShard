@@ -22,7 +22,10 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 
 use crate::journal::Snapshot;
-use crate::record::{AccountRecord, CharacterRecord, ItemRecord, SpawnerRecord, SCHEMA_VERSION};
+use crate::record::{
+    AccountRecord, CharacterRecord, DecorationRecord, ItemRecord, MobileRecord, SpawnerRecord,
+    SCHEMA_VERSION,
+};
 
 /// What a store could not do.
 #[derive(Debug, thiserror::Error)]
@@ -77,6 +80,15 @@ pub trait Store: Send + Sync {
     /// restart, and a rare spawn keeps its remaining wait.
     async fn spawners(&self) -> Result<Vec<SpawnerRecord>, StoreError>;
 
+    /// Every saved NPC mobile — townsfolk, vendors, creatures. The caller
+    /// re-creates them at boot exactly as they stood, the Sphere/ServUO whole-world
+    /// model: a killed creature is simply not in the save, and stays gone.
+    async fn mobiles(&self) -> Result<Vec<MobileRecord>, StoreError>;
+
+    /// Every saved decoration — the placed statics, doors and town containers.
+    /// The caller re-lays them at boot, door state and all.
+    async fn decorations(&self) -> Result<Vec<DecorationRecord>, StoreError>;
+
     /// Every account.
     async fn accounts(&self) -> Result<Vec<AccountRecord>, StoreError>;
 
@@ -98,6 +110,10 @@ pub struct MemoryStore {
     items: Mutex<HashMap<u32, ItemRecord>>,
     /// Spawn regions keyed by id.
     spawners: Mutex<HashMap<u32, SpawnerRecord>>,
+    /// NPC mobiles keyed by serial.
+    mobiles: Mutex<HashMap<u32, MobileRecord>>,
+    /// Placed decorations keyed by serial.
+    decorations: Mutex<HashMap<u32, DecorationRecord>>,
     accounts: Mutex<HashMap<String, AccountRecord>>,
     /// How many saves have landed. What a test asserts on.
     saves: Mutex<u64>,
@@ -157,6 +173,25 @@ impl Store for MemoryStore {
             // A gone character takes its inventory with it.
             items.retain(|_, item| item.owner != *serial);
         }
+        // A mobile sweep replaces the whole set — and a mobile no longer in it
+        // (killed since the last save) takes its worn gear and stock with it, or
+        // dead vendors would leave orphaned crates in the items table forever.
+        if let Some(records) = &snapshot.mobiles {
+            let mut mobiles = self.mobiles.lock().expect("the mutex is never poisoned");
+            let fresh: std::collections::HashSet<u32> = records.iter().map(|m| m.serial).collect();
+            let gone: Vec<u32> = mobiles
+                .keys()
+                .filter(|serial| !fresh.contains(serial))
+                .copied()
+                .collect();
+            for serial in gone {
+                items.retain(|_, item| item.owner != serial);
+            }
+            mobiles.clear();
+            for record in records {
+                mobiles.insert(record.serial, record.clone());
+            }
+        }
         drop(items);
         drop(characters);
         // A spawner sweep replaces the whole set at once.
@@ -165,6 +200,17 @@ impl Store for MemoryStore {
             spawners.clear();
             for record in records {
                 spawners.insert(record.id, record.clone());
+            }
+        }
+        // A decoration sweep likewise.
+        if let Some(records) = &snapshot.decorations {
+            let mut decorations = self
+                .decorations
+                .lock()
+                .expect("the mutex is never poisoned");
+            decorations.clear();
+            for record in records {
+                decorations.insert(record.serial, record.clone());
             }
         }
         *self.saves.lock().expect("the mutex is never poisoned") += 1;
@@ -194,6 +240,26 @@ impl Store for MemoryStore {
     async fn spawners(&self) -> Result<Vec<SpawnerRecord>, StoreError> {
         Ok(self
             .spawners
+            .lock()
+            .expect("the mutex is never poisoned")
+            .values()
+            .cloned()
+            .collect())
+    }
+
+    async fn mobiles(&self) -> Result<Vec<MobileRecord>, StoreError> {
+        Ok(self
+            .mobiles
+            .lock()
+            .expect("the mutex is never poisoned")
+            .values()
+            .cloned()
+            .collect())
+    }
+
+    async fn decorations(&self) -> Result<Vec<DecorationRecord>, StoreError> {
+        Ok(self
+            .decorations
             .lock()
             .expect("the mutex is never poisoned")
             .values()
@@ -248,6 +314,8 @@ mod tests {
             inventories: vec![],
             ground: None,
             spawners: None,
+            mobiles: None,
+            decorations: None,
         }
     }
 
@@ -301,6 +369,8 @@ mod tests {
             inventories: vec![],
             ground: None,
             spawners: None,
+            mobiles: None,
+            decorations: None,
         };
         let error = store.save(&future).await.expect_err("must refuse");
         assert!(matches!(error, StoreError::SchemaMismatch { .. }));
@@ -321,6 +391,8 @@ mod tests {
             amount: 1,
             stackable: false,
             container_gump: None,
+            price: None,
+            name: None,
             location: crate::record::ItemLocation::Contained {
                 container,
                 x: 0,
@@ -339,6 +411,8 @@ mod tests {
             amount: 1,
             stackable: false,
             container_gump: None,
+            price: None,
+            name: None,
             location: crate::record::ItemLocation::Ground {
                 facet: 0,
                 x: 1400,
@@ -365,6 +439,8 @@ mod tests {
                 }],
                 ground: None,
                 spawners: None,
+                mobiles: None,
+                decorations: None,
             })
             .await
             .expect("save");
@@ -380,12 +456,95 @@ mod tests {
                 }],
                 ground: None,
                 spawners: None,
+                mobiles: None,
+                decorations: None,
             })
             .await
             .expect("save");
 
         let items = store.items().await.expect("load");
         assert_eq!(items.len(), 1, "the owner's items are replaced, not merged");
+    }
+
+    fn mobile(serial: u32, hits: u16) -> crate::record::MobileRecord {
+        crate::record::MobileRecord {
+            serial,
+            body: 0x00C8,
+            hue: 0,
+            facet: 0,
+            x: 1400,
+            y: 1600,
+            z: 0,
+            facing: 0,
+            name: None,
+            hits_current: hits,
+            hits_max: 30,
+            notoriety: 3,
+            damage: 3,
+            resistance: 0,
+            swing: 0,
+            sight: 8,
+            aggression: 0,
+            beat: 0,
+            ranged: 0,
+            ranged_kind: 0,
+            wander: true,
+            banker: false,
+            vendor: false,
+            npc_home: None,
+            npc_wander: 0,
+            spawned_by: Some(1),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_mobile_sweep_replaces_the_set_and_a_dead_mobiles_items_go_with_it() {
+        // The whole-world model: the store holds what the last sweep said. A
+        // mobile absent from the new sweep was killed — it must vanish, and so
+        // must its worn gear, or dead vendors leave orphaned crates forever.
+        let store = MemoryStore::new();
+        store
+            .save(&Snapshot {
+                tick: 1,
+                schema: SCHEMA_VERSION,
+                characters: vec![],
+                removed: vec![],
+                inventories: vec![crate::record::Inventory {
+                    owner: 2,
+                    items: vec![contained(0x4000_0001, 2, 2)],
+                }],
+                ground: None,
+                spawners: None,
+                mobiles: Some(vec![mobile(2, 30), mobile(3, 30)]),
+                decorations: None,
+            })
+            .await
+            .expect("save");
+        // The next sweep: mobile 2 died (and its inventory was not re-swept),
+        // mobile 3 lives on wounded.
+        store
+            .save(&Snapshot {
+                tick: 2,
+                schema: SCHEMA_VERSION,
+                characters: vec![],
+                removed: vec![],
+                inventories: vec![],
+                ground: None,
+                spawners: None,
+                mobiles: Some(vec![mobile(3, 7)]),
+                decorations: None,
+            })
+            .await
+            .expect("save");
+
+        let mobiles = store.mobiles().await.expect("load");
+        assert_eq!(mobiles.len(), 1, "the dead mobile is gone");
+        assert_eq!(mobiles[0].serial, 3);
+        assert_eq!(mobiles[0].hits_current, 7, "the survivor keeps its wounds");
+        assert!(
+            store.items().await.expect("load").is_empty(),
+            "the dead mobile's items went with it"
+        );
     }
 
     #[tokio::test]
@@ -403,6 +562,8 @@ mod tests {
                 }],
                 ground: Some(vec![ground(0x4000_0010)]),
                 spawners: None,
+                mobiles: None,
+                decorations: None,
             })
             .await
             .expect("save");
@@ -416,6 +577,8 @@ mod tests {
                 inventories: vec![],
                 ground: Some(vec![ground(0x4000_0011)]),
                 spawners: None,
+                mobiles: None,
+                decorations: None,
             })
             .await
             .expect("save");

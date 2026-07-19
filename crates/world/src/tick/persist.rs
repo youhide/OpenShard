@@ -1,4 +1,7 @@
 use super::*;
+use openshard_state::components::{
+    body_opens_doors, Aggression, Banker, Npc, Price, RangedAttack, SwingSpeed, Vendor,
+};
 
 impl World {
     // -- persistence -------------------------------------------------------
@@ -73,6 +76,8 @@ impl World {
             inventories: Vec::new(),
             ground: None,
             spawners: None,
+            mobiles: None,
+            decorations: None,
         });
 
         // Every online character, whole: its record and its entire carried
@@ -91,20 +96,44 @@ impl World {
             }
         }
 
-        // The whole ground, every save — decoration excluded. Dropped loot and
-        // stray items persist whether or not anyone was active this tick.
+        // The whole ground, every save — decoration excluded (it has its own
+        // sweep below). Dropped loot and stray items persist whether or not
+        // anyone was active this tick.
         snapshot.ground = Some(self.ground_items());
         // And every spawn region with its timer, so populated areas stay populated
         // across a restart and a rare spawn's wait is not reset.
         snapshot.spawners = Some(self.spawner_records());
 
+        // Every NPC mobile, whole, each with its carried inventory — worn gear and
+        // a vendor's stock crate alike, through the same walk a character's takes.
+        // The Sphere/ServUO model: the save IS the world, so a restart restores it
+        // exactly and a killed creature (absent here) stays dead.
+        let mobiles = self.mobile_records();
+        for record in &mobiles {
+            if let Some(entity) =
+                Serial::new(record.serial).and_then(|s| self.state.registry.entity_of(s))
+            {
+                snapshot.inventories.push(Inventory {
+                    owner: record.serial,
+                    items: self.inventory_of(entity),
+                });
+            }
+        }
+        snapshot.mobiles = Some(mobiles);
+        // And every placed decoration, door state included.
+        snapshot.decorations = Some(self.decoration_records());
+
         // Skip only a genuinely empty save, so a quiet, empty shard queues nothing.
         let ground_empty = snapshot.ground.as_ref().is_none_or(Vec::is_empty);
         let spawners_empty = snapshot.spawners.as_ref().is_none_or(Vec::is_empty);
+        let mobiles_empty = snapshot.mobiles.as_ref().is_none_or(Vec::is_empty);
+        let decorations_empty = snapshot.decorations.as_ref().is_none_or(Vec::is_empty);
         if snapshot.characters.is_empty()
             && snapshot.removed.is_empty()
             && ground_empty
             && spawners_empty
+            && mobiles_empty
+            && decorations_empty
         {
             return;
         }
@@ -221,8 +250,123 @@ impl World {
             amount,
             stackable: registry.has::<Stackable>(item),
             container_gump,
+            // Vendor stock carries a unit price and a label; without them a
+            // restored shop would sell nameless wares for a single coin.
+            price: registry.get::<Price>(item).map(|p| p.0),
+            name: registry.get::<Name>(item).map(|n| n.0.clone()),
             location,
         })
+    }
+
+    /// Every NPC mobile — townsperson, vendor, creature — as a saveable record:
+    /// the Sphere/ServUO whole-world sweep. Players are excluded (they are
+    /// [`CharacterRecord`]s), and so is a ridden mount in limbo — it has no
+    /// position, and its ride persists through the saddle item instead.
+    pub(super) fn mobile_records(&self) -> Vec<MobileRecord> {
+        let registry = &self.state.registry;
+        let mut records = Vec::new();
+        for (entity, body) in registry.query::<Body>() {
+            if registry.has::<Client>(entity) {
+                continue;
+            }
+            let Some(&Position(at)) = registry.get::<Position>(entity) else {
+                continue;
+            };
+            let Some(serial) = registry.serial_of(entity) else {
+                continue;
+            };
+            let hits = registry
+                .get::<Hitpoints>(entity)
+                .copied()
+                .unwrap_or(Hitpoints { current: 1, max: 1 });
+            // No brain reads back as the values `spawn` builds no brain from.
+            let (sight, aggression, beat, wander) =
+                registry
+                    .get::<Brain>(entity)
+                    .map_or((0, 2, 0, false), |brain| {
+                        (
+                            brain.sight,
+                            brain.aggression.to_bits(),
+                            brain.beat_ticks,
+                            brain.wander,
+                        )
+                    });
+            let (ranged, ranged_kind) = registry
+                .get::<RangedAttack>(entity)
+                .map_or((0, 0), |ranged| (ranged.range, ranged.kind));
+            let npc = registry.get::<Npc>(entity).copied();
+            records.push(MobileRecord {
+                serial: serial.raw(),
+                body: body.id,
+                hue: body.hue,
+                facet: self.state.facet_of(entity),
+                x: at.x,
+                y: at.y,
+                z: at.z,
+                facing: registry
+                    .get::<Heading>(entity)
+                    .map_or(0, |heading| heading.0.to_bits()),
+                name: registry.get::<Name>(entity).map(|n| n.0.clone()),
+                hits_current: hits.current,
+                hits_max: hits.max,
+                notoriety: registry
+                    .get::<Notoriety>(entity)
+                    .copied()
+                    .unwrap_or(Notoriety::Neutral)
+                    .to_bits(),
+                damage: registry.get::<MeleeDamage>(entity).map_or(0, |d| d.amount),
+                resistance: registry.get::<Resistance>(entity).map_or(0, |r| r.physical),
+                swing: registry.get::<SwingSpeed>(entity).map_or(0, |s| s.ticks),
+                sight,
+                aggression,
+                beat,
+                ranged,
+                ranged_kind,
+                wander,
+                banker: registry.has::<Banker>(entity),
+                vendor: registry.has::<Vendor>(entity),
+                npc_home: npc.map(|n| (n.home.x, n.home.y, n.home.z)),
+                npc_wander: npc.map_or(0, |n| n.wander),
+                spawned_by: registry.get::<SpawnedBy>(entity).map(|s| s.0),
+            });
+        }
+        records
+    }
+
+    /// Every placed decoration as a saveable record, door state included.
+    pub(super) fn decoration_records(&self) -> Vec<DecorationRecord> {
+        let registry = &self.state.registry;
+        let mut records = Vec::new();
+        for (entity, _) in registry.query::<Decoration>() {
+            let Some(serial) = registry.serial_of(entity) else {
+                continue;
+            };
+            let Some(&Graphic { id, hue }) = registry.get::<Graphic>(entity) else {
+                continue;
+            };
+            let Some(&Position(at)) = registry.get::<Position>(entity) else {
+                continue;
+            };
+            let door = registry.get::<Door>(entity).map(|door| DoorState {
+                closed_graphic: door.closed,
+                open_graphic: door.open,
+                offset_x: door.offset_x,
+                offset_y: door.offset_y,
+                is_open: door.is_open,
+            });
+            records.push(DecorationRecord {
+                serial: serial.raw(),
+                graphic: id,
+                hue,
+                facet: self.state.facet_of(entity),
+                x: at.x,
+                y: at.y,
+                z: at.z,
+                door,
+                container_gump: registry.get::<Container>(entity).map(|c| c.gump),
+            });
+        }
+        records
     }
 
     /// What a character looks like on disk.
@@ -325,6 +469,12 @@ impl World {
         if let Some(gump) = record.container_gump {
             self.state.registry.insert(entity, Container { gump });
         }
+        if let Some(price) = record.price {
+            self.state.registry.insert(entity, Price(price));
+        }
+        if let Some(name) = &record.name {
+            self.state.registry.insert(entity, Name(name.clone()));
+        }
         // Loose clutter resumes rotting; a container does not (mark_decay skips it).
         items::mark_decay(&mut self.state, entity);
         self.state
@@ -372,6 +522,12 @@ impl World {
             if let Some(gump) = record.container_gump {
                 self.state.registry.insert(entity, Container { gump });
             }
+            if let Some(price) = record.price {
+                self.state.registry.insert(entity, Price(price));
+            }
+            if let Some(name) = &record.name {
+                self.state.registry.insert(entity, Name(name.clone()));
+            }
         }
         // Pass two: where each item goes.
         for record in &records {
@@ -417,6 +573,220 @@ impl World {
             }
         }
         true
+    }
+
+    /// Bring the world's NPC mobiles back from the store at boot — each exactly
+    /// as saved, wounded or well, at the tile it stood on, with its gear and a
+    /// vendor's stock equipped from the already-restored item records. Call after
+    /// [`restore_items`](Self::restore_items), which filed each mobile's inventory
+    /// under its serial, and before anyone connects.
+    ///
+    /// The component list mirrors `npc::spawn` — the record-to-component
+    /// conversion is exactly the seam this module exists to hold (see
+    /// `persistence::record`) — with the differences a restore wants: the saved
+    /// z and facing are honoured verbatim (no `stand_z` re-drop), no
+    /// `MobileSpawned` is announced (the pack stocked this vendor in its first
+    /// life; the stock is in the save), and a fresh stock crate is not equipped
+    /// (the saved one is restored with the rest of the inventory).
+    pub fn restore_mobiles(&mut self, records: Vec<MobileRecord>) {
+        for record in records {
+            let Some(serial) = Serial::new(record.serial) else {
+                continue;
+            };
+            let entity = self.state.registry.spawn();
+            if self.state.registry.bind_serial(entity, serial).is_err() {
+                self.state.registry.despawn(entity);
+                continue;
+            }
+            let facet = if self.state.facets.contains_key(&record.facet) {
+                record.facet
+            } else {
+                self.state.default_facet
+            };
+            let position = Point::new(record.x, record.y, record.z);
+            let facing = Facing::from_bits(record.facing);
+            let registry = &mut self.state.registry;
+            registry.insert(
+                entity,
+                Body {
+                    id: record.body,
+                    hue: record.hue,
+                },
+            );
+            registry.insert(entity, Position(position));
+            registry.insert(entity, Heading(facing));
+            registry.insert(entity, Facet(facet));
+            registry.insert(
+                entity,
+                Hitpoints {
+                    current: record.hits_current.max(1),
+                    max: record.hits_max.max(1),
+                },
+            );
+            registry.insert(entity, Notoriety::from_bits(record.notoriety));
+            registry.insert(
+                entity,
+                MeleeDamage {
+                    amount: record.damage,
+                },
+            );
+            registry.insert(
+                entity,
+                Resistance {
+                    physical: record.resistance.min(100),
+                    ..Default::default()
+                },
+            );
+            if record.swing != 0 {
+                registry.insert(
+                    entity,
+                    SwingSpeed {
+                        ticks: record.swing,
+                    },
+                );
+            }
+            if record.ranged > 0 {
+                registry.insert(
+                    entity,
+                    RangedAttack {
+                        range: record.ranged,
+                        kind: record.ranged_kind,
+                    },
+                );
+            }
+            // The same brain rule `spawn` applies: anything that hunts, drifts,
+            // or must answer or flee a blow.
+            let aggression = Aggression::from_bits(record.aggression);
+            if record.sight > 0 || record.wander || aggression != Aggression::Aggressive {
+                registry.insert(
+                    entity,
+                    Brain {
+                        sight: record.sight,
+                        wander: record.wander,
+                        next_think: 0,
+                        guard_until: 0,
+                        opens_doors: body_opens_doors(record.body),
+                        aggression,
+                        beat_ticks: record.beat,
+                    },
+                );
+            }
+            if let Some(name) = record.name {
+                registry.insert(entity, Name(name));
+            }
+            if record.banker {
+                registry.insert(entity, Banker { next_greet: 0 });
+            }
+            if record.vendor {
+                registry.insert(entity, Vendor);
+            }
+            if let Some((x, y, z)) = record.npc_home {
+                registry.insert(
+                    entity,
+                    Npc {
+                        home: Point::new(x, y, z),
+                        wander: record.npc_wander,
+                        next_beat: 0,
+                    },
+                );
+            }
+            // Re-tie it to the region that maintains it, so the region counts it
+            // and does not spawn over it.
+            if let Some(region) = record.spawned_by {
+                registry.insert(entity, SpawnedBy(region));
+            }
+            registry.insert(entity, Movement(Walker::new(position, facing)));
+            self.state
+                .facet_state_mut(facet)
+                .sectors
+                .insert(entity, position);
+            // Its gear and stock were filed by `restore_items` under this serial.
+            self.restore_inventory(record.serial);
+        }
+    }
+
+    /// Re-lay the saved decoration at boot: statics, doors (their open/shut state
+    /// honoured) and town containers, each re-registered with the obstruction
+    /// index over its own z-span — the part [`place_ground_item`](Self::place_ground_item)
+    /// never does, and why decoration cannot ride the ground-item path.
+    pub fn restore_decorations(&mut self, records: Vec<DecorationRecord>) {
+        for record in records {
+            let Some(serial) = Serial::new(record.serial) else {
+                continue;
+            };
+            let entity = self.state.registry.spawn();
+            if self.state.registry.bind_serial(entity, serial).is_err() {
+                self.state.registry.despawn(entity);
+                continue;
+            }
+            let facet = if self.state.facets.contains_key(&record.facet) {
+                record.facet
+            } else {
+                self.state.default_facet
+            };
+            let position = Point::new(record.x, record.y, record.z);
+            self.state.registry.insert(
+                entity,
+                Graphic {
+                    id: record.graphic,
+                    hue: record.hue,
+                },
+            );
+            self.state.registry.insert(entity, Position(position));
+            self.state.registry.insert(entity, Facet(facet));
+            self.state.registry.insert(entity, Decoration);
+            if let Some(gump) = record.container_gump {
+                self.state.registry.insert(entity, Container { gump });
+            }
+            match record.door {
+                Some(door) => {
+                    self.state.registry.insert(
+                        entity,
+                        Door {
+                            closed: door.closed_graphic,
+                            open: door.open_graphic,
+                            offset_x: door.offset_x,
+                            offset_y: door.offset_y,
+                            is_open: door.is_open,
+                            close_at: 0,
+                        },
+                    );
+                    // A shut door seals its doorway again; an open one blocks
+                    // nobody until it swings shut.
+                    if !door.is_open {
+                        self.state.facet_state_mut(facet).obstructions.block(
+                            position.x,
+                            position.y,
+                            entity,
+                            true,
+                            position.z,
+                            openshard_state::DOOR_HEIGHT,
+                        );
+                    }
+                }
+                None => {
+                    // Plain art blocks over its tiledata z-span, exactly as
+                    // `place_decoration` registered it the first time.
+                    let height = self
+                        .state
+                        .facet_state(facet)
+                        .terrain
+                        .as_deref()
+                        .filter(|t| t.item_blocks(record.graphic))
+                        .map(|t| t.item_height(record.graphic));
+                    if let Some(height) = height {
+                        self.state
+                            .facet_state_mut(facet)
+                            .obstructions
+                            .block(position.x, position.y, entity, false, position.z, height);
+                    }
+                }
+            }
+            self.state
+                .facet_state_mut(facet)
+                .sectors
+                .insert(entity, position);
+        }
     }
 
     /// Rebuild a saved ride: recreate the ridden creature the mount item was

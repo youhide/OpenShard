@@ -25,7 +25,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::journal::Snapshot;
 use crate::record::{
-    AccountRecord, CharacterRecord, ItemLocation, ItemRecord, SpawnerRecord, SCHEMA_VERSION,
+    AccountRecord, CharacterRecord, DecorationRecord, ItemLocation, ItemRecord, MobileRecord,
+    SpawnerRecord, SCHEMA_VERSION,
 };
 use crate::store::{Store, StoreError};
 
@@ -144,9 +145,22 @@ CREATE TABLE IF NOT EXISTS items (
     z        INTEGER NOT NULL,
     parent   INTEGER NOT NULL,
     grid     INTEGER NOT NULL,
-    layer    INTEGER NOT NULL
+    layer    INTEGER NOT NULL,
+    price    INTEGER,
+    name     TEXT
 );
 CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
+-- NPC mobiles and placed decoration, each a JSON record keyed by serial: a
+-- mobile is two dozen fields the simulation refactors freely, and the spawner
+-- creature list set the JSON-blob precedent. The schema gate versions them.
+CREATE TABLE IF NOT EXISTS mobiles (
+    serial INTEGER PRIMARY KEY,
+    data   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS decorations (
+    serial INTEGER PRIMARY KEY,
+    data   TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS spawners (
     id            INTEGER PRIMARY KEY,
     facet         INTEGER NOT NULL,
@@ -246,6 +260,8 @@ impl Store for SqliteStore {
         let inventories = snapshot.inventories.clone();
         let ground = snapshot.ground.clone();
         let spawners = snapshot.spawners.clone();
+        let mobiles = snapshot.mobiles.clone();
+        let decorations = snapshot.decorations.clone();
         blocking(move || {
             let mut guard = connection
                 .lock()
@@ -274,6 +290,31 @@ impl Store for SqliteStore {
                     )
                     .map_err(database)?;
             }
+            // The mobiles sweep runs BEFORE the inventories: it clears every item
+            // owned by any previously saved mobile (a dead vendor's crate must not
+            // linger), and the same snapshot re-writes the live mobiles' inventories
+            // right after — the world side always sweeps the two together.
+            if let Some(mobiles) = &mobiles {
+                transaction
+                    .execute(
+                        "DELETE FROM items WHERE owner IN (SELECT serial FROM mobiles)",
+                        [],
+                    )
+                    .map_err(database)?;
+                transaction
+                    .execute("DELETE FROM mobiles", [])
+                    .map_err(database)?;
+                for mobile in mobiles {
+                    let data = serde_json::to_string(mobile)
+                        .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+                    transaction
+                        .execute(
+                            "INSERT INTO mobiles (serial, data) VALUES (?1, ?2)",
+                            params![mobile.serial, data],
+                        )
+                        .map_err(database)?;
+                }
+            }
             // Each inventory replaces everything under its owner; a ground sweep
             // replaces every ownerless item. Write one item the same way whichever
             // set it came from.
@@ -283,8 +324,8 @@ impl Store for SqliteStore {
                     tx.execute(
                         "INSERT OR REPLACE INTO items \
                      (serial, owner, graphic, hue, amount, stackable, gump, \
-                      loc_kind, facet, x, y, z, parent, grid, layer) \
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                      loc_kind, facet, x, y, z, parent, grid, layer, price, name) \
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
                         params![
                             item.serial,
                             item.owner,
@@ -301,6 +342,8 @@ impl Store for SqliteStore {
                             f.parent,
                             f.grid,
                             f.layer,
+                            item.price,
+                            item.name,
                         ],
                     )?;
                     Ok(())
@@ -363,6 +406,22 @@ impl Store for SqliteStore {
                         .map_err(database)?;
                 }
             }
+            // A decoration sweep replaces the whole set.
+            if let Some(decorations) = &decorations {
+                transaction
+                    .execute("DELETE FROM decorations", [])
+                    .map_err(database)?;
+                for decoration in decorations {
+                    let data = serde_json::to_string(decoration)
+                        .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+                    transaction
+                        .execute(
+                            "INSERT INTO decorations (serial, data) VALUES (?1, ?2)",
+                            params![decoration.serial, data],
+                        )
+                        .map_err(database)?;
+                }
+            }
             transaction.commit().map_err(database)?;
             Ok(())
         })
@@ -411,7 +470,7 @@ impl Store for SqliteStore {
             let mut statement = guard
                 .prepare(
                     "SELECT serial, owner, graphic, hue, amount, stackable, gump, \
-                     loc_kind, facet, x, y, z, parent, grid, layer FROM items",
+                     loc_kind, facet, x, y, z, parent, grid, layer, price, name FROM items",
                 )
                 .map_err(database)?;
             let rows = statement
@@ -435,6 +494,8 @@ impl Store for SqliteStore {
                             amount: row.get(4)?,
                             stackable: row.get(5)?,
                             container_gump: row.get(6)?,
+                            price: row.get(15)?,
+                            name: row.get(16)?,
                             // A placeholder overwritten below; the location cannot be
                             // built inside `query_map`'s closure return type cleanly.
                             location: ItemLocation::Ground {
@@ -502,6 +563,54 @@ impl Store for SqliteStore {
                 spawners.push(record);
             }
             Ok(spawners)
+        })
+        .await
+    }
+
+    async fn mobiles(&self) -> Result<Vec<MobileRecord>, StoreError> {
+        let connection = Arc::clone(&self.connection);
+        blocking(move || {
+            let guard = connection
+                .lock()
+                .expect("the sqlite mutex is never poisoned");
+            let mut statement = guard
+                .prepare("SELECT data FROM mobiles")
+                .map_err(database)?;
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(database)?;
+            let mut mobiles = Vec::new();
+            for row in rows {
+                let data = row.map_err(database)?;
+                mobiles.push(
+                    serde_json::from_str(&data).map_err(|e| StoreError::Corrupt(e.to_string()))?,
+                );
+            }
+            Ok(mobiles)
+        })
+        .await
+    }
+
+    async fn decorations(&self) -> Result<Vec<DecorationRecord>, StoreError> {
+        let connection = Arc::clone(&self.connection);
+        blocking(move || {
+            let guard = connection
+                .lock()
+                .expect("the sqlite mutex is never poisoned");
+            let mut statement = guard
+                .prepare("SELECT data FROM decorations")
+                .map_err(database)?;
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(database)?;
+            let mut decorations = Vec::new();
+            for row in rows {
+                let data = row.map_err(database)?;
+                decorations.push(
+                    serde_json::from_str(&data).map_err(|e| StoreError::Corrupt(e.to_string()))?,
+                );
+            }
+            Ok(decorations)
         })
         .await
     }
@@ -598,6 +707,28 @@ mod tests {
             inventories: vec![],
             ground: None,
             spawners: None,
+            mobiles: None,
+            decorations: None,
+        }
+    }
+
+    fn contained(serial: u32, owner: u32, container: u32) -> ItemRecord {
+        ItemRecord {
+            serial,
+            owner,
+            graphic: 0x0EED,
+            hue: 0,
+            amount: 1,
+            stackable: false,
+            container_gump: None,
+            price: None,
+            name: None,
+            location: ItemLocation::Contained {
+                container,
+                x: 0,
+                y: 0,
+                grid: 0,
+            },
         }
     }
 
@@ -696,6 +827,8 @@ mod tests {
             inventories: vec![],
             ground: None,
             spawners: None,
+            mobiles: None,
+            decorations: None,
         };
         let error = store.save(&future).await.expect_err("must refuse");
         assert!(matches!(error, StoreError::SchemaMismatch { .. }));
@@ -704,6 +837,119 @@ mod tests {
             100,
             "the refused save must not have landed"
         );
+    }
+
+    #[tokio::test]
+    async fn mobiles_and_decorations_replace_and_reopen() {
+        // The two whole-world tables: a sweep replaces the set, a dead mobile's
+        // items go with it, and everything survives a reopen from the file.
+        use crate::record::{DecorationRecord, DoorState, Inventory, MobileRecord};
+        fn mobile(serial: u32, hits: u16) -> MobileRecord {
+            MobileRecord {
+                serial,
+                body: 0x00C8,
+                hue: 0,
+                facet: 0,
+                x: 1400,
+                y: 1600,
+                z: 0,
+                facing: 0,
+                name: Some("Mirabel".into()),
+                hits_current: hits,
+                hits_max: 30,
+                notoriety: 3,
+                damage: 3,
+                resistance: 0,
+                swing: 0,
+                sight: 8,
+                aggression: 0,
+                beat: 0,
+                ranged: 0,
+                ranged_kind: 0,
+                wander: true,
+                banker: false,
+                vendor: true,
+                npc_home: Some((1400, 1600, 0)),
+                npc_wander: 2,
+                spawned_by: None,
+            }
+        }
+        let decoration = DecorationRecord {
+            serial: 0x4000_0100,
+            graphic: 0x0675,
+            hue: 0,
+            facet: 0,
+            x: 1401,
+            y: 1600,
+            z: 0,
+            door: Some(DoorState {
+                closed_graphic: 0x0675,
+                open_graphic: 0x0676,
+                offset_x: -1,
+                offset_y: 1,
+                is_open: true,
+            }),
+            container_gump: None,
+        };
+        let path = temp_db("world-tables");
+        {
+            let store = SqliteStore::open(&path).expect("open");
+            let mut first = snapshot(vec![], vec![]);
+            first.inventories = vec![Inventory {
+                owner: 2,
+                items: vec![contained(0x4000_0001, 2, 2)],
+            }];
+            first.mobiles = Some(vec![mobile(2, 30), mobile(3, 30)]);
+            first.decorations = Some(vec![decoration.clone()]);
+            store.save(&first).await.expect("save");
+            // Mobile 2 dies; the next sweep carries only the wounded survivor.
+            let mut second = snapshot(vec![], vec![]);
+            second.mobiles = Some(vec![mobile(3, 7)]);
+            store.save(&second).await.expect("save");
+        }
+        {
+            let store = SqliteStore::open(&path).expect("reopen");
+            let mobiles = store.mobiles().await.expect("read");
+            assert_eq!(mobiles.len(), 1, "the dead mobile is gone");
+            assert_eq!(mobiles[0].serial, 3);
+            assert_eq!(mobiles[0].hits_current, 7, "wounds survived the reopen");
+            assert_eq!(mobiles[0].npc_home, Some((1400, 1600, 0)));
+            assert!(
+                store.items().await.expect("read").is_empty(),
+                "the dead mobile's items went with it"
+            );
+            let decorations = store.decorations().await.expect("read");
+            assert_eq!(decorations.len(), 1);
+            assert_eq!(decorations[0], decoration, "door state and all");
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn a_priced_named_item_survives_a_reopen() {
+        // Vendor stock: the price and label columns round-trip, or a restored
+        // shop sells nameless wares for a coin.
+        let path = temp_db("priced-item");
+        {
+            let store = SqliteStore::open(&path).expect("open");
+            let mut item = contained(0x4000_0001, 1, 1);
+            item.price = Some(4);
+            item.name = Some("black pearl".into());
+            let mut snap = snapshot(vec![character(1, 100)], vec![]);
+            snap.inventories = vec![crate::record::Inventory {
+                owner: 1,
+                items: vec![item],
+            }];
+            store.save(&snap).await.expect("save");
+        }
+        {
+            let store = SqliteStore::open(&path).expect("reopen");
+            let items = store.items().await.expect("read");
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].price, Some(4));
+            assert_eq!(items[0].name.as_deref(), Some("black pearl"));
+        }
+        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]

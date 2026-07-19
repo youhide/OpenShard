@@ -725,19 +725,28 @@ fn double_clicking_yourself_opens_the_paperdoll() {
         .raw();
     let _ = packets_for(&mut world, player);
 
-    // The real client sets bit 31 double-clicking your own character; the
-    // server must strip it and still open the paperdoll (and, when mounted,
-    // dismount). A raw serial here would sail past the very bug that gate exists
-    // to catch.
+    // Bit 31 is the client's paperdoll *request* (the login-time open, the
+    // paperdoll macro) — ServUO's `UseReq` routes it straight to the paperdoll
+    // and nothing else. A raw self-double-click (no bit) opens it too, through
+    // the ordinary use rule, when the player is on foot.
     world.queue(Command::DoubleClick {
         connection: player,
         serial: serial | 0x8000_0000,
     });
     world.tick(now);
-
     assert!(
         packets_for(&mut world, player).iter().any(|p| p[0] == 0x88),
-        "double-clicking a mobile opens its paperdoll"
+        "the paperdoll request opens the paperdoll"
+    );
+
+    world.queue(Command::DoubleClick {
+        connection: player,
+        serial,
+    });
+    world.tick(now);
+    assert!(
+        packets_for(&mut world, player).iter().any(|p| p[0] == 0x88),
+        "and so does a raw self-double-click on foot"
     );
 }
 
@@ -4143,7 +4152,7 @@ fn a_spawner_respawn_timer_survives_a_restart() {
 }
 
 #[test]
-fn re_registering_a_region_replaces_it_rather_than_stacking() {
+fn re_registering_a_region_keeps_the_first_and_its_timer() {
     use crate::spawner::{SpawnArea, Spawner};
 
     let mut world = world();
@@ -4155,11 +4164,319 @@ fn re_registering_a_region_replaces_it_rather_than_stacking() {
         facet: 0,
     };
     world.register_spawner(Spawner::new(0, area, vec![], 3, 40));
+    // Give the standing region a timer with time still to wait, as a restore from
+    // the database would.
+    world.spawners[0].next_spawn = 5_000;
+    // A second registration over the same box — a boot re-populate, or a second
+    // staff click — must not stack a spawner nor reset the waiting one.
     world.register_spawner(Spawner::new(0, area, vec![], 3, 40));
     assert_eq!(
         world.spawners.len(),
         1,
         "the same region registered twice is one spawner, not two"
+    );
+    assert_eq!(
+        world.spawners[0].next_spawn, 5_000,
+        "and the restored timer is left alone, not reset by the re-populate"
+    );
+}
+
+#[test]
+fn a_vendor_and_its_priced_stock_survive_a_restart() {
+    use openshard_state::components::{Price, Vendor};
+
+    // The whole-world save: a staff Populate seeds the vendor once, and from
+    // then on the *save* is the truth — a restart brings the shopkeeper back
+    // with its crate, wares, prices and labels, with no re-populate anywhere.
+    let now = Instant::now();
+    let mut home = world();
+    let _gm = enter_gm(&mut home, now);
+    home.queue(Command::SpawnMobile {
+        body: 0x0190,
+        hue: 0,
+        hits: 50,
+        notoriety: 7,
+        damage: 0,
+        resistance: 0,
+        swing: 0,
+        sight: 0,
+        aggression: 0,
+        beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
+        wander: false,
+        position: Point::new(START.0 + 1, START.1, 0),
+        facet: 0,
+        name: Some("Mirabel".to_owned()),
+        banker: false,
+        vendor: true,
+        equipment: Vec::new(),
+    });
+    home.tick(now);
+    let vendor = home
+        .state
+        .registry
+        .query::<Vendor>()
+        .map(|(entity, _)| entity)
+        .next()
+        .expect("a shopkeeper");
+    let vendor_serial = home.registry().serial_of(vendor).unwrap().raw();
+    home.queue(Command::StockVendor {
+        serial: vendor_serial,
+        stock: vec![npc::StockLine {
+            graphic: 0x0F7A,
+            hue: 0,
+            amount: 50,
+            price: 4,
+            name: "black pearl".to_owned(),
+        }],
+    });
+    home.tick(now);
+
+    home.take_snapshot();
+    let snapshot = home.drain_saves().next_back().expect("a snapshot");
+    let mobiles = snapshot.mobiles.clone().expect("a mobile sweep");
+    assert!(
+        mobiles
+            .iter()
+            .any(|m| m.serial == vendor_serial && m.vendor),
+        "the vendor is in the mobile sweep, marked as one"
+    );
+    // What the store would hand back at boot: every saved item, inventories
+    // and ground alike.
+    let mut items: Vec<ItemRecord> = snapshot
+        .inventories
+        .iter()
+        .flat_map(|inventory| inventory.items.clone())
+        .collect();
+    items.extend(snapshot.ground.clone().unwrap_or_default());
+
+    // The restart: a fresh world restored from the records alone.
+    let mut shard = world();
+    shard.restore_items(items);
+    shard.restore_mobiles(mobiles);
+
+    let vendor = shard
+        .registry()
+        .entity_of(Serial::new(vendor_serial).unwrap())
+        .expect("the vendor came back on its serial");
+    assert!(
+        shard.registry().has::<Vendor>(vendor),
+        "and is still a shopkeeper"
+    );
+    assert_eq!(
+        shard.registry().get::<Name>(vendor).unwrap().0,
+        "Mirabel",
+        "with its name"
+    );
+    let (stock_item, price) = shard
+        .state
+        .registry
+        .query::<Price>()
+        .next()
+        .expect("its priced stock came back");
+    assert_eq!(price.0, 4, "at the price it was stocked at");
+    assert_eq!(
+        shard.registry().get::<Name>(stock_item).unwrap().0,
+        "black pearl",
+        "under its label"
+    );
+    assert_eq!(
+        shard.registry().get::<Amount>(stock_item).unwrap().0,
+        50,
+        "at its full amount"
+    );
+    // And the stock sits in a crate the vendor actually wears.
+    let held_in = shard
+        .registry()
+        .get::<Contained>(stock_item)
+        .expect("stock lives in a container")
+        .container;
+    let crate_entity = shard.registry().entity_of(held_in).expect("the crate");
+    let worn = shard
+        .registry()
+        .get::<Equipped>(crate_entity)
+        .expect("the crate is worn");
+    assert_eq!(worn.mobile.raw(), vendor_serial);
+    assert_eq!(worn.layer, npc::STOCK_LAYER);
+}
+
+#[test]
+fn a_wounded_spawner_creature_survives_a_restart_and_is_counted() {
+    use crate::spawner::{CreatureTemplate, SpawnArea, Spawner};
+
+    // ServUO's model exactly: a live creature is saved as it stands — wounded
+    // stays wounded — and its region re-counts it on load, so a restart neither
+    // heals it, loses it, nor spawns a double over it.
+    let now = Instant::now();
+    let mut home = world();
+    let creature = CreatureTemplate {
+        body: 0x0009,
+        hue: 0,
+        hits: 10,
+        notoriety: 3,
+        damage: 0,
+        resistance: 0,
+        swing: 0,
+        sight: 0,
+        aggression: 2,
+        beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
+        wander: false,
+    };
+    let area = SpawnArea {
+        x: START.0,
+        y: START.1,
+        width: 2,
+        height: 2,
+        facet: 0,
+    };
+    home.queue(Command::RegisterSpawner {
+        spawner: Spawner::new(0, area, vec![creature], 1, 1000),
+    });
+    for _ in 0..3 {
+        home.tick(now);
+    }
+    let (spawned, _) = home
+        .state
+        .registry
+        .query::<SpawnedBy>()
+        .next()
+        .expect("the region filled");
+    let spawned_serial = home.registry().serial_of(spawned).unwrap().raw();
+    // Wound it, as a fight would.
+    home.state.registry.insert(
+        spawned,
+        Hitpoints {
+            current: 3,
+            max: 10,
+        },
+    );
+
+    home.take_snapshot();
+    let snapshot = home.drain_saves().next_back().expect("a snapshot");
+    let mobiles = snapshot.mobiles.clone().expect("a mobile sweep");
+    let spawners = snapshot.spawners.clone().expect("a spawner sweep");
+
+    let mut shard = world();
+    shard.restore_spawners(spawners);
+    shard.restore_mobiles(mobiles);
+
+    let creature = shard
+        .registry()
+        .entity_of(Serial::new(spawned_serial).unwrap())
+        .expect("the creature came back on its serial");
+    assert_eq!(
+        shard.registry().get::<Hitpoints>(creature).unwrap().current,
+        3,
+        "still wounded, not respawned fresh"
+    );
+    assert!(
+        shard.registry().has::<SpawnedBy>(creature),
+        "and still tied to its region"
+    );
+    // Many ticks later the region holds its ceiling of one: the restored
+    // creature is counted, not spawned over.
+    let mut later = now;
+    for _ in 0..8 {
+        later += TICK_INTERVAL;
+        shard.tick(later);
+    }
+    assert_eq!(
+        shard.registry().query::<SpawnedBy>().count(),
+        1,
+        "the region counts the restored creature and does not over-spawn"
+    );
+}
+
+#[test]
+fn decoration_and_door_state_survive_a_restart() {
+    use crate::tick::command::DecorDoor;
+    use openshard_state::components::Decoration;
+
+    // Decoration is saved like everything else — and a door left open stays
+    // open across the restart, its doorway unblocked until it swings shut.
+    let now = Instant::now();
+    let mut home = world();
+    let _gm = enter_gm(&mut home, now);
+    let shut_at = Point::new(START.0 + 2, START.1, 0);
+    let open_at = Point::new(START.0 + 4, START.1, 0);
+    home.queue(Command::Decorate {
+        facet: 0,
+        statics: vec![(0x07C1, 0, Point::new(START.0 + 6, START.1, 0))],
+        doors: vec![
+            DecorDoor {
+                closed: 0x0675,
+                open: 0x0676,
+                offset_x: -1,
+                offset_y: 1,
+                position: shut_at,
+            },
+            DecorDoor {
+                closed: 0x0675,
+                open: 0x0676,
+                offset_x: -1,
+                offset_y: 1,
+                position: open_at,
+            },
+        ],
+        containers: Vec::new(),
+    });
+    home.tick(now);
+    // Swing the second door open.
+    let door_to_open = home
+        .state
+        .registry
+        .query::<Door>()
+        .find(|(entity, _)| {
+            home.registry()
+                .get::<Position>(*entity)
+                .is_some_and(|p| p.0.x == open_at.x)
+        })
+        .map(|(entity, _)| entity)
+        .expect("the second door");
+    openshard_items::open_door(&mut home.state, door_to_open);
+    home.tick(now);
+
+    home.take_snapshot();
+    let snapshot = home.drain_saves().next_back().expect("a snapshot");
+    let decorations = snapshot.decorations.clone().expect("a decoration sweep");
+    assert_eq!(decorations.len(), 3, "one static, two doors");
+
+    let mut shard = world();
+    shard.restore_decorations(decorations);
+    assert_eq!(
+        shard.registry().query::<Decoration>().count(),
+        3,
+        "everything re-laid"
+    );
+    let restored_open = shard
+        .state
+        .registry
+        .query::<Door>()
+        .find(|(_, door)| door.is_open)
+        .expect("the open door is still open");
+    assert_eq!(restored_open.1.open, 0x0676);
+    // The shut door seals its doorway; the open one blocks nobody.
+    assert!(
+        shard
+            .state
+            .facet_state(0)
+            .obstructions
+            .blocker_at(shut_at.x, shut_at.y)
+            .is_some(),
+        "the shut door blocks its tile again"
+    );
+    let open_pos = shard.registry().get::<Position>(restored_open.0).unwrap().0;
+    assert!(
+        shard
+            .state
+            .facet_state(0)
+            .obstructions
+            .blocker_at(open_pos.x, open_pos.y)
+            .is_none(),
+        "the open door does not"
     );
 }
 
@@ -5458,26 +5775,14 @@ fn a_horse_is_mounted_and_dismounted_by_double_click() {
         "a bay horse draws as the bay mount item"
     );
 
-    // Double-clicking yourself dismounts; the horse lands beside the rider.
-    // The real client double-clicking your own character sets bit 31 on the
-    // serial (the paperdoll/self flag) — reproduce that, or this exercises a
-    // serial no client ever sends and the dismount path stays untested.
+    // A raw self-double-click (no bit 31 — that would be a paperdoll request)
+    // dismounts, war mode or peace; the horse lands beside the rider.
     let saddle_serial = world.registry().serial_of(riding.item).unwrap().raw();
     let _ = packets_for(&mut world, gm); // clear the outbox before the dismount
-    // A self-double-click dismounts only in war mode (ServUO); raise a hand first,
-    // or a peace-mode click is a no-op — the guard against a login paperdoll-open
-    // throwing the rider off.
-    world.state.registry.insert(
-        player,
-        openshard_state::components::Combat {
-            warmode: true,
-            ..Default::default()
-        },
-    );
     let player_serial = world.registry().serial_of(player).unwrap().raw();
     world.queue(Command::DoubleClick {
         connection: gm,
-        serial: player_serial | 0x8000_0000,
+        serial: player_serial,
     });
     world.tick(now);
     assert!(world.registry().get::<Riding>(player).is_none());
@@ -5501,10 +5806,11 @@ fn a_horse_is_mounted_and_dismounted_by_double_click() {
 }
 
 #[test]
-fn a_peace_mode_self_double_click_leaves_the_rider_mounted() {
-    // The relogin bug: ClassicUO reopens the paperdoll on login by sending a
-    // self-double-click, in peace mode. It must not throw a mounted rider off —
-    // ServUO only dismounts on a self-double-click in war mode.
+fn a_paperdoll_request_leaves_the_rider_mounted() {
+    // The relogin bug: ClassicUO opens the paperdoll on login with a 0x06 whose
+    // serial carries bit 31 — a paperdoll *request*, not a use. ServUO's `UseReq`
+    // routes it straight to the paperdoll; treating it as a raw self-double-click
+    // is what used to throw the rider off a breath after logging in mounted.
     let now = Instant::now();
     let mut world = world();
     let gm = enter_gm(&mut world, now);
@@ -5516,6 +5822,7 @@ fn a_peace_mode_self_double_click_leaves_the_rider_mounted() {
     });
     world.tick(now);
     assert!(world.registry().get::<Riding>(player).is_some(), "mounted");
+    let _ = packets_for(&mut world, gm);
 
     let player_serial = world.registry().serial_of(player).unwrap().raw();
     world.queue(Command::DoubleClick {
@@ -5525,7 +5832,11 @@ fn a_peace_mode_self_double_click_leaves_the_rider_mounted() {
     world.tick(now);
     assert!(
         world.registry().get::<Riding>(player).is_some(),
-        "a peace-mode self-double-click leaves the rider in the saddle"
+        "the paperdoll request leaves the rider in the saddle"
+    );
+    assert!(
+        packets_for(&mut world, gm).iter().any(|p| p[0] == 0x88),
+        "and still opens the paperdoll"
     );
 }
 
@@ -5634,6 +5945,90 @@ fn a_mounted_character_logs_back_in_still_mounted() {
         mount_graphic,
         "and it draws as the same mount it was"
     );
+
+    // And dismounting the REBUILT mount draws it: the save kept only the saddle,
+    // so the creature must be reconstituted whole — above all its `Heading`,
+    // without which the 0x78 encoder returns nothing and the horse is invisible.
+    let mount_serial = world.registry().serial_of(riding.mount).unwrap().raw();
+    let _ = packets_for(&mut world, gm);
+    let player_serial = world.registry().serial_of(player).unwrap().raw();
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: player_serial,
+    });
+    world.tick(now);
+    assert!(
+        packets_for(&mut world, gm)
+            .iter()
+            .any(|p| p[0] == 0x78 && mentions(p, mount_serial)),
+        "the rebuilt horse is drawn for the rider on dismount"
+    );
+    let mount = riding.mount;
+    assert!(
+        world.registry().get::<Heading>(mount).is_some(),
+        "the dismounted horse has a heading"
+    );
+    assert!(
+        world.registry().get::<Movement>(mount).is_some(),
+        "and a walker, so it can move"
+    );
+    assert!(
+        world.registry().get::<Brain>(mount).is_some(),
+        "and a brain, so it behaves like an animal"
+    );
+}
+
+#[test]
+fn a_dismounted_horse_stays_beside_the_rider_through_its_beats() {
+    // The ride never moves the walker, so a horse ridden across the map used to
+    // take its first post-dismount step from where it was *mounted* — teleporting
+    // away and vanishing (0x1D) off the rider's screen a beat later.
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player = world.state.players[&gm];
+    let (horse, horse_serial) = spawn_horse(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: horse_serial,
+    });
+    world.tick(now);
+    assert!(world.registry().get::<Riding>(player).is_some(), "mounted");
+
+    // Ride far from the mounting spot.
+    let far = Point::new(START.0 + 30, START.1, 0);
+    teleport(&mut world, gm, far);
+
+    // Dismount there, with a raw self-double-click.
+    let player_serial = world.registry().serial_of(player).unwrap().raw();
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: player_serial,
+    });
+    world.tick(now);
+    let _ = packets_for(&mut world, gm);
+
+    // Give the horse several brain beats; it must amble near the rider, not
+    // teleport back to the mounting spot and drop off the rider's screen.
+    let mut later = now;
+    let mut forgotten = false;
+    for _ in 0..(AI_THINK_TICKS * 6) {
+        later += TICK_INTERVAL;
+        world.tick(later);
+        forgotten |= packets_for(&mut world, gm)
+            .iter()
+            .any(|p| p[0] == 0x1D && mentions(p, horse_serial));
+    }
+    let horse_at = world
+        .registry()
+        .get::<Position>(horse)
+        .expect("still in the world")
+        .0;
+    assert!(
+        distance(horse_at, far) <= 6,
+        "the horse ambles near where it was dismounted, not back at the stable: {horse_at}"
+    );
+    assert!(!forgotten, "the horse never dropped off the rider's screen");
 }
 
 #[test]

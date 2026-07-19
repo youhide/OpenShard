@@ -1,5 +1,7 @@
 use super::*;
-use openshard_movement::{step_from, Terrain};
+use openshard_movement::{step_from, Terrain, Walker};
+use openshard_protocol::Notoriety;
+use openshard_state::components::{Aggression, Brain, Heading, Hitpoints, Movement};
 
 /// The layer a mount item rides on — the client draws whoever wears one as
 /// mounted. `0x19`, the classic mount layer.
@@ -7,6 +9,14 @@ pub const MOUNT_LAYER: u8 = 0x19;
 
 /// How close a rider must stand to swing up.
 const MOUNT_REACH: u32 = 2;
+
+/// The hit points a save-rebuilt mount comes back with — the save keeps only the
+/// saddle, not the creature, so a restored horse is simply healthy.
+const DEFAULT_MOUNT_HITS: u16 = 50;
+
+/// How far a dismounted, save-rebuilt mount notices the world — enough to flee a
+/// blow (passive animals run when struck), not enough to go looking for one.
+const MOUNT_SIGHT: u8 = 8;
 
 /// Try to mount `target`: it must be a rideable body, riderless, no one's
 /// client, and within arm's reach — and the player must be on foot. Returns
@@ -137,6 +147,51 @@ pub fn dismount(state: &mut WorldState, player: EntityId) {
     }
     state.registry.insert(mount, Position(landing));
     state.registry.insert(mount, Facet(facet));
+
+    // Reconstitute what the ride (or a save) stripped. The horse faces the way
+    // its rider faces — and without a `Heading` the `0x78` encoder refuses to
+    // draw it at all, which was the invisible-horse bug after a mounted relogin.
+    let heading = state
+        .registry
+        .get::<Heading>(player)
+        .copied()
+        .unwrap_or(Heading(openshard_protocol::Facing::walking(
+            openshard_protocol::Direction::South,
+        )));
+    state.registry.insert(mount, heading);
+    // The walker restarts at the landing, always: the ride never moved it, so a
+    // horse ridden across the map would otherwise take its next step from where
+    // it was *mounted* — teleporting away and vanishing off the rider's screen.
+    state
+        .registry
+        .insert(mount, Movement(Walker::new(landing, heading.0)));
+    // A save-rebuilt mount carries only its body; give it the pack-horse
+    // temperament so it is a live animal, not an inert prop. A fresh mount keeps
+    // its real spawned values — these fill in only where nothing is.
+    if state.registry.get::<Notoriety>(mount).is_none() {
+        state.registry.insert(mount, Notoriety::Innocent);
+    }
+    if state.registry.get::<Hitpoints>(mount).is_none() {
+        state.registry.insert(
+            mount,
+            Hitpoints {
+                current: DEFAULT_MOUNT_HITS,
+                max: DEFAULT_MOUNT_HITS,
+            },
+        );
+    }
+    if state.registry.get::<Brain>(mount).is_none() {
+        state.registry.insert(
+            mount,
+            Brain {
+                sight: MOUNT_SIGHT,
+                wander: true,
+                aggression: Aggression::Passive,
+                ..Brain::default()
+            },
+        );
+    }
+
     state.facet_state_mut(facet).sectors.insert(mount, landing);
     state.reveal(mount);
     // And the rider redraws on foot for everyone watching.

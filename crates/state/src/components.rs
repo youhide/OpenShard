@@ -362,6 +362,16 @@ impl Aggression {
             _ => Self::Aggressive,
         }
     }
+
+    /// The byte [`from_bits`](Self::from_bits) reads — what a save writes.
+    #[must_use]
+    pub const fn to_bits(self) -> u8 {
+        match self {
+            Self::Passive => 0,
+            Self::Defensive => 1,
+            Self::Aggressive => 2,
+        }
+    }
 }
 
 /// Whether a body knows what a door handle is. The reference rule is

@@ -30,7 +30,9 @@ use serde::{Deserialize, Serialize};
 /// - v2: items — a character's carried inventory, and loose things on the ground.
 /// - v3: an item's `stackable` flag.
 /// - v4: spawn regions and their respawn timers.
-pub const SCHEMA_VERSION: u32 = 4;
+/// - v5: the whole world — NPC mobiles (with gear and vendor stock), decoration
+///   (with door state), and an item's `price`/`name`.
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// An account, as saved.
 ///
@@ -152,6 +154,14 @@ pub struct ItemRecord {
     pub stackable: bool,
     /// The container gump if this item is itself a container, else `None`.
     pub container_gump: Option<u16>,
+    /// What one unit costs at a vendor, if this is priced stock. Defaulted so a
+    /// v4 save loads.
+    #[serde(default)]
+    pub price: Option<u32>,
+    /// The item's label, if it carries one — vendor stock names its wares.
+    /// Defaulted so a v4 save loads.
+    #[serde(default)]
+    pub name: Option<String>,
     /// Where it is.
     pub location: ItemLocation,
 }
@@ -233,6 +243,112 @@ pub struct SpawnerRecord {
     pub creatures: Vec<CreatureData>,
 }
 
+/// An NPC mobile, as saved — the townsperson, the vendor, the creature on the
+/// ground. The Sphere/ServUO model: every live mobile is persisted, so a restart
+/// restores the world exactly (a wounded rare comes back wounded; a killed one
+/// stays gone, its region timer counting down). Deliberately a sibling of
+/// [`CharacterRecord`], not a variant of it: an NPC has no account, and the two
+/// change for different reasons.
+///
+/// Its worn gear and vendor stock ride the same [`Inventory`]/[`ItemRecord`]
+/// machinery a character's do, keyed by this serial.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct MobileRecord {
+    /// The wire serial. Stable across restarts, like a character's.
+    pub serial: u32,
+    /// The body graphic.
+    pub body: u16,
+    /// The body hue.
+    pub hue: u16,
+    /// Which facet.
+    pub facet: u8,
+    /// Where it stands.
+    pub x: u16,
+    /// Where it stands.
+    pub y: u16,
+    /// How high it stands. Signed: UO has basements.
+    pub z: i8,
+    /// Which way it faces, as the wire byte.
+    pub facing: u8,
+    /// Its name, if it has one — a named townsperson; `None` for a beast.
+    pub name: Option<String>,
+    /// Hit points as they stood at the save — a wounded creature stays wounded.
+    pub hits_current: u16,
+    /// Maximum hit points.
+    pub hits_max: u16,
+    /// Health-bar colour, the notoriety wire value.
+    pub notoriety: u8,
+    /// Melee damage before resistance.
+    pub damage: u16,
+    /// Physical resistance, a percentage.
+    pub resistance: u8,
+    /// Swing cadence in ticks; `0` derives it from dexterity.
+    pub swing: u64,
+    /// How far it notices a target; `0` never picks a fight (and no brain).
+    pub sight: u8,
+    /// Whether it starts fights (2), answers them (1), or only runs (0).
+    pub aggression: u8,
+    /// Ticks between its beats while hunting; 0 takes the shard default.
+    pub beat: u64,
+    /// How far its ranged attack reaches, in tiles; 0 fights hand to hand.
+    pub ranged: u8,
+    /// The ranged attack's damage type wire value.
+    pub ranged_kind: u8,
+    /// Whether it drifts when idle.
+    pub wander: bool,
+    /// Whether it offers banking.
+    pub banker: bool,
+    /// Whether it keeps a shop.
+    pub vendor: bool,
+    /// A townsperson's post `(x, y, z)`, if it keeps one.
+    pub npc_home: Option<(u16, u16, i8)>,
+    /// How far from its post a townsperson drifts; meaningful with `npc_home`.
+    pub npc_wander: u8,
+    /// The spawn region that maintains it, if one does — restored so the region
+    /// counts it and does not spawn over it.
+    pub spawned_by: Option<u32>,
+}
+
+/// A shut-and-openable door's live state, inside a [`DecorationRecord`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct DoorState {
+    /// The graphic it shows shut.
+    pub closed_graphic: u16,
+    /// The graphic it shows open.
+    pub open_graphic: u16,
+    /// How far the leaf swings east-west when opened.
+    pub offset_x: i16,
+    /// How far the leaf swings north-south when opened.
+    pub offset_y: i16,
+    /// Whether it stood open at the save — a door left open stays open.
+    pub is_open: bool,
+}
+
+/// A placed decoration, as saved — the statics, doors and town containers a pack
+/// lays over the map's art. Saved like everything else in the world; the pack is
+/// the *seed* (a staff Populate/Decorate, once), the save is the truth thereafter.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct DecorationRecord {
+    /// The wire serial. Stable across restarts.
+    pub serial: u32,
+    /// The graphic as it stands now (a door's current leaf).
+    pub graphic: u16,
+    /// Its hue.
+    pub hue: u16,
+    /// Which facet.
+    pub facet: u8,
+    /// Where it stands.
+    pub x: u16,
+    /// Where it stands.
+    pub y: u16,
+    /// How high. Signed: UO has basements.
+    pub z: i8,
+    /// Door state, if this decoration is a door.
+    pub door: Option<DoorState>,
+    /// The container gump if this decoration opens as one, else `None`.
+    pub container_gump: Option<u16>,
+}
+
 /// A character's whole carried inventory, replaced as a unit.
 ///
 /// A store saves a character's items by replacing everything under its `owner`
@@ -281,6 +397,8 @@ mod tests {
                 amount: 1,
                 stackable: false,
                 container_gump: Some(0x003C),
+                price: Some(11),
+                name: Some("scissors".into()),
                 location,
             };
             let json = serde_json::to_string(&record).expect("an item must serialise");

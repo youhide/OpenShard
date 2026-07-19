@@ -32,7 +32,8 @@ use openshard_events::{Cursor, EventBus};
 use openshard_gateway::ConnectionId;
 use openshard_movement::{step_from, Terrain, Walk, Walker};
 use openshard_persistence::{
-    CharacterRecord, Inventory, ItemLocation, ItemRecord, Journal, Snapshot, SCHEMA_VERSION,
+    CharacterRecord, DecorationRecord, DoorState, Inventory, ItemLocation, ItemRecord, Journal,
+    MobileRecord, Snapshot, SCHEMA_VERSION,
 };
 use openshard_protocol::{
     encode_light_level, encode_login_complete, encode_map_change, encode_message, encode_walk_ack,
@@ -600,18 +601,19 @@ impl World {
                 }
             }
             Command::DoubleClick { connection, serial } => {
-                // The 2D client sets bit 31 when a player double-clicks their
-                // OWN character — the paperdoll/self gesture, and how you
-                // dismount. `Serial::new` rejects anything >= 0x8000_0000, so
-                // unmasked the self-click is swallowed and dismount only ever
-                // happens on logout. Strip it (ServUO's `& 0x7FFFFFFF`, Sphere's
-                // `&~ UID_F_RESOURCE`); self-ness is recovered downstream by
-                // `target == player`, and no ordinary serial ever sets the bit.
-                let serial = serial & 0x7FFF_FFFF;
-                // A vendor's shop first: if the click was a shopkeeper in
-                // range the buy gump answers it; anything else is the
-                // ordinary use rule.
-                if !npc::open_shop(&mut self.state, connection, serial) {
+                // Bit 31 is the client's *paperdoll request* — the login-time
+                // paperdoll open, the paperdoll macro — and it is only that:
+                // ServUO's `UseReq` routes it straight to `OnPaperdollRequest`,
+                // never to `Use`. A raw double-click carries the bare serial.
+                // Stripping the bit and treating both alike was the bug where
+                // relogging mounted dismounted you a breath later: the client's
+                // paperdoll-open read as a self-double-click.
+                if serial & 0x8000_0000 != 0 {
+                    items::paperdoll_request(&mut self.state, connection, serial & 0x7FFF_FFFF);
+                } else if !npc::open_shop(&mut self.state, connection, serial) {
+                    // A vendor's shop first: if the click was a shopkeeper in
+                    // range the buy gump answers it; anything else is the
+                    // ordinary use rule.
                     items::double_click(&mut self.state, connection, serial);
                 }
             }

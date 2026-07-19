@@ -65,7 +65,10 @@ use std::collections::HashSet;
 
 use openshard_entities::{EntityId, Serial};
 
-use crate::record::{CharacterRecord, Inventory, ItemRecord, SpawnerRecord, SCHEMA_VERSION};
+use crate::record::{
+    CharacterRecord, DecorationRecord, Inventory, ItemRecord, MobileRecord, SpawnerRecord,
+    SCHEMA_VERSION,
+};
 
 /// A consistent picture of everything that changed, taken at one tick.
 ///
@@ -93,6 +96,13 @@ pub struct Snapshot {
     /// Every spawn region and its respawn timer, when this snapshot swept them.
     /// `Some(_)` replaces the whole set; `None` leaves the stored spawners be.
     pub spawners: Option<Vec<SpawnerRecord>>,
+    /// Every NPC mobile in the world, when this snapshot swept them. `Some(_)`
+    /// replaces the whole set — a creature killed since the last save is simply
+    /// absent, which is what makes its death stick across a restart.
+    pub mobiles: Option<Vec<MobileRecord>>,
+    /// Every placed decoration, when this snapshot swept them. Same replace-all
+    /// semantics as the mobiles.
+    pub decorations: Option<Vec<DecorationRecord>>,
 }
 
 impl Snapshot {
@@ -103,6 +113,8 @@ impl Snapshot {
             && self.inventories.is_empty()
             && self.ground.is_none()
             && self.spawners.is_none()
+            && self.mobiles.is_none()
+            && self.decorations.is_none()
     }
 
     /// How many rows this would touch.
@@ -116,6 +128,8 @@ impl Snapshot {
                 .sum::<usize>()
             + self.ground.as_ref().map_or(0, Vec::len)
             + self.spawners.as_ref().map_or(0, Vec::len)
+            + self.mobiles.as_ref().map_or(0, Vec::len)
+            + self.decorations.as_ref().map_or(0, Vec::len)
     }
 }
 
@@ -265,6 +279,8 @@ impl Journal {
             inventories,
             ground: None,
             spawners: None,
+            mobiles: None,
+            decorations: None,
         })
     }
 }

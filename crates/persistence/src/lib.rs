@@ -41,8 +41,8 @@ mod store;
 pub use journal::{Journal, Snapshot};
 pub use pg::PgStore;
 pub use record::{
-    AccountRecord, CharacterRecord, CreatureData, Inventory, ItemLocation, ItemRecord,
-    SpawnerRecord, SCHEMA_VERSION,
+    AccountRecord, CharacterRecord, CreatureData, DecorationRecord, DoorState, Inventory,
+    ItemLocation, ItemRecord, MobileRecord, SpawnerRecord, SCHEMA_VERSION,
 };
 pub use sqlite::SqliteStore;
 pub use store::{MemoryStore, Store, StoreError};
