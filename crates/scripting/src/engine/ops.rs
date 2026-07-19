@@ -129,6 +129,10 @@ struct MobileSpec {
     #[serde(default)]
     beat: u64,
     #[serde(default)]
+    ranged: u8,
+    #[serde(default)]
+    ranged_kind: u8,
+    #[serde(default)]
     wander: bool,
     x: u16,
     y: u16,
@@ -181,6 +185,8 @@ fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
             sight: spec.sight,
             aggression: spec.aggression,
             beat: spec.beat,
+            ranged: spec.ranged,
+            ranged_kind: spec.ranged_kind,
             wander: spec.wander,
             x: spec.x,
             y: spec.y,
@@ -333,6 +339,10 @@ struct CreatureSpec {
     #[serde(default)]
     beat: u64,
     #[serde(default)]
+    ranged: u8,
+    #[serde(default)]
+    ranged_kind: u8,
+    #[serde(default)]
     wander: bool,
 }
 
@@ -369,6 +379,8 @@ fn op_register_spawner(state: &mut OpState, #[serde] spec: SpawnerSpec) {
             sight: c.sight,
             aggression: c.aggression,
             beat: c.beat,
+            ranged: c.ranged,
+            ranged_kind: c.ranged_kind,
             wander: c.wander,
         })
         .collect();

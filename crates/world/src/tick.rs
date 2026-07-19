@@ -376,6 +376,7 @@ impl World {
             self.step(serial, direction);
         }
         combat::swings(&mut self.state);
+        combat::volleys(&mut self.state);
         combat::expire_criminality(&mut self.state);
         combat::decay_murders(&mut self.state);
         magic::regen_mana(&mut self.state);
@@ -493,6 +494,8 @@ impl World {
                 aggression,
                 beat,
                 wander,
+                ranged,
+                ranged_kind,
                 position,
                 facet,
                 name,
@@ -514,6 +517,8 @@ impl World {
                         aggression,
                         beat,
                         wander,
+                        ranged,
+                        ranged_kind,
                         position,
                         facet,
                         name,

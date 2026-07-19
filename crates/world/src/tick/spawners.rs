@@ -59,6 +59,8 @@ impl World {
                     sight: creature.sight,
                     aggression: creature.aggression,
                     beat: creature.beat,
+                    ranged: creature.ranged,
+                    ranged_kind: creature.ranged_kind,
                     wander: creature.wander,
                     position: Point::new(x, y, z),
                     facet,
@@ -120,6 +122,8 @@ impl World {
                         sight: c.sight,
                         aggression: c.aggression,
                         beat: c.beat,
+                        ranged: c.ranged,
+                        ranged_kind: c.ranged_kind,
                         wander: c.wander,
                     })
                     .collect(),
@@ -156,6 +160,8 @@ impl World {
                     sight: c.sight,
                     aggression: c.aggression,
                     beat: c.beat,
+                    ranged: c.ranged,
+                    ranged_kind: c.ranged_kind,
                     wander: c.wander,
                 })
                 .collect();

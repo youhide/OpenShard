@@ -6,7 +6,7 @@ use openshard_movement::Walker;
 use openshard_protocol::{Direction, Facing, Notoriety, Point};
 use openshard_state::components::{
     body_opens_doors, Aggression, Banker, Body, Brain, Facet, Heading, Hitpoints, MeleeDamage,
-    Movement, Name, Npc, Position, Resistance, SwingSpeed,
+    Movement, Name, Npc, Position, RangedAttack, Resistance, SwingSpeed,
 };
 use openshard_state::WorldState;
 use tracing::{debug, warn};
@@ -50,6 +50,10 @@ pub struct SpawnSpec {
     pub aggression: u8,
     /// Ticks between its beats while hunting; 0 takes the shard default.
     pub beat: u64,
+    /// How far its ranged attack reaches, in tiles; 0 fights hand to hand.
+    pub ranged: u8,
+    /// The ranged attack's damage type wire value.
+    pub ranged_kind: u8,
     pub wander: bool,
     pub position: Point,
     pub facet: u8,
@@ -84,6 +88,8 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
         aggression,
         beat,
         wander,
+        ranged,
+        ranged_kind,
         position,
         facet,
         name,
@@ -150,6 +156,16 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
     // pins an exact cadence — a special creature that ignores its stats.
     if swing != 0 {
         state.registry.insert(entity, SwingSpeed { ticks: swing });
+    }
+    // A reach makes it an archer/mage/breather: it kites and volleys.
+    if ranged > 0 {
+        state.registry.insert(
+            entity,
+            RangedAttack {
+                range: ranged,
+                kind: ranged_kind,
+            },
+        );
     }
     // A brain only for a creature that needs one — something that hunts or
     // wanders. A pure prop (a shopkeeper standing still) gets none and never

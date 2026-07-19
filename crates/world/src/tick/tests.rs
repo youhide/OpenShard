@@ -1469,6 +1469,8 @@ fn spawn_mobile_full(
         sight: 0, // passive by default; tests that want a brain set it
         aggression: 2,
         beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
         wander: false,
         position: point,
         facet: 0,
@@ -2734,6 +2736,8 @@ fn spawn_creature(world: &mut World, point: Point, sight: u8, wander: bool, now:
         sight,
         aggression: 2,
         beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
         wander,
         position: point,
         facet: 0,
@@ -3632,6 +3636,8 @@ fn a_spawner_fills_to_its_ceiling_and_clear_empties_it() {
         sight: 0,
         aggression: 2,
         beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
         wander: false,
     };
     let area = SpawnArea {
@@ -4152,6 +4158,8 @@ fn spawn_banker(world: &mut World, at: Point, now: Instant) {
         sight: 0,
         aggression: 2,
         beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
         wander: false,
         position: at,
         facet: 0,
@@ -4854,6 +4862,8 @@ fn a_creature_does_not_notice_prey_through_a_shut_door() {
         sight: 5,
         aggression: 2,
         beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
         wander: false,
         position: Point::new(START.0, START.1 + 2, 0),
         facet: 0,
@@ -4917,6 +4927,8 @@ fn spawn_brained(world: &mut World, body: u16, at: Point, sight: u8, now: Instan
         sight,
         aggression: 2,
         beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
         wander: false,
         position: at,
         facet: 0,
@@ -5109,6 +5121,8 @@ fn spawn_postured(
         sight,
         aggression,
         beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
         wander: false,
         position: at,
         facet: 0,
@@ -5287,6 +5301,8 @@ fn spawn_horse(world: &mut World, at: Point, now: Instant) -> (EntityId, u32) {
         sight: 0,
         aggression: 0,
         beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
         wander: true,
         position: at,
         facet: 0,
@@ -5437,6 +5453,8 @@ fn a_shop_sells_goods_and_buys_them_back() {
         sight: 0,
         aggression: 0,
         beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
         wander: false,
         position: Point::new(START.0 + 1, START.1, 0),
         facet: 0,
@@ -5561,4 +5579,141 @@ fn a_shop_sells_goods_and_buys_them_back() {
         92,
         "no gold moved on the refused purchase"
     );
+}
+
+/// Spawn an archer-shaped creature: ranged reach 8, energy bolts.
+fn spawn_archer(world: &mut World, at: Point, now: Instant) -> EntityId {
+    spawn_archer_bodied(world, 0x0190, at, now)
+}
+
+/// The same archer with a chosen body — a beast body cannot open doors.
+fn spawn_archer_bodied(world: &mut World, body: u16, at: Point, now: Instant) -> EntityId {
+    world.queue(Command::SpawnMobile {
+        body,
+        hue: 0,
+        hits: 50,
+        notoriety: 5,
+        damage: 7,
+        resistance: 0,
+        swing: 10,
+        sight: 10,
+        aggression: 2,
+        beat: 0,
+        ranged: 8,
+        ranged_kind: 4,
+        wander: false,
+        position: at,
+        facet: 0,
+        name: None,
+        banker: false,
+        vendor: false,
+        equipment: Vec::new(),
+    });
+    world.tick(now);
+    world
+        .state
+        .registry
+        .query::<openshard_state::components::RangedAttack>()
+        .map(|(entity, _)| entity)
+        .next()
+        .expect("an archer")
+}
+
+#[test]
+fn a_ranged_creature_volleys_from_a_distance() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player = world.state.players[&gm];
+    let before = world.registry().get::<Hitpoints>(player).unwrap().current;
+    spawn_archer(&mut world, Point::new(START.0, START.1 + 5, 0), now);
+
+    let mut later = now;
+    for _ in 0..40 {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    let after = world.registry().get::<Hitpoints>(player).unwrap().current;
+    assert!(
+        after < before,
+        "five tiles out and in sight, the bolts landed ({before} -> {after})"
+    );
+}
+
+#[test]
+fn a_pressed_archer_backs_away() {
+    let now = Instant::now();
+    let mut world = world();
+    let _gm = enter_gm(&mut world, now);
+    let player_at = Point::new(START.0, START.1, 0);
+    let archer = spawn_archer(&mut world, Point::new(START.0, START.1 + 1, 0), now);
+
+    let mut later = now;
+    for _ in 0..40 {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    let stood = world.registry().get::<Position>(archer).unwrap().0;
+    assert!(
+        distance(stood, player_at) > 2,
+        "an archer does not brawl: it opened the gap (ended at {stood:?})"
+    );
+}
+
+#[test]
+fn no_volley_passes_a_shut_door() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player = world.state.players[&gm];
+    // The archer boxed in a ring of crates whose only gap is a doorway: when
+    // the door shuts there is no line to shoot down and no way around — and a
+    // beast body cannot work the handle.
+    let den = Point::new(START.0, START.1 + 3, 0);
+    for dx in -1i32..=1 {
+        for dy in -1i32..=1 {
+            if dx == 0 && dy == 0 || (dx == 0 && dy == -1) {
+                continue; // the north gap stays open for the door
+            }
+            let crate_entity = world.state.registry.spawn();
+            world.state.facet_state_mut(0).obstructions.block(
+                (i32::from(den.x) + dx) as u16,
+                (i32::from(den.y) + dy) as u16,
+                crate_entity,
+                false,
+            );
+        }
+    }
+    let (_door, door_serial) = place_door(&mut world, Point::new(den.x, den.y - 1, 0), now);
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: door_serial,
+    });
+    world.tick(now);
+    let archer = spawn_archer_bodied(&mut world, 0x00D1, den, now);
+    let mut later = now;
+    for _ in 0..12 {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert!(
+        world
+            .registry()
+            .get::<Combat>(archer)
+            .and_then(|c| c.target)
+            .is_some(),
+        "it took aim through the open door"
+    );
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: door_serial,
+    });
+    world.tick(later);
+    let before = world.registry().get::<Hitpoints>(player).unwrap().current;
+    for _ in 0..40 {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    let after = world.registry().get::<Hitpoints>(player).unwrap().current;
+    assert_eq!(after, before, "a shut door stops arrows too");
 }

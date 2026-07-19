@@ -17,7 +17,8 @@ use openshard_items as items;
 use openshard_movement::{find_path, step_from, Terrain};
 use openshard_protocol::{Direction, Point};
 use openshard_state::components::{
-    Aggression, Brain, ChasePath, Client, Combat, Heading, Hitpoints, Position, Scripted,
+    Aggression, Brain, ChasePath, Client, Combat, Heading, Hitpoints, Position, RangedAttack,
+    Scripted,
 };
 use openshard_state::sectors::{distance, in_range};
 use openshard_state::WorldState;
@@ -54,6 +55,10 @@ const CHASE_RANGE_MIN: u32 = 12;
 
 /// A creature this tough never runs — ServUO's "500 hits does not flee" rule.
 const BRAVE_HITS: u16 = 500;
+
+/// How close a foe may press a ranged fighter before it backs off — the
+/// keep-away distance an archer or mage maintains.
+const KITE_GAP: u32 = 2;
 
 /// The first step from `from` toward `to`, planned *around* obstacles so a chaser
 /// does not wedge itself against a wall. Falls back to the straight-line direction
@@ -108,6 +113,24 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<u8> {
             if should_flee(state, creature, brain) {
                 state.registry.remove::<ChasePath>(creature);
                 return flee_step(state, creature, facet, pos, target_pos);
+            }
+            // A ranged fighter kites: back off from a foe at its heels, stand
+            // and shoot inside its reach (the volley system does the firing),
+            // and only close in when out of range or out of sight line.
+            if let Some(&RangedAttack { range, .. }) = state.registry.get::<RangedAttack>(creature)
+            {
+                let gap = distance(pos, target_pos);
+                if gap <= KITE_GAP {
+                    state.registry.remove::<ChasePath>(creature);
+                    return kite_step(state, facet, pos, target_pos);
+                }
+                let clear = state
+                    .facet_state(facet)
+                    .live_terrain()
+                    .sight_clear(pos, target_pos);
+                if gap <= u32::from(range) && clear {
+                    return None; // in reach, sight line clear: stand and loose
+                }
             }
             if in_range(pos, target_pos, combat::MELEE_RANGE) {
                 // Arrived; the route served.
@@ -396,6 +419,20 @@ fn flee_step(
     }
     let away = direction_toward(threat, from).unwrap_or(Direction::South);
     for turn in [0u8, 1, 7, 2, 6, 3, 5] {
+        let dir = Direction::from_bits((away.to_bits() + turn) & 7);
+        let (open, _) = probe(state, facet, from, dir);
+        if open {
+            return Some(dir.to_bits());
+        }
+    }
+    None
+}
+
+/// A step that opens distance without dropping the fight — the kiting half of
+/// a ranged brain. Same search as fleeing, warmode kept.
+fn kite_step(state: &mut WorldState, facet: u8, from: Point, threat: Point) -> Option<u8> {
+    let away = direction_toward(threat, from).unwrap_or(Direction::South);
+    for turn in [0u8, 1, 7, 2, 6] {
         let dir = Direction::from_bits((away.to_bits() + turn) & 7);
         let (open, _) = probe(state, facet, from, dir);
         if open {

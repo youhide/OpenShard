@@ -14,10 +14,11 @@
 
 use openshard_entities::{EntityId, Serial};
 use openshard_gateway::ConnectionId;
+use openshard_movement::Terrain;
 use openshard_protocol::{encode_attack, encode_war_mode, Notoriety};
 use openshard_state::components::{
     Client, Combat, CriminalUntil, DamageType, Hitpoints, MeleeDamage, MurderDecay, Murders,
-    Position, Resistance, Stats, SwingSpeed,
+    Position, RangedAttack, Resistance, Stats, SwingSpeed,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::WorldState;
@@ -258,6 +259,66 @@ pub fn attack(state: &mut WorldState, connection: ConnectionId, target: u32) {
 /// reads no clock. A swing lands when the attacker is in war mode, has a target
 /// within [`MELEE_RANGE`] on the same facet, and its timer is up; out of reach it
 /// simply waits, its timer unspent, so the blow falls the instant the gap closes.
+/// Loose every ranged attack whose timer is up: a warlike combatant with a
+/// [`RangedAttack`], a target inside its reach but beyond arm's length, and a
+/// clear line to it fires — through [`damage`], the one door all damage passes,
+/// so resistance and murder attribution already apply. Sharing the swing timer
+/// with melee means a creature closes to bite or stands to shoot, never both
+/// in one beat.
+pub fn volleys(state: &mut WorldState) {
+    let now = state.ticks;
+    let ready: Vec<(EntityId, Serial, u8, u8)> = state
+        .registry
+        .query::<Combat>()
+        .filter_map(|(attacker, combat)| {
+            if !combat.warmode || now < combat.next_swing {
+                return None;
+            }
+            let ranged = state.registry.get::<RangedAttack>(attacker)?;
+            combat
+                .target
+                .map(|target| (attacker, target, ranged.range, ranged.kind))
+        })
+        .collect();
+    for (attacker, target_serial, range, kind) in ready {
+        let Some(target) = state.registry.entity_of(target_serial) else {
+            continue;
+        };
+        let (Some(&Position(from)), Some(&Position(to))) = (
+            state.registry.get::<Position>(attacker),
+            state.registry.get::<Position>(target),
+        ) else {
+            continue;
+        };
+        let facet = state.facet_of(attacker);
+        if state.facet_of(target) != facet
+            || in_range(from, to, MELEE_RANGE)
+            || !in_range(from, to, u32::from(range))
+        {
+            continue; // melee's beat, or out of reach — the brain closes in
+        }
+        if !state
+            .facet_state(facet)
+            .live_terrain()
+            .sight_clear(from, to)
+        {
+            continue; // no shooting through walls
+        }
+        let amount = state
+            .registry
+            .get::<MeleeDamage>(attacker)
+            .map_or(SWING_DAMAGE, |d| d.amount);
+        let by = state.registry.serial_of(attacker);
+        let pace = swing_speed(state, attacker);
+        if let Some(combat) = state.registry.get_mut::<Combat>(attacker) {
+            combat.next_swing = now + pace;
+        }
+        if let Some(raw) = state.registry.serial_of(target).map(Serial::raw) {
+            damage(state, raw, amount, DamageType::from_u8(kind), by);
+        }
+    }
+}
+
 pub fn swings(state: &mut WorldState) {
     let now = state.ticks;
     // Collected first: `damage` mutates the registry, so the query cannot be held

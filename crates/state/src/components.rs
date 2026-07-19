@@ -390,6 +390,18 @@ pub const fn mount_item_for(body: u16) -> Option<u16> {
     })
 }
 
+/// A creature that fights at distance — an archer's bow, a mage's bolt, a
+/// dragon's breath, abstracted to what the tick needs: how far it reaches and
+/// what kind of hurt it is. The damage amount is the creature's `MeleeDamage`;
+/// a ranged creature caught in melee still bites with the same number.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct RangedAttack {
+    /// How far the attack reaches, in tiles.
+    pub range: u8,
+    /// The damage type's wire value (see [`DamageType::from_u8`]).
+    pub kind: u8,
+}
+
 /// Marks a townsperson as a shopkeeper: it answers double-click with a buy
 /// gump and "sell" with an offer list. Its goods live in a container worn on
 /// its stock layer, priced item by item with [`Price`].

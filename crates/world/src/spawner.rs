@@ -36,6 +36,10 @@ pub struct CreatureTemplate {
     pub aggression: u8,
     /// Ticks between its beats while hunting; 0 takes the shard default.
     pub beat: u64,
+    /// How far its ranged attack reaches, in tiles; 0 fights hand to hand.
+    pub ranged: u8,
+    /// The ranged attack's damage type wire value.
+    pub ranged_kind: u8,
     /// Whether it drifts when idle.
     pub wander: bool,
 }

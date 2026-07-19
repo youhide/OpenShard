@@ -223,6 +223,10 @@ pub enum Command {
         aggression: u8,
         /// Ticks between its beats while hunting; 0 takes the shard default.
         beat: u64,
+        /// How far its ranged attack reaches, in tiles; 0 fights hand to hand.
+        ranged: u8,
+        /// The ranged attack's damage type (see `DamageType::from_u8`).
+        ranged_kind: u8,
         /// Whether it wanders when idle.
         wander: bool,
         /// Where it stands.

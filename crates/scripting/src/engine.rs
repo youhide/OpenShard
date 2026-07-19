@@ -525,6 +525,8 @@ mod tests {
                     sight: 8,
                     aggression: 2,
                     beat: 0,
+                    ranged: 0,
+                    ranged_kind: 0,
                     wander: false,
                 }],
             }]
