@@ -1158,6 +1158,7 @@ version = "0.0.1"
 dependencies = [
  "openshard-combat",
  "openshard-entities",
+ "openshard-items",
  "openshard-movement",
  "openshard-protocol",
  "openshard-state",
@@ -1179,6 +1180,7 @@ version = "0.0.1"
 dependencies = [
  "openshard-entities",
  "openshard-gateway",
+ "openshard-movement",
  "openshard-protocol",
  "openshard-state",
 ]
@@ -1222,6 +1224,7 @@ version = "0.0.1"
 dependencies = [
  "openshard-entities",
  "openshard-gateway",
+ "openshard-movement",
  "openshard-protocol",
  "openshard-state",
  "tracing",
