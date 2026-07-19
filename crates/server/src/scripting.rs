@@ -354,7 +354,10 @@ fn into_world(command: ScriptCommand) -> Command {
             respawn_delay,
             creatures,
         } => Command::RegisterSpawner {
+            // Id 0 is a placeholder: the world assigns the real id (and de-dups by
+            // region) when it registers, since it owns the counter.
             spawner: openshard_world::spawner::Spawner::new(
+                0,
                 openshard_world::spawner::SpawnArea {
                     x,
                     y,

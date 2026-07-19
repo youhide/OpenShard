@@ -226,7 +226,7 @@ impl Default for StartConfig {
 }
 
 /// Where the world is kept between restarts.
-#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistenceConfig {
     /// Where the world is kept: a SQLite file path, a `postgres://` URL, or empty
@@ -240,6 +240,30 @@ pub struct PersistenceConfig {
     /// operator's choice, and neither is a tier.
     #[serde(default)]
     pub database: String,
+
+    /// How often the world is saved, in seconds. `0` turns the periodic save off —
+    /// the world is then written only on a clean shutdown and on a staff `.save`.
+    ///
+    /// A save is cheap and never stops the world (an instant snapshot, written by a
+    /// task nothing waits on), so this is only how much play a crash may cost, not a
+    /// pause anyone feels. The default is a few minutes; a busy shard tightens it.
+    #[serde(default = "default_save_seconds")]
+    pub save_seconds: u64,
+}
+
+/// The default periodic save interval, in seconds — a few minutes, tightened by
+/// the operator on a busy shard.
+fn default_save_seconds() -> u64 {
+    180
+}
+
+impl Default for PersistenceConfig {
+    fn default() -> Self {
+        Self {
+            database: String::new(),
+            save_seconds: default_save_seconds(),
+        }
+    }
 }
 
 /// The gameplay script the shard runs.
@@ -548,6 +572,13 @@ y = 1600
 #   database = "openshard.db"
 #   database = "postgres://user:pass@localhost/openshard"
 database = ""
+
+# How often to save the world, in seconds. The save never stops the world (an
+# instant snapshot, written off to the side), so this is only how much play a
+# crash could cost. A clean shutdown and the staff ".save" command always save.
+# 0 turns the periodic save off. Default is 180.
+#   save_seconds = 120
+save_seconds = 180
 
 [scripting]
 # The gameplay script the shard loads and hot-reloads. A path to a .js/.ts file.

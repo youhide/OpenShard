@@ -49,8 +49,32 @@ pub fn run(state: &mut WorldState, actor: EntityId, rest: &str) {
         "add" => add_item(state, actor, &args),
         "set" => set_stat(state, actor, &args),
         "admin" => crate::admin::open_menu(state, actor),
+        "save" => save_world(state, actor),
         other => notify(state, actor, &format!("Unknown command '{other}'.")),
     }
+}
+
+/// `.save` — force an immediate world save. No pause: the snapshot is an instant
+/// memcpy the tick takes and a task nobody waits on writes, so the world keeps
+/// running. Everyone is told it happened — a nod to the old shards' "please wait"
+/// without the wait. The tick does the actual snapshot; this only asks and
+/// announces.
+fn save_world(state: &mut WorldState, actor: EntityId) {
+    let connections: Vec<_> = state.players.keys().copied().collect();
+    for connection in connections {
+        let packet = encode_message(
+            u32::MAX,
+            0xFFFF,
+            0,
+            SYSTEM_HUE,
+            SYSTEM_FONT,
+            "System",
+            "The world is being saved.",
+        );
+        state.send(connection, packet);
+    }
+    state.save_requested = true;
+    notify(state, actor, "World save requested.");
 }
 
 /// Tell the actor where it is standing.

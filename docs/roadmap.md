@@ -196,10 +196,37 @@ connection takes the mobile off every screen that had it.
   excluded (a pack re-lays that). On boot the item serials are reserved and ground
   items placed; a returning character re-equips its saved inventory instead of a
   starter backpack. Items keep their serials across a restart so a container's
-  contents still point at it. Deferred: an item's `Stackable` mark (a restored
-  pile keeps its amount but a lone stackable loses the flag until re-lifted), and
-  a live item's mid-session ground moves (the ground is swept at save cadence, not
-  event-driven yet).
+  contents still point at it.
+- [x] **A save is complete, and shutdown flushes it.** Consistency, because it is
+  gold and gear: every save writes *every online character* in full — record and
+  whole inventory — not only the ones that moved, because picking an item up takes
+  no step and so never marks a character dirty; the ground is swept every save, not
+  only when someone was active; and a logout re-fills the in-memory
+  pending-inventory cache so a **re-login in the same run** re-equips what it
+  carried (before the fix it lost the backpack). And the shard **saves on the way
+  out**: Ctrl-C, or the gateway stopping, takes one last full snapshot, closes the
+  save channel and *awaits* the writer so every queued transaction lands before the
+  process exits — unlike the per-tick handoff, because the one moment a lost write
+  costs a player real value is the last one.
+- [x] **`Stackable` persists, the save interval is a config line, and `.save`
+  forces one.** An item's `Stackable` flag is saved (`ItemRecord`, schema v3), so a
+  restored gold pile still merges with more rather than losing the flag until
+  re-lifted. `persistence.save_seconds` sets the periodic cadence (0 = only shutdown
+  and `.save`; a save never stops the world, so this is only how much a crash could
+  cost). And a staff **`.save`** (GM+) takes an immediate snapshot and tells every
+  player "the world is being saved" — the old shards' announce **without** their
+  pause, because OpenShard's snapshot is an instant memcpy, not a synchronous walk
+  of the world.
+- [x] **Spawn regions persist, timers and all.** A populated area stays populated
+  across a restart without re-running `.admin`, and — the point — a rare spawn keeps
+  its remaining wait: killed with hours to go, it comes back with those hours ahead
+  of it, not popping again the moment the shard is up. `SpawnerRecord` (schema v4)
+  saves the region, its creatures and the timer as the **seconds still to wait**,
+  not a tick count (which resets at boot) or a wall-clock time (the tick reads no
+  clock) — so downtime pauses the timer rather than eating it, the semantics chosen
+  for a rare spawn. Registering a region twice replaces it rather than stacking a
+  second, and after a restart the regions come from the store, not the pack, so a
+  re-populate is not needed and the timers hold.
 
 Two backends, one choice. A shard runs on SQLite or on PostgreSQL, and which is
 the operator's to make: neither is "the production one", and SQLite runs a real
@@ -576,9 +603,19 @@ Roughly in dependency order, each script-first:
     AI seam is decide-then-apply, like the creature brain: `npc::live` greets and
     faces itself, and returns the idle steps the tick applies through its
     terrain-checked `step`. This is the first of the living NPCs; **vendors** (buy
-    `0x74`/`0x3B`, sell `0x9E`/`0x9F`) reuse the `Npc` base, and proper **A*
-    pathfinding** — Sphere's is a poor guide, ServUO's the base to beat — is the
-    dedicated next AI slice.
+    `0x74`/`0x3B`, sell `0x9E`/`0x9F`) reuse the `Npc` base.
+  - [x] **A* pathfinding**, so pursuit and homing route *around* walls instead of
+    shuffling into them — the thing Sphere does badly. `movement::find_path` is a
+    bounded A* over the `Terrain` (the same `can_step` the client's walk uses), with
+    a Chebyshev heuristic, a node budget so it can never stall a tick, and a
+    corner-cut guard (a diagonal is only taken when both tiles beside it are open,
+    so a path never clips a building's edge). It is a pure, dice-free function —
+    same map and endpoints, same path — so a replay's monsters keep the same trail.
+    The creature chase (`ai::step_toward`) and a townsperson heading back to its
+    post both plan through it, falling back to the straight line only when there is
+    no map or no route within budget. Next AI refinements: caching a path rather
+    than re-planning each beat, and pathing to a tile *adjacent* to a quarry rather
+    than onto it.
   - [x] **A name on single-click.** Clicking a mobile (`0x09`) draws its name over
     its head for the clicker alone — a `0x1C` label in the notoriety colour
     (ServUO's `Notoriety.Hues`: blue innocent … yellow invulnerable), so a banker

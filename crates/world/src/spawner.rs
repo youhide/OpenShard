@@ -54,6 +54,8 @@ pub struct SpawnArea {
 /// A region the tick keeps populated.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Spawner {
+    /// Its stable id — the key it persists and is de-duplicated by.
+    pub id: u32,
     /// Where it spawns.
     pub area: SpawnArea,
     /// The creatures it may put down; each spawn picks one at random.
@@ -63,19 +65,23 @@ pub struct Spawner {
     /// Ticks to wait after a spawn before the next one — the respawn pace.
     pub respawn_delay: u64,
     /// The earliest tick the next spawn may happen. Advanced past a spawn so a
-    /// region refills at its own pace, not all at once.
+    /// region refills at its own pace, not all at once. Persisted as the *seconds*
+    /// still to wait, so a rare spawn's timer survives a restart (see the tick's
+    /// `spawner_records`).
     pub next_spawn: u64,
 }
 
 impl Spawner {
     /// A region that starts able to spawn immediately.
     pub fn new(
+        id: u32,
         area: SpawnArea,
         creatures: Vec<CreatureTemplate>,
         max_count: u16,
         respawn_delay: u64,
     ) -> Self {
         Self {
+            id,
             area,
             creatures,
             max_count,
@@ -98,7 +104,7 @@ mod tests {
             height: 3,
             facet: 0,
         };
-        let spawner = Spawner::new(area, Vec::new(), 5, 40);
+        let spawner = Spawner::new(1, area, Vec::new(), 5, 40);
         assert_eq!(spawner.next_spawn, 0, "ready from tick zero");
         assert_eq!(spawner.max_count, 5);
     }

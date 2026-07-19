@@ -12,6 +12,7 @@
 
 use openshard_combat as combat;
 use openshard_entities::{EntityId, Serial};
+use openshard_movement::find_path;
 use openshard_protocol::{Direction, Point};
 use openshard_state::components::{Brain, Client, Combat, Heading, Hitpoints, Position};
 use openshard_state::sectors::{distance, in_range};
@@ -20,6 +21,24 @@ use openshard_state::WorldState;
 /// The chance in eight, per beat, that an idle wanderer takes a step. Low enough
 /// that a field of creatures drifts rather than marches.
 const WANDER_IN_EIGHT: u32 = 3;
+
+/// How many tiles a chase may plan across before it gives up and just heads the
+/// straight way. Ample to round a building; an unreachable or very distant quarry
+/// is not worth a bigger search each beat.
+const PATH_BUDGET: usize = 400;
+
+/// The first step from `from` toward `to`, planned *around* obstacles so a chaser
+/// does not wedge itself against a wall. Falls back to the straight-line direction
+/// when there is no map, or no route within the budget — better to close the gap
+/// roughly and re-plan than to freeze.
+pub fn step_toward(state: &WorldState, facet: u8, from: Point, to: Point) -> Option<u8> {
+    if let Some(terrain) = state.facet_state(facet).terrain.as_deref() {
+        if let Some(path) = find_path(terrain, from, to, PATH_BUDGET) {
+            return path.first().map(|d| d.to_bits());
+        }
+    }
+    direction_toward(from, to).map(Direction::to_bits)
+}
 
 /// One creature's beat: chase and fight what it has, pick a fight if it sees one,
 /// or drift.
@@ -42,7 +61,8 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<u8> {
     {
         if let Some(target_pos) = foe_in_sight(state, target_serial, pos, facet, sight) {
             if !in_range(pos, target_pos, combat::MELEE_RANGE) {
-                return direction_toward(pos, target_pos).map(Direction::to_bits);
+                // Plan around walls rather than shuffle into them.
+                return step_toward(state, facet, pos, target_pos);
             }
             return None;
         }

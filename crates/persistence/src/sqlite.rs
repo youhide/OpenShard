@@ -24,7 +24,9 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::journal::Snapshot;
-use crate::record::{AccountRecord, CharacterRecord, ItemLocation, ItemRecord, SCHEMA_VERSION};
+use crate::record::{
+    AccountRecord, CharacterRecord, ItemLocation, ItemRecord, SpawnerRecord, SCHEMA_VERSION,
+};
 use crate::store::{Store, StoreError};
 
 /// The flat form of an [`ItemLocation`] for the `items` table: a kind tag and the
@@ -127,12 +129,13 @@ CREATE TABLE IF NOT EXISTS characters (
     facing  INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS items (
-    serial   INTEGER PRIMARY KEY,
-    owner    INTEGER NOT NULL,
-    graphic  INTEGER NOT NULL,
-    hue      INTEGER NOT NULL,
-    amount   INTEGER NOT NULL,
-    gump     INTEGER,
+    serial    INTEGER PRIMARY KEY,
+    owner     INTEGER NOT NULL,
+    graphic   INTEGER NOT NULL,
+    hue       INTEGER NOT NULL,
+    amount    INTEGER NOT NULL,
+    stackable INTEGER NOT NULL,
+    gump      INTEGER,
     -- location: kind 0 ground / 1 contained / 2 equipped, and its parameters.
     loc_kind INTEGER NOT NULL,
     facet    INTEGER NOT NULL,
@@ -143,7 +146,21 @@ CREATE TABLE IF NOT EXISTS items (
     grid     INTEGER NOT NULL,
     layer    INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS items_owner ON items (owner);";
+CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
+CREATE TABLE IF NOT EXISTS spawners (
+    id            INTEGER PRIMARY KEY,
+    facet         INTEGER NOT NULL,
+    x             INTEGER NOT NULL,
+    y             INTEGER NOT NULL,
+    width         INTEGER NOT NULL,
+    height        INTEGER NOT NULL,
+    max_count     INTEGER NOT NULL,
+    respawn_secs  INTEGER NOT NULL,
+    remaining_secs INTEGER NOT NULL,
+    -- The creature list as a JSON array; a spawner holds a handful, not a table's
+    -- worth, so a blob is simpler than a join.
+    creatures     TEXT NOT NULL
+);";
 
 /// A `Store` kept in a SQLite database.
 ///
@@ -228,6 +245,7 @@ impl Store for SqliteStore {
         let removed = snapshot.removed.clone();
         let inventories = snapshot.inventories.clone();
         let ground = snapshot.ground.clone();
+        let spawners = snapshot.spawners.clone();
         blocking(move || {
             let mut guard = connection
                 .lock()
@@ -264,15 +282,16 @@ impl Store for SqliteStore {
                     let f = item.location.flatten();
                     tx.execute(
                         "INSERT OR REPLACE INTO items \
-                     (serial, owner, graphic, hue, amount, gump, \
+                     (serial, owner, graphic, hue, amount, stackable, gump, \
                       loc_kind, facet, x, y, z, parent, grid, layer) \
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
                         params![
                             item.serial,
                             item.owner,
                             item.graphic,
                             item.hue,
                             item.amount,
+                            item.stackable,
                             item.container_gump,
                             f.kind,
                             f.facet,
@@ -313,6 +332,36 @@ impl Store for SqliteStore {
                 transaction
                     .execute("DELETE FROM items WHERE owner = ?1", params![serial])
                     .map_err(database)?;
+            }
+            // A spawner sweep replaces the whole set.
+            if let Some(spawners) = &spawners {
+                transaction
+                    .execute("DELETE FROM spawners", [])
+                    .map_err(database)?;
+                for spawner in spawners {
+                    let creatures = serde_json::to_string(&spawner.creatures)
+                        .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+                    transaction
+                        .execute(
+                            "INSERT INTO spawners \
+                             (id, facet, x, y, width, height, max_count, \
+                              respawn_secs, remaining_secs, creatures) \
+                             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                            params![
+                                spawner.id,
+                                spawner.facet,
+                                spawner.x,
+                                spawner.y,
+                                spawner.width,
+                                spawner.height,
+                                spawner.max_count,
+                                spawner.respawn_secs,
+                                spawner.remaining_secs,
+                                creatures,
+                            ],
+                        )
+                        .map_err(database)?;
+                }
             }
             transaction.commit().map_err(database)?;
             Ok(())
@@ -361,21 +410,21 @@ impl Store for SqliteStore {
                 .expect("the sqlite mutex is never poisoned");
             let mut statement = guard
                 .prepare(
-                    "SELECT serial, owner, graphic, hue, amount, gump, \
+                    "SELECT serial, owner, graphic, hue, amount, stackable, gump, \
                      loc_kind, facet, x, y, z, parent, grid, layer FROM items",
                 )
                 .map_err(database)?;
             let rows = statement
                 .query_map([], |row| {
                     let flat = FlatLocation {
-                        kind: row.get(6)?,
-                        facet: row.get(7)?,
-                        x: row.get(8)?,
-                        y: row.get(9)?,
-                        z: row.get(10)?,
-                        parent: row.get(11)?,
-                        grid: row.get(12)?,
-                        layer: row.get(13)?,
+                        kind: row.get(7)?,
+                        facet: row.get(8)?,
+                        x: row.get(9)?,
+                        y: row.get(10)?,
+                        z: row.get(11)?,
+                        parent: row.get(12)?,
+                        grid: row.get(13)?,
+                        layer: row.get(14)?,
                     };
                     Ok((
                         ItemRecord {
@@ -384,7 +433,8 @@ impl Store for SqliteStore {
                             graphic: row.get(2)?,
                             hue: row.get(3)?,
                             amount: row.get(4)?,
-                            container_gump: row.get(5)?,
+                            stackable: row.get(5)?,
+                            container_gump: row.get(6)?,
                             // A placeholder overwritten below; the location cannot be
                             // built inside `query_map`'s closure return type cleanly.
                             location: ItemLocation::Ground {
@@ -408,6 +458,50 @@ impl Store for SqliteStore {
                 }
             }
             Ok(items)
+        })
+        .await
+    }
+
+    async fn spawners(&self) -> Result<Vec<SpawnerRecord>, StoreError> {
+        let connection = Arc::clone(&self.connection);
+        blocking(move || {
+            let guard = connection
+                .lock()
+                .expect("the sqlite mutex is never poisoned");
+            let mut statement = guard
+                .prepare(
+                    "SELECT id, facet, x, y, width, height, max_count, \
+                     respawn_secs, remaining_secs, creatures FROM spawners",
+                )
+                .map_err(database)?;
+            let rows = statement
+                .query_map([], |row| {
+                    let creatures: String = row.get(9)?;
+                    Ok((
+                        SpawnerRecord {
+                            id: row.get(0)?,
+                            facet: row.get(1)?,
+                            x: row.get(2)?,
+                            y: row.get(3)?,
+                            width: row.get(4)?,
+                            height: row.get(5)?,
+                            max_count: row.get(6)?,
+                            respawn_secs: row.get(7)?,
+                            remaining_secs: row.get(8)?,
+                            creatures: Vec::new(),
+                        },
+                        creatures,
+                    ))
+                })
+                .map_err(database)?;
+            let mut spawners = Vec::new();
+            for row in rows {
+                let (mut record, creatures) = row.map_err(database)?;
+                record.creatures = serde_json::from_str(&creatures)
+                    .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+                spawners.push(record);
+            }
+            Ok(spawners)
         })
         .await
     }
@@ -503,6 +597,7 @@ mod tests {
             removed,
             inventories: vec![],
             ground: None,
+            spawners: None,
         }
     }
 
@@ -600,6 +695,7 @@ mod tests {
             removed: vec![],
             inventories: vec![],
             ground: None,
+            spawners: None,
         };
         let error = store.save(&future).await.expect_err("must refuse");
         assert!(matches!(error, StoreError::SchemaMismatch { .. }));

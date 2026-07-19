@@ -37,9 +37,11 @@
 //! defence that works is server-side: see [`WalkPace`].
 
 mod pace;
+mod path;
 mod sequence;
 mod walk;
 
 pub use pace::{Pace, WalkPace, RUN_INTERVAL, WALK_BUFFER, WALK_INTERVAL};
+pub use path::find_path;
 pub use sequence::{OutOfSequence, WalkSequence};
 pub use walk::{step_from, OpenWorld, Terrain, Walk, Walker};

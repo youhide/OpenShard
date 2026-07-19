@@ -196,7 +196,9 @@ fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> {
             "world.client_files is empty: running with no map. Every step will be allowed — \
              players walk through walls and across water. Set it to a client install."
         );
-        return Ok(World::new(start).with_gameplay(gameplay));
+        return Ok(World::new(start)
+            .with_gameplay(gameplay)
+            .with_save_seconds(config.persistence.save_seconds));
     }
 
     let dir = Path::new(dir);
@@ -205,7 +207,9 @@ fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> {
     // a map, so it is read once and each facet's terrain gets a copy.
     let tiles = TileData::load(dir.join("tiledata.mul"))?;
 
-    let mut world = World::new(start).with_gameplay(gameplay);
+    let mut world = World::new(start)
+        .with_gameplay(gameplay)
+        .with_save_seconds(config.persistence.save_seconds);
     for &facet in &config.world.facets {
         let map = Map::load_facet(dir, facet)?;
         // The start is only checked against facet 0, where new characters spawn.
@@ -368,6 +372,19 @@ async fn run_shard(
         Err(error) => error!(%error, "could not read saved items; starting with none"),
     }
 
+    // Bring back the spawn regions with their respawn timers, so a populated area
+    // stays populated across a restart and a rare spawn keeps its remaining wait
+    // rather than popping again the moment the shard comes up.
+    match store.spawners().await {
+        Ok(spawners) => {
+            if !spawners.is_empty() {
+                info!(spawners = spawners.len(), "restored spawn regions");
+            }
+            world.restore_spawners(spawners);
+        }
+        Err(error) => error!(%error, "could not read saved spawners; starting with none"),
+    }
+
     let mut login = LoginServer::new(accounts, &config.server.name, advertised);
     // The character-creation screen needs somewhere to start. Without it the
     // client refuses to create at all — "No city found. Something wrong with the
@@ -379,7 +396,9 @@ async fn run_shard(
         (config.world.start.x, config.world.start.y),
     );
 
-    tokio::spawn(save_loop(store, snapshots, failed));
+    // Kept, not detached: shutdown hands it a final snapshot, closes the channel,
+    // and awaits this task so every queued write lands before the process exits.
+    let save_task = tokio::spawn(save_loop(store, snapshots, failed));
 
     // The gameplay script, if one is configured. Constructed after the world is
     // built and restored, before the first tick, so its cursors start clean.
@@ -437,10 +456,17 @@ async fn run_shard(
                 world.resweep();
             }
 
+            // Ctrl-C: leave the loop and save the world on the way out, rather than
+            // dying with the last save cadence's worth of play unwritten.
+            _ = tokio::signal::ctrl_c() => {
+                info!("shutdown requested; saving the world");
+                break;
+            }
+
             event = events.recv() => {
                 let Some(event) = event else {
-                    error!("the gateway stopped");
-                    return;
+                    error!("the gateway stopped; saving the world");
+                    break;
                 };
                 handle(&mut sessions, &mut login, &mut world, advertised, &saved, event);
             }
@@ -449,6 +475,20 @@ async fn run_shard(
         // Reclaim keys from clients that selected a shard and never came back.
         login.keys.expire(Instant::now());
     }
+
+    // Shutdown: one last full snapshot, then flush every queued write before the
+    // process exits. This is the one moment a lost write costs a player real value,
+    // so unlike the per-tick handoff it is *awaited*. Dropping the sender ends the
+    // save task's receive loop once it has drained what is left.
+    world.take_snapshot();
+    for snapshot in world.drain_saves() {
+        let _ = saves.send(snapshot);
+    }
+    drop(saves);
+    if let Err(error) = save_task.await {
+        error!(%error, "the save task did not finish cleanly on shutdown");
+    }
+    info!("world saved; shutting down");
 }
 
 /// Whether the relay is about to send this client somewhere it cannot get back

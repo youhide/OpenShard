@@ -245,8 +245,9 @@ fn wander_step(state: &mut WorldState, npc: EntityId, at: Point) -> Option<u8> {
     }
     let strayed = chebyshev(at, home) >= u32::from(wander);
     if strayed {
-        // Back toward the post.
-        openshard_ai::direction_toward(at, home).map(|d| d.to_bits())
+        // Back toward the post — pathed around the counter, not into it.
+        let facet = state.facet_of(npc);
+        openshard_ai::step_toward(state, facet, at, home)
     } else if state.rng.below(100) < WANDER_CHANCE {
         // A small idle drift — one of the eight directions (wire bytes 0..8).
         Some(state.rng.below(8) as u8)

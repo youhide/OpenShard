@@ -32,7 +32,7 @@ use openshard_events::{Cursor, EventBus};
 use openshard_gateway::ConnectionId;
 use openshard_movement::{step_from, OpenWorld, Terrain, Walk, Walker};
 use openshard_persistence::{
-    CharacterRecord, Inventory, ItemLocation, ItemRecord, Journal, Snapshot,
+    CharacterRecord, Inventory, ItemLocation, ItemRecord, Journal, Snapshot, SCHEMA_VERSION,
 };
 use openshard_protocol::{
     encode_light_level, encode_login_complete, encode_map_change, encode_message, encode_walk_ack,
@@ -49,7 +49,7 @@ use openshard_state::components::{
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
-use openshard_state::{FacetState, Gameplay, Outbound, WorldState};
+use openshard_state::{FacetState, Gameplay, Outbound, WorldState, TICKS_PER_SECOND};
 
 use openshard_ai as ai;
 use openshard_chat as chat;
@@ -637,8 +637,12 @@ pub struct World {
     /// Commands waiting for the next tick.
     inbox: Vec<Command>,
     /// The spawn regions the tick keeps populated. Registered by the script pack,
-    /// maintained here. Transient for now — not saved, re-registered on start.
+    /// maintained here, and persisted — a populated area stays populated across a
+    /// restart, and a rare spawn keeps its remaining respawn wait.
     spawners: Vec<crate::spawner::Spawner>,
+    /// The next id to hand a newly registered spawner. Bumped past every id loaded
+    /// from the store so a fresh registration never collides with a restored one.
+    next_spawner_id: u32,
     /// Saved inventories waiting for their owners to log in, keyed by character
     /// serial. Loaded from the store at boot by [`restore_inventory`]; a character
     /// entering takes its own and equips it, once.
@@ -685,6 +689,7 @@ impl World {
                 open_containers: HashMap::new(),
                 pending_targets: HashMap::new(),
                 gameplay: Gameplay::default(),
+                save_requested: false,
             },
             journal: Journal::new(),
             save_every: SAVE_EVERY_TICKS,
@@ -695,6 +700,7 @@ impl World {
             turned: Cursor::default(),
             inbox: Vec::new(),
             spawners: Vec::new(),
+            next_spawner_id: 1,
             pending_inventories: HashMap::new(),
         }
     }
@@ -708,6 +714,14 @@ impl World {
     pub const fn with_save_every(mut self, ticks: u64) -> Self {
         self.save_every = ticks;
         self
+    }
+
+    /// How often to save, in *seconds* — what the operator sets in the config. `0`
+    /// keeps the periodic save off (only shutdown and a staff `.save` write). The
+    /// world owns the tick rate, so the conversion lives here rather than in the
+    /// server.
+    pub const fn with_save_seconds(self, seconds: u64) -> Self {
+        self.with_save_every(seconds.saturating_mul(TICKS_PER_SECOND))
     }
 
     /// Set the tunable gameplay rules. The server builds these from the
@@ -872,7 +886,13 @@ impl World {
         // Before the bus retires anything: what happened is what needs saving,
         // and reading it after `update` would read it a tick late.
         self.mark_dirty();
-        self.offer_snapshot();
+        // A staff `.save` this tick forces a snapshot now; otherwise the cadence
+        // decides. Either way the world never pauses — the snapshot is instant.
+        if std::mem::take(&mut self.state.save_requested) {
+            self.take_snapshot();
+        } else {
+            self.offer_snapshot();
+        }
 
         // Retire the oldest events. Once per tick, after every system, so that
         // "one tick" means the same thing for every event type.
@@ -937,45 +957,57 @@ impl World {
     /// tick four hundred times to see one row.
     pub fn take_snapshot(&mut self) {
         let ticks = self.state.ticks;
-        // The borrow split: `drain` needs the journal mutably and the closure
-        // needs the registry, so the registry is taken out of `self` by
-        // reference first. The closure is called inside the tick and reads
-        // memory only — this is the "consistent picture at one instant" the
-        // snapshot promises.
-        let registry = &self.state.registry;
-        let snapshot = self
-            .journal
-            .drain(ticks, |entity| Self::record_of(registry, entity));
-        if let Some(mut snapshot) = snapshot {
-            // The journal already carried logged-out characters' inventories (kept
-            // before their despawn). Add the live inventory of every character in
-            // this snapshot that is still online — its entity is still there to
-            // walk — and sweep the ground. Both read the live world, so they happen
-            // here, after the drain.
-            let online: Vec<u32> = snapshot
-                .characters
-                .iter()
-                .map(|c| c.serial)
-                .filter(|serial| {
-                    Serial::new(*serial)
-                        .and_then(|s| self.state.registry.entity_of(s))
-                        .is_some()
-                })
-                .collect();
-            for serial in online {
-                if let Some(entity) =
-                    Serial::new(serial).and_then(|s| self.state.registry.entity_of(s))
-                {
-                    snapshot.inventories.push(Inventory {
-                        owner: serial,
-                        items: self.inventory_of(entity),
-                    });
-                }
+
+        // Start from the journal's logged-out records, their kept inventories, and
+        // deletions. Dirty *online*-character records are dropped (the `|_| None`)
+        // because every online character is saved in full below regardless — an
+        // item picked up without a step never marks the character dirty, so the
+        // dirty set is not a safe basis for saving what a character holds.
+        let mut snapshot = self.journal.drain(ticks, |_| None).unwrap_or(Snapshot {
+            tick: ticks,
+            schema: SCHEMA_VERSION,
+            characters: Vec::new(),
+            removed: Vec::new(),
+            inventories: Vec::new(),
+            ground: None,
+            spawners: None,
+        });
+
+        // Every online character, whole: its record and its entire carried
+        // inventory — worn gear, backpack, bank box and everything nested. A save is
+        // a complete picture of who is here and what they hold, so nothing of value
+        // depends on whether its owner happened to move this tick.
+        let online: Vec<EntityId> = self.state.players.values().copied().collect();
+        for entity in online {
+            if let Some(record) = Self::record_of(&self.state.registry, entity) {
+                let owner = record.serial;
+                snapshot.characters.push(record);
+                snapshot.inventories.push(Inventory {
+                    owner,
+                    items: self.inventory_of(entity),
+                });
             }
-            snapshot.ground = Some(self.ground_items());
-            debug!(tick = ticks, rows = snapshot.len(), "snapshot taken");
-            self.saves.push(snapshot);
         }
+
+        // The whole ground, every save — decoration excluded. Dropped loot and
+        // stray items persist whether or not anyone was active this tick.
+        snapshot.ground = Some(self.ground_items());
+        // And every spawn region with its timer, so populated areas stay populated
+        // across a restart and a rare spawn's wait is not reset.
+        snapshot.spawners = Some(self.spawner_records());
+
+        // Skip only a genuinely empty save, so a quiet, empty shard queues nothing.
+        let ground_empty = snapshot.ground.as_ref().is_none_or(Vec::is_empty);
+        let spawners_empty = snapshot.spawners.as_ref().is_none_or(Vec::is_empty);
+        if snapshot.characters.is_empty()
+            && snapshot.removed.is_empty()
+            && ground_empty
+            && spawners_empty
+        {
+            return;
+        }
+        debug!(tick = ticks, rows = snapshot.len(), "snapshot taken");
+        self.saves.push(snapshot);
     }
 
     /// Every item a character is carrying — worn, and inside anything worn, at any
@@ -1082,6 +1114,7 @@ impl World {
             graphic: graphic.id,
             hue: graphic.hue,
             amount,
+            stackable: registry.has::<Stackable>(item),
             container_gump,
             location,
         })
@@ -1181,6 +1214,9 @@ impl World {
         if record.amount > 1 {
             self.state.registry.insert(entity, Amount(record.amount));
         }
+        if record.stackable {
+            self.state.registry.insert(entity, Stackable);
+        }
         if let Some(gump) = record.container_gump {
             self.state.registry.insert(entity, Container { gump });
         }
@@ -1224,8 +1260,8 @@ impl World {
             );
             if record.amount > 1 {
                 self.state.registry.insert(entity, Amount(record.amount));
-                // A pile is stackable; single stackables (a lone gold coin) lose the
-                // mark until re-lifted — a known gap, not a loss of the amount.
+            }
+            if record.stackable {
                 self.state.registry.insert(entity, Stackable);
             }
             if let Some(gump) = record.container_gump {
@@ -1313,7 +1349,7 @@ impl World {
                 connection,
                 response,
             } => self.handle_target(connection, response),
-            Command::RegisterSpawner { spawner } => self.spawners.push(spawner),
+            Command::RegisterSpawner { spawner } => self.register_spawner(spawner),
             Command::ClearSpawners => self.clear_spawners(),
             Command::Decorate {
                 facet,
@@ -2273,6 +2309,96 @@ impl World {
     }
 
     /// Drop every spawn region and despawn the creatures they were maintaining —
+    /// Register a spawn region, giving it a fresh id and replacing any earlier one
+    /// over the same box. Re-running the pack's "populate" does not stack a second
+    /// spawner on a region — it re-places it, with a reset timer — and after a
+    /// restart the regions come from the store, not from here, so their timers hold.
+    fn register_spawner(&mut self, mut spawner: crate::spawner::Spawner) {
+        self.spawners.retain(|s| s.area != spawner.area);
+        spawner.id = self.next_spawner_id;
+        self.next_spawner_id += 1;
+        self.spawners.push(spawner);
+    }
+
+    /// The spawn regions as saveable records. The live timer is a tick count; it is
+    /// saved as the *seconds still to wait*, so it means the same after a restart
+    /// resets the tick counter — a rare spawn killed with hours left comes back with
+    /// those hours ahead of it, and downtime does not spend them.
+    fn spawner_records(&self) -> Vec<openshard_persistence::SpawnerRecord> {
+        let now = self.state.ticks;
+        self.spawners
+            .iter()
+            .map(|s| openshard_persistence::SpawnerRecord {
+                id: s.id,
+                facet: s.area.facet,
+                x: s.area.x,
+                y: s.area.y,
+                width: s.area.width,
+                height: s.area.height,
+                max_count: s.max_count,
+                respawn_secs: s.respawn_delay / TICKS_PER_SECOND,
+                remaining_secs: s.next_spawn.saturating_sub(now) / TICKS_PER_SECOND,
+                creatures: s
+                    .creatures
+                    .iter()
+                    .map(|c| openshard_persistence::CreatureData {
+                        body: c.body,
+                        hue: c.hue,
+                        hits: c.hits,
+                        notoriety: c.notoriety,
+                        damage: c.damage,
+                        resistance: c.resistance,
+                        swing: c.swing,
+                        sight: c.sight,
+                        wander: c.wander,
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
+    /// Re-create the spawn regions from saved records at boot. The remaining-wait
+    /// seconds become a tick offset from now (the tick counter is zero at boot), so
+    /// the timer resumes where it stood; downtime is not counted against it. Call
+    /// once, before anyone connects.
+    pub fn restore_spawners(&mut self, records: Vec<openshard_persistence::SpawnerRecord>) {
+        let now = self.state.ticks;
+        for record in records {
+            self.next_spawner_id = self.next_spawner_id.max(record.id + 1);
+            let area = crate::spawner::SpawnArea {
+                x: record.x,
+                y: record.y,
+                width: record.width,
+                height: record.height,
+                facet: record.facet,
+            };
+            let creatures = record
+                .creatures
+                .into_iter()
+                .map(|c| crate::spawner::CreatureTemplate {
+                    body: c.body,
+                    hue: c.hue,
+                    hits: c.hits,
+                    notoriety: c.notoriety,
+                    damage: c.damage,
+                    resistance: c.resistance,
+                    swing: c.swing,
+                    sight: c.sight,
+                    wander: c.wander,
+                })
+                .collect();
+            let mut spawner = crate::spawner::Spawner::new(
+                record.id,
+                area,
+                creatures,
+                record.max_count,
+                record.respawn_secs * TICKS_PER_SECOND,
+            );
+            spawner.next_spawn = now + record.remaining_secs * TICKS_PER_SECOND;
+            self.spawners.push(spawner);
+        }
+    }
+
     /// "Clear spawns". A creature belongs to a region by its [`SpawnedBy`]; taking
     /// it off every screen before despawning, so no client is left drawing a ghost.
     fn clear_spawners(&mut self) {
@@ -2645,10 +2771,16 @@ impl World {
             self.departed.push(record.clone());
             // The carried inventory, walked now for the same reason as the record:
             // in a moment the items are despawned with the character and there is
-            // nothing left to read. A returning character equips this back.
+            // nothing left to read. Two copies, for two readers: the journal's for
+            // the store, and `pending_inventories` so a re-login *this run* re-equips
+            // it — the same fast-relogin path the departed record cache serves, and
+            // without it a relog before the next save loses everything carried.
+            let items = self.inventory_of(entity);
+            self.pending_inventories
+                .insert(record.serial, items.clone());
             self.journal.keep_inventory(Inventory {
                 owner: record.serial,
-                items: self.inventory_of(entity),
+                items,
             });
             self.journal.keep(record);
         }
@@ -5799,6 +5931,30 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn dot_save_forces_a_snapshot_and_tells_everyone() {
+        // A staff `.save` writes now, without pausing, even with the periodic save
+        // turned off — and every player is told it happened.
+        let mut world = World::new(START).with_save_every(0);
+        let now = Instant::now();
+        let gm = enter_gm(&mut world, now);
+        let _ = world.drain_saves().count();
+        let _ = packets_for(&mut world, gm);
+
+        gm_say(&mut world, gm, ".save", now);
+
+        assert!(
+            world.drain_saves().next().is_some(),
+            "the save was forced despite the cadence being off"
+        );
+        assert!(
+            packets_for(&mut world, gm)
+                .iter()
+                .any(|p| { p[0] == 0x1C && String::from_utf8_lossy(p).contains("being saved") }),
+            "players were told the world is being saved"
+        );
+    }
+
+    #[test]
     fn a_gm_can_teleport_add_and_set() {
         let now = Instant::now();
         let mut world = world();
@@ -6300,7 +6456,7 @@ pub(crate) mod tests {
             facet: 0,
         };
         world.queue(Command::RegisterSpawner {
-            spawner: Spawner::new(area, vec![creature], 3, 0),
+            spawner: Spawner::new(0, area, vec![creature], 3, 0),
         });
 
         // One creature per region per pass, so a few ticks fill it to the ceiling
@@ -6521,6 +6677,7 @@ pub(crate) mod tests {
             .registry
             .insert(gold, Graphic { id: 0x0EED, hue: 0 });
         home.state.registry.insert(gold, Amount(500));
+        home.state.registry.insert(gold, Stackable);
         home.state.registry.insert(
             gold,
             Contained {
@@ -6533,6 +6690,12 @@ pub(crate) mod tests {
 
         // What persistence would carry: the backpack (worn) and the gold (inside).
         let records = home.inventory_of(entity);
+        assert!(
+            records
+                .iter()
+                .any(|r| r.serial == gold_serial.raw() && r.stackable),
+            "the gold is saved as stackable"
+        );
         assert!(
             records.iter().any(|r| r.serial == backpack_serial.raw()
                 && matches!(r.location, ItemLocation::Equipped { .. })),
@@ -6583,10 +6746,211 @@ pub(crate) mod tests {
             .entity_of(gold_serial)
             .expect("the gold is back on its serial");
         assert_eq!(shard.registry().get::<Amount>(gold).unwrap().0, 500);
+        assert!(
+            shard.registry().has::<Stackable>(gold),
+            "the gold came back stackable, so it still merges with more"
+        );
         assert_eq!(
             shard.registry().get::<Contained>(gold).unwrap().container,
             backpack_serial,
             "and back inside the same backpack"
+        );
+    }
+
+    #[test]
+    fn a_relogin_in_the_same_run_keeps_the_inventory() {
+        use openshard_entities::SerialKind;
+
+        // The bug the user hit: logging out and back in *without a restart* lost the
+        // backpack, because the pending-inventory cache was only filled at boot.
+        let mut world = world();
+        let now = Instant::now();
+        let conn = enter(&mut world, now);
+        let entity = world.state.players[&conn];
+        let char_serial = world.registry().serial_of(entity).unwrap().raw();
+        let (backpack, _) = world
+            .registry()
+            .query::<Equipped>()
+            .find(|(_, w)| w.layer == BACKPACK_LAYER)
+            .unwrap();
+        let backpack_serial = world.registry().serial_of(backpack).unwrap();
+        let (gold, gold_serial) = world
+            .state
+            .registry
+            .spawn_with_serial(SerialKind::Item)
+            .unwrap();
+        world
+            .state
+            .registry
+            .insert(gold, Graphic { id: 0x0EED, hue: 0 });
+        world.state.registry.insert(gold, Amount(300));
+        world.state.registry.insert(
+            gold,
+            Contained {
+                container: backpack_serial,
+                x: 0,
+                y: 0,
+                grid: 0,
+            },
+        );
+
+        // Log out and, in the same world, log the same character back in.
+        world.queue(Command::Disconnect { connection: conn });
+        world.tick(now);
+        let conn = connection();
+        world.queue(Command::Enter {
+            connection: conn,
+            version: ClientVersion::TOL,
+            account: "admin".to_owned(),
+            name: "Lord British".to_owned(),
+            serial: Some(char_serial),
+            position: Some(Point::new(1500, 1000, 0)),
+            facet: 0,
+            appearance: None,
+            access: AccessLevel::Player,
+        });
+        world.tick(now);
+
+        let gold = world
+            .registry()
+            .entity_of(gold_serial)
+            .expect("the gold came back on relog");
+        assert_eq!(world.registry().get::<Amount>(gold).unwrap().0, 300);
+    }
+
+    #[test]
+    fn a_spawner_respawn_timer_survives_a_restart() {
+        use crate::spawner::{SpawnArea, Spawner};
+
+        // The user's case: a rare spawn on a long timer, killed with time still to
+        // wait, must come back with that wait ahead of it — not pop again the moment
+        // the shard restarts.
+        let mut home = world();
+        let area = SpawnArea {
+            x: START.0,
+            y: START.1,
+            width: 1,
+            height: 1,
+            facet: 0,
+        };
+        // A 100-second respawn region.
+        home.register_spawner(Spawner::new(0, area, vec![], 1, 100 * TICKS_PER_SECOND));
+        // Pretend it spawned a while ago and has 60 seconds left to wait.
+        home.state.ticks = 5_000;
+        home.spawners[0].next_spawn = home.state.ticks + 60 * TICKS_PER_SECOND;
+
+        // What the save carries.
+        let records = home.spawner_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].remaining_secs, 60, "sixty seconds still to wait");
+        assert_eq!(records[0].respawn_secs, 100);
+        assert!(records[0].id > 0, "it was given a real id on registration");
+
+        // Restart: a fresh world, tick counter back at zero, restores the region.
+        let mut shard = world();
+        shard.restore_spawners(records);
+        assert_eq!(shard.spawners.len(), 1);
+        assert_eq!(
+            shard.spawners[0].next_spawn,
+            60 * TICKS_PER_SECOND,
+            "the sixty seconds are still ahead of it, not reset to zero"
+        );
+        assert_eq!(shard.spawners[0].respawn_delay, 100 * TICKS_PER_SECOND);
+    }
+
+    #[test]
+    fn re_registering_a_region_replaces_it_rather_than_stacking() {
+        use crate::spawner::{SpawnArea, Spawner};
+
+        let mut world = world();
+        let area = SpawnArea {
+            x: 100,
+            y: 100,
+            width: 5,
+            height: 5,
+            facet: 0,
+        };
+        world.register_spawner(Spawner::new(0, area, vec![], 3, 40));
+        world.register_spawner(Spawner::new(0, area, vec![], 3, 40));
+        assert_eq!(
+            world.spawners.len(),
+            1,
+            "the same region registered twice is one spawner, not two"
+        );
+    }
+
+    #[test]
+    fn a_snapshot_saves_an_idle_online_character_and_the_ground() {
+        use openshard_entities::SerialKind;
+
+        // A save must capture an online character's inventory and loose ground items
+        // even when nobody moved — an item picked up without a step, gold dropped and
+        // left. The old save only ran when the journal was dirty and only walked
+        // dirty characters, which is how backpacks and dropped gold went missing.
+        let mut world = world();
+        let now = Instant::now();
+        let conn = enter(&mut world, now);
+        let entity = world.state.players[&conn];
+        let (backpack, _) = world
+            .registry()
+            .query::<Equipped>()
+            .find(|(_, w)| w.layer == BACKPACK_LAYER)
+            .unwrap();
+        let backpack_serial = world.registry().serial_of(backpack).unwrap();
+        // A backpack item and a loose ground item.
+        let (bagged, _) = world
+            .state
+            .registry
+            .spawn_with_serial(SerialKind::Item)
+            .unwrap();
+        world
+            .state
+            .registry
+            .insert(bagged, Graphic { id: 0x0EED, hue: 0 });
+        world.state.registry.insert(
+            bagged,
+            Contained {
+                container: backpack_serial,
+                x: 0,
+                y: 0,
+                grid: 0,
+            },
+        );
+        items::spawn_item(
+            &mut world.state,
+            0x1BFB,
+            0,
+            1,
+            false,
+            Point::new(1365, 1600, 0),
+            0,
+        );
+
+        // Tick once to settle, draining any snapshots the enter produced, then force
+        // a fresh snapshot with no movement in between.
+        world.tick(now);
+        let _ = world.drain_saves().count();
+        world.take_snapshot();
+
+        let snapshot = world.drain_saves().next().expect("a snapshot was taken");
+        let owner = world.registry().serial_of(entity).unwrap().raw();
+        assert!(
+            snapshot.characters.iter().any(|c| c.serial == owner),
+            "the idle online character was saved"
+        );
+        let inv = snapshot
+            .inventories
+            .iter()
+            .find(|inv| inv.owner == owner)
+            .expect("its inventory was walked");
+        assert!(
+            inv.items.iter().any(|i| i.graphic == 0x0EED),
+            "the backpack gold is in the saved inventory"
+        );
+        let ground = snapshot.ground.as_ref().expect("the ground was swept");
+        assert!(
+            ground.iter().any(|i| i.graphic == 0x1BFB),
+            "the loose ground item was saved"
         );
     }
 
@@ -7213,19 +7577,37 @@ mod persistence_tests {
     }
 
     #[test]
-    fn a_quiet_world_offers_nothing() {
-        // The reason the tick offers an Option and not an empty snapshot. A
-        // shard where nobody is doing anything must not queue a transaction
-        // twenty times a second to say so.
+    fn an_empty_world_offers_nothing() {
+        // No transaction just to say a shard is idle. With nobody online and
+        // nothing loose on the ground, a save writes nothing and so is skipped.
+        //
+        // Note the deliberate change from earlier: an *online* character is now
+        // saved every cadence whether or not it moved — picking an item up takes no
+        // step, so the dirty set is not a safe basis for saving what someone holds.
+        // That safety is worth a small, periodic write per online player; this test
+        // guards the other side, that an empty shard still writes nothing.
         let mut world = eager();
         let now = Instant::now();
-        enter(&mut world, now);
-        let _ = world.drain_saves();
-
         for tick in 1..10 {
             world.tick(now + WALK_INTERVAL * tick);
         }
         assert_eq!(world.drain_saves().count(), 0);
+    }
+
+    #[test]
+    fn an_online_character_is_saved_every_cadence_even_when_idle() {
+        // The safety the change above buys: a character that logs in and stands
+        // still is still written, so an item it picked up without moving is not lost
+        // at the next restart.
+        let mut world = eager();
+        let now = Instant::now();
+        enter(&mut world, now);
+        let _ = world.drain_saves().count();
+        world.tick(now + WALK_INTERVAL);
+        assert!(
+            world.drain_saves().next().is_some(),
+            "an idle online character is still saved"
+        );
     }
 
     #[test]

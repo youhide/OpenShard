@@ -28,7 +28,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// - v1: characters only.
 /// - v2: items — a character's carried inventory, and loose things on the ground.
-pub const SCHEMA_VERSION: u32 = 2;
+/// - v3: an item's `stackable` flag.
+/// - v4: spawn regions and their respawn timers.
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// An account, as saved.
 ///
@@ -144,10 +146,73 @@ pub struct ItemRecord {
     pub hue: u16,
     /// The stack amount; `1` for a single item.
     pub amount: u16,
+    /// Whether it stacks — a pile of gold merges with another, a sword does not.
+    /// Saved so a restored pile still stacks; without it a lone gold coin would
+    /// stop merging until re-lifted.
+    pub stackable: bool,
     /// The container gump if this item is itself a container, else `None`.
     pub container_gump: Option<u16>,
     /// Where it is.
     pub location: ItemLocation,
+}
+
+/// One creature kind a spawn region may put down, as saved — a plain mirror of
+/// the world's creature template, kept here so the on-disk shape does not move
+/// every time the simulation's does.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct CreatureData {
+    /// The body graphic.
+    pub body: u16,
+    /// Its hue.
+    pub hue: u16,
+    /// Starting and maximum hit points.
+    pub hits: u16,
+    /// Health-bar colour, the notoriety wire value.
+    pub notoriety: u8,
+    /// Melee damage before resistance.
+    pub damage: u16,
+    /// Physical resistance, a percentage.
+    pub resistance: u8,
+    /// Swing cadence in ticks; `0` derives it from dexterity.
+    pub swing: u64,
+    /// How far it notices a target.
+    pub sight: u8,
+    /// Whether it drifts when idle.
+    pub wander: bool,
+}
+
+/// A spawn region, as saved.
+///
+/// # Why the timer is *remaining seconds*, not a wall-clock time
+///
+/// The requirement is that a rare spawn killed shortly before a restart comes back
+/// with the same wait ahead of it — killed with five hours left, five hours left
+/// on load, whatever the shard was down for. So the timer is stored as the seconds
+/// still to wait, not an absolute time: on load it counts down from there, and
+/// downtime does not eat into it. Seconds, not ticks, so it survives the tick
+/// counter resetting to zero at boot.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct SpawnerRecord {
+    /// Its stable id, the key it is replaced by.
+    pub id: u32,
+    /// Which facet.
+    pub facet: u8,
+    /// The region's north-west corner and size.
+    pub x: u16,
+    /// North-west corner y.
+    pub y: u16,
+    /// Region width.
+    pub width: u16,
+    /// Region height.
+    pub height: u16,
+    /// The most live creatures it keeps.
+    pub max_count: u16,
+    /// The respawn delay, in seconds.
+    pub respawn_secs: u64,
+    /// Seconds still to wait before the next spawn; `0` is ready now.
+    pub remaining_secs: u64,
+    /// The creatures it may put down.
+    pub creatures: Vec<CreatureData>,
 }
 
 /// A character's whole carried inventory, replaced as a unit.
@@ -196,6 +261,7 @@ mod tests {
                 graphic: 0x0E75,
                 hue: 0,
                 amount: 1,
+                stackable: false,
                 container_gump: Some(0x003C),
                 location,
             };

@@ -216,6 +216,10 @@ pub struct WorldState {
     pub pending_targets: HashMap<EntityId, TargetPurpose>,
     /// The tunable rules — swing era, speech ranges, timers — the systems read.
     pub gameplay: Gameplay,
+    /// Set by a staff `.save` to ask the tick for an immediate snapshot. The world
+    /// clears it once taken — a request, not the save itself, because taking the
+    /// snapshot is the `World`'s to do, not a system's.
+    pub save_requested: bool,
 }
 
 /// What a raised targeting cursor is waiting to do with the click.

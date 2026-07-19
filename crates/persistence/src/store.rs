@@ -22,7 +22,7 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 
 use crate::journal::Snapshot;
-use crate::record::{AccountRecord, CharacterRecord, ItemRecord, SCHEMA_VERSION};
+use crate::record::{AccountRecord, CharacterRecord, ItemRecord, SpawnerRecord, SCHEMA_VERSION};
 
 /// What a store could not do.
 #[derive(Debug, thiserror::Error)]
@@ -72,6 +72,11 @@ pub trait Store: Send + Sync {
     /// character its own when it logs in.
     async fn items(&self) -> Result<Vec<ItemRecord>, StoreError>;
 
+    /// Every saved spawn region, with the respawn timer it was saved with. The
+    /// caller re-creates them at boot so populated areas stay populated across a
+    /// restart, and a rare spawn keeps its remaining wait.
+    async fn spawners(&self) -> Result<Vec<SpawnerRecord>, StoreError>;
+
     /// Every account.
     async fn accounts(&self) -> Result<Vec<AccountRecord>, StoreError>;
 
@@ -91,6 +96,8 @@ pub struct MemoryStore {
     characters: Mutex<HashMap<u32, CharacterRecord>>,
     /// Items keyed by serial: inventory (owner is a character) and ground (owner 0).
     items: Mutex<HashMap<u32, ItemRecord>>,
+    /// Spawn regions keyed by id.
+    spawners: Mutex<HashMap<u32, SpawnerRecord>>,
     accounts: Mutex<HashMap<String, AccountRecord>>,
     /// How many saves have landed. What a test asserts on.
     saves: Mutex<u64>,
@@ -150,6 +157,16 @@ impl Store for MemoryStore {
             // A gone character takes its inventory with it.
             items.retain(|_, item| item.owner != *serial);
         }
+        drop(items);
+        drop(characters);
+        // A spawner sweep replaces the whole set at once.
+        if let Some(records) = &snapshot.spawners {
+            let mut spawners = self.spawners.lock().expect("the mutex is never poisoned");
+            spawners.clear();
+            for record in records {
+                spawners.insert(record.id, record.clone());
+            }
+        }
         *self.saves.lock().expect("the mutex is never poisoned") += 1;
         Ok(())
     }
@@ -167,6 +184,16 @@ impl Store for MemoryStore {
     async fn items(&self) -> Result<Vec<ItemRecord>, StoreError> {
         Ok(self
             .items
+            .lock()
+            .expect("the mutex is never poisoned")
+            .values()
+            .cloned()
+            .collect())
+    }
+
+    async fn spawners(&self) -> Result<Vec<SpawnerRecord>, StoreError> {
+        Ok(self
+            .spawners
             .lock()
             .expect("the mutex is never poisoned")
             .values()
@@ -220,6 +247,7 @@ mod tests {
             removed,
             inventories: vec![],
             ground: None,
+            spawners: None,
         }
     }
 
@@ -272,6 +300,7 @@ mod tests {
             removed: vec![],
             inventories: vec![],
             ground: None,
+            spawners: None,
         };
         let error = store.save(&future).await.expect_err("must refuse");
         assert!(matches!(error, StoreError::SchemaMismatch { .. }));
@@ -290,6 +319,7 @@ mod tests {
             graphic: 0x0EED,
             hue: 0,
             amount: 1,
+            stackable: false,
             container_gump: None,
             location: crate::record::ItemLocation::Contained {
                 container,
@@ -307,6 +337,7 @@ mod tests {
             graphic: 0x1BFB,
             hue: 0,
             amount: 1,
+            stackable: false,
             container_gump: None,
             location: crate::record::ItemLocation::Ground {
                 facet: 0,
@@ -333,6 +364,7 @@ mod tests {
                     items: vec![contained(0x4000_0001, 1, 1), contained(0x4000_0002, 1, 1)],
                 }],
                 ground: None,
+                spawners: None,
             })
             .await
             .expect("save");
@@ -347,6 +379,7 @@ mod tests {
                     items: vec![contained(0x4000_0001, 1, 1)],
                 }],
                 ground: None,
+                spawners: None,
             })
             .await
             .expect("save");
@@ -369,6 +402,7 @@ mod tests {
                     items: vec![contained(0x4000_0001, 1, 1)],
                 }],
                 ground: Some(vec![ground(0x4000_0010)]),
+                spawners: None,
             })
             .await
             .expect("save");
@@ -381,6 +415,7 @@ mod tests {
                 removed: vec![],
                 inventories: vec![],
                 ground: Some(vec![ground(0x4000_0011)]),
+                spawners: None,
             })
             .await
             .expect("save");

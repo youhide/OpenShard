@@ -43,7 +43,9 @@ use tokio::sync::Mutex;
 use tokio_postgres::{Client, NoTls, Row};
 
 use crate::journal::Snapshot;
-use crate::record::{AccountRecord, CharacterRecord, ItemLocation, ItemRecord, SCHEMA_VERSION};
+use crate::record::{
+    AccountRecord, CharacterRecord, ItemLocation, ItemRecord, SpawnerRecord, SCHEMA_VERSION,
+};
 use crate::store::{Store, StoreError};
 
 /// The tables, created on connect. `IF NOT EXISTS` so connecting to a database
@@ -73,12 +75,13 @@ CREATE TABLE IF NOT EXISTS characters (
     facing  INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS items (
-    serial   BIGINT PRIMARY KEY,
-    owner    BIGINT NOT NULL,
-    graphic  INTEGER NOT NULL,
-    hue      INTEGER NOT NULL,
-    amount   INTEGER NOT NULL,
-    gump     INTEGER,
+    serial    BIGINT PRIMARY KEY,
+    owner     BIGINT NOT NULL,
+    graphic   INTEGER NOT NULL,
+    hue       INTEGER NOT NULL,
+    amount    INTEGER NOT NULL,
+    stackable BOOLEAN NOT NULL,
+    gump      INTEGER,
     loc_kind INTEGER NOT NULL,
     facet    INTEGER NOT NULL,
     x        INTEGER NOT NULL,
@@ -88,7 +91,19 @@ CREATE TABLE IF NOT EXISTS items (
     grid     INTEGER NOT NULL,
     layer    INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS items_owner ON items (owner);";
+CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
+CREATE TABLE IF NOT EXISTS spawners (
+    id             BIGINT PRIMARY KEY,
+    facet          INTEGER NOT NULL,
+    x              INTEGER NOT NULL,
+    y              INTEGER NOT NULL,
+    width          INTEGER NOT NULL,
+    height         INTEGER NOT NULL,
+    max_count      INTEGER NOT NULL,
+    respawn_secs   BIGINT NOT NULL,
+    remaining_secs BIGINT NOT NULL,
+    creatures      TEXT NOT NULL
+);";
 
 /// A `Store` kept in a PostgreSQL database.
 ///
@@ -247,6 +262,37 @@ impl Store for PgStore {
                 .await
                 .map_err(database)?;
         }
+        if let Some(spawners) = &snapshot.spawners {
+            transaction
+                .execute("DELETE FROM spawners", &[])
+                .await
+                .map_err(database)?;
+            for spawner in spawners {
+                let creatures = serde_json::to_string(&spawner.creatures)
+                    .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+                transaction
+                    .execute(
+                        "INSERT INTO spawners \
+                         (id, facet, x, y, width, height, max_count, \
+                          respawn_secs, remaining_secs, creatures) \
+                         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+                        &[
+                            &i64::from(spawner.id),
+                            &i32::from(spawner.facet),
+                            &i32::from(spawner.x),
+                            &i32::from(spawner.y),
+                            &i32::from(spawner.width),
+                            &i32::from(spawner.height),
+                            &i32::from(spawner.max_count),
+                            &(spawner.respawn_secs as i64),
+                            &(spawner.remaining_secs as i64),
+                            &creatures,
+                        ],
+                    )
+                    .await
+                    .map_err(database)?;
+            }
+        }
         transaction.commit().await.map_err(database)?;
         Ok(())
     }
@@ -268,13 +314,26 @@ impl Store for PgStore {
         let client = self.client.lock().await;
         let rows = client
             .query(
-                "SELECT serial, owner, graphic, hue, amount, gump, \
+                "SELECT serial, owner, graphic, hue, amount, stackable, gump, \
                  loc_kind, facet, x, y, z, parent, grid, layer FROM items",
                 &[],
             )
             .await
             .map_err(database)?;
         rows.iter().filter_map(item_from_row).collect()
+    }
+
+    async fn spawners(&self) -> Result<Vec<SpawnerRecord>, StoreError> {
+        let client = self.client.lock().await;
+        let rows = client
+            .query(
+                "SELECT id, facet, x, y, width, height, max_count, \
+                 respawn_secs, remaining_secs, creatures FROM spawners",
+                &[],
+            )
+            .await
+            .map_err(database)?;
+        rows.iter().map(spawner_from_row).collect()
     }
 
     async fn accounts(&self) -> Result<Vec<AccountRecord>, StoreError> {
@@ -371,12 +430,13 @@ async fn insert_item(
     transaction
         .execute(
             "INSERT INTO items \
-             (serial, owner, graphic, hue, amount, gump, \
+             (serial, owner, graphic, hue, amount, stackable, gump, \
               loc_kind, facet, x, y, z, parent, grid, layer) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) \
              ON CONFLICT (serial) DO UPDATE SET \
              owner = EXCLUDED.owner, graphic = EXCLUDED.graphic, hue = EXCLUDED.hue, \
-             amount = EXCLUDED.amount, gump = EXCLUDED.gump, loc_kind = EXCLUDED.loc_kind, \
+             amount = EXCLUDED.amount, stackable = EXCLUDED.stackable, gump = EXCLUDED.gump, \
+             loc_kind = EXCLUDED.loc_kind, \
              facet = EXCLUDED.facet, x = EXCLUDED.x, y = EXCLUDED.y, z = EXCLUDED.z, \
              parent = EXCLUDED.parent, grid = EXCLUDED.grid, layer = EXCLUDED.layer",
             &[
@@ -385,6 +445,7 @@ async fn insert_item(
                 &i32::from(item.graphic),
                 &i32::from(item.hue),
                 &i32::from(item.amount),
+                &item.stackable,
                 &item.container_gump.map(i32::from),
                 &kind,
                 &facet,
@@ -405,14 +466,14 @@ async fn insert_item(
 /// is one no version wrote. Every narrowing is checked, like [`character_from_row`].
 fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
     fn build(row: &Row) -> Result<Option<ItemRecord>, StoreError> {
-        let kind: i32 = row.get(6);
-        let facet = u8::try_from(row.get::<_, i32>(7)).map_err(|_| corrupt("facet"))?;
-        let x = u16::try_from(row.get::<_, i32>(8)).map_err(|_| corrupt("x"))?;
-        let y = u16::try_from(row.get::<_, i32>(9)).map_err(|_| corrupt("y"))?;
-        let z = i8::try_from(row.get::<_, i32>(10)).map_err(|_| corrupt("z"))?;
-        let parent = u32::try_from(row.get::<_, i64>(11)).map_err(|_| corrupt("parent"))?;
-        let grid = u8::try_from(row.get::<_, i32>(12)).map_err(|_| corrupt("grid"))?;
-        let layer = u8::try_from(row.get::<_, i32>(13)).map_err(|_| corrupt("layer"))?;
+        let kind: i32 = row.get(7);
+        let facet = u8::try_from(row.get::<_, i32>(8)).map_err(|_| corrupt("facet"))?;
+        let x = u16::try_from(row.get::<_, i32>(9)).map_err(|_| corrupt("x"))?;
+        let y = u16::try_from(row.get::<_, i32>(10)).map_err(|_| corrupt("y"))?;
+        let z = i8::try_from(row.get::<_, i32>(11)).map_err(|_| corrupt("z"))?;
+        let parent = u32::try_from(row.get::<_, i64>(12)).map_err(|_| corrupt("parent"))?;
+        let grid = u8::try_from(row.get::<_, i32>(13)).map_err(|_| corrupt("grid"))?;
+        let layer = u8::try_from(row.get::<_, i32>(14)).map_err(|_| corrupt("layer"))?;
         let location = match kind {
             0 => ItemLocation::Ground { facet, x, y, z },
             1 => ItemLocation::Contained {
@@ -433,14 +494,35 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
             graphic: u16::try_from(row.get::<_, i32>(2)).map_err(|_| corrupt("graphic"))?,
             hue: u16::try_from(row.get::<_, i32>(3)).map_err(|_| corrupt("hue"))?,
             amount: u16::try_from(row.get::<_, i32>(4)).map_err(|_| corrupt("amount"))?,
+            stackable: row.get(5),
             container_gump: row
-                .get::<_, Option<i32>>(5)
+                .get::<_, Option<i32>>(6)
                 .map(|g| u16::try_from(g).map_err(|_| corrupt("gump")))
                 .transpose()?,
             location,
         }))
     }
     build(row).transpose()
+}
+
+/// Rebuild a [`SpawnerRecord`] from a row, checking every narrowing and parsing
+/// the creature list back from its JSON column.
+fn spawner_from_row(row: &Row) -> Result<SpawnerRecord, StoreError> {
+    let creatures: String = row.get(9);
+    Ok(SpawnerRecord {
+        id: u32::try_from(row.get::<_, i64>(0)).map_err(|_| corrupt("id"))?,
+        facet: u8::try_from(row.get::<_, i32>(1)).map_err(|_| corrupt("facet"))?,
+        x: u16::try_from(row.get::<_, i32>(2)).map_err(|_| corrupt("x"))?,
+        y: u16::try_from(row.get::<_, i32>(3)).map_err(|_| corrupt("y"))?,
+        width: u16::try_from(row.get::<_, i32>(4)).map_err(|_| corrupt("width"))?,
+        height: u16::try_from(row.get::<_, i32>(5)).map_err(|_| corrupt("height"))?,
+        max_count: u16::try_from(row.get::<_, i32>(6)).map_err(|_| corrupt("max_count"))?,
+        respawn_secs: u64::try_from(row.get::<_, i64>(7)).map_err(|_| corrupt("respawn_secs"))?,
+        remaining_secs: u64::try_from(row.get::<_, i64>(8))
+            .map_err(|_| corrupt("remaining_secs"))?,
+        creatures: serde_json::from_str(&creatures)
+            .map_err(|e| StoreError::Corrupt(e.to_string()))?,
+    })
 }
 
 /// A column held a value outside the range of the record field it maps to.
@@ -494,6 +576,7 @@ mod tests {
             removed,
             inventories: vec![],
             ground: None,
+            spawners: None,
         }
     }
 
@@ -651,6 +734,7 @@ mod tests {
             removed: vec![],
             inventories: vec![],
             ground: None,
+            spawners: None,
         };
         let error = store.save(&future).await.expect_err("must refuse");
         assert!(matches!(error, StoreError::SchemaMismatch { .. }));

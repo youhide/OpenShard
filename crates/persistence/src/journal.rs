@@ -65,7 +65,7 @@ use std::collections::HashSet;
 
 use openshard_entities::{EntityId, Serial};
 
-use crate::record::{CharacterRecord, Inventory, ItemRecord, SCHEMA_VERSION};
+use crate::record::{CharacterRecord, Inventory, ItemRecord, SpawnerRecord, SCHEMA_VERSION};
 
 /// A consistent picture of everything that changed, taken at one tick.
 ///
@@ -90,6 +90,9 @@ pub struct Snapshot {
     /// replaces the whole ground; `None` leaves the stored ground untouched (this
     /// snapshot only carried character changes).
     pub ground: Option<Vec<ItemRecord>>,
+    /// Every spawn region and its respawn timer, when this snapshot swept them.
+    /// `Some(_)` replaces the whole set; `None` leaves the stored spawners be.
+    pub spawners: Option<Vec<SpawnerRecord>>,
 }
 
 impl Snapshot {
@@ -99,6 +102,7 @@ impl Snapshot {
             && self.removed.is_empty()
             && self.inventories.is_empty()
             && self.ground.is_none()
+            && self.spawners.is_none()
     }
 
     /// How many rows this would touch.
@@ -111,6 +115,7 @@ impl Snapshot {
                 .map(|inv| inv.items.len())
                 .sum::<usize>()
             + self.ground.as_ref().map_or(0, Vec::len)
+            + self.spawners.as_ref().map_or(0, Vec::len)
     }
 }
 
@@ -259,6 +264,7 @@ impl Journal {
             removed,
             inventories,
             ground: None,
+            spawners: None,
         })
     }
 }
