@@ -12,7 +12,7 @@
 
 use openshard_combat as combat;
 use openshard_entities::{EntityId, Serial};
-use openshard_movement::find_path;
+use openshard_movement::{find_path, Terrain};
 use openshard_protocol::{Direction, Point};
 use openshard_state::components::{Brain, Client, Combat, Heading, Hitpoints, Position};
 use openshard_state::sectors::{distance, in_range};
@@ -131,13 +131,21 @@ fn nearest_player_in_sight(
     facet: u8,
     sight: u8,
 ) -> Option<Serial> {
-    let sectors = &state.facet_state(facet).sectors;
+    let facet_state = state.facet_state(facet);
+    let live = facet_state.live_terrain();
+    let sectors = &facet_state.sectors;
     let mut best: Option<(u32, Serial)> = None;
     for (id, pos) in sectors.nearby(from, u32::from(sight)) {
         if id == creature || !state.registry.has::<Client>(id) {
             continue;
         }
         if !in_range(from, pos, u32::from(sight)) {
+            continue;
+        }
+        // Noticing needs a sight line — both reference emulators gate the
+        // *acquisition* on line of sight and keep the chase itself on the
+        // cheaper range check, and so does this.
+        if !live.sight_clear(from, pos) {
             continue;
         }
         if state

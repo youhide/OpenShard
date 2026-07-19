@@ -4814,3 +4814,71 @@ fn an_opened_door_lets_a_step_through_and_blocks_again_when_it_shuts() {
         "the auto-closed door blocks again"
     );
 }
+
+#[test]
+fn a_creature_does_not_notice_prey_through_a_shut_door() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player = world.state.players[&gm];
+    let player_serial = world.registry().serial_of(player).unwrap();
+
+    // A shut door directly south of the player, and a hungry creature beyond
+    // it: the only sight line runs through the door.
+    let (_door, door_serial) = place_door(&mut world, Point::new(START.0, START.1 + 1, 0), now);
+    world.queue(Command::SpawnMobile {
+        body: 0x0190,
+        hue: 0,
+        hits: 50,
+        notoriety: 5,
+        damage: 5,
+        resistance: 0,
+        swing: 0,
+        sight: 5,
+        wander: false,
+        position: Point::new(START.0, START.1 + 2, 0),
+        facet: 0,
+        name: None,
+        banker: false,
+        equipment: Vec::new(),
+    });
+    world.tick(now);
+    let creature = world
+        .state
+        .registry
+        .query::<Brain>()
+        .map(|(entity, _)| entity)
+        .next()
+        .expect("a creature with a brain");
+
+    // Many beats pass; the door hides the player the whole time.
+    for _ in 0..(AI_THINK_TICKS * 3) {
+        world.tick(now);
+    }
+    assert!(
+        world
+            .registry()
+            .get::<Combat>(creature)
+            .and_then(|c| c.target)
+            .is_none(),
+        "a shut door hides prey — no aggro through it"
+    );
+
+    // Open the door and the next beat notices.
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: door_serial,
+    });
+    world.tick(now);
+    for _ in 0..(AI_THINK_TICKS + 1) {
+        world.tick(now);
+    }
+    assert_eq!(
+        world
+            .registry()
+            .get::<Combat>(creature)
+            .and_then(|c| c.target),
+        Some(player_serial),
+        "an open doorway is a sight line"
+    );
+}

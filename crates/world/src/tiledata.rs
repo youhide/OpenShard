@@ -97,6 +97,8 @@ impl TileFlags {
     pub const FLOOR: u64 = 0x0000_0001;
     /// UFLAG1_WALL: wall, door or fireplace.
     pub const WALL: u64 = 0x0000_0010;
+    /// UFLAG1_NOSHOOT: blocks a straight line — arrows, and sight.
+    pub const NO_SHOOT: u64 = 0x0000_0020;
     /// UFLAG1_BLOCK: too big and heavy to walk through.
     pub const BLOCK: u64 = 0x0000_0040;
     /// UFLAG1_WATER: water or wet.
@@ -152,6 +154,7 @@ impl fmt::Debug for TileFlags {
         for (mask, name) in [
             (Self::FLOOR, "FLOOR"),
             (Self::WALL, "WALL"),
+            (Self::NO_SHOOT, "NO_SHOOT"),
             (Self::BLOCK, "BLOCK"),
             (Self::WATER, "WATER"),
             (Self::PLATFORM, "PLATFORM"),

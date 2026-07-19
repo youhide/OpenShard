@@ -4,7 +4,7 @@ use openshard_movement::Terrain;
 use openshard_protocol::Point;
 
 use crate::map::Map;
-use crate::tiledata::TileData;
+use crate::tiledata::{TileData, TileFlags};
 
 /// How far a walking human can step up.
 ///
@@ -390,6 +390,47 @@ impl Terrain for MapTerrain {
 
     fn can_fit(&self, x: u16, y: u16, z: i32, height: i32) -> bool {
         MapTerrain::can_fit(self, x, y, z, height)
+    }
+
+    fn sight_clear(&self, from: Point, to: Point) -> bool {
+        // Eye height: the ray runs at head level, interpolated between the two
+        // ends so a look up a hill follows the slope.
+        const EYE: i32 = 9;
+        let tiles = openshard_movement::line_tiles((from.x, from.y), (to.x, to.y));
+        let count = tiles.len() as i32;
+        for (i, (x, y)) in tiles.into_iter().enumerate() {
+            let t = i as i32 + 1;
+            let ray_z =
+                i32::from(from.z) + (i32::from(to.z) - i32::from(from.z)) * t / (count + 1) + EYE;
+            // A hill in the way: ground above the eye line occludes.
+            if self
+                .ground_z(x, y)
+                .is_some_and(|ground| i32::from(ground) > ray_z)
+            {
+                return false;
+            }
+            for item in self.map.statics_at(x, y) {
+                let tile = self.tiles.static_tile(item.tile);
+                let flags = tile.flags;
+                // Windows are the deliberate hole in a wall; grilles and bars
+                // carry NO_SHOOT and stay opaque, which is why a monster does
+                // not aggro through a portcullis it can never reach through.
+                if flags.has(TileFlags::WINDOW) {
+                    continue;
+                }
+                if !flags.has(TileFlags::WALL) && !flags.has(TileFlags::NO_SHOOT) {
+                    continue;
+                }
+                let base = i32::from(item.z);
+                // Walls often carry zero height in tiledata; treat them as a
+                // full storey, the way the client draws them.
+                let top = base + i32::from(tile.height.max(15));
+                if base <= ray_z && ray_z < top {
+                    return false;
+                }
+            }
+        }
+        true
     }
 }
 

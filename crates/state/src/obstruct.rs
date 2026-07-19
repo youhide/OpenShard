@@ -153,6 +153,16 @@ impl Terrain for LiveTerrain<'_> {
     fn can_fit(&self, x: u16, y: u16, z: i32, height: i32) -> bool {
         self.map.is_none_or(|m| m.can_fit(x, y, z, height)) && !self.obstructions.is_blocked(x, y)
     }
+
+    fn sight_clear(&self, from: Point, to: Point) -> bool {
+        if !self.map.is_none_or(|m| m.sight_clear(from, to)) {
+            return false;
+        }
+        // A shut door is opaque; a crate is furniture, not a wall.
+        openshard_movement::line_tiles((from.x, from.y), (to.x, to.y))
+            .into_iter()
+            .all(|(x, y)| self.obstructions.blocker_at(x, y).is_none_or(|o| !o.door))
+    }
 }
 
 #[cfg(test)]
@@ -190,6 +200,18 @@ mod tests {
         assert!(planner
             .can_step(Point::new(12, 9, 0), Point::new(12, 10, 0))
             .is_none());
+    }
+
+    #[test]
+    fn a_shut_door_is_opaque_and_an_open_one_is_not() {
+        let mut obstructions = Obstructions::default();
+        let door = an_entity();
+        obstructions.block(10, 10, door, true);
+        let live = LiveTerrain::new(None, &obstructions, false);
+        assert!(!live.sight_clear(Point::new(10, 8, 0), Point::new(10, 12, 0)));
+        obstructions.unblock(10, 10, door);
+        let live = LiveTerrain::new(None, &obstructions, false);
+        assert!(live.sight_clear(Point::new(10, 8, 0), Point::new(10, 12, 0)));
     }
 
     #[test]

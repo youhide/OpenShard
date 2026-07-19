@@ -91,6 +91,50 @@ pub trait Terrain {
     fn item_blocks(&self, _graphic: u16) -> bool {
         false
     }
+
+    /// Whether a straight sight line from `from` to `to` is clear of walls.
+    ///
+    /// What gates a creature noticing prey: both reference emulators require
+    /// line of sight to *acquire* a target, and relax to cheaper range checks
+    /// only for continuing a chase already begun. A terrain with no map hides
+    /// nothing.
+    fn sight_clear(&self, _from: Point, _to: Point) -> bool {
+        true
+    }
+}
+
+/// The tiles a straight line from `from` to `to` crosses, endpoints excluded —
+/// where a sight line looks for walls. Plain integer Bresenham; the endpoints
+/// are the looker and the looked-at, and neither occludes itself.
+#[must_use]
+pub fn line_tiles(from: (u16, u16), to: (u16, u16)) -> Vec<(u16, u16)> {
+    let (mut x, mut y) = (i32::from(from.0), i32::from(from.1));
+    let (tx, ty) = (i32::from(to.0), i32::from(to.1));
+    let dx = (tx - x).abs();
+    let dy = -(ty - y).abs();
+    let sx = if x < tx { 1 } else { -1 };
+    let sy = if y < ty { 1 } else { -1 };
+    let mut err = dx + dy;
+    let mut tiles = Vec::new();
+    loop {
+        if x == tx && y == ty {
+            break;
+        }
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y += sy;
+        }
+        if x == tx && y == ty {
+            break;
+        }
+        tiles.push((x as u16, y as u16));
+    }
+    tiles
 }
 
 /// A world with no floor and no walls: every step is allowed, z never changes.
@@ -207,6 +251,19 @@ pub fn step_from(position: Point, direction: Direction) -> Option<Point> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sight_line_crosses_the_tiles_between_and_not_the_ends() {
+        let tiles = line_tiles((10, 10), (10, 13));
+        assert_eq!(tiles, vec![(10, 11), (10, 12)]);
+        let diagonal = line_tiles((0, 0), (3, 3));
+        assert_eq!(diagonal, vec![(1, 1), (2, 2)]);
+        assert!(line_tiles((5, 5), (5, 5)).is_empty());
+        assert!(
+            line_tiles((5, 5), (6, 5)).is_empty(),
+            "adjacent tiles see each other"
+        );
+    }
 
     fn request(direction: Direction, sequence: u8) -> WalkRequest {
         WalkRequest {
