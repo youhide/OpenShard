@@ -18,8 +18,8 @@ use openshard_protocol::{
     Point, DROP_TO_GROUND, PAPERDOLL_CAN_LIFT, PAPERDOLL_WARMODE,
 };
 use openshard_state::components::{
-    Amount, Body, Client, Combat, Contained, Container, Decays, Decoration, Door, Equipped, Facet,
-    Graphic, Name, Position, Stackable,
+    mount_item_for, Amount, Body, Client, Combat, Contained, Container, Decays, Decoration, Door,
+    Equipped, Facet, Graphic, Name, Position, Ridden, Riding, Stackable,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{HeldItem, Origin, Outbound, WorldState, TICKS_PER_SECOND};
@@ -30,6 +30,7 @@ mod decay;
 mod doors;
 mod drag;
 mod equip;
+mod mounts;
 mod spawn;
 mod stack;
 
@@ -38,5 +39,6 @@ pub use decay::*;
 pub use doors::*;
 pub use drag::*;
 pub use equip::*;
+pub use mounts::*;
 pub use spawn::*;
 pub use stack::*;

@@ -24,6 +24,12 @@ pub fn double_click(state: &mut WorldState, connection: ConnectionId, serial: u3
         toggle_door(state, player, target, target_serial);
     } else if state.registry.has::<Container>(target) {
         open_container(state, connection, player, target, target_serial);
+    } else if target == player && state.registry.has::<Riding>(player) {
+        // Double-clicking yourself in the saddle is the dismount.
+        dismount(state, player);
+    } else if try_mount(state, player, target, target_serial) {
+        // A rideable, riderless creature in reach: the double-click was a leg
+        // over the saddle, not a paperdoll request.
     } else if state.registry.has::<Body>(target) {
         open_paperdoll(state, connection, player, target, target_serial);
     }

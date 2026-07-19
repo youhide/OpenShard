@@ -45,7 +45,7 @@ use tracing::{debug, info, warn};
 use openshard_state::components::{
     Access, Account, Amount, Body, Brain, Client, Combat, Contained, Container, DamageType,
     Decoration, Door, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement,
-    Name, Position, Resistance, Scripted, SpawnedBy, Stackable, Stats,
+    Name, Position, Resistance, Ridden, Scripted, SpawnedBy, Stackable, Stats,
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
@@ -645,6 +645,10 @@ impl World {
             if self.state.registry.has::<Scripted>(creature) {
                 continue;
             }
+            // A ridden mount is out of the world; its legs are the rider's.
+            if self.state.registry.has::<Ridden>(creature) {
+                continue;
+            }
             if let Some(dir) = ai::think_one(&mut self.state, creature) {
                 if let Some(serial) = self.state.registry.serial_of(creature) {
                     self.step(serial.raw(), dir);
@@ -706,6 +710,11 @@ impl World {
         let Some(entity) = self.state.players.remove(&connection) else {
             return;
         };
+        // A rider logs out on foot: the mount comes back to the ground here,
+        // where there is still an entity to stand it next to. The mount item
+        // is never saved (see `inventory_of`), so this also keeps the record
+        // honest.
+        items::dismount(&mut self.state, entity);
         // Forget any targeting cursor it had up: a gone mobile clicks nothing.
         self.state.pending_targets.remove(&entity);
         let serial = self.state.registry.serial_of(entity);

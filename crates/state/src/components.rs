@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use openshard_entities::Serial;
+use openshard_entities::{EntityId, Serial};
 use openshard_gateway::ConnectionId;
 use openshard_movement::Walker;
 use openshard_protocol::{AccessLevel, ClientVersion, Facing, Point};
@@ -370,6 +370,41 @@ impl Aggression {
 #[must_use]
 pub const fn body_opens_doors(body: u16) -> bool {
     matches!(body, 0x0190..=0x0193 | 0x025D | 0x025E | 0x0260 | 0x0261)
+}
+
+/// The item graphic that draws a body as a mount on a rider, for the bodies
+/// that can be ridden at all. The classic stable: horses, llama, ostards.
+/// `None` is "not rideable", which is what double-click checks first.
+#[must_use]
+pub const fn mount_item_for(body: u16) -> Option<u16> {
+    Some(match body {
+        0x00C8 => 0x3E9F, // bay horse
+        0x00CC => 0x3EA2, // dark brown horse
+        0x00E2 => 0x3EA0, // grey horse
+        0x00E4 => 0x3EA1, // tan horse
+        0x00DC => 0x3EA6, // llama
+        0x00DB => 0x3EA5, // forest ostard
+        0x00D2 => 0x3EA3, // desert ostard
+        0x00DA => 0x3EA4, // frenzied ostard
+        _ => return None,
+    })
+}
+
+/// A mobile being ridden: off every screen and every sector, alive in the
+/// registry, waiting for the dismount that puts it back on the ground.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Ridden {
+    /// Who sits on it.
+    pub rider: EntityId,
+}
+
+/// A mobile riding a mount.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Riding {
+    /// The creature underneath, held out of the world until dismount.
+    pub mount: EntityId,
+    /// The mount item worn on the mount layer — what the client draws.
+    pub item: EntityId,
 }
 
 /// The cached route of a chase, followed a step per beat.

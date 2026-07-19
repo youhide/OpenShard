@@ -132,6 +132,12 @@ impl World {
             if worn.mobile != owner {
                 continue;
             }
+            // The saddle is not luggage: the mount item exists only while the
+            // ridden creature does, and the creature is not persisted. Saving
+            // the item alone would restore a rider glued to a phantom horse.
+            if worn.layer == items::MOUNT_LAYER {
+                continue;
+            }
             let location = ItemLocation::Equipped {
                 mobile: owner_raw,
                 layer: worn.layer,

@@ -6,6 +6,7 @@ use openshard_magic::{SpellCast, MANA_REGEN_TICKS};
 use openshard_movement::WALK_INTERVAL;
 use openshard_protocol::{encode_remove, DROP_TO_GROUND};
 use openshard_skills::SkillUsed;
+use openshard_state::components::Riding;
 use openshard_state::components::{
     Amount, Contained, Container, CriminalUntil, Decays, Equipped, Graphic, MurderDecay, Murders,
     Skills, Stackable,
@@ -5264,5 +5265,149 @@ fn the_chase_pace_is_the_operators_knob() {
     assert!(
         fast <= openshard_combat::MELEE_RANGE,
         "at 250ms the hunter caught its prey over 2s from 7 tiles (ended {fast})"
+    );
+}
+
+/// Spawn a bay horse next to the start and return its entity and serial.
+fn spawn_horse(world: &mut World, at: Point, now: Instant) -> (EntityId, u32) {
+    world.queue(Command::SpawnMobile {
+        body: 0x00C8,
+        hue: 0x0455,
+        hits: 30,
+        notoriety: 1,
+        damage: 3,
+        resistance: 0,
+        swing: 0,
+        sight: 0,
+        aggression: 0,
+        beat: 0,
+        wander: true,
+        position: at,
+        facet: 0,
+        name: None,
+        banker: false,
+        equipment: Vec::new(),
+    });
+    world.tick(now);
+    let horse = world
+        .state
+        .registry
+        .query::<Body>()
+        .find(|(_, body)| body.id == 0x00C8)
+        .map(|(entity, _)| entity)
+        .expect("a horse");
+    let serial = world.registry().serial_of(horse).unwrap().raw();
+    (horse, serial)
+}
+
+#[test]
+fn a_horse_is_mounted_and_dismounted_by_double_click() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player = world.state.players[&gm];
+    let (horse, horse_serial) = spawn_horse(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: horse_serial,
+    });
+    world.tick(now);
+    let riding = world
+        .registry()
+        .get::<Riding>(player)
+        .copied()
+        .expect("in the saddle");
+    assert_eq!(riding.mount, horse);
+    assert!(
+        world.registry().get::<Position>(horse).is_none(),
+        "a ridden horse is out of the world"
+    );
+    let saddle = world
+        .registry()
+        .get::<Equipped>(riding.item)
+        .expect("a mount item");
+    assert_eq!(saddle.layer, openshard_items::MOUNT_LAYER);
+    assert_eq!(
+        world.registry().get::<Graphic>(riding.item).unwrap().id,
+        0x3E9F,
+        "a bay horse draws as the bay mount item"
+    );
+
+    // Double-clicking yourself dismounts; the horse lands beside the rider.
+    let player_serial = world.registry().serial_of(player).unwrap().raw();
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: player_serial,
+    });
+    world.tick(now);
+    assert!(world.registry().get::<Riding>(player).is_none());
+    let horse_at = world
+        .registry()
+        .get::<Position>(horse)
+        .expect("back on the ground")
+        .0;
+    assert!(
+        distance(horse_at, Point::new(START.0, START.1, 0)) <= 1,
+        "the horse stands beside its rider"
+    );
+}
+
+#[test]
+fn a_ridden_horse_does_not_wander_and_logout_grounds_it() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let (horse, horse_serial) = spawn_horse(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: horse_serial,
+    });
+    world.tick(now);
+    assert!(world.registry().get::<Position>(horse).is_none());
+
+    // Many beats: a ridden wanderer stays exactly where it is — nowhere.
+    let mut later = now;
+    for _ in 0..(AI_THINK_TICKS * 6) {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert!(
+        world.registry().get::<Position>(horse).is_none(),
+        "no brain beat moves a ridden mount"
+    );
+
+    // The rider logs out; the horse comes back to the ground.
+    world.queue(Command::Disconnect { connection: gm });
+    world.tick(later);
+    assert!(
+        world.registry().get::<Position>(horse).is_some(),
+        "logout dismounts, the horse is not leaked in limbo"
+    );
+}
+
+#[test]
+fn the_saddle_is_not_saved() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let (_horse, horse_serial) = spawn_horse(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: horse_serial,
+    });
+    world.tick(now);
+    world.take_snapshot();
+    let snapshot = world.drain_saves().next_back().expect("a snapshot");
+    assert!(
+        snapshot.inventories.iter().all(|inventory| {
+            inventory.items.iter().all(|item| {
+                !matches!(
+                    item.location,
+                    ItemLocation::Equipped { layer, .. } if layer == openshard_items::MOUNT_LAYER
+                )
+            })
+        }),
+        "the mount item stays out of the record"
     );
 }
