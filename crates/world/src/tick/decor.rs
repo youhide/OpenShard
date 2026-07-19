@@ -46,6 +46,12 @@ impl World {
                     close_at: 0,
                 },
             );
+            self.state.facet_state_mut(facet).obstructions.block(
+                door.position.x,
+                door.position.y,
+                entity,
+                true,
+            );
         }
         for container in containers {
             let Some(entity) =
@@ -83,6 +89,21 @@ impl World {
         self.state.registry.insert(entity, Position(position));
         self.state.registry.insert(entity, Facet(facet));
         self.state.registry.insert(entity, Decoration);
+        // Placed art with impassable tiledata blocks its tile, the way ServUO
+        // treats any non-movable impassable item; doors refine this to a door
+        // obstacle right after.
+        let blocks = self
+            .state
+            .facet_state(facet)
+            .terrain
+            .as_deref()
+            .is_some_and(|t| t.item_blocks(graphic));
+        if blocks {
+            self.state
+                .facet_state_mut(facet)
+                .obstructions
+                .block(position.x, position.y, entity, false);
+        }
         self.state
             .facet_state_mut(facet)
             .sectors
@@ -225,6 +246,10 @@ impl World {
                         close_at: 0,
                     },
                 );
+                self.state
+                    .facet_state_mut(facet)
+                    .obstructions
+                    .block(position.x, position.y, entity, true);
             }
         }
         debug!(facet, count, "generated doors from static frames");
@@ -245,6 +270,12 @@ impl World {
                 for watcher in self.state.watchers_of(entity) {
                     self.state.forget(watcher, entity, serial);
                 }
+            }
+            if let Some(&Position(at)) = self.state.registry.get::<Position>(entity) {
+                self.state
+                    .facet_state_mut(facet)
+                    .obstructions
+                    .unblock(at.x, at.y, entity);
             }
             self.state.facet_state_mut(facet).sectors.remove(entity);
             self.state.registry.despawn(entity);

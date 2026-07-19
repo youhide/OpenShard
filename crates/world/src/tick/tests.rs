@@ -4322,6 +4322,7 @@ fn add_empty_facet(world: &mut World, facet: u8) {
         FacetState {
             terrain: None,
             sectors: Sectors::new(FACET_WITHOUT_A_MAP.0, FACET_WITHOUT_A_MAP.1),
+            obstructions: Obstructions::default(),
         },
     );
 }
@@ -4689,5 +4690,127 @@ fn the_tick_interval_is_not_a_protocol_constant() {
     assert!(
         TICK_INTERVAL < WALK_INTERVAL,
         "a step must not span two ticks"
+    );
+}
+
+/// Decorate one door and return its entity and wire serial. The door sits at
+/// `at` closed, and its open leaf swings a tile aside like the metal doors do.
+fn place_door(world: &mut World, at: Point, now: Instant) -> (EntityId, u32) {
+    world.queue(Command::Decorate {
+        facet: 0,
+        statics: Vec::new(),
+        doors: vec![DecorDoor {
+            closed: 0x0675,
+            open: 0x0676,
+            offset_x: -1,
+            offset_y: 1,
+            position: at,
+        }],
+        containers: Vec::new(),
+    });
+    world.tick(now);
+    let door = world.registry().query::<Door>().next().unwrap().0;
+    let serial = world.registry().serial_of(door).unwrap().raw();
+    (door, serial)
+}
+
+#[test]
+fn a_closed_door_blocks_a_walk() {
+    // The doorway tile is open ground as far as the map knows — that is how the
+    // doorway was chosen — so the closed door entity is the only thing standing
+    // in the way. Walking into it must be refused, or every door is theatre.
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let entity = world.state.players[&gm];
+    place_door(&mut world, Point::new(START.0, START.1 + 1, 0), now);
+
+    let mut refused: Cursor<StepRefused> = world.bus().cursor();
+    world.queue(Command::Walk {
+        connection: gm,
+        request: walk(0, Direction::South),
+    });
+    world.tick(now);
+    assert_eq!(
+        world.bus().read(&mut refused).count(),
+        1,
+        "the walk into the shut door is refused"
+    );
+    assert_eq!(
+        world.registry().get::<Position>(entity).unwrap().0,
+        Point::new(START.0, START.1, Z_WITHOUT_A_MAP),
+        "and nobody moved"
+    );
+}
+
+#[test]
+fn an_opened_door_lets_a_step_through_and_blocks_again_when_it_shuts() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let entity = world.state.players[&gm];
+    let serial = world.registry().serial_of(entity).unwrap().raw();
+    let at = Point::new(START.0 + 1, START.1, 0);
+    let (_door, door_serial) = place_door(&mut world, at, now);
+
+    // Shut, it refuses the server-authoritative step an NPC would take — the
+    // same gate a creature's chase goes through.
+    let mut refused: Cursor<StepRefused> = world.bus().cursor();
+    for _ in 0..2 {
+        // Twice: the first may only turn to face east.
+        world.queue(Command::Step {
+            serial,
+            direction: Direction::East.to_bits(),
+        });
+        world.tick(now);
+    }
+    assert!(
+        world.bus().read(&mut refused).count() >= 1,
+        "a step into a shut door is refused"
+    );
+    assert_eq!(
+        world.registry().get::<Position>(entity).unwrap().0,
+        Point::new(START.0, START.1, Z_WITHOUT_A_MAP)
+    );
+
+    // Open, the doorway is a doorway again.
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: door_serial,
+    });
+    world.tick(now);
+    world.queue(Command::Step {
+        serial,
+        direction: Direction::East.to_bits(),
+    });
+    world.tick(now);
+    assert_eq!(
+        world.registry().get::<Position>(entity).unwrap().0,
+        at,
+        "an open door is walked through"
+    );
+
+    // And when it swings shut on its own, the tile seals behind it.
+    teleport(&mut world, gm, Point::new(START.0, START.1, 0));
+    let close_at = world.registry().query::<Door>().next().unwrap().1.close_at;
+    let mut later = now;
+    while world.state.ticks < close_at {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert!(
+        !world.registry().query::<Door>().next().unwrap().1.is_open,
+        "the door swung shut on its own"
+    );
+    let mut refused: Cursor<StepRefused> = world.bus().cursor();
+    world.queue(Command::Step {
+        serial,
+        direction: Direction::East.to_bits(),
+    });
+    world.tick(later);
+    assert_eq!(
+        world.bus().read(&mut refused).count(),
+        1,
+        "the auto-closed door blocks again"
     );
 }

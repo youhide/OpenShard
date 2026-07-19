@@ -32,10 +32,11 @@ const PATH_BUDGET: usize = 400;
 /// when there is no map, or no route within the budget — better to close the gap
 /// roughly and re-plan than to freeze.
 pub fn step_toward(state: &WorldState, facet: u8, from: Point, to: Point) -> Option<u8> {
-    if let Some(terrain) = state.facet_state(facet).terrain.as_deref() {
-        if let Some(path) = find_path(terrain, from, to, PATH_BUDGET) {
-            return path.first().map(|d| d.to_bits());
-        }
+    // The live terrain, not the bare map: a route must not thread a closed door
+    // or a placed crate the step would then refuse.
+    let live = state.facet_state(facet).live_terrain();
+    if let Some(path) = find_path(&live, from, to, PATH_BUDGET) {
+        return path.first().map(|d| d.to_bits());
     }
     direction_toward(from, to).map(Direction::to_bits)
 }

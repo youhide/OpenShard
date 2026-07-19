@@ -89,6 +89,19 @@ pub(crate) fn set_door(state: &mut WorldState, door: EntityId, serial: Serial, o
         },
     );
     state.facet_state_mut(facet).sectors.insert(door, moved);
+    // The tile the shut leaf fills is blocked; opening frees it. This is the
+    // line that makes a door real to movement — see `state::obstruct`.
+    if open {
+        state
+            .facet_state_mut(facet)
+            .obstructions
+            .unblock(at.x, at.y, door);
+    } else {
+        state
+            .facet_state_mut(facet)
+            .obstructions
+            .block(moved.x, moved.y, door, true);
+    }
     state.reveal(door);
 }
 

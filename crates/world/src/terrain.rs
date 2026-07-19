@@ -352,6 +352,10 @@ impl MapTerrain {
 }
 
 impl Terrain for MapTerrain {
+    fn item_blocks(&self, graphic: u16) -> bool {
+        self.tiles.static_tile(graphic).flags.is_blocking()
+    }
+
     fn can_step(&self, from: Point, to: Point) -> Option<Point> {
         let from_z = i32::from(from.z);
         // Reach the next tile from the top of what we stand on, not from our feet:

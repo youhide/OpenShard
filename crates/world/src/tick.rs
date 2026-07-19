@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 use openshard_entities::{EntityId, Registry, Serial, SerialKind};
 use openshard_events::{Cursor, EventBus};
 use openshard_gateway::ConnectionId;
-use openshard_movement::{step_from, OpenWorld, Terrain, Walk, Walker};
+use openshard_movement::{step_from, Terrain, Walk, Walker};
 use openshard_persistence::{
     CharacterRecord, Inventory, ItemLocation, ItemRecord, Journal, Snapshot, SCHEMA_VERSION,
 };
@@ -49,7 +49,7 @@ use openshard_state::components::{
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
-use openshard_state::{FacetState, Gameplay, Outbound, WorldState, TICKS_PER_SECOND};
+use openshard_state::{FacetState, Gameplay, Obstructions, Outbound, WorldState, TICKS_PER_SECOND};
 
 use openshard_ai as ai;
 use openshard_chat as chat;
@@ -166,6 +166,7 @@ impl World {
             FacetState {
                 terrain: None,
                 sectors: Sectors::new(FACET_WITHOUT_A_MAP.0, FACET_WITHOUT_A_MAP.1),
+                obstructions: Obstructions::default(),
             },
         );
         Self {
@@ -244,6 +245,7 @@ impl World {
             FacetState {
                 terrain: Some(Box::new(terrain) as Box<dyn Terrain + Send + Sync>),
                 sectors,
+                obstructions: Obstructions::default(),
             },
         );
         self

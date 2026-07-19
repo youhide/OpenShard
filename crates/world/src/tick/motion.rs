@@ -19,10 +19,9 @@ impl World {
         let facet = self.state.facet_of(entity);
         let was = walker.position;
         let out_of_sequence = walker.sequence.is_fresh() && request.sequence != 0;
-        let outcome = match &self.state.facet_state(facet).terrain {
-            Some(terrain) => walker.request(request, terrain.as_ref(), now),
-            None => walker.request(request, &OpenWorld, now),
-        };
+        // The live terrain, not the bare map: a closed door blocks a walk the
+        // statics would allow.
+        let outcome = walker.request(request, &self.state.facet_state(facet).live_terrain(), now);
         self.state.registry.insert(entity, Movement(walker));
 
         match outcome {
@@ -138,10 +137,11 @@ impl World {
             });
             return;
         };
-        let landed = match &self.state.facet_state(facet).terrain {
-            Some(terrain) => terrain.can_step(walker.position, target),
-            None => OpenWorld.can_step(walker.position, target),
-        };
+        let landed = self
+            .state
+            .facet_state(facet)
+            .live_terrain()
+            .can_step(walker.position, target);
         let Some(landed) = landed else {
             self.state.bus.send(StepRefused {
                 entity,

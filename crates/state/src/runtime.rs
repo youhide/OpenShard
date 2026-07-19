@@ -27,6 +27,7 @@ use crate::components::{
     Amount, Body, Client, Contained, Equipped, Facet, Graphic, Heading, Hitpoints, Movement,
     Position,
 };
+use crate::obstruct::{LiveTerrain, Obstructions};
 use crate::rng::Rng;
 use crate::sectors::{Sectors, VIEW_RANGE};
 
@@ -128,6 +129,25 @@ pub struct FacetState {
     pub terrain: Option<Box<dyn Terrain + Send + Sync>>,
     /// Who is near what, on this facet.
     pub sectors: Sectors,
+    /// What the live world has put in the way: closed doors, placed decoration.
+    pub obstructions: Obstructions,
+}
+
+impl FacetState {
+    /// The terrain every movement decision actually checks: the map with the
+    /// live obstacles laid over it. Works with no map too — an open world with
+    /// doors in it still has doors.
+    #[must_use]
+    pub fn live_terrain(&self) -> LiveTerrain<'_> {
+        LiveTerrain::new(self.terrain.as_deref(), &self.obstructions, false)
+    }
+
+    /// The same terrain as a door-opener plans over: closed doors do not block,
+    /// because the mobile walking the route opens them on arrival.
+    #[must_use]
+    pub fn planning_terrain(&self, through_doors: bool) -> LiveTerrain<'_> {
+        LiveTerrain::new(self.terrain.as_deref(), &self.obstructions, through_doors)
+    }
 }
 
 /// An item on a cursor: the entity, and where it was lifted from.

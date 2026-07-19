@@ -84,6 +84,13 @@ pub trait Terrain {
     fn can_fit(&self, _x: u16, _y: u16, _z: i32, _height: i32) -> bool {
         true
     }
+
+    /// Whether static art `graphic` is impassable by its tiledata flags — what
+    /// decides if a *placed* copy of it should block the tile it stands on. A
+    /// terrain with no tiledata blocks nothing.
+    fn item_blocks(&self, _graphic: u16) -> bool {
+        false
+    }
 }
 
 /// A world with no floor and no walls: every step is allowed, z never changes.
