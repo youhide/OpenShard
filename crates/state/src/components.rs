@@ -323,6 +323,40 @@ pub struct Brain {
     pub wander: bool,
     /// The tick it next gets to act — brains think in beats, not every tick.
     pub next_think: u64,
+    /// Standing watch until this tick after a chase found no way through —
+    /// the give-up both reference emulators use instead of wall-shuffling.
+    /// Zero means not guarding.
+    pub guard_until: u64,
+    /// Whether it opens a shut door in its way rather than treating it as
+    /// wall. Humanoids do; animals do not — ServUO's `CanOpenDoors`.
+    pub opens_doors: bool,
+}
+
+/// Whether a body knows what a door handle is. The reference rule is
+/// "not an animal, not a sea creature"; without body-type tables yet, the
+/// human bodies are the safe core of that set.
+#[must_use]
+pub const fn body_opens_doors(body: u16) -> bool {
+    matches!(body, 0x0190..=0x0193 | 0x025D | 0x025E | 0x0260 | 0x0261)
+}
+
+/// The cached route of a chase, followed a step per beat.
+///
+/// Replanning A* from scratch every beat is what the old brain did, and it is
+/// both wasteful and the direct cause of wall-hugging: a plan that fails one
+/// beat was retried identically the next. A route is planned once, followed
+/// until it goes stale — the quarry moved, the route ran out, or two seconds
+/// passed (the references' repath cadence) — and replanned then.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ChasePath {
+    /// The remaining route, as wire directions (0–7).
+    pub steps: Vec<u8>,
+    /// The next step to take.
+    pub next: usize,
+    /// Where the route was aimed; a quarry that strays invalidates it.
+    pub goal: Point,
+    /// When it was planned, for the repath clock.
+    pub planned_at: u64,
 }
 
 /// Marks a mobile whose brain is a script's `onTick`, not the built-in one.

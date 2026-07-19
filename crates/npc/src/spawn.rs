@@ -5,8 +5,8 @@ use openshard_entities::{EntityId, Serial, SerialKind};
 use openshard_movement::Walker;
 use openshard_protocol::{Direction, Facing, Notoriety, Point};
 use openshard_state::components::{
-    Banker, Body, Brain, Facet, Heading, Hitpoints, MeleeDamage, Movement, Name, Npc, Position,
-    Resistance, SwingSpeed,
+    body_opens_doors, Banker, Body, Brain, Facet, Heading, Hitpoints, MeleeDamage, Movement, Name,
+    Npc, Position, Resistance, SwingSpeed,
 };
 use openshard_state::WorldState;
 use tracing::{debug, warn};
@@ -151,6 +151,8 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
                 sight,
                 wander,
                 next_think: 0,
+                guard_until: 0,
+                opens_doors: body_opens_doors(body),
             },
         );
     }

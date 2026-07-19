@@ -11,6 +11,7 @@ use openshard_state::components::{
     Skills, Stackable,
 };
 use openshard_state::components::{Banker, SwingSpeed};
+use openshard_state::sectors::distance;
 
 pub(super) const START: (u16, u16) = (1363, 1600);
 
@@ -4880,5 +4881,189 @@ fn a_creature_does_not_notice_prey_through_a_shut_door() {
             .and_then(|c| c.target),
         Some(player_serial),
         "an open doorway is a sight line"
+    );
+}
+
+/// Spawn a creature with a brain, returning its entity. `body` decides whether
+/// it knows door handles (0x0190 human does; 0x00D1 goat does not).
+fn spawn_brained(world: &mut World, body: u16, at: Point, sight: u8, now: Instant) -> EntityId {
+    world.queue(Command::SpawnMobile {
+        body,
+        hue: 0,
+        hits: 50,
+        notoriety: 5,
+        damage: 5,
+        resistance: 0,
+        swing: 0,
+        sight,
+        wander: false,
+        position: at,
+        facet: 0,
+        name: None,
+        banker: false,
+        equipment: Vec::new(),
+    });
+    world.tick(now);
+    world
+        .state
+        .registry
+        .query::<Brain>()
+        .map(|(entity, _)| entity)
+        .next()
+        .expect("a creature with a brain")
+}
+
+/// Ring a tile with crate obstacles, leaving sight clear — a fence, to a chase.
+fn fence_around(world: &mut World, center: Point) {
+    for dx in -1i32..=1 {
+        for dy in -1i32..=1 {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let crate_entity = world.state.registry.spawn();
+            world.state.facet_state_mut(0).obstructions.block(
+                (i32::from(center.x) + dx) as u16,
+                (i32::from(center.y) + dy) as u16,
+                crate_entity,
+                false,
+            );
+        }
+    }
+}
+
+#[test]
+fn an_unreachable_quarry_is_given_up_not_wall_humped() {
+    let now = Instant::now();
+    let mut world = world();
+    let _gm = enter_gm(&mut world, now);
+    // The player fenced in on all eight sides: visible, unreachable.
+    fence_around(&mut world, Point::new(START.0, START.1, 0));
+    let creature = spawn_brained(
+        &mut world,
+        0x00D1,
+        Point::new(START.0, START.1 + 4, 0),
+        8,
+        now,
+    );
+
+    // Let it notice, try, and conclude.
+    for _ in 0..(AI_THINK_TICKS * 4) {
+        world.tick(now);
+    }
+    let brain = *world.registry().get::<Brain>(creature).unwrap();
+    assert!(
+        brain.guard_until > world.state.ticks,
+        "no way through the fence: the creature stands guard instead of shuffling"
+    );
+    assert!(
+        world
+            .registry()
+            .get::<Combat>(creature)
+            .and_then(|c| c.target)
+            .is_none(),
+        "and the doomed chase was dropped"
+    );
+    // While guarding it holds its ground.
+    let held = world.registry().get::<Position>(creature).unwrap().0;
+    for _ in 0..(AI_THINK_TICKS * 3) {
+        world.tick(now);
+    }
+    assert_eq!(
+        world.registry().get::<Position>(creature).unwrap().0,
+        held,
+        "a guard stands watch, it does not pace into the fence"
+    );
+}
+
+#[test]
+fn a_chase_rounds_a_wall_of_crates() {
+    let now = Instant::now();
+    let mut world = world();
+    let _gm = enter_gm(&mut world, now);
+    let player_at = Point::new(START.0, START.1, 0);
+    // A five-tile wall between quarry and creature, open at both ends.
+    for dx in -2i32..=2 {
+        let crate_entity = world.state.registry.spawn();
+        world.state.facet_state_mut(0).obstructions.block(
+            (i32::from(player_at.x) + dx) as u16,
+            player_at.y + 2,
+            crate_entity,
+            false,
+        );
+    }
+    let creature = spawn_brained(
+        &mut world,
+        0x00D1,
+        Point::new(START.0, START.1 + 4, 0),
+        10,
+        now,
+    );
+
+    // Enough beats to notice, plan, and walk around either end.
+    let mut later = now;
+    for _ in 0..(AI_THINK_TICKS * 30) {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    let reached = world.registry().get::<Position>(creature).unwrap().0;
+    assert!(
+        distance(reached, player_at) <= openshard_combat::MELEE_RANGE,
+        "the creature went around the wall and reached its quarry (ended at {reached:?})"
+    );
+}
+
+#[test]
+fn a_human_chaser_opens_the_door_in_its_way() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let door_at = Point::new(START.0, START.1 + 1, 0);
+    let (door, door_serial) = place_door(&mut world, door_at, now);
+
+    // Open the door first so the creature can see and acquire its prey.
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: door_serial,
+    });
+    world.tick(now);
+    let creature = spawn_brained(
+        &mut world,
+        0x0190,
+        Point::new(START.0, START.1 + 3, 0),
+        8,
+        now,
+    );
+    for _ in 0..(AI_THINK_TICKS * 2) {
+        world.tick(now);
+    }
+    assert!(
+        world
+            .registry()
+            .get::<Combat>(creature)
+            .and_then(|c| c.target)
+            .is_some(),
+        "through the open doorway it noticed the player"
+    );
+
+    // Slam the door in its face: a human body opens it rather than giving up.
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: door_serial,
+    });
+    world.tick(now);
+    assert!(!world.registry().get::<Door>(door).unwrap().is_open);
+    let mut later = now;
+    for _ in 0..(AI_THINK_TICKS * 6) {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert!(
+        world.registry().get::<Door>(door).unwrap().is_open,
+        "the chaser worked the handle"
+    );
+    let creature_at = world.registry().get::<Position>(creature).unwrap().0;
+    assert!(
+        distance(creature_at, Point::new(START.0, START.1, 0)) <= openshard_combat::MELEE_RANGE,
+        "and came through the doorway (ended at {creature_at:?})"
     );
 }

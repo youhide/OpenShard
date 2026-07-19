@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 openshard-combat.workspace = true
+openshard-items.workspace = true
 openshard-entities.workspace = true
 openshard-movement.workspace = true
 openshard-protocol.workspace = true

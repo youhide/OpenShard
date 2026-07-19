@@ -28,7 +28,7 @@
 
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
-use openshard_protocol::{encode_message, Facing, Point, SYSTEM_SERIAL};
+use openshard_protocol::{encode_message, Direction, Facing, Point, SYSTEM_SERIAL};
 use openshard_state::components::{
     Amount, Banker, Contained, Container, Equipped, Graphic, Heading, Name, Npc, Position,
 };
@@ -248,9 +248,24 @@ fn wander_step(state: &mut WorldState, npc: EntityId, at: Point) -> Option<u8> {
     }
     let strayed = chebyshev(at, home) >= u32::from(wander);
     if strayed {
-        // Back toward the post — pathed around the counter, not into it.
+        // Back toward the post — pathed around the counter, not into it. A
+        // townsperson is human: a shut door on the way home is opened, not an
+        // obstacle (the auto-close swings it shut again behind them).
         let facet = state.facet_of(npc);
-        openshard_ai::step_toward(state, facet, at, home)
+        let dir = openshard_ai::step_toward(state, facet, at, home, true)?;
+        if let Some(tile) = openshard_movement::step_from(at, Direction::from_bits(dir)) {
+            let door = state
+                .facet_state(facet)
+                .live_terrain()
+                .blocker_at(tile.x, tile.y)
+                .filter(|o| o.door)
+                .map(|o| o.entity);
+            if let Some(door) = door {
+                openshard_items::open_door(state, door);
+                return None;
+            }
+        }
+        Some(dir)
     } else if state.rng.below(100) < WANDER_CHANCE {
         // A small idle drift — one of the eight directions (wire bytes 0..8).
         Some(state.rng.below(8) as u8)

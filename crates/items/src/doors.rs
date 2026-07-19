@@ -105,6 +105,17 @@ pub(crate) fn set_door(state: &mut WorldState, door: EntityId, serial: Serial, o
     state.reveal(door);
 }
 
+/// Open a shut door by decree — what an NPC that knows door handles does when
+/// one stands in its way. No reach check: the caller is the AI, standing at the
+/// threshold, not a client to be doubted. Opening arms the same auto-close as a
+/// double-click, so the door swings shut behind the walker.
+pub fn open_door(state: &mut WorldState, door: EntityId) {
+    let Some(serial) = state.registry.serial_of(door) else {
+        return;
+    };
+    set_door(state, door, serial, true);
+}
+
 /// Swing shut every door whose auto-close tick has arrived. Driven by the tick
 /// counter, like decay, so a door closes on the same tick in a replay. See
 /// [`Door`].
