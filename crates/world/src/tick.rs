@@ -600,6 +600,14 @@ impl World {
                 }
             }
             Command::DoubleClick { connection, serial } => {
+                // The 2D client sets bit 31 when a player double-clicks their
+                // OWN character — the paperdoll/self gesture, and how you
+                // dismount. `Serial::new` rejects anything >= 0x8000_0000, so
+                // unmasked the self-click is swallowed and dismount only ever
+                // happens on logout. Strip it (ServUO's `& 0x7FFFFFFF`, Sphere's
+                // `&~ UID_F_RESOURCE`); self-ness is recovered downstream by
+                // `target == player`, and no ordinary serial ever sets the bit.
+                let serial = serial & 0x7FFF_FFFF;
                 // A vendor's shop first: if the click was a shopkeeper in
                 // range the buy gump answers it; anything else is the
                 // ordinary use rule.

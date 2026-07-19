@@ -725,9 +725,13 @@ fn double_clicking_yourself_opens_the_paperdoll() {
         .raw();
     let _ = packets_for(&mut world, player);
 
+    // The real client sets bit 31 double-clicking your own character; the
+    // server must strip it and still open the paperdoll (and, when mounted,
+    // dismount). A raw serial here would sail past the very bug that gate exists
+    // to catch.
     world.queue(Command::DoubleClick {
         connection: player,
-        serial,
+        serial: serial | 0x8000_0000,
     });
     world.tick(now);
 
@@ -5358,10 +5362,13 @@ fn a_horse_is_mounted_and_dismounted_by_double_click() {
     );
 
     // Double-clicking yourself dismounts; the horse lands beside the rider.
+    // The real client double-clicking your own character sets bit 31 on the
+    // serial (the paperdoll/self flag) — reproduce that, or this exercises a
+    // serial no client ever sends and the dismount path stays untested.
     let player_serial = world.registry().serial_of(player).unwrap().raw();
     world.queue(Command::DoubleClick {
         connection: gm,
-        serial: player_serial,
+        serial: player_serial | 0x8000_0000,
     });
     world.tick(now);
     assert!(world.registry().get::<Riding>(player).is_none());
