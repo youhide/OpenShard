@@ -1,0 +1,104 @@
+# OpenShard configuration.
+
+[server]
+name = "OpenShard"
+
+# Where to bind. 0.0.0.0 listens on every interface.
+listen = "0.0.0.0:2593"
+
+# What to TELL CLIENTS to dial, in the 0x8C relay packet.
+#
+# NOT the same as `listen`, and the single most likely reason a client hangs.
+# `listen` is where this shard answers; `advertise` is the address it hands out.
+# Get it wrong and the failure is silent from here: the client logs in fine,
+# picks the shard, is told to dial somewhere it cannot reach, and sits on
+# "logging into shard" until it times out. This end sees one connection and a
+# disconnect, and nothing that looks like an error, because nothing here failed.
+#
+# The default only works if the client runs on THIS MACHINE. A client anywhere
+# else — another PC, a VM, a phone — will dial its own 127.0.0.1 and find
+# nothing.
+#
+#   client on this machine   127.0.0.1:2593
+#   client on your LAN       this machine's LAN address, e.g. 192.168.1.10:2593
+#   client over the internet your PUBLIC address, with 2593 forwarded
+advertise = "127.0.0.1:2593"
+
+[world]
+# The client install directory, holding map0LegacyMUL.uop and tiledata.mul.
+#
+# Leave empty and the shard runs with no map at all: every step is allowed and
+# players walk through walls and across water. Useful for testing the protocol,
+# useless as a game.
+client_files = ""
+
+# Which facets to load: 0 is Felucca, then Trammel, Ilshenar, Malas, Tokuno,
+# Ter Mur. A character stays on its facet; there is no travel between them yet.
+facets = [0]
+
+# Where a new character appears. The height comes from the map, not from here.
+#
+# This default is open ground on one facet and may be open water on yours.
+[world.start]
+x = 1363
+y = 1600
+
+[persistence]
+# Where the world is kept. Leave empty to keep it in memory and lose it at stop;
+# give it a value to have characters survive a restart. A "postgres://" URL uses
+# PostgreSQL; anything else is a SQLite file path. Neither backend is a tier.
+#
+#   database = "openshard.db"
+#   database = "postgres://user:pass@localhost/openshard"
+database = ""
+
+# How often to save the world, in seconds. The save never stops the world (an
+# instant snapshot, written off to the side), so this is only how much play a
+# crash could cost. A clean shutdown and the staff ".save" command always save.
+# 0 turns the periodic save off. Default is 180.
+#   save_seconds = 120
+save_seconds = 180
+
+[scripting]
+# The gameplay script the shard loads and hot-reloads. A path to a .js/.ts file.
+#
+# Leave empty and nothing reacts on its own: mobiles move when clients ask and
+# no more. Point it at a script and the shard delivers domain events to it every
+# tick and applies the commands it enqueues. The file is watched — save it and
+# the hooks reload without a restart.
+#
+#   main = "scripts/main.js"
+main = ""
+
+[gameplay]
+# The rules knobs — the SphereServer sphere.ini equivalents. Every value here has
+# a working default; uncomment one only to change the shard's feel.
+
+# Which swing-speed formula combat uses (Sphere's CombatEra). Implemented:
+#   1 pre-AoS      2 AoS
+# Sphere's 0, 3 and 4 need weapon weight or ML-format speeds not built yet.
+combat_era = 1
+
+# The swing formula's numerator (Sphere's SpeedScaleFactor). Larger is slower.
+# Pre-AoS is 15000; AoS uses 40000.
+speed_scale_factor = 15000
+
+# The ceiling any one skill trains to, in tenths (1000 = 100.0).
+skill_cap = 1000
+
+# How long an item lies on the ground before it rots, in seconds.
+decay_seconds = 1200
+
+# How long a criminal flag lasts after a grey act, in seconds.
+criminal_seconds = 120
+
+# How far speech carries, in tiles: normal, a whisper, a yell.
+distance_talk = 18
+distance_whisper = 3
+distance_yell = 31
+
+# Development accounts, in plaintext, until there is a database.
+[[accounts]]
+name = "admin"
+password = "hunter2"
+characters = ["Lord British"]
