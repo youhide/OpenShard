@@ -45,7 +45,7 @@ use tracing::{debug, info, warn};
 use openshard_state::components::{
     Access, Account, Amount, Body, Brain, Client, Combat, Contained, Container, DamageType,
     Decoration, Door, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement,
-    Name, Position, Resistance, Ridden, Scripted, SpawnedBy, Stackable, Stats,
+    Name, Position, Resistance, Ridden, Riding, Scripted, SpawnedBy, Stackable, Stats,
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
@@ -743,11 +743,12 @@ impl World {
         let Some(entity) = self.state.players.remove(&connection) else {
             return;
         };
-        // A rider logs out on foot: the mount comes back to the ground here,
-        // where there is still an entity to stand it next to. The mount item
-        // is never saved (see `inventory_of`), so this also keeps the record
-        // honest.
-        items::dismount(&mut self.state, entity);
+        // A rider logs out *still mounted*: the ride persists. The saddle rides
+        // along in the saved inventory below, and `restore_inventory` rebuilds the
+        // ridden creature from it on relogin, so the character comes back on
+        // horseback where every other emulator would have dropped them on foot.
+        // The transient creature itself is despawned once the inventory has
+        // captured the saddle that stands for it (below).
         // Forget any targeting cursor it had up: a gone mobile clicks nothing.
         self.state.pending_targets.remove(&entity);
         let serial = self.state.registry.serial_of(entity);
@@ -777,6 +778,13 @@ impl World {
                 items,
             });
             self.journal.keep(record);
+        }
+
+        // The ridden creature lived only in limbo; the saddle that rebuilds it is
+        // now safely in the saved inventory, so drop the creature (the saddle item
+        // itself goes with the character's belongings below).
+        if let Some(&Riding { mount, .. }) = self.state.registry.get::<Riding>(entity) {
+            self.state.registry.despawn(mount);
         }
 
         // Take it off every screen *before* despawning: once the entity is gone

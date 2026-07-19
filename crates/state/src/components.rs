@@ -390,6 +390,25 @@ pub const fn mount_item_for(body: u16) -> Option<u16> {
     })
 }
 
+/// The creature body a mount-item graphic stands for — the inverse of
+/// [`mount_item_for`]. Persistence saves the worn mount item, not the ridden
+/// creature (which lives only while ridden), so restoring a saved ride rebuilds
+/// the creature from the item it was drawn as. `None` is "not a mount item".
+#[must_use]
+pub const fn mount_body_for(item_graphic: u16) -> Option<u16> {
+    Some(match item_graphic {
+        0x3E9F => 0x00C8, // bay horse
+        0x3EA2 => 0x00CC, // dark brown horse
+        0x3EA0 => 0x00E2, // grey horse
+        0x3EA1 => 0x00E4, // tan horse
+        0x3EA6 => 0x00DC, // llama
+        0x3EA5 => 0x00DB, // forest ostard
+        0x3EA3 => 0x00D2, // desert ostard
+        0x3EA4 => 0x00DA, // frenzied ostard
+        _ => return None,
+    })
+}
+
 /// A creature that fights at distance — an archer's bow, a mage's bolt, a
 /// dragon's breath, abstracted to what the tick needs: how far it reaches and
 /// what kind of hurt it is. The damage amount is the creature's `MeleeDamage`;

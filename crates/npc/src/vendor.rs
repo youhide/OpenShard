@@ -21,7 +21,7 @@ use openshard_state::sectors::in_range;
 use openshard_state::WorldState;
 use tracing::debug;
 
-use crate::{notify, GOLD_GRAPHIC};
+use crate::GOLD_GRAPHIC;
 
 /// The layer a vendor's stock container rides on — ServUO's restockable buy
 /// layer, `0x1A`.
@@ -216,7 +216,7 @@ pub fn buy(
     }
     let gold = items::count_in_container(state, backpack, GOLD_GRAPHIC);
     if u32::from(u16::MAX) < total || gold < total {
-        notify(state, connection, "Thou canst not afford that.");
+        vendor_says(state, vendor, "Thou canst not afford that.");
         return;
     }
     items::take_from_container(state, backpack, GOLD_GRAPHIC, total as u16);
@@ -224,9 +224,9 @@ pub fn buy(
         items::remove_from_stack(state, stock_serial, item, take);
         items::give(state, backpack, graphic, hue, take);
     }
-    notify(
+    vendor_says(
         state,
-        connection,
+        vendor,
         &format!("The total of thy purchase is {total} gold."),
     );
 }
@@ -275,7 +275,7 @@ pub fn offer_sell_list(state: &mut WorldState, connection: ConnectionId, actor: 
         })
         .collect();
     if lines.is_empty() {
-        notify(state, connection, "Thou hast nothing I wouldst buy.");
+        vendor_says(state, vendor, "Thou hast nothing I wouldst buy.");
         return true;
     }
     state.send(connection, encode_sell_list(vendor_serial.raw(), &lines));
@@ -323,9 +323,9 @@ pub fn sell(state: &mut WorldState, connection: ConnectionId, vendor_serial: u32
     }
     let paid = earned.min(u32::from(u16::MAX)) as u16;
     items::give(state, backpack, GOLD_GRAPHIC, 0, paid);
-    notify(
+    vendor_says(
         state,
-        connection,
+        vendor,
         &format!("The total of thy sale is {paid} gold."),
     );
 }
@@ -364,6 +364,27 @@ fn nearest_vendor(state: &WorldState, actor: EntityId) -> Option<EntityId> {
         })
         .min_by_key(|(d, _)| *d)
         .map(|(_, vendor)| vendor)
+}
+
+/// "buy" near a vendor opens its shop — the same buy gump a double-click does,
+/// reached by keyword the way "sell" reaches the offer list. Returns whether a
+/// vendor was in reach and answered.
+pub fn buy_keyword(state: &mut WorldState, connection: ConnectionId, actor: EntityId) -> bool {
+    let Some(vendor) = nearest_vendor(state, actor) else {
+        return false;
+    };
+    let Some(vendor_serial) = state.registry.serial_of(vendor) else {
+        return false;
+    };
+    open_shop(state, connection, vendor_serial.raw())
+}
+
+/// The vendor's own voice: a conversational line drawn over its head for
+/// everyone in earshot, the way any NPC speaks — not a private `0x1C` system
+/// line to a single screen. The customer's answer should look like the
+/// shopkeeper talking, not the shard.
+fn vendor_says(state: &mut WorldState, vendor: EntityId, text: &str) {
+    openshard_chat::speak(state, vendor, 0, crate::GREET_HUE, crate::GREET_FONT, text);
 }
 
 /// The serial of the container `mobile` wears at `layer`, if any.

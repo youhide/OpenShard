@@ -97,10 +97,14 @@ pub(crate) fn set_door(state: &mut WorldState, door: EntityId, serial: Serial, o
             .obstructions
             .unblock(at.x, at.y, door);
     } else {
-        state
-            .facet_state_mut(facet)
-            .obstructions
-            .block(moved.x, moved.y, door, true);
+        state.facet_state_mut(facet).obstructions.block(
+            moved.x,
+            moved.y,
+            door,
+            true,
+            moved.z,
+            openshard_state::DOOR_HEIGHT,
+        );
     }
     state.reveal(door);
 }

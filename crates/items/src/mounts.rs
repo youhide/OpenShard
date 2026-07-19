@@ -97,17 +97,26 @@ pub fn dismount(state: &mut WorldState, player: EntityId) {
     state.registry.remove::<Riding>(player);
     state.registry.remove::<Ridden>(mount);
 
-    // The saddle disappears from every screen that drew it — the watchers'
-    // and the rider's own.
+    // The saddle disappears from every screen that drew it — the watchers' and
+    // the rider's own. It rode out as a `0x2E` (equipment is drawn as part of the
+    // wearer's `0x78`, and never enters anyone's `seen`), so `forget` would find
+    // nothing to remove and send no `0x1D`, leaving the rider looking mounted.
+    // The remove goes straight to the equip audience, the way `drag.rs` unequips
+    // a worn item; the client then drops the mount layer and redraws on foot.
     if let Some(item_serial) = state.registry.serial_of(item) {
-        for watcher in state.watchers_of(player) {
-            state.forget(watcher, item, item_serial);
+        for watcher in equip_audience(state, player) {
+            if let Some(&Client { connection, .. }) = state.registry.get::<Client>(watcher) {
+                state.outbox.push(Outbound {
+                    connection,
+                    packet: encode_remove(item_serial.raw()),
+                });
+            }
         }
-        state.forget(player, item, item_serial);
     }
     state.registry.despawn(item);
 
-    // The creature lands on the first open tile beside the rider.
+    // The creature lands on the first open tile beside the rider, at the floor z
+    // the terrain computes for it — not the rider's own z carried verbatim.
     let Some(&Position(rider_at)) = state.registry.get::<Position>(player) else {
         return;
     };
@@ -116,13 +125,12 @@ pub fn dismount(state: &mut WorldState, player: EntityId) {
     for dir in 0..8u8 {
         let dir = openshard_protocol::Direction::from_bits(dir);
         if let Some(tile) = step_from(rider_at, dir) {
-            if state
+            if let Some(landed) = state
                 .facet_state(facet)
                 .live_terrain()
                 .can_step(rider_at, tile)
-                .is_some()
             {
-                landing = tile;
+                landing = landed;
                 break;
             }
         }

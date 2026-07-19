@@ -177,26 +177,72 @@ impl World {
         }
     }
 
-    /// "Clear spawns". A creature belongs to a region by its [`SpawnedBy`]; taking
-    /// it off every screen before despawning, so no client is left drawing a ghost.
+    /// "Clear spawns" — the full reset the admin menu pairs with "Populate".
+    ///
+    /// Drops every spawn region and despawns every NPC mobile: a body, no client
+    /// (players have one), and not a ridden mount (whose rider is a live player we
+    /// must not strand on a phantom horse). This is both the spawner-maintained
+    /// animals — tagged [`SpawnedBy`] — *and* the named townsfolk, bankers and
+    /// vendors the pack places once via `op_spawn_mobile`, which carry no
+    /// `SpawnedBy` and so used to survive a clear, reading as "clear did nothing".
+    /// Each mobile takes its worn gear (and a vendor's stock crate and its wares)
+    /// with it, and is taken off every screen before it goes.
     pub(super) fn clear_spawners(&mut self) {
         self.spawners.clear();
-        let owned: Vec<EntityId> = self
+        let mobiles: Vec<EntityId> = self
             .state
             .registry
-            .query::<SpawnedBy>()
+            .query::<Body>()
+            .filter(|(entity, _)| {
+                !self.state.registry.has::<Client>(*entity)
+                    && !self.state.registry.has::<Ridden>(*entity)
+            })
             .map(|(entity, _)| entity)
             .collect();
-        for entity in owned {
-            let serial = self.state.registry.serial_of(entity);
-            let facet = self.state.facet_of(entity);
-            if let Some(serial) = serial {
-                for watcher in self.state.watchers_of(entity) {
-                    self.state.forget(watcher, entity, serial);
-                }
-            }
-            self.state.facet_state_mut(facet).sectors.remove(entity);
-            self.state.registry.despawn(entity);
+        for entity in mobiles {
+            self.despawn_mobile(entity);
         }
+    }
+
+    /// Despawn one NPC mobile with everything it wears (and everything nested in
+    /// what it wears), taking it off every watcher's screen first.
+    fn despawn_mobile(&mut self, entity: EntityId) {
+        if let Some(serial) = self.state.registry.serial_of(entity) {
+            let worn: Vec<EntityId> = self
+                .state
+                .registry
+                .query::<Equipped>()
+                .filter(|(_, worn)| worn.mobile == serial)
+                .map(|(item, _)| item)
+                .collect();
+            for item in worn {
+                self.despawn_item_tree(item);
+            }
+            for watcher in self.state.watchers_of(entity) {
+                self.state.forget(watcher, entity, serial);
+            }
+        }
+        let facet = self.state.facet_of(entity);
+        self.state.facet_state_mut(facet).sectors.remove(entity);
+        self.state.registry.despawn(entity);
+    }
+
+    /// Despawn an item and, if it is a container, everything inside it, to any
+    /// depth. Worn and contained items are drawn as part of their holder, never
+    /// on their own, so no `0x1D` is owed — the holder's removal took them.
+    fn despawn_item_tree(&mut self, item: EntityId) {
+        if let Some(serial) = self.state.registry.serial_of(item) {
+            let contents: Vec<EntityId> = self
+                .state
+                .registry
+                .query::<Contained>()
+                .filter(|(_, held)| held.container == serial)
+                .map(|(child, _)| child)
+                .collect();
+            for child in contents {
+                self.despawn_item_tree(child);
+            }
+        }
+        self.state.registry.despawn(item);
     }
 }

@@ -132,12 +132,9 @@ impl World {
             if worn.mobile != owner {
                 continue;
             }
-            // The saddle is not luggage: the mount item exists only while the
-            // ridden creature does, and the creature is not persisted. Saving
-            // the item alone would restore a rider glued to a phantom horse.
-            if worn.layer == items::MOUNT_LAYER {
-                continue;
-            }
+            // The saddle *is* saved, on the mount layer like any worn item: it
+            // carries the mount's graphic, and [`restore_inventory`] rebuilds the
+            // ridden creature from it, so the rider logs back in still mounted.
             let location = ItemLocation::Equipped {
                 mobile: owner_raw,
                 layer: worn.layer,
@@ -389,6 +386,11 @@ impl World {
                         self.state
                             .registry
                             .insert(entity, Equipped { mobile, layer });
+                        // A saved mount: rebuild the ridden creature the saddle
+                        // stands for and put the rider back in the saddle.
+                        if layer == items::MOUNT_LAYER {
+                            self.remount_saved(mobile, entity, record.graphic, record.hue);
+                        }
                     }
                 }
                 ItemLocation::Contained {
@@ -415,5 +417,28 @@ impl World {
             }
         }
         true
+    }
+
+    /// Rebuild a saved ride: recreate the ridden creature the mount item was
+    /// drawn as, and put its rider back in the saddle, so a character that logged
+    /// out mounted logs back in mounted. The creature lives only in limbo (no
+    /// position) until the rider dismounts, exactly as a live mount does — its
+    /// stats do not matter while ridden, so a fresh serial and the body the
+    /// saddle names are all it needs.
+    fn remount_saved(&mut self, rider_serial: Serial, item: EntityId, graphic: u16, hue: u16) {
+        let Some(rider) = self.state.registry.entity_of(rider_serial) else {
+            return;
+        };
+        let Some(body) = openshard_state::components::mount_body_for(graphic) else {
+            return;
+        };
+        let Ok((mount, _)) = self.state.registry.spawn_with_serial(SerialKind::Mobile) else {
+            return;
+        };
+        let facet = self.state.facet_of(rider);
+        self.state.registry.insert(mount, Body { id: body, hue });
+        self.state.registry.insert(mount, Facet(facet));
+        self.state.registry.insert(mount, Ridden { rider });
+        self.state.registry.insert(rider, Riding { mount, item });
     }
 }

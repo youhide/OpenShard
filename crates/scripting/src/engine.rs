@@ -534,6 +534,29 @@ mod tests {
     }
 
     #[test]
+    fn an_admin_action_can_clear_spawners() {
+        // The "Clear spawns" button: a staff verb the pack turns into a wipe
+        // through op_clear_spawners, the mirror of the populate path above.
+        let mut engine = DenoEngine::new();
+        engine
+            .load(
+                "function onEvent(e) {\n\
+                 if (e.type === 'AdminAction' && e.action === 'clear') {\n\
+                     Deno.core.ops.op_clear_spawners();\n\
+                 }\n\
+                 }",
+            )
+            .unwrap();
+        engine
+            .deliver(&Event::AdminAction {
+                serial: 1,
+                action: "clear".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(engine.take_commands(), vec![Command::ClearSpawners]);
+    }
+
+    #[test]
     fn a_hook_can_decorate() {
         // The pack places a batch of statics on top of the map's art.
         let mut engine = DenoEngine::new();

@@ -35,7 +35,7 @@ pub use components::{
     Hitpoints, Mana, MeleeDamage, Movement, MurderDecay, Murders, Name, Npc, Position, Resistance,
     Scripted, Skills, SpawnedBy, Stackable, Stats, SwingSpeed,
 };
-pub use obstruct::{LiveTerrain, Obstacle, Obstructions};
+pub use obstruct::{LiveTerrain, Obstacle, Obstructions, DOOR_HEIGHT};
 pub use rng::Rng;
 pub use runtime::{
     FacetState, Gameplay, HeldItem, Origin, Outbound, TargetPurpose, WorldState, TICKS_PER_SECOND,

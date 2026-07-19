@@ -14,9 +14,7 @@
 
 use openshard_entities::{EntityId, Serial};
 use openshard_gateway::ConnectionId;
-use openshard_protocol::{
-    encode_message, encode_unicode_message, DEFAULT_LANGUAGE_TAG, NO_GRAPHIC,
-};
+use openshard_protocol::{encode_unicode_message, DEFAULT_LANGUAGE_TAG, NO_GRAPHIC};
 use openshard_state::components::{Body, Client, Name, Position};
 use openshard_state::sectors::in_range;
 use openshard_state::{Gameplay, Outbound, WorldState};
@@ -95,23 +93,22 @@ pub fn speak(state: &mut WorldState, entity: EntityId, mode: u8, hue: u16, font:
         .registry
         .get::<Name>(entity)
         .map_or(String::new(), |n| n.0.clone());
-    // Latin-1 speech rides the universally-understood `0x1C`; anything ASCII
-    // cannot carry — an accent, a non-Latin script — has to go out as Unicode
-    // `0xAE`, and a player who typed it necessarily spoke `0xAD` to begin with.
-    let packet = if text.is_ascii() {
-        encode_message(serial.raw(), graphic, mode, hue, font, &name, text)
-    } else {
-        encode_unicode_message(
-            serial.raw(),
-            graphic,
-            mode,
-            hue,
-            font,
-            DEFAULT_LANGUAGE_TAG,
-            &name,
-            text,
-        )
-    };
+    // Everything goes out as Unicode `0xAE`, always. The old `0x1C` renders in
+    // the client's antique ASCII font, so choosing the packet by content — ASCII
+    // on `0x1C`, accented on `0xAE` — made the same speaker flip fonts mid-breath
+    // the moment a word carried an accent. One font, the modern one, for every
+    // line; `0xAE` also carries any script `0x1C` cannot. The hue is left as the
+    // caller (the client, for a player) chose it.
+    let packet = encode_unicode_message(
+        serial.raw(),
+        graphic,
+        mode,
+        hue,
+        font,
+        DEFAULT_LANGUAGE_TAG,
+        &name,
+        text,
+    );
 
     let range = speech_range(mode, &state.gameplay);
     let sectors = &state.facet_state(facet).sectors;

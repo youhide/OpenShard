@@ -26,6 +26,14 @@ use openshard_entities::EntityId;
 use openshard_movement::{OpenWorld, Terrain};
 use openshard_protocol::Point;
 
+/// A mobile's body height in z-units, for deciding what overlaps it. Matches the
+/// step check's `PLAYER_HEIGHT` in `world::terrain`.
+const MOBILE_HEIGHT: i32 = 16;
+
+/// The height a door (or a plain wall-style obstacle) blocks through when the
+/// placer has no tiledata height to hand. A classic UO wall/door is 20 tall.
+pub const DOOR_HEIGHT: u8 = 20;
+
 /// One entity blocking a tile.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Obstacle {
@@ -34,6 +42,13 @@ pub struct Obstacle {
     /// A closed door: a mobile that knows how may open it rather than walk
     /// around, so movement wants to know *what* blocked, not just that.
     pub door: bool,
+    /// The base z the blocker sits at.
+    pub z: i8,
+    /// How tall it is: its body spans `[z, z + height)`. This is the z-span that
+    /// lets a wall on an upper floor block that floor and *not* the ground
+    /// beneath it — without it, a placed multi-storey building sealed every floor
+    /// below its highest impassable piece.
+    pub height: u8,
 }
 
 /// The dynamic obstacles on one facet: tile → the entities blocking it.
@@ -43,15 +58,23 @@ pub struct Obstructions {
 }
 
 impl Obstructions {
-    /// Mark `entity` as blocking `(x, y)`. Blocking twice is idempotent.
-    pub fn block(&mut self, x: u16, y: u16, entity: EntityId, door: bool) {
+    /// Mark `entity` as blocking `(x, y)` through the z-span `[z, z + height)`.
+    /// Blocking twice is idempotent.
+    pub fn block(&mut self, x: u16, y: u16, entity: EntityId, door: bool, z: i8, height: u8) {
         let tile = self.tiles.entry((x, y)).or_default();
         if let Some(existing) = tile.iter_mut().find(|o| o.entity == entity) {
             // Re-registering refines what the blocker is — a doorway placed as
             // plain impassable art and then given its `Door` stays one obstacle.
             existing.door = door;
+            existing.z = z;
+            existing.height = height;
         } else {
-            tile.push(Obstacle { entity, door });
+            tile.push(Obstacle {
+                entity,
+                door,
+                z,
+                height,
+            });
         }
     }
 
@@ -65,10 +88,29 @@ impl Obstructions {
         }
     }
 
-    /// The first thing blocking `(x, y)`, if anything is.
+    /// The first thing blocking `(x, y)` at any height, if anything is. Used for
+    /// door detection and sight, where a door is a full-height wall and its z
+    /// does not matter.
     #[must_use]
     pub fn blocker_at(&self, x: u16, y: u16) -> Option<Obstacle> {
         self.tiles.get(&(x, y)).and_then(|t| t.first().copied())
+    }
+
+    /// The first thing blocking `(x, y)` in the vertical span a mobile standing
+    /// at `stand_z` occupies — its body `[z, z + height)` meeting the mobile's
+    /// `[stand_z, stand_z + MOBILE_HEIGHT)`. This is what movement asks, so an
+    /// upper-floor blocker leaves the ground floor open.
+    #[must_use]
+    pub fn blocker_at_z(&self, x: u16, y: u16, stand_z: i32) -> Option<Obstacle> {
+        self.tiles.get(&(x, y)).and_then(|tile| {
+            tile.iter()
+                .find(|o| {
+                    let bottom = i32::from(o.z);
+                    let top = bottom + i32::from(o.height).max(1);
+                    bottom < stand_z + MOBILE_HEIGHT && stand_z < top
+                })
+                .copied()
+        })
     }
 
     /// Whether anything blocks `(x, y)`.
@@ -129,11 +171,37 @@ impl Terrain for LiveTerrain<'_> {
             Some(map) => map.can_step(from, to)?,
             None => OpenWorld.can_step(from, to)?,
         };
-        match self.obstructions.blocker_at(to.x, to.y) {
-            Some(o) if o.door && self.through_doors => Some(landed),
-            Some(_) => None,
-            None => Some(landed),
+        // A live obstacle in the mobile's own vertical span on the destination
+        // tile: a shut door yields only to a planner told it will be opened,
+        // anything else stops the step. Checked at the z the mobile will stand at,
+        // so an upper-floor wall does not block the floor below.
+        match self
+            .obstructions
+            .blocker_at_z(to.x, to.y, i32::from(landed.z))
+        {
+            Some(o) if o.door && self.through_doors => {}
+            Some(_) => return None,
+            None => {}
         }
+        // The diagonal corner rule: a diagonal step may not slip through the
+        // corner where two blockers meet — both cardinal tiles flanking it must
+        // themselves be steppable. The A* planner already refuses such corners
+        // (`movement::path::corner_open`); enforcing it here in the shared
+        // validator means a *server-driven* creature taking a naive, wandering
+        // or kiting step cannot squeeze between two walls the way only a planned
+        // route was ever stopped from doing. A client never sends a corner-cutting
+        // diagonal, so a player's own walk is unaffected. The flank calls are
+        // orthogonal, so they do not re-enter this branch.
+        let dx = i32::from(to.x) - i32::from(from.x);
+        let dy = i32::from(to.y) - i32::from(from.y);
+        if dx != 0 && dy != 0 {
+            let flank_x = Point::new((i32::from(from.x) + dx.signum()) as u16, from.y, from.z);
+            let flank_y = Point::new(from.x, (i32::from(from.y) + dy.signum()) as u16, from.z);
+            if self.can_step(from, flank_x).is_none() || self.can_step(from, flank_y).is_none() {
+                return None;
+            }
+        }
+        Some(landed)
     }
 
     fn ground_z(&self, x: u16, y: u16) -> Option<i8> {
@@ -151,7 +219,8 @@ impl Terrain for LiveTerrain<'_> {
     }
 
     fn can_fit(&self, x: u16, y: u16, z: i32, height: i32) -> bool {
-        self.map.is_none_or(|m| m.can_fit(x, y, z, height)) && !self.obstructions.is_blocked(x, y)
+        self.map.is_none_or(|m| m.can_fit(x, y, z, height))
+            && self.obstructions.blocker_at_z(x, y, z).is_none()
     }
 
     fn sight_clear(&self, from: Point, to: Point) -> bool {
@@ -178,7 +247,7 @@ mod tests {
     fn a_blocked_tile_refuses_a_step_the_open_world_allows() {
         let mut obstructions = Obstructions::default();
         let door = an_entity();
-        obstructions.block(10, 10, door, true);
+        obstructions.block(10, 10, door, true, 0, DOOR_HEIGHT);
         let live = LiveTerrain::new(None, &obstructions, false);
         assert!(live
             .can_step(Point::new(10, 9, 0), Point::new(10, 10, 0))
@@ -191,8 +260,8 @@ mod tests {
     #[test]
     fn a_door_opener_plans_through_a_door_but_not_through_a_crate() {
         let mut obstructions = Obstructions::default();
-        obstructions.block(10, 10, an_entity(), true);
-        obstructions.block(12, 10, an_entity(), false);
+        obstructions.block(10, 10, an_entity(), true, 0, DOOR_HEIGHT);
+        obstructions.block(12, 10, an_entity(), false, 0, DOOR_HEIGHT);
         let planner = LiveTerrain::new(None, &obstructions, true);
         assert!(planner
             .can_step(Point::new(10, 9, 0), Point::new(10, 10, 0))
@@ -206,7 +275,7 @@ mod tests {
     fn a_shut_door_is_opaque_and_an_open_one_is_not() {
         let mut obstructions = Obstructions::default();
         let door = an_entity();
-        obstructions.block(10, 10, door, true);
+        obstructions.block(10, 10, door, true, 0, DOOR_HEIGHT);
         let live = LiveTerrain::new(None, &obstructions, false);
         assert!(!live.sight_clear(Point::new(10, 8, 0), Point::new(10, 12, 0)));
         obstructions.unblock(10, 10, door);
@@ -215,12 +284,67 @@ mod tests {
     }
 
     #[test]
+    fn a_diagonal_passes_an_open_corner() {
+        let obstructions = Obstructions::default();
+        let live = LiveTerrain::new(None, &obstructions, false);
+        assert!(
+            live.can_step(Point::new(10, 10, 0), Point::new(11, 11, 0))
+                .is_some(),
+            "nothing flanks the diagonal, so it is not cutting a corner"
+        );
+    }
+
+    #[test]
+    fn a_diagonal_is_refused_when_either_flank_is_blocked() {
+        // One crate east of the mover is enough: the diagonal into (11,11) would
+        // slip past its corner, which the rule forbids even with the other flank
+        // wide open. This is the case a server-driven creature used to exploit.
+        let mut obstructions = Obstructions::default();
+        obstructions.block(11, 10, an_entity(), false, 0, DOOR_HEIGHT);
+        let live = LiveTerrain::new(None, &obstructions, false);
+        assert!(
+            live.can_step(Point::new(10, 10, 0), Point::new(11, 11, 0))
+                .is_none(),
+            "a single blocked flank forbids the corner cut"
+        );
+        // The orthogonal step onto the open tile beside it is still fine.
+        assert!(
+            live.can_step(Point::new(10, 10, 0), Point::new(10, 11, 0))
+                .is_some(),
+            "the cardinal step is unaffected"
+        );
+    }
+
+    #[test]
     fn unblocking_frees_the_tile_and_blocking_twice_is_one_obstacle() {
         let mut obstructions = Obstructions::default();
         let door = an_entity();
-        obstructions.block(5, 5, door, true);
-        obstructions.block(5, 5, door, true);
+        obstructions.block(5, 5, door, true, 0, DOOR_HEIGHT);
+        obstructions.block(5, 5, door, true, 0, DOOR_HEIGHT);
         obstructions.unblock(5, 5, door);
         assert!(!obstructions.is_blocked(5, 5));
+    }
+
+    #[test]
+    fn an_upper_floor_blocker_leaves_the_ground_floor_open() {
+        // The Britain-library bug: a placed impassable static on an upper floor
+        // (z 20, a wall 20 tall) must not seal the ground beneath it, but one at
+        // ground level must still block. The mobile steps at z 0.
+        let mut obstructions = Obstructions::default();
+        obstructions.block(10, 10, an_entity(), false, 20, 20);
+        let live = LiveTerrain::new(None, &obstructions, false);
+        assert!(
+            live.can_step(Point::new(10, 9, 0), Point::new(10, 10, 0))
+                .is_some(),
+            "an upper-floor wall does not block the floor below"
+        );
+
+        obstructions.block(11, 10, an_entity(), false, 0, 20);
+        let live = LiveTerrain::new(None, &obstructions, false);
+        assert!(
+            live.can_step(Point::new(11, 9, 0), Point::new(11, 10, 0))
+                .is_none(),
+            "but a ground-level wall still blocks"
+        );
     }
 }

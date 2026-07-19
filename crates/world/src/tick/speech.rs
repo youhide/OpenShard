@@ -34,9 +34,14 @@ impl World {
         // request the banker answers, not a hidden command.
         if let Some(&actor) = self.state.players.get(&connection) {
             npc::banker_keywords(&mut self.state, connection, actor, &text);
-            // "sell" near a shopkeeper opens the offer list the same way.
-            if text.to_ascii_lowercase().contains("sell") {
+            // "sell" near a shopkeeper opens the offer list; "buy" opens the shop —
+            // the keyword path to the same gump a double-click reaches. Checked
+            // "sell" first so the "buy" substring inside neither steals it.
+            let lowered = text.to_ascii_lowercase();
+            if lowered.contains("sell") {
                 npc::offer_sell_list(&mut self.state, connection, actor);
+            } else if lowered.contains("buy") {
+                npc::buy_keyword(&mut self.state, connection, actor);
             }
         }
     }

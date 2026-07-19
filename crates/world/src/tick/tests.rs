@@ -2910,12 +2910,12 @@ fn speech_reaches_nearby_players_and_the_speaker() {
     let all: Vec<Outbound> = world.drain_outbound().collect();
     assert!(
         all.iter()
-            .any(|o| o.connection == speaker && o.packet[0] == 0x1C),
+            .any(|o| o.connection == speaker && o.packet[0] == 0xAE),
         "the speaker sees their own words"
     );
     assert!(
         all.iter()
-            .any(|o| o.connection == listener && o.packet[0] == 0x1C),
+            .any(|o| o.connection == listener && o.packet[0] == 0xAE),
         "and so does the player beside them"
     );
 }
@@ -2942,7 +2942,7 @@ fn speech_does_not_carry_out_of_earshot() {
     assert!(
         !packets_for(&mut world, listener)
             .iter()
-            .any(|p| p[0] == 0x1C),
+            .any(|p| p[0] == 0xAE),
         "a shout across a field is not heard"
     );
 }
@@ -2970,7 +2970,7 @@ fn a_whisper_carries_only_to_those_right_beside() {
     assert!(
         !packets_for(&mut world, listener)
             .iter()
-            .any(|p| p[0] == 0x1C),
+            .any(|p| p[0] == 0xAE),
         "a whisper does not reach ten tiles off"
     );
 }
@@ -2998,7 +2998,7 @@ fn a_yell_carries_past_normal_earshot() {
     assert!(
         !packets_for(&mut world, listener)
             .iter()
-            .any(|p| p[0] == 0x1C),
+            .any(|p| p[0] == 0xAE),
         "normal speech stops short of twenty-five tiles"
     );
 
@@ -3014,38 +3014,41 @@ fn a_yell_carries_past_normal_earshot() {
     assert!(
         packets_for(&mut world, listener)
             .iter()
-            .any(|p| p[0] == 0x1C),
+            .any(|p| p[0] == 0xAE),
         "but a yell carries that far"
     );
 }
 
 #[test]
-fn accented_speech_goes_out_as_unicode() {
-    // A Brazilian player types "olá": Latin-1 `0x1C` would lose the accent, so
-    // the world reaches for Unicode `0xAE` instead. Pure-ASCII speech (the
-    // test above) stays on `0x1C`, universally understood.
+fn all_speech_goes_out_as_unicode() {
+    // Every line rides Unicode `0xAE`, plain ASCII and accented alike, so the
+    // font never flips: a Brazilian player's "olá" keeps its accent, and the
+    // ASCII "hail" tested above draws in the same modern font rather than the
+    // client's antique `0x1C` one.
     let now = Instant::now();
     let mut world = world();
     let speaker = enter(&mut world, now);
 
-    world.queue(Command::Say {
-        connection: speaker,
-        mode: 0,
-        hue: 0,
-        font: 3,
-        text: "olá".to_owned(),
-    });
-    world.tick(now);
+    for text in ["hail", "olá"] {
+        world.queue(Command::Say {
+            connection: speaker,
+            mode: 0,
+            hue: 0,
+            font: 3,
+            text: text.to_owned(),
+        });
+        world.tick(now);
 
-    let packets = packets_for(&mut world, speaker);
-    assert!(
-        packets.iter().any(|p| p[0] == 0xAE),
-        "accented speech takes the Unicode path"
-    );
-    assert!(
-        !packets.iter().any(|p| p[0] == 0x1C),
-        "and not the ASCII one, which would mangle it"
-    );
+        let packets = packets_for(&mut world, speaker);
+        assert!(
+            packets.iter().any(|p| p[0] == 0xAE),
+            "{text:?} takes the Unicode path"
+        );
+        assert!(
+            !packets.iter().any(|p| p[0] == 0x1C),
+            "and not the ASCII one, which mangles accents and flips the font"
+        );
+    }
 }
 
 #[test]
@@ -3676,6 +3679,91 @@ fn a_spawner_fills_to_its_ceiling_and_clear_empties_it() {
 }
 
 #[test]
+fn clear_also_removes_placed_npcs_and_their_gear_but_not_players() {
+    // "Populate" places named townsfolk and vendors directly, with no SpawnedBy
+    // tag; a clear that only swept SpawnedBy left them standing, which read as
+    // "clear did nothing". The full reset takes them and their stock crate too,
+    // while the living player is untouched.
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player = world.state.players[&gm];
+
+    world.queue(Command::SpawnMobile {
+        body: 0x0190,
+        hue: 0,
+        hits: 50,
+        notoriety: 1,
+        damage: 0,
+        resistance: 0,
+        swing: 0,
+        sight: 0,
+        aggression: 0,
+        beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
+        wander: false,
+        position: Point::new(START.0 + 1, START.1, 0),
+        facet: 0,
+        name: Some("Mirabel".to_owned()),
+        banker: false,
+        vendor: true,
+        equipment: Vec::new(),
+    });
+    world.tick(now);
+    let vendor = world
+        .state
+        .registry
+        .query::<openshard_state::components::Vendor>()
+        .map(|(entity, _)| entity)
+        .next()
+        .expect("a placed vendor");
+    let vendor_serial = world.registry().serial_of(vendor).unwrap().raw();
+    world.queue(Command::StockVendor {
+        serial: vendor_serial,
+        stock: vec![npc::StockLine {
+            graphic: 0x0F7A,
+            hue: 0,
+            amount: 50,
+            price: 4,
+            name: "black pearl".to_owned(),
+        }],
+    });
+    world.tick(now);
+    assert!(
+        world
+            .registry()
+            .query::<openshard_state::components::Price>()
+            .next()
+            .is_some(),
+        "the vendor was stocked"
+    );
+
+    world.queue(Command::ClearSpawners);
+    world.tick(now);
+    assert!(
+        world
+            .registry()
+            .query::<openshard_state::components::Vendor>()
+            .next()
+            .is_none(),
+        "the placed vendor is gone, SpawnedBy or not"
+    );
+    assert!(
+        world
+            .registry()
+            .query::<openshard_state::components::Price>()
+            .next()
+            .is_none(),
+        "and its stock crate and wares went with it"
+    );
+    assert!(
+        world.registry().get::<Position>(player).is_some(),
+        "the living player is left standing"
+    );
+}
+
+#[test]
 fn a_creature_can_be_made_to_speak() {
     let now = Instant::now();
     let mut world = world();
@@ -3693,7 +3781,7 @@ fn a_creature_can_be_made_to_speak() {
     assert!(
         packets_for(&mut world, player)
             .iter()
-            .any(|p| p[0] == 0x1C && mentions(p, mob)),
+            .any(|p| p[0] == 0xAE && mentions(p, mob)),
         "the player hears the creature the script gave a voice"
     );
 }
@@ -4231,9 +4319,14 @@ fn a_banker_greets_a_nearby_player() {
     // runs the townsfolk beat, so it greets straight away. The line is one of
     // several, but every one names the visitor.
     spawn_banker(&mut world, Point::new(START.0 + 2, START.1, 0), now);
-    let greeted = packets_for(&mut world, connection)
-        .iter()
-        .any(|p| p[0] == 0x1C && String::from_utf8_lossy(p).contains("Lord British"));
+    // Speech is Unicode `0xAE` now, so the name is UTF-16; strip the zero bytes
+    // and the ASCII characters read straight through.
+    let greeted = packets_for(&mut world, connection).iter().any(|p| {
+        p[0] == 0xAE && {
+            let text: Vec<u8> = p.iter().copied().filter(|&b| b != 0).collect();
+            String::from_utf8_lossy(&text).contains("Lord British")
+        }
+    });
     assert!(greeted, "the banker greeted the nearby player by name");
 }
 
@@ -4964,6 +5057,8 @@ fn fence_around(world: &mut World, center: Point) {
                 (i32::from(center.y) + dy) as u16,
                 crate_entity,
                 false,
+                0,
+                openshard_state::DOOR_HEIGHT,
             );
         }
     }
@@ -5027,6 +5122,8 @@ fn a_chase_rounds_a_wall_of_crates() {
             player_at.y + 2,
             crate_entity,
             false,
+            0,
+            openshard_state::DOOR_HEIGHT,
         );
     }
     let creature = spawn_brained(
@@ -5365,6 +5462,8 @@ fn a_horse_is_mounted_and_dismounted_by_double_click() {
     // The real client double-clicking your own character sets bit 31 on the
     // serial (the paperdoll/self flag) — reproduce that, or this exercises a
     // serial no client ever sends and the dismount path stays untested.
+    let saddle_serial = world.registry().serial_of(riding.item).unwrap().raw();
+    let _ = packets_for(&mut world, gm); // clear the outbox before the dismount
     let player_serial = world.registry().serial_of(player).unwrap().raw();
     world.queue(Command::DoubleClick {
         connection: gm,
@@ -5372,6 +5471,14 @@ fn a_horse_is_mounted_and_dismounted_by_double_click() {
     });
     world.tick(now);
     assert!(world.registry().get::<Riding>(player).is_none());
+    // The rider's own client is told to remove the mount item (a 0x1D), or it
+    // keeps drawing the saddle and the rider looks mounted on foot.
+    assert!(
+        packets_for(&mut world, gm)
+            .iter()
+            .any(|p| p[0] == 0x1D && mentions(p, saddle_serial)),
+        "the saddle is removed from the rider's own screen"
+    );
     let horse_at = world
         .registry()
         .get::<Position>(horse)
@@ -5384,7 +5491,7 @@ fn a_horse_is_mounted_and_dismounted_by_double_click() {
 }
 
 #[test]
-fn a_ridden_horse_does_not_wander_and_logout_grounds_it() {
+fn a_ridden_horse_does_not_wander_and_the_ride_survives_logout() {
     let now = Instant::now();
     let mut world = world();
     let gm = enter_gm(&mut world, now);
@@ -5407,38 +5514,86 @@ fn a_ridden_horse_does_not_wander_and_logout_grounds_it() {
         "no brain beat moves a ridden mount"
     );
 
-    // The rider logs out; the horse comes back to the ground.
+    // The rider logs out still mounted: the ride is saved on the saddle, not
+    // grounded. The transient creature is dropped from limbo — it is rebuilt from
+    // the saved saddle on relogin — so it is neither standing on the ground nor
+    // leaked there.
     world.queue(Command::Disconnect { connection: gm });
     world.tick(later);
     assert!(
-        world.registry().get::<Position>(horse).is_some(),
-        "logout dismounts, the horse is not leaked in limbo"
+        world.registry().get::<Position>(horse).is_none(),
+        "logout keeps the ride on the saddle rather than grounding the mount"
     );
 }
 
 #[test]
-fn the_saddle_is_not_saved() {
+fn a_mounted_character_logs_back_in_still_mounted() {
     let now = Instant::now();
     let mut world = world();
     let gm = enter_gm(&mut world, now);
+    let player = world.state.players[&gm];
+    let char_serial = world.registry().serial_of(player).unwrap().raw();
     let (_horse, horse_serial) = spawn_horse(&mut world, Point::new(START.0 + 1, START.1, 0), now);
     world.queue(Command::DoubleClick {
         connection: gm,
         serial: horse_serial,
     });
     world.tick(now);
+    let mount_graphic = {
+        let riding = world
+            .registry()
+            .get::<Riding>(player)
+            .copied()
+            .expect("mounted");
+        world.registry().get::<Graphic>(riding.item).unwrap().id
+    };
+
+    // The save now carries the saddle, on the mount layer.
     world.take_snapshot();
     let snapshot = world.drain_saves().next_back().expect("a snapshot");
     assert!(
-        snapshot.inventories.iter().all(|inventory| {
-            inventory.items.iter().all(|item| {
-                !matches!(
+        snapshot.inventories.iter().any(|inventory| {
+            inventory.items.iter().any(|item| {
+                matches!(
                     item.location,
                     ItemLocation::Equipped { layer, .. } if layer == openshard_items::MOUNT_LAYER
                 )
             })
         }),
-        "the mount item stays out of the record"
+        "the mount item rides along in the record"
+    );
+
+    // Log out and log the same character back in, in the same run: it returns to
+    // the world still in the saddle, on a rebuilt mount that draws the same.
+    world.queue(Command::Disconnect { connection: gm });
+    world.tick(now);
+    let gm = connection();
+    world.queue(Command::Enter {
+        connection: gm,
+        version: ClientVersion::TOL,
+        account: "admin".to_owned(),
+        name: "Lord British".to_owned(),
+        serial: Some(char_serial),
+        position: Some(Point::new(START.0, START.1, 0)),
+        facet: 0,
+        appearance: None,
+        access: AccessLevel::GameMaster,
+    });
+    world.tick(now);
+    let player = world.state.players[&gm];
+    let riding = world
+        .registry()
+        .get::<Riding>(player)
+        .copied()
+        .expect("still in the saddle after relogin");
+    assert!(
+        world.registry().get::<Ridden>(riding.mount).is_some(),
+        "the ridden creature was rebuilt from the saved saddle"
+    );
+    assert_eq!(
+        world.registry().get::<Graphic>(riding.item).unwrap().id,
+        mount_graphic,
+        "and it draws as the same mount it was"
     );
 }
 
@@ -5588,6 +5743,84 @@ fn a_shop_sells_goods_and_buys_them_back() {
     );
 }
 
+#[test]
+fn saying_buy_opens_the_shop_and_an_empty_sell_answers_overhead() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+
+    // A shopkeeper one tile off, its stock crate empty.
+    world.queue(Command::SpawnMobile {
+        body: 0x0190,
+        hue: 0,
+        hits: 50,
+        notoriety: 1,
+        damage: 0,
+        resistance: 0,
+        swing: 0,
+        sight: 0,
+        aggression: 0,
+        beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
+        wander: false,
+        position: Point::new(START.0 + 1, START.1, 0),
+        facet: 0,
+        name: Some("Mirabel".to_owned()),
+        banker: false,
+        vendor: true,
+        equipment: Vec::new(),
+    });
+    world.tick(now);
+    let vendor = world
+        .state
+        .registry
+        .query::<openshard_state::components::Vendor>()
+        .map(|(entity, _)| entity)
+        .next()
+        .expect("a shopkeeper");
+    let vendor_serial = world.registry().serial_of(vendor).unwrap().raw();
+    world.drain_outbound().count();
+
+    // "buy" opens the price list, exactly as a double-click would.
+    world.queue(Command::Say {
+        connection: gm,
+        mode: 0,
+        hue: 0,
+        font: 3,
+        text: "buy".to_owned(),
+    });
+    world.tick(now);
+    assert!(
+        packets_for(&mut world, gm)
+            .iter()
+            .any(|p| p.first() == Some(&0x74)),
+        "saying 'buy' opened the shop"
+    );
+
+    // "sell" with nothing the vendor wants is answered over the vendor's head as
+    // ordinary speech (0xAE from the vendor), not a private system line (0x1C).
+    world.queue(Command::Say {
+        connection: gm,
+        mode: 0,
+        hue: 0,
+        font: 3,
+        text: "sell".to_owned(),
+    });
+    world.tick(now);
+    let packets = packets_for(&mut world, gm);
+    assert!(
+        packets
+            .iter()
+            .any(|p| p[0] == 0xAE && mentions(p, vendor_serial)),
+        "the vendor spoke its refusal over its own head"
+    );
+    assert!(
+        !packets.iter().any(|p| p[0] == 0x1C),
+        "and not as a private system message"
+    );
+}
+
 /// Spawn an archer-shaped creature: ranged reach 8, energy bolts.
 fn spawn_archer(world: &mut World, at: Point, now: Instant) -> EntityId {
     spawn_archer_bodied(world, 0x0190, at, now)
@@ -5688,6 +5921,8 @@ fn no_volley_passes_a_shut_door() {
                 (i32::from(den.y) + dy) as u16,
                 crate_entity,
                 false,
+                0,
+                openshard_state::DOOR_HEIGHT,
             );
         }
     }

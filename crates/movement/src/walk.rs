@@ -92,6 +92,13 @@ pub trait Terrain {
         false
     }
 
+    /// The height of static art `graphic` by its tiledata, so a *placed* copy
+    /// blocks only the vertical span it occupies — an upper-floor wall does not
+    /// seal the ground beneath it. A terrain with no tiledata reports zero.
+    fn item_height(&self, _graphic: u16) -> u8 {
+        0
+    }
+
     /// Whether a straight sight line from `from` to `to` is clear of walls.
     ///
     /// What gates a creature noticing prey: both reference emulators require

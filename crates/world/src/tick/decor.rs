@@ -51,6 +51,8 @@ impl World {
                 door.position.y,
                 entity,
                 true,
+                door.position.z,
+                openshard_state::DOOR_HEIGHT,
             );
         }
         for container in containers {
@@ -91,18 +93,21 @@ impl World {
         self.state.registry.insert(entity, Decoration);
         // Placed art with impassable tiledata blocks its tile, the way ServUO
         // treats any non-movable impassable item; doors refine this to a door
-        // obstacle right after.
-        let blocks = self
+        // obstacle right after. It blocks only its own z-span — its base z and
+        // tiledata height — so an upper-floor wall does not seal the ground floor
+        // beneath it (the Britain-library bug).
+        let height = self
             .state
             .facet_state(facet)
             .terrain
             .as_deref()
-            .is_some_and(|t| t.item_blocks(graphic));
-        if blocks {
+            .filter(|t| t.item_blocks(graphic))
+            .map(|t| t.item_height(graphic));
+        if let Some(height) = height {
             self.state
                 .facet_state_mut(facet)
                 .obstructions
-                .block(position.x, position.y, entity, false);
+                .block(position.x, position.y, entity, false, position.z, height);
         }
         self.state
             .facet_state_mut(facet)
@@ -246,10 +251,14 @@ impl World {
                         close_at: 0,
                     },
                 );
-                self.state
-                    .facet_state_mut(facet)
-                    .obstructions
-                    .block(position.x, position.y, entity, true);
+                self.state.facet_state_mut(facet).obstructions.block(
+                    position.x,
+                    position.y,
+                    entity,
+                    true,
+                    position.z,
+                    openshard_state::DOOR_HEIGHT,
+                );
             }
         }
         debug!(facet, count, "generated doors from static frames");

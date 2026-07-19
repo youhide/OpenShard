@@ -39,7 +39,9 @@ use openshard_state::WorldState;
 mod spawn;
 mod vendor;
 pub use spawn::{spawn, MobileSpawned, SpawnSpec};
-pub use vendor::{buy, offer_sell_list, open_shop, sell, stock, StockLine, STOCK_LAYER};
+pub use vendor::{
+    buy, buy_keyword, offer_sell_list, open_shop, sell, stock, StockLine, STOCK_LAYER,
+};
 
 /// The bank box graphic, gump and layer — ServUO's `BankBox` on `Layer.Bank`. A
 /// character wears one; a banker opens it. Exported so the world equips it on the
@@ -57,9 +59,9 @@ pub(crate) const GOLD_GRAPHIC: u16 = 0x0EED;
 /// How near a player has to come for a townsperson to greet them.
 const GREET_RANGE: u32 = 4;
 /// The muted grey the client draws townsfolk chatter in.
-const GREET_HUE: u16 = 0x03B2;
+pub(crate) const GREET_HUE: u16 = 0x03B2;
 /// The font a greeting is spoken in.
-const GREET_FONT: u16 = 3;
+pub(crate) const GREET_FONT: u16 = 3;
 
 /// How long between an NPC's beats, in ticks (~2s at 20Hz).
 const BEAT_TICKS: u64 = 40;

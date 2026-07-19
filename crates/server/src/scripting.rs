@@ -1089,8 +1089,13 @@ mod tests {
         scripts.pump(&mut world); // the script hears it, queues the answer
         world.tick(now); // the answer is spoken
 
+        // Speech is Unicode `0xAE` now, so "pong" is UTF-16; strip the zero bytes
+        // and the ASCII characters read straight through.
         let answered = world.drain_outbound().any(|out| {
-            out.packet.first() == Some(&0x1C) && out.packet.windows(4).any(|w| w == b"pong")
+            out.packet.first() == Some(&0xAE) && {
+                let text: Vec<u8> = out.packet.iter().copied().filter(|&b| b != 0).collect();
+                text.windows(4).any(|w| w == b"pong")
+            }
         });
         assert!(answered, "the script answered the keyword");
     }
