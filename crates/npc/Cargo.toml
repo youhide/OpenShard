@@ -20,3 +20,4 @@ openshard-items.workspace = true
 openshard-movement.workspace = true
 openshard-protocol.workspace = true
 openshard-state.workspace = true
+tracing.workspace = true

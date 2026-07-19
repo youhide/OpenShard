@@ -43,9 +43,9 @@ use openshard_protocol::{
 use tracing::{debug, info, warn};
 
 use openshard_state::components::{
-    Access, Account, Amount, Banker, Body, Brain, Client, Combat, Contained, Container, DamageType,
+    Access, Account, Amount, Body, Brain, Client, Combat, Contained, Container, DamageType,
     Decoration, Door, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement,
-    Name, Npc, Position, Resistance, Scripted, SpawnedBy, Stackable, Stats, SwingSpeed,
+    Name, Position, Resistance, Scripted, SpawnedBy, Stackable, Stats,
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
@@ -61,8 +61,8 @@ use openshard_skills as skills;
 
 use crate::doorgen;
 use crate::events::{
-    AdminMenuAction, MobileMoved, MobileSpawned, MobileTurned, PlayerEntered, PlayerLeft,
-    RefusedReason, SpellRequested, StepRefused,
+    AdminMenuAction, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason,
+    SpellRequested, StepRefused,
 };
 use crate::gm;
 use crate::terrain::MapTerrain;
@@ -73,7 +73,6 @@ mod defaults;
 mod enter;
 mod motion;
 mod persist;
-mod spawn;
 mod spawners;
 mod speech;
 mod staff;
@@ -95,28 +94,6 @@ struct Entering {
     facet: u8,
     appearance: Option<Appearance>,
     access: AccessLevel,
-}
-
-/// Everything [`World::spawn_mobile`] needs — a plain bundle, so the one function
-/// that makes a creature takes one argument instead of eleven.
-struct SpawnMobile {
-    body: u16,
-    hue: u16,
-    hits: u16,
-    notoriety: u8,
-    damage: u16,
-    resistance: u8,
-    swing: u64,
-    sight: u8,
-    wander: bool,
-    position: Point,
-    facet: u8,
-    /// A name the client shows on single-click, if any. Townsfolk have one.
-    name: Option<String>,
-    /// Whether this mobile is a banker — it answers "bank".
-    banker: bool,
-    /// Worn clothing and gear, `(graphic, layer, hue)` — so it is not naked.
-    equipment: Vec<(u16, u8, u16)>,
 }
 
 // `Outbound`, `FacetState`, `HeldItem` and `Origin` are the world's runtime
@@ -515,22 +492,25 @@ impl World {
                 banker,
                 equipment,
             } => {
-                self.spawn_mobile(SpawnMobile {
-                    body,
-                    hue,
-                    hits,
-                    notoriety,
-                    damage,
-                    resistance,
-                    swing,
-                    sight,
-                    wander,
-                    position,
-                    facet,
-                    name,
-                    banker,
-                    equipment,
-                });
+                npc::spawn(
+                    &mut self.state,
+                    npc::SpawnSpec {
+                        body,
+                        hue,
+                        hits,
+                        notoriety,
+                        damage,
+                        resistance,
+                        swing,
+                        sight,
+                        wander,
+                        position,
+                        facet,
+                        name,
+                        banker,
+                        equipment,
+                    },
+                );
             }
             Command::Damage {
                 serial,

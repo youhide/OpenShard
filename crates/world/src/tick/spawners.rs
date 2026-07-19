@@ -46,24 +46,27 @@ impl World {
                 .and_then(|terrain| terrain.ground_z(x, y))
                 .unwrap_or(0);
 
-            if let Some(entity) = self.spawn_mobile(SpawnMobile {
-                body: creature.body,
-                hue: creature.hue,
-                hits: creature.hits,
-                notoriety: creature.notoriety,
-                damage: creature.damage,
-                resistance: creature.resistance,
-                swing: creature.swing,
-                sight: creature.sight,
-                wander: creature.wander,
-                position: Point::new(x, y, z),
-                facet,
-                // A maintained spawn is a monster or an animal, never a named
-                // townsperson; those are placed once, not respawned.
-                name: None,
-                banker: false,
-                equipment: Vec::new(),
-            }) {
+            if let Some(entity) = npc::spawn(
+                &mut self.state,
+                npc::SpawnSpec {
+                    body: creature.body,
+                    hue: creature.hue,
+                    hits: creature.hits,
+                    notoriety: creature.notoriety,
+                    damage: creature.damage,
+                    resistance: creature.resistance,
+                    swing: creature.swing,
+                    sight: creature.sight,
+                    wander: creature.wander,
+                    position: Point::new(x, y, z),
+                    facet,
+                    // A maintained spawn is a monster or an animal, never a named
+                    // townsperson; those are placed once, not respawned.
+                    name: None,
+                    banker: false,
+                    equipment: Vec::new(),
+                },
+            ) {
                 self.state.registry.insert(entity, SpawnedBy(id));
             }
             self.spawners[index].next_spawn = now + delay;

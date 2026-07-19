@@ -36,6 +36,9 @@ use openshard_state::rng::Rng;
 use openshard_state::sectors::in_range;
 use openshard_state::WorldState;
 
+mod spawn;
+pub use spawn::{spawn, MobileSpawned, SpawnSpec};
+
 /// The bank box graphic, gump and layer — ServUO's `BankBox` on `Layer.Bank`. A
 /// character wears one; a banker opens it. Exported so the world equips it on the
 /// same layer this crate opens.

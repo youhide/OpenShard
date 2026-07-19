@@ -15,9 +15,6 @@ pub(super) const BODY_HUMAN_MALE: u16 = 0x0190;
 pub(super) const BACKPACK_GRAPHIC: u16 = 0x0E75;
 pub(super) const BACKPACK_GUMP: u16 = 0x003C;
 pub(super) const BACKPACK_LAYER: u8 = 0x15;
-/// How far an idle banker may drift from its post before it heads back — a couple
-/// of tiles of shuffling near the counter, not a stroll out the door.
-pub(super) const BANKER_WANDER: u8 = 2;
 /// The skin hue a character gets when nothing else chose one — the same one
 /// Sphere hands a body with no stored colour.
 pub(super) const DEFAULT_HUE: u16 = 0x83EA;

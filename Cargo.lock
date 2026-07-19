@@ -1269,6 +1269,7 @@ dependencies = [
  "openshard-movement",
  "openshard-protocol",
  "openshard-state",
+ "tracing",
 ]
 
 [[package]]

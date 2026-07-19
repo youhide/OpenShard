@@ -10,6 +10,7 @@ use openshard_state::components::{
     Amount, Contained, Container, CriminalUntil, Decays, Equipped, Graphic, MurderDecay, Murders,
     Skills, Stackable,
 };
+use openshard_state::components::{Banker, SwingSpeed};
 
 pub(super) const START: (u16, u16) = (1363, 1600);
 

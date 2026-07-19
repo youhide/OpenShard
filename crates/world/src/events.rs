@@ -43,20 +43,9 @@ pub struct SpellRequested {
     pub spell: u16,
 }
 
-/// A creature or NPC appeared in the world.
-///
-/// The mobile counterpart of [`PlayerEntered`], for the mobiles no client drives
-/// — a spawned creature. A script reads it to learn a fresh mobile's serial, the
-/// name it needs to take control of it (`op_control`) or act on it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct MobileSpawned {
-    /// The entity.
-    pub entity: EntityId,
-    /// Its wire identity.
-    pub serial: Serial,
-    /// Where it appeared.
-    pub position: Point,
-}
+// `MobileSpawned` moved to `openshard-npc` with the spawn rule that emits it.
+// Re-exported here so readers keep finding it beside `PlayerEntered`.
+pub use openshard_npc::MobileSpawned;
 
 /// A mobile took a step.
 ///
