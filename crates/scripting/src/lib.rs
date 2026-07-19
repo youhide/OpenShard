@@ -245,8 +245,17 @@ pub enum Command {
         name: String,
         /// Whether it is a banker — saying "bank" near it opens the box.
         banker: bool,
+        /// Whether it is a shopkeeper — double-click opens its shop.
+        vendor: bool,
         /// Worn clothing and gear, so it is not naked.
         equipment: Vec<WornItem>,
+    },
+    /// Fill a vendor's stock crate with priced goods.
+    StockVendor {
+        /// The vendor mobile's wire serial.
+        serial: u32,
+        /// The goods, priced and labelled.
+        stock: Vec<StockItem>,
     },
     /// Deal damage to a mobile, of a kind (0 physical, 1 fire, 2 cold, 3 poison,
     /// 4 energy) the target's resistance to that kind reduces.
@@ -483,6 +492,21 @@ pub struct SpawnCreature {
     pub beat: u64,
     /// Whether it wanders when idle.
     pub wander: bool,
+}
+
+/// One line of vendor stock, as `op_stock` supplies it.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct StockItem {
+    /// The goods' graphic.
+    pub graphic: u16,
+    /// Their hue.
+    pub hue: u16,
+    /// How many the vendor holds.
+    pub amount: u16,
+    /// What one unit costs.
+    pub price: u32,
+    /// The label the client shows.
+    pub name: String,
 }
 
 /// Why a script call failed.

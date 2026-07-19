@@ -53,6 +53,7 @@ pub use openshard_chat::MobileSpoke;
 pub use openshard_combat::{MobileDamaged, MobileDied};
 pub use openshard_items::ItemSpawned;
 pub use openshard_magic::SpellCast;
+pub use openshard_npc::StockLine;
 pub use openshard_skills::SkillUsed;
 pub use openshard_state::components;
 pub use openshard_state::Gameplay;

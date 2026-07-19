@@ -263,6 +263,7 @@ fn into_world(command: ScriptCommand) -> Command {
             facet,
             name,
             banker,
+            vendor,
             equipment,
         } => Command::SpawnMobile {
             body,
@@ -281,6 +282,7 @@ fn into_world(command: ScriptCommand) -> Command {
             // An empty name from the script means nameless.
             name: (!name.is_empty()).then_some(name),
             banker,
+            vendor,
             equipment: equipment
                 .into_iter()
                 .map(|w| (w.graphic, w.layer, w.hue))
@@ -348,6 +350,19 @@ fn into_world(command: ScriptCommand) -> Command {
         },
         ScriptCommand::Speak { serial, hue, text } => Command::Speak { serial, hue, text },
         ScriptCommand::Control { serial } => Command::Control { serial },
+        ScriptCommand::StockVendor { serial, stock } => Command::StockVendor {
+            serial,
+            stock: stock
+                .into_iter()
+                .map(|line| openshard_world::StockLine {
+                    graphic: line.graphic,
+                    hue: line.hue,
+                    amount: line.amount,
+                    price: line.price,
+                    name: line.name,
+                })
+                .collect(),
+        },
         ScriptCommand::RegisterSpawner {
             x,
             y,
@@ -667,6 +682,7 @@ mod tests {
             facet: 0,
             name: None,
             banker: false,
+            vendor: false,
             equipment: Vec::new(),
         });
         world.tick(now);
@@ -732,6 +748,7 @@ mod tests {
             facet: 0,
             name: None,
             banker: false,
+            vendor: false,
             equipment: Vec::new(),
         });
         world.tick(now); // the mobile spawns, MobileSpawned emitted

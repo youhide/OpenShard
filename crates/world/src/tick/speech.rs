@@ -34,6 +34,10 @@ impl World {
         // request the banker answers, not a hidden command.
         if let Some(&actor) = self.state.players.get(&connection) {
             npc::banker_keywords(&mut self.state, connection, actor, &text);
+            // "sell" near a shopkeeper opens the offer list the same way.
+            if text.to_ascii_lowercase().contains("sell") {
+                npc::offer_sell_list(&mut self.state, connection, actor);
+            }
         }
     }
 

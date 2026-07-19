@@ -1474,6 +1474,7 @@ fn spawn_mobile_full(
         facet: 0,
         name: None,
         banker: false,
+        vendor: false,
         equipment: Vec::new(),
     });
     world.tick(now);
@@ -2738,6 +2739,7 @@ fn spawn_creature(world: &mut World, point: Point, sight: u8, wander: bool, now:
         facet: 0,
         name: None,
         banker: false,
+        vendor: false,
         equipment: Vec::new(),
     });
     world.tick(now);
@@ -4155,6 +4157,7 @@ fn spawn_banker(world: &mut World, at: Point, now: Instant) {
         facet: 0,
         name: Some("the banker".to_owned()),
         banker: true,
+        vendor: false,
         equipment: Vec::new(),
     });
     world.tick(now);
@@ -4856,6 +4859,7 @@ fn a_creature_does_not_notice_prey_through_a_shut_door() {
         facet: 0,
         name: None,
         banker: false,
+        vendor: false,
         equipment: Vec::new(),
     });
     world.tick(now);
@@ -4918,6 +4922,7 @@ fn spawn_brained(world: &mut World, body: u16, at: Point, sight: u8, now: Instan
         facet: 0,
         name: None,
         banker: false,
+        vendor: false,
         equipment: Vec::new(),
     });
     world.tick(now);
@@ -5109,6 +5114,7 @@ fn spawn_postured(
         facet: 0,
         name: None,
         banker: false,
+        vendor: false,
         equipment: Vec::new(),
     });
     world.tick(now);
@@ -5286,6 +5292,7 @@ fn spawn_horse(world: &mut World, at: Point, now: Instant) -> (EntityId, u32) {
         facet: 0,
         name: None,
         banker: false,
+        vendor: false,
         equipment: Vec::new(),
     });
     world.tick(now);
@@ -5409,5 +5416,149 @@ fn the_saddle_is_not_saved() {
             })
         }),
         "the mount item stays out of the record"
+    );
+}
+
+#[test]
+fn a_shop_sells_goods_and_buys_them_back() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+
+    // A shopkeeper one tile away, stocked with black pearls by "the script".
+    world.queue(Command::SpawnMobile {
+        body: 0x0190,
+        hue: 0,
+        hits: 50,
+        notoriety: 1,
+        damage: 0,
+        resistance: 0,
+        swing: 0,
+        sight: 0,
+        aggression: 0,
+        beat: 0,
+        wander: false,
+        position: Point::new(START.0 + 1, START.1, 0),
+        facet: 0,
+        name: Some("Mirabel".to_owned()),
+        banker: false,
+        vendor: true,
+        equipment: Vec::new(),
+    });
+    world.tick(now);
+    let vendor = world
+        .state
+        .registry
+        .query::<openshard_state::components::Vendor>()
+        .map(|(entity, _)| entity)
+        .next()
+        .expect("a shopkeeper");
+    let vendor_serial = world.registry().serial_of(vendor).unwrap().raw();
+    world.queue(Command::StockVendor {
+        serial: vendor_serial,
+        stock: vec![npc::StockLine {
+            graphic: 0x0F7A,
+            hue: 0,
+            amount: 50,
+            price: 4,
+            name: "black pearl".to_owned(),
+        }],
+    });
+    world.tick(now);
+    let stock_item = world
+        .state
+        .registry
+        .query::<openshard_state::components::Price>()
+        .map(|(entity, _)| entity)
+        .next()
+        .expect("stocked goods");
+    let stock_serial = world.registry().serial_of(stock_item).unwrap().raw();
+
+    // A hundred coins in the pack, and a double-click opens the shop: the buy
+    // list rides out with the contents.
+    let backpack = Serial::new(backpack_serial(&world, gm)).unwrap();
+    openshard_items::give(&mut world.state, backpack, GOLD, 0, 100);
+    world.drain_outbound().count();
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: vendor_serial,
+    });
+    world.tick(now);
+    assert!(
+        packets_for(&mut world, gm)
+            .iter()
+            .any(|p| p.first() == Some(&0x74)),
+        "the shop opened with a price list"
+    );
+
+    // Three pearls at four coins: twelve gold change hands.
+    world.queue(Command::Buy {
+        connection: gm,
+        vendor: vendor_serial,
+        purchases: vec![openshard_protocol::Purchase {
+            serial: stock_serial,
+            amount: 3,
+        }],
+    });
+    world.tick(now);
+    assert_eq!(
+        openshard_items::count_in_container(&world.state, backpack, GOLD),
+        88,
+        "twelve gold paid"
+    );
+    assert_eq!(
+        openshard_items::count_in_container(&world.state, backpack, 0x0F7A),
+        3,
+        "three pearls delivered"
+    );
+
+    // Sell two back at half price: four gold returns.
+    let pearls = world
+        .state
+        .registry
+        .query::<Contained>()
+        .filter(|(_, held)| held.container == backpack)
+        .find(|(entity, _)| {
+            world
+                .registry()
+                .get::<Graphic>(*entity)
+                .is_some_and(|g| g.id == 0x0F7A)
+        })
+        .map(|(entity, _)| world.registry().serial_of(entity).unwrap().raw())
+        .expect("pearls in the pack");
+    world.queue(Command::Sell {
+        connection: gm,
+        vendor: vendor_serial,
+        sales: vec![openshard_protocol::Sale {
+            serial: pearls,
+            amount: 2,
+        }],
+    });
+    world.tick(now);
+    assert_eq!(
+        openshard_items::count_in_container(&world.state, backpack, GOLD),
+        92,
+        "two pearls at half price is four gold"
+    );
+    assert_eq!(
+        openshard_items::count_in_container(&world.state, backpack, 0x0F7A),
+        1,
+        "one pearl kept"
+    );
+
+    // A pauper is refused: the vendor keeps its goods when gold runs short.
+    world.queue(Command::Buy {
+        connection: gm,
+        vendor: vendor_serial,
+        purchases: vec![openshard_protocol::Purchase {
+            serial: stock_serial,
+            amount: 47,
+        }],
+    });
+    world.tick(now);
+    assert_eq!(
+        openshard_items::count_in_container(&world.state, backpack, GOLD),
+        92,
+        "no gold moved on the refused purchase"
     );
 }

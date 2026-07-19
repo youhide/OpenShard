@@ -57,6 +57,9 @@ pub struct SpawnSpec {
     pub name: Option<String>,
     /// Whether this mobile is a banker — it answers "bank".
     pub banker: bool,
+    /// Whether this mobile is a shopkeeper — it answers double-click with a
+    /// buy gump and "sell" with an offer.
+    pub vendor: bool,
     /// Worn clothing and gear, `(graphic, layer, hue)` — so it is not naked.
     pub equipment: Vec<(u16, u8, u16)>,
 }
@@ -85,6 +88,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
         facet,
         name,
         banker,
+        vendor,
         equipment,
     } = spec;
     let facet = if state.facets.contains_key(&facet) {
@@ -179,8 +183,15 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
     if let Some(name) = name {
         state.registry.insert(entity, Name(name));
     }
+    if vendor {
+        crate::vendor::make_vendor(state, entity, serial);
+    }
     if banker {
         state.registry.insert(entity, Banker { next_greet: 0 });
+    }
+    // Both kinds of townsfolk get the base: a home to keep to, the beat that
+    // turns them to face whoever comes near.
+    if banker || vendor {
         state.registry.insert(
             entity,
             Npc {

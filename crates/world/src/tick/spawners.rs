@@ -66,6 +66,7 @@ impl World {
                     // townsperson; those are placed once, not respawned.
                     name: None,
                     banker: false,
+                    vendor: false,
                     equipment: Vec::new(),
                 },
             ) {

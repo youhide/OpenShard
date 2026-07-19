@@ -68,6 +68,7 @@ mod packet;
 mod seed;
 mod speech;
 mod target;
+mod vendor;
 mod version;
 mod world;
 
@@ -106,6 +107,9 @@ pub use speech::{
     NO_GRAPHIC, SYSTEM_SERIAL,
 };
 pub use target::{encode_target_cursor, TargetResponse};
+pub use vendor::{
+    encode_buy_list, encode_sell_list, BuyLine, BuyReply, Purchase, Sale, SellLine, SellReply,
+};
 pub use version::{ClientVersion, Era, ParseVersionError};
 pub use world::{
     encode_light_level, encode_login_complete, encode_map_change, encode_walk_ack,

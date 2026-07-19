@@ -37,7 +37,9 @@ use openshard_state::sectors::in_range;
 use openshard_state::WorldState;
 
 mod spawn;
+mod vendor;
 pub use spawn::{spawn, MobileSpawned, SpawnSpec};
+pub use vendor::{buy, offer_sell_list, open_shop, sell, stock, StockLine, STOCK_LAYER};
 
 /// The bank box graphic, gump and layer — ServUO's `BankBox` on `Layer.Bank`. A
 /// character wears one; a banker opens it. Exported so the world equips it on the
@@ -51,7 +53,7 @@ pub const BANK_LAYER: u8 = 0x1D;
 /// How near a banker a player must be for "bank" to open the box — ServUO's 12.
 const BANK_RANGE: u32 = 12;
 /// The gold-coin graphic, `Gold`'s itemid in ServUO. What a balance counts.
-const GOLD_GRAPHIC: u16 = 0x0EED;
+pub(crate) const GOLD_GRAPHIC: u16 = 0x0EED;
 /// How near a player has to come for a townsperson to greet them.
 const GREET_RANGE: u32 = 4;
 /// The muted grey the client draws townsfolk chatter in.
@@ -337,7 +339,7 @@ fn bank_gold(state: &WorldState, actor: EntityId) -> u32 {
 
 /// Send a private system line to a connection — a `0x1C` from the system serial,
 /// the "the bank says" reply a keyword earns.
-fn notify(state: &mut WorldState, connection: ConnectionId, text: &str) {
+pub(crate) fn notify(state: &mut WorldState, connection: ConnectionId, text: &str) {
     let packet = encode_message(
         SYSTEM_SERIAL,
         0xFFFF,

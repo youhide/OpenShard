@@ -153,6 +153,37 @@ pub(crate) fn dispatch(
             });
             true
         }
+        Some(0x3B) => {
+            // A vendor purchase, answered out of the tick like everything else.
+            if !session.in_world {
+                return true;
+            }
+            let Ok(reply) = openshard_protocol::BuyReply::decode(packet) else {
+                warn!(%id, "malformed 0x3B");
+                return false;
+            };
+            world.queue(Command::Buy {
+                connection: id,
+                vendor: reply.vendor,
+                purchases: reply.purchases,
+            });
+            true
+        }
+        Some(0x9F) => {
+            if !session.in_world {
+                return true;
+            }
+            let Ok(reply) = openshard_protocol::SellReply::decode(packet) else {
+                warn!(%id, "malformed 0x9F");
+                return false;
+            };
+            world.queue(Command::Sell {
+                connection: id,
+                vendor: reply.vendor,
+                sales: reply.sales,
+            });
+            true
+        }
         Some(LookRequest::ID) => {
             if !session.in_world {
                 return true;

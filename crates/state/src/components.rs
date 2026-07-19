@@ -390,6 +390,16 @@ pub const fn mount_item_for(body: u16) -> Option<u16> {
     })
 }
 
+/// Marks a townsperson as a shopkeeper: it answers double-click with a buy
+/// gump and "sell" with an offer list. Its goods live in a container worn on
+/// its stock layer, priced item by item with [`Price`].
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Vendor;
+
+/// What a vendor charges per unit for a stock item. Selling pays half.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Price(pub u32);
+
 /// A mobile being ridden: off every screen and every sector, alive in the
 /// registry, waiting for the dismount that puts it back on the ground.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

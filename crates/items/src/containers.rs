@@ -274,6 +274,86 @@ pub fn take_from_container(
     true
 }
 
+/// Put `amount` of an item into a container by decree — a vendor handing over
+/// goods, a sale paying out gold. Merges onto an existing stackable pile of the
+/// same art and hue; otherwise a fresh stackable item appears. Everyone with
+/// the container open sees the change. Returns the pile touched, or `None`
+/// when the serial pool is dry.
+pub fn give(
+    state: &mut WorldState,
+    container: Serial,
+    graphic: u16,
+    hue: u16,
+    amount: u16,
+) -> Option<EntityId> {
+    if amount == 0 {
+        return None;
+    }
+    let existing = state
+        .registry
+        .query::<Contained>()
+        .filter(|(_, held)| held.container == container)
+        .find(|(entity, _)| {
+            state.registry.has::<Stackable>(*entity)
+                && state
+                    .registry
+                    .get::<Graphic>(*entity)
+                    .is_some_and(|g| g.id == graphic && g.hue == hue)
+        })
+        .map(|(entity, _)| entity);
+    if let Some(pile) = existing {
+        let total = amount_of(state, pile).saturating_add(amount);
+        state.registry.insert(pile, Amount(total));
+        tell_watchers_updated(state, container, pile);
+        return Some(pile);
+    }
+    let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
+        warn!("out of item serials; nothing given");
+        return None;
+    };
+    state.registry.insert(entity, Graphic { id: graphic, hue });
+    state.registry.insert(
+        entity,
+        Contained {
+            container,
+            x: 60,
+            y: 60,
+            grid: 0,
+        },
+    );
+    state.registry.insert(entity, Amount(amount));
+    state.registry.insert(entity, Stackable);
+    tell_watchers_updated(state, container, entity);
+    Some(entity)
+}
+
+/// Take `amount` off a contained stack by decree — stock sold out of a
+/// vendor's crate, goods sold out of a player's pack. Returns how many were
+/// actually taken; a stack that reaches zero is despawned and forgotten by
+/// everyone watching the container.
+pub fn remove_from_stack(
+    state: &mut WorldState,
+    container: Serial,
+    item: EntityId,
+    amount: u16,
+) -> u16 {
+    let have = amount_of(state, item);
+    let take = have.min(amount);
+    if take == 0 {
+        return 0;
+    }
+    if take == have {
+        if let Some(serial) = state.registry.serial_of(item) {
+            tell_watchers_removed(state, container, serial);
+        }
+        state.registry.despawn(item);
+    } else {
+        state.registry.insert(item, Amount(have - take));
+        tell_watchers_updated(state, container, item);
+    }
+    take
+}
+
 /// Tell every client with `container` open that `item` has left it — a `0x1D`,
 /// the same "forget that" the interest system draws with, so a reagent consumed
 /// out of an open pack disappears from the gump live.

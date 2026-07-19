@@ -141,6 +141,8 @@ struct MobileSpec {
     #[serde(default)]
     banker: bool,
     #[serde(default)]
+    vendor: bool,
+    #[serde(default)]
     equipment: Vec<WornItemSpec>,
 }
 
@@ -186,6 +188,7 @@ fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
             facet: spec.facet,
             name: spec.name,
             banker: spec.banker,
+            vendor: spec.vendor,
             equipment,
         });
 }
@@ -532,6 +535,57 @@ fn op_generate_doors(state: &mut OpState, #[serde] region: DoorRegionSpec) {
         });
 }
 
+/// One stock line for `op_stock`, from the script.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StockLineSpec {
+    graphic: u16,
+    #[serde(default)]
+    hue: u16,
+    #[serde(default = "one")]
+    amount: u16,
+    #[serde(default = "one_price")]
+    price: u32,
+    #[serde(default)]
+    name: String,
+}
+
+/// The serde default for a stock line's price: one coin.
+fn one_price() -> u32 {
+    1
+}
+
+/// Everything `op_stock` takes: the vendor and its goods.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StockSpec {
+    serial: u32,
+    items: Vec<StockLineSpec>,
+}
+
+/// Fill a vendor's stock crate with priced goods.
+#[op2]
+fn op_stock(state: &mut OpState, #[serde] spec: StockSpec) {
+    let stock = spec
+        .items
+        .into_iter()
+        .map(|line| crate::StockItem {
+            graphic: line.graphic,
+            hue: line.hue,
+            amount: line.amount,
+            price: line.price,
+            name: line.name,
+        })
+        .collect();
+    state
+        .borrow_mut::<Host>()
+        .outbox
+        .push(Command::StockVendor {
+            serial: spec.serial,
+            stock,
+        });
+}
+
 extension!(
     openshard_ops,
     ops = [
@@ -540,6 +594,7 @@ extension!(
         op_spawn_item,
         op_spawn_container,
         op_spawn_mobile,
+        op_stock,
         op_damage,
         op_heal,
         op_cast_spell,

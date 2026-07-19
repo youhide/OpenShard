@@ -233,6 +233,8 @@ pub enum Command {
         name: Option<String>,
         /// Whether it is a banker (answers "bank").
         banker: bool,
+        /// Whether it is a shopkeeper — double-click opens its shop.
+        vendor: bool,
         /// Worn clothing and gear, as `(graphic, layer, hue)` — so an NPC is not
         /// naked. Drawn in its `0x78`.
         equipment: Vec<(u16, u8, u16)>,
@@ -416,5 +418,30 @@ pub enum Command {
         connection: ConnectionId,
         /// Which spell, zero-based.
         spell: u16,
+    },
+    /// Fill a vendor's stock crate with priced goods. From a script.
+    StockVendor {
+        /// The vendor mobile's wire serial.
+        serial: u32,
+        /// The goods, priced and labelled.
+        stock: Vec<npc::StockLine>,
+    },
+    /// A client bought from a vendor's shop (`0x3B`).
+    Buy {
+        /// Which connection.
+        connection: ConnectionId,
+        /// The vendor mobile's wire serial.
+        vendor: u32,
+        /// What it took, by stock serial and amount.
+        purchases: Vec<openshard_protocol::Purchase>,
+    },
+    /// A client sold to a vendor (`0x9F`).
+    Sell {
+        /// Which connection.
+        connection: ConnectionId,
+        /// The vendor mobile's wire serial.
+        vendor: u32,
+        /// What it let go, by item serial and amount.
+        sales: Vec<openshard_protocol::Sale>,
     },
 }

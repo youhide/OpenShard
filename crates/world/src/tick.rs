@@ -497,6 +497,7 @@ impl World {
                 facet,
                 name,
                 banker,
+                vendor,
                 equipment,
             } => {
                 npc::spawn(
@@ -517,6 +518,7 @@ impl World {
                         facet,
                         name,
                         banker,
+                        vendor,
                         equipment,
                     },
                 );
@@ -593,7 +595,12 @@ impl World {
                 }
             }
             Command::DoubleClick { connection, serial } => {
-                items::double_click(&mut self.state, connection, serial)
+                // A vendor's shop first: if the click was a shopkeeper in
+                // range the buy gump answers it; anything else is the
+                // ordinary use rule.
+                if !npc::open_shop(&mut self.state, connection, serial) {
+                    items::double_click(&mut self.state, connection, serial);
+                }
             }
             Command::SingleClick { connection, serial } => self.single_click(connection, serial),
             Command::EquipItem {
@@ -616,6 +623,19 @@ impl World {
             Command::Disconnect { connection } => self.disconnect(connection),
             Command::Control { serial } => self.control(serial),
             Command::RequestCast { connection, spell } => self.request_cast(connection, spell),
+            Command::StockVendor { serial, stock } => {
+                npc::stock(&mut self.state, serial, stock);
+            }
+            Command::Buy {
+                connection,
+                vendor,
+                purchases,
+            } => npc::buy(&mut self.state, connection, vendor, &purchases),
+            Command::Sell {
+                connection,
+                vendor,
+                sales,
+            } => npc::sell(&mut self.state, connection, vendor, &sales),
         }
     }
 
