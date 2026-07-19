@@ -25,8 +25,18 @@ pub fn double_click(state: &mut WorldState, connection: ConnectionId, serial: u3
     } else if state.registry.has::<Container>(target) {
         open_container(state, connection, player, target, target_serial);
     } else if target == player && state.registry.has::<Riding>(player) {
-        // Double-clicking yourself in the saddle is the dismount.
-        dismount(state, player);
+        // ServUO's rule (`PlayerMobile.OnDoubleClick`): a self-double-click
+        // dismounts the rider *only in war mode*; in peace mode it is a no-op.
+        // That is what stops the client reopening the paperdoll on login — a
+        // self-double-click sent in peace mode — from throwing the rider off,
+        // which read as "you relog mounted and dismount a second later".
+        let warmode = state
+            .registry
+            .get::<openshard_state::components::Combat>(player)
+            .is_some_and(|combat| combat.warmode);
+        if warmode {
+            dismount(state, player);
+        }
     } else if try_mount(state, player, target, target_serial) {
         // A rideable, riderless creature in reach: the double-click was a leg
         // over the saddle, not a paperdoll request.

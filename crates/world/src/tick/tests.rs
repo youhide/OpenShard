@@ -5464,6 +5464,16 @@ fn a_horse_is_mounted_and_dismounted_by_double_click() {
     // serial no client ever sends and the dismount path stays untested.
     let saddle_serial = world.registry().serial_of(riding.item).unwrap().raw();
     let _ = packets_for(&mut world, gm); // clear the outbox before the dismount
+    // A self-double-click dismounts only in war mode (ServUO); raise a hand first,
+    // or a peace-mode click is a no-op — the guard against a login paperdoll-open
+    // throwing the rider off.
+    world.state.registry.insert(
+        player,
+        openshard_state::components::Combat {
+            warmode: true,
+            ..Default::default()
+        },
+    );
     let player_serial = world.registry().serial_of(player).unwrap().raw();
     world.queue(Command::DoubleClick {
         connection: gm,
@@ -5487,6 +5497,35 @@ fn a_horse_is_mounted_and_dismounted_by_double_click() {
     assert!(
         distance(horse_at, Point::new(START.0, START.1, 0)) <= 1,
         "the horse stands beside its rider"
+    );
+}
+
+#[test]
+fn a_peace_mode_self_double_click_leaves_the_rider_mounted() {
+    // The relogin bug: ClassicUO reopens the paperdoll on login by sending a
+    // self-double-click, in peace mode. It must not throw a mounted rider off —
+    // ServUO only dismounts on a self-double-click in war mode.
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player = world.state.players[&gm];
+    let (_horse, horse_serial) = spawn_horse(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: horse_serial,
+    });
+    world.tick(now);
+    assert!(world.registry().get::<Riding>(player).is_some(), "mounted");
+
+    let player_serial = world.registry().serial_of(player).unwrap().raw();
+    world.queue(Command::DoubleClick {
+        connection: gm,
+        serial: player_serial | 0x8000_0000,
+    });
+    world.tick(now);
+    assert!(
+        world.registry().get::<Riding>(player).is_some(),
+        "a peace-mode self-double-click leaves the rider in the saddle"
     );
 }
 
