@@ -18,41 +18,42 @@ Sphere paid for it. Its architecture we can decline.
 
 ## Layers
 
+Arrows are dependencies; they only ever point down.
+
 ```
-                        Clients
-                (ClassicUO / 2D Client)
-                           │
-                    UO Network Protocol
-                           │
-                  ┌────────┴────────┐
-                  │     gateway     │   accept, framing, encrypt
-                  └────────┬────────┘
-                           │
-                  ┌────────┴────────┐
-                  │    protocol     │   encode / decode / version gates
-                  └────────┬────────┘
-                           │
-                  ┌────────┴────────┐
-                  │      world      │   the tick, spatial index
-                  └────────┬────────┘
-                           │
-        ┌──────────────────┼──────────────────┐
-        │                  │                  │
-    entities            events            HTTP API
-   (Registry)         (EventBus)         (dashboard)
-        │                  │
-        │         ┌────────┴────────┐
-        │         │                 │
-   combat  movement  ai  items  skills  magic  housing  guilds  chat
-                           │
-                    persistence queue
-                           │
-                    PostgreSQL / SQLite
+   server        the binary: boot, the accept loop, packet dispatch, sessions;
+     │           drives login, the script engine and the world around the tick
+     │           (login and scripting sit beside it, not below the world)
+     ▼
+   world         the tick and command queue, the client's file formats
+     │           (map/tiledata/UOP), the persistence journal — orchestration
+     ▼
+   combat  chat  items  skills  magic  ai  npc
+     │           the gameplay systems: each a fn(&mut WorldState) in its own
+     │           crate, owning its domain events
+     ▼
+   state         WorldState — registry, bus, sectors, seeded rng, the
+     │           drawing/interest substrate, the Gameplay tunables
+     ▼
+   entities   events   protocol   gateway   movement   persistence   config
+                 the foundation: identity/storage, event machinery, the wire,
+                 framing, the walk rules, the Store trait. No gameplay.
 ```
 
-Dependencies point downward only. `combat` depends on `entities` and `events`,
-never on `ai`. Two systems that need to interact do it by emitting and reading
-events, not by calling.
+### Dependency rules
+
+- **Dependencies point downward only.** A crate never depends on one above it,
+  and there are no cycles. `combat` depends on `state` and `entities`, never on
+  `ai`; nothing below `world` knows the tick exists.
+- **Systems do not depend on each other.** Two systems that need to interact do
+  it by emitting and reading events, not by calling. (The narrow exceptions are
+  compositional, not conversational: `ai` builds on `combat`'s components, `npc`
+  on `ai` — a layer using the layer below, never a peer calling a peer.)
+- **Nothing depends on `world` except the thing that runs it** — the server. A
+  crate that wants to know what happened reads events; it does not import the
+  tick.
+- **Domain events live in the crate that owns the rule** that emits them, and
+  `world` re-exports them so consumers see one surface.
 
 ## Crates
 
@@ -66,23 +67,13 @@ events, not by calling.
 | `protocol` | Versions, feature gates, the codec, framing, the login and world packets. |
 | `gateway` | The sans-io `Connection` and a thin Tokio `Server`. Finds packet boundaries; knows nothing of meaning. |
 | `login` | `Accounts`, `AuthKeys`, and the sans-io `LoginServer`. |
-| `movement` | The walk handshake, the sequence rules, and the pace limiter. `Terrain` is a trait it does not implement. |
+| `movement` | The walk handshake, the sequence rules, the pace limiter, and A* (`find_path`). `Terrain` is a trait it does not implement. |
 | `config` | TOML, validated at load. |
-| `server` | The binary. Glue only. |
+| `server` | The binary. Glue only: `boot` loads config/store/world, `shard` owns the accept loop and shutdown, `dispatch` turns packets into commands, `session` is per-connection state. |
+| `world` | The tick, the client's file formats, `MapTerrain`, and the persistence journal. Owns `WorldState` and drives it. Orchestration, not rules — see the `tick/` layout below. |
 
-**Partial.**
-
-| Crate | Owns | Missing |
-|---|---|---|
-| `world` | The tick, the client's file formats, `MapTerrain`, and the persistence journal. Owns `WorldState` and drives it. | The gameplay *systems*, being extracted into their domain crates one at a time; they still live in `world::tick`. |
-
-`world` holds a [`WorldState`](../crates/state/src/runtime.rs) and the tick that
-drives it; the systems that mutate it are moving out into the domain crates
-below, each becoming a `fn(&mut WorldState)`. Until a system moves it still lives
-in `world::tick`, so that file shrinks rather than the design changing under it.
-
-**The gameplay systems, extracted from `world::tick` into their own crates.**
-Each is a set of `fn(&mut WorldState)` owning its domain events:
+**The gameplay systems.** Each is a set of `fn(&mut WorldState)` in its own
+crate, owning its domain events:
 
 | Crate | System | Events |
 |---|---|---|
@@ -90,8 +81,9 @@ Each is a set of `fn(&mut WorldState)` owning its domain events:
 | `skills` | skill/stat checks, the gain curve, the shared `roll_skill` | `SkillUsed` |
 | `magic` | `cast_spell`/`heal`/`regen_mana` | `SpellCast` |
 | `combat` | `damage`/`die`/`swings`/`attack`, criminal flagging, the swing formula | `MobileDamaged`, `MobileDied` |
-| `items` | spawn/drag/stack/decay/containers/equip | `ItemSpawned` |
+| `items` | spawn/drag/stack/decay/containers/equip/doors, one module each | `ItemSpawned` |
 | `ai` | `think_one` — a brain decides a step; the world applies it | — |
+| `npc` | townsfolk services and the creature `spawn` rule | `MobileSpawned` |
 
 The drawing/interest substrate they share (`show`, `forget`, `broadcast_move`,
 `refresh_around`, `reveal`, `mobile_incoming`, …) lives on `WorldState`, in the
@@ -102,6 +94,57 @@ rules.
 **Stubs** — declared so the dependency graph is visible.
 
 `housing`, `guilds`, `plugins`, `metrics`.
+
+## The shape of a file
+
+`world/src/tick.rs` once reached 8,116 lines by absorbing tests, banker logic,
+persistence bridging and door generation inline. That is the cautionary tale
+this section exists to prevent repeating.
+
+**A file over ~2k lines is overdue for a split.** The mechanics that make a
+split cheap, used by `tick/`, `engine/` (scripting) and the items crate:
+
+- **Child modules of the owning module**, not siblings: `tick.rs` declares
+  `mod motion;` and the file lives at `tick/motion.rs`, holding one
+  `impl World { … }` block. A child sees the parent's private items, so the
+  parent's fields and helpers need no visibility widening; an item a child
+  exposes back to the parent or a sibling is `pub(super)`, nothing wider.
+- **Tests that read private state stay child modules** (`tick/tests.rs` behind
+  `#[cfg(test)] mod tests;`), where parent-module privacy still reaches them.
+  They cannot become `tests/` integration tests without widening the API — so
+  they don't.
+- **A crate's flat API survives a split** with `pub use module::*;` re-exports
+  (`items`), so callers never learn the file layout changed.
+
+The `tick/` layout, as the worked example: `command.rs` (the `Command` enum),
+`defaults.rs` (tuning constants), `persist.rs` (the journal bridge),
+`enter.rs` (character entry), `motion.rs` (`walk`/`step`), `spawners.rs`
+(spawn-region upkeep), `decor.rs` (decoration and door generation), `speech.rs`,
+`staff.rs`, and the three test files. `tick.rs` itself keeps the `World` struct,
+the command router and the tick — orchestration, ~750 lines.
+
+### Where code goes
+
+- A gameplay **rule** → a domain crate, as `fn(&mut WorldState)`.
+- Entity assembly, journal bridging, walk/step authority, decoration placement
+  → `world/tick/*` (they need the journal, the terrain, or the command queue).
+- Wire routing (packet → `Command`) → `server/dispatch`.
+- Drawing, interest, packet composition shared by systems → `state`.
+
+### Anti-patterns
+
+Named so a review can point at them:
+
+- **The god file** — a tick that absorbs every new feature inline. Rules go in
+  domain crates; the tick sequences them.
+- **Gameplay in `state`** — `WorldState` is data plus the shared drawing
+  substrate. The moment it grows a rule, every system depends on that rule.
+- **Circular crate dependencies** — if two crates need each other, one of them
+  is holding an event that belongs on the bus.
+- **`Era` branching** — ask `version.supports(Feature::X)`; see Protocol below.
+- **Global mutable state** — everything is a plain value a test can build.
+- **The database inside a tick** — the journal drains to a task nothing waits
+  on; see `persistence/src/journal.rs`.
 
 ## Entities
 
