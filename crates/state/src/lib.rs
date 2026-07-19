@@ -31,7 +31,7 @@ pub mod sectors;
 pub use components::{
     Access, Account, Amount, Banker, Body, Brain, Client, Combat, Contained, Container,
     CriminalUntil, DamageType, Decays, Decoration, Door, Equipped, Facet, Graphic, Heading,
-    Hitpoints, Mana, MeleeDamage, Movement, MurderDecay, Murders, Name, Position, Resistance,
+    Hitpoints, Mana, MeleeDamage, Movement, MurderDecay, Murders, Name, Npc, Position, Resistance,
     Scripted, Skills, SpawnedBy, Stackable, Stats, SwingSpeed,
 };
 pub use rng::Rng;

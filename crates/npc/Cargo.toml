@@ -1,0 +1,21 @@
+[package]
+name = "openshard-npc"
+description = "Townsfolk: bankers and vendors — their services, dialogue, and the little AI that greets, faces and wanders."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+openshard-ai.workspace = true
+openshard-chat.workspace = true
+openshard-entities.workspace = true
+openshard-gateway.workspace = true
+openshard-items.workspace = true
+openshard-protocol.workspace = true
+openshard-state.workspace = true

@@ -562,8 +562,23 @@ Roughly in dependency order, each script-first:
     tiles of one opens your box (the same `0x24`/`0x3C` a double-click sends,
     reused through `items::open_worn_container`), and "balance" counts the gold in
     it. The words are still spoken, so it reads as a request the banker answers.
-    This is the first of the living NPCs; **vendors** (buy `0x74`/`0x3B`, sell
-    `0x9E`/`0x9F`) are the next slice.
+    And it has life, in its own crate — **`crates/npc`**, so the townsfolk rules do
+    not pile into `tick.rs` (the banker logic *moved out* of it). An NPC is
+    **dressed** (`op_spawn_mobile` grew an `equipment` list — a robe, hair — worn
+    like any gear and drawn in its `0x78`), **named** (a generated personal name and
+    the "the banker" title, from the seeded generator so a replay names it the
+    same), **stands on the floor** (a spawn drops onto the map's surface at its
+    tile, a building's raised floor and all, through a new `Terrain::stand_z`,
+    rather than sinking to a given z and reading as inside a wall), **greets** with
+    a line chosen fresh each time and by name, turning to face the visitor, and
+    **keeps to a home** — an `Npc { home, wander }` base (the part vendors reuse)
+    lets it shuffle a couple of tiles near its post rather than stand frozen. The
+    AI seam is decide-then-apply, like the creature brain: `npc::live` greets and
+    faces itself, and returns the idle steps the tick applies through its
+    terrain-checked `step`. This is the first of the living NPCs; **vendors** (buy
+    `0x74`/`0x3B`, sell `0x9E`/`0x9F`) reuse the `Npc` base, and proper **A*
+    pathfinding** — Sphere's is a poor guide, ServUO's the base to beat — is the
+    dedicated next AI slice.
   - [x] **A name on single-click.** Clicking a mobile (`0x09`) draws its name over
     its head for the clicker alone — a `0x1C` label in the notoriety colour
     (ServUO's `Notoriety.Hues`: blue innocent … yellow invulnerable), so a banker

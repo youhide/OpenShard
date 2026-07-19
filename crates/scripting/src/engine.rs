@@ -222,11 +222,31 @@ struct MobileSpec {
     name: String,
     #[serde(default)]
     banker: bool,
+    #[serde(default)]
+    equipment: Vec<WornItemSpec>,
+}
+
+/// One worn item in a [`MobileSpec`]: `{ graphic, layer, hue }`.
+#[derive(serde::Deserialize)]
+struct WornItemSpec {
+    graphic: u16,
+    layer: u8,
+    #[serde(default)]
+    hue: u16,
 }
 
 /// Put a creature or NPC in the world.
 #[op2]
 fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
+    let equipment = spec
+        .equipment
+        .into_iter()
+        .map(|w| crate::WornItem {
+            graphic: w.graphic,
+            layer: w.layer,
+            hue: w.hue,
+        })
+        .collect();
     state
         .borrow_mut::<Host>()
         .outbox
@@ -246,6 +266,7 @@ fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
             facet: spec.facet,
             name: spec.name,
             banker: spec.banker,
+            equipment,
         });
 }
 

@@ -139,7 +139,10 @@ fn nearest_player_in_sight(
 
 /// The eight-way step that most reduces the gap from `from` to `to`, or `None`
 /// when they share a tile. What a chaser walks along.
-fn direction_toward(from: Point, to: Point) -> Option<Direction> {
+/// The eight-way direction from one tile toward another, or `None` when they are
+/// the same tile. Shared by the creature brain and the townsfolk who turn to face
+/// whoever they greet.
+pub fn direction_toward(from: Point, to: Point) -> Option<Direction> {
     let dx = (i32::from(to.x) - i32::from(from.x)).signum();
     let dy = (i32::from(to.y) - i32::from(from.y)).signum();
     match (dx, dy) {

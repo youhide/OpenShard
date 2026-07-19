@@ -40,6 +40,7 @@ openshard-login = { path = "crates/login", version = "0.0.1" }
 openshard-magic = { path = "crates/magic", version = "0.0.1" }
 openshard-metrics = { path = "crates/metrics", version = "0.0.1" }
 openshard-movement = { path = "crates/movement", version = "0.0.1" }
+openshard-npc = { path = "crates/npc", version = "0.0.1" }
 openshard-persistence = { path = "crates/persistence", version = "0.0.1" }
 openshard-plugins = { path = "crates/plugins", version = "0.0.1" }
 openshard-protocol = { path = "crates/protocol", version = "0.0.1" }

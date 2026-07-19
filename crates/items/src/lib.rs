@@ -149,6 +149,29 @@ pub fn equip_new_container(
     debug!(%serial, graphic, layer, "container equipped");
     Some(entity)
 }
+
+/// Put a plain worn item on a mobile — a robe, hair, shoes. Like
+/// [`equip_new_container`] but without the `Container`, so it is clothing, not a
+/// bag. Drawn as part of the wearer's `0x78`; how an NPC stops being naked.
+pub fn equip_worn_item(
+    state: &mut WorldState,
+    mobile: Serial,
+    graphic: u16,
+    hue: u16,
+    layer: u8,
+) -> Option<EntityId> {
+    let (entity, serial) = match state.registry.spawn_with_serial(SerialKind::Item) {
+        Ok(pair) => pair,
+        Err(error) => {
+            warn!(?error, "out of item serials; not equipping clothing");
+            return None;
+        }
+    };
+    state.registry.insert(entity, Graphic { id: graphic, hue });
+    state.registry.insert(entity, Equipped { mobile, layer });
+    debug!(%serial, graphic, layer, "clothing equipped");
+    Some(entity)
+}
 /// Set an item's decay clock: it rots `gameplay.decay_ticks` from now. Every
 /// loose item on the ground has one; every item off it has none, and so does a
 /// container — it and its contents stay put until someone moves them, which is

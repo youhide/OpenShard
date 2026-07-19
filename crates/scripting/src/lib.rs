@@ -241,6 +241,8 @@ pub enum Command {
         name: String,
         /// Whether it is a banker — saying "bank" near it opens the box.
         banker: bool,
+        /// Worn clothing and gear, so it is not naked.
+        equipment: Vec<WornItem>,
     },
     /// Deal damage to a mobile, of a kind (0 physical, 1 fire, 2 cold, 3 poison,
     /// 4 energy) the target's resistance to that kind reduces.
@@ -380,6 +382,18 @@ pub enum Command {
         /// Region height.
         height: u16,
     },
+}
+
+/// One worn item on a spawned mobile — a robe, hair, a weapon. The clothing a
+/// [`SpawnMobile`](Command::SpawnMobile) dresses an NPC in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WornItem {
+    /// The item graphic.
+    pub graphic: u16,
+    /// The equipment layer.
+    pub layer: u8,
+    /// Its hue, or 0.
+    pub hue: u16,
 }
 
 /// One placed decoration — a graphic at a tile. The batch a

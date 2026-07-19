@@ -45,10 +45,10 @@ use tracing::{debug, info, warn};
 use openshard_state::components::{
     Access, Account, Amount, Banker, Body, Brain, Client, Combat, Contained, Container, DamageType,
     Decoration, Door, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement,
-    Name, Position, Resistance, Scripted, SpawnedBy, Stackable, Stats, SwingSpeed,
+    Name, Npc, Position, Resistance, Scripted, SpawnedBy, Stackable, Stats, SwingSpeed,
 };
 use openshard_state::rng::Rng;
-use openshard_state::sectors::{in_range, Sectors};
+use openshard_state::sectors::Sectors;
 use openshard_state::{FacetState, Gameplay, Outbound, WorldState};
 
 use openshard_ai as ai;
@@ -56,6 +56,7 @@ use openshard_chat as chat;
 use openshard_combat as combat;
 use openshard_items as items;
 use openshard_magic as magic;
+use openshard_npc as npc;
 use openshard_skills as skills;
 
 use crate::doorgen;
@@ -81,17 +82,9 @@ const BODY_HUMAN_MALE: u16 = 0x0190;
 const BACKPACK_GRAPHIC: u16 = 0x0E75;
 const BACKPACK_GUMP: u16 = 0x003C;
 const BACKPACK_LAYER: u8 = 0x15;
-/// The graphic, container gump, and layer of a character's bank box. Layer 0x1D
-/// is UO's `Layer.Bank`; graphic `0x0E7C` is the box and `0x004A` its gump — the
-/// same values ServUO's `BankBox` uses. Worn like the backpack, so it persists and
-/// is always in reach of its owner; a banker just opens it.
-const BANK_GRAPHIC: u16 = 0x0E7C;
-const BANK_GUMP: u16 = 0x004A;
-const BANK_LAYER: u8 = 0x1D;
-/// How near a banker a player must be for "bank" to open the box — ServUO's 12.
-const BANK_RANGE: u32 = 12;
-/// The gold-coin graphic, `Gold`'s itemid in ServUO. What a bank balance counts.
-const GOLD_GRAPHIC: u16 = 0x0EED;
+/// How far an idle banker may drift from its post before it heads back — a couple
+/// of tiles of shuffling near the counter, not a stroll out the door.
+const BANKER_WANDER: u8 = 2;
 /// The skin hue a character gets when nothing else chose one — the same one
 /// Sphere hands a body with no stored colour.
 const DEFAULT_HUE: u16 = 0x83EA;
@@ -385,6 +378,9 @@ pub enum Command {
         name: Option<String>,
         /// Whether it is a banker (answers "bank").
         banker: bool,
+        /// Worn clothing and gear, as `(graphic, layer, hue)` — so an NPC is not
+        /// naked. Drawn in its `0x78`.
+        equipment: Vec<(u16, u8, u16)>,
     },
     /// Deal damage to a mobile — a script or another mobile's blow.
     Damage {
@@ -601,6 +597,8 @@ struct SpawnMobile {
     name: Option<String>,
     /// Whether this mobile is a banker — it answers "bank".
     banker: bool,
+    /// Worn clothing and gear, `(graphic, layer, hue)` — so it is not naked.
+    equipment: Vec<(u16, u8, u16)>,
 }
 
 // `Outbound`, `FacetState`, `HeldItem` and `Origin` are the world's runtime
@@ -857,6 +855,12 @@ impl World {
         // commands and all driven by the tick counter, so a fight, a flag and a
         // decay are as replayable as everything else.
         self.think();
+        // The townsfolk beat: `npc::live` greets and faces on its own and hands
+        // back the idle steps it wants, which the tick applies through `step` —
+        // the same decide-then-apply split the creature brain uses.
+        for (serial, direction) in npc::live(&mut self.state) {
+            self.step(serial, direction);
+        }
         combat::swings(&mut self.state);
         combat::expire_criminality(&mut self.state);
         combat::decay_murders(&mut self.state);
@@ -1365,6 +1369,7 @@ impl World {
                 facet,
                 name,
                 banker,
+                equipment,
             } => {
                 self.spawn_mobile(SpawnMobile {
                     body,
@@ -1380,6 +1385,7 @@ impl World {
                     facet,
                     name,
                     banker,
+                    equipment,
                 });
             }
             Command::Damage {
@@ -1642,15 +1648,15 @@ impl World {
             .state
             .registry
             .query::<Equipped>()
-            .any(|(_, worn)| worn.mobile == serial && worn.layer == BANK_LAYER);
+            .any(|(_, worn)| worn.mobile == serial && worn.layer == npc::BANK_LAYER);
         if !has_bank {
             items::equip_new_container(
                 &mut self.state,
                 serial,
-                BANK_GRAPHIC,
-                BANK_GUMP,
+                npc::BANK_GRAPHIC,
+                npc::BANK_GUMP,
                 0,
-                BANK_LAYER,
+                npc::BANK_LAYER,
             );
         }
 
@@ -1797,7 +1803,7 @@ impl World {
         // opens your bank box. The words were still spoken above, so it reads as a
         // request the banker answers, not a hidden command.
         if let Some(&actor) = self.state.players.get(&connection) {
-            self.banker_keywords(connection, actor, &text);
+            npc::banker_keywords(&mut self.state, connection, actor, &text);
         }
     }
 
@@ -1830,84 +1836,6 @@ impl World {
         // speaker name and the label mode make it a name tag, not speech.
         let packet = encode_message(serial, body, LABEL_MODE, hue, 3, "", &name);
         self.state.send(connection, packet);
-    }
-
-    /// Answer a banker's keywords, if the speaker is near one. "bank" opens the
-    /// speaker's bank box; "balance" tells them what is in it. A banker has to be
-    /// within [`BANK_RANGE`] — the service is the townsperson's, not the word's.
-    fn banker_keywords(&mut self, connection: ConnectionId, actor: EntityId, text: &str) {
-        let wants = |word: &str| {
-            text.to_lowercase()
-                .split(|c: char| !c.is_alphabetic())
-                .any(|w| w == word)
-        };
-        if !wants("bank") && !wants("balance") {
-            return;
-        }
-        if !self.banker_in_reach(actor) {
-            return;
-        }
-        if wants("balance") {
-            let gold = self.bank_gold(actor);
-            gm::notify(
-                &mut self.state,
-                actor,
-                &format!("Thy bank box holds {gold} gold."),
-            );
-        }
-        if wants("bank") {
-            items::open_worn_container(&mut self.state, connection, actor, BANK_LAYER);
-        }
-    }
-
-    /// Whether a banker stands within [`BANK_RANGE`] of `actor`, on its facet.
-    fn banker_in_reach(&self, actor: EntityId) -> bool {
-        let Some(&Position(at)) = self.state.registry.get::<Position>(actor) else {
-            return false;
-        };
-        let facet = self.state.facet_of(actor);
-        self.state.registry.query::<Banker>().any(|(banker, _)| {
-            self.state.facet_of(banker) == facet
-                && self
-                    .state
-                    .registry
-                    .get::<Position>(banker)
-                    .is_some_and(|p| in_range(p.0, at, BANK_RANGE))
-        })
-    }
-
-    /// The gold in a mobile's bank box — the amounts of every gold pile inside it.
-    fn bank_gold(&self, actor: EntityId) -> u32 {
-        let Some(owner) = self.state.registry.serial_of(actor) else {
-            return 0;
-        };
-        // The bank box worn on the bank layer.
-        let Some(bank) = self
-            .state
-            .registry
-            .query::<Equipped>()
-            .find(|(item, eq)| {
-                eq.mobile == owner
-                    && eq.layer == BANK_LAYER
-                    && self.state.registry.has::<Container>(*item)
-            })
-            .and_then(|(item, _)| self.state.registry.serial_of(item))
-        else {
-            return 0;
-        };
-        self.state
-            .registry
-            .query::<Contained>()
-            .filter(|(item, held)| {
-                held.container == bank
-                    && self
-                        .state
-                        .registry
-                        .get::<Graphic>(*item)
-                        .is_some_and(|g| g.id == GOLD_GRAPHIC)
-            })
-            .map(|(item, _)| u32::from(self.state.registry.get::<Amount>(item).map_or(1, |a| a.0)))
-            .sum()
     }
 
     fn walk(&mut self, connection: ConnectionId, request: WalkRequest, now: Instant) {
@@ -2103,12 +2031,29 @@ impl World {
             facet,
             name,
             banker,
+            equipment,
         } = spec;
         let facet = if self.state.facets.contains_key(&facet) {
             facet
         } else {
             warn!(facet, "unloaded facet; spawning the mobile on the default");
             self.state.default_facet
+        };
+        // Drop the mobile onto the ground, the way a client's spawner does: the
+        // pack gives x/y and a rough height, and the floor it stands on — the top
+        // of the static surface there, a building's raised floor and all — is the
+        // map's to say. Without this a banker sinks to the given z and reads as
+        // "inside a wall".
+        let position = match self
+            .state
+            .facet_state(facet)
+            .terrain
+            .as_ref()
+            .and_then(|t| t.stand_z(position.x, position.y, i32::from(position.z)))
+            .and_then(|z| i8::try_from(z).ok())
+        {
+            Some(z) => Point::new(position.x, position.y, z),
+            None => position,
         };
         let (entity, serial) = match self.state.registry.spawn_with_serial(SerialKind::Mobile) {
             Ok(pair) => pair,
@@ -2164,13 +2109,32 @@ impl World {
                 },
             );
         }
-        // A name the client shows on single-click, and the banker mark that makes
-        // "bank" open a box near it. Both are plain townsperson data.
+        // A banker earns a generated name and title ("Rowena the banker") when the
+        // spawn did not name it, the townsperson AI base (so it greets, faces and
+        // keeps near its post), and the service mark that answers "bank".
+        let name = if banker && name.is_none() {
+            Some(npc::banker_name(&mut self.state.rng))
+        } else {
+            name
+        };
         if let Some(name) = name {
             self.state.registry.insert(entity, Name(name));
         }
         if banker {
-            self.state.registry.insert(entity, Banker);
+            self.state.registry.insert(entity, Banker { next_greet: 0 });
+            self.state.registry.insert(
+                entity,
+                Npc {
+                    home: position,
+                    wander: BANKER_WANDER,
+                    next_beat: 0,
+                },
+            );
+        }
+        // Dress it before the reveal, so the clothing rides in the `0x78` that
+        // draws it — a naked banker is a bug that looks like nudity.
+        for (graphic, layer, item_hue) in equipment {
+            items::equip_worn_item(&mut self.state, serial, graphic, item_hue, layer);
         }
         self.state
             .registry
@@ -2300,6 +2264,7 @@ impl World {
                 // townsperson; those are placed once, not respawned.
                 name: None,
                 banker: false,
+                equipment: Vec::new(),
             }) {
                 self.state.registry.insert(entity, SpawnedBy(id));
             }
@@ -4191,6 +4156,7 @@ pub(crate) mod tests {
             facet: 0,
             name: None,
             banker: false,
+            equipment: Vec::new(),
         });
         world.tick(now);
         // The newest mobile that no client drives — the creature just made.
@@ -5458,6 +5424,7 @@ pub(crate) mod tests {
             facet: 0,
             name: None,
             banker: false,
+            equipment: Vec::new(),
         });
         world.tick(now);
         world
@@ -6638,6 +6605,7 @@ pub(crate) mod tests {
             facet: 0,
             name: Some("the banker".to_owned()),
             banker: true,
+            equipment: Vec::new(),
         });
         world.tick(now);
     }
@@ -6665,7 +6633,7 @@ pub(crate) mod tests {
         assert!(
             world.registry().query::<Equipped>().any(|(item, worn)| {
                 worn.mobile == owner
-                    && worn.layer == BANK_LAYER
+                    && worn.layer == npc::BANK_LAYER
                     && world.registry().has::<Container>(item)
             }),
             "a character wears a bank box on the bank layer"
@@ -6687,6 +6655,21 @@ pub(crate) mod tests {
                 .any(|p| p[0] == 0x24),
             "the bank box gump opened"
         );
+    }
+
+    #[test]
+    fn a_banker_greets_a_nearby_player() {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        // The banker two tiles off — inside the greet range. Its spawn tick also
+        // runs the townsfolk beat, so it greets straight away. The line is one of
+        // several, but every one names the visitor.
+        spawn_banker(&mut world, Point::new(START.0 + 2, START.1, 0), now);
+        let greeted = packets_for(&mut world, connection)
+            .iter()
+            .any(|p| p[0] == 0x1C && String::from_utf8_lossy(p).contains("Lord British"));
+        assert!(greeted, "the banker greeted the nearby player by name");
     }
 
     #[test]

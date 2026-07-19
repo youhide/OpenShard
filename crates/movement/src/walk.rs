@@ -63,6 +63,17 @@ pub trait Terrain {
     /// functional doors a building's static art only implies.
     fn statics_at(&self, _x: u16, _y: u16, _out: &mut Vec<(u16, i8)>) {}
 
+    /// The z a mobile stands at on `(x, y)`, reached from near `near_z` — the top
+    /// of the walkable surface there, a building's raised floor and all.
+    ///
+    /// Where a spawn drops onto the ground: the pack gives a tile and a rough
+    /// height, and the map says which floor that lands on (asking from `near_z`
+    /// rather than the sky, so it finds the floor and not the roof above it).
+    /// `None` when the tile has no reachable surface, or the terrain has no map.
+    fn stand_z(&self, _x: u16, _y: u16, _near_z: i32) -> Option<i32> {
+        None
+    }
+
     /// Whether an object `height` tall can sit at `(x, y, z)` — nothing solid in
     /// its body, and a surface under it to rest on.
     ///

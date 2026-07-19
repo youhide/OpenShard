@@ -335,14 +335,36 @@ pub struct Brain {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Scripted;
 
-/// Marks a mobile as a banker: a townsperson who opens your bank box when you ask.
+/// Marks a mobile as a banker: a townsperson who opens your bank box when you ask,
+/// and greets those who come near.
 ///
 /// The service, not the person — the graphic, name and standing-still are ordinary
 /// mobile data a spawn sets; this is the one bit that makes saying "bank" near it
 /// do something. A player within reach of any banker gets their own bank box, the
-/// same container the bank holds for them everywhere.
+/// same container the bank holds for them everywhere. `next_greet` is the tick it
+/// may next greet a passer-by, so it welcomes rather than natters.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Banker;
+pub struct Banker {
+    /// The earliest tick it may greet someone again.
+    pub next_greet: u64,
+}
+
+/// A townsperson's AI base — what makes a banker or a vendor *live* rather than
+/// stand frozen. The shared part every profession reuses; the profession itself
+/// is a marker beside it ([`Banker`], and vendors to come).
+///
+/// It keeps to a home: the tile it was placed on, and how far it may drift. A
+/// beat every so often lets it greet a passer-by, turn to face them, or take an
+/// idle step back toward where it belongs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Npc {
+    /// The tile it belongs at — a shop counter, a bank.
+    pub home: Point,
+    /// How many tiles it may stray from `home`; `0` stands perfectly still.
+    pub wander: u8,
+    /// The tick it next gets a beat.
+    pub next_beat: u64,
+}
 
 /// A mobile's fighting state: whether it is in war mode, whom it is attacking,
 /// and when it may next swing.

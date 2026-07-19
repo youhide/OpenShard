@@ -380,6 +380,10 @@ impl Terrain for MapTerrain {
         out.extend(self.map.statics_at(x, y).map(|item| (item.tile, item.z)));
     }
 
+    fn stand_z(&self, x: u16, y: u16, near_z: i32) -> Option<i32> {
+        self.surface_at(x, y, near_z)
+    }
+
     fn can_fit(&self, x: u16, y: u16, z: i32, height: i32) -> bool {
         MapTerrain::can_fit(self, x, y, z, height)
     }

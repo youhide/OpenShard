@@ -1257,6 +1257,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "openshard-npc"
+version = "0.0.1"
+dependencies = [
+ "openshard-ai",
+ "openshard-chat",
+ "openshard-entities",
+ "openshard-gateway",
+ "openshard-items",
+ "openshard-protocol",
+ "openshard-state",
+]
+
+[[package]]
 name = "openshard-persistence"
 version = "0.0.1"
 dependencies = [
@@ -1337,6 +1350,7 @@ dependencies = [
  "openshard-items",
  "openshard-magic",
  "openshard-movement",
+ "openshard-npc",
  "openshard-persistence",
  "openshard-protocol",
  "openshard-skills",

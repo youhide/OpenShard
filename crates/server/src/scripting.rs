@@ -261,6 +261,7 @@ fn into_world(command: ScriptCommand) -> Command {
             facet,
             name,
             banker,
+            equipment,
         } => Command::SpawnMobile {
             body,
             hue,
@@ -276,6 +277,10 @@ fn into_world(command: ScriptCommand) -> Command {
             // An empty name from the script means nameless.
             name: (!name.is_empty()).then_some(name),
             banker,
+            equipment: equipment
+                .into_iter()
+                .map(|w| (w.graphic, w.layer, w.hue))
+                .collect(),
         },
         ScriptCommand::Damage {
             serial,
@@ -651,6 +656,7 @@ mod tests {
             facet: 0,
             name: None,
             banker: false,
+            equipment: Vec::new(),
         });
         world.tick(now);
         let mob = world
@@ -713,6 +719,7 @@ mod tests {
             facet: 0,
             name: None,
             banker: false,
+            equipment: Vec::new(),
         });
         world.tick(now); // the mobile spawns, MobileSpawned emitted
 

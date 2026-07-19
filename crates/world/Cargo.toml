@@ -21,6 +21,7 @@ openshard-chat.workspace = true
 openshard-combat.workspace = true
 openshard-items.workspace = true
 openshard-magic.workspace = true
+openshard-npc.workspace = true
 openshard-persistence.workspace = true
 openshard-protocol.workspace = true
 openshard-skills.workspace = true
