@@ -48,6 +48,8 @@ pub struct SpawnSpec {
     pub sight: u8,
     /// Whether it starts fights (2), answers them (1), or only runs (0).
     pub aggression: u8,
+    /// Ticks between its beats while hunting; 0 takes the shard default.
+    pub beat: u64,
     pub wander: bool,
     pub position: Point,
     pub facet: u8,
@@ -77,6 +79,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
         swing,
         sight,
         aggression,
+        beat,
         wander,
         position,
         facet,
@@ -161,6 +164,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
                 guard_until: 0,
                 opens_doors: body_opens_doors(body),
                 aggression,
+                beat_ticks: beat,
             },
         );
     }

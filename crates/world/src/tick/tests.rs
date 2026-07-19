@@ -15,6 +15,10 @@ use openshard_state::sectors::distance;
 
 pub(super) const START: (u16, u16) = (1363, 1600);
 
+/// A generous upper bound on ticks-per-beat, so a test loop that waits "a few
+/// beats" survives any cadence the defaults settle on.
+pub(super) const AI_THINK_TICKS: u64 = 10;
+
 /// Ticks a bare-handed, default-dexterity mobile waits between swings under
 /// the default rules — the pace the combat tests reckon against. `dex 100`,
 /// wrestling, era 1, scale 15000: thirty ticks.
@@ -1249,7 +1253,7 @@ fn gameplay_config_reaches_the_systems() {
     // decay here gives a spawned item a clock of a hundred ticks, not the
     // twenty-minute default's twenty-four thousand.
     let now = Instant::now();
-    let gameplay = Gameplay::new(2, 40000, 700, 5, 60, 18, 3, 31);
+    let gameplay = Gameplay::new(2, 40000, 700, 5, 60, 18, 3, 31, 400);
     let mut world = World::new(START).with_gameplay(gameplay);
     world.queue(Command::SpawnItem {
         graphic: 0x0EED,
@@ -1463,6 +1467,7 @@ fn spawn_mobile_full(
         swing: 0, // the default pace
         sight: 0, // passive by default; tests that want a brain set it
         aggression: 2,
+        beat: 0,
         wander: false,
         position: point,
         facet: 0,
@@ -2726,6 +2731,7 @@ fn spawn_creature(world: &mut World, point: Point, sight: u8, wander: bool, now:
         swing: 0,
         sight,
         aggression: 2,
+        beat: 0,
         wander,
         position: point,
         facet: 0,
@@ -3622,6 +3628,7 @@ fn a_spawner_fills_to_its_ceiling_and_clear_empties_it() {
         swing: 0,
         sight: 0,
         aggression: 2,
+        beat: 0,
         wander: false,
     };
     let area = SpawnArea {
@@ -4141,6 +4148,7 @@ fn spawn_banker(world: &mut World, at: Point, now: Instant) {
         swing: 0,
         sight: 0,
         aggression: 2,
+        beat: 0,
         wander: false,
         position: at,
         facet: 0,
@@ -4841,6 +4849,7 @@ fn a_creature_does_not_notice_prey_through_a_shut_door() {
         swing: 0,
         sight: 5,
         aggression: 2,
+        beat: 0,
         wander: false,
         position: Point::new(START.0, START.1 + 2, 0),
         facet: 0,
@@ -4902,6 +4911,7 @@ fn spawn_brained(world: &mut World, body: u16, at: Point, sight: u8, now: Instan
         swing: 0,
         sight,
         aggression: 2,
+        beat: 0,
         wander: false,
         position: at,
         facet: 0,
@@ -5092,6 +5102,7 @@ fn spawn_postured(
         swing: 0,
         sight,
         aggression,
+        beat: 0,
         wander: false,
         position: at,
         facet: 0,
@@ -5206,5 +5217,52 @@ fn a_gutted_monster_turns_tail() {
     assert!(
         distance(fled_to, player_at) > distance(start_at, player_at) + 2,
         "badly hurt, it broke off (ended at {fled_to:?})"
+    );
+}
+
+#[test]
+fn the_chase_pace_is_the_operators_knob() {
+    // Two identical hunts, one at the classic 400ms pace and one at the
+    // 250ms "monsters catch runners" setting: over the same ticks, the fast
+    // shard's creature closes on its prey and the classic one lags behind.
+    let chased_distance = |step_ms: u64| {
+        let now = Instant::now();
+        let gameplay = Gameplay::new(1, 15000, 1000, 20 * 60, 2 * 60, 18, 3, 31, step_ms);
+        let mut world = World::new(START).with_gameplay(gameplay);
+        let _gm = enter_gm(&mut world, now);
+        let player_at = Point::new(START.0, START.1, 0);
+        spawn_brained(
+            &mut world,
+            0x00D1,
+            Point::new(START.0, START.1 + 7, 0),
+            10,
+            now,
+        );
+        let creature = world
+            .state
+            .registry
+            .query::<Brain>()
+            .map(|(entity, _)| entity)
+            .next()
+            .unwrap();
+        let mut later = now;
+        for _ in 0..40 {
+            later += TICK_INTERVAL;
+            world.tick(later);
+        }
+        distance(
+            world.registry().get::<Position>(creature).unwrap().0,
+            player_at,
+        )
+    };
+    let classic = chased_distance(400);
+    let fast = chased_distance(250);
+    assert!(
+        fast < classic,
+        "the 250ms shard's hunter closed further (fast ended {fast}, classic {classic})"
+    );
+    assert!(
+        fast <= openshard_combat::MELEE_RANGE,
+        "at 250ms the hunter caught its prey over 2s from 7 tiles (ended {fast})"
     );
 }

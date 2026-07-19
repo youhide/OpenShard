@@ -83,6 +83,11 @@ combat_era = 1
 # Pre-AoS is 15000; AoS uses 40000.
 speed_scale_factor = 15000
 
+# Milliseconds between a hunting creature's steps. The classic pace is 400 —
+# slower than a running player (250), so outrunning a monster works the way it
+# always has. Set 250 to let monsters keep pace with a runner.
+# creature_step_ms = 400
+
 # The ceiling any one skill trains to, in tenths (1000 = 100.0).
 skill_cap = 1000
 

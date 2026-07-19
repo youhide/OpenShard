@@ -524,6 +524,7 @@ mod tests {
                     swing: 0,
                     sight: 8,
                     aggression: 2,
+                    beat: 0,
                     wander: false,
                 }],
             }]

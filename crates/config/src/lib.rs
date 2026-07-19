@@ -112,6 +112,12 @@ pub struct GameplayConfig {
     /// How far a yell carries, in tiles. Sphere's `DistanceYell`.
     #[serde(default = "default_distance_yell")]
     pub distance_yell: u32,
+    /// Milliseconds between a hunting creature's steps. 400 is the classic
+    /// base-monster pace — slower than a running player (250), so running away
+    /// works, as it always has. Set 250 to let monsters keep pace with a
+    /// runner. Idle creatures amble at twice this.
+    #[serde(default = "default_creature_step_ms")]
+    pub creature_step_ms: u64,
 }
 
 /// Whether combat [`combat_era`](GameplayConfig::combat_era) is one the swing
@@ -141,6 +147,10 @@ fn default_distance_talk() -> u32 {
 fn default_distance_whisper() -> u32 {
     3
 }
+fn default_creature_step_ms() -> u64 {
+    400
+}
+
 fn default_distance_yell() -> u32 {
     31
 }
@@ -156,6 +166,7 @@ impl Default for GameplayConfig {
             distance_talk: default_distance_talk(),
             distance_whisper: default_distance_whisper(),
             distance_yell: default_distance_yell(),
+            creature_step_ms: default_creature_step_ms(),
         }
     }
 }

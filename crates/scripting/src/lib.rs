@@ -228,6 +228,8 @@ pub enum Command {
         sight: u8,
         /// Whether it starts fights (2), answers them (1), or only runs (0).
         aggression: u8,
+        /// Ticks between its beats while hunting; 0 takes the shard default.
+        beat: u64,
         /// Whether it wanders when idle.
         wander: bool,
         /// Where it stands.
@@ -477,6 +479,8 @@ pub struct SpawnCreature {
     pub sight: u8,
     /// Whether it starts fights (2), answers them (1), or only runs (0).
     pub aggression: u8,
+    /// Ticks between its beats while hunting; 0 takes the shard default.
+    pub beat: u64,
     /// Whether it wanders when idle.
     pub wander: bool,
 }

@@ -34,6 +34,8 @@ pub struct CreatureTemplate {
     pub sight: u8,
     /// Whether it starts fights (2), answers them (1), or only runs (0).
     pub aggression: u8,
+    /// Ticks between its beats while hunting; 0 takes the shard default.
+    pub beat: u64,
     /// Whether it drifts when idle.
     pub wander: bool,
 }

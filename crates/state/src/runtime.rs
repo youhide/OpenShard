@@ -63,6 +63,11 @@ pub struct Gameplay {
     pub distance_whisper: u32,
     /// How far a yell carries, in tiles.
     pub distance_yell: u32,
+    /// Ticks between a hunting creature's steps. 8 (0.4s) is the references'
+    /// base-monster pace — slower than a running player on purpose; 5 (0.25s)
+    /// matches a runner, for shards that want monsters to catch people. Idle
+    /// creatures amble at twice this.
+    pub creature_step_ticks: u64,
 }
 
 impl Gameplay {
@@ -82,6 +87,7 @@ impl Gameplay {
         distance_talk: u32,
         distance_whisper: u32,
         distance_yell: u32,
+        creature_step_ms: u64,
     ) -> Self {
         Self {
             combat_era,
@@ -92,6 +98,8 @@ impl Gameplay {
             distance_talk,
             distance_whisper,
             distance_yell,
+            // 50ms per tick; anything under one tick is one tick.
+            creature_step_ticks: (creature_step_ms / 50).max(1),
         }
     }
 }
@@ -100,7 +108,7 @@ impl Default for Gameplay {
     /// The pre-AoS feel the systems were built with — the values that were
     /// compile-time constants before an operator could tune them.
     fn default() -> Self {
-        Self::new(1, 15000, 1000, 20 * 60, 2 * 60, 18, 3, 31)
+        Self::new(1, 15000, 1000, 20 * 60, 2 * 60, 18, 3, 31, 400)
     }
 }
 

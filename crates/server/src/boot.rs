@@ -77,6 +77,7 @@ pub(crate) fn gameplay_of(config: &Config) -> Gameplay {
         g.distance_talk,
         g.distance_whisper,
         g.distance_yell,
+        g.creature_step_ms,
     )
 }
 

@@ -491,6 +491,7 @@ impl World {
                 swing,
                 sight,
                 aggression,
+                beat,
                 wander,
                 position,
                 facet,
@@ -510,6 +511,7 @@ impl World {
                         swing,
                         sight,
                         aggression,
+                        beat,
                         wander,
                         position,
                         facet,
@@ -648,8 +650,23 @@ impl World {
                     self.step(serial.raw(), dir);
                 }
             }
+            // A hunter re-beats at its own pace (or the shard's); idle life
+            // ambles at half speed. Engagement is read after the think, so the
+            // beat that acquired a target already quickens.
+            let engaged = self
+                .state
+                .registry
+                .get::<Combat>(creature)
+                .and_then(|c| c.target)
+                .is_some();
+            let default_beat = self.state.gameplay.creature_step_ticks.max(1);
             if let Some(brain) = self.state.registry.get_mut::<Brain>(creature) {
-                brain.next_think = now + AI_THINK_TICKS;
+                let base = if brain.beat_ticks > 0 {
+                    brain.beat_ticks
+                } else {
+                    default_beat
+                };
+                brain.next_think = now + if engaged { base } else { base * 2 };
             }
         }
     }

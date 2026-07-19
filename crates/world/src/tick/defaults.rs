@@ -56,10 +56,6 @@ pub(super) const MAX_FOLLOWERS: u8 = 5;
 pub(super) const fn max_weight(strength: u16) -> u16 {
     40 + strength * 7 / 2
 }
-/// Ticks between a brain's beats — half a second at [`TICK_INTERVAL`]. Creatures
-/// think in beats, not every tick: it paces their walk and spares the loop from
-/// re-deciding a thousand times a second what has not changed.
-pub(super) const AI_THINK_TICKS: u64 = 10;
 /// The seed the world's roll generator starts from.
 ///
 /// Fixed, so a fresh world's rolls are reproducible in a test and a replay. A

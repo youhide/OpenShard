@@ -186,6 +186,9 @@ pub struct CreatureData {
     /// Defaults to aggressive, the only behaviour that existed before it.
     #[serde(default = "aggressive")]
     pub aggression: u8,
+    /// Ticks between its beats while hunting; 0 takes the shard default.
+    #[serde(default)]
+    pub beat: u64,
     /// Whether it drifts when idle.
     pub wander: bool,
 }

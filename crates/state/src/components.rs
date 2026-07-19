@@ -332,6 +332,9 @@ pub struct Brain {
     pub opens_doors: bool,
     /// Whether it starts fights, only answers them, or only runs.
     pub aggression: Aggression,
+    /// Ticks between its beats while hunting; `0` takes the shard's default
+    /// (`Gameplay::creature_step_ticks`). Idle, it ambles at twice this.
+    pub beat_ticks: u64,
 }
 
 /// How a creature relates to the people around it — ServUO's `FightMode`,

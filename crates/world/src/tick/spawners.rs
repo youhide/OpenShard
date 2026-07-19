@@ -58,6 +58,7 @@ impl World {
                     swing: creature.swing,
                     sight: creature.sight,
                     aggression: creature.aggression,
+                    beat: creature.beat,
                     wander: creature.wander,
                     position: Point::new(x, y, z),
                     facet,
@@ -117,6 +118,7 @@ impl World {
                         swing: c.swing,
                         sight: c.sight,
                         aggression: c.aggression,
+                        beat: c.beat,
                         wander: c.wander,
                     })
                     .collect(),
@@ -152,6 +154,7 @@ impl World {
                     swing: c.swing,
                     sight: c.sight,
                     aggression: c.aggression,
+                    beat: c.beat,
                     wander: c.wander,
                 })
                 .collect();

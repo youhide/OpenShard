@@ -127,6 +127,8 @@ struct MobileSpec {
     #[serde(default = "aggressive")]
     aggression: u8,
     #[serde(default)]
+    beat: u64,
+    #[serde(default)]
     wander: bool,
     x: u16,
     y: u16,
@@ -176,6 +178,7 @@ fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
             swing: spec.swing,
             sight: spec.sight,
             aggression: spec.aggression,
+            beat: spec.beat,
             wander: spec.wander,
             x: spec.x,
             y: spec.y,
@@ -325,6 +328,8 @@ struct CreatureSpec {
     #[serde(default = "aggressive")]
     aggression: u8,
     #[serde(default)]
+    beat: u64,
+    #[serde(default)]
     wander: bool,
 }
 
@@ -360,6 +365,7 @@ fn op_register_spawner(state: &mut OpState, #[serde] spec: SpawnerSpec) {
             swing: c.swing,
             sight: c.sight,
             aggression: c.aggression,
+            beat: c.beat,
             wander: c.wander,
         })
         .collect();
