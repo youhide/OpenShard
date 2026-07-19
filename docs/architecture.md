@@ -80,10 +80,10 @@ crate, owning its domain events:
 | `chat` | `say`/`speak`, speech ranges | `MobileSpoke` |
 | `skills` | skill/stat checks, the gain curve, the shared `roll_skill` | `SkillUsed` |
 | `magic` | `cast_spell`/`heal`/`regen_mana` | `SpellCast` |
-| `combat` | `damage`/`die`/`swings`/`attack`, criminal flagging, the swing formula | `MobileDamaged`, `MobileDied` |
-| `items` | spawn/drag/stack/decay/containers/equip/doors, one module each | `ItemSpawned` |
-| `ai` | `think_one` — a brain decides a step; the world applies it | — |
-| `npc` | townsfolk services and the creature `spawn` rule | `MobileSpawned` |
+| `combat` | `damage`/`die`/`swings`/`volleys`/`attack`, criminal flagging, the swing formula | `MobileDamaged`, `MobileDied` |
+| `items` | spawn/drag/stack/decay/containers/equip/doors/mounts, one module each | `ItemSpawned` |
+| `ai` | the creature brain: LOS aggro, cached-path chase, give-up, kiting, fleeing, retaliation | — |
+| `npc` | townsfolk services (banker, vendor buy/sell) and the creature `spawn` rule | `MobileSpawned` |
 
 The drawing/interest substrate they share (`show`, `forget`, `broadcast_move`,
 `refresh_around`, `reveal`, `mobile_incoming`, …) lives on `WorldState`, in the
