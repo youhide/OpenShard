@@ -48,6 +48,11 @@ struct SpawnSpec {
 }
 
 /// The default stack size: a single item.
+/// The serde default for a spec's `aggression`: aggressive, the old behaviour.
+fn aggressive() -> u8 {
+    2
+}
+
 fn one() -> u16 {
     1
 }
@@ -119,6 +124,8 @@ struct MobileSpec {
     swing: u64,
     #[serde(default)]
     sight: u8,
+    #[serde(default = "aggressive")]
+    aggression: u8,
     #[serde(default)]
     wander: bool,
     x: u16,
@@ -168,6 +175,7 @@ fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
             resistance: spec.resistance,
             swing: spec.swing,
             sight: spec.sight,
+            aggression: spec.aggression,
             wander: spec.wander,
             x: spec.x,
             y: spec.y,
@@ -314,6 +322,8 @@ struct CreatureSpec {
     swing: u64,
     #[serde(default)]
     sight: u8,
+    #[serde(default = "aggressive")]
+    aggression: u8,
     #[serde(default)]
     wander: bool,
 }
@@ -349,6 +359,7 @@ fn op_register_spawner(state: &mut OpState, #[serde] spec: SpawnerSpec) {
             resistance: c.resistance,
             swing: c.swing,
             sight: c.sight,
+            aggression: c.aggression,
             wander: c.wander,
         })
         .collect();

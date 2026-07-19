@@ -330,6 +330,35 @@ pub struct Brain {
     /// Whether it opens a shut door in its way rather than treating it as
     /// wall. Humanoids do; animals do not — ServUO's `CanOpenDoors`.
     pub opens_doors: bool,
+    /// Whether it starts fights, only answers them, or only runs.
+    pub aggression: Aggression,
+}
+
+/// How a creature relates to the people around it — ServUO's `FightMode`,
+/// folded to the three postures that matter: fauna that never fights, the
+/// guard-dog that answers force with force, and the monster that starts it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum Aggression {
+    /// Never fights; runs from whoever hurts it. A deer.
+    Passive,
+    /// Fights only whoever attacked it first. A guard dog.
+    Defensive,
+    /// Attacks what it sees first. A monster — and the default, because every
+    /// spawn before this knob existed behaved this way.
+    #[default]
+    Aggressive,
+}
+
+impl Aggression {
+    /// The wire/config byte: 0 passive, 1 defensive, anything else aggressive.
+    #[must_use]
+    pub const fn from_bits(bits: u8) -> Self {
+        match bits {
+            0 => Self::Passive,
+            1 => Self::Defensive,
+            _ => Self::Aggressive,
+        }
+    }
 }
 
 /// Whether a body knows what a door handle is. The reference rule is

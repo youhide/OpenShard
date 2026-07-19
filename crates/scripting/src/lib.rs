@@ -226,6 +226,8 @@ pub enum Command {
         swing: u64,
         /// How far it notices a foe, in tiles; 0 is passive.
         sight: u8,
+        /// Whether it starts fights (2), answers them (1), or only runs (0).
+        aggression: u8,
         /// Whether it wanders when idle.
         wander: bool,
         /// Where it stands.
@@ -473,6 +475,8 @@ pub struct SpawnCreature {
     pub swing: u64,
     /// How far it notices a foe; 0 is passive.
     pub sight: u8,
+    /// Whether it starts fights (2), answers them (1), or only runs (0).
+    pub aggression: u8,
     /// Whether it wanders when idle.
     pub wander: bool,
 }

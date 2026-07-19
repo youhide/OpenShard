@@ -32,6 +32,8 @@ pub struct CreatureTemplate {
     pub swing: u64,
     /// How far it notices a target; `0` for a placid animal.
     pub sight: u8,
+    /// Whether it starts fights (2), answers them (1), or only runs (0).
+    pub aggression: u8,
     /// Whether it drifts when idle.
     pub wander: bool,
 }

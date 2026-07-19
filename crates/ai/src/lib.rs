@@ -11,11 +11,14 @@
 //! or a wander replays identically.
 
 use openshard_combat as combat;
+use openshard_combat::MobileDamaged;
 use openshard_entities::{EntityId, Serial};
 use openshard_items as items;
 use openshard_movement::{find_path, step_from, Terrain};
 use openshard_protocol::{Direction, Point};
-use openshard_state::components::{Brain, ChasePath, Client, Combat, Heading, Hitpoints, Position};
+use openshard_state::components::{
+    Aggression, Brain, ChasePath, Client, Combat, Heading, Hitpoints, Position, Scripted,
+};
 use openshard_state::sectors::{distance, in_range};
 use openshard_state::WorldState;
 
@@ -43,6 +46,14 @@ const GUARD_TICKS: u64 = 200;
 /// A chase is abandoned beyond this many times the creature's sight — chasing
 /// forever across the map is nobody's behaviour.
 const CHASE_RANGE_FACTOR: u32 = 2;
+
+/// The floor on how far any fight is followed, so a defensive creature with no
+/// hunting sight of its own still answers its attacker — ServUO's default
+/// perception is 16, and this is the same idea.
+const CHASE_RANGE_MIN: u32 = 12;
+
+/// A creature this tough never runs — ServUO's "500 hits does not flee" rule.
+const BRAVE_HITS: u16 = 500;
 
 /// The first step from `from` toward `to`, planned *around* obstacles so a chaser
 /// does not wedge itself against a wall. Falls back to the straight-line direction
@@ -94,6 +105,10 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<u8> {
     {
         if let Some(target_pos) = foe_in_sight(state, target_serial, pos, facet, chase_limit(sight))
         {
+            if should_flee(state, creature, brain) {
+                state.registry.remove::<ChasePath>(creature);
+                return flee_step(state, creature, facet, pos, target_pos);
+            }
             if in_range(pos, target_pos, combat::MELEE_RANGE) {
                 // Arrived; the route served.
                 state.registry.remove::<ChasePath>(creature);
@@ -105,8 +120,9 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<u8> {
         state.registry.remove::<ChasePath>(creature);
     }
 
-    // Nothing to fight: look for prey, or wander.
-    if sight > 0 {
+    // Nothing to fight: look for prey — only a creature that starts fights
+    // hunts; the defensive and the passive wait to be wronged — or wander.
+    if sight > 0 && brain.aggression == Aggression::Aggressive {
         if let Some(prey) = nearest_player_in_sight(state, creature, pos, facet, sight) {
             let next_swing = state.ticks + combat::swing_speed(state, creature);
             state.registry.insert(
@@ -142,7 +158,7 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<u8> {
 /// How far a chase follows before it is abandoned — wider than the sight that
 /// started it, so a quarry backing off does not flicker in and out of the fight.
 fn chase_limit(sight: u8) -> u32 {
-    u32::from(sight) * CHASE_RANGE_FACTOR
+    (u32::from(sight) * CHASE_RANGE_FACTOR).max(CHASE_RANGE_MIN)
 }
 
 /// The position of `target` if it is still a live foe within `range` of `from`
@@ -349,6 +365,88 @@ fn nearest_player_in_sight(
         }
     }
     best.map(|(_, serial)| serial)
+}
+
+/// Whether this creature runs from its foe rather than closing in: fauna
+/// always does, and anything badly hurt does unless it is too big to scare.
+/// There is no re-engage threshold yet because nothing regenerates hit points;
+/// a fleer keeps running until the foe falls out of chase range.
+fn should_flee(state: &WorldState, creature: EntityId, brain: Brain) -> bool {
+    if brain.aggression == Aggression::Passive {
+        return true;
+    }
+    state
+        .registry
+        .get::<Hitpoints>(creature)
+        .is_some_and(|h| h.max < BRAVE_HITS && u32::from(h.current) * 5 < u32::from(h.max))
+}
+
+/// A step away from the threat: straight away when the ground allows, else the
+/// nearest open turn to either side. `None` when boxed in — cornered.
+fn flee_step(
+    state: &mut WorldState,
+    creature: EntityId,
+    facet: u8,
+    from: Point,
+    threat: Point,
+) -> Option<u8> {
+    // A runner does not also swing; drop the guard while running.
+    if let Some(combat) = state.registry.get_mut::<Combat>(creature) {
+        combat.warmode = false;
+    }
+    let away = direction_toward(threat, from).unwrap_or(Direction::South);
+    for turn in [0u8, 1, 7, 2, 6, 3, 5] {
+        let dir = Direction::from_bits((away.to_bits() + turn) & 7);
+        let (open, _) = probe(state, facet, from, dir);
+        if open {
+            return Some(dir.to_bits());
+        }
+    }
+    None
+}
+
+/// Answer violence: a creature with a brain that is hit and idle turns on its
+/// attacker — warlike if it fights at all, target-only if it is fauna (so the
+/// flee logic knows what to run from). Reading the damage event is what keeps
+/// combat ignorant of AI: combat emits, this reacts.
+pub fn retaliate(state: &mut WorldState, blows: &[MobileDamaged]) {
+    for blow in blows {
+        let Some(by) = blow.by else {
+            continue;
+        };
+        if by == blow.serial {
+            continue;
+        }
+        let victim = blow.entity;
+        let Some(&brain) = state.registry.get::<Brain>(victim) else {
+            continue;
+        };
+        if state.registry.has::<Scripted>(victim) {
+            continue;
+        }
+        // Being struck ends any standing watch on the spot.
+        if let Some(b) = state.registry.get_mut::<Brain>(victim) {
+            b.guard_until = 0;
+        }
+        let engaged = state
+            .registry
+            .get::<Combat>(victim)
+            .and_then(|c| c.target)
+            .is_some();
+        if engaged || state.registry.entity_of(by).is_none() {
+            continue;
+        }
+        let warmode = brain.aggression != Aggression::Passive;
+        let next_swing = state.ticks + combat::swing_speed(state, victim);
+        state.registry.insert(
+            victim,
+            Combat {
+                warmode,
+                target: Some(by),
+                next_swing,
+            },
+        );
+    }
 }
 
 /// The eight-way step that most reduces the gap from `from` to `to`, or `None`

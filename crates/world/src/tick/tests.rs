@@ -1462,6 +1462,7 @@ fn spawn_mobile_full(
         resistance,
         swing: 0, // the default pace
         sight: 0, // passive by default; tests that want a brain set it
+        aggression: 2,
         wander: false,
         position: point,
         facet: 0,
@@ -2724,6 +2725,7 @@ fn spawn_creature(world: &mut World, point: Point, sight: u8, wander: bool, now:
         resistance: 0,
         swing: 0,
         sight,
+        aggression: 2,
         wander,
         position: point,
         facet: 0,
@@ -3619,6 +3621,7 @@ fn a_spawner_fills_to_its_ceiling_and_clear_empties_it() {
         resistance: 0,
         swing: 0,
         sight: 0,
+        aggression: 2,
         wander: false,
     };
     let area = SpawnArea {
@@ -4137,6 +4140,7 @@ fn spawn_banker(world: &mut World, at: Point, now: Instant) {
         resistance: 0,
         swing: 0,
         sight: 0,
+        aggression: 2,
         wander: false,
         position: at,
         facet: 0,
@@ -4836,6 +4840,7 @@ fn a_creature_does_not_notice_prey_through_a_shut_door() {
         resistance: 0,
         swing: 0,
         sight: 5,
+        aggression: 2,
         wander: false,
         position: Point::new(START.0, START.1 + 2, 0),
         facet: 0,
@@ -4896,6 +4901,7 @@ fn spawn_brained(world: &mut World, body: u16, at: Point, sight: u8, now: Instan
         resistance: 0,
         swing: 0,
         sight,
+        aggression: 2,
         wander: false,
         position: at,
         facet: 0,
@@ -5065,5 +5071,140 @@ fn a_human_chaser_opens_the_door_in_its_way() {
     assert!(
         distance(creature_at, Point::new(START.0, START.1, 0)) <= openshard_combat::MELEE_RANGE,
         "and came through the doorway (ended at {creature_at:?})"
+    );
+}
+
+/// Spawn a creature with an explicit aggression posture, returning its entity.
+fn spawn_postured(
+    world: &mut World,
+    at: Point,
+    sight: u8,
+    aggression: u8,
+    now: Instant,
+) -> EntityId {
+    world.queue(Command::SpawnMobile {
+        body: 0x00D1,
+        hue: 0,
+        hits: 50,
+        notoriety: 1,
+        damage: 5,
+        resistance: 0,
+        swing: 0,
+        sight,
+        aggression,
+        wander: false,
+        position: at,
+        facet: 0,
+        name: None,
+        banker: false,
+        equipment: Vec::new(),
+    });
+    world.tick(now);
+    world
+        .state
+        .registry
+        .query::<Brain>()
+        .map(|(entity, _)| entity)
+        .next()
+        .expect("a creature with a brain")
+}
+
+#[test]
+fn a_defensive_creature_answers_the_blow() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player_serial = world
+        .registry()
+        .serial_of(world.state.players[&gm])
+        .unwrap();
+    // Defensive and blind: it hunts nothing, so only the blow can start this.
+    let creature = spawn_postured(&mut world, Point::new(START.0, START.1 + 2, 0), 0, 1, now);
+    assert!(
+        world.registry().get::<Combat>(creature).is_none(),
+        "unprovoked, it minds its own business"
+    );
+    let creature_serial = world.registry().serial_of(creature).unwrap().raw();
+    world.queue(Command::Damage {
+        serial: creature_serial,
+        amount: 5,
+        damage_type: 0,
+        by: player_serial.raw(),
+    });
+    world.tick(now);
+    world.tick(now);
+    let combat = world.registry().get::<Combat>(creature).expect("engaged");
+    assert_eq!(
+        combat.target,
+        Some(player_serial),
+        "it turned on its attacker"
+    );
+    assert!(combat.warmode, "and it means it");
+}
+
+#[test]
+fn a_passive_creature_runs_from_its_attacker() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player_at = Point::new(START.0, START.1, 0);
+    let player_serial = world
+        .registry()
+        .serial_of(world.state.players[&gm])
+        .unwrap();
+    let start_at = Point::new(START.0, START.1 + 1, 0);
+    let creature = spawn_postured(&mut world, start_at, 0, 0, now);
+    let creature_serial = world.registry().serial_of(creature).unwrap().raw();
+    world.queue(Command::Damage {
+        serial: creature_serial,
+        amount: 5,
+        damage_type: 0,
+        by: player_serial.raw(),
+    });
+    world.tick(now);
+    let combat = world.registry().get::<Combat>(creature).expect("aware");
+    assert!(!combat.warmode, "fauna does not fight back");
+    let mut later = now;
+    for _ in 0..(AI_THINK_TICKS * 8) {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    let fled_to = world.registry().get::<Position>(creature).unwrap().0;
+    assert!(
+        distance(fled_to, player_at) > distance(start_at, player_at) + 2,
+        "the deer ran (ended at {fled_to:?})"
+    );
+}
+
+#[test]
+fn a_gutted_monster_turns_tail() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player_at = Point::new(START.0, START.1, 0);
+    let player_serial = world
+        .registry()
+        .serial_of(world.state.players[&gm])
+        .unwrap();
+    let start_at = Point::new(START.0, START.1 + 1, 0);
+    let creature = spawn_postured(&mut world, start_at, 8, 2, now);
+    let creature_serial = world.registry().serial_of(creature).unwrap().raw();
+    // Cut it to under a fifth of its hits: 50 -> 9.
+    world.queue(Command::Damage {
+        serial: creature_serial,
+        amount: 41,
+        damage_type: 0,
+        by: player_serial.raw(),
+    });
+    world.tick(now);
+    let mut later = now;
+    for _ in 0..(AI_THINK_TICKS * 8) {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    let fled_to = world.registry().get::<Position>(creature).unwrap().0;
+    assert!(
+        distance(fled_to, player_at) > distance(start_at, player_at) + 2,
+        "badly hurt, it broke off (ended at {fled_to:?})"
     );
 }

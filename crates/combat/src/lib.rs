@@ -51,6 +51,8 @@ pub struct MobileDamaged {
     pub amount: u16,
     /// What it has left.
     pub remaining: u16,
+    /// Who dealt it, when the blow had an author — what retaliation reads.
+    pub by: Option<Serial>,
 }
 
 /// A mobile died — its hit points reached zero.
@@ -163,6 +165,7 @@ pub fn damage(
         serial,
         amount,
         remaining,
+        by: attacker,
     });
     state.broadcast_health(entity);
     if remaining == 0 {

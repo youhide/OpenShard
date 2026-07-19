@@ -5,8 +5,8 @@ use openshard_entities::{EntityId, Serial, SerialKind};
 use openshard_movement::Walker;
 use openshard_protocol::{Direction, Facing, Notoriety, Point};
 use openshard_state::components::{
-    body_opens_doors, Banker, Body, Brain, Facet, Heading, Hitpoints, MeleeDamage, Movement, Name,
-    Npc, Position, Resistance, SwingSpeed,
+    body_opens_doors, Aggression, Banker, Body, Brain, Facet, Heading, Hitpoints, MeleeDamage,
+    Movement, Name, Npc, Position, Resistance, SwingSpeed,
 };
 use openshard_state::WorldState;
 use tracing::{debug, warn};
@@ -46,6 +46,8 @@ pub struct SpawnSpec {
     pub resistance: u8,
     pub swing: u64,
     pub sight: u8,
+    /// Whether it starts fights (2), answers them (1), or only runs (0).
+    pub aggression: u8,
     pub wander: bool,
     pub position: Point,
     pub facet: u8,
@@ -74,6 +76,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
         resistance,
         swing,
         sight,
+        aggression,
         wander,
         position,
         facet,
@@ -144,7 +147,11 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
     // A brain only for a creature that needs one — something that hunts or
     // wanders. A pure prop (a shopkeeper standing still) gets none and never
     // enters `think`. `Combat` it earns when it first picks a fight.
-    if sight > 0 || wander {
+    let aggression = Aggression::from_bits(aggression);
+    // A brain for anything that hunts, drifts, or must answer or flee a blow —
+    // which is everything but the aggressive-but-blind prop (sight 0), the old
+    // meaning of "no brain".
+    if sight > 0 || wander || aggression != Aggression::Aggressive {
         state.registry.insert(
             entity,
             Brain {
@@ -153,6 +160,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
                 next_think: 0,
                 guard_until: 0,
                 opens_doors: body_opens_doors(body),
+                aggression,
             },
         );
     }

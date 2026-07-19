@@ -159,6 +159,11 @@ pub struct ItemRecord {
 /// One creature kind a spawn region may put down, as saved — a plain mirror of
 /// the world's creature template, kept here so the on-disk shape does not move
 /// every time the simulation's does.
+/// The serde default for [`CreatureData::aggression`]: aggressive.
+fn aggressive() -> u8 {
+    2
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct CreatureData {
     /// The body graphic.
@@ -177,6 +182,10 @@ pub struct CreatureData {
     pub swing: u64,
     /// How far it notices a target.
     pub sight: u8,
+    /// Whether it starts fights (2), answers them (1), or only runs (0).
+    /// Defaults to aggressive, the only behaviour that existed before it.
+    #[serde(default = "aggressive")]
+    pub aggression: u8,
     /// Whether it drifts when idle.
     pub wander: bool,
 }

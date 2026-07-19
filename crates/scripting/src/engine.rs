@@ -523,6 +523,7 @@ mod tests {
                     resistance: 0,
                     swing: 0,
                     sight: 8,
+                    aggression: 2,
                     wander: false,
                 }],
             }]

@@ -127,6 +127,8 @@ pub struct World {
     entered: Cursor<PlayerEntered>,
     /// Read to find out what to mark dirty. See `mark_dirty`.
     moved: Cursor<MobileMoved>,
+    /// What combat reported hit, for the AI's retaliation.
+    damaged: Cursor<openshard_combat::MobileDamaged>,
     /// Read to find out what to mark dirty. See `mark_dirty`.
     turned: Cursor<MobileTurned>,
     /// Commands waiting for the next tick.
@@ -193,6 +195,7 @@ impl World {
             departed: Vec::new(),
             entered: Cursor::default(),
             moved: Cursor::default(),
+            damaged: Cursor::default(),
             turned: Cursor::default(),
             inbox: Vec::new(),
             spawners: Vec::new(),
@@ -487,6 +490,7 @@ impl World {
                 resistance,
                 swing,
                 sight,
+                aggression,
                 wander,
                 position,
                 facet,
@@ -505,6 +509,7 @@ impl World {
                         resistance,
                         swing,
                         sight,
+                        aggression,
                         wander,
                         position,
                         facet,
@@ -617,6 +622,13 @@ impl World {
     /// owns movement. A creature that gets a `Combat` from the brain is fought by
     /// `combat::swings` exactly as a player would be.
     fn think(&mut self) {
+        // Violence answered first: whoever was struck since the last tick turns
+        // on its attacker (or turns tail), before any beat is spent.
+        let blows: Vec<openshard_combat::MobileDamaged> =
+            self.state.bus.read(&mut self.damaged).copied().collect();
+        if !blows.is_empty() {
+            ai::retaliate(&mut self.state, &blows);
+        }
         let now = self.state.ticks;
         let thinkers: Vec<EntityId> = self
             .state
