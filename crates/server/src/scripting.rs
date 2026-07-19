@@ -259,6 +259,8 @@ fn into_world(command: ScriptCommand) -> Command {
             y,
             z,
             facet,
+            name,
+            banker,
         } => Command::SpawnMobile {
             body,
             hue,
@@ -271,6 +273,9 @@ fn into_world(command: ScriptCommand) -> Command {
             wander,
             position: openshard_protocol::Point::new(x, y, z),
             facet,
+            // An empty name from the script means nameless.
+            name: (!name.is_empty()).then_some(name),
+            banker,
         },
         ScriptCommand::Damage {
             serial,
@@ -409,6 +414,19 @@ fn into_world(command: ScriptCommand) -> Command {
                 .collect(),
         },
         ScriptCommand::ClearDecorations => Command::ClearDecorations,
+        ScriptCommand::GenerateDoors {
+            facet,
+            x,
+            y,
+            width,
+            height,
+        } => Command::GenerateDoors {
+            facet,
+            x,
+            y,
+            width,
+            height,
+        },
     }
 }
 
@@ -631,6 +649,8 @@ mod tests {
             wander: false,
             position: openshard_protocol::Point::new(1363, 1600, 0),
             facet: 0,
+            name: None,
+            banker: false,
         });
         world.tick(now);
         let mob = world
@@ -691,6 +711,8 @@ mod tests {
             wander: false,
             position: openshard_protocol::Point::new(1363, 1600, 0),
             facet: 0,
+            name: None,
+            banker: false,
         });
         world.tick(now); // the mobile spawns, MobileSpawned emitted
 

@@ -309,6 +309,34 @@ fn shift(at: Point, dx: i16, dy: i16) -> Point {
     Point::new(x, y, at.z)
 }
 
+/// Open the container a player wears at `layer` — its backpack, or its bank box.
+///
+/// The service path a banker uses: find the worn container and open it onto the
+/// player's own client, the same `0x24`/`0x3C` a double-click sends. Does nothing
+/// if the player wears no container there.
+pub fn open_worn_container(
+    state: &mut WorldState,
+    connection: ConnectionId,
+    player: EntityId,
+    layer: u8,
+) {
+    let Some(mobile) = state.registry.serial_of(player) else {
+        return;
+    };
+    let worn = state
+        .registry
+        .query::<Equipped>()
+        .find(|(item, eq)| {
+            eq.mobile == mobile && eq.layer == layer && state.registry.has::<Container>(*item)
+        })
+        .map(|(item, _)| item);
+    if let Some(item) = worn {
+        if let Some(serial) = state.registry.serial_of(item) {
+            open_container(state, connection, player, item, serial);
+        }
+    }
+}
+
 /// Open a container onto the acting client, if it may reach it.
 ///
 /// The container is reachable when it is on the ground within [`ITEM_REACH`], or

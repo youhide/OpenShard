@@ -65,7 +65,7 @@ use std::collections::HashSet;
 
 use openshard_entities::{EntityId, Serial};
 
-use crate::record::{CharacterRecord, SCHEMA_VERSION};
+use crate::record::{CharacterRecord, Inventory, ItemRecord, SCHEMA_VERSION};
 
 /// A consistent picture of everything that changed, taken at one tick.
 ///
@@ -83,17 +83,34 @@ pub struct Snapshot {
     pub characters: Vec<CharacterRecord>,
     /// Serials that are gone and must be deleted.
     pub removed: Vec<u32>,
+    /// The full carried inventory of each character in this snapshot: the store
+    /// replaces everything under each `owner` rather than diffing item by item.
+    pub inventories: Vec<Inventory>,
+    /// Every loose item on the ground, when this snapshot swept it. `Some(_)`
+    /// replaces the whole ground; `None` leaves the stored ground untouched (this
+    /// snapshot only carried character changes).
+    pub ground: Option<Vec<ItemRecord>>,
 }
 
 impl Snapshot {
     /// Whether this snapshot would write nothing.
     pub fn is_empty(&self) -> bool {
-        self.characters.is_empty() && self.removed.is_empty()
+        self.characters.is_empty()
+            && self.removed.is_empty()
+            && self.inventories.is_empty()
+            && self.ground.is_none()
     }
 
     /// How many rows this would touch.
     pub fn len(&self) -> usize {
-        self.characters.len() + self.removed.len()
+        self.characters.len()
+            + self.removed.len()
+            + self
+                .inventories
+                .iter()
+                .map(|inv| inv.items.len())
+                .sum::<usize>()
+            + self.ground.as_ref().map_or(0, Vec::len)
     }
 }
 
@@ -118,6 +135,7 @@ impl Snapshot {
 pub struct Journal {
     dirty: HashSet<EntityId>,
     kept: Vec<CharacterRecord>,
+    kept_inventories: Vec<Inventory>,
     removed: HashSet<u32>,
 }
 
@@ -160,6 +178,14 @@ impl Journal {
         self.kept.push(record);
     }
 
+    /// Record a logging-out character's whole inventory, for the same reason as
+    /// [`keep`](Self::keep): in a moment the entity is despawned and its worn and
+    /// contained items are unreadable, so they are walked now, before the despawn.
+    /// An online character's inventory is walked live at snapshot time instead.
+    pub fn keep_inventory(&mut self, inventory: Inventory) {
+        self.kept_inventories.push(inventory);
+    }
+
     /// Mark a serial as deleted.
     ///
     /// Takes the serial and not just the entity because by the time anything
@@ -176,7 +202,10 @@ impl Journal {
 
     /// Whether a save would write nothing.
     pub fn is_empty(&self) -> bool {
-        self.dirty.is_empty() && self.kept.is_empty() && self.removed.is_empty()
+        self.dirty.is_empty()
+            && self.kept.is_empty()
+            && self.kept_inventories.is_empty()
+            && self.removed.is_empty()
     }
 
     /// How many rows are waiting to be written.
@@ -219,11 +248,17 @@ impl Journal {
         let mut characters = std::mem::take(&mut self.kept);
         characters.extend(self.dirty.drain().filter_map(&mut record));
         let removed = self.removed.drain().collect();
+        // Logged-out characters' inventories, captured before their despawn. Online
+        // characters' inventories are added live by the caller after the drain —
+        // `ground` likewise — because both need to read the still-live world.
+        let inventories = std::mem::take(&mut self.kept_inventories);
         Some(Snapshot {
             tick,
             schema: SCHEMA_VERSION,
             characters,
             removed,
+            inventories,
+            ground: None,
         })
     }
 }

@@ -335,6 +335,15 @@ pub struct Brain {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Scripted;
 
+/// Marks a mobile as a banker: a townsperson who opens your bank box when you ask.
+///
+/// The service, not the person — the graphic, name and standing-still are ordinary
+/// mobile data a spawn sets; this is the one bit that makes saying "bank" near it
+/// do something. A player within reach of any banker gets their own bank box, the
+/// same container the bank holds for them everywhere.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Banker;
+
 /// A mobile's fighting state: whether it is in war mode, whom it is attacking,
 /// and when it may next swing.
 ///

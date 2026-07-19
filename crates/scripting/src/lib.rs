@@ -236,6 +236,11 @@ pub enum Command {
         z: i8,
         /// Which facet.
         facet: u8,
+        /// A name the client shows on single-click, for a townsperson; empty for a
+        /// nameless creature.
+        name: String,
+        /// Whether it is a banker — saying "bank" near it opens the box.
+        banker: bool,
     },
     /// Deal damage to a mobile, of a kind (0 physical, 1 fire, 2 cold, 3 poison,
     /// 4 energy) the target's resistance to that kind reduces.
@@ -361,6 +366,20 @@ pub enum Command {
     },
     /// Remove every script-placed decoration.
     ClearDecorations,
+    /// Generate functional doors from the map's static frames in a region — the
+    /// shop doors a building's static art only implies.
+    GenerateDoors {
+        /// Which facet.
+        facet: u8,
+        /// The region's north-west corner and size, in tiles.
+        x: u16,
+        /// North-west corner y.
+        y: u16,
+        /// Region width.
+        width: u16,
+        /// Region height.
+        height: u16,
+    },
 }
 
 /// One placed decoration — a graphic at a tile. The batch a

@@ -53,6 +53,26 @@ pub trait Terrain {
     fn ground_z(&self, _x: u16, _y: u16) -> Option<i8> {
         None
     }
+
+    /// The static tiles standing at `(x, y)`, appended to `out` as
+    /// `(graphic, z)` pairs.
+    ///
+    /// Only what the map holds; a terrain with no statics (an open world) adds
+    /// nothing. The primitive tuple keeps this trait — which lives below `world` —
+    /// free of the map's own types. Used to find door frames when generating the
+    /// functional doors a building's static art only implies.
+    fn statics_at(&self, _x: u16, _y: u16, _out: &mut Vec<(u16, i8)>) {}
+
+    /// Whether an object `height` tall can sit at `(x, y, z)` — nothing solid in
+    /// its body, and a surface under it to rest on.
+    ///
+    /// This is what keeps a generated door in a real doorway: a door belongs in an
+    /// open gap with a floor, so a spot that is a solid wall (something in the way)
+    /// or thin air (no surface) reports that nothing fits. An open world fits
+    /// everything — it has no walls and, having no map, generates no doors anyway.
+    fn can_fit(&self, _x: u16, _y: u16, _z: i32, _height: i32) -> bool {
+        true
+    }
 }
 
 /// A world with no floor and no walls: every step is allowed, z never changes.

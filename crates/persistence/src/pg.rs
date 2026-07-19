@@ -43,7 +43,7 @@ use tokio::sync::Mutex;
 use tokio_postgres::{Client, NoTls, Row};
 
 use crate::journal::Snapshot;
-use crate::record::{AccountRecord, CharacterRecord, SCHEMA_VERSION};
+use crate::record::{AccountRecord, CharacterRecord, ItemLocation, ItemRecord, SCHEMA_VERSION};
 use crate::store::{Store, StoreError};
 
 /// The tables, created on connect. `IF NOT EXISTS` so connecting to a database
@@ -71,7 +71,24 @@ CREATE TABLE IF NOT EXISTS characters (
     y       INTEGER NOT NULL,
     z       INTEGER NOT NULL,
     facing  INTEGER NOT NULL
-);";
+);
+CREATE TABLE IF NOT EXISTS items (
+    serial   BIGINT PRIMARY KEY,
+    owner    BIGINT NOT NULL,
+    graphic  INTEGER NOT NULL,
+    hue      INTEGER NOT NULL,
+    amount   INTEGER NOT NULL,
+    gump     INTEGER,
+    loc_kind INTEGER NOT NULL,
+    facet    INTEGER NOT NULL,
+    x        INTEGER NOT NULL,
+    y        INTEGER NOT NULL,
+    z        INTEGER NOT NULL,
+    parent   BIGINT NOT NULL,
+    grid     INTEGER NOT NULL,
+    layer    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS items_owner ON items (owner);";
 
 /// A `Store` kept in a PostgreSQL database.
 ///
@@ -195,12 +212,38 @@ impl Store for PgStore {
                 .await
                 .map_err(database)?;
         }
+        for inventory in &snapshot.inventories {
+            transaction
+                .execute(
+                    "DELETE FROM items WHERE owner = $1",
+                    &[&i64::from(inventory.owner)],
+                )
+                .await
+                .map_err(database)?;
+            for item in &inventory.items {
+                insert_item(&transaction, item).await?;
+            }
+        }
+        if let Some(ground) = &snapshot.ground {
+            transaction
+                .execute("DELETE FROM items WHERE owner = 0", &[])
+                .await
+                .map_err(database)?;
+            for item in ground {
+                insert_item(&transaction, item).await?;
+            }
+        }
         for serial in &snapshot.removed {
             transaction
                 .execute(
                     "DELETE FROM characters WHERE serial = $1",
                     &[&i64::from(*serial)],
                 )
+                .await
+                .map_err(database)?;
+            // A gone character takes its inventory with it.
+            transaction
+                .execute("DELETE FROM items WHERE owner = $1", &[&i64::from(*serial)])
                 .await
                 .map_err(database)?;
         }
@@ -219,6 +262,19 @@ impl Store for PgStore {
             .await
             .map_err(database)?;
         rows.iter().map(character_from_row).collect()
+    }
+
+    async fn items(&self) -> Result<Vec<ItemRecord>, StoreError> {
+        let client = self.client.lock().await;
+        let rows = client
+            .query(
+                "SELECT serial, owner, graphic, hue, amount, gump, \
+                 loc_kind, facet, x, y, z, parent, grid, layer FROM items",
+                &[],
+            )
+            .await
+            .map_err(database)?;
+        rows.iter().filter_map(item_from_row).collect()
     }
 
     async fn accounts(&self) -> Result<Vec<AccountRecord>, StoreError> {
@@ -273,6 +329,120 @@ fn character_from_row(row: &Row) -> Result<CharacterRecord, StoreError> {
     })
 }
 
+/// Write one item, flattening its location into the union of columns. Shared by
+/// the inventory and ground writes in `save`.
+async fn insert_item(
+    transaction: &tokio_postgres::Transaction<'_>,
+    item: &ItemRecord,
+) -> Result<(), StoreError> {
+    // (kind, facet, x, y, z, parent, grid, layer) — the fields a kind does not use
+    // are zero, the same flat form the SQLite backend writes.
+    let (kind, facet, x, y, z, parent, grid, layer): (i32, i32, i32, i32, i32, i64, i32, i32) =
+        match item.location {
+            ItemLocation::Ground { facet, x, y, z } => (
+                0,
+                i32::from(facet),
+                i32::from(x),
+                i32::from(y),
+                i32::from(z),
+                0,
+                0,
+                0,
+            ),
+            ItemLocation::Contained {
+                container,
+                x,
+                y,
+                grid,
+            } => (
+                1,
+                0,
+                i32::from(x),
+                i32::from(y),
+                0,
+                i64::from(container),
+                i32::from(grid),
+                0,
+            ),
+            ItemLocation::Equipped { mobile, layer } => {
+                (2, 0, 0, 0, 0, i64::from(mobile), 0, i32::from(layer))
+            }
+        };
+    transaction
+        .execute(
+            "INSERT INTO items \
+             (serial, owner, graphic, hue, amount, gump, \
+              loc_kind, facet, x, y, z, parent, grid, layer) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) \
+             ON CONFLICT (serial) DO UPDATE SET \
+             owner = EXCLUDED.owner, graphic = EXCLUDED.graphic, hue = EXCLUDED.hue, \
+             amount = EXCLUDED.amount, gump = EXCLUDED.gump, loc_kind = EXCLUDED.loc_kind, \
+             facet = EXCLUDED.facet, x = EXCLUDED.x, y = EXCLUDED.y, z = EXCLUDED.z, \
+             parent = EXCLUDED.parent, grid = EXCLUDED.grid, layer = EXCLUDED.layer",
+            &[
+                &i64::from(item.serial),
+                &i64::from(item.owner),
+                &i32::from(item.graphic),
+                &i32::from(item.hue),
+                &i32::from(item.amount),
+                &item.container_gump.map(i32::from),
+                &kind,
+                &facet,
+                &x,
+                &y,
+                &z,
+                &parent,
+                &grid,
+                &layer,
+            ],
+        )
+        .await
+        .map_err(database)?;
+    Ok(())
+}
+
+/// Rebuild an [`ItemRecord`] from a row, or drop it (`None`) if its location kind
+/// is one no version wrote. Every narrowing is checked, like [`character_from_row`].
+fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
+    fn build(row: &Row) -> Result<Option<ItemRecord>, StoreError> {
+        let kind: i32 = row.get(6);
+        let facet = u8::try_from(row.get::<_, i32>(7)).map_err(|_| corrupt("facet"))?;
+        let x = u16::try_from(row.get::<_, i32>(8)).map_err(|_| corrupt("x"))?;
+        let y = u16::try_from(row.get::<_, i32>(9)).map_err(|_| corrupt("y"))?;
+        let z = i8::try_from(row.get::<_, i32>(10)).map_err(|_| corrupt("z"))?;
+        let parent = u32::try_from(row.get::<_, i64>(11)).map_err(|_| corrupt("parent"))?;
+        let grid = u8::try_from(row.get::<_, i32>(12)).map_err(|_| corrupt("grid"))?;
+        let layer = u8::try_from(row.get::<_, i32>(13)).map_err(|_| corrupt("layer"))?;
+        let location = match kind {
+            0 => ItemLocation::Ground { facet, x, y, z },
+            1 => ItemLocation::Contained {
+                container: parent,
+                x,
+                y,
+                grid,
+            },
+            2 => ItemLocation::Equipped {
+                mobile: parent,
+                layer,
+            },
+            _ => return Ok(None),
+        };
+        Ok(Some(ItemRecord {
+            serial: u32::try_from(row.get::<_, i64>(0)).map_err(|_| corrupt("serial"))?,
+            owner: u32::try_from(row.get::<_, i64>(1)).map_err(|_| corrupt("owner"))?,
+            graphic: u16::try_from(row.get::<_, i32>(2)).map_err(|_| corrupt("graphic"))?,
+            hue: u16::try_from(row.get::<_, i32>(3)).map_err(|_| corrupt("hue"))?,
+            amount: u16::try_from(row.get::<_, i32>(4)).map_err(|_| corrupt("amount"))?,
+            container_gump: row
+                .get::<_, Option<i32>>(5)
+                .map(|g| u16::try_from(g).map_err(|_| corrupt("gump")))
+                .transpose()?,
+            location,
+        }))
+    }
+    build(row).transpose()
+}
+
 /// A column held a value outside the range of the record field it maps to.
 fn corrupt(field: &str) -> StoreError {
     StoreError::Corrupt(format!(
@@ -322,6 +492,8 @@ mod tests {
             schema: SCHEMA_VERSION,
             characters,
             removed,
+            inventories: vec![],
+            ground: None,
         }
     }
 
@@ -477,6 +649,8 @@ mod tests {
             schema: SCHEMA_VERSION + 1,
             characters: vec![character(1, 999)],
             removed: vec![],
+            inventories: vec![],
+            ground: None,
         };
         let error = store.save(&future).await.expect_err("must refuse");
         assert!(matches!(error, StoreError::SchemaMismatch { .. }));

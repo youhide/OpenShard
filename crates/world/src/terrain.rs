@@ -305,6 +305,50 @@ impl MapTerrain {
             bottom < z + PLAYER_HEIGHT && z < top
         })
     }
+
+    /// Whether an object `height` tall fits at `(x, y, z)` with a surface under it.
+    ///
+    /// ServUO's `Map.CanFit` for a static-only world (`checkBlocksFit` and
+    /// `checkMobiles` off, `requireSurface` on): a **surface or impassable** tile
+    /// whose body overlaps `[z, z + height)` blocks — note *surface*, so a floor or
+    /// platform planted through the door's body counts, not only a wall — and there
+    /// must be a surface (the land, or a static floor) exactly at `z` to rest on.
+    /// This is stricter than [`is_obstructed`](Self::is_obstructed), which only asks
+    /// about walls in the way; door generation needs both halves, or it drops doors
+    /// into wooden walls that read as frames but have no doorway.
+    fn can_fit(&self, x: u16, y: u16, z: i32, height: i32) -> bool {
+        let (low_z, avg_z, _top) = self.land_heights(x, y);
+        let land_flags = self
+            .map
+            .land(x, y)
+            .map(|cell| self.tiles.land(cell.tile).flags);
+        let land_impassable = land_flags.is_some_and(|f| f.is_blocking());
+        // Impassable land (water, a mountain) in the object's body blocks it.
+        if land_impassable && avg_z > z && z + height > low_z {
+            return false;
+        }
+        // Passable land you sit exactly on is a surface to stand on.
+        let mut has_surface = land_flags.is_some() && !land_impassable && z == avg_z;
+
+        for item in self.map.statics_at(x, y) {
+            let tile = self.tiles.static_tile(item.tile);
+            let surface = tile.flags.is_platform();
+            let impassable = tile.flags.is_blocking();
+            let base = i32::from(item.z);
+            // `calc_top` is the tile's top for fit purposes — halved for a bridge
+            // (stairs), the same `CalcHeight` the client uses; `platform_surface`
+            // already encodes that.
+            let (_, calc_top) =
+                platform_surface(base, i32::from(tile.height), tile.flags.is_climbable());
+            if (surface || impassable) && calc_top > z && z + height > base {
+                return false;
+            }
+            if surface && !impassable && z == calc_top {
+                has_surface = true;
+            }
+        }
+        has_surface
+    }
 }
 
 impl Terrain for MapTerrain {
@@ -328,6 +372,16 @@ impl Terrain for MapTerrain {
         // height the client will compute for the tile — see `average_land_z`.
         self.map().land(x, y)?;
         i8::try_from(self.average_land_z(x, y)).ok()
+    }
+
+    fn statics_at(&self, x: u16, y: u16, out: &mut Vec<(u16, i8)>) {
+        // `tile` is the static's graphic id — for statics it is the item graphic
+        // itself, which is what the door-frame tables match against.
+        out.extend(self.map.statics_at(x, y).map(|item| (item.tile, item.z)));
+    }
+
+    fn can_fit(&self, x: u16, y: u16, z: i32, height: i32) -> bool {
+        MapTerrain::can_fit(self, x, y, z, height)
     }
 }
 

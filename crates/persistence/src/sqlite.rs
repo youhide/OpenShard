@@ -24,8 +24,87 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::journal::Snapshot;
-use crate::record::{AccountRecord, CharacterRecord, SCHEMA_VERSION};
+use crate::record::{AccountRecord, CharacterRecord, ItemLocation, ItemRecord, SCHEMA_VERSION};
 use crate::store::{Store, StoreError};
+
+/// The flat form of an [`ItemLocation`] for the `items` table: a kind tag and the
+/// union of every variant's parameters, the fields not used by a kind left zero.
+struct FlatLocation {
+    kind: u8,
+    facet: u8,
+    x: u16,
+    y: u16,
+    z: i8,
+    parent: u32,
+    grid: u8,
+    layer: u8,
+}
+
+impl ItemLocation {
+    fn flatten(self) -> FlatLocation {
+        match self {
+            ItemLocation::Ground { facet, x, y, z } => FlatLocation {
+                kind: 0,
+                facet,
+                x,
+                y,
+                z,
+                parent: 0,
+                grid: 0,
+                layer: 0,
+            },
+            ItemLocation::Contained {
+                container,
+                x,
+                y,
+                grid,
+            } => FlatLocation {
+                kind: 1,
+                facet: 0,
+                x,
+                y,
+                z: 0,
+                parent: container,
+                grid,
+                layer: 0,
+            },
+            ItemLocation::Equipped { mobile, layer } => FlatLocation {
+                kind: 2,
+                facet: 0,
+                x: 0,
+                y: 0,
+                z: 0,
+                parent: mobile,
+                grid: 0,
+                layer,
+            },
+        }
+    }
+
+    /// Rebuild a location from its flat columns, or `None` if the kind tag is one
+    /// no version wrote — a corrupt or future row, dropped rather than guessed.
+    fn inflate(f: &FlatLocation) -> Option<Self> {
+        match f.kind {
+            0 => Some(ItemLocation::Ground {
+                facet: f.facet,
+                x: f.x,
+                y: f.y,
+                z: f.z,
+            }),
+            1 => Some(ItemLocation::Contained {
+                container: f.parent,
+                x: f.x,
+                y: f.y,
+                grid: f.grid,
+            }),
+            2 => Some(ItemLocation::Equipped {
+                mobile: f.parent,
+                layer: f.layer,
+            }),
+            _ => None,
+        }
+    }
+}
 
 /// The tables, created on open. `IF NOT EXISTS` so opening an existing database
 /// is a no-op rather than an error.
@@ -46,7 +125,25 @@ CREATE TABLE IF NOT EXISTS characters (
     y       INTEGER NOT NULL,
     z       INTEGER NOT NULL,
     facing  INTEGER NOT NULL
-);";
+);
+CREATE TABLE IF NOT EXISTS items (
+    serial   INTEGER PRIMARY KEY,
+    owner    INTEGER NOT NULL,
+    graphic  INTEGER NOT NULL,
+    hue      INTEGER NOT NULL,
+    amount   INTEGER NOT NULL,
+    gump     INTEGER,
+    -- location: kind 0 ground / 1 contained / 2 equipped, and its parameters.
+    loc_kind INTEGER NOT NULL,
+    facet    INTEGER NOT NULL,
+    x        INTEGER NOT NULL,
+    y        INTEGER NOT NULL,
+    z        INTEGER NOT NULL,
+    parent   INTEGER NOT NULL,
+    grid     INTEGER NOT NULL,
+    layer    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS items_owner ON items (owner);";
 
 /// A `Store` kept in a SQLite database.
 ///
@@ -129,6 +226,8 @@ impl Store for SqliteStore {
         let connection = Arc::clone(&self.connection);
         let characters = snapshot.characters.clone();
         let removed = snapshot.removed.clone();
+        let inventories = snapshot.inventories.clone();
+        let ground = snapshot.ground.clone();
         blocking(move || {
             let mut guard = connection
                 .lock()
@@ -157,9 +256,62 @@ impl Store for SqliteStore {
                     )
                     .map_err(database)?;
             }
+            // Each inventory replaces everything under its owner; a ground sweep
+            // replaces every ownerless item. Write one item the same way whichever
+            // set it came from.
+            let write_item =
+                |tx: &rusqlite::Transaction<'_>, item: &ItemRecord| -> rusqlite::Result<()> {
+                    let f = item.location.flatten();
+                    tx.execute(
+                        "INSERT OR REPLACE INTO items \
+                     (serial, owner, graphic, hue, amount, gump, \
+                      loc_kind, facet, x, y, z, parent, grid, layer) \
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                        params![
+                            item.serial,
+                            item.owner,
+                            item.graphic,
+                            item.hue,
+                            item.amount,
+                            item.container_gump,
+                            f.kind,
+                            f.facet,
+                            f.x,
+                            f.y,
+                            f.z,
+                            f.parent,
+                            f.grid,
+                            f.layer,
+                        ],
+                    )?;
+                    Ok(())
+                };
+            for inventory in &inventories {
+                transaction
+                    .execute(
+                        "DELETE FROM items WHERE owner = ?1",
+                        params![inventory.owner],
+                    )
+                    .map_err(database)?;
+                for item in &inventory.items {
+                    write_item(&transaction, item).map_err(database)?;
+                }
+            }
+            if let Some(ground) = &ground {
+                transaction
+                    .execute("DELETE FROM items WHERE owner = 0", [])
+                    .map_err(database)?;
+                for item in ground {
+                    write_item(&transaction, item).map_err(database)?;
+                }
+            }
             for serial in &removed {
                 transaction
                     .execute("DELETE FROM characters WHERE serial = ?1", params![serial])
+                    .map_err(database)?;
+                // A gone character takes its inventory with it.
+                transaction
+                    .execute("DELETE FROM items WHERE owner = ?1", params![serial])
                     .map_err(database)?;
             }
             transaction.commit().map_err(database)?;
@@ -197,6 +349,65 @@ impl Store for SqliteStore {
                 })
                 .map_err(database)?;
             rows.collect::<Result<Vec<_>, _>>().map_err(database)
+        })
+        .await
+    }
+
+    async fn items(&self) -> Result<Vec<ItemRecord>, StoreError> {
+        let connection = Arc::clone(&self.connection);
+        blocking(move || {
+            let guard = connection
+                .lock()
+                .expect("the sqlite mutex is never poisoned");
+            let mut statement = guard
+                .prepare(
+                    "SELECT serial, owner, graphic, hue, amount, gump, \
+                     loc_kind, facet, x, y, z, parent, grid, layer FROM items",
+                )
+                .map_err(database)?;
+            let rows = statement
+                .query_map([], |row| {
+                    let flat = FlatLocation {
+                        kind: row.get(6)?,
+                        facet: row.get(7)?,
+                        x: row.get(8)?,
+                        y: row.get(9)?,
+                        z: row.get(10)?,
+                        parent: row.get(11)?,
+                        grid: row.get(12)?,
+                        layer: row.get(13)?,
+                    };
+                    Ok((
+                        ItemRecord {
+                            serial: row.get(0)?,
+                            owner: row.get(1)?,
+                            graphic: row.get(2)?,
+                            hue: row.get(3)?,
+                            amount: row.get(4)?,
+                            container_gump: row.get(5)?,
+                            // A placeholder overwritten below; the location cannot be
+                            // built inside `query_map`'s closure return type cleanly.
+                            location: ItemLocation::Ground {
+                                facet: 0,
+                                x: 0,
+                                y: 0,
+                                z: 0,
+                            },
+                        },
+                        flat,
+                    ))
+                })
+                .map_err(database)?;
+            let mut items = Vec::new();
+            for row in rows {
+                let (mut record, flat) = row.map_err(database)?;
+                // Drop a row whose kind tag is unknown rather than guess a location.
+                if let Some(location) = ItemLocation::inflate(&flat) {
+                    record.location = location;
+                    items.push(record);
+                }
+            }
+            Ok(items)
         })
         .await
     }
@@ -290,6 +501,8 @@ mod tests {
             schema: SCHEMA_VERSION,
             characters,
             removed,
+            inventories: vec![],
+            ground: None,
         }
     }
 
@@ -385,6 +598,8 @@ mod tests {
             schema: SCHEMA_VERSION + 1,
             characters: vec![character(1, 999)],
             removed: vec![],
+            inventories: vec![],
+            ground: None,
         };
         let error = store.save(&future).await.expect_err("must refuse");
         assert!(matches!(error, StoreError::SchemaMismatch { .. }));

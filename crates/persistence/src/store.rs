@@ -22,7 +22,7 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 
 use crate::journal::Snapshot;
-use crate::record::{AccountRecord, CharacterRecord, SCHEMA_VERSION};
+use crate::record::{AccountRecord, CharacterRecord, ItemRecord, SCHEMA_VERSION};
 
 /// What a store could not do.
 #[derive(Debug, thiserror::Error)]
@@ -67,6 +67,11 @@ pub trait Store: Send + Sync {
     /// Every character.
     async fn characters(&self) -> Result<Vec<CharacterRecord>, StoreError>;
 
+    /// Every saved item: characters' carried inventories and loose ground clutter.
+    /// The caller reserves their serials, restores ground items now, and hands each
+    /// character its own when it logs in.
+    async fn items(&self) -> Result<Vec<ItemRecord>, StoreError>;
+
     /// Every account.
     async fn accounts(&self) -> Result<Vec<AccountRecord>, StoreError>;
 
@@ -84,6 +89,8 @@ pub trait Store: Send + Sync {
 pub struct MemoryStore {
     /// Keyed by serial, which is the identity that outlives a restart.
     characters: Mutex<HashMap<u32, CharacterRecord>>,
+    /// Items keyed by serial: inventory (owner is a character) and ground (owner 0).
+    items: Mutex<HashMap<u32, ItemRecord>>,
     accounts: Mutex<HashMap<String, AccountRecord>>,
     /// How many saves have landed. What a test asserts on.
     saves: Mutex<u64>,
@@ -119,11 +126,29 @@ impl Store for MemoryStore {
             });
         }
         let mut characters = self.characters.lock().expect("the mutex is never poisoned");
+        let mut items = self.items.lock().expect("the mutex is never poisoned");
         for record in &snapshot.characters {
             characters.insert(record.serial, record.clone());
         }
+        // Each inventory replaces everything under its owner: drop the old set,
+        // then write the new one.
+        for inventory in &snapshot.inventories {
+            items.retain(|_, item| item.owner != inventory.owner);
+            for item in &inventory.items {
+                items.insert(item.serial, item.clone());
+            }
+        }
+        // A ground sweep replaces every ownerless item at once.
+        if let Some(ground) = &snapshot.ground {
+            items.retain(|_, item| item.owner != 0);
+            for item in ground {
+                items.insert(item.serial, item.clone());
+            }
+        }
         for serial in &snapshot.removed {
             characters.remove(serial);
+            // A gone character takes its inventory with it.
+            items.retain(|_, item| item.owner != *serial);
         }
         *self.saves.lock().expect("the mutex is never poisoned") += 1;
         Ok(())
@@ -132,6 +157,16 @@ impl Store for MemoryStore {
     async fn characters(&self) -> Result<Vec<CharacterRecord>, StoreError> {
         Ok(self
             .characters
+            .lock()
+            .expect("the mutex is never poisoned")
+            .values()
+            .cloned()
+            .collect())
+    }
+
+    async fn items(&self) -> Result<Vec<ItemRecord>, StoreError> {
+        Ok(self
+            .items
             .lock()
             .expect("the mutex is never poisoned")
             .values()
@@ -183,6 +218,8 @@ mod tests {
             schema: SCHEMA_VERSION,
             characters,
             removed,
+            inventories: vec![],
+            ground: None,
         }
     }
 
@@ -233,6 +270,8 @@ mod tests {
             schema: SCHEMA_VERSION + 1,
             characters: vec![character(1, 999)],
             removed: vec![],
+            inventories: vec![],
+            ground: None,
         };
         let error = store.save(&future).await.expect_err("must refuse");
         assert!(matches!(error, StoreError::SchemaMismatch { .. }));
@@ -242,5 +281,116 @@ mod tests {
             characters[0].x, 100,
             "the refused save must not have landed"
         );
+    }
+
+    fn contained(serial: u32, owner: u32, container: u32) -> ItemRecord {
+        ItemRecord {
+            serial,
+            owner,
+            graphic: 0x0EED,
+            hue: 0,
+            amount: 1,
+            container_gump: None,
+            location: crate::record::ItemLocation::Contained {
+                container,
+                x: 0,
+                y: 0,
+                grid: 0,
+            },
+        }
+    }
+
+    fn ground(serial: u32) -> ItemRecord {
+        ItemRecord {
+            serial,
+            owner: 0,
+            graphic: 0x1BFB,
+            hue: 0,
+            amount: 1,
+            container_gump: None,
+            location: crate::record::ItemLocation::Ground {
+                facet: 0,
+                x: 1400,
+                y: 1600,
+                z: 0,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn an_inventory_save_replaces_the_owners_items() {
+        // A character reorganises: the store holds what the last save said, not a
+        // union of every save. Two items, then one, leaves one — not three.
+        let store = MemoryStore::new();
+        store
+            .save(&Snapshot {
+                tick: 1,
+                schema: SCHEMA_VERSION,
+                characters: vec![character(1, 100)],
+                removed: vec![],
+                inventories: vec![crate::record::Inventory {
+                    owner: 1,
+                    items: vec![contained(0x4000_0001, 1, 1), contained(0x4000_0002, 1, 1)],
+                }],
+                ground: None,
+            })
+            .await
+            .expect("save");
+        store
+            .save(&Snapshot {
+                tick: 2,
+                schema: SCHEMA_VERSION,
+                characters: vec![character(1, 100)],
+                removed: vec![],
+                inventories: vec![crate::record::Inventory {
+                    owner: 1,
+                    items: vec![contained(0x4000_0001, 1, 1)],
+                }],
+                ground: None,
+            })
+            .await
+            .expect("save");
+
+        let items = store.items().await.expect("load");
+        assert_eq!(items.len(), 1, "the owner's items are replaced, not merged");
+    }
+
+    #[tokio::test]
+    async fn a_ground_sweep_replaces_only_ground_and_removing_a_character_takes_its_items() {
+        let store = MemoryStore::new();
+        store
+            .save(&Snapshot {
+                tick: 1,
+                schema: SCHEMA_VERSION,
+                characters: vec![character(1, 100)],
+                removed: vec![],
+                inventories: vec![crate::record::Inventory {
+                    owner: 1,
+                    items: vec![contained(0x4000_0001, 1, 1)],
+                }],
+                ground: Some(vec![ground(0x4000_0010)]),
+            })
+            .await
+            .expect("save");
+        // A later ground sweep leaves the inventory alone.
+        store
+            .save(&Snapshot {
+                tick: 2,
+                schema: SCHEMA_VERSION,
+                characters: vec![],
+                removed: vec![],
+                inventories: vec![],
+                ground: Some(vec![ground(0x4000_0011)]),
+            })
+            .await
+            .expect("save");
+        let items = store.items().await.expect("load");
+        assert_eq!(items.len(), 2, "one inventory item, one fresh ground item");
+
+        // Deleting the character deletes its inventory but not the ground item.
+        store.save(&snapshot(vec![], vec![1])).await.expect("save");
+        let items = store.items().await.expect("load");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].owner, 0, "only the ground item survives");
     }
 }

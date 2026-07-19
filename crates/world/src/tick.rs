@@ -31,21 +31,24 @@ use openshard_entities::{EntityId, Registry, Serial, SerialKind};
 use openshard_events::{Cursor, EventBus};
 use openshard_gateway::ConnectionId;
 use openshard_movement::{step_from, OpenWorld, Terrain, Walk, Walker};
-use openshard_persistence::{CharacterRecord, Journal, Snapshot};
+use openshard_persistence::{
+    CharacterRecord, Inventory, ItemLocation, ItemRecord, Journal, Snapshot,
+};
 use openshard_protocol::{
-    encode_light_level, encode_login_complete, encode_map_change, encode_walk_ack,
+    encode_light_level, encode_login_complete, encode_map_change, encode_message, encode_walk_ack,
     encode_walk_reject, AccessLevel, ClientVersion, Direction, Facing, MobileStatus, Notoriety,
     PlayerStart, PlayerUpdate, Point, WalkRequest, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
+    LABEL_MODE,
 };
 use tracing::{debug, info, warn};
 
 use openshard_state::components::{
-    Access, Account, Body, Brain, Client, Combat, Container, DamageType, Decoration, Door, Facet,
-    Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name, Position, Resistance, Scripted,
-    SpawnedBy, Stats, SwingSpeed,
+    Access, Account, Amount, Banker, Body, Brain, Client, Combat, Contained, Container, DamageType,
+    Decoration, Door, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement,
+    Name, Position, Resistance, Scripted, SpawnedBy, Stackable, Stats, SwingSpeed,
 };
 use openshard_state::rng::Rng;
-use openshard_state::sectors::Sectors;
+use openshard_state::sectors::{in_range, Sectors};
 use openshard_state::{FacetState, Gameplay, Outbound, WorldState};
 
 use openshard_ai as ai;
@@ -55,6 +58,7 @@ use openshard_items as items;
 use openshard_magic as magic;
 use openshard_skills as skills;
 
+use crate::doorgen;
 use crate::events::{
     AdminMenuAction, MobileMoved, MobileSpawned, MobileTurned, PlayerEntered, PlayerLeft,
     RefusedReason, SpellRequested, StepRefused,
@@ -77,6 +81,17 @@ const BODY_HUMAN_MALE: u16 = 0x0190;
 const BACKPACK_GRAPHIC: u16 = 0x0E75;
 const BACKPACK_GUMP: u16 = 0x003C;
 const BACKPACK_LAYER: u8 = 0x15;
+/// The graphic, container gump, and layer of a character's bank box. Layer 0x1D
+/// is UO's `Layer.Bank`; graphic `0x0E7C` is the box and `0x004A` its gump — the
+/// same values ServUO's `BankBox` uses. Worn like the backpack, so it persists and
+/// is always in reach of its owner; a banker just opens it.
+const BANK_GRAPHIC: u16 = 0x0E7C;
+const BANK_GUMP: u16 = 0x004A;
+const BANK_LAYER: u8 = 0x1D;
+/// How near a banker a player must be for "bank" to open the box — ServUO's 12.
+const BANK_RANGE: u32 = 12;
+/// The gold-coin graphic, `Gold`'s itemid in ServUO. What a bank balance counts.
+const GOLD_GRAPHIC: u16 = 0x0EED;
 /// The skin hue a character gets when nothing else chose one — the same one
 /// Sphere hands a body with no stored colour.
 const DEFAULT_HUE: u16 = 0x83EA;
@@ -275,6 +290,20 @@ pub enum Command {
     },
     /// Remove every script-placed decoration.
     ClearDecorations,
+    /// Generate functional doors from the map's static frames in a region — the
+    /// shop doors a building's art only implies. See [`crate::doorgen`].
+    GenerateDoors {
+        /// Which facet.
+        facet: u8,
+        /// The region's north-west corner and size, in tiles.
+        x: u16,
+        /// North-west corner y.
+        y: u16,
+        /// Region width.
+        width: u16,
+        /// Region height.
+        height: u16,
+    },
     /// The server moves a mobile one step — a script or AI decree, not a client
     /// request.
     ///
@@ -352,6 +381,10 @@ pub enum Command {
         position: Point,
         /// Which facet.
         facet: u8,
+        /// A name shown on single-click, if any — a townsperson has one.
+        name: Option<String>,
+        /// Whether it is a banker (answers "bank").
+        banker: bool,
     },
     /// Deal damage to a mobile — a script or another mobile's blow.
     Damage {
@@ -473,6 +506,13 @@ pub enum Command {
         /// The object's serial.
         serial: u32,
     },
+    /// A client single-clicked something and wants its name (`0x09`).
+    SingleClick {
+        /// Which connection asked.
+        connection: ConnectionId,
+        /// The clicked object, by serial.
+        serial: u32,
+    },
     /// A client asked to wear the item on its cursor (`0x13`).
     EquipItem {
         /// Which connection.
@@ -557,6 +597,10 @@ struct SpawnMobile {
     wander: bool,
     position: Point,
     facet: u8,
+    /// A name the client shows on single-click, if any. Townsfolk have one.
+    name: Option<String>,
+    /// Whether this mobile is a banker — it answers "bank".
+    banker: bool,
 }
 
 // `Outbound`, `FacetState`, `HeldItem` and `Origin` are the world's runtime
@@ -597,6 +641,12 @@ pub struct World {
     /// The spawn regions the tick keeps populated. Registered by the script pack,
     /// maintained here. Transient for now — not saved, re-registered on start.
     spawners: Vec<crate::spawner::Spawner>,
+    /// Saved inventories waiting for their owners to log in, keyed by character
+    /// serial. Loaded from the store at boot by [`restore_inventory`]; a character
+    /// entering takes its own and equips it, once.
+    ///
+    /// [`restore_inventory`]: World::restore_inventory
+    pending_inventories: HashMap<u32, Vec<ItemRecord>>,
 }
 
 impl std::fmt::Debug for World {
@@ -647,6 +697,7 @@ impl World {
             turned: Cursor::default(),
             inbox: Vec::new(),
             spawners: Vec::new(),
+            pending_inventories: HashMap::new(),
         }
     }
 
@@ -891,10 +942,145 @@ impl World {
         let snapshot = self
             .journal
             .drain(ticks, |entity| Self::record_of(registry, entity));
-        if let Some(snapshot) = snapshot {
+        if let Some(mut snapshot) = snapshot {
+            // The journal already carried logged-out characters' inventories (kept
+            // before their despawn). Add the live inventory of every character in
+            // this snapshot that is still online — its entity is still there to
+            // walk — and sweep the ground. Both read the live world, so they happen
+            // here, after the drain.
+            let online: Vec<u32> = snapshot
+                .characters
+                .iter()
+                .map(|c| c.serial)
+                .filter(|serial| {
+                    Serial::new(*serial)
+                        .and_then(|s| self.state.registry.entity_of(s))
+                        .is_some()
+                })
+                .collect();
+            for serial in online {
+                if let Some(entity) =
+                    Serial::new(serial).and_then(|s| self.state.registry.entity_of(s))
+                {
+                    snapshot.inventories.push(Inventory {
+                        owner: serial,
+                        items: self.inventory_of(entity),
+                    });
+                }
+            }
+            snapshot.ground = Some(self.ground_items());
             debug!(tick = ticks, rows = snapshot.len(), "snapshot taken");
             self.saves.push(snapshot);
         }
+    }
+
+    /// Every item a character is carrying — worn, and inside anything worn, at any
+    /// depth — as saveable records owned by that character.
+    ///
+    /// A breadth-first walk: the worn items first, then the contents of every
+    /// container found, and their containers in turn. `owner` is the character on
+    /// every record however deep, because that is the key a store replaces a whole
+    /// inventory by.
+    fn inventory_of(&self, entity: EntityId) -> Vec<ItemRecord> {
+        let registry = &self.state.registry;
+        let Some(owner) = registry.serial_of(entity) else {
+            return Vec::new();
+        };
+        let owner_raw = owner.raw();
+        let mut records = Vec::new();
+        let mut containers: Vec<Serial> = Vec::new();
+
+        for (item, worn) in registry.query::<Equipped>() {
+            if worn.mobile != owner {
+                continue;
+            }
+            let location = ItemLocation::Equipped {
+                mobile: owner_raw,
+                layer: worn.layer,
+            };
+            if let Some(record) = Self::item_record(registry, item, owner_raw, location) {
+                if record.container_gump.is_some() {
+                    if let Some(serial) = registry.serial_of(item) {
+                        containers.push(serial);
+                    }
+                }
+                records.push(record);
+            }
+        }
+
+        while let Some(container) = containers.pop() {
+            for (item, held) in registry.query::<Contained>() {
+                if held.container != container {
+                    continue;
+                }
+                let location = ItemLocation::Contained {
+                    container: container.raw(),
+                    x: held.x,
+                    y: held.y,
+                    grid: held.grid,
+                };
+                if let Some(record) = Self::item_record(registry, item, owner_raw, location) {
+                    if record.container_gump.is_some() {
+                        if let Some(serial) = registry.serial_of(item) {
+                            containers.push(serial);
+                        }
+                    }
+                    records.push(record);
+                }
+            }
+        }
+        records
+    }
+
+    /// Every loose item on the ground — the dropped and the spawned, but not the
+    /// [`Decoration`] a pack re-places and not a mobile — as ownerless records.
+    fn ground_items(&self) -> Vec<ItemRecord> {
+        let registry = &self.state.registry;
+        let mut records = Vec::new();
+        for (item, Position(at)) in registry.query::<Position>() {
+            // A drawable thing on the ground: a graphic, not a mobile (which carries
+            // a Body), and not decoration (which the pack owns and re-lays).
+            if !registry.has::<Graphic>(item)
+                || registry.has::<Body>(item)
+                || registry.has::<Decoration>(item)
+            {
+                continue;
+            }
+            let facet = self.state.facet_of(item);
+            let location = ItemLocation::Ground {
+                facet,
+                x: at.x,
+                y: at.y,
+                z: at.z,
+            };
+            if let Some(record) = Self::item_record(registry, item, 0, location) {
+                records.push(record);
+            }
+        }
+        records
+    }
+
+    /// Turn one item entity into a saveable record, or `None` if it is not a
+    /// drawable item (no graphic or no serial).
+    fn item_record(
+        registry: &Registry,
+        item: EntityId,
+        owner: u32,
+        location: ItemLocation,
+    ) -> Option<ItemRecord> {
+        let serial = registry.serial_of(item)?;
+        let graphic = registry.get::<Graphic>(item)?;
+        let amount = registry.get::<Amount>(item).map_or(1, |a| a.0);
+        let container_gump = registry.get::<Container>(item).map(|c| c.gump);
+        Some(ItemRecord {
+            serial: serial.raw(),
+            owner,
+            graphic: graphic.id,
+            hue: graphic.hue,
+            amount,
+            container_gump,
+            location,
+        })
     }
 
     /// What a character looks like on disk.
@@ -936,6 +1122,151 @@ impl World {
         if let Some(serial) = Serial::new(raw) {
             self.state.registry.reserve_serial(serial);
         }
+    }
+
+    /// Bring saved items back from the store at boot.
+    ///
+    /// Reserves every item's serial so a live spawn cannot take it, places the
+    /// loose ground items now, and files each character's carried items away by
+    /// owner for [`enter`](Self::enter) to equip when that character logs in. Call
+    /// once, after the map is loaded and before anyone connects.
+    pub fn restore_items(&mut self, records: Vec<ItemRecord>) {
+        for record in &records {
+            self.reserve_serial(record.serial);
+        }
+        for record in records {
+            if record.owner == 0 {
+                self.place_ground_item(&record);
+            } else {
+                self.pending_inventories
+                    .entry(record.owner)
+                    .or_default()
+                    .push(record);
+            }
+        }
+    }
+
+    /// Put one restored item on the ground, bound to its saved serial.
+    fn place_ground_item(&mut self, record: &ItemRecord) {
+        let ItemLocation::Ground { facet, x, y, z } = record.location else {
+            return;
+        };
+        let Some(serial) = Serial::new(record.serial) else {
+            return;
+        };
+        let facet = if self.state.facets.contains_key(&facet) {
+            facet
+        } else {
+            self.state.default_facet
+        };
+        let entity = self.state.registry.spawn();
+        if self.state.registry.bind_serial(entity, serial).is_err() {
+            self.state.registry.despawn(entity);
+            return;
+        }
+        let position = Point::new(x, y, z);
+        self.state.registry.insert(
+            entity,
+            Graphic {
+                id: record.graphic,
+                hue: record.hue,
+            },
+        );
+        self.state.registry.insert(entity, Position(position));
+        self.state.registry.insert(entity, Facet(facet));
+        if record.amount > 1 {
+            self.state.registry.insert(entity, Amount(record.amount));
+        }
+        if let Some(gump) = record.container_gump {
+            self.state.registry.insert(entity, Container { gump });
+        }
+        // Loose clutter resumes rotting; a container does not (mark_decay skips it).
+        items::mark_decay(&mut self.state, entity);
+        self.state
+            .facet_state_mut(facet)
+            .sectors
+            .insert(entity, position);
+    }
+
+    /// Equip a logging-in character's saved inventory, if any is waiting.
+    ///
+    /// Two passes so nesting resolves whatever order the records are in: first
+    /// spawn every item bound to its saved serial with its graphic and container
+    /// mark, then place each — worn on the mobile, or inside the container its
+    /// record names, now that every container entity exists. Returns whether an
+    /// inventory was restored, so [`enter`](Self::enter) knows not to hand out a
+    /// starter backpack.
+    fn restore_inventory(&mut self, owner: u32) -> bool {
+        let Some(records) = self.pending_inventories.remove(&owner) else {
+            return false;
+        };
+        // Pass one: the entities, so a container exists before its contents point
+        // at it.
+        for record in &records {
+            let Some(serial) = Serial::new(record.serial) else {
+                continue;
+            };
+            let entity = self.state.registry.spawn();
+            if self.state.registry.bind_serial(entity, serial).is_err() {
+                self.state.registry.despawn(entity);
+                continue;
+            }
+            self.state.registry.insert(
+                entity,
+                Graphic {
+                    id: record.graphic,
+                    hue: record.hue,
+                },
+            );
+            if record.amount > 1 {
+                self.state.registry.insert(entity, Amount(record.amount));
+                // A pile is stackable; single stackables (a lone gold coin) lose the
+                // mark until re-lifted — a known gap, not a loss of the amount.
+                self.state.registry.insert(entity, Stackable);
+            }
+            if let Some(gump) = record.container_gump {
+                self.state.registry.insert(entity, Container { gump });
+            }
+        }
+        // Pass two: where each item goes.
+        for record in &records {
+            let Some(entity) =
+                Serial::new(record.serial).and_then(|s| self.state.registry.entity_of(s))
+            else {
+                continue;
+            };
+            match record.location {
+                ItemLocation::Equipped { mobile, layer } => {
+                    if let Some(mobile) = Serial::new(mobile) {
+                        self.state
+                            .registry
+                            .insert(entity, Equipped { mobile, layer });
+                    }
+                }
+                ItemLocation::Contained {
+                    container,
+                    x,
+                    y,
+                    grid,
+                } => {
+                    if let Some(container) = Serial::new(container) {
+                        self.state.registry.insert(
+                            entity,
+                            Contained {
+                                container,
+                                x,
+                                y,
+                                grid,
+                            },
+                        );
+                    }
+                }
+                // An owned item is never on the ground; ignore a stray one rather
+                // than drop it into the world at 0,0.
+                ItemLocation::Ground { .. } => {}
+            }
+        }
+        true
     }
 
     fn apply(&mut self, command: Command, now: Instant) {
@@ -986,6 +1317,13 @@ impl World {
                 doors,
                 containers,
             } => self.decorate(facet, &statics, &doors, &containers),
+            Command::GenerateDoors {
+                facet,
+                x,
+                y,
+                width,
+                height,
+            } => self.generate_doors(facet, x, y, width, height),
             Command::ClearDecorations => self.clear_decorations(),
             Command::Step { serial, direction } => self.step(serial, direction),
             Command::SpawnItem {
@@ -1025,6 +1363,8 @@ impl World {
                 wander,
                 position,
                 facet,
+                name,
+                banker,
             } => {
                 self.spawn_mobile(SpawnMobile {
                     body,
@@ -1038,6 +1378,8 @@ impl World {
                     wander,
                     position,
                     facet,
+                    name,
+                    banker,
                 });
             }
             Command::Damage {
@@ -1114,6 +1456,7 @@ impl World {
             Command::DoubleClick { connection, serial } => {
                 items::double_click(&mut self.state, connection, serial)
             }
+            Command::SingleClick { connection, serial } => self.single_click(connection, serial),
             Command::EquipItem {
                 connection,
                 item,
@@ -1263,19 +1606,53 @@ impl World {
             .insert(entity, position);
         self.state.seen.insert(entity, HashSet::new());
 
+        // Bring back what this character was carrying, if the store had it. A
+        // returning character re-equips its saved backpack, bank box and gear; a
+        // new one has nothing waiting.
+        let restored = self.restore_inventory(serial.raw());
+
         // Every character wears a backpack. Without it the paperdoll's bag is dead
         // and there is nowhere to put anything picked up. Equipped before the
         // packets go out so it rides in the `0x78` that tells the client — and
-        // everyone watching — what this mobile is wearing. Equipment is not saved
-        // yet, so a fresh one is worn each login and `disconnect` despawns it.
-        items::equip_new_container(
-            &mut self.state,
-            serial,
-            BACKPACK_GRAPHIC,
-            BACKPACK_GUMP,
-            0,
-            BACKPACK_LAYER,
-        );
+        // everyone watching — what this mobile is wearing. A returning character's
+        // backpack came back with its inventory; only a character that restored
+        // none — a brand-new one, or one whose save predates item persistence —
+        // gets a fresh starter bag.
+        let has_backpack = self
+            .state
+            .registry
+            .query::<Equipped>()
+            .any(|(_, worn)| worn.mobile == serial && worn.layer == BACKPACK_LAYER);
+        if !restored || !has_backpack {
+            items::equip_new_container(
+                &mut self.state,
+                serial,
+                BACKPACK_GRAPHIC,
+                BACKPACK_GUMP,
+                0,
+                BACKPACK_LAYER,
+            );
+        }
+
+        // And a bank box, on the bank layer. Like the backpack it is worn, so it
+        // persists with the character and its contents survive a restart — which is
+        // what makes a bank worth anything. A returning character's came back with
+        // its saved inventory; a new one gets an empty one.
+        let has_bank = self
+            .state
+            .registry
+            .query::<Equipped>()
+            .any(|(_, worn)| worn.mobile == serial && worn.layer == BANK_LAYER);
+        if !has_bank {
+            items::equip_new_container(
+                &mut self.state,
+                serial,
+                BANK_GRAPHIC,
+                BANK_GUMP,
+                0,
+                BANK_LAYER,
+            );
+        }
 
         // The order is the client's, not ours. 0x1B must come first — until it
         // lands there is no body to attach anything to — and 0x55 must come
@@ -1415,6 +1792,122 @@ impl World {
             }
         }
         chat::say(&mut self.state, connection, mode, hue, font, &text);
+
+        // Townsperson services triggered by keyword: saying "bank" near a banker
+        // opens your bank box. The words were still spoken above, so it reads as a
+        // request the banker answers, not a hidden command.
+        if let Some(&actor) = self.state.players.get(&connection) {
+            self.banker_keywords(connection, actor, &text);
+        }
+    }
+
+    /// Answer a single-click (`0x09`): draw the clicked mobile's name over its
+    /// head, seen only by the asker, in its notoriety colour.
+    ///
+    /// Mobiles with a name only — a townsperson, a player. A nameless creature and
+    /// a plain item say nothing rather than a blank label; item names wait on a
+    /// tiledata name lookup.
+    fn single_click(&mut self, connection: ConnectionId, serial: u32) {
+        let Some(target) = Serial::new(serial).and_then(|s| self.state.registry.entity_of(s))
+        else {
+            return;
+        };
+        let Some(name) = self.state.registry.get::<Name>(target) else {
+            return;
+        };
+        let name = name.0.clone();
+        let Some(body) = self.state.registry.get::<Body>(target).map(|b| b.id) else {
+            return;
+        };
+        let hue = self
+            .state
+            .registry
+            .get::<Notoriety>(target)
+            .copied()
+            .unwrap_or(Notoriety::Innocent)
+            .name_hue();
+        // The object's own serial makes the client draw the text over it; an empty
+        // speaker name and the label mode make it a name tag, not speech.
+        let packet = encode_message(serial, body, LABEL_MODE, hue, 3, "", &name);
+        self.state.send(connection, packet);
+    }
+
+    /// Answer a banker's keywords, if the speaker is near one. "bank" opens the
+    /// speaker's bank box; "balance" tells them what is in it. A banker has to be
+    /// within [`BANK_RANGE`] — the service is the townsperson's, not the word's.
+    fn banker_keywords(&mut self, connection: ConnectionId, actor: EntityId, text: &str) {
+        let wants = |word: &str| {
+            text.to_lowercase()
+                .split(|c: char| !c.is_alphabetic())
+                .any(|w| w == word)
+        };
+        if !wants("bank") && !wants("balance") {
+            return;
+        }
+        if !self.banker_in_reach(actor) {
+            return;
+        }
+        if wants("balance") {
+            let gold = self.bank_gold(actor);
+            gm::notify(
+                &mut self.state,
+                actor,
+                &format!("Thy bank box holds {gold} gold."),
+            );
+        }
+        if wants("bank") {
+            items::open_worn_container(&mut self.state, connection, actor, BANK_LAYER);
+        }
+    }
+
+    /// Whether a banker stands within [`BANK_RANGE`] of `actor`, on its facet.
+    fn banker_in_reach(&self, actor: EntityId) -> bool {
+        let Some(&Position(at)) = self.state.registry.get::<Position>(actor) else {
+            return false;
+        };
+        let facet = self.state.facet_of(actor);
+        self.state.registry.query::<Banker>().any(|(banker, _)| {
+            self.state.facet_of(banker) == facet
+                && self
+                    .state
+                    .registry
+                    .get::<Position>(banker)
+                    .is_some_and(|p| in_range(p.0, at, BANK_RANGE))
+        })
+    }
+
+    /// The gold in a mobile's bank box — the amounts of every gold pile inside it.
+    fn bank_gold(&self, actor: EntityId) -> u32 {
+        let Some(owner) = self.state.registry.serial_of(actor) else {
+            return 0;
+        };
+        // The bank box worn on the bank layer.
+        let Some(bank) = self
+            .state
+            .registry
+            .query::<Equipped>()
+            .find(|(item, eq)| {
+                eq.mobile == owner
+                    && eq.layer == BANK_LAYER
+                    && self.state.registry.has::<Container>(*item)
+            })
+            .and_then(|(item, _)| self.state.registry.serial_of(item))
+        else {
+            return 0;
+        };
+        self.state
+            .registry
+            .query::<Contained>()
+            .filter(|(item, held)| {
+                held.container == bank
+                    && self
+                        .state
+                        .registry
+                        .get::<Graphic>(*item)
+                        .is_some_and(|g| g.id == GOLD_GRAPHIC)
+            })
+            .map(|(item, _)| u32::from(self.state.registry.get::<Amount>(item).map_or(1, |a| a.0)))
+            .sum()
     }
 
     fn walk(&mut self, connection: ConnectionId, request: WalkRequest, now: Instant) {
@@ -1608,6 +2101,8 @@ impl World {
             wander,
             position,
             facet,
+            name,
+            banker,
         } = spec;
         let facet = if self.state.facets.contains_key(&facet) {
             facet
@@ -1668,6 +2163,14 @@ impl World {
                     next_think: 0,
                 },
             );
+        }
+        // A name the client shows on single-click, and the banker mark that makes
+        // "bank" open a box near it. Both are plain townsperson data.
+        if let Some(name) = name {
+            self.state.registry.insert(entity, Name(name));
+        }
+        if banker {
+            self.state.registry.insert(entity, Banker);
         }
         self.state
             .registry
@@ -1793,6 +2296,10 @@ impl World {
                 wander: creature.wander,
                 position: Point::new(x, y, z),
                 facet,
+                // A maintained spawn is a monster or an animal, never a named
+                // townsperson; those are placed once, not respawned.
+                name: None,
+                banker: false,
             }) {
                 self.state.registry.insert(entity, SpawnedBy(id));
             }
@@ -1914,6 +2421,145 @@ impl World {
         Some(entity)
     }
 
+    /// Generate functional doors from the map's static door frames in a region.
+    ///
+    /// ServUO's `DoorGenerator`, ported (see [`crate::doorgen`]): where a west
+    /// frame faces an east frame across a one- or two-tile gap — or a north faces a
+    /// south — a `DarkWoodDoor` (single) or a linked pair (double) is dropped into
+    /// the gap, so a building's implied shop door becomes one that opens. Reading
+    /// the terrain and placing entities cannot overlap borrows, so the scan
+    /// collects every placement first and lays them down after.
+    fn generate_doors(&mut self, facet: u8, x: u16, y: u16, width: u16, height: u16) {
+        let facet = if self.state.facets.contains_key(&facet) {
+            facet
+        } else {
+            self.state.default_facet
+        };
+
+        // Tiles that already hold a door — the named metal/special doors placed
+        // from decoration data, and doors generated earlier in this same pass. A
+        // generated door never lands on one of these, which is what stops the bank
+        // door being doubled and a doorway being filled twice.
+        let door_entities: Vec<EntityId> = self
+            .state
+            .registry
+            .query::<Door>()
+            .map(|(entity, _)| entity)
+            .collect();
+        let mut occupied: HashSet<(u16, u16)> = HashSet::new();
+        for entity in door_entities {
+            if self.state.facet_of(entity) == facet {
+                if let Some(&Position(p)) = self.state.registry.get::<Position>(entity) {
+                    occupied.insert((p.x, p.y));
+                }
+            }
+        }
+
+        // (closed, open, offset_x, offset_y, where-it-sits-closed).
+        let mut placements: Vec<(u16, u16, i16, i16, Point)> = Vec::new();
+        {
+            let Some(terrain) = self.state.facet_state(facet).terrain.as_ref() else {
+                warn!(facet, "no map on this facet; no doors to generate");
+                return;
+            };
+            // Is there a frame of the given side at (tx, ty) sharing height z?
+            let frame_at = |tx: u16, ty: u16, tz: i8, pred: fn(u16) -> bool| -> bool {
+                let mut here = Vec::new();
+                terrain.statics_at(tx, ty, &mut here);
+                here.iter().any(|&(id, z)| z == tz && pred(id))
+            };
+            // Place a door in the gap, but only if a door actually fits there — an
+            // open doorway with a floor, not a solid wall or thin air — and it is
+            // not already doored. `can_fit` is ServUO's `CanFit` guard (16 tall);
+            // the `occupied` set is our own de-dup.
+            let mut try_place = |gap: Point, door: (u16, u16, i16, i16)| {
+                let key = (gap.x, gap.y);
+                if occupied.contains(&key) || !terrain.can_fit(gap.x, gap.y, i32::from(gap.z), 16) {
+                    return;
+                }
+                occupied.insert(key);
+                let (c, o, ox, oy) = door;
+                placements.push((c, o, ox, oy, gap));
+            };
+            let east = |vx: u16| vx.checked_add(2);
+            let mut here = Vec::new();
+            for ry in 0..height {
+                for rx in 0..width {
+                    let (Some(vx), Some(vy)) = (x.checked_add(rx), y.checked_add(ry)) else {
+                        continue;
+                    };
+                    here.clear();
+                    terrain.statics_at(vx, vy, &mut here);
+                    for &(id, z) in &here {
+                        if doorgen::is_west_frame(id) {
+                            // A single door: one gap tile to an east frame two away.
+                            if east(vx).is_some_and(|e| frame_at(e, vy, z, doorgen::is_east_frame))
+                            {
+                                try_place(
+                                    Point::new(vx + 1, vy, z),
+                                    doorgen::GenFacing::WestCw.door(),
+                                );
+                            } else if vx
+                                .checked_add(3)
+                                .is_some_and(|e| frame_at(e, vy, z, doorgen::is_east_frame))
+                            {
+                                // A double door fills the two-tile gap.
+                                try_place(
+                                    Point::new(vx + 1, vy, z),
+                                    doorgen::GenFacing::WestCw.door(),
+                                );
+                                try_place(
+                                    Point::new(vx + 2, vy, z),
+                                    doorgen::GenFacing::EastCcw.door(),
+                                );
+                            }
+                        } else if doorgen::is_north_frame(id) {
+                            if vy
+                                .checked_add(2)
+                                .is_some_and(|s| frame_at(vx, s, z, doorgen::is_south_frame))
+                            {
+                                try_place(
+                                    Point::new(vx, vy + 1, z),
+                                    doorgen::GenFacing::SouthCw.door(),
+                                );
+                            } else if vy
+                                .checked_add(3)
+                                .is_some_and(|s| frame_at(vx, s, z, doorgen::is_south_frame))
+                            {
+                                try_place(
+                                    Point::new(vx, vy + 1, z),
+                                    doorgen::GenFacing::NorthCcw.door(),
+                                );
+                                try_place(
+                                    Point::new(vx, vy + 2, z),
+                                    doorgen::GenFacing::SouthCw.door(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let count = placements.len();
+        for (closed, open, offset_x, offset_y, position) in placements {
+            if let Some(entity) = self.place_decoration(facet, closed, 0, position) {
+                self.state.registry.insert(
+                    entity,
+                    Door {
+                        closed,
+                        open,
+                        offset_x,
+                        offset_y,
+                        is_open: false,
+                        close_at: 0,
+                    },
+                );
+            }
+        }
+        debug!(facet, count, "generated doors from static frames");
+    }
+
     /// Remove every script-placed decoration — "Clear deco".
     fn clear_decorations(&mut self) {
         let placed: Vec<EntityId> = self
@@ -2032,6 +2678,13 @@ impl World {
             // server's in-memory character list, which a re-login reads before the
             // deferred store save has necessarily landed.
             self.departed.push(record.clone());
+            // The carried inventory, walked now for the same reason as the record:
+            // in a moment the items are despawned with the character and there is
+            // nothing left to read. A returning character equips this back.
+            self.journal.keep_inventory(Inventory {
+                owner: record.serial,
+                items: self.inventory_of(entity),
+            });
             self.journal.keep(record);
         }
 
@@ -3072,8 +3725,9 @@ pub(crate) mod tests {
             .expect("the item is now worn");
         assert_eq!(worn.mobile.raw(), me);
         assert_eq!(worn.layer, LAYER_TORSO);
-        // Two worn things now: the torso item and the backpack every character has.
-        assert_eq!(world.state.equipment_of(Serial::new(me).unwrap()).len(), 2);
+        // Three worn things now: the torso item, and the backpack and bank box every
+        // character is given on entry.
+        assert_eq!(world.state.equipment_of(Serial::new(me).unwrap()).len(), 3);
         assert!(
             packets_for(&mut world, player).iter().any(|p| p[0] == 0x2E),
             "the wearer is told they put it on"
@@ -3535,6 +4189,8 @@ pub(crate) mod tests {
             wander: false,
             position: point,
             facet: 0,
+            name: None,
+            banker: false,
         });
         world.tick(now);
         // The newest mobile that no client drives — the creature just made.
@@ -4800,6 +5456,8 @@ pub(crate) mod tests {
             wander,
             position: point,
             facet: 0,
+            name: None,
+            banker: false,
         });
         world.tick(now);
         world
@@ -5478,6 +6136,89 @@ pub(crate) mod tests {
         assert_eq!(world.registry().get::<Position>(door).unwrap().0, at);
     }
 
+    /// A terrain whose only statics are one west door frame at (100, 100) and one
+    /// east frame at (102, 100) — a single-door gap for the generator to fill. The
+    /// gap has a surface (a door fits) unless `walled`, which stands in for a solid
+    /// wall where nothing fits.
+    struct FrameTerrain {
+        walled: bool,
+    }
+    impl Terrain for FrameTerrain {
+        fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
+            Some(to)
+        }
+        fn statics_at(&self, x: u16, y: u16, out: &mut Vec<(u16, i8)>) {
+            if y == 100 && (x == 100 || x == 102) {
+                out.push((0x0007, 0)); // 0x0007 is both a west and an east frame
+            }
+        }
+        fn can_fit(&self, x: u16, y: u16, _z: i32, _height: i32) -> bool {
+            !(self.walled && (x, y) == (101, 100))
+        }
+    }
+
+    fn generate_britain_doors(world: &mut World, now: Instant) {
+        world.queue(Command::GenerateDoors {
+            facet: 0,
+            x: 100,
+            y: 100,
+            width: 3,
+            height: 1,
+        });
+        world.tick(now);
+    }
+
+    #[test]
+    fn doors_are_generated_between_static_frames() {
+        let now = Instant::now();
+        let mut world = world();
+        world.state.facet_state_mut(0).terrain = Some(Box::new(FrameTerrain { walled: false }));
+
+        generate_britain_doors(&mut world, now);
+
+        let (entity, door) = world
+            .registry()
+            .query::<Door>()
+            .next()
+            .expect("a door was generated");
+        assert_eq!(
+            world.registry().get::<Position>(entity).unwrap().0,
+            Point::new(101, 100, 0),
+            "the door fills the gap between the frames"
+        );
+        // A DarkWoodDoor, WestCW: closed 0x06A5, open 0x06A6, hinge (-1, 1).
+        assert_eq!(door.closed, 0x06A5);
+        assert_eq!(door.open, 0x06A6);
+        assert_eq!((door.offset_x, door.offset_y), (-1, 1));
+        assert!(
+            world.registry().has::<Decoration>(entity),
+            "a generated door is decoration"
+        );
+
+        // Running the pass again puts no second door on the same gap.
+        generate_britain_doors(&mut world, now);
+        assert_eq!(
+            world.registry().query::<Door>().count(),
+            1,
+            "a tile that already has a door is not doored again"
+        );
+    }
+
+    #[test]
+    fn no_door_is_generated_into_a_wall() {
+        let now = Instant::now();
+        let mut world = world();
+        world.state.facet_state_mut(0).terrain = Some(Box::new(FrameTerrain { walled: true }));
+
+        generate_britain_doors(&mut world, now);
+
+        assert_eq!(
+            world.registry().query::<Door>().count(),
+            0,
+            "an obstructed gap is a wall, not a doorway"
+        );
+    }
+
     #[test]
     fn a_decoration_container_opens_on_double_click() {
         let now = Instant::now();
@@ -5781,6 +6522,224 @@ pub(crate) mod tests {
         let body = world.registry().get::<Body>(entity).copied().unwrap();
         assert_eq!(body.id, BODY_HUMAN_MALE);
         assert_eq!(body.hue, DEFAULT_HUE);
+    }
+
+    #[test]
+    fn a_characters_inventory_survives_a_logout_and_restore() {
+        use openshard_entities::SerialKind;
+
+        // A character with something in its backpack logs out; a fresh shard loads
+        // the saved items and the same character logs back in to find them.
+        let mut home = world();
+        let now = Instant::now();
+        let conn_a = enter(&mut home, now);
+        let entity = home.state.players[&conn_a];
+        let char_serial = home.registry().serial_of(entity).unwrap().raw();
+
+        // The backpack it was equipped on entry.
+        let (backpack, _) = home
+            .registry()
+            .query::<Equipped>()
+            .find(|(_, worn)| worn.layer == BACKPACK_LAYER)
+            .expect("a backpack was equipped");
+        let backpack_serial = home.registry().serial_of(backpack).unwrap();
+
+        // A stack of gold inside it.
+        let (gold, gold_serial) = home
+            .state
+            .registry
+            .spawn_with_serial(SerialKind::Item)
+            .unwrap();
+        home.state
+            .registry
+            .insert(gold, Graphic { id: 0x0EED, hue: 0 });
+        home.state.registry.insert(gold, Amount(500));
+        home.state.registry.insert(
+            gold,
+            Contained {
+                container: backpack_serial,
+                x: 40,
+                y: 65,
+                grid: 0,
+            },
+        );
+
+        // What persistence would carry: the backpack (worn) and the gold (inside).
+        let records = home.inventory_of(entity);
+        assert!(
+            records.iter().any(|r| r.serial == backpack_serial.raw()
+                && matches!(r.location, ItemLocation::Equipped { .. })),
+            "the backpack is saved as worn"
+        );
+        assert!(
+            records.iter().any(|r| r.serial == gold_serial.raw()
+                && r.amount == 500
+                && matches!(r.location, ItemLocation::Contained { .. })),
+            "the gold is saved inside, amount and all"
+        );
+
+        // Log out — the character and its items leave the world.
+        home.queue(Command::Disconnect { connection: conn_a });
+        home.tick(now);
+
+        // A fresh shard: reserve the serials, load the items, play the character.
+        let mut shard = world();
+        shard.reserve_serial(char_serial);
+        shard.restore_items(records);
+        let conn_b = connection();
+        shard.queue(Command::Enter {
+            connection: conn_b,
+            version: ClientVersion::TOL,
+            account: "admin".to_owned(),
+            name: "Lord British".to_owned(),
+            serial: Some(char_serial),
+            position: Some(Point::new(1500, 1000, 0)),
+            facet: 0,
+            appearance: None,
+            access: AccessLevel::Player,
+        });
+        shard.tick(now);
+
+        // Exactly one backpack (the restored one, not a fresh starter too), with the
+        // gold back inside it.
+        let backpacks = shard
+            .registry()
+            .query::<Equipped>()
+            .filter(|(_, worn)| worn.mobile.raw() == char_serial && worn.layer == BACKPACK_LAYER)
+            .count();
+        assert_eq!(
+            backpacks, 1,
+            "the saved backpack came back, no starter added"
+        );
+        let gold = shard
+            .registry()
+            .entity_of(gold_serial)
+            .expect("the gold is back on its serial");
+        assert_eq!(shard.registry().get::<Amount>(gold).unwrap().0, 500);
+        assert_eq!(
+            shard.registry().get::<Contained>(gold).unwrap().container,
+            backpack_serial,
+            "and back inside the same backpack"
+        );
+    }
+
+    fn spawn_banker(world: &mut World, at: Point, now: Instant) {
+        world.queue(Command::SpawnMobile {
+            body: 0x0190,
+            hue: 0,
+            hits: 100,
+            notoriety: 7, // invulnerable
+            damage: 0,
+            resistance: 0,
+            swing: 0,
+            sight: 0,
+            wander: false,
+            position: at,
+            facet: 0,
+            name: Some("the banker".to_owned()),
+            banker: true,
+        });
+        world.tick(now);
+    }
+
+    fn say(world: &mut World, connection: ConnectionId, text: &str, now: Instant) {
+        world.queue(Command::Say {
+            connection,
+            mode: 0,
+            hue: 0,
+            font: 3,
+            text: text.to_owned(),
+        });
+        world.tick(now);
+    }
+
+    #[test]
+    fn entering_the_world_equips_a_bank_box() {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        let owner = world
+            .registry()
+            .serial_of(world.state.players[&connection])
+            .unwrap();
+        assert!(
+            world.registry().query::<Equipped>().any(|(item, worn)| {
+                worn.mobile == owner
+                    && worn.layer == BANK_LAYER
+                    && world.registry().has::<Container>(item)
+            }),
+            "a character wears a bank box on the bank layer"
+        );
+    }
+
+    #[test]
+    fn saying_bank_near_a_banker_opens_the_bank_box() {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        spawn_banker(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+        let _ = packets_for(&mut world, connection);
+
+        say(&mut world, connection, "bank", now);
+        assert!(
+            packets_for(&mut world, connection)
+                .iter()
+                .any(|p| p[0] == 0x24),
+            "the bank box gump opened"
+        );
+    }
+
+    #[test]
+    fn single_clicking_a_named_mobile_draws_its_name() {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        spawn_banker(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+        let banker = world
+            .registry()
+            .query::<Banker>()
+            .next()
+            .map(|(e, _)| e)
+            .unwrap();
+        let banker_serial = world.registry().serial_of(banker).unwrap().raw();
+        let _ = packets_for(&mut world, connection);
+
+        world.queue(Command::SingleClick {
+            connection,
+            serial: banker_serial,
+        });
+        world.tick(now);
+
+        // A 0x1C label naming the banker, in the invulnerable (yellow) hue.
+        let label = packets_for(&mut world, connection)
+            .into_iter()
+            .find(|p| p[0] == 0x1C)
+            .expect("a name label was sent");
+        // hue is at bytes 10..12 of a 0x1C.
+        let hue = u16::from_be_bytes([label[10], label[11]]);
+        assert_eq!(hue, 0x0035, "the banker's name is drawn yellow");
+        assert!(
+            String::from_utf8_lossy(&label).contains("the banker"),
+            "the label carries the name"
+        );
+    }
+
+    #[test]
+    fn saying_bank_with_no_banker_near_does_nothing() {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        // A banker, but far out of the 12-tile reach.
+        spawn_banker(&mut world, Point::new(START.0 + 40, START.1, 0), now);
+        let _ = packets_for(&mut world, connection);
+
+        say(&mut world, connection, "bank", now);
+        assert!(
+            !packets_for(&mut world, connection)
+                .iter()
+                .any(|p| p[0] == 0x24),
+            "no banker in reach, no bank box"
+        );
     }
 
     #[test]

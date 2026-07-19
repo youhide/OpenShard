@@ -23,7 +23,7 @@
 //! reload.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use deno_core::{extension, op2, v8, JsRuntime, OpState, RuntimeOptions};
@@ -218,6 +218,10 @@ struct MobileSpec {
     z: i8,
     #[serde(default)]
     facet: u8,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    banker: bool,
 }
 
 /// Put a creature or NPC in the world.
@@ -240,6 +244,8 @@ fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
             y: spec.y,
             z: spec.z,
             facet: spec.facet,
+            name: spec.name,
+            banker: spec.banker,
         });
 }
 
@@ -551,6 +557,34 @@ fn op_clear_decorations(state: &mut OpState) {
         .push(Command::ClearDecorations);
 }
 
+/// A region to generate doors in:
+/// `op_generate_doors({ facet, x, y, width, height })`.
+#[derive(serde::Deserialize)]
+struct DoorRegionSpec {
+    #[serde(default)]
+    facet: u8,
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+}
+
+/// Generate functional doors from the map's static frames in a region — the shop
+/// doors a building's static art only implies.
+#[op2]
+fn op_generate_doors(state: &mut OpState, #[serde] region: DoorRegionSpec) {
+    state
+        .borrow_mut::<Host>()
+        .outbox
+        .push(Command::GenerateDoors {
+            facet: region.facet,
+            x: region.x,
+            y: region.y,
+            width: region.width,
+            height: region.height,
+        });
+}
+
 extension!(
     openshard_ops,
     ops = [
@@ -570,7 +604,8 @@ extension!(
         op_register_spawner,
         op_clear_spawners,
         op_decorate,
-        op_clear_decorations
+        op_clear_decorations,
+        op_generate_doors
     ],
     docs = "OpenShard's script-facing ops: read entity state, enqueue commands.",
 );
@@ -617,14 +652,19 @@ impl DenoEngine {
         }
     }
 
-    /// Load a script from a file and remember it for [`reload_if_changed`](Self::reload_if_changed).
+    /// Load a script and remember it for [`reload_if_changed`](Self::reload_if_changed).
+    ///
+    /// `path` is either a single script file or a **directory**: a whole pack, whose
+    /// `.js` files are concatenated (see [`read_pack`]). A directory lets a shard
+    /// split its data into folders by place and facet, the way Sphere's scriptpack
+    /// is many files — the engine still evaluates one script, so hot reload and the
+    /// single isolate are unchanged.
     pub fn load_file(
         &mut self,
         path: impl AsRef<Path>,
     ) -> std::io::Result<Result<(), ScriptError>> {
         let path = path.as_ref();
-        let source = std::fs::read_to_string(path)?;
-        let mtime = std::fs::metadata(path)?.modified()?;
+        let (source, mtime) = read_pack(path)?;
         let loaded = self.load(&source);
         if loaded.is_ok() {
             self.watched = Some((path.to_path_buf(), mtime));
@@ -632,20 +672,23 @@ impl DenoEngine {
         Ok(loaded)
     }
 
-    /// Reload the watched file if it has changed on disk since it was loaded.
+    /// Reload the watched script if anything under it has changed on disk since it
+    /// was loaded.
     ///
     /// Returns `Ok(true)` if a reload happened. This is hot reload as a poll: the
     /// caller ticks it between world ticks — no watcher thread, no dependency, no
     /// shared state, and iterating on a hook is save-the-file, not bounce-the-shard.
+    /// For a directory pack, the change signal is the newest modification time
+    /// across the whole tree, so saving any file in the pack reloads it.
     pub fn reload_if_changed(&mut self) -> std::io::Result<Result<bool, ScriptError>> {
         let Some((path, seen)) = self.watched.clone() else {
             return Ok(Ok(false));
         };
-        let mtime = std::fs::metadata(&path)?.modified()?;
+        let mtime = newest_mtime(&path)?;
         if mtime == seen {
             return Ok(Ok(false));
         }
-        let source = std::fs::read_to_string(&path)?;
+        let (source, mtime) = read_pack(&path)?;
         match self.load(&source) {
             Ok(()) => {
                 self.watched = Some((path, mtime));
@@ -692,6 +735,67 @@ fn wrap(source: &str) -> String {
          onEvent:typeof onEvent===\"function\"?onEvent:undefined\
          }};}})()"
     )
+}
+
+/// Read a pack into one script and the newest mtime across it.
+///
+/// A single file is itself; a directory is every `.js` under it (recursively),
+/// concatenated in path order with `index.js` files last — so a data file that
+/// registers spawns or decoration runs before the `index.js` that wires `onEvent`
+/// over them. The files share one script scope, so the pack convention is to
+/// register into a `globalThis` namespace rather than collide on top-level names.
+fn read_pack(path: &Path) -> std::io::Result<(String, SystemTime)> {
+    if !path.is_dir() {
+        return Ok((std::fs::read_to_string(path)?, mtime_of(path)?));
+    }
+    let mut files = Vec::new();
+    collect_js(path, &mut files)?;
+    files.sort();
+    // A stable sort by "is it an index.js" floats those to the end while keeping
+    // the alphabetical order within each group.
+    files.sort_by_key(|p| p.file_name().is_some_and(|n| n == "index.js"));
+
+    let mut source = String::new();
+    let mut newest = SystemTime::UNIX_EPOCH;
+    for file in &files {
+        newest = newest.max(mtime_of(file)?);
+        source.push_str("\n;\n");
+        source.push_str(&std::fs::read_to_string(file)?);
+    }
+    Ok((source, newest))
+}
+
+/// The newest modification time across a pack — a single file's, or the latest of
+/// every `.js` under a directory. Cheap enough to poll: it stats, it does not read.
+fn newest_mtime(path: &Path) -> std::io::Result<SystemTime> {
+    if !path.is_dir() {
+        return mtime_of(path);
+    }
+    let mut files = Vec::new();
+    collect_js(path, &mut files)?;
+    let mut newest = SystemTime::UNIX_EPOCH;
+    for file in &files {
+        newest = newest.max(mtime_of(file)?);
+    }
+    Ok(newest)
+}
+
+/// One file's modification time.
+fn mtime_of(path: &Path) -> std::io::Result<SystemTime> {
+    std::fs::metadata(path)?.modified()
+}
+
+/// Collect every `.js` file under `dir`, recursively, into `out`.
+fn collect_js(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_js(&path, out)?;
+        } else if path.extension().is_some_and(|ext| ext == "js") {
+            out.push(path);
+        }
+    }
+    Ok(())
 }
 
 /// Pull a named function property off the hooks object, as a `Global`.
@@ -1242,6 +1346,43 @@ mod tests {
         assert_eq!(engine.take_commands()[0].direction(), 7);
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_pack_directory_is_concatenated_with_index_last() {
+        // A data file in a subfolder registers into `globalThis.Pack`; the
+        // top-level index.js — which must run last — reads it in `onEvent`. Loading
+        // the directory concatenates them in that order.
+        let dir = std::env::temp_dir().join(format!("openshard-pack-{}", std::process::id()));
+        let sub = dir.join("felucca").join("britain");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(
+            sub.join("deco.js"),
+            "globalThis.Pack = globalThis.Pack || { moves: {} };\n\
+             Pack.moves['go'] = 5;",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("index.js"),
+            "function onEvent(e){ Deno.core.ops.op_move(e.serial, globalThis.Pack.moves['go']); }",
+        )
+        .unwrap();
+
+        let mut engine = DenoEngine::new();
+        engine.load_file(&dir).unwrap().unwrap();
+        engine
+            .deliver(&Event::AdminAction {
+                serial: 1,
+                action: "go".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(
+            engine.take_commands()[0].direction(),
+            5,
+            "index.js read what the data file in the subfolder registered"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     impl Command {

@@ -93,8 +93,8 @@ pub use login::{
     CHARACTER_NAME_LENGTH, MAX_SHARDS, MIN_CHARACTER_SLOTS, PASSWORD_LENGTH, SHARD_NAME_LENGTH,
 };
 pub use mobile::{
-    encode_open_paperdoll, encode_remove, Equipment, MobileIncoming, MobileMove, MobileStatus,
-    Notoriety, StatusFlags, PAPERDOLL_CAN_LIFT, PAPERDOLL_WARMODE,
+    encode_open_paperdoll, encode_remove, Equipment, LookRequest, MobileIncoming, MobileMove,
+    MobileStatus, Notoriety, StatusFlags, LABEL_MODE, PAPERDOLL_CAN_LIFT, PAPERDOLL_WARMODE,
 };
 pub use packet::{
     client_packet_length, frame_client_packet, Frame, FrameError, PacketLength, MAX_PACKET_SIZE,

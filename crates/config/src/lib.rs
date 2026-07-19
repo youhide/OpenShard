@@ -246,13 +246,14 @@ pub struct PersistenceConfig {
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScriptingConfig {
-    /// The script to load and hot-reload — a path to a `.js`/`.ts` file.
+    /// The script to load and hot-reload — a path to a `.js`/`.ts` file, or a
+    /// *directory* (a pack) whose `.js` files are concatenated into one script.
     ///
     /// Empty means no scripting: the shard runs, mobiles move when clients ask,
     /// and nothing reacts on its own. A real mode, not a broken one — the same
     /// bargain as an empty map or an empty database — and the seam gameplay (§6)
-    /// hangs off, so it is here from the start rather than retrofitted. The file
-    /// is watched, so saving it reloads the hooks in the live shard.
+    /// hangs off, so it is here from the start rather than retrofitted. The path is
+    /// watched, so saving any file under it reloads the hooks in the live shard.
     #[serde(default)]
     pub main: String,
 }

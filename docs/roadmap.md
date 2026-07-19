@@ -187,6 +187,19 @@ connection takes the mobile off every screen that had it.
   returns on its saved serial and spot
 - [x] PostgreSQL backend — `PgStore`, the same `Store` trait, tested against a
   live server
+- [x] **Item persistence** — a character's carried inventory (worn gear, the
+  backpack and everything nested inside it) and loose ground clutter survive a
+  restart. `ItemRecord` is the saved shape; `SCHEMA_VERSION` moved to 2. An
+  inventory is saved as a unit — the store replaces everything under an owner
+  rather than diffing item by item, walked live for an online character and kept
+  at logout like the character record; the ground is a full sweep, decoration
+  excluded (a pack re-lays that). On boot the item serials are reserved and ground
+  items placed; a returning character re-equips its saved inventory instead of a
+  starter backpack. Items keep their serials across a restart so a container's
+  contents still point at it. Deferred: an item's `Stackable` mark (a restored
+  pile keeps its amount but a lone stackable loses the flag until re-lifted), and
+  a live item's mid-session ground moves (the ground is swept at save cadence, not
+  event-driven yet).
 
 Two backends, one choice. A shard runs on SQLite or on PostgreSQL, and which is
 the operator's to make: neither is "the production one", and SQLite runs a real
@@ -502,24 +515,61 @@ Roughly in dependency order, each script-first:
   - [x] **The `.admin` gump and a pack-driven world.** `.admin` opens a staff-only
     gump (`0xB0`, answered on `0xB1`, re-checked GM+ on the button, not only on
     open) whose buttons populate cities and lay down decoration. The *data* lives
-    in the community pack (`scripting.main`), not the engine: a button emits an
-    `AdminAction` event the pack reads, and the pack answers with `op_register_spawner`
-    and `op_decorate` — so spawns and scenery are edited in a hot-reloaded script,
-    no rebuild. **Spawners** are tick-maintained regions (`maintain_spawners`): a
-    region holds creature templates, a max count and a respawn delay in ticks, and
-    a `SpawnedBy` marker lets it refill as its creatures die — replayable, like
-    decay. **Decoration** is what a shard adds on top of the map's static art, in
-    three kinds, all marked `Decoration` (never decays, never lifts): plain
-    statics (walls, signs, furniture), **doors** that toggle open/shut on
-    double-click and swing closed on their own (`Door`, a two-graphic-plus-hinge
-    toggle in `items`, auto-closed by the tick), and **containers** that open onto
-    a gump (town chests, crates, barrels — reusing the `Container` open path,
-    placed empty). The whole of Britain is migrated from ServUO's `britain.cfg`
-    (door graphics/offsets from its door tables, container gumps from the client's
-    own `containers.cfg`), resolved to raw graphics *at pack time* so the engine
-    stays a generic toggle/open and knows nothing of door or container families.
-    Still deferred: container **loot tables**, door **keys/locks**, and the
+    in the community pack, not the engine: a button emits an `AdminAction` event
+    the pack reads, and the pack answers with `op_register_spawner`, `op_decorate`
+    and `op_generate_doors` — so spawns and scenery are edited in a hot-reloaded
+    script, no rebuild. **Spawners** are tick-maintained regions (`maintain_spawners`):
+    a region holds creature templates, a max count and a respawn delay in ticks,
+    and a `SpawnedBy` marker lets it refill as its creatures die — replayable, like
+    decay. **Decoration** is what a shard adds on top of the map's static art, all
+    marked `Decoration` (never decays, never lifts): plain statics (walls, signs,
+    furniture), **doors** that toggle open/shut on double-click and swing closed on
+    their own (`Door`, a two-graphic-plus-hinge toggle in `items`, auto-closed by
+    the tick), and **containers** that open onto a gump (town chests, crates,
+    barrels — reusing the `Container` open path, placed empty). The whole of Britain
+    is migrated from ServUO's `britain.cfg` and `signs.cfg` (door graphics/offsets
+    from its door tables, container gumps from the client's own `containers.cfg`),
+    resolved to raw graphics *at pack time* so the engine stays a generic
+    toggle/open and knows nothing of door or container families.
+  - [x] **Doors generated from the map's own art.** A building's plain wooden shop
+    doors are not in the decoration data — they are *implied* by the static door
+    frames the client map draws, so the shard generates them: `op_generate_doors`
+    scans a region's statics for facing frame posts and drops a functional
+    `DarkWoodDoor` into each one- or two-tile gap. This is ServUO's `DoorGenerator`,
+    ported (`world::doorgen`) — the same four frame-graphic tables and single/double
+    geometry — reusing the statics the engine already parses through a new
+    `Terrain::statics_at`. The metal and special doors are placed by name from the
+    data; this fills in the ones the map only implies.
+  - [x] **The pack is a directory now.** `scripting.main` may point at a folder, not
+    just a file: the engine concatenates every `.js` under it (organised by facet
+    and place — `felucca/britain/spawns.js`, `deco.js`), `index.js` last, into the
+    one script it still evaluates, and hot-reload watches the newest mtime across
+    the tree. Data files register into a shared `Pack` namespace under a verb;
+    `index.js` wires `onEvent` over it. Deco and spawn are separate files, so a
+    shard edits one without touching the other. Still deferred: container **loot
+    tables**, door **keys/locks**, sign **text** (a cliloc slice), and the
     furniture/addon *behaviours* (a real armoire versus a scenery one).
+  - [x] **Inventory persists.** A character's carried things — worn gear, its
+    backpack and everything nested inside — and loose ground clutter now survive a
+    restart, not just its position. See §4; this is the foundation a bank and a
+    vendor stand on, because a service that forgets your gold on logout is a demo,
+    not a service.
+  - [x] **Bankers, and a bank box that holds value.** Every character wears a bank
+    box (a container on `Layer.Bank`, graphic `0x0E7C`) alongside its backpack, so
+    it persists and its contents survive a restart. A `Banker` NPC — a standing,
+    named, invulnerable townsperson the pack places once (`op_spawn_mobile` grew a
+    `name` and a `banker` flag) — answers the keyword: saying "bank" within twelve
+    tiles of one opens your box (the same `0x24`/`0x3C` a double-click sends,
+    reused through `items::open_worn_container`), and "balance" counts the gold in
+    it. The words are still spoken, so it reads as a request the banker answers.
+    This is the first of the living NPCs; **vendors** (buy `0x74`/`0x3B`, sell
+    `0x9E`/`0x9F`) are the next slice.
+  - [x] **A name on single-click.** Clicking a mobile (`0x09`) draws its name over
+    its head for the clicker alone — a `0x1C` label in the notoriety colour
+    (ServUO's `Notoriety.Hues`: blue innocent … yellow invulnerable), so a banker
+    reads as "the banker" before you know to ask. Named mobiles only; a plain
+    item's name waits on a tiledata name lookup. This is the 2D client's tooltip:
+    what a modern client shows on hover, it asks for a click at a time.
 - [ ] `housing`, `guilds`
 
 The bridge is event-driven today: the server calls the script's `onEvent`, not a

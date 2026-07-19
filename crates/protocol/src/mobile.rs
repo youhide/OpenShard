@@ -7,6 +7,7 @@
 use crate::codec::PacketWriter;
 use crate::direction::Facing;
 use crate::feature::Feature;
+use crate::login::{expect_id, LoginDecodeError};
 use crate::version::ClientVersion;
 use crate::world::Point;
 
@@ -78,7 +79,51 @@ impl Notoriety {
         }
         self.to_bits()
     }
+
+    /// The hue the client draws a mobile's *name* in — the colour a single-click
+    /// label comes back in, matching the health bar. ServUO's `Notoriety.Hues`,
+    /// indexed by the same wire byte: blue innocent, green friend, grey
+    /// neutral/criminal, orange enemy, red murderer, yellow invulnerable.
+    pub const fn name_hue(self) -> u16 {
+        match self {
+            Self::Innocent => 0x0059,
+            Self::Friend => 0x003F,
+            Self::Neutral | Self::Criminal => 0x03B2,
+            Self::Enemy => 0x0090,
+            Self::Murderer => 0x0022,
+            Self::Invulnerable => 0x0035,
+        }
+    }
 }
+
+/// `0x09` — the client single-clicked something and wants its name.
+///
+/// Five bytes: the id and the clicked serial. The server answers by drawing the
+/// object's name over its head, seen only by the asker — a `0x1C` label in the
+/// notoriety colour. What the modern client shows as a tooltip on hover, the 2D
+/// client asks for a click at a time.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct LookRequest {
+    /// The clicked object, by serial.
+    pub serial: u32,
+}
+
+impl LookRequest {
+    /// The packet id.
+    pub const ID: u8 = 0x09;
+
+    /// Decode a whole `0x09` packet.
+    pub fn decode(bytes: &[u8]) -> Result<Self, LoginDecodeError> {
+        let mut reader = expect_id(bytes, Self::ID)?;
+        Ok(Self {
+            serial: reader.u32()?,
+        })
+    }
+}
+
+/// The `0x1C` message mode that draws text as a name label over an object rather
+/// than as spoken words — ServUO's `MessageType.Label`.
+pub const LABEL_MODE: u8 = 6;
 
 /// One piece of equipment on a mobile, as the client draws it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -382,6 +427,22 @@ impl MobileIncoming {
 mod tests {
     use super::*;
     use crate::direction::Direction;
+
+    #[test]
+    fn a_single_click_decodes_the_clicked_serial() {
+        let bytes = [0x09, 0x40, 0x00, 0x00, 0x2A];
+        let look = LookRequest::decode(&bytes).expect("a 0x09 decodes");
+        assert_eq!(look.serial, 0x4000_002A);
+    }
+
+    #[test]
+    fn a_name_hue_matches_the_health_bar_colour() {
+        // Blue innocent, yellow invulnerable — the same colours the bar uses, from
+        // ServUO's Notoriety.Hues.
+        assert_eq!(Notoriety::Innocent.name_hue(), 0x0059);
+        assert_eq!(Notoriety::Invulnerable.name_hue(), 0x0035);
+        assert_eq!(Notoriety::Murderer.name_hue(), 0x0022);
+    }
 
     fn facing() -> Facing {
         Facing::running(Direction::SouthEast)

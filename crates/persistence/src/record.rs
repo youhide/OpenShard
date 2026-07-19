@@ -25,7 +25,10 @@ use serde::{Deserialize, Serialize};
 /// around it. A store that opens a save from the future must refuse rather than
 /// guess: reading a newer save with older code is how a shard silently drops
 /// every field it does not recognise and then writes the loss back.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// - v1: characters only.
+/// - v2: items — a character's carried inventory, and loose things on the ground.
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// An account, as saved.
 ///
@@ -79,9 +82,128 @@ pub struct CharacterRecord {
     pub facing: u8,
 }
 
+/// Where an item is, as saved. An item is in exactly one of three places, the
+/// same three the live `Position`/`Contained`/`Equipped` components model — never
+/// more than one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum ItemLocation {
+    /// Loose on the ground, at a world tile on a facet.
+    Ground {
+        /// Which facet.
+        facet: u8,
+        /// Where.
+        x: u16,
+        /// Where.
+        y: u16,
+        /// How high. Signed: UO has basements.
+        z: i8,
+    },
+    /// Inside a container, by the container's serial and the slot in its gump.
+    Contained {
+        /// The container it is in, by serial.
+        container: u32,
+        /// Column in the gump.
+        x: u16,
+        /// Row in the gump.
+        y: u16,
+        /// Slot in the grid view.
+        grid: u8,
+    },
+    /// Worn on a mobile, at a layer.
+    Equipped {
+        /// The wearer's serial.
+        mobile: u32,
+        /// The equipment layer.
+        layer: u8,
+    },
+}
+
+/// An item, as saved.
+///
+/// # Why the serial is here, like a character's
+///
+/// An item's serial is what a container's contents point at and what a worn item
+/// is drawn under, so it is stable across restarts for the same reason a
+/// character's is: change it and every reference to the old one dangles. It is
+/// saved and reserved on the way back in.
+///
+/// `owner` is the character whose inventory this belongs to, or `0` for a loose
+/// ground item that belongs to no one — the key a store replaces a whole
+/// inventory by. `container_gump` is `Some` when the item is *itself* a container,
+/// carrying the window the client opens for it, so a bag inside a bag comes back
+/// openable.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct ItemRecord {
+    /// The wire serial. Stable across restarts; see the type docs.
+    pub serial: u32,
+    /// The character whose inventory this is in, or `0` for a ground item.
+    pub owner: u32,
+    /// The item graphic.
+    pub graphic: u16,
+    /// The item hue.
+    pub hue: u16,
+    /// The stack amount; `1` for a single item.
+    pub amount: u16,
+    /// The container gump if this item is itself a container, else `None`.
+    pub container_gump: Option<u16>,
+    /// Where it is.
+    pub location: ItemLocation,
+}
+
+/// A character's whole carried inventory, replaced as a unit.
+///
+/// A store saves a character's items by replacing everything under its `owner`
+/// rather than tracking each item's comings and goings — see
+/// [`crate::journal`]. `items` is every worn and contained item, at every depth.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Inventory {
+    /// The character serial these items belong to.
+    pub owner: u32,
+    /// Every item worn or contained under that character, at any nesting depth.
+    pub items: Vec<ItemRecord>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_item_record_round_trips_through_json() {
+        // Every field reachable by name from outside — a skipped field comes back
+        // as its default, and an item that loads with a default location is on the
+        // ground at 0,0 instead of in the pack it was saved in.
+        for location in [
+            ItemLocation::Ground {
+                facet: 0,
+                x: 1400,
+                y: 1600,
+                z: -5,
+            },
+            ItemLocation::Contained {
+                container: 0x4000_0001,
+                x: 40,
+                y: 65,
+                grid: 3,
+            },
+            ItemLocation::Equipped {
+                mobile: 0x0000_0001,
+                layer: 0x15,
+            },
+        ] {
+            let record = ItemRecord {
+                serial: 0x4000_0002,
+                owner: 0x0000_0001,
+                graphic: 0x0E75,
+                hue: 0,
+                amount: 1,
+                container_gump: Some(0x003C),
+                location,
+            };
+            let json = serde_json::to_string(&record).expect("an item must serialise");
+            let back: ItemRecord = serde_json::from_str(&json).expect("and come back");
+            assert_eq!(back, record);
+        }
+    }
 
     #[test]
     fn a_character_record_round_trips_through_json() {

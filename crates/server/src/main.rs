@@ -34,7 +34,7 @@ use openshard_persistence::{
 use openshard_protocol::{
     encode_login_denied, huffman, AccessLevel, AttackRequest, CastSpellRequest, CharacterPlay,
     ClientVersion, CreateCharacter, DoubleClick, DropItem, EquipItemRequest, GameServerLogin,
-    GumpResponse, PickUpItem, Point, StartLocation, TalkRequest, TargetResponse,
+    GumpResponse, LookRequest, PickUpItem, Point, StartLocation, TalkRequest, TargetResponse,
     UnicodeTalkRequest, WalkRequest, WarModeRequest,
 };
 use openshard_world::{
@@ -352,6 +352,20 @@ async fn run_shard(
             }
         }
         Err(error) => error!(%error, "could not read saved characters; starting with none"),
+    }
+
+    // Bring back saved items: the world reserves their serials, drops the loose
+    // ground clutter back where it lay, and files each character's carried
+    // inventory to re-equip when it logs in. After the characters, so their
+    // serials are already reserved and an item can point at the container it was in.
+    match store.items().await {
+        Ok(items) => {
+            if !items.is_empty() {
+                info!(items = items.len(), "restored saved items");
+            }
+            world.restore_items(items);
+        }
+        Err(error) => error!(%error, "could not read saved items; starting with none"),
     }
 
     let mut login = LoginServer::new(accounts, &config.server.name, advertised);
@@ -711,6 +725,20 @@ fn dispatch(
             world.queue(Command::DoubleClick {
                 connection: id,
                 serial: click.serial,
+            });
+            true
+        }
+        Some(LookRequest::ID) => {
+            if !session.in_world {
+                return true;
+            }
+            let Ok(look) = LookRequest::decode(packet) else {
+                warn!(%id, "malformed 0x09");
+                return false;
+            };
+            world.queue(Command::SingleClick {
+                connection: id,
+                serial: look.serial,
             });
             true
         }
