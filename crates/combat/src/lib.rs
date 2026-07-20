@@ -19,9 +19,9 @@ use openshard_protocol::{
     encode_attack, encode_graphical_effect, encode_war_mode, EffectKind, EffectPoint, Notoriety,
 };
 use openshard_state::components::{
-    body_is_female, body_opens_doors, creature_base_sound, Body, Client, Combat, CriminalUntil,
-    DamageType, Hitpoints, MeleeDamage, MurderDecay, Murders, Poisoned, Position, RangedAttack,
-    Resistance, Stats, SwingSpeed,
+    body_is_female, body_opens_doors, creature_base_sound, Body, Combat, CriminalUntil, DamageType,
+    Hitpoints, MeleeDamage, MurderDecay, Murders, Poisoned, Position, RangedAttack, Resistance,
+    Stats, SwingSpeed,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{Action, WorldState};
@@ -242,24 +242,18 @@ pub fn damage(
 /// ghosts, corpses and resurrection are a later slice, and despawning someone
 /// still connected is worse than leaving them standing.
 pub fn die(state: &mut WorldState, entity: EntityId, serial: Serial) {
-    // The death throe and cry, while the mobile is still on screen to play them —
-    // a creature is forgotten and despawned just below, a player stays but dies
-    // once. The cry is the victim's own: a wolf's yelp, a human's death gasp.
+    // The death throe and cry, while the mobile is still on screen to play them:
+    // a wolf's yelp, a human's death gasp.
     state.animate(entity, Action::Die);
     if let Some(sound) = death_sound(state, entity) {
         state.play_sound(entity, sound);
     }
+    // Announce it and stop. What becomes of the body — a corpse for a creature, a
+    // ghost for a player — is the world's job off this event (the tick's `reap`);
+    // combat reports the death, it does not dispose of the body. A player is left
+    // standing at zero hits for now (ghosts are a later slice); a creature the
+    // world turns into a corpse and takes off the map.
     state.bus.send(MobileDied { entity, serial });
-    if state.registry.has::<Client>(entity) {
-        return;
-    }
-    let facet = state.facet_of(entity);
-    for watcher in state.watchers_of(entity) {
-        state.forget(watcher, entity, serial);
-    }
-    state.seen.remove(&entity);
-    state.facet_state_mut(facet).sectors.remove(entity);
-    state.registry.despawn(entity);
 }
 
 /// Set a player's war stance and tell it the settled one.
@@ -452,10 +446,25 @@ pub fn swings(state: &mut WorldState) {
         damage(state, target_serial.raw(), blow, DamageType::Physical, by);
         state.play_sound(attacker, sound);
         set_next_swing(state, attacker, now + swing_speed(state, attacker));
-        // The blow may have killed it; a dead target is no target.
-        if state.registry.entity_of(target_serial).is_none() {
+        // The blow may have killed it; a dead target is no target. Dead means gone
+        // *or* standing at zero hits — a creature killed this tick is not swept off
+        // the map until the tick's `reap`, so the entity still resolves for a beat.
+        if target_is_dead(state, target_serial) {
             clear_target(state, attacker);
         }
+    }
+}
+
+/// Whether a target counts as dead: its entity already gone (reaped), or still
+/// present but at zero hits (killed this tick, not yet reaped). Either way a
+/// combatant stops swinging at it.
+fn target_is_dead(state: &WorldState, serial: Serial) -> bool {
+    match state.registry.entity_of(serial) {
+        None => true,
+        Some(entity) => state
+            .registry
+            .get::<Hitpoints>(entity)
+            .is_some_and(|hp| hp.current == 0),
     }
 }
 

@@ -34,8 +34,29 @@ pub fn decay(state: &mut WorldState) {
         for watcher in state.watchers_of(item) {
             state.forget(watcher, item, serial);
         }
+        // A decaying container takes its contents with it — a corpse rots away
+        // with whatever loot was never lifted, classic UO. Without this the loot
+        // would outlive the corpse as orphaned items pointing at a gone serial.
+        despawn_contents(state, serial);
         state.facet_state_mut(facet).sectors.remove(item);
         state.registry.despawn(item);
         debug!(%serial, "decayed");
+    }
+}
+
+/// Despawn everything directly inside `container`, and recursively inside any
+/// container among them. Used when a decaying container rots away.
+fn despawn_contents(state: &mut WorldState, container: Serial) {
+    let contained: Vec<EntityId> = state
+        .registry
+        .query::<Contained>()
+        .filter(|(_, c)| c.container == container)
+        .map(|(entity, _)| entity)
+        .collect();
+    for entity in contained {
+        if let Some(serial) = state.registry.serial_of(entity) {
+            despawn_contents(state, serial);
+            state.registry.despawn(entity);
+        }
     }
 }

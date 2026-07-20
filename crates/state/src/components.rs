@@ -547,6 +547,14 @@ pub const SPELL_COUNT: u8 = 64;
 /// A Magery spellbook's item graphic.
 pub const SPELLBOOK_GRAPHIC: u16 = 0x0EFA;
 
+/// The corpse item graphic. A protocol special case: for item `0x2006` the
+/// client reads the `Amount` field as the dead body id, so a corpse draws as the
+/// creature it was. A corpse is a container (the loot window) that decays.
+pub const CORPSE_GRAPHIC: u16 = 0x2006;
+
+/// The gump the client opens for a corpse — the loot window, not a chest.
+pub const CORPSE_GUMP: u16 = 0x0009;
+
 /// The item graphic of the scroll for a Magery spell, `0-based` — the classic
 /// run `0x1F2D..` (Reactive Armor, Clumsy, …), one per spell.
 #[must_use]

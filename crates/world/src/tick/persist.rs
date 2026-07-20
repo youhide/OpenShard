@@ -583,8 +583,19 @@ impl World {
         if let Some(mask) = record.spellbook {
             self.state.registry.insert(entity, Spellbook(mask));
         }
-        // Loose clutter resumes rotting; a container does not (mark_decay skips it).
+        // Loose clutter resumes rotting; a container does not (mark_decay skips
+        // it) — except a corpse, which is a container that *must* rot, so it gets
+        // a fresh timer here (the decay tick is not itself saved, so a restored
+        // corpse counts down from the restore, like any restored clutter does).
         items::mark_decay(&mut self.state, entity);
+        if record.graphic == openshard_state::components::CORPSE_GRAPHIC {
+            self.state.registry.insert(
+                entity,
+                openshard_state::components::Decays {
+                    at_tick: self.state.ticks + 7 * 60 * TICKS_PER_SECOND,
+                },
+            );
+        }
         self.state
             .facet_state_mut(facet)
             .sectors

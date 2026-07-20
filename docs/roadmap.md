@@ -479,11 +479,26 @@ Roughly in dependency order, each script-first:
     are already per-mobile — so it is a fill-in, not a redesign. This is also what
     gates **combat eras 3–5** in the `[gameplay]` config: only 1 (pre-AoS) and
     2 (AoS) are accepted at load until weapons carry real properties.
-  - [ ] **Ghosts, corpses and resurrection** — a player who dies today stays
-    standing at zero hits (despawning someone connected is worse); the real slice
-    is a corpse container holding the gear, a ghost state the living cannot see
+  - [x] **Creature corpses and loot.** A slain creature no longer vanishes: the
+    tick's `reap` (reading `MobileDied` — combat emits the death, the world
+    disposes of the body) lays a corpse where it fell — item `0x2006` with
+    `Amount = body` (the protocol special case that draws the right corpse), a
+    container on gump `0x0009` holding the creature's worn gear and a core gold
+    drop scaled from its toughness. It decays after seven minutes and takes its
+    loot down with it (`items::decay` now cascades into a container's contents, so
+    nothing is orphaned). `combat::die` stopped despawning — it announces, `reap`
+    disposes. The corpse persists as a ground container; a restored one gets a
+    fresh decay timer (the tick is not saved).
+  - [ ] **Ghosts and resurrection** — a player who dies still stands at zero hits
+    (`reap` only takes creatures; despawning someone connected is worse). The
+    slice: a player corpse holding the gear, a ghost state the living cannot see
     through, and resurrection (the spell is in the table, tagged `Scripted`,
     waiting on exactly this).
+  - [ ] **Pack loot tables** — the corpse gold is a flat core default; real loot
+    (per-creature gold ranges, items, rares) is the pack's, off a `CorpseCreated`
+    event carrying the corpse serial — the "default in core, customise in the
+    pack" split, needing an op to fill a corpse by serial.
+  - [ ] **Stamina as a real pool** — the status bar sends `stamina = dexterity`
   - [ ] **Stamina as a real pool** — the status bar sends `stamina = dexterity`
     so the client will run at all; a real pool spends on running, refills on the
     tick counter like mana, and is the number a war-mode push-through should cost.

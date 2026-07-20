@@ -73,6 +73,7 @@ use crate::terrain::MapTerrain;
 
 mod command;
 mod context;
+mod death;
 mod decor;
 mod defaults;
 mod enter;
@@ -144,6 +145,8 @@ pub struct World {
     /// Damage this tick, read to disturb a spell mid-cast (the `spell_disturb`
     /// rule); a separate cursor from `damaged`, which the AI reads for its own.
     disturbed: Cursor<openshard_combat::MobileDamaged>,
+    /// Deaths this tick, read by `reap` to lay a corpse where a creature fell.
+    dead: Cursor<openshard_combat::MobileDied>,
     /// Commands waiting for the next tick.
     inbox: Vec<Command>,
     /// The spawn regions the tick keeps populated. Registered by the script pack,
@@ -212,6 +215,7 @@ impl World {
             turned: Cursor::default(),
             raised: Cursor::default(),
             disturbed: Cursor::default(),
+            dead: Cursor::default(),
             inbox: Vec::new(),
             spawners: Vec::new(),
             next_spawner_id: 1,
@@ -408,6 +412,9 @@ impl World {
         // caster was struck; the Sphere style resolves in `begin_cast` and never
         // reaches here.
         self.advance_casts();
+        // Lay a corpse where each creature fell this tick — after every source of
+        // death (a swing, a volley, poison, a spell, a command) has had its turn.
+        self.reap();
         items::decay(&mut self.state);
         items::close_doors(&mut self.state);
         self.maintain_spawners();

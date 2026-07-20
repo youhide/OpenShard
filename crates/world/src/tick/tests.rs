@@ -1939,6 +1939,112 @@ fn a_creature_dies_with_its_own_voice() {
 }
 
 #[test]
+fn a_slain_creature_leaves_a_corpse_with_loot() {
+    // Death is no longer a vanishing: a slain creature leaves a corpse at the
+    // spot — item 0x2006 with amount = its body — a container holding a little
+    // gold, the core's default loot until the pack owns real tables.
+    const CORPSE: u16 = 0x2006;
+    const GOLD: u16 = 0x0EED;
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let spot = Point::new(START.0, START.1, 0);
+    let mob = spawn_mobile_at(&mut world, spot, 8, now); // dies on the second swing
+    engage(&mut world, player, mob, now);
+
+    for _ in 0..(2 * WRESTLING_SWING_TICKS) {
+        world.tick(now);
+    }
+    assert!(
+        world
+            .registry()
+            .entity_of(Serial::new(mob).unwrap())
+            .is_none(),
+        "the creature was reaped off the map"
+    );
+    let corpse = world
+        .state
+        .registry
+        .query::<Graphic>()
+        .find(|(_, g)| g.id == CORPSE)
+        .map(|(entity, _)| entity)
+        .expect("a corpse was laid where it fell");
+    assert_eq!(
+        world.registry().get::<Position>(corpse).unwrap().0,
+        spot,
+        "the corpse lies on the death tile"
+    );
+    assert!(
+        world.registry().has::<Container>(corpse),
+        "the corpse is a container to be looted"
+    );
+    assert_eq!(
+        world.registry().get::<Amount>(corpse).unwrap().0,
+        0x0190,
+        "amount = the body (a human male corpse draws right)"
+    );
+    let corpse_serial = world.registry().serial_of(corpse).unwrap();
+    let gold = world
+        .state
+        .registry
+        .query::<Contained>()
+        .filter(|(_, c)| c.container == corpse_serial)
+        .any(|(entity, _)| {
+            world
+                .state
+                .registry
+                .get::<Graphic>(entity)
+                .is_some_and(|g| g.id == GOLD)
+        });
+    assert!(gold, "the corpse holds a gold pile");
+}
+
+#[test]
+fn a_decaying_corpse_takes_its_loot_with_it() {
+    // A corpse rots away with whatever was never lifted — no gold left orphaned,
+    // pointing at a container that is gone.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 8, now);
+    engage(&mut world, player, mob, now);
+    for _ in 0..(2 * WRESTLING_SWING_TICKS) {
+        world.tick(now);
+    }
+    let corpse = world
+        .state
+        .registry
+        .query::<Graphic>()
+        .find(|(_, g)| g.id == 0x2006)
+        .map(|(entity, _)| entity)
+        .expect("a corpse");
+    let corpse_serial = world.registry().serial_of(corpse).unwrap();
+
+    // Bring its decay clock forward to now and let the tick reap it.
+    let tick = world.state.ticks;
+    world.state.registry.insert(
+        corpse,
+        openshard_state::components::Decays { at_tick: tick },
+    );
+    world.tick(now);
+
+    assert!(
+        !world.state.registry.contains(corpse),
+        "the corpse rotted away"
+    );
+    assert_eq!(
+        world
+            .state
+            .registry
+            .query::<Contained>()
+            .filter(|(_, c)| c.container == corpse_serial)
+            .count(),
+        0,
+        "and took its loot with it — nothing orphaned points at the gone corpse"
+    );
+}
+
+#[test]
 fn no_swing_without_war_mode() {
     let now = Instant::now();
     let mut world = world();
