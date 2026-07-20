@@ -13,6 +13,25 @@ pub struct Appearance {
     pub hue: u16,
 }
 
+/// A character's stats and skills, carried on [`Command::Enter`] — chosen at
+/// creation for a new character, or restored from the save for a played one.
+/// `None` (a bare test enter, or a character from before these were stored) takes
+/// the world's flat defaults and no skills.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct CharacterSheet {
+    /// Strength.
+    pub strength: u16,
+    /// Dexterity.
+    pub dexterity: u16,
+    /// Intelligence.
+    pub intelligence: u16,
+    /// Trained skills as `(id, value in tenths, lock)`.
+    pub skills: Vec<(u8, u16, openshard_protocol::SkillLock)>,
+    /// Active effects — a poison a relog must not wash off, and the buffs and
+    /// debuffs that will join it. Empty for a clean character.
+    pub effects: Vec<openshard_persistence::EffectRecord>,
+}
+
 /// One door in a [`Command::Decorate`] batch. The closed/open graphics and the
 /// hinge offset are already resolved by whoever places it (the pack does the
 /// door-family arithmetic); the world only stores and toggles.
@@ -74,6 +93,9 @@ pub enum Command {
         /// How the character looks: chosen at creation, or restored from the save.
         /// `None` falls back to the default body.
         appearance: Option<Appearance>,
+        /// The character's stats and skills, from creation or the save. `None`
+        /// takes the world's defaults.
+        sheet: Option<CharacterSheet>,
         /// The staff authority the account plays with — what privileged commands
         /// its characters may run. Re-derived from the account each login, never
         /// saved with the character.
@@ -86,10 +108,17 @@ pub enum Command {
         /// The request.
         request: WalkRequest,
     },
-    /// A client asked for its own status again — a `0x34`, sent when the paperdoll
-    /// opens. The status went out at world entry; this resends it so a paperdoll
-    /// opened much later is not stale.
+    /// A client asked for its own status again — a `0x34` type `0x04`, sent when
+    /// the paperdoll opens. The status went out at world entry; this resends it so
+    /// a paperdoll opened much later is not stale.
     RequestStatus {
+        /// Which connection asked.
+        connection: ConnectionId,
+    },
+    /// A client asked for its skill list — a `0x34` type `0x05`, sent when the
+    /// skill window opens. Without this the window opens empty: the login list is
+    /// long gone by the time a player clicks the skill button.
+    RequestSkills {
         /// Which connection asked.
         connection: ConnectionId,
     },
@@ -319,6 +348,15 @@ pub enum Command {
         skill: u8,
         /// The difficulty, 0–100.
         difficulty: u16,
+    },
+    /// A client moved a skill's up/down/lock arrow (`0x3A`).
+    SetSkillLock {
+        /// Which connection.
+        connection: ConnectionId,
+        /// Which skill, by id.
+        skill: u8,
+        /// The new lock state.
+        lock: openshard_protocol::SkillLock,
     },
     /// A client toggled war mode (`0x72`).
     WarMode {

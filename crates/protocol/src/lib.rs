@@ -66,6 +66,7 @@ mod login;
 mod mobile;
 mod packet;
 mod seed;
+mod skill;
 mod speech;
 mod target;
 mod vendor;
@@ -102,6 +103,10 @@ pub use packet::{
     SEED_LENGTH_NEW, SEED_LENGTH_OLD,
 };
 pub use seed::{Seed, SeedReader, SEED_COMMAND};
+pub use skill::{
+    encode_skill_update, encode_skills_full, skill_count, SkillEntry, SkillLock, SkillLockRequest,
+    UseSkillRequest,
+};
 pub use speech::{
     encode_message, encode_unicode_message, TalkRequest, UnicodeTalkRequest, DEFAULT_LANGUAGE_TAG,
     NO_GRAPHIC, SYSTEM_SERIAL,

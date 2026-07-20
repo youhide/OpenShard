@@ -18,6 +18,24 @@ use openshard_entities::{EntityId, Serial};
 use openshard_state::components::{Hitpoints, Mana, Skills, Stats};
 use openshard_state::WorldState;
 
+/// A mobile's skill went up a notch.
+///
+/// Every gain — from a mined ore, a picked lock, a cast spell — passes through
+/// [`roll_skill`], so this is the one place a skill's value changes upward. The
+/// world reads it to send the owner the single-line `0x3A` update that makes an
+/// open skill window follow the gain live; nothing else needs it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SkillRaised {
+    /// The mobile.
+    pub entity: EntityId,
+    /// Its wire identity.
+    pub serial: Serial,
+    /// Which skill, by id.
+    pub skill: u8,
+    /// The skill's value now, in tenths, after the gain.
+    pub value: u16,
+}
+
 /// A mobile used a skill: the check resolved, and any gain is already applied.
 ///
 /// What the *use* accomplishes is not decided here — whether the ore comes out
@@ -131,13 +149,24 @@ pub fn roll_skill(state: &mut WorldState, entity: EntityId, skill: u8, difficult
         .map_or(0, |s| s.get(skill));
     let success = curves::success_chance(value, difficulty) >= state.rng.below(1000);
     if value < state.gameplay.skill_cap && state.rng.below(1000) < curves::gain_chance(value) {
+        let raised = value + 1;
         let mut skills = state
             .registry
             .get::<Skills>(entity)
             .cloned()
             .unwrap_or_default();
-        skills.set(skill, value + 1);
+        skills.set(skill, raised);
         state.registry.insert(entity, skills);
+        // The one place a skill rises: say so, so the world can update the
+        // owner's open skill window without polling every skill every tick.
+        if let Some(serial) = state.registry.serial_of(entity) {
+            state.bus.send(SkillRaised {
+                entity,
+                serial,
+                skill,
+                value: raised,
+            });
+        }
     }
     success
 }

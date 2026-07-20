@@ -63,7 +63,7 @@ use openshard_skills as skills;
 use crate::doorgen;
 use crate::events::{
     AdminMenuAction, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason,
-    SpellRequested, StepRefused,
+    StepRefused,
 };
 use crate::gm;
 use crate::terrain::MapTerrain;
@@ -74,11 +74,13 @@ mod defaults;
 mod enter;
 mod motion;
 mod persist;
+mod skills_wire;
 mod spawners;
 mod speech;
+mod spells;
 mod staff;
 
-pub use command::{Appearance, Command, DecorContainer, DecorDoor};
+pub use command::{Appearance, CharacterSheet, Command, DecorContainer, DecorDoor};
 use defaults::*;
 pub use defaults::{SAVE_EVERY_TICKS, TICK_INTERVAL};
 
@@ -94,6 +96,7 @@ struct Entering {
     position: Option<Point>,
     facet: u8,
     appearance: Option<Appearance>,
+    sheet: Option<CharacterSheet>,
     access: AccessLevel,
 }
 
@@ -132,6 +135,11 @@ pub struct World {
     damaged: Cursor<openshard_combat::MobileDamaged>,
     /// Read to find out what to mark dirty. See `mark_dirty`.
     turned: Cursor<MobileTurned>,
+    /// Skill gains this tick, to push the single-line `0x3A` update to the owner.
+    raised: Cursor<openshard_skills::SkillRaised>,
+    /// Damage this tick, read to disturb a spell mid-cast (the `spell_disturb`
+    /// rule); a separate cursor from `damaged`, which the AI reads for its own.
+    disturbed: Cursor<openshard_combat::MobileDamaged>,
     /// Commands waiting for the next tick.
     inbox: Vec<Command>,
     /// The spawn regions the tick keeps populated. Registered by the script pack,
@@ -198,6 +206,8 @@ impl World {
             moved: Cursor::default(),
             damaged: Cursor::default(),
             turned: Cursor::default(),
+            raised: Cursor::default(),
+            disturbed: Cursor::default(),
             inbox: Vec::new(),
             spawners: Vec::new(),
             next_spawner_id: 1,
@@ -380,11 +390,19 @@ impl World {
         combat::volleys(&mut self.state);
         combat::expire_criminality(&mut self.state);
         combat::decay_murders(&mut self.state);
+        combat::poison_tick(&mut self.state);
         magic::regen_mana(&mut self.state);
+        // Finish or break the ServUO-style casts whose delay is up or whose
+        // caster was struck; the Sphere style resolves in `begin_cast` and never
+        // reaches here.
+        self.advance_casts();
         items::decay(&mut self.state);
         items::close_doors(&mut self.state);
         self.maintain_spawners();
 
+        // Follow this tick's skill gains on any open window. Before `update`
+        // retires the events, like `mark_dirty`.
+        self.send_skill_updates();
         // Before the bus retires anything: what happened is what needs saving,
         // and reading it after `update` would read it a tick late.
         self.mark_dirty();
@@ -412,6 +430,7 @@ impl World {
                 position,
                 facet,
                 appearance,
+                sheet,
                 access,
             } => self.enter(Entering {
                 connection,
@@ -422,6 +441,7 @@ impl World {
                 position,
                 facet,
                 appearance,
+                sheet,
                 access,
             }),
             Command::Walk {
@@ -431,6 +451,11 @@ impl World {
             Command::RequestStatus { connection } => {
                 if let Some(&entity) = self.state.players.get(&connection) {
                     self.send_status(connection, entity);
+                }
+            }
+            Command::RequestSkills { connection } => {
+                if let Some(&entity) = self.state.players.get(&connection) {
+                    self.send_skills(connection, entity);
                 }
             }
             Command::GumpResponse {
@@ -580,6 +605,11 @@ impl World {
                 skill,
                 difficulty,
             } => skills::use_skill(&mut self.state, serial, skill, difficulty),
+            Command::SetSkillLock {
+                connection,
+                skill,
+                lock,
+            } => self.set_skill_lock(connection, skill, lock),
             Command::WarMode { connection, war } => {
                 combat::war_mode(&mut self.state, connection, war)
             }
@@ -637,7 +667,7 @@ impl World {
             } => items::drop_item(&mut self.state, connection, serial, position, container),
             Command::Disconnect { connection } => self.disconnect(connection),
             Command::Control { serial } => self.control(serial),
-            Command::RequestCast { connection, spell } => self.request_cast(connection, spell),
+            Command::RequestCast { connection, spell } => self.begin_cast(connection, spell),
             Command::StockVendor { serial, stock } => {
                 npc::stock(&mut self.state, serial, stock);
             }

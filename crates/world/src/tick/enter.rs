@@ -15,6 +15,7 @@ impl World {
             position,
             facet,
             appearance,
+            sheet,
             access,
         } = entering;
         if self.state.players.contains_key(&connection) {
@@ -99,6 +100,48 @@ impl World {
                 max: DEFAULT_MANA,
             },
         );
+        // A created or restored character brings its own stats and skills, over
+        // the flat defaults above: strength re-caps hit points, intelligence
+        // mana, and the trained skills (with their lock arrows) come back as they
+        // were chosen or last stood. A bare enter (a test, an old save) keeps the
+        // defaults and no skills.
+        if let Some(sheet) = sheet {
+            self.state.registry.insert(
+                entity,
+                Stats {
+                    strength: sheet.strength.max(1),
+                    dexterity: sheet.dexterity,
+                    intelligence: sheet.intelligence,
+                },
+            );
+            self.state.registry.insert(
+                entity,
+                Hitpoints {
+                    current: sheet.strength.max(1),
+                    max: sheet.strength.max(1),
+                },
+            );
+            self.state.registry.insert(
+                entity,
+                Mana {
+                    current: sheet.intelligence,
+                    max: sheet.intelligence,
+                },
+            );
+            if !sheet.skills.is_empty() {
+                let mut skills = openshard_state::components::Skills::default();
+                for (id, value, lock) in sheet.skills {
+                    skills.set(id, value);
+                    skills.set_lock(id, lock);
+                }
+                self.state.registry.insert(entity, skills);
+            }
+            // A poison (and, later, the buffs and debuffs beside it) comes back
+            // on relog — logging out and in is not a cure. Its pulses resume from
+            // this tick.
+            let now = self.state.ticks;
+            Self::apply_effects(&mut self.state.registry, entity, &sheet.effects, now);
+        }
         self.state.registry.insert(entity, Combat::default());
         self.state.registry.insert(entity, Notoriety::Innocent);
         self.state.registry.insert(
@@ -210,6 +253,9 @@ impl World {
         // login-complete that starts the client drawing, so the numbers are there
         // the moment the paperdoll can be opened.
         self.send_status(connection, entity);
+        // The skill window's full contents, so it is filled the moment the player
+        // opens it — ServUO sends `SkillUpdate` on world entry the same way.
+        self.send_skills(connection, entity);
         // The player's own `0x78`, so its client learns its equipment — and the
         // serial of the backpack it must be able to double-click open. The client
         // draws its body from `0x1B`, but its worn items come from here; `reveal`

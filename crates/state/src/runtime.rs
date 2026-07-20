@@ -68,6 +68,37 @@ pub struct Gameplay {
     /// matches a runner, for shards that want monsters to catch people. Idle
     /// creatures amble at twice this.
     pub creature_step_ticks: u64,
+    /// How a spell is cast — Sphere's cast-while-walking, or the UO/ServUO
+    /// stop-to-cast with the target after.
+    pub cast_style: CastStyle,
+    /// Whether taking damage while casting disturbs the spell (UO's fizzle). Only
+    /// meaningful in [`CastStyle::Stop`], where there is a cast to disturb.
+    pub spell_disturb: bool,
+}
+
+/// How a spell is cast — the choice both reference emulators make differently.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum CastStyle {
+    /// The UO/ServUO original: the caster stops, says the words over a cast
+    /// delay, and only then does the target cursor appear (after which it may
+    /// move again). Damage during the delay can disturb it.
+    #[default]
+    Stop,
+    /// Sphere's feel: the spell resolves as it is cast, with no rooting delay —
+    /// the caster keeps walking, and a target cursor (if any) comes up at once.
+    Walk,
+}
+
+impl CastStyle {
+    /// Parse the operator's `cast_style` string. `"sphere"`/`"walk"` is the
+    /// walking cast; anything else is the stop-to-cast default.
+    #[must_use]
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "sphere" | "walk" | "walking" => Self::Walk,
+            _ => Self::Stop,
+        }
+    }
 }
 
 impl Gameplay {
@@ -88,6 +119,8 @@ impl Gameplay {
         distance_whisper: u32,
         distance_yell: u32,
         creature_step_ms: u64,
+        cast_style: CastStyle,
+        spell_disturb: bool,
     ) -> Self {
         Self {
             combat_era,
@@ -100,6 +133,8 @@ impl Gameplay {
             distance_yell,
             // 50ms per tick; anything under one tick is one tick.
             creature_step_ticks: (creature_step_ms / 50).max(1),
+            cast_style,
+            spell_disturb,
         }
     }
 }
@@ -108,7 +143,19 @@ impl Default for Gameplay {
     /// The pre-AoS feel the systems were built with — the values that were
     /// compile-time constants before an operator could tune them.
     fn default() -> Self {
-        Self::new(1, 15000, 1000, 20 * 60, 2 * 60, 18, 3, 31, 400)
+        Self::new(
+            1,
+            15000,
+            1000,
+            20 * 60,
+            2 * 60,
+            18,
+            3,
+            31,
+            400,
+            CastStyle::Stop,
+            true,
+        )
     }
 }
 
@@ -255,6 +302,15 @@ pub struct WorldState {
 pub enum TargetPurpose {
     /// Teleport the targeter to the clicked spot — the cursor `.tele`.
     Teleport,
+    /// A targeted spell waiting for its aim — the cursor a spell puts up once
+    /// the cast resolves. `success` is the skill roll already made, carried here
+    /// so a fumbled cast that still raises a cursor simply lands no effect.
+    Spell {
+        /// Which spell, by id.
+        spell: u16,
+        /// Whether the cast's skill roll passed.
+        success: bool,
+    },
 }
 
 impl WorldState {

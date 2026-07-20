@@ -540,6 +540,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            sheet: None,
             access: AccessLevel::Player,
         });
         world.tick(now); // emits PlayerEntered
@@ -586,6 +587,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            sheet: None,
             access: AccessLevel::Player,
         });
         world.tick(now); // PlayerEntered
@@ -628,6 +630,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            sheet: None,
             access: AccessLevel::Player,
         });
         world.tick(now);
@@ -827,6 +830,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            sheet: None,
             access: AccessLevel::Player,
         });
         world.tick(now); // PlayerEntered
@@ -876,6 +880,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            sheet: None,
             access: AccessLevel::Player,
         });
         world.tick(now); // PlayerEntered
@@ -923,73 +928,6 @@ mod tests {
     }
 
     #[test]
-    fn a_client_cast_request_is_handed_to_the_script() {
-        // The client cast path, end to end: a spellbook asks to cast (a `0xBF`,
-        // here queued as the `RequestCast` it decodes to), the world says so with
-        // `SpellRequested`, and the script — which owns the spell's mana and
-        // reagents — casts it. The engine never learns what a spell costs.
-        let script = TempScript::new(
-            "spellbook",
-            "function onEvent(e) {\n\
-             if (e.type === 'PlayerEntered') Deno.core.ops.op_set_skill(e.serial, 1, 1000);\n\
-             if (e.type === 'SpellRequested')\n\
-                 Deno.core.ops.op_cast_spell({ serial: e.serial, spell: e.spell, mana: 10, skill: 1 });\n\
-             }",
-        );
-
-        let now = Instant::now();
-        let mut world = World::new((1363, 1600));
-        let mut scripts = Scripts::load(script.path(), &world).expect("script loads");
-        let connection = ConnectionId::from_raw(1);
-
-        world.queue(Command::Enter {
-            connection,
-            version: ClientVersion::TOL,
-            account: "admin".to_owned(),
-            name: "Lord British".to_owned(),
-            serial: None,
-            position: None,
-            facet: 0,
-            appearance: None,
-            access: AccessLevel::Player,
-        });
-        world.tick(now); // PlayerEntered
-        scripts.pump(&mut world); // train magery queued
-        world.tick(now); // the skill is set
-
-        let caster = world
-            .registry()
-            .query::<openshard_world::Client>()
-            .map(|(e, _)| e)
-            .next()
-            .expect("the player");
-        let mana_before = world
-            .registry()
-            .get::<openshard_world::Mana>(caster)
-            .unwrap()
-            .current;
-
-        // The client asks to cast (what a decoded `0xBF.0x1C` becomes).
-        world.queue(Command::RequestCast {
-            connection,
-            spell: 4,
-        });
-        world.tick(now); // SpellRequested emitted
-        scripts.pump(&mut world); // the script hears it and queues the cast
-        world.tick(now); // the cast is applied
-
-        let mana_after = world
-            .registry()
-            .get::<openshard_world::Mana>(caster)
-            .unwrap()
-            .current;
-        assert!(
-            mana_after < mana_before,
-            "the script cast the spell the client requested (mana {mana_before} -> {mana_after})"
-        );
-    }
-
-    #[test]
     fn a_script_spawns_an_aggressive_creature_that_fights() {
         // AI end to end: a script drops an aggressive creature on the player's
         // tile, and the built-in brain — no further scripting — notices, and the
@@ -1016,6 +954,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            sheet: None,
             access: AccessLevel::Player,
         });
         world.tick(now);
@@ -1071,6 +1010,7 @@ mod tests {
             position: None,
             facet: 0,
             appearance: None,
+            sheet: None,
             access: AccessLevel::Player,
         });
         world.tick(now);

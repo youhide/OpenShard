@@ -102,6 +102,17 @@ distance_talk = 18
 distance_whisper = 3
 distance_yell = 31
 
+# How a spell is cast — the Sphere-vs-ServUO knob.
+#   "servuo"  the UO original: the caster stops, says the words over a cast
+#             delay, and the target cursor comes up only after (then it may walk).
+#   "sphere"  Sphere's feel: the spell resolves as it is cast, no rooting — the
+#             caster keeps walking, and any target cursor comes up at once.
+cast_style = "servuo"
+
+# Whether taking damage while casting disturbs the spell (UO's fizzle). Only
+# bites in the "servuo" cast style, where there is a cast delay to interrupt.
+spell_disturb = true
+
 # Development accounts, in plaintext, until there is a database.
 [[accounts]]
 name = "admin"

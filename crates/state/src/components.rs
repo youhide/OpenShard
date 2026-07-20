@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use openshard_entities::{EntityId, Serial};
 use openshard_gateway::ConnectionId;
 use openshard_movement::Walker;
-use openshard_protocol::{AccessLevel, ClientVersion, Facing, Point};
+use openshard_protocol::{AccessLevel, ClientVersion, Facing, Point, SkillLock};
 
 /// Where a mobile or item is.
 ///
@@ -264,6 +264,20 @@ pub struct CriminalUntil {
     pub tick: u64,
 }
 
+/// Poison working through a mobile: its strength, the tick its next pulse lands,
+/// and how many pulses remain before it clears. Tick counts, never a clock — a
+/// poisoned fight replays like decay and the criminal flag — so `poison_tick`
+/// reads only the world's counter.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Poisoned {
+    /// The poison level, 0 (lesser) .. 4 (lethal) — sets the damage per pulse.
+    pub level: u8,
+    /// The tick the next pulse of damage lands.
+    pub next_pulse: u64,
+    /// Pulses left before the poison wears off.
+    pub pulses_left: u8,
+}
+
 /// How many innocents a mobile has killed — the tally that turns it red.
 ///
 /// The deeper standing [`CriminalUntil`] left for later: a persistent count, not
@@ -293,6 +307,9 @@ pub struct MurderDecay {
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct Skills {
     values: HashMap<u8, u16>,
+    /// How the window trains each skill — `Up` unless the player set an arrow.
+    /// Sparse like the values: an untouched skill trains up.
+    locks: HashMap<u8, SkillLock>,
 }
 
 impl Skills {
@@ -305,6 +322,41 @@ impl Skills {
     pub fn set(&mut self, skill: u8, value: u16) {
         self.values.insert(skill, value);
     }
+
+    /// How `skill` is set to train; `Up` unless the player moved its arrow.
+    pub fn lock(&self, skill: u8) -> SkillLock {
+        self.locks.get(&skill).copied().unwrap_or_default()
+    }
+
+    /// Set how `skill` trains — the up/down/lock arrow.
+    pub fn set_lock(&mut self, skill: u8, lock: SkillLock) {
+        self.locks.insert(skill, lock);
+    }
+
+    /// Every trained skill and its lock, for persistence — `(id, value, lock)`,
+    /// in no particular order. A skill at zero with a moved arrow still counts,
+    /// so a "down" lock the player set is not forgotten.
+    pub fn entries(&self) -> impl Iterator<Item = (u8, u16, SkillLock)> + '_ {
+        self.values
+            .keys()
+            .chain(self.locks.keys())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .map(move |&id| (id, self.get(id), self.lock(id)))
+    }
+}
+
+/// A spell in progress — the rooted cast delay of the "servuo" cast style. The
+/// mobile is committed to `spell` and cannot walk until `complete_at`, the tick
+/// the cast resolves; taking damage in the meantime disturbs it if the shard
+/// runs with `spell_disturb`. The "sphere" style never sets this — it resolves a
+/// cast as it is made.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Casting {
+    /// The spell being cast, by id.
+    pub spell: u16,
+    /// The tick the cast finishes and resolves.
+    pub complete_at: u64,
 }
 
 /// Marks a mobile as run by the server rather than a person: it has a brain.

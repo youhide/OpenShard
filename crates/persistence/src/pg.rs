@@ -73,7 +73,12 @@ CREATE TABLE IF NOT EXISTS characters (
     x       INTEGER NOT NULL,
     y       INTEGER NOT NULL,
     z       INTEGER NOT NULL,
-    facing  INTEGER NOT NULL
+    facing  INTEGER NOT NULL,
+    strength     INTEGER NOT NULL,
+    dexterity    INTEGER NOT NULL,
+    intelligence INTEGER NOT NULL,
+    skills  TEXT NOT NULL,
+    effects  TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS items (
     serial    BIGINT PRIMARY KEY,
@@ -213,15 +218,23 @@ impl Store for PgStore {
         // world is a world that never existed — see `crate::journal`.
         let transaction = client.transaction().await.map_err(database)?;
         for record in &snapshot.characters {
+            let skills = serde_json::to_string(&record.skills)
+                .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+            let effects = serde_json::to_string(&record.effects)
+                .map_err(|e| StoreError::Corrupt(e.to_string()))?;
             transaction
                 .execute(
                     "INSERT INTO characters \
-                     (serial, account, name, body, hue, facet, x, y, z, facing) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
+                     (serial, account, name, body, hue, facet, x, y, z, facing, \
+                      strength, dexterity, intelligence, skills, effects) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) \
                      ON CONFLICT (serial) DO UPDATE SET \
                      account = EXCLUDED.account, name = EXCLUDED.name, \
                      body = EXCLUDED.body, hue = EXCLUDED.hue, facet = EXCLUDED.facet, \
-                     x = EXCLUDED.x, y = EXCLUDED.y, z = EXCLUDED.z, facing = EXCLUDED.facing",
+                     x = EXCLUDED.x, y = EXCLUDED.y, z = EXCLUDED.z, facing = EXCLUDED.facing, \
+                     strength = EXCLUDED.strength, dexterity = EXCLUDED.dexterity, \
+                     intelligence = EXCLUDED.intelligence, skills = EXCLUDED.skills, \
+                     effects = EXCLUDED.effects",
                     &[
                         &i64::from(record.serial),
                         &record.account,
@@ -233,6 +246,11 @@ impl Store for PgStore {
                         &i32::from(record.y),
                         &i32::from(record.z),
                         &i32::from(record.facing),
+                        &i32::from(record.strength),
+                        &i32::from(record.dexterity),
+                        &i32::from(record.intelligence),
+                        &skills,
+                        &effects,
                     ],
                 )
                 .await
@@ -358,8 +376,8 @@ impl Store for PgStore {
         let client = self.client.lock().await;
         let rows = client
             .query(
-                "SELECT serial, account, name, body, hue, facet, x, y, z, facing \
-                 FROM characters",
+                "SELECT serial, account, name, body, hue, facet, x, y, z, facing, \
+                 strength, dexterity, intelligence, skills, effects FROM characters",
                 &[],
             )
             .await
@@ -470,6 +488,13 @@ fn character_from_row(row: &Row) -> Result<CharacterRecord, StoreError> {
         y: u16::try_from(row.get::<_, i32>(7)).map_err(|_| corrupt("y"))?,
         z: i8::try_from(row.get::<_, i32>(8)).map_err(|_| corrupt("z"))?,
         facing: u8::try_from(row.get::<_, i32>(9)).map_err(|_| corrupt("facing"))?,
+        strength: u16::try_from(row.get::<_, i32>(10)).map_err(|_| corrupt("strength"))?,
+        dexterity: u16::try_from(row.get::<_, i32>(11)).map_err(|_| corrupt("dexterity"))?,
+        intelligence: u16::try_from(row.get::<_, i32>(12)).map_err(|_| corrupt("intelligence"))?,
+        skills: serde_json::from_str(row.get::<_, &str>(13))
+            .map_err(|e| StoreError::Corrupt(e.to_string()))?,
+        effects: serde_json::from_str(row.get::<_, &str>(14))
+            .map_err(|e| StoreError::Corrupt(e.to_string()))?,
     })
 }
 
@@ -658,6 +683,11 @@ mod tests {
             y: 1600,
             z: 30,
             facing: 0,
+            strength: 100,
+            dexterity: 100,
+            intelligence: 100,
+            skills: Vec::new(),
+            effects: Vec::new(),
         }
     }
 

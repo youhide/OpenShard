@@ -302,6 +302,11 @@ mod tests {
             y: 1600,
             z: 30,
             facing: 0,
+            strength: 100,
+            dexterity: 100,
+            intelligence: 100,
+            skills: Vec::new(),
+            effects: Vec::new(),
         }
     }
 

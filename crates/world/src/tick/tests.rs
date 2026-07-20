@@ -47,6 +47,7 @@ pub(super) fn enter_as(world: &mut World, connection: ConnectionId, now: Instant
         position: None,
         facet: 0,
         appearance: None,
+        sheet: None,
         access: AccessLevel::Player,
     });
     world.tick(now);
@@ -65,6 +66,7 @@ pub(super) fn enter_gm(world: &mut World, now: Instant) -> ConnectionId {
         position: None,
         facet: 0,
         appearance: None,
+        sheet: None,
         access: AccessLevel::GameMaster,
     });
     world.tick(now);
@@ -1267,7 +1269,19 @@ fn gameplay_config_reaches_the_systems() {
     // decay here gives a spawned item a clock of a hundred ticks, not the
     // twenty-minute default's twenty-four thousand.
     let now = Instant::now();
-    let gameplay = Gameplay::new(2, 40000, 700, 5, 60, 18, 3, 31, 400);
+    let gameplay = Gameplay::new(
+        2,
+        40000,
+        700,
+        5,
+        60,
+        18,
+        3,
+        31,
+        400,
+        openshard_state::CastStyle::Stop,
+        true,
+    );
     let mut world = World::new(START).with_gameplay(gameplay);
     world.queue(Command::SpawnItem {
         graphic: 0x0EED,
@@ -2327,6 +2341,637 @@ fn setting_a_skill_stores_it() {
     });
     world.tick(now);
     assert_eq!(skill_value(&world, entity, 1), 755);
+}
+
+#[test]
+fn a_skill_query_is_answered_with_the_skill_list() {
+    // Opening the skill window sends a 0x34 type 0x05; it must be answered with
+    // the 0x3A list, not the status the paperdoll's 0x34 type 0x04 gets.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::RequestSkills { connection });
+    world.tick(now);
+    assert!(
+        packets_for(&mut world, connection)
+            .iter()
+            .any(|p| p[0] == 0x3A && p[3] == 0x02),
+        "the skill window request is answered with the full list"
+    );
+}
+
+#[test]
+fn entering_the_world_sends_the_skill_window() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    // The full skill list rode out on login: a 0x3A whose type byte is the
+    // capped-absolute form a modern (TOL) client gets.
+    assert!(
+        packets_for(&mut world, connection)
+            .iter()
+            .any(|p| p[0] == 0x3A && p[3] == 0x02),
+        "the skill window is filled on login"
+    );
+}
+
+#[test]
+fn a_skill_lock_arrow_is_stored() {
+    use openshard_protocol::SkillLock;
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+
+    world.queue(Command::SetSkillLock {
+        connection,
+        skill: 45, // Mining
+        lock: SkillLock::Down,
+    });
+    world.tick(now);
+    assert_eq!(
+        world
+            .registry()
+            .get::<Skills>(entity)
+            .map_or(SkillLock::Up, |s| s.lock(45)),
+        SkillLock::Down,
+        "the down arrow was stored"
+    );
+}
+
+#[test]
+fn a_skill_gain_updates_the_open_window() {
+    // A low skill used against a trivial task gains within a few tries; each
+    // gain pushes a single-line 0x3A update (the delta-capped type 0xDF) to the
+    // owner so an open window follows it live.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let serial = serial_of(&world, connection);
+    world.queue(Command::SetSkill {
+        serial,
+        skill: 1,
+        value: 100,
+    });
+    world.tick(now);
+    let _ = packets_for(&mut world, connection);
+
+    let mut saw_update = false;
+    for _ in 0..80 {
+        world.queue(Command::UseSkill {
+            serial,
+            skill: 1,
+            difficulty: 0,
+        });
+        world.tick(now);
+        saw_update |= packets_for(&mut world, connection)
+            .iter()
+            .any(|p| p[0] == 0x3A && p[3] == 0xDF);
+        if saw_update {
+            break;
+        }
+    }
+    assert!(
+        saw_update,
+        "a gain pushed a single-skill update to the window"
+    );
+}
+
+#[test]
+fn a_characters_stats_and_skills_survive_a_relogin() {
+    use openshard_protocol::SkillLock;
+    use openshard_state::components::Stats;
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let serial = serial_of(&world, conn);
+
+    // Train a skill, set stats, and lock the skill down.
+    world.queue(Command::SetSkill {
+        serial,
+        skill: 25, // Magery
+        value: 501,
+    });
+    world.queue(Command::SetStats {
+        serial,
+        strength: 55,
+        dexterity: 40,
+        intelligence: 90,
+    });
+    world.tick(now);
+    world.queue(Command::SetSkillLock {
+        connection: conn,
+        skill: 25,
+        lock: SkillLock::Down,
+    });
+    world.tick(now);
+
+    // The save captures the stats, the skill, and its lock.
+    world.take_snapshot();
+    let snapshot = world.drain_saves().next_back().expect("a snapshot");
+    let record = snapshot
+        .characters
+        .iter()
+        .find(|c| c.serial == serial)
+        .cloned()
+        .expect("the character was saved");
+    assert_eq!(record.strength, 55);
+    assert_eq!(record.intelligence, 90);
+    let magery = record
+        .skills
+        .iter()
+        .find(|s| s.id == 25)
+        .expect("magery saved");
+    assert_eq!(magery.value, 501);
+    assert_eq!(
+        magery.lock,
+        SkillLock::Down.to_bits(),
+        "the lock is saved too"
+    );
+
+    // Relogin, threading the record back through Enter the way the server does.
+    world.queue(Command::Disconnect { connection: conn });
+    world.tick(now);
+    let conn = connection();
+    world.queue(Command::Enter {
+        connection: conn,
+        version: ClientVersion::TOL,
+        account: "admin".to_owned(),
+        name: "Lord British".to_owned(),
+        serial: Some(serial),
+        position: Some(Point::new(START.0, START.1, 0)),
+        facet: 0,
+        appearance: None,
+        sheet: Some(CharacterSheet {
+            strength: record.strength,
+            dexterity: record.dexterity,
+            intelligence: record.intelligence,
+            skills: record
+                .skills
+                .iter()
+                .map(|s| (s.id, s.value, SkillLock::from_bits(s.lock)))
+                .collect(),
+            effects: record.effects.clone(),
+        }),
+        access: AccessLevel::Player,
+    });
+    world.tick(now);
+    let player = world.state.players[&conn];
+    assert_eq!(
+        world.registry().get::<Stats>(player).unwrap().strength,
+        55,
+        "stats came back"
+    );
+    assert_eq!(skill_value(&world, player, 25), 501, "the skill came back");
+    assert_eq!(
+        world.registry().get::<Skills>(player).unwrap().lock(25),
+        SkillLock::Down,
+        "and its lock arrow"
+    );
+}
+
+// -- spell casting --------------------------------------------------------
+
+/// A reagent graphic used by the cast tests.
+const BLACK_PEARL: u16 = 0x0F7A;
+
+/// A player ready to cast: grandmaster Magery and a pack full of a reagent.
+/// Returns its connection and entity.
+fn ready_caster(world: &mut World, reagent: u16, now: Instant) -> (ConnectionId, EntityId) {
+    let connection = enter(world, now);
+    let entity = world.state.players[&connection];
+    let serial = serial_of(world, connection);
+    world.queue(Command::SetSkill {
+        serial,
+        skill: 25, // Magery
+        value: 1000,
+    });
+    world.tick(now);
+    let backpack = Serial::new(backpack_serial(world, connection)).unwrap();
+    openshard_items::give(&mut world.state, backpack, reagent, 0, 20);
+    let _ = packets_for(world, connection);
+    (connection, entity)
+}
+
+/// A world whose spells cast Sphere-style — resolve at once, no rooting.
+fn sphere_world() -> World {
+    World::new(START).with_gameplay(Gameplay {
+        cast_style: openshard_state::CastStyle::Walk,
+        ..Default::default()
+    })
+}
+
+#[test]
+fn a_sphere_cast_resolves_at_once() {
+    let now = Instant::now();
+    let mut world = sphere_world();
+    let (connection, entity) = ready_caster(&mut world, BLACK_PEARL, now);
+    let mana_before = world.registry().get::<Mana>(entity).unwrap().current;
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 17,
+    }); // Fireball
+    world.tick(now);
+
+    assert!(
+        world
+            .registry()
+            .get::<openshard_state::components::Casting>(entity)
+            .is_none(),
+        "the sphere style roots nobody"
+    );
+    assert!(
+        world.registry().get::<Mana>(entity).unwrap().current < mana_before,
+        "the mana was paid at once"
+    );
+    assert!(
+        packets_for(&mut world, connection)
+            .iter()
+            .any(|p| p[0] == 0x6C),
+        "and the target cursor came up at once"
+    );
+}
+
+#[test]
+fn a_servuo_cast_waits_out_its_delay_then_targets() {
+    let now = Instant::now();
+    let mut world = world(); // the default is the ServUO stop-to-cast style
+    let (connection, entity) = ready_caster(&mut world, BLACK_PEARL, now);
+    let mana_before = world.registry().get::<Mana>(entity).unwrap().current;
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 17,
+    });
+    world.tick(now);
+    assert!(
+        world
+            .registry()
+            .get::<openshard_state::components::Casting>(entity)
+            .is_some(),
+        "the caster is committed to the cast"
+    );
+    assert_eq!(
+        world.registry().get::<Mana>(entity).unwrap().current,
+        mana_before,
+        "mana is not spent until the cast resolves"
+    );
+    let _ = packets_for(&mut world, connection);
+
+    // Wait out the cast delay.
+    let mut later = now;
+    for _ in 0..20 {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert!(
+        world
+            .registry()
+            .get::<openshard_state::components::Casting>(entity)
+            .is_none(),
+        "the cast finished"
+    );
+    assert!(
+        world.registry().get::<Mana>(entity).unwrap().current < mana_before,
+        "and paid its mana"
+    );
+    assert!(
+        packets_for(&mut world, connection)
+            .iter()
+            .any(|p| p[0] == 0x6C),
+        "then the target cursor came up"
+    );
+}
+
+#[test]
+fn stepping_breaks_a_cast() {
+    let now = Instant::now();
+    let mut world = world();
+    let (connection, entity) = ready_caster(&mut world, BLACK_PEARL, now);
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 17,
+    });
+    world.tick(now);
+    assert!(world
+        .registry()
+        .get::<openshard_state::components::Casting>(entity)
+        .is_some());
+
+    world.queue(Command::Walk {
+        connection,
+        request: walk(1, Direction::North),
+    });
+    world.tick(now);
+    assert!(
+        world
+            .registry()
+            .get::<openshard_state::components::Casting>(entity)
+            .is_none(),
+        "a step chose the walk over the spell"
+    );
+}
+
+#[test]
+fn a_blow_disturbs_a_cast_when_the_shard_says_so() {
+    let now = Instant::now();
+    let mut world = world(); // spell_disturb is on by default
+    let (connection, entity) = ready_caster(&mut world, BLACK_PEARL, now);
+    let serial = serial_of(&world, connection);
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 17,
+    });
+    world.tick(now);
+    assert!(world
+        .registry()
+        .get::<openshard_state::components::Casting>(entity)
+        .is_some());
+
+    world.queue(Command::Damage {
+        serial,
+        amount: 5,
+        damage_type: 0,
+        by: 0,
+    });
+    world.tick(now);
+    assert!(
+        world
+            .registry()
+            .get::<openshard_state::components::Casting>(entity)
+            .is_none(),
+        "the blow broke the cast"
+    );
+}
+
+#[test]
+fn a_fireball_damages_the_mobile_it_is_aimed_at() {
+    let now = Instant::now();
+    let mut world = sphere_world();
+    let (connection, _) = ready_caster(&mut world, BLACK_PEARL, now);
+    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 17,
+    });
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::TargetResponse {
+            cursor_id: 0,
+            serial: target,
+            location: Point::new(0, 0, 0),
+            graphic: 0,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    let target_entity = world
+        .registry()
+        .entity_of(Serial::new(target).unwrap())
+        .expect("the target");
+    assert!(
+        world
+            .registry()
+            .get::<Hitpoints>(target_entity)
+            .unwrap()
+            .current
+            < 50,
+        "the fireball hurt what it was aimed at"
+    );
+}
+
+/// The reagent the Poison spell consumes.
+const NIGHTSHADE: u16 = 0x0F88;
+
+#[test]
+fn poison_pulses_damage_then_wears_off() {
+    use openshard_state::components::Poisoned;
+    let now = Instant::now();
+    let mut world = world();
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let entity = world
+        .registry()
+        .entity_of(Serial::new(mob).unwrap())
+        .unwrap();
+    let ticks = world.state.ticks;
+    combat::apply_poison(&mut world.state, mob, 2, ticks); // greater
+    assert!(
+        world.registry().get::<Poisoned>(entity).is_some(),
+        "poisoned"
+    );
+
+    let hp_before = world.registry().get::<Hitpoints>(entity).unwrap().current;
+    let mut later = now;
+    for _ in 0..(combat::POISON_INTERVAL * u64::from(combat::POISON_PULSES) + 5) {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    let hp_after = world.registry().get::<Hitpoints>(entity).unwrap().current;
+    assert!(
+        hp_after < hp_before,
+        "poison hurt the mobile ({hp_before} -> {hp_after})"
+    );
+    assert!(
+        world.registry().get::<Poisoned>(entity).is_none(),
+        "and wore off after its pulses"
+    );
+}
+
+#[test]
+fn cure_clears_poison() {
+    use openshard_state::components::Poisoned;
+    let now = Instant::now();
+    let mut world = world();
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    let entity = world
+        .registry()
+        .entity_of(Serial::new(mob).unwrap())
+        .unwrap();
+    let ticks = world.state.ticks;
+    combat::apply_poison(&mut world.state, mob, 2, ticks);
+    assert!(
+        combat::cure_poison(&mut world.state, mob),
+        "it had poison to cure"
+    );
+    assert!(world.registry().get::<Poisoned>(entity).is_none());
+}
+
+#[test]
+fn poison_survives_a_relogin() {
+    // The cheese this closes: log out poisoned, log back in clean, and a relog
+    // is a free cure. ServUO keeps the logged-out mobile in-world with the timer
+    // still running; this shard saves the effect to the character row instead, so
+    // it comes back on the sheet. The same path carries buffs and debuffs later.
+    use openshard_protocol::SkillLock;
+    use openshard_state::components::Poisoned;
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let serial = serial_of(&world, conn);
+
+    // Poison the character, then let the save sweep the world.
+    let ticks = world.state.ticks;
+    combat::apply_poison(&mut world.state, serial, 2, ticks); // greater
+    world.take_snapshot();
+    let snapshot = world.drain_saves().next_back().expect("a snapshot");
+    let record = snapshot
+        .characters
+        .iter()
+        .find(|c| c.serial == serial)
+        .cloned()
+        .expect("the character was saved");
+    let poison = record
+        .effects
+        .iter()
+        .find(|e| e.kind == openshard_persistence::EFFECT_POISON)
+        .expect("the poison went to disk");
+    assert_eq!(poison.amount, 2, "at the level it was applied");
+
+    // Relogin, threading the record back through Enter the way the server does.
+    world.queue(Command::Disconnect { connection: conn });
+    world.tick(now);
+    let conn = connection();
+    world.queue(Command::Enter {
+        connection: conn,
+        version: ClientVersion::TOL,
+        account: "admin".to_owned(),
+        name: "Lord British".to_owned(),
+        serial: Some(serial),
+        position: Some(Point::new(START.0, START.1, 0)),
+        facet: 0,
+        appearance: None,
+        sheet: Some(CharacterSheet {
+            strength: record.strength,
+            dexterity: record.dexterity,
+            intelligence: record.intelligence,
+            skills: record
+                .skills
+                .iter()
+                .map(|s| (s.id, s.value, SkillLock::from_bits(s.lock)))
+                .collect(),
+            effects: record.effects.clone(),
+        }),
+        access: AccessLevel::Player,
+    });
+    world.tick(now);
+
+    let player = world.state.players[&conn];
+    let poisoned = world
+        .registry()
+        .get::<Poisoned>(player)
+        .expect("still poisoned after the relog — no free cure");
+    assert_eq!(poisoned.level, 2, "and at the same strength");
+}
+
+#[test]
+fn a_poisoned_creature_comes_back_poisoned() {
+    // The mobile half of the same rule: a creature's effects ride the mobile
+    // sweep the way its wounds do, so a restart does not cure the region's
+    // monsters either.
+    use openshard_state::components::Poisoned;
+    let now = Instant::now();
+    let mut home = world();
+    let mob = spawn_mobile_at(&mut home, Point::new(START.0, START.1, 0), 50, now);
+    let ticks = home.state.ticks;
+    combat::apply_poison(&mut home.state, mob, 1, ticks); // lesser
+
+    home.take_snapshot();
+    let snapshot = home.drain_saves().next_back().expect("a snapshot");
+    let mobiles = snapshot.mobiles.clone().expect("a mobile sweep");
+    assert!(
+        mobiles
+            .iter()
+            .find(|m| m.serial == mob)
+            .expect("the creature was swept")
+            .effects
+            .iter()
+            .any(|e| e.kind == openshard_persistence::EFFECT_POISON),
+        "its poison went to disk"
+    );
+
+    let mut shard = world();
+    shard.restore_mobiles(mobiles);
+    let creature = shard
+        .registry()
+        .entity_of(Serial::new(mob).unwrap())
+        .expect("the creature came back");
+    assert_eq!(
+        shard
+            .registry()
+            .get::<Poisoned>(creature)
+            .expect("still poisoned")
+            .level,
+        1,
+    );
+}
+
+#[test]
+fn the_poison_spell_poisons_what_it_is_aimed_at() {
+    use openshard_state::components::Poisoned;
+    let now = Instant::now();
+    let mut world = sphere_world();
+    let (connection, _) = ready_caster(&mut world, NIGHTSHADE, now);
+    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 19,
+    }); // Poison
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::TargetResponse {
+            cursor_id: 0,
+            serial: target,
+            location: Point::new(0, 0, 0),
+            graphic: 0,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    let entity = world
+        .registry()
+        .entity_of(Serial::new(target).unwrap())
+        .unwrap();
+    assert!(
+        world.registry().get::<Poisoned>(entity).is_some(),
+        "the Poison spell left its mark"
+    );
+}
+
+#[test]
+fn a_cast_without_reagents_fizzles() {
+    let now = Instant::now();
+    let mut world = sphere_world();
+    // Enter without stocking the pack — no reagents.
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = serial_of(&world, connection);
+    world.queue(Command::SetSkill {
+        serial,
+        skill: 25,
+        value: 1000,
+    });
+    world.tick(now);
+    let mana_before = world.registry().get::<Mana>(entity).unwrap().current;
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 17,
+    });
+    world.tick(now);
+    assert_eq!(
+        world.registry().get::<Mana>(entity).unwrap().current,
+        mana_before,
+        "a fizzle for want of a reagent spends nothing"
+    );
 }
 
 #[test]
@@ -3810,6 +4455,7 @@ fn a_command_does_nothing_until_the_tick() {
         position: None,
         facet: 0,
         appearance: None,
+        sheet: None,
         access: AccessLevel::Player,
     });
 
@@ -3828,10 +4474,11 @@ fn entering_sends_the_sequence_the_client_needs() {
     let ids: Vec<u8> = world.drain_outbound().map(|out| out.packet[0]).collect();
     assert_eq!(
         ids,
-        vec![0x1B, 0xBF, 0x20, 0x4F, 0x11, 0x78, 0x55],
+        vec![0x1B, 0xBF, 0x20, 0x4F, 0x11, 0x3A, 0x78, 0x55],
         "0x1B first or there is no body; 0x55 last or the client draws early; \
              0x11 status and the 0x78 of the player's own equipment before it, or the \
-             client has no stamina and no backpack serial to open"
+             client has no stamina and no backpack serial to open; 0x3A fills the \
+             skill window"
     );
 }
 
@@ -3907,6 +4554,7 @@ fn a_created_character_enters_with_its_chosen_body() {
             body: 0x025E,
             hue: 0x0430,
         }),
+        sheet: None,
         access: AccessLevel::Player,
     });
     world.tick(Instant::now());
@@ -4019,6 +4667,7 @@ fn a_characters_inventory_survives_a_logout_and_restore() {
         position: Some(Point::new(1500, 1000, 0)),
         facet: 0,
         appearance: None,
+        sheet: None,
         access: AccessLevel::Player,
     });
     shard.tick(now);
@@ -4100,6 +4749,7 @@ fn a_relogin_in_the_same_run_keeps_the_inventory() {
         position: Some(Point::new(1500, 1000, 0)),
         facet: 0,
         appearance: None,
+        sheet: None,
         access: AccessLevel::Player,
     });
     world.tick(now);
@@ -4720,6 +5370,7 @@ fn a_loaded_character_returns_on_its_saved_serial_and_spot() {
             body: 0x0191,
             hue: 0x83EA,
         }),
+        sheet: None,
         access: AccessLevel::Player,
     });
     world.tick(Instant::now());
@@ -4776,6 +5427,7 @@ fn enter_on_facet(world: &mut World, connection: ConnectionId, facet: u8, now: I
         position: None,
         facet,
         appearance: None,
+        sheet: None,
         access: AccessLevel::Player,
     });
     world.tick(now);
@@ -5056,6 +5708,7 @@ fn a_command_queued_during_a_tick_waits_for_the_next_one() {
         position: None,
         facet: 0,
         appearance: None,
+        sheet: None,
         access: AccessLevel::Player,
     });
     assert_eq!(world.player_count(), 0);
@@ -5666,7 +6319,19 @@ fn the_chase_pace_is_the_operators_knob() {
     // shard's creature closes on its prey and the classic one lags behind.
     let chased_distance = |step_ms: u64| {
         let now = Instant::now();
-        let gameplay = Gameplay::new(1, 15000, 1000, 20 * 60, 2 * 60, 18, 3, 31, step_ms);
+        let gameplay = Gameplay::new(
+            1,
+            15000,
+            1000,
+            20 * 60,
+            2 * 60,
+            18,
+            3,
+            31,
+            step_ms,
+            openshard_state::CastStyle::Stop,
+            true,
+        );
         let mut world = World::new(START).with_gameplay(gameplay);
         let _gm = enter_gm(&mut world, now);
         let player_at = Point::new(START.0, START.1, 0);
@@ -5927,6 +6592,7 @@ fn a_mounted_character_logs_back_in_still_mounted() {
         position: Some(Point::new(START.0, START.1, 0)),
         facet: 0,
         appearance: None,
+        sheet: None,
         access: AccessLevel::GameMaster,
     });
     world.tick(now);

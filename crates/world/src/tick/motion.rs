@@ -11,6 +11,17 @@ impl World {
         let Some(serial) = self.state.registry.serial_of(entity) else {
             return;
         };
+        // A step breaks a spell mid-cast: the ServUO style roots the caster, so
+        // stepping is choosing the walk over the spell. (The Sphere style never
+        // sets `Casting`, so this is a no-op there.)
+        if self
+            .state
+            .registry
+            .remove::<openshard_state::components::Casting>(entity)
+            .is_some()
+        {
+            self.notify_self(entity, "Your concentration is broken.");
+        }
         let Some(Movement(mut walker)) = self.state.registry.get::<Movement>(entity).copied()
         else {
             return;

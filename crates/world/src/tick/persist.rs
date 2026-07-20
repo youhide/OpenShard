@@ -1,6 +1,8 @@
 use super::*;
+use openshard_persistence::{EffectRecord, EFFECT_POISON};
 use openshard_state::components::{
-    body_opens_doors, Aggression, Banker, Npc, Price, RangedAttack, SwingSpeed, Vendor,
+    body_opens_doors, Aggression, Banker, Npc, Poisoned, Price, RangedAttack, Skills, SwingSpeed,
+    Vendor,
 };
 
 impl World {
@@ -328,6 +330,7 @@ impl World {
                 npc_home: npc.map(|n| (n.home.x, n.home.y, n.home.z)),
                 npc_wander: npc.map_or(0, |n| n.wander),
                 spawned_by: registry.get::<SpawnedBy>(entity).map(|s| s.0),
+                effects: Self::effects_of(registry, entity),
             });
         }
         records
@@ -373,6 +376,53 @@ impl World {
     ///
     /// `None` for anything that is not a character, which is not an error: the
     /// journal tracks entities and the world will hold more than people.
+    /// The active effects on a mobile, as they go to disk.
+    ///
+    /// Poison is the only one today; buffs and debuffs slot in here as they
+    /// land, so a relog carries a debuff instead of washing it off. The stored
+    /// `remaining` is the pulse count — the time to the *next* pulse resets to a
+    /// full interval on restore, which is close enough and stays a tick count,
+    /// never a clock.
+    pub(super) fn effects_of(registry: &Registry, entity: EntityId) -> Vec<EffectRecord> {
+        let mut effects = Vec::new();
+        if let Some(poison) = registry.get::<Poisoned>(entity) {
+            effects.push(EffectRecord {
+                kind: EFFECT_POISON,
+                amount: poison.level as i16,
+                remaining: poison.pulses_left as u16,
+            });
+        }
+        effects
+    }
+
+    /// Put saved effects back on a restored mobile.
+    ///
+    /// The mirror of [`effects_of`](Self::effects_of): a stored poison becomes a
+    /// live [`Poisoned`] again, its next pulse a full interval out from `now`
+    /// (boot, or the tick a character logs in). A tick count, so the restored
+    /// poison replays like every other timed thing.
+    pub(super) fn apply_effects(
+        registry: &mut Registry,
+        entity: EntityId,
+        effects: &[EffectRecord],
+        now: u64,
+    ) {
+        for effect in effects {
+            // Poison is the only kind today; buffs and debuffs join it here, and
+            // an unknown kind from a newer save is skipped, not a crash.
+            if effect.kind == EFFECT_POISON {
+                registry.insert(
+                    entity,
+                    Poisoned {
+                        level: effect.amount.clamp(0, i16::from(u8::MAX)) as u8,
+                        next_pulse: now + combat::POISON_INTERVAL,
+                        pulses_left: effect.remaining.min(u16::from(u8::MAX)) as u8,
+                    },
+                );
+            }
+        }
+    }
+
     pub(super) fn record_of(registry: &Registry, entity: EntityId) -> Option<CharacterRecord> {
         let serial = registry.serial_of(entity)?;
         let position = registry.get::<Position>(entity)?.0;
@@ -384,6 +434,20 @@ impl World {
         // which is the honest answer.
         let account = registry.get::<Account>(entity)?;
         let facet = registry.get::<Facet>(entity).map_or(DEFAULT_FACET, |f| f.0);
+        let stats = registry.get::<Stats>(entity).copied().unwrap_or(Stats {
+            strength: 100,
+            dexterity: 100,
+            intelligence: 100,
+        });
+        let skills = registry.get::<Skills>(entity).map_or_else(Vec::new, |s| {
+            s.entries()
+                .map(|(id, value, lock)| openshard_persistence::SkillRecord {
+                    id,
+                    value,
+                    lock: lock.to_bits(),
+                })
+                .collect()
+        });
         Some(CharacterRecord {
             serial: serial.raw(),
             account: account.0.clone(),
@@ -395,6 +459,11 @@ impl World {
             y: position.y,
             z: position.z,
             facing: heading.to_bits(),
+            strength: stats.strength,
+            dexterity: stats.dexterity,
+            intelligence: stats.intelligence,
+            skills,
+            effects: Self::effects_of(registry, entity),
         })
     }
 
@@ -696,6 +765,10 @@ impl World {
                 registry.insert(entity, SpawnedBy(region));
             }
             registry.insert(entity, Movement(Walker::new(position, facing)));
+            // A wounded creature comes back wounded; a poisoned one comes back
+            // poisoned. Its pulses resume at boot's tick.
+            let now = self.state.ticks;
+            Self::apply_effects(&mut self.state.registry, entity, &record.effects, now);
             self.state
                 .facet_state_mut(facet)
                 .sectors

@@ -78,6 +78,8 @@ pub(crate) fn gameplay_of(config: &Config) -> Gameplay {
         g.distance_whisper,
         g.distance_yell,
         g.creature_step_ms,
+        openshard_world::CastStyle::parse(&g.cast_style),
+        g.spell_disturb,
     )
 }
 

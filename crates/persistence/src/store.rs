@@ -302,6 +302,11 @@ mod tests {
             y: 1600,
             z: 30,
             facing: 0,
+            strength: 100,
+            dexterity: 100,
+            intelligence: 100,
+            skills: Vec::new(),
+            effects: Vec::new(),
         }
     }
 
@@ -494,6 +499,7 @@ mod tests {
             npc_home: None,
             npc_wander: 0,
             spawned_by: Some(1),
+            effects: Vec::new(),
         }
     }
 

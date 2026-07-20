@@ -25,7 +25,7 @@ pub(crate) fn dispatch(
             let key = (account.to_lowercase(), play.name.to_lowercase());
             let record = saved.get(&key);
             let facet = record.map_or(0, |record| record.facet);
-            let (serial, position, appearance) = match record {
+            let (serial, position, appearance, sheet) = match record {
                 Some(record) => (
                     Some(record.serial),
                     Some(Point::new(record.x, record.y, record.z)),
@@ -33,8 +33,19 @@ pub(crate) fn dispatch(
                         body: record.body,
                         hue: record.hue,
                     }),
+                    Some(CharacterSheet {
+                        strength: record.strength,
+                        dexterity: record.dexterity,
+                        intelligence: record.intelligence,
+                        skills: record
+                            .skills
+                            .iter()
+                            .map(|s| (s.id, s.value, SkillLock::from_bits(s.lock)))
+                            .collect(),
+                        effects: record.effects.clone(),
+                    }),
                 ),
-                None => (None, None, None),
+                None => (None, None, None, None),
             };
             session.in_world = true;
             // Tell the gateway framer this client's version now, before any
@@ -52,6 +63,7 @@ pub(crate) fn dispatch(
                 position,
                 facet,
                 appearance,
+                sheet,
                 access,
             });
             true
@@ -72,11 +84,17 @@ pub(crate) fn dispatch(
             true
         }
         Some(0x34) => {
-            // Status request (opening the paperdoll). The full 10 bytes are a
-            // magic word, a request type and a serial; we only ever answer with
-            // this connection's own status, so none of it needs decoding.
+            // A status/skills query: a magic word (4), a type byte, and a serial.
+            // Type 0x05 asks for the skill list — the client sends it when the
+            // skill window opens — and type 0x04 (and the rest) for the status
+            // bar. ServUO's `MobileQuery`. Answering every query with the status,
+            // as before, left the skill window empty.
             if session.in_world {
-                world.queue(Command::RequestStatus { connection: id });
+                if packet.get(5) == Some(&0x05) {
+                    world.queue(Command::RequestSkills { connection: id });
+                } else {
+                    world.queue(Command::RequestStatus { connection: id });
+                }
             }
             true
         }
@@ -297,6 +315,23 @@ pub(crate) fn dispatch(
             }
             true
         }
+        Some(SkillLockRequest::ID) => {
+            if !session.in_world {
+                return true;
+            }
+            match SkillLockRequest::decode(packet) {
+                Ok(request) => world.queue(Command::SetSkillLock {
+                    connection: id,
+                    skill: request.skill,
+                    lock: request.lock,
+                }),
+                Err(_) => {
+                    warn!(%id, "malformed 0x3A skill lock");
+                    return false;
+                }
+            }
+            true
+        }
         _ => true,
     }
 }
@@ -427,6 +462,22 @@ pub(crate) fn create_character(
         appearance: Some(Appearance {
             body: create.body(),
             hue: create.skin_hue,
+        }),
+        // The stats and skills the player chose on the creation screen. The
+        // client sends whole points; skills are stored in tenths, so a chosen 50
+        // becomes 500. New skills start unlocked (training up).
+        sheet: Some(CharacterSheet {
+            strength: u16::from(create.strength),
+            dexterity: u16::from(create.dexterity),
+            intelligence: u16::from(create.intelligence),
+            skills: create
+                .skills
+                .iter()
+                .filter(|choice| choice.value > 0)
+                .map(|choice| (choice.skill, u16::from(choice.value) * 10, SkillLock::Up))
+                .collect(),
+            // A new character is clean.
+            effects: Vec::new(),
         }),
         access,
     });

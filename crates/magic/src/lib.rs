@@ -15,6 +15,12 @@ use openshard_items::{count_in_container, take_from_container};
 use openshard_state::components::{Hitpoints, Mana};
 use openshard_state::WorldState;
 
+mod spells;
+pub use spells::{
+    cast_delay_ticks, difficulty, info, mana, SpellEffect, SpellInfo, SpellTarget, AREA_RADIUS,
+    MAGERY,
+};
+
 /// How often, in ticks, a mobile with spent mana gets a point back.
 pub const MANA_REGEN_TICKS: u64 = 60;
 
@@ -120,6 +126,40 @@ pub fn cast_spell(state: &mut WorldState, cast: Cast<'_>) {
         target,
         success,
     });
+}
+
+/// The core cast path's pay-and-roll: check the mana and reagents, spend them,
+/// and roll the casting skill — returning whether the roll passed, or `None` if
+/// the spell fizzled short of mana or a reagent (nothing is spent). Unlike
+/// [`cast_spell`] it emits no event: the *world* emits [`SpellCast`] once it
+/// knows the target — which a targeted spell learns only after the cast — and
+/// applies the core effect there.
+pub fn pay_and_roll(
+    state: &mut WorldState,
+    caster: EntityId,
+    mana: u16,
+    difficulty: u16,
+    skill: u8,
+    pack: u32,
+    reagents: &[(u16, u16)],
+) -> Option<bool> {
+    let have = state.registry.get::<Mana>(caster).map_or(0, |m| m.current);
+    if have < mana || !has_reagents(state, pack, reagents) {
+        return None;
+    }
+    consume_reagents(state, pack, reagents);
+    if let Some(&Mana { current, max }) = state.registry.get::<Mana>(caster) {
+        state.registry.insert(
+            caster,
+            Mana {
+                current: current - mana,
+                max,
+            },
+        );
+    }
+    Some(openshard_skills::roll_skill(
+        state, caster, skill, difficulty,
+    ))
 }
 
 /// Whether `pack` holds every reagent the spell needs. A zero pack with any

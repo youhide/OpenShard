@@ -34,11 +34,11 @@ use openshard_persistence::{
 use openshard_protocol::{
     encode_login_denied, huffman, AccessLevel, AttackRequest, CastSpellRequest, CharacterPlay,
     ClientVersion, CreateCharacter, DoubleClick, DropItem, EquipItemRequest, GameServerLogin,
-    GumpResponse, LookRequest, PickUpItem, Point, StartLocation, TalkRequest, TargetResponse,
-    UnicodeTalkRequest, WalkRequest, WarModeRequest,
+    GumpResponse, LookRequest, PickUpItem, Point, SkillLock, SkillLockRequest, StartLocation,
+    TalkRequest, TargetResponse, UnicodeTalkRequest, WalkRequest, WarModeRequest,
 };
 use openshard_world::{
-    Appearance, Command, Gameplay, Map, MapTerrain, TileData, World, TICK_INTERVAL,
+    Appearance, CharacterSheet, Command, Gameplay, Map, MapTerrain, TileData, World, TICK_INTERVAL,
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;

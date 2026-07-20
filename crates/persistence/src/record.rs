@@ -32,7 +32,11 @@ use serde::{Deserialize, Serialize};
 /// - v4: spawn regions and their respawn timers.
 /// - v5: the whole world — NPC mobiles (with gear and vendor stock), decoration
 ///   (with door state), and an item's `price`/`name`.
-pub const SCHEMA_VERSION: u32 = 5;
+/// - v6: a character's stats and skills (with their lock arrows).
+/// - v7: a mobile's active effects — poison today, buffs and debuffs as they
+///   land — so a relog cannot wash a debuff off, the way ServUO keeps a
+///   logged-out mobile's timers running and Sphere saves its effect tags.
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// An account, as saved.
 ///
@@ -84,6 +88,62 @@ pub struct CharacterRecord {
     pub z: i8,
     /// Which way it faces, as the wire byte.
     pub facing: u8,
+    /// Strength — caps hit points.
+    #[serde(default = "default_stat")]
+    pub strength: u16,
+    /// Dexterity — the stamina pool and swing pace.
+    #[serde(default = "default_stat")]
+    pub dexterity: u16,
+    /// Intelligence — caps mana.
+    #[serde(default = "default_stat")]
+    pub intelligence: u16,
+    /// Every trained skill, as `(id, value in tenths, lock byte)`. Empty for a
+    /// character that has none yet.
+    #[serde(default)]
+    pub skills: Vec<SkillRecord>,
+    /// Every timed effect working through it — poison, buffs, debuffs — so a
+    /// relog cannot wash them off. Empty for a clean character.
+    #[serde(default)]
+    pub effects: Vec<EffectRecord>,
+}
+
+/// A timed effect on a mobile that a relog must not wash off — poison today,
+/// buffs and debuffs (bless, curse, a stat drain) as they land. Deliberately one
+/// shape for all of them, so a new effect kind rides the same list and column
+/// with no schema change: a `kind` tag, its `amount` (a poison level, a stat
+/// offset), and how much is `remaining` (poison pulses, or a buff's seconds).
+/// The remaining *count* is stored, not a tick (which resets to zero at boot) —
+/// the effect re-derives its next fire from "now" on restore, the way a
+/// spawner's remaining wait does.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct EffectRecord {
+    /// What kind of effect: `0` poison, and future buffs/debuffs beyond it.
+    pub kind: u8,
+    /// Its magnitude — a poison level, or a stat offset (signed for a debuff).
+    pub amount: i16,
+    /// How much it has left — poison pulses, or a timed buff's seconds.
+    pub remaining: u16,
+}
+
+/// The effect kind for poison — the first, and the pattern the rest follow.
+pub const EFFECT_POISON: u8 = 0;
+
+/// One skill a character has, as saved: which, how far trained, and the arrow
+/// the player set it to train by.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct SkillRecord {
+    /// The skill id, zero-based.
+    pub id: u8,
+    /// The trained value, in tenths.
+    pub value: u16,
+    /// The lock arrow as its wire byte (0 up, 1 down, 2 locked).
+    pub lock: u8,
+}
+
+/// The stat a pre-v6 save (which stored none) loads with — the flat hundred the
+/// world handed out before stats were persisted.
+fn default_stat() -> u16 {
+    100
 }
 
 /// Where an item is, as saved. An item is in exactly one of three places, the
@@ -307,6 +367,9 @@ pub struct MobileRecord {
     /// The spawn region that maintains it, if one does — restored so the region
     /// counts it and does not spawn over it.
     pub spawned_by: Option<u32>,
+    /// Every timed effect working through it — poison and the rest.
+    #[serde(default)]
+    pub effects: Vec<EffectRecord>,
 }
 
 /// A shut-and-openable door's live state, inside a [`DecorationRecord`].
@@ -424,6 +487,26 @@ mod tests {
             y: 1600,
             z: 30,
             facing: 3,
+            strength: 55,
+            dexterity: 40,
+            intelligence: 25,
+            skills: vec![
+                SkillRecord {
+                    id: 25, // Magery
+                    value: 501,
+                    lock: 1, // down
+                },
+                SkillRecord {
+                    id: 45, // Mining
+                    value: 300,
+                    lock: 0,
+                },
+            ],
+            effects: vec![EffectRecord {
+                kind: EFFECT_POISON,
+                amount: 2,
+                remaining: 5,
+            }],
         };
         let json = serde_json::to_string(&record).expect("a record must serialise");
         let back: CharacterRecord = serde_json::from_str(&json).expect("and come back");
@@ -446,6 +529,11 @@ mod tests {
             y: 500,
             z: -40,
             facing: 0,
+            strength: 100,
+            dexterity: 100,
+            intelligence: 100,
+            skills: Vec::new(),
+            effects: Vec::new(),
         };
         let json = serde_json::to_string(&record).expect("a record must serialise");
         let back: CharacterRecord = serde_json::from_str(&json).expect("and come back");

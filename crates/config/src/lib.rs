@@ -80,7 +80,7 @@ pub struct Config {
 /// Note this is a different axis from a client's `Era` in `openshard-protocol`:
 /// that is which *packets* a client version understands, never branched on for
 /// rules; this is which *rules* the shard runs, never seen on the wire.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GameplayConfig {
     /// Which swing-speed formula combat uses, Sphere's `m_iCombatSpeedEra`.
@@ -118,6 +118,19 @@ pub struct GameplayConfig {
     /// runner. Idle creatures amble at twice this.
     #[serde(default = "default_creature_step_ms")]
     pub creature_step_ms: u64,
+    /// How a spell is cast. `"servuo"` (the default) is the UO original: the
+    /// caster stops, says the words over a cast delay, and the target cursor
+    /// comes up only after — then it may move again. `"sphere"` is Sphere's feel:
+    /// the spell resolves as it is cast, with no rooting, so the caster keeps
+    /// walking. The Sphere-vs-ServUO knob the whole spell system reads.
+    #[serde(default = "default_cast_style")]
+    pub cast_style: String,
+    /// Whether taking damage while casting disturbs the spell — UO's fizzle. Only
+    /// bites in the `"servuo"` cast style, where there is a cast delay to
+    /// interrupt. `true` is the UO/ServUO original; `false` lets a cast finish
+    /// through the hits, Sphere-style.
+    #[serde(default = "default_spell_disturb")]
+    pub spell_disturb: bool,
 }
 
 /// Whether combat [`combat_era`](GameplayConfig::combat_era) is one the swing
@@ -154,6 +167,12 @@ fn default_creature_step_ms() -> u64 {
 fn default_distance_yell() -> u32 {
     31
 }
+fn default_cast_style() -> String {
+    "servuo".to_owned()
+}
+fn default_spell_disturb() -> bool {
+    true
+}
 
 impl Default for GameplayConfig {
     fn default() -> Self {
@@ -167,6 +186,8 @@ impl Default for GameplayConfig {
             distance_whisper: default_distance_whisper(),
             distance_yell: default_distance_yell(),
             creature_step_ms: default_creature_step_ms(),
+            cast_style: default_cast_style(),
+            spell_disturb: default_spell_disturb(),
         }
     }
 }

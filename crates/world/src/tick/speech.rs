@@ -76,21 +76,4 @@ impl World {
         let packet = encode_message(serial, body, LABEL_MODE, hue, 3, "", &name);
         self.state.send(connection, packet);
     }
-
-    /// A client asked to cast a spell: say so on the bus for a script to act on.
-    /// The world does not cast — it does not know what the spell costs or does.
-    /// See [`Command::RequestCast`].
-    pub(super) fn request_cast(&mut self, connection: ConnectionId, spell: u16) {
-        let Some(&entity) = self.state.players.get(&connection) else {
-            return;
-        };
-        let Some(serial) = self.state.registry.serial_of(entity) else {
-            return;
-        };
-        self.state.bus.send(SpellRequested {
-            entity,
-            serial,
-            spell,
-        });
-    }
 }

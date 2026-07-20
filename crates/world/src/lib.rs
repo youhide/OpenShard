@@ -56,7 +56,6 @@ pub use openshard_magic::SpellCast;
 pub use openshard_npc::StockLine;
 pub use openshard_skills::SkillUsed;
 pub use openshard_state::components;
-pub use openshard_state::Gameplay;
 pub use openshard_state::Outbound;
 pub use openshard_state::{distance, in_range, sectors, Sectors, SECTOR_SIZE, VIEW_RANGE};
 pub use openshard_state::{
@@ -64,7 +63,10 @@ pub use openshard_state::{
     Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, MurderDecay,
     Murders, Name, Position, Resistance, Scripted, Skills, Stackable, Stats, SwingSpeed,
 };
+pub use openshard_state::{CastStyle, Gameplay};
 pub use terrain::{MapTerrain, MAX_STEP_UP, PLAYER_HEIGHT};
-pub use tick::{Appearance, Command, DecorContainer, DecorDoor, World, TICK_INTERVAL};
+pub use tick::{
+    Appearance, CharacterSheet, Command, DecorContainer, DecorDoor, World, TICK_INTERVAL,
+};
 pub use tiledata::{LandTile, StaticTile, TileData, TileDataError, TileDataFormat, TileFlags};
 pub use uop::UopError;

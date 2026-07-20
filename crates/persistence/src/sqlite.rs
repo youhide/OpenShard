@@ -127,7 +127,16 @@ CREATE TABLE IF NOT EXISTS characters (
     x       INTEGER NOT NULL,
     y       INTEGER NOT NULL,
     z       INTEGER NOT NULL,
-    facing  INTEGER NOT NULL
+    facing  INTEGER NOT NULL,
+    strength     INTEGER NOT NULL,
+    dexterity    INTEGER NOT NULL,
+    intelligence INTEGER NOT NULL,
+    -- The trained skills as a JSON array, like the spawner creature list: a
+    -- handful per character, not a table's worth.
+    skills  TEXT NOT NULL,
+    -- Active effects as a JSON array (poison today, buffs and debuffs later),
+    -- so a relog cannot wash a debuff off.
+    effects  TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS items (
     serial    INTEGER PRIMARY KEY,
@@ -270,11 +279,16 @@ impl Store for SqliteStore {
             // world is a world that never existed — see `crate::journal`.
             let transaction = guard.transaction().map_err(database)?;
             for record in &characters {
+                let skills = serde_json::to_string(&record.skills)
+                    .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+                let effects = serde_json::to_string(&record.effects)
+                    .map_err(|e| StoreError::Corrupt(e.to_string()))?;
                 transaction
                     .execute(
                         "INSERT OR REPLACE INTO characters \
-                         (serial, account, name, body, hue, facet, x, y, z, facing) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                         (serial, account, name, body, hue, facet, x, y, z, facing, \
+                          strength, dexterity, intelligence, skills, effects) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                         params![
                             record.serial,
                             record.account,
@@ -286,6 +300,11 @@ impl Store for SqliteStore {
                             record.y,
                             record.z,
                             record.facing,
+                            record.strength,
+                            record.dexterity,
+                            record.intelligence,
+                            skills,
+                            effects,
                         ],
                     )
                     .map_err(database)?;
@@ -436,27 +455,47 @@ impl Store for SqliteStore {
                 .expect("the sqlite mutex is never poisoned");
             let mut statement = guard
                 .prepare(
-                    "SELECT serial, account, name, body, hue, facet, x, y, z, facing \
-                     FROM characters",
+                    "SELECT serial, account, name, body, hue, facet, x, y, z, facing, \
+                     strength, dexterity, intelligence, skills, effects FROM characters",
                 )
                 .map_err(database)?;
             let rows = statement
                 .query_map([], |row| {
-                    Ok(CharacterRecord {
-                        serial: row.get(0)?,
-                        account: row.get(1)?,
-                        name: row.get(2)?,
-                        body: row.get(3)?,
-                        hue: row.get(4)?,
-                        facet: row.get(5)?,
-                        x: row.get(6)?,
-                        y: row.get(7)?,
-                        z: row.get(8)?,
-                        facing: row.get(9)?,
-                    })
+                    let skills: String = row.get(13)?;
+                    let effects: String = row.get(14)?;
+                    Ok((
+                        CharacterRecord {
+                            serial: row.get(0)?,
+                            account: row.get(1)?,
+                            name: row.get(2)?,
+                            body: row.get(3)?,
+                            hue: row.get(4)?,
+                            facet: row.get(5)?,
+                            x: row.get(6)?,
+                            y: row.get(7)?,
+                            z: row.get(8)?,
+                            facing: row.get(9)?,
+                            strength: row.get(10)?,
+                            dexterity: row.get(11)?,
+                            intelligence: row.get(12)?,
+                            skills: Vec::new(),
+                            effects: Vec::new(),
+                        },
+                        skills,
+                        effects,
+                    ))
                 })
                 .map_err(database)?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(database)
+            let mut characters = Vec::new();
+            for row in rows {
+                let (mut record, skills, effects) = row.map_err(database)?;
+                record.skills = serde_json::from_str(&skills)
+                    .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+                record.effects = serde_json::from_str(&effects)
+                    .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+                characters.push(record);
+            }
+            Ok(characters)
         })
         .await
     }
@@ -695,6 +734,11 @@ mod tests {
             y: 1600,
             z: 30,
             facing: 0,
+            strength: 100,
+            dexterity: 100,
+            intelligence: 100,
+            skills: Vec::new(),
+            effects: Vec::new(),
         }
     }
 
@@ -872,6 +916,7 @@ mod tests {
                 npc_home: Some((1400, 1600, 0)),
                 npc_wander: 2,
                 spawned_by: None,
+                effects: Vec::new(),
             }
         }
         let decoration = DecorationRecord {

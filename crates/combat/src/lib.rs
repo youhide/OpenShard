@@ -18,7 +18,7 @@ use openshard_movement::Terrain;
 use openshard_protocol::{encode_attack, encode_war_mode, Notoriety};
 use openshard_state::components::{
     Client, Combat, CriminalUntil, DamageType, Hitpoints, MeleeDamage, MurderDecay, Murders,
-    Position, RangedAttack, Resistance, Stats, SwingSpeed,
+    Poisoned, Position, RangedAttack, Resistance, Stats, SwingSpeed,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::WorldState;
@@ -484,6 +484,94 @@ pub fn flag_criminal(state: &mut WorldState, mobile: EntityId) {
 /// Base standing, not always innocent: a murderer wears grey while its criminal
 /// flag lasts, but the red underneath does not lapse, so a lapsing flag uncovers
 /// it rather than washing it blue.
+/// Ticks between poison pulses — about two seconds, ServUO's pulse cadence.
+pub const POISON_INTERVAL: u64 = 40;
+/// How many pulses a fresh poison runs before it wears off.
+pub const POISON_PULSES: u8 = 8;
+
+/// The damage one pulse of a poison of `level` deals, before poison resistance.
+#[must_use]
+pub const fn poison_damage(level: u8) -> u16 {
+    level as u16 + 1
+}
+
+/// Poison a mobile at `level` (0 lesser .. 4 lethal), starting its pulses at
+/// `now`. A stronger poison overrides a weaker one; a weaker never downgrades a
+/// stronger one already working — ServUO's rule.
+pub fn apply_poison(state: &mut WorldState, serial: u32, level: u8, now: u64) {
+    let Some(entity) = Serial::new(serial).and_then(|s| state.registry.entity_of(s)) else {
+        return;
+    };
+    let level = level.min(4);
+    if state
+        .registry
+        .get::<Poisoned>(entity)
+        .is_some_and(|existing| existing.level > level)
+    {
+        return;
+    }
+    state.registry.insert(
+        entity,
+        Poisoned {
+            level,
+            next_pulse: now + POISON_INTERVAL,
+            pulses_left: POISON_PULSES,
+        },
+    );
+}
+
+/// Cure a mobile's poison — returns whether it had any to cure.
+pub fn cure_poison(state: &mut WorldState, serial: u32) -> bool {
+    let Some(entity) = Serial::new(serial).and_then(|s| state.registry.entity_of(s)) else {
+        return false;
+    };
+    state.registry.remove::<Poisoned>(entity).is_some()
+}
+
+/// Each tick, land a pulse on every poisoned mobile whose pulse is due, and
+/// clear a poison that has run its course. The damage passes through [`damage`],
+/// so poison resistance cuts it and a lethal dose kills like any other — and a
+/// poisoned caster's pulse disturbs its own spell, through the same
+/// `MobileDamaged`.
+pub fn poison_tick(state: &mut WorldState) {
+    let now = state.ticks;
+    let due: Vec<(EntityId, u8, u8)> = state
+        .registry
+        .query::<Poisoned>()
+        .filter(|(_, poison)| now >= poison.next_pulse)
+        .map(|(entity, poison)| (entity, poison.level, poison.pulses_left))
+        .collect();
+    for (entity, level, pulses_left) in due {
+        let Some(serial) = state.registry.serial_of(entity) else {
+            continue;
+        };
+        damage(
+            state,
+            serial.raw(),
+            poison_damage(level),
+            DamageType::Poison,
+            None,
+        );
+        // The blow may have killed and despawned a creature; only touch the
+        // poison if the mobile is still here.
+        if state.registry.get::<Hitpoints>(entity).is_none() {
+            continue;
+        }
+        if pulses_left <= 1 {
+            state.registry.remove::<Poisoned>(entity);
+        } else {
+            state.registry.insert(
+                entity,
+                Poisoned {
+                    level,
+                    next_pulse: now + POISON_INTERVAL,
+                    pulses_left: pulses_left - 1,
+                },
+            );
+        }
+    }
+}
+
 pub fn expire_criminality(state: &mut WorldState) {
     let now = state.ticks;
     let expired: Vec<EntityId> = state
