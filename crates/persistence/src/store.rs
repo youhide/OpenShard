@@ -398,6 +398,7 @@ mod tests {
             container_gump: None,
             price: None,
             name: None,
+            spellbook: None,
             location: crate::record::ItemLocation::Contained {
                 container,
                 x: 0,
@@ -418,6 +419,7 @@ mod tests {
             container_gump: None,
             price: None,
             name: None,
+            spellbook: None,
             location: crate::record::ItemLocation::Ground {
                 facet: 0,
                 x: 1400,

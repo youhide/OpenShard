@@ -97,7 +97,9 @@ CREATE TABLE IF NOT EXISTS items (
     grid     INTEGER NOT NULL,
     layer    INTEGER NOT NULL,
     price    BIGINT,
-    name     TEXT
+    name     TEXT,
+    -- a spellbook's learned-spell bitmask, so a bought book still opens after a relog.
+    spellbook BIGINT
 );
 CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
 CREATE TABLE IF NOT EXISTS mobiles (
@@ -390,7 +392,8 @@ impl Store for PgStore {
         let rows = client
             .query(
                 "SELECT serial, owner, graphic, hue, amount, stackable, gump, \
-                 loc_kind, facet, x, y, z, parent, grid, layer, price, name FROM items",
+                 loc_kind, facet, x, y, z, parent, grid, layer, price, name, spellbook \
+                 FROM items",
                 &[],
             )
             .await
@@ -541,15 +544,15 @@ async fn insert_item(
         .execute(
             "INSERT INTO items \
              (serial, owner, graphic, hue, amount, stackable, gump, \
-              loc_kind, facet, x, y, z, parent, grid, layer, price, name) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) \
+              loc_kind, facet, x, y, z, parent, grid, layer, price, name, spellbook) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) \
              ON CONFLICT (serial) DO UPDATE SET \
              owner = EXCLUDED.owner, graphic = EXCLUDED.graphic, hue = EXCLUDED.hue, \
              amount = EXCLUDED.amount, stackable = EXCLUDED.stackable, gump = EXCLUDED.gump, \
              loc_kind = EXCLUDED.loc_kind, \
              facet = EXCLUDED.facet, x = EXCLUDED.x, y = EXCLUDED.y, z = EXCLUDED.z, \
              parent = EXCLUDED.parent, grid = EXCLUDED.grid, layer = EXCLUDED.layer, \
-             price = EXCLUDED.price, name = EXCLUDED.name",
+             price = EXCLUDED.price, name = EXCLUDED.name, spellbook = EXCLUDED.spellbook",
             &[
                 &i64::from(item.serial),
                 &i64::from(item.owner),
@@ -568,6 +571,9 @@ async fn insert_item(
                 &layer,
                 &item.price.map(i64::from),
                 &item.name,
+                // A u64 mask reinterpreted as i64 (Postgres BIGINT is signed);
+                // the full book is u64::MAX, so it must be bit-cast, not widened.
+                &item.spellbook.map(|mask| mask as i64),
             ],
         )
         .await
@@ -617,6 +623,8 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
                 .map(|p| u32::try_from(p).map_err(|_| corrupt("price")))
                 .transpose()?,
             name: row.get(16),
+            // Bit-cast back from the i64 the mask was stored as.
+            spellbook: row.get::<_, Option<i64>>(17).map(|mask| mask as u64),
             location,
         }))
     }

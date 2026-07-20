@@ -16,12 +16,15 @@ data-oriented, script-first, hot-reloadable, observable.
 > client's map and takes clients through login and character creation into a
 > ticking, shared world. Characters walk and run the same ground the client
 > draws (the step rules are the client's own), pick things up, fill backpacks,
-> wear clothes, ride horses, and buy and sell with vendors. They fight creatures
-> that fight back with real behaviour — line-of-sight aggro, pathing around
-> walls, fleeing, kiting — gain skills into a live skill window, and cast from a
-> 64-spell Magery book whose poisons and Bless/Curse buffs persist through a
-> relog. The **whole world** saves itself to SQLite or PostgreSQL without ever
-> pausing — every NPC, every door, every debuff — and survives a restart.
+> wear clothes, ride horses, and buy and sell with vendors — including a mage who
+> stocks reagents, an empty spellbook and the 64 Magery scrolls to scribe into
+> it. They read the name of anything they click (or hover, with AoS cliloc
+> tooltips) and act on it through a context menu. They fight creatures that fight
+> back with real behaviour — line-of-sight aggro, pathing around walls, fleeing,
+> kiting — gain skills into a live skill window, and cast only the spells in their
+> book, whose poisons and Bless/Curse buffs persist through a relog. The **whole
+> world** saves itself to SQLite or PostgreSQL without ever pausing — every NPC,
+> every door, every debuff, every scribed spellbook — and survives a restart.
 > Gameplay is TypeScript, hot-reloaded on save. See
 > [`docs/roadmap.md`](docs/roadmap.md).
 

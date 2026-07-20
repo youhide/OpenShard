@@ -19,13 +19,14 @@ use openshard_events::EventBus;
 use openshard_gateway::ConnectionId;
 use openshard_movement::Terrain;
 use openshard_protocol::{
-    encode_health, encode_opl_info, encode_remove, ClientVersion, Equipment, Feature,
-    MobileIncoming, MobileMove, Notoriety, PlayerUpdate, Point, PropertyList, WorldItem,
+    encode_action, encode_health, encode_new_action, encode_opl_info, encode_play_sound,
+    encode_remove, ClientVersion, Equipment, Feature, MobileIncoming, MobileMove, Notoriety,
+    PlayerUpdate, Point, PropertyList, WorldItem,
 };
 
 use crate::components::{
-    Amount, Body, Client, Contained, Equipped, Facet, Graphic, Heading, Hitpoints, Movement, Name,
-    Position,
+    body_opens_doors, Amount, Body, Client, Contained, Equipped, Facet, Graphic, Heading,
+    Hitpoints, Movement, Name, Position,
 };
 use crate::obstruct::{LiveTerrain, Obstructions};
 use crate::rng::Rng;
@@ -80,6 +81,14 @@ pub struct Gameplay {
     pub tooltip_mode: TooltipMode,
     /// Whether the server answers a context-menu request with a popup.
     pub context_menus: bool,
+    /// Whether spells require and consume reagents at all (classic UO on; a
+    /// no-reagent shard off).
+    pub reagents: bool,
+    /// Whether a failed cast still spends mana — Sphere's `ManaLossFail`. Spent at
+    /// resolution once success is known; a successful cast always spends.
+    pub mana_loss_on_fail: bool,
+    /// Whether a failed cast still consumes reagents — Sphere's `ReagentLossFail`.
+    pub reagent_loss_on_fail: bool,
 }
 
 /// How AoS object tooltips (the "cliloc" hover names) are served — Sphere's
@@ -158,6 +167,9 @@ impl Gameplay {
         spell_disturb: bool,
         tooltip_mode: TooltipMode,
         context_menus: bool,
+        reagents: bool,
+        mana_loss_on_fail: bool,
+        reagent_loss_on_fail: bool,
     ) -> Self {
         Self {
             combat_era,
@@ -174,6 +186,9 @@ impl Gameplay {
             spell_disturb,
             tooltip_mode,
             context_menus,
+            reagents,
+            mana_loss_on_fail,
+            reagent_loss_on_fail,
         }
     }
 }
@@ -196,6 +211,9 @@ impl Default for Gameplay {
             true,
             TooltipMode::SendVersion,
             true,
+            true, // reagents
+            true, // mana_loss_on_fail
+            true, // reagent_loss_on_fail
         )
     }
 }
@@ -432,6 +450,143 @@ impl WorldState {
                     packet: scaled.clone(),
                 });
             }
+        }
+    }
+
+    /// Send one prebuilt, version-independent packet to every player within
+    /// view range of `source` — its own client included.
+    ///
+    /// The audience for a sound or a graphical effect is who is *near*, not the
+    /// `seen` set a health redraw uses: a door never enters anyone's `seen` (it is
+    /// decoration, redrawn by `reveal`, not tracked as an interest), yet its creak
+    /// must still be heard — so this asks the spatial index for neighbours the way
+    /// `reveal` does, and keeps the ones with a client. There is no self-vs-others
+    /// split: a sound and an effect are the same bytes for everyone, so a caller
+    /// builds the packet once and this fans it out. The feedback seam every
+    /// gameplay system reaches for — a swing, a spell, a door — so the world is
+    /// *felt*, not merely correct.
+    pub fn broadcast_from(&mut self, source: EntityId, packet: Vec<u8>) {
+        let facet = self.facet_of(source);
+        let sectors = &self.facet_state(facet).sectors;
+        let Some(centre) = sectors.position_of(source) else {
+            return;
+        };
+        // Collected before the mutation so the sectors borrow is dropped.
+        let audience: Vec<EntityId> = sectors
+            .nearby(centre, VIEW_RANGE)
+            .map(|(id, _)| id)
+            .collect();
+        for entity in audience {
+            if let Some(&Client { connection, .. }) = self.registry.get::<Client>(entity) {
+                self.outbox.push(Outbound {
+                    connection,
+                    packet: packet.clone(),
+                });
+            }
+        }
+    }
+
+    /// Play `sound` at `source`'s position, heard by everyone who can see it.
+    ///
+    /// A no-op for a source with no `Position` (a contained item) — its holder's
+    /// tile is where such a sound belongs, and that is the caller's to place. The
+    /// `0x54` is placed in 3D so the client attenuates it by distance.
+    pub fn play_sound(&mut self, source: EntityId, sound: u16) {
+        let Some(&Position(at)) = self.registry.get::<Position>(source) else {
+            return;
+        };
+        let packet = encode_play_sound(sound, at.x, at.y, at.z);
+        self.broadcast_from(source, packet);
+    }
+
+    /// Animate `mobile` performing `action` — a swing, a death throe, a cast
+    /// gesture — for everyone who can see it.
+    ///
+    /// The wire is per-client, not per-packet: a modern client (7.0.0.0+) gets the
+    /// `0xE2` new-animation packet, where the server names a body-agnostic
+    /// [`AnimationType`](Action) and the client picks the frames for that body —
+    /// which is why a swing needs no body table there. An older client gets the
+    /// `0x6E` classic packet, whose action id *is* body-specific, so it is chosen
+    /// off a coarse humanoid-vs-creature split (the same `body_opens_doors` line
+    /// the door AI uses). The split is deliberately rough: exact per-weapon,
+    /// per-body actions want the animation tables the references key off body id,
+    /// and the modern path — the one the test clients take — does not need them.
+    pub fn animate(&mut self, mobile: EntityId, action: Action) {
+        let Some(serial) = self.registry.serial_of(mobile) else {
+            return;
+        };
+        let humanoid = self
+            .registry
+            .get::<Body>(mobile)
+            .is_some_and(|body| body_opens_doors(body.id));
+        // Built once each; the per-recipient choice is only which to send.
+        let new_packet = encode_new_action(serial.raw(), action.animation_type(), 0, 0);
+        let (old_action, frames) = action.classic_action(humanoid);
+        let old_packet = encode_action(serial.raw(), old_action, frames, 1, true, false, 0);
+
+        let facet = self.facet_of(mobile);
+        let sectors = &self.facet_state(facet).sectors;
+        let Some(centre) = sectors.position_of(mobile) else {
+            return;
+        };
+        let audience: Vec<EntityId> = sectors
+            .nearby(centre, VIEW_RANGE)
+            .map(|(id, _)| id)
+            .collect();
+        for entity in audience {
+            if let Some(&Client {
+                connection,
+                version,
+            }) = self.registry.get::<Client>(entity)
+            {
+                let packet = if version.supports(Feature::NewMobileAnimation) {
+                    new_packet.clone()
+                } else {
+                    old_packet.clone()
+                };
+                self.outbox.push(Outbound { connection, packet });
+            }
+        }
+    }
+}
+
+/// A mobile action worth animating — the semantic the caller names, which
+/// [`WorldState::animate`] turns into the wire animation each client understands.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Action {
+    /// A melee or ranged swing.
+    Attack,
+    /// A death throe.
+    Die,
+    /// A spellcasting gesture.
+    Cast,
+}
+
+impl Action {
+    /// The `0xE2` [`AnimationType`](Action) — ServUO's enum: Attack 0, Die 3,
+    /// Spell 11. The client maps it to the right frames for whatever body it is,
+    /// so no body table is needed on this path.
+    const fn animation_type(self) -> u16 {
+        match self {
+            Self::Attack => 0, // Attack
+            Self::Die => 3,    // Die
+            Self::Cast => 11,  // Spell
+        }
+    }
+
+    /// The `0x6E` classic action id and frame count, which *are* body-specific.
+    /// The humanoid ids are ServUO's people-animation values (Wrestle 31, human
+    /// die 21, human directed-cast 16); the creature ids its monster-group values
+    /// (attack 4, die 2, cast 12). A coarse split until weapon and body tables
+    /// land — good enough for the old 2D client, which is the minority path.
+    const fn classic_action(self, humanoid: bool) -> (u16, u16) {
+        match (self, humanoid) {
+            (Self::Attack, true) => (31, 7), // WeaponAnimation.Wrestle
+            (Self::Attack, false) => (4, 4), // monster attack1
+            (Self::Die, true) => (21, 6),    // human die
+            (Self::Die, false) => (2, 4),    // monster die
+            (Self::Cast, true) => (16, 7),   // human directed-cast
+            (Self::Cast, false) => (12, 7),  // monster cast
         }
     }
 }

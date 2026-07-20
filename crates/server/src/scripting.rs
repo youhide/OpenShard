@@ -21,7 +21,7 @@ use openshard_world::events::{
     AdminMenuAction, MobileMoved, MobileSpawned, PlayerEntered, PlayerLeft, SpellRequested,
     StepRefused,
 };
-use openshard_world::{Command, MobileDied, MobileSpoke, SkillUsed, SpellCast, World};
+use openshard_world::{Command, ItemUsed, MobileDied, MobileSpoke, SkillUsed, SpellCast, World};
 use tracing::{error, info, warn};
 
 /// The gameplay script, driven around the world's tick.
@@ -37,6 +37,7 @@ pub struct Scripts {
     used: Cursor<SkillUsed>,
     cast: Cursor<SpellCast>,
     spoke: Cursor<MobileSpoke>,
+    item_used: Cursor<ItemUsed>,
     admin: Cursor<AdminMenuAction>,
 }
 
@@ -81,6 +82,7 @@ impl Scripts {
             used: world.bus().cursor(),
             cast: world.bus().cursor(),
             spoke: world.bus().cursor(),
+            item_used: world.bus().cursor(),
             admin: world.bus().cursor(),
             engine,
         })
@@ -167,6 +169,13 @@ impl Scripts {
                 events.push(ScriptEvent::MobileSpoke {
                     serial: e.serial.raw(),
                     text: e.text.clone(),
+                });
+            }
+            for e in bus.read(&mut self.item_used) {
+                events.push(ScriptEvent::ItemUsed {
+                    item: e.item.raw(),
+                    graphic: e.graphic,
+                    by: e.by.raw(),
                 });
             }
             for e in bus.read(&mut self.admin) {

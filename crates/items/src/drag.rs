@@ -237,6 +237,9 @@ pub fn drop_onto_item(
 ) {
     let target = Serial::new(target_serial).and_then(|s| state.registry.entity_of(s));
     match target {
+        Some(target) if state.registry.has::<Spellbook>(target) => {
+            drop_scroll_on_book(state, connection, held, target);
+        }
         Some(target) if state.registry.has::<Container>(target) => {
             drop_into_container(state, connection, held, position, target_serial);
         }
@@ -245,6 +248,53 @@ pub fn drop_onto_item(
         }
         _ => bounce(state, connection, held, DragCancelReason::Other),
     }
+}
+
+/// A Magery scroll dropped on a spellbook is learned into it and spent. A
+/// non-scroll, a book out of reach, or a spell the book already holds bounces
+/// back — no scroll is wasted on a spell you have.
+fn drop_scroll_on_book(
+    state: &mut WorldState,
+    connection: ConnectionId,
+    held: HeldItem,
+    book: EntityId,
+) {
+    let spell = state
+        .registry
+        .get::<Graphic>(held.entity)
+        .and_then(|g| scroll_spell(g.id));
+    let (Some(spell), Some(&player), Some(book_serial)) = (
+        spell,
+        state.players.get(&connection),
+        state.registry.serial_of(book),
+    ) else {
+        bounce(state, connection, held, DragCancelReason::Other);
+        return;
+    };
+    if !crate::container_in_reach(state, book, player) {
+        bounce(state, connection, held, DragCancelReason::OutOfRange);
+        return;
+    }
+    let mut mask = state
+        .registry
+        .get::<Spellbook>(book)
+        .copied()
+        .unwrap_or_default();
+    if mask.has(spell) {
+        // Already in the book — keep the scroll rather than burn it for nothing.
+        bounce(state, connection, held, DragCancelReason::Other);
+        return;
+    }
+    mask.learn(spell);
+    state.registry.insert(book, mask);
+    state.held.remove(&connection);
+    state.registry.despawn(held.entity);
+    // Refresh the open book so the new spell appears at once.
+    state.send(
+        connection,
+        encode_spellbook_content(book_serial.raw(), SPELLBOOK_GRAPHIC, 1, mask.0),
+    );
+    debug!(spell, "learned a spell from a scroll");
 }
 
 /// Put a held item back where it was lifted and tell the client the drag is

@@ -60,6 +60,7 @@ mod containers;
 mod context;
 mod direction;
 mod feature;
+mod feedback;
 mod gump;
 pub mod huffman;
 mod items;
@@ -70,6 +71,7 @@ mod properties;
 mod seed;
 mod skill;
 mod speech;
+mod spellbook;
 mod target;
 mod vendor;
 mod version;
@@ -86,6 +88,10 @@ pub use containers::{
 pub use context::{encode_context_menu, ContextMenuRequest, ContextMenuSelect};
 pub use direction::{Direction, Facing, RUNNING_BIT};
 pub use feature::{Feature, FeatureSet};
+pub use feedback::{
+    encode_action, encode_graphical_effect, encode_hued_effect, encode_new_action,
+    encode_play_sound, EffectKind, EffectPoint,
+};
 pub use gump::{encode_gump_display, GumpResponse};
 pub use items::{
     encode_drag_cancel, encode_equip, DragCancelReason, DropItem, EquipItemRequest, PickUpItem,
@@ -116,6 +122,7 @@ pub use speech::{
     encode_message, encode_unicode_message, TalkRequest, UnicodeTalkRequest, DEFAULT_LANGUAGE_TAG,
     NO_GRAPHIC, SYSTEM_SERIAL,
 };
+pub use spellbook::encode_spellbook_content;
 pub use target::{encode_target_cursor, TargetResponse};
 pub use vendor::{
     encode_buy_list, encode_sell_list, BuyLine, BuyReply, Purchase, Sale, SellLine, SellReply,

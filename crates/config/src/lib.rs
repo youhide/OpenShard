@@ -146,6 +146,25 @@ pub struct GameplayConfig {
     /// client on plain single-click names.
     #[serde(default = "default_context_menus")]
     pub context_menus: bool,
+    /// Whether spells require and consume reagents at all. `true` (the default) is
+    /// classic UO — a spell fizzles without its reagents in the pack, and a
+    /// successful cast spends them. `false` casts from mana alone, Sphere's
+    /// no-reagent shards. Independent of the cast style.
+    #[serde(default = "default_true")]
+    pub reagents: bool,
+    /// Whether a *failed* cast still spends mana — Sphere's `ManaLossFail`, and
+    /// the axis it confirmed: mana and reagents are spent at resolution, once
+    /// success or failure is known, so this decides what a fizzle costs. `true`
+    /// (the default) is the UO/ServUO original — a fizzle burns the mana;
+    /// `false` refunds it. A successful cast always spends.
+    #[serde(default = "default_true")]
+    pub mana_loss_on_fail: bool,
+    /// Whether a *failed* cast still consumes reagents — Sphere's `ReagentLossFail`.
+    /// `true` (the default) is the UO/ServUO original; `false` keeps the reagents
+    /// when the cast fizzles. Only meaningful when [`reagents`](Self::reagents) is
+    /// on. A successful cast always consumes.
+    #[serde(default = "default_true")]
+    pub reagent_loss_on_fail: bool,
 }
 
 /// Whether combat [`combat_era`](GameplayConfig::combat_era) is one the swing
@@ -194,6 +213,11 @@ fn default_tooltips() -> String {
 fn default_context_menus() -> bool {
     true
 }
+/// The shared default for the spell-cost bools — reagents on, loss on fail on
+/// (the UO/ServUO original).
+fn default_true() -> bool {
+    true
+}
 
 impl Default for GameplayConfig {
     fn default() -> Self {
@@ -211,6 +235,9 @@ impl Default for GameplayConfig {
             spell_disturb: default_spell_disturb(),
             tooltips: default_tooltips(),
             context_menus: default_context_menus(),
+            reagents: default_true(),
+            mana_loss_on_fail: default_true(),
+            reagent_loss_on_fail: default_true(),
         }
     }
 }

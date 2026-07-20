@@ -3,8 +3,9 @@ use super::*;
 /// Handle a double-click. See `Command::DoubleClick`.
 ///
 /// A door toggles open or shut; a container opens its gump; a mobile shows its
-/// paperdoll. Anything else is ignored rather than answered — "use" for a piece
-/// of food is a later rule, and a wrong guess is worse than silence.
+/// paperdoll. Any other item is handed to the pack as an [`ItemUsed`] trigger,
+/// keyed by graphic — the engine has no default "use" for a bare item, so a
+/// shard gives it one; without a pack the double-click is simply silent.
 pub fn double_click(state: &mut WorldState, connection: ConnectionId, serial: u32) {
     let Some(&player) = state.players.get(&connection) else {
         return;
@@ -22,6 +23,8 @@ pub fn double_click(state: &mut WorldState, connection: ConnectionId, serial: u3
     // is its own interaction.
     if state.registry.has::<Door>(target) {
         toggle_door(state, player, target, target_serial);
+    } else if state.registry.has::<Spellbook>(target) {
+        open_spellbook(state, connection, player, target, target_serial);
     } else if state.registry.has::<Container>(target) {
         open_container(state, connection, player, target, target_serial);
     } else if target == player && state.registry.has::<Riding>(player) {
@@ -35,6 +38,12 @@ pub fn double_click(state: &mut WorldState, connection: ConnectionId, serial: u3
         // over the saddle, not a paperdoll request.
     } else if state.registry.has::<Body>(target) {
         open_paperdoll(state, connection, player, target, target_serial);
+    } else {
+        // Not a door, container, spellbook, mount or mobile: an ordinary item.
+        // Hand its "use" to the pack, keyed by graphic — Sphere's @DClick. The
+        // engine has no default behaviour for a bare item, so this is silent
+        // until a shard's script gives the graphic a meaning.
+        item_used(state, player, target, target_serial);
     }
 }
 
@@ -56,6 +65,35 @@ pub fn paperdoll_request(state: &mut WorldState, connection: ConnectionId, seria
     if state.registry.has::<Body>(target) {
         open_paperdoll(state, connection, player, target, target_serial);
     }
+}
+
+/// Open a spellbook: draw it as a book (`0x24` with the `0xFFFF` gump) and send
+/// the client the spells it holds (`0xBF 0x1B`), so the spell circles fill in.
+/// A book carried in the pack is in reach; one on the ground within `ITEM_REACH`.
+pub(crate) fn open_spellbook(
+    state: &mut WorldState,
+    connection: ConnectionId,
+    player: EntityId,
+    book: EntityId,
+    book_serial: Serial,
+) {
+    if !container_in_reach(state, book, player) {
+        return;
+    }
+    let Some(&Client { version, .. }) = state.registry.get::<Client>(player) else {
+        return;
+    };
+    let mask = state.registry.get::<Spellbook>(book).map_or(0, |b| b.0);
+    state.send(
+        connection,
+        // The gump `0xFFFF` is what tells the client this container is a book.
+        encode_open_container(book_serial.raw(), 0xFFFF, version),
+    );
+    state.send(
+        connection,
+        // Magery spells start at offset 1; the mask's bit `n` is spell `n`.
+        encode_spellbook_content(book_serial.raw(), SPELLBOOK_GRAPHIC, 1, mask),
+    );
 }
 
 /// Open the container a player wears at `layer` — its backpack, or its bank box.
@@ -161,6 +199,16 @@ pub(crate) fn container_in_reach(
                 state.registry.get::<Position>(wearer)?.0,
             ))
         })
+    } else if let Some(&Contained {
+        container: outer, ..
+    }) = state.registry.get::<Contained>(container)
+    {
+        // Nested — a spellbook in the pack, a bag in a bag: in reach when the
+        // container holding it is. Recurse to that one's own reach test.
+        return state
+            .registry
+            .entity_of(outer)
+            .is_some_and(|outer| container_in_reach(state, outer, player));
     } else {
         None
     };
@@ -316,6 +364,29 @@ pub fn give(
 ) -> Option<EntityId> {
     if amount == 0 {
         return None;
+    }
+    // A spellbook is a single item, not a stack, and carries its (empty) contents
+    // — the behaviour a bought or spawned spellbook needs to be a real book. A
+    // full book is dealt out elsewhere (a staff command); one off the shelf is
+    // blank until scrolls fill it.
+    if graphic == SPELLBOOK_GRAPHIC {
+        let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
+            warn!("out of item serials; nothing given");
+            return None;
+        };
+        state.registry.insert(entity, Graphic { id: graphic, hue });
+        state.registry.insert(
+            entity,
+            Contained {
+                container,
+                x: 60,
+                y: 60,
+                grid: 0,
+            },
+        );
+        state.registry.insert(entity, Spellbook::default());
+        tell_watchers_updated(state, container, entity);
+        return Some(entity);
     }
     let existing = state
         .registry

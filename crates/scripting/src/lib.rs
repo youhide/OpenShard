@@ -143,6 +143,18 @@ pub enum Event {
         /// What was said.
         text: String,
     },
+    /// An item was used (double-clicked) that the engine has no built-in
+    /// behaviour for — the item-trigger seam (Sphere's `@DClick`). A pack matches
+    /// on `graphic` and gives the item a meaning: drink the potion, read the sign,
+    /// pull the lever. Reach is already checked; the pack only decides *what*.
+    ItemUsed {
+        /// The item's wire identity.
+        item: Serial,
+        /// Its graphic, so a pack matches on the tile with no lookup.
+        graphic: u16,
+        /// Who used it, by wire identity.
+        by: Serial,
+    },
     /// A game master pressed a button in the `.admin` menu. The engine only
     /// carries the verb across; the pack decides what it does — which spawn set to
     /// register, what to clear. This is how staff tools reach the script pack.

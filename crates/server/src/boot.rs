@@ -82,6 +82,9 @@ pub(crate) fn gameplay_of(config: &Config) -> Gameplay {
         g.spell_disturb,
         openshard_world::TooltipMode::parse(&g.tooltips),
         g.context_menus,
+        g.reagents,
+        g.mana_loss_on_fail,
+        g.reagent_loss_on_fail,
     )
 }
 

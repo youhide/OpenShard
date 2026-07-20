@@ -4,6 +4,14 @@ use super::*;
 /// roughly the classic client's self-closing delay.
 pub(crate) const DOOR_OPEN_TICKS: u64 = 20 * TICKS_PER_SECOND;
 
+/// The creak a wooden door makes swinging open, and the thud shutting — ServUO's
+/// `DarkWoodHouseDoor` sounds, the sensible default for the town and shop doors
+/// the pack lays down. A metal or barred door would sound different, but the
+/// engine's `Door` is a generic toggle with no material, so wooden it is until a
+/// door carries its own sound.
+const DOOR_OPEN_SOUND: u16 = 0x00EA;
+const DOOR_CLOSE_SOUND: u16 = 0x00F1;
+
 /// Open or close a door the player double-clicked, if it is in reach.
 ///
 /// The toggle is the whole mechanic: swap the graphic between the door's shut and
@@ -89,6 +97,16 @@ pub(crate) fn set_door(state: &mut WorldState, door: EntityId, serial: Serial, o
         },
     );
     state.facet_state_mut(facet).sectors.insert(door, moved);
+    // The creak or thud, heard by everyone who can see the door — the same
+    // audience the redraw goes to. A door that swings in silence reads as broken.
+    state.play_sound(
+        door,
+        if open {
+            DOOR_OPEN_SOUND
+        } else {
+            DOOR_CLOSE_SOUND
+        },
+    );
     // The tile the shut leaf fills is blocked; opening frees it. This is the
     // line that makes a door real to movement — see `state::obstruct`.
     if open {

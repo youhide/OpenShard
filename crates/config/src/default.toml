@@ -126,6 +126,21 @@ tooltips = "version"
 # this false, the classic client stays on plain single-click names.
 context_menus = true
 
+# Spell cost — mana and reagents. Independent of the cast style above.
+#
+# Sphere confirmed the model: mana and reagents are spent at *resolution*, once
+# the cast has succeeded or fizzled — not up front — so the two "loss on fail"
+# knobs decide what a fizzle costs (Sphere's ManaLossFail / ReagentLossFail). A
+# successful cast always spends. The ServUO/UO original is all three true.
+#
+# reagents               require and consume reagents (false = cast from mana
+#                        alone, a no-reagent shard).
+# mana_loss_on_fail      a fizzled cast still burns the mana (false refunds it).
+# reagent_loss_on_fail   a fizzled cast still consumes the reagents.
+reagents = true
+mana_loss_on_fail = true
+reagent_loss_on_fail = true
+
 # Development accounts, in plaintext, until there is a database.
 [[accounts]]
 name = "admin"

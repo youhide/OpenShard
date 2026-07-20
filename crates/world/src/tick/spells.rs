@@ -18,9 +18,11 @@
 
 use super::*;
 use openshard_magic::{SpellEffect, SpellTarget};
-use openshard_protocol::encode_target_cursor;
+use openshard_protocol::{
+    encode_graphical_effect, encode_play_sound, encode_target_cursor, EffectKind, EffectPoint,
+};
 use openshard_state::components::{Casting, Skills};
-use openshard_state::{CastStyle, TargetPurpose};
+use openshard_state::{CastStyle, DamageType, TargetPurpose};
 
 /// The skill a spell rolls — Magery, id 25.
 const MAGERY_SKILL: u8 = 25;
@@ -45,6 +47,13 @@ impl World {
             .is_some_and(|h| h.current == 0)
         {
             return; // the dead do not cast
+        }
+        // The classic gate: a spell is castable only if it is written in a
+        // spellbook the caster carries. A scroll learned into the book, or the
+        // full book the mage sells, is what puts it there.
+        if !self.caster_has_spell(caster, spell) {
+            self.notify_self(caster, "That spell is not in your spellbook.");
+            return;
         }
         match self.state.gameplay.cast_style {
             CastStyle::Walk => self.resolve_cast(caster, spell),
@@ -106,7 +115,17 @@ impl World {
         let Some(serial) = self.state.registry.serial_of(caster) else {
             return;
         };
-        let reagents: Vec<(u16, u16)> = info.reagents.iter().map(|&graphic| (graphic, 1)).collect();
+        // Read the cost knobs first — a copy each, so the `&mut self.state` the
+        // call takes does not clash with reading `self.state.gameplay`.
+        let reagents_required = self.state.gameplay.reagents;
+        let mana_loss_on_fail = self.state.gameplay.mana_loss_on_fail;
+        let reagent_loss_on_fail = self.state.gameplay.reagent_loss_on_fail;
+        // Reagents off means an empty list: nothing to check, nothing to consume.
+        let reagents: Vec<(u16, u16)> = if reagents_required {
+            info.reagents.iter().map(|&graphic| (graphic, 1)).collect()
+        } else {
+            Vec::new()
+        };
         let pack = self.caster_pack(serial);
         let Some(success) = magic::pay_and_roll(
             &mut self.state,
@@ -116,6 +135,8 @@ impl World {
             MAGERY_SKILL,
             pack,
             &reagents,
+            mana_loss_on_fail,
+            reagent_loss_on_fail,
         ) else {
             self.state.bus.send(magic::SpellCast {
                 caster,
@@ -173,6 +194,9 @@ impl World {
             return;
         };
         let by = self.state.registry.serial_of(caster);
+        // The sound and bolt/sparkle that make the cast land — before the effect,
+        // so a target killed by the blow is still there for the bolt to fly at.
+        self.spell_feedback(caster, target_serial, target_location, info.effect);
         match info.effect {
             SpellEffect::Damage(kind, base) => {
                 if target_serial != 0 {
@@ -273,6 +297,107 @@ impl World {
         }
     }
 
+    /// The sound and visual a core-run spell plays as it lands — ServUO's
+    /// per-spell sound and particle, mapped from the coarse [`SpellEffect`] the
+    /// engine resolves: a fire bolt for any fire damage, a magic-arrow bolt for
+    /// physical or cold, a sparkle on the mark for a heal or a buff, an explosion
+    /// at the aimed spot for an area blast. Not per-spell exact — that waits on
+    /// the spell table carrying its own art — but a cast is no longer silent and
+    /// invisible, which was the most visible gap against a real client. A
+    /// `Scripted` spell voices itself in the pack, off `SpellCast`, so this holds
+    /// its tongue for one. Broadcast to everyone who can see the caster.
+    fn spell_feedback(
+        &mut self,
+        caster: EntityId,
+        target_serial: u32,
+        target_location: Point,
+        effect: SpellEffect,
+    ) {
+        // A bolt flies caster→mark; a sparkle sits on the mark; a blast plants
+        // itself at the aimed spot. The graphic and sound are ServUO's per-spell.
+        enum Visual {
+            Bolt(u16),
+            OnTarget(u16),
+            AtSpot(u16),
+        }
+        let (sound, visual): (u16, Visual) = match effect {
+            SpellEffect::Damage(DamageType::Fire, _) => (0x015E, Visual::Bolt(0x36D4)),
+            SpellEffect::Damage(DamageType::Energy, _) => (0x020A, Visual::Bolt(0x379F)),
+            // Physical and cold fall back to the magic-arrow bolt for now.
+            SpellEffect::Damage(_, _) => (0x01E5, Visual::Bolt(0x36E4)),
+            SpellEffect::AreaDamage(_, _) => (0x0207, Visual::AtSpot(0x36BD)),
+            SpellEffect::Heal(_) => (0x01F2, Visual::OnTarget(0x376A)),
+            SpellEffect::Poison => (0x0205, Visual::OnTarget(0x374A)),
+            SpellEffect::Cure | SpellEffect::AreaCure => (0x01E0, Visual::OnTarget(0x373A)),
+            SpellEffect::Teleport => (0x01FE, Visual::AtSpot(0x3728)),
+            SpellEffect::StatMod(_) => (0x01EA, Visual::OnTarget(0x373A)),
+            SpellEffect::Scripted => return, // the pack's to voice
+        };
+
+        let caster_serial = self.state.registry.serial_of(caster).map_or(0, |s| s.raw());
+        let caster_pos = self.caster_position(caster);
+        let target_pos = Serial::new(target_serial)
+            .and_then(|s| self.state.registry.entity_of(s))
+            .and_then(|e| self.state.registry.get::<Position>(e).map(|p| p.0))
+            // An area spell (target_serial 0) aims at a spot, not a mobile.
+            .unwrap_or(target_location);
+        let point = |p: Point| EffectPoint {
+            x: p.x,
+            y: p.y,
+            z: p.z,
+        };
+
+        let packet = match visual {
+            Visual::Bolt(graphic) => encode_graphical_effect(
+                EffectKind::Moving,
+                caster_serial,
+                target_serial,
+                graphic,
+                point(caster_pos),
+                point(target_pos),
+                7,
+                0,
+                false,
+                true,
+            ),
+            Visual::OnTarget(graphic) => encode_graphical_effect(
+                EffectKind::FixedFrom,
+                target_serial,
+                0,
+                graphic,
+                point(target_pos),
+                point(target_pos),
+                9,
+                20,
+                true,
+                false,
+            ),
+            Visual::AtSpot(graphic) => encode_graphical_effect(
+                EffectKind::FixedXyz,
+                0,
+                0,
+                graphic,
+                point(target_location),
+                point(target_location),
+                9,
+                20,
+                true,
+                false,
+            ),
+        };
+        self.state.broadcast_from(caster, packet);
+        // The sound at the point of the effect — target_pos is the aimed spot for
+        // an area spell, since its target_serial is 0.
+        self.state.broadcast_from(
+            caster,
+            encode_play_sound(sound, target_pos.x, target_pos.y, target_pos.z),
+        );
+        // The caster's gesture. A Sphere-style cast resolves as it is made, so the
+        // gesture plays with the effect; the ServUO rooted cast plays it too, on
+        // the tick the spell lands.
+        self.state.animate(caster, openshard_state::Action::Cast);
+    }
+
     /// How strong a stat buff the caster lands, and the tick it lifts.
     ///
     /// Both scale from the caster's Magery, ServUO's shape: the magnitude rises to
@@ -293,6 +418,29 @@ impl World {
         };
         let seconds = u64::from(magery / 10).clamp(10, 120);
         (offset, self.state.ticks + seconds * TICKS_PER_SECOND)
+    }
+
+    /// Whether the caster carries a spellbook that holds `spell` — a book in its
+    /// backpack with the spell's bit set. The gate `begin_cast` reads.
+    fn caster_has_spell(&self, caster: EntityId, spell: u16) -> bool {
+        let Some(serial) = self.state.registry.serial_of(caster) else {
+            return false;
+        };
+        let pack = self.caster_pack(serial);
+        if pack == 0 {
+            return false;
+        }
+        self.state
+            .registry
+            .query::<Spellbook>()
+            .any(|(book, mask)| {
+                mask.has(spell as u8)
+                    && self
+                        .state
+                        .registry
+                        .get::<Contained>(book)
+                        .is_some_and(|c| c.container.raw() == pack)
+            })
     }
 
     /// The backpack serial reagents come out of, or `0` if the caster wears none.

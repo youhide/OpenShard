@@ -711,6 +711,37 @@ mod tests {
     }
 
     #[test]
+    fn an_item_use_trigger_reaches_the_hook_by_graphic() {
+        // The item-trigger seam from the script's side: `onEvent` sees an
+        // `ItemUsed` as a plain object it switches on by `graphic`, and the `by`
+        // and `item` serials cross the serde boundary intact.
+        let mut engine = DenoEngine::new();
+        engine
+            .load(
+                "function onEvent(e) {\n\
+                 if (e.type === \"ItemUsed\" && e.graphic === 3854)\n\
+                 Deno.core.ops.op_say(e.by, \"drink \" + e.item, 0);\n\
+                 }",
+            )
+            .unwrap();
+        engine
+            .deliver(&Event::ItemUsed {
+                item: 0x4000_0007,
+                graphic: 3854,
+                by: 42,
+            })
+            .unwrap();
+        assert_eq!(
+            engine.take_commands(),
+            vec![Command::Speak {
+                serial: 42,
+                hue: 0,
+                text: format!("drink {}", 0x4000_0007u32),
+            }]
+        );
+    }
+
+    #[test]
     fn reloading_rebinds_the_hook_in_the_live_isolate() {
         // Hot reload's core claim: the second load replaces the first hook's
         // behaviour without a new isolate.

@@ -128,12 +128,21 @@ pub fn cast_spell(state: &mut WorldState, cast: Cast<'_>) {
     });
 }
 
-/// The core cast path's pay-and-roll: check the mana and reagents, spend them,
-/// and roll the casting skill — returning whether the roll passed, or `None` if
-/// the spell fizzled short of mana or a reagent (nothing is spent). Unlike
-/// [`cast_spell`] it emits no event: the *world* emits [`SpellCast`] once it
-/// knows the target — which a targeted spell learns only after the cast — and
-/// applies the core effect there.
+/// The core cast path's pay-and-roll — Sphere's confirmed model: check that the
+/// mana and reagents are *there* (fizzling short of them spends nothing), roll the
+/// casting skill, and only *then* spend, at resolution once success is known.
+/// Returns whether the roll passed, or `None` if the spell could not be cast for
+/// want of mana or a reagent.
+///
+/// A successful cast always spends; a *failed* one spends mana only if
+/// `mana_loss_on_fail` and reagents only if `reagent_loss_on_fail` — Sphere's
+/// `ManaLossFail`/`ReagentLossFail`, the UO/ServUO original being both on. Reagents
+/// are toggled off entirely by the caller passing an empty list. Unlike
+/// [`cast_spell`] it emits no event: the *world* emits [`SpellCast`] once it knows
+/// the target — which a targeted spell learns only after the cast — and applies
+/// the core effect there.
+// Each argument is a distinct cast input; a struct would only move the list up.
+#[allow(clippy::too_many_arguments)]
 pub fn pay_and_roll(
     state: &mut WorldState,
     caster: EntityId,
@@ -142,24 +151,30 @@ pub fn pay_and_roll(
     skill: u8,
     pack: u32,
     reagents: &[(u16, u16)],
+    mana_loss_on_fail: bool,
+    reagent_loss_on_fail: bool,
 ) -> Option<bool> {
     let have = state.registry.get::<Mana>(caster).map_or(0, |m| m.current);
     if have < mana || !has_reagents(state, pack, reagents) {
-        return None;
+        return None; // cannot cast — nothing is spent
     }
-    consume_reagents(state, pack, reagents);
-    if let Some(&Mana { current, max }) = state.registry.get::<Mana>(caster) {
-        state.registry.insert(
-            caster,
-            Mana {
-                current: current - mana,
-                max,
-            },
-        );
+    // Roll before spending, so we know success in time to honour the loss flags.
+    let success = openshard_skills::roll_skill(state, caster, skill, difficulty);
+    if success || mana_loss_on_fail {
+        if let Some(&Mana { current, max }) = state.registry.get::<Mana>(caster) {
+            state.registry.insert(
+                caster,
+                Mana {
+                    current: current.saturating_sub(mana),
+                    max,
+                },
+            );
+        }
     }
-    Some(openshard_skills::roll_skill(
-        state, caster, skill, difficulty,
-    ))
+    if success || reagent_loss_on_fail {
+        consume_reagents(state, pack, reagents);
+    }
+    Some(success)
 }
 
 /// Whether `pack` holds every reagent the spell needs. A zero pack with any

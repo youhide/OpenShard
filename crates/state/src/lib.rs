@@ -39,7 +39,7 @@ pub use components::{
 pub use obstruct::{LiveTerrain, Obstacle, Obstructions, DOOR_HEIGHT};
 pub use rng::Rng;
 pub use runtime::{
-    CastStyle, FacetState, Gameplay, HeldItem, Origin, Outbound, TargetPurpose, TooltipMode,
-    WorldState, TICKS_PER_SECOND,
+    Action, CastStyle, FacetState, Gameplay, HeldItem, Origin, Outbound, TargetPurpose,
+    TooltipMode, WorldState, TICKS_PER_SECOND,
 };
 pub use sectors::{distance, in_range, Sectors, SECTOR_SIZE, VIEW_RANGE};

@@ -14,12 +14,13 @@ use openshard_entities::{EntityId, Serial, SerialKind};
 use openshard_gateway::ConnectionId;
 use openshard_protocol::{
     encode_add_to_container, encode_container_contents, encode_drag_cancel, encode_equip,
-    encode_open_container, encode_open_paperdoll, encode_remove, ContainedItem, DragCancelReason,
-    Point, DROP_TO_GROUND, PAPERDOLL_CAN_LIFT, PAPERDOLL_WARMODE,
+    encode_open_container, encode_open_paperdoll, encode_remove, encode_spellbook_content,
+    ContainedItem, DragCancelReason, Point, DROP_TO_GROUND, PAPERDOLL_CAN_LIFT, PAPERDOLL_WARMODE,
 };
 use openshard_state::components::{
-    mount_item_for, Amount, Body, Client, Combat, Contained, Container, Decays, Decoration, Door,
-    Equipped, Facet, Graphic, Name, Position, Ridden, Riding, Stackable,
+    mount_item_for, scroll_spell, Amount, Body, Client, Combat, Contained, Container, Decays,
+    Decoration, Door, Equipped, Facet, Graphic, Name, Position, Ridden, Riding, Spellbook,
+    Stackable, SPELLBOOK_GRAPHIC,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{HeldItem, Origin, Outbound, WorldState, TICKS_PER_SECOND};
@@ -33,6 +34,7 @@ mod equip;
 mod mounts;
 mod spawn;
 mod stack;
+mod trigger;
 
 pub use containers::*;
 pub use decay::*;
@@ -42,3 +44,4 @@ pub use equip::*;
 pub use mounts::*;
 pub use spawn::*;
 pub use stack::*;
+pub use trigger::*;

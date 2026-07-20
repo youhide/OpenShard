@@ -2,7 +2,7 @@ use super::*;
 use openshard_persistence::EffectRecord;
 use openshard_state::components::{
     body_opens_doors, effect, Aggression, Banker, Npc, Poisoned, Price, RangedAttack, Skills,
-    StatMod, StatMods, SwingSpeed, Vendor,
+    Spellbook, StatMod, StatMods, SwingSpeed, Vendor,
 };
 
 impl World {
@@ -256,6 +256,9 @@ impl World {
             // restored shop would sell nameless wares for a single coin.
             price: registry.get::<Price>(item).map(|p| p.0),
             name: registry.get::<Name>(item).map(|n| n.0.clone()),
+            // A spellbook carries its learned spells; without the mask a
+            // restored book is a graphic that no longer opens.
+            spellbook: registry.get::<Spellbook>(item).map(|b| b.0),
             location,
         })
     }
@@ -577,6 +580,9 @@ impl World {
         if let Some(name) = &record.name {
             self.state.registry.insert(entity, Name(name.clone()));
         }
+        if let Some(mask) = record.spellbook {
+            self.state.registry.insert(entity, Spellbook(mask));
+        }
         // Loose clutter resumes rotting; a container does not (mark_decay skips it).
         items::mark_decay(&mut self.state, entity);
         self.state
@@ -629,6 +635,9 @@ impl World {
             }
             if let Some(name) = &record.name {
                 self.state.registry.insert(entity, Name(name.clone()));
+            }
+            if let Some(mask) = record.spellbook {
+                self.state.registry.insert(entity, Spellbook(mask));
             }
         }
         // Pass two: where each item goes.

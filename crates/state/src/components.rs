@@ -512,6 +512,59 @@ impl Aggression {
     }
 }
 
+/// A Magery spellbook's contents: a bit per spell, bit `n` set when the book
+/// holds spell `n` (0-based, the same numbering `magic::info` uses). A spellbook
+/// is an ordinary item (graphic [`SPELLBOOK_GRAPHIC`]) that also carries this;
+/// double-clicking it sends the client the mask (`0xBF 0x1B`), dropping a scroll
+/// on it sets a bit, and casting checks one.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Spellbook(pub u64);
+
+impl Spellbook {
+    /// Whether the book holds spell `n` (0-based).
+    #[must_use]
+    pub const fn has(self, spell: u8) -> bool {
+        spell < SPELL_COUNT && self.0 & (1u64 << spell) != 0
+    }
+
+    /// Add spell `n` (0-based); a no-op past the eighth circle.
+    pub fn learn(&mut self, spell: u8) {
+        if spell < SPELL_COUNT {
+            self.0 |= 1u64 << spell;
+        }
+    }
+
+    /// Every Magery spell — the "full" book the mage sells for testing.
+    #[must_use]
+    pub const fn full() -> Self {
+        Self(u64::MAX) // all 64 bits; the client reads only the first 64 spells
+    }
+}
+
+/// The 64 Magery spells, first through eighth circle.
+pub const SPELL_COUNT: u8 = 64;
+
+/// A Magery spellbook's item graphic.
+pub const SPELLBOOK_GRAPHIC: u16 = 0x0EFA;
+
+/// The item graphic of the scroll for a Magery spell, `0-based` — the classic
+/// run `0x1F2D..` (Reactive Armor, Clumsy, …), one per spell.
+#[must_use]
+pub const fn spell_scroll_graphic(spell: u8) -> u16 {
+    0x1F2D + spell as u16
+}
+
+/// The Magery spell a scroll graphic teaches, if it is a Magery scroll.
+#[must_use]
+pub const fn scroll_spell(graphic: u16) -> Option<u8> {
+    let base = 0x1F2D;
+    if graphic >= base && graphic < base + SPELL_COUNT as u16 {
+        Some((graphic - base) as u8)
+    } else {
+        None
+    }
+}
+
 /// Whether a body knows what a door handle is. The reference rule is
 /// "not an animal, not a sea creature"; without body-type tables yet, the
 /// human bodies are the safe core of that set.
@@ -614,8 +667,132 @@ pub const fn creature_name(body: u16) -> Option<&'static str> {
         0x00D4 => "a grizzly bear",
         0x00D5 => "a polar bear",
         0x00E1 => "a timber wolf",
+        // Undead.
+        0x001A => "a spectre",
+        0x0018 => "a lich",
+        0x004F => "a lich lord",
+        0x009A => "a mummy",
+        0x0099 => "a ghoul",
+        0x0039 => "a bone knight",
+        0x0093 => "a skeletal knight",
+        0x0094 => "a skeletal mage",
+        // Dragons and reptiles.
+        0x000C | 0x003B => "a dragon",
+        0x003C | 0x003D => "a drake",
+        0x003E => "a wyvern",
+        0x00B4 | 0x0031 => "a white wyrm",
+        0x0096 => "a sea serpent",
+        0x0015 => "a giant serpent",
+        0x00CE => "a lava lizard",
+        // Daemons.
+        0x0009 => "a daemon",
+        0x004A => "an imp",
+        // Elementals.
+        0x000F => "a fire elemental",
+        0x0010 => "a water elemental",
+        0x000D => "an air elemental",
+        0x000E => "an earth elemental",
+        0x009F => "a blood elemental",
+        0x00A3 => "a snow elemental",
+        0x00A2 => "a poison elemental",
+        // The rest of the common bestiary.
+        0x0016 => "a gazer",
+        0x001E => "a harpy",
+        0x0049 => "a stone harpy",
+        0x0001 => "an ogre",
+        0x0053 => "an ogre lord",
+        0x004B => "a cyclops",
+        0x004C => "a titan",
+        0x001C => "a giant spider",
+        0x009D => "a giant black widow",
+        0x002F => "a reaper",
+        0x0033 => "a slime",
+        0x0007 => "an orc captain",
+        0x0046 => "a terathan warrior",
         _ => return None,
     })
+}
+
+/// A creature's base sound id — ServUO's `BaseSoundID`, keyed by body like
+/// [`creature_name`]. Its attack, hurt and death sounds are fixed offsets from
+/// it (`+2`, `+3`, `+4`), so an orc growls and a wolf howls instead of every
+/// mobile making the human punch sound. `None` for a human body (which uses the
+/// gendered death sounds) and for the passive fauna ServUO leaves silent (a
+/// rabbit, a deer). Grow it alongside `creature_name` as bodies are added.
+pub const fn creature_base_sound(body: u16) -> Option<u16> {
+    Some(match body {
+        // Farm and forest animals.
+        0x0006 => 0x001B,          // bird
+        0x00C9 => 0x0069,          // cat
+        0x00CA => 0x0294,          // alligator
+        0x00CB | 0x0122 => 0x00C4, // pig, boar
+        0x00CF => 0x00D6,          // sheep
+        0x00D0 => 0x006E,          // chicken
+        0x00D1 => 0x0099,          // goat
+        0x00D7 => 0x0188,          // giant rat
+        0x00D8 | 0x00E7 => 0x0078, // cow
+        0x00D9 => 0x0085,          // dog
+        0x00DD => 0x00E0,          // walrus
+        0x00EE => 0x00CC,          // rat
+        0x0097 => 0x008A,          // dolphin
+        // Mounts.
+        0x00C8 | 0x00CC | 0x00E2 | 0x00E4 | 0x0123 => 0x00A8, // horse, pack horse
+        0x00DC | 0x0124 => 0x03F3,                            // llama, pack llama
+        0x00DB | 0x00D2 => 0x0270,                            // forest / desert ostard
+        0x00DA => 0x0275,                                     // frenzied ostard
+        // Monsters.
+        0x0003 => 0x01D7,                            // zombie
+        0x0004 => 0x0174,                            // gargoyle
+        0x0011 => 0x045A,                            // orc
+        0x0012 => 0x016F,                            // ettin
+        0x0017 | 0x0019 | 0x001B | 0x00E1 => 0x00E5, // dire / grey / timber wolf
+        0x001D => 0x009E,                            // gorilla
+        0x0023 | 0x0024 => 0x01A1,                   // lizardman
+        0x002A => 0x01B5,                            // ratman
+        0x0030 => 0x018D,                            // scorpion
+        0x0032 | 0x0038 => 0x048D,                   // skeleton
+        0x0034 => 0x00DB,                            // snake
+        0x0035 | 0x0036 => 0x01CD,                   // troll
+        0x00A7 | 0x00D4 | 0x00D5 => 0x00A3,          // brown / grizzly / polar bear
+        // Undead.
+        0x001A | 0x0099 => 0x0482,          // spectre / wraith, ghoul
+        0x0018 => 0x03E9,                   // lich
+        0x004F => 0x019C,                   // lich lord
+        0x009A => 0x01D7,                   // mummy
+        0x0039 | 0x0093 | 0x0094 => 0x01C3, // bone / skeletal knight and mage
+        // Dragons and reptiles — all share the dragon roar.
+        0x000C | 0x003B | 0x003C | 0x003D | 0x003E | 0x00B4 | 0x0031 => 0x016A,
+        0x0096 => 0x01BF, // sea serpent
+        0x0015 => 0x00DB, // giant serpent
+        0x00CE => 0x005A, // lava lizard
+        // Daemons.
+        0x0009 => 0x0165, // daemon
+        0x004A => 0x01A6, // imp
+        // Elementals.
+        0x000F => 0x0346,          // fire
+        0x0010 | 0x009F => 0x0116, // water, blood
+        0x000D => 0x028F,          // air
+        0x000E => 0x010C,          // earth
+        0x00A3 | 0x00A2 => 0x0107, // snow, poison
+        // The rest of the common bestiary.
+        0x0016 => 0x0179,          // gazer
+        0x001E | 0x0049 => 0x0192, // harpy, stone harpy
+        0x0001 | 0x0053 => 0x01AB, // ogre, ogre lord
+        0x004B => 0x025C,          // cyclops
+        0x004C => 0x0261,          // titan
+        0x001C | 0x009D => 0x0388, // giant spider, giant black widow
+        0x002F => 0x01BA,          // reaper
+        0x0033 => 0x01C8,          // slime
+        0x0007 => 0x045A,          // orc captain (orc sound)
+        0x0046 => 0x024D,          // terathan warrior
+        _ => return None,
+    })
+}
+
+/// Whether a body is female — the human death sound splits male from female,
+/// ServUO's `m_Female`. The known female bodies: human, elf and gargoyle.
+pub const fn body_is_female(body: u16) -> bool {
+    matches!(body, 0x0191 | 0x025E | 0x02EF)
 }
 
 /// A creature that fights at distance — an archer's bow, a mage's bolt, a
@@ -868,6 +1045,31 @@ mod tests {
         assert!(registry.has::<Client>(player));
         assert!(!registry.has::<Client>(npc), "an NPC has no connection");
         assert_eq!(registry.count::<Position>(), 2, "both are somewhere");
+    }
+
+    #[test]
+    fn every_sounded_creature_is_also_named() {
+        // The two bestiary tables cover the same creatures: a body that growls has
+        // a name to show on single-click too. Names may outrun sounds — passive
+        // fauna (a rabbit, a deer) are named but silent — but never the reverse.
+        for body in 0u16..=0x0400 {
+            if creature_base_sound(body).is_some() {
+                assert!(
+                    creature_name(body).is_some(),
+                    "body {body:#06x} sounds like a creature but has no name"
+                );
+            }
+        }
+        // Spot-checks of the extended table (ServUO's BaseSoundID), and that a
+        // human body is in neither — it falls back to the fists/gendered sounds.
+        assert_eq!(creature_base_sound(0x001A), Some(0x0482)); // spectre / wraith
+        assert_eq!(creature_base_sound(0x000C), Some(0x016A)); // dragon
+        assert_eq!(creature_name(0x0009), Some("a daemon"));
+        assert_eq!(
+            creature_base_sound(0x0190),
+            None,
+            "a human is not a creature-sound body"
+        );
     }
 
     #[test]

@@ -46,7 +46,8 @@ use tracing::{debug, info, warn};
 use openshard_state::components::{
     Access, Account, Amount, Body, Brain, Client, Combat, Contained, Container, DamageType,
     Decoration, Door, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement,
-    Name, Position, Resistance, Ridden, Riding, Scripted, SpawnedBy, Stackable, Stats, Vendor,
+    Name, Position, Resistance, Ridden, Riding, Scripted, SpawnedBy, Spellbook, Stackable, Stats,
+    Vendor,
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;

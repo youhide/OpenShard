@@ -603,6 +603,86 @@ fn double_clicking_a_container_opens_it() {
     assert!(packets.iter().any(|p| p[0] == 0x3C), "the contents follow");
 }
 
+/// A bottle graphic — the engine has no built-in double-click behaviour for it,
+/// so it is the plain-item case the trigger seam exists for.
+const POTION_GRAPHIC: u16 = 0x0F0E;
+
+/// Spawn a plain item at `point` and return its serial.
+fn spawn_plain_item_at(world: &mut World, point: Point, now: Instant) -> u32 {
+    world.queue(Command::SpawnItem {
+        graphic: POTION_GRAPHIC,
+        hue: 0,
+        amount: 1,
+        stackable: false,
+        position: point,
+        facet: 0,
+    });
+    world.tick(now);
+    world
+        .state
+        .registry
+        .query::<Graphic>()
+        .find(|(_, g)| g.id == POTION_GRAPHIC)
+        .and_then(|(e, _)| world.state.registry.serial_of(e))
+        .expect("the item spawned")
+        .raw()
+}
+
+#[test]
+fn double_clicking_a_plain_item_fires_the_use_trigger() {
+    // The item-trigger seam (Sphere's @DClick): an item with no engine behaviour
+    // — not a door, container, spellbook, mount or mobile — hands its double-click
+    // to the pack as an ItemUsed carrying the graphic, so a shard can make a
+    // bottle drinkable without the engine knowing what a bottle is.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let item = spawn_plain_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let player_serial = world
+        .registry()
+        .serial_of(world.state.players[&player])
+        .unwrap()
+        .raw();
+
+    let mut used: Cursor<crate::ItemUsed> = world.bus().cursor();
+    world.queue(Command::DoubleClick {
+        connection: player,
+        serial: item,
+    });
+    world.tick(now);
+
+    let events: Vec<crate::ItemUsed> = world.bus().read(&mut used).copied().collect();
+    assert_eq!(events.len(), 1, "one use trigger for one double-click");
+    assert_eq!(events[0].graphic, POTION_GRAPHIC, "keyed by the tile");
+    assert_eq!(events[0].item.raw(), item, "on the item clicked");
+    assert_eq!(events[0].by.raw(), player_serial, "by the clicker");
+}
+
+#[test]
+fn the_use_trigger_respects_reach() {
+    // Reach is server-authoritative: a double-click on an item across the map
+    // fires nothing, the same guard a lift uses. Otherwise a pack could be made
+    // to act on an item the player cannot touch.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    // Well beyond ITEM_REACH from START.
+    let item = spawn_plain_item_at(&mut world, Point::new(START.0 + 50, START.1, 0), now);
+
+    let mut used: Cursor<crate::ItemUsed> = world.bus().cursor();
+    world.queue(Command::DoubleClick {
+        connection: player,
+        serial: item,
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world.bus().read(&mut used).count(),
+        0,
+        "an out-of-reach item fires no use trigger"
+    );
+}
+
 /// The serial of the backpack a connection's character is wearing.
 fn backpack_serial(world: &World, connection: ConnectionId) -> u32 {
     let owner = world
@@ -1283,6 +1363,9 @@ fn gameplay_config_reaches_the_systems() {
         true,
         openshard_state::TooltipMode::SendVersion,
         true,
+        true,
+        true,
+        true,
     );
     let mut world = World::new(START).with_gameplay(gameplay);
     world.queue(Command::SpawnItem {
@@ -1731,6 +1814,127 @@ fn a_player_in_war_mode_swings_at_an_adjacent_target() {
             .current
             < 50,
         "the target has taken damage"
+    );
+}
+
+#[test]
+fn a_landed_blow_plays_a_hit_sound() {
+    // A silent fight reads as broken; every landed melee blow thwacks. The 0x54
+    // reaches the attacker, who always has a client and hears their own swing.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 50, now);
+    engage(&mut world, player, mob, now);
+    let _ = packets_for(&mut world, player); // drain up to the first swing
+
+    for _ in 0..WRESTLING_SWING_TICKS {
+        world.tick(now);
+    }
+    let packets = packets_for(&mut world, player);
+    let fists = combat::MELEE_HIT_SOUND.to_be_bytes();
+    assert!(
+        packets
+            .iter()
+            .any(|p| p[0] == 0x54 && p.len() >= 4 && p[2..4] == fists),
+        "a human blow plays the fists thwack (0x0137), not a creature's sound"
+    );
+    assert!(
+        packets.iter().any(|p| p[0] == 0xE2),
+        "and swings — a 0xE2 animation to the modern (TOL) client"
+    );
+}
+
+#[test]
+fn a_dying_creature_plays_its_death_throe() {
+    // Death is a throe, not a silent vanish: the killing blow sends a 0xE2 Die
+    // animation (type 3) on the creature's serial to everyone watching, while it
+    // is still on screen to play it. A one-hit-point mob dies on the first swing.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 1, now);
+    engage(&mut world, player, mob, now);
+    let _ = packets_for(&mut world, player);
+
+    for _ in 0..WRESTLING_SWING_TICKS {
+        world.tick(now);
+    }
+    assert!(
+        world
+            .registry()
+            .entity_of(Serial::new(mob).unwrap())
+            .is_none(),
+        "the creature died and was removed"
+    );
+    let mob_serial = mob.to_be_bytes();
+    assert!(
+        packets_for(&mut world, player).iter().any(|p| {
+            p[0] == 0xE2 && p.len() >= 7 && p[1..5] == mob_serial && p[5..7] == [0x00, 0x03]
+        }),
+        "the creature played a 0xE2 Die animation (type 3) on its own serial"
+    );
+}
+
+#[test]
+fn a_creature_dies_with_its_own_voice() {
+    // Per-creature sound, the point of the sound rule: an orc's death cry is its
+    // own (ServUO BaseSoundID 0x45A, death = +4), not the human death gasp or the
+    // fists thwack every mobile used to share.
+    const ORC_BODY: u16 = 0x0011;
+    const ORC_DEATH_SOUND: u16 = 0x045A + 4;
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    world.queue(Command::SpawnMobile {
+        body: ORC_BODY,
+        hue: 0,
+        hits: 1, // one blow fells it
+        notoriety: 5,
+        damage: 5,
+        resistance: 0,
+        swing: 0,
+        sight: 0,
+        aggression: 2,
+        beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
+        wander: false,
+        position: Point::new(START.0, START.1, 0),
+        facet: 0,
+        name: None,
+        banker: false,
+        vendor: false,
+        equipment: Vec::new(),
+    });
+    world.tick(now);
+    let orc = world
+        .state
+        .registry
+        .query::<Body>()
+        .find(|(entity, body)| body.id == ORC_BODY && !world.state.registry.has::<Client>(*entity))
+        .and_then(|(entity, _)| world.state.registry.serial_of(entity))
+        .expect("the orc spawned")
+        .raw();
+    engage(&mut world, player, orc, now);
+    let _ = packets_for(&mut world, player);
+
+    for _ in 0..WRESTLING_SWING_TICKS {
+        world.tick(now);
+    }
+    assert!(
+        world
+            .registry()
+            .entity_of(Serial::new(orc).unwrap())
+            .is_none(),
+        "the orc died"
+    );
+    let cry = ORC_DEATH_SOUND.to_be_bytes();
+    assert!(
+        packets_for(&mut world, player)
+            .iter()
+            .any(|p| p[0] == 0x54 && p.len() >= 4 && p[2..4] == cry),
+        "the orc died with its own death cry (0x45E), not a human's or a fist"
     );
 }
 
@@ -2553,8 +2757,40 @@ fn ready_caster(world: &mut World, reagent: u16, now: Instant) -> (ConnectionId,
     world.tick(now);
     let backpack = Serial::new(backpack_serial(world, connection)).unwrap();
     openshard_items::give(&mut world.state, backpack, reagent, 0, 20);
+    // A full spellbook, so the cast gate — you may cast only what your book holds
+    // — passes for every spell a cast test tries.
+    if let Some(book) = openshard_items::give(
+        &mut world.state,
+        backpack,
+        openshard_state::components::SPELLBOOK_GRAPHIC,
+        0,
+        1,
+    ) {
+        world
+            .state
+            .registry
+            .insert(book, openshard_state::components::Spellbook::full());
+    }
     let _ = packets_for(world, connection);
     (connection, entity)
+}
+
+/// Give a connection's character a full spellbook so the cast gate passes,
+/// without stocking reagents or setting skill — the parts a cost test controls.
+fn give_full_spellbook(world: &mut World, connection: ConnectionId) {
+    let backpack = Serial::new(backpack_serial(world, connection)).unwrap();
+    if let Some(book) = openshard_items::give(
+        &mut world.state,
+        backpack,
+        openshard_state::components::SPELLBOOK_GRAPHIC,
+        0,
+        1,
+    ) {
+        world
+            .state
+            .registry
+            .insert(book, openshard_state::components::Spellbook::full());
+    }
 }
 
 /// A world whose spells cast Sphere-style — resolve at once, no rooting.
@@ -3181,6 +3417,49 @@ fn the_poison_spell_poisons_what_it_is_aimed_at() {
 }
 
 #[test]
+fn a_resolved_cast_plays_its_sound_and_shows_its_bolt() {
+    // The most visible gap against a real client, closed: a spell that lands is
+    // no longer silent and invisible. Fireball plays its 0x54 sound and flings a
+    // 0x70 graphical effect at the mark, both reaching the caster.
+    let now = Instant::now();
+    let mut world = sphere_world();
+    let (connection, _) = ready_caster(&mut world, BLACK_PEARL, now);
+    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let _ = packets_for(&mut world, connection); // drain the setup burst
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 17,
+    }); // Fireball
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::TargetResponse {
+            cursor_id: 0,
+            serial: target,
+            location: Point::new(0, 0, 0),
+            graphic: 0,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    let packets = packets_for(&mut world, connection);
+    assert!(
+        packets.iter().any(|p| p[0] == 0x54),
+        "the cast plays a sound"
+    );
+    assert!(
+        packets.iter().any(|p| p[0] == 0x70),
+        "and flings a visible bolt"
+    );
+    assert!(
+        packets.iter().any(|p| p[0] == 0xE2),
+        "and the caster gestures — a 0xE2 animation to the modern client"
+    );
+}
+
+#[test]
 fn a_cast_without_reagents_fizzles() {
     let now = Instant::now();
     let mut world = sphere_world();
@@ -3206,6 +3485,102 @@ fn a_cast_without_reagents_fizzles() {
         mana_before,
         "a fizzle for want of a reagent spends nothing"
     );
+}
+
+#[test]
+fn with_reagents_off_a_cast_needs_no_reagents() {
+    // The [gameplay] reagents = false knob (Sphere's no-reagent shards): a spell
+    // casts from mana alone, with an empty pack, where the default would fizzle
+    // (see the test above). The mana being spent is proof the cast proceeded.
+    let gameplay = Gameplay {
+        cast_style: openshard_state::CastStyle::Walk,
+        reagents: false,
+        ..Default::default()
+    };
+    let now = Instant::now();
+    let mut world = World::new(START).with_gameplay(gameplay);
+    let connection = enter(&mut world, now); // no reagents stocked
+    let entity = world.state.players[&connection];
+    let serial = serial_of(&world, connection);
+    world.queue(Command::SetSkill {
+        serial,
+        skill: 25,
+        value: 1000,
+    });
+    world.tick(now);
+    give_full_spellbook(&mut world, connection); // the cast gate, but no reagents
+    let mana_before = world.registry().get::<Mana>(entity).unwrap().current;
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 17,
+    }); // Fireball — normally needs a black pearl
+    world.tick(now);
+    assert!(
+        world.registry().get::<Mana>(entity).unwrap().current < mana_before,
+        "with reagents off, the cast paid its mana and proceeded despite an empty pack"
+    );
+}
+
+#[test]
+fn mana_loss_on_fail_off_refunds_a_fizzle() {
+    // Sphere's ManaLossFail, confirmed and made a knob: mana is spent at
+    // resolution, and with mana_loss_on_fail = false a *failed* cast keeps it. The
+    // test is outcome-agnostic — whichever way the seeded roll lands, the rule
+    // holds: mana is spent exactly when the cast succeeds, never on a fizzle here.
+    let gameplay = Gameplay {
+        cast_style: openshard_state::CastStyle::Walk,
+        reagents: false, // isolate mana — no reagent fizzle in the way
+        mana_loss_on_fail: false,
+        ..Default::default()
+    };
+    let now = Instant::now();
+    let mut world = World::new(START).with_gameplay(gameplay);
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = serial_of(&world, connection);
+    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    // A middling skill, so the roll can plausibly go either way.
+    world.queue(Command::SetSkill {
+        serial,
+        skill: 25,
+        value: 300,
+    });
+    world.tick(now);
+    give_full_spellbook(&mut world, connection); // the cast gate
+    let mana_before = world.registry().get::<Mana>(entity).unwrap().current;
+
+    let mut cast: Cursor<SpellCast> = world.bus().cursor();
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 17,
+    }); // Fireball, a targeted spell
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::TargetResponse {
+            cursor_id: 0,
+            serial: target,
+            location: Point::new(0, 0, 0),
+            graphic: 0,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    let succeeded = world.bus().read(&mut cast).any(|e| e.success);
+    let mana_after = world.registry().get::<Mana>(entity).unwrap().current;
+    if succeeded {
+        assert!(
+            mana_after < mana_before,
+            "a successful cast spends its mana"
+        );
+    } else {
+        assert_eq!(
+            mana_after, mana_before,
+            "a fizzle with mana_loss_on_fail off keeps the mana"
+        );
+    }
 }
 
 #[test]
@@ -4271,6 +4646,8 @@ fn a_door_opens_and_closes_on_double_click() {
     let door = world.registry().query::<Door>().next().unwrap().0;
     let serial = world.registry().serial_of(door).unwrap().raw();
 
+    let _ = packets_for(&mut world, gm); // drain the login/decorate burst
+
     // Double-click opens it: the graphic becomes the open art and it hops by
     // the hinge offset.
     world.queue(Command::DoubleClick {
@@ -4289,6 +4666,10 @@ fn a_door_opens_and_closes_on_double_click() {
         "it swung aside by its hinge offset"
     );
     assert!(world.registry().get::<Door>(door).unwrap().is_open);
+    assert!(
+        packets_for(&mut world, gm).iter().any(|p| p[0] == 0x54),
+        "the door creaks — a 0x54 sound to everyone who sees it swing"
+    );
 
     // Double-clicking again shuts it and returns it to its frame.
     world.queue(Command::DoubleClick {
@@ -4931,6 +5312,95 @@ fn a_characters_inventory_survives_a_logout_and_restore() {
         shard.registry().get::<Contained>(gold).unwrap().container,
         backpack_serial,
         "and back inside the same backpack"
+    );
+}
+
+#[test]
+fn a_spellbook_keeps_its_spells_across_a_logout_and_restore() {
+    use openshard_entities::SerialKind;
+    use openshard_state::components::{Spellbook, SPELLBOOK_GRAPHIC};
+
+    // A bought spellbook with spells learned into it must open again after a
+    // relog: without the mask on disk it comes back as a graphic with no
+    // Spellbook component, and double-click falls through — the exact bug a
+    // player hit buying a book, scribing scrolls, and logging back in.
+    let mut home = world();
+    let now = Instant::now();
+    let conn_a = enter(&mut home, now);
+    let entity = home.state.players[&conn_a];
+    let char_serial = home.registry().serial_of(entity).unwrap().raw();
+
+    let (backpack, _) = home
+        .registry()
+        .query::<Equipped>()
+        .find(|(_, worn)| worn.layer == BACKPACK_LAYER)
+        .expect("a backpack was equipped");
+    let backpack_serial = home.registry().serial_of(backpack).unwrap();
+
+    // Spells 0, 5 and 63 learned — 63 is the top bit, which only survives the
+    // store's i64 bit-cast if it is treated as an unsigned mask.
+    let learned = (1u64 << 0) | (1u64 << 5) | (1u64 << 63);
+    let (book, book_serial) = home
+        .state
+        .registry
+        .spawn_with_serial(SerialKind::Item)
+        .unwrap();
+    home.state.registry.insert(
+        book,
+        Graphic {
+            id: SPELLBOOK_GRAPHIC,
+            hue: 0,
+        },
+    );
+    home.state.registry.insert(book, Spellbook(learned));
+    home.state.registry.insert(
+        book,
+        Contained {
+            container: backpack_serial,
+            x: 40,
+            y: 65,
+            grid: 0,
+        },
+    );
+
+    // The sweep carries the mask.
+    let records = home.inventory_of(entity);
+    assert!(
+        records
+            .iter()
+            .any(|r| r.serial == book_serial.raw() && r.spellbook == Some(learned)),
+        "the spellbook is saved with its learned spells"
+    );
+
+    home.queue(Command::Disconnect { connection: conn_a });
+    home.tick(now);
+
+    let mut shard = world();
+    shard.reserve_serial(char_serial);
+    shard.restore_items(records);
+    let conn_b = connection();
+    shard.queue(Command::Enter {
+        connection: conn_b,
+        version: ClientVersion::TOL,
+        account: "admin".to_owned(),
+        name: "Lord British".to_owned(),
+        serial: Some(char_serial),
+        position: Some(Point::new(1500, 1000, 0)),
+        facet: 0,
+        appearance: None,
+        sheet: None,
+        access: AccessLevel::Player,
+    });
+    shard.tick(now);
+
+    let book = shard
+        .registry()
+        .entity_of(book_serial)
+        .expect("the spellbook is back on its serial");
+    assert_eq!(
+        shard.registry().get::<Spellbook>(book).map(|b| b.0),
+        Some(learned),
+        "the restored book still knows the spells it was scribed with"
     );
 }
 
@@ -7027,6 +7497,9 @@ fn the_chase_pace_is_the_operators_knob() {
             openshard_state::CastStyle::Stop,
             true,
             openshard_state::TooltipMode::SendVersion,
+            true,
+            true,
+            true,
             true,
         );
         let mut world = World::new(START).with_gameplay(gameplay);

@@ -51,7 +51,7 @@ pub use events::{
 pub use map::{LandCell, Map, MapError, StaticItem, BLOCK_SIZE};
 pub use openshard_chat::MobileSpoke;
 pub use openshard_combat::{MobileDamaged, MobileDied};
-pub use openshard_items::ItemSpawned;
+pub use openshard_items::{ItemSpawned, ItemUsed};
 pub use openshard_magic::SpellCast;
 pub use openshard_npc::StockLine;
 pub use openshard_skills::SkillUsed;

@@ -405,6 +405,21 @@ Roughly in dependency order, each script-first:
   - [ ] **Partial lift honours the amount everywhere** — the `0x07` amount is
     honoured for ground splits; a partial lift out of a container takes the whole
     item.
+  - [x] **The item-trigger seam (Sphere's `@DClick`).** The engine handles the
+    double-clicks it knows — door, container, spellbook, mount, mobile — and hands
+    every *other* item to the pack as an `ItemUsed { item, graphic, by }` event
+    (defined in `items`, re-exported by `world`, delivered to scripts like every
+    domain event), with reach already checked server-side (`container_in_reach`).
+    The engine keeps *no* default behaviour for a bare item: the meaning lives in
+    the pack, which registers a handler per graphic and answers with ops. This is
+    the "default in core, customise in the pack" split — except the core default
+    here is nothing, because a graphic has no behaviour until a shard gives it one.
+    The Community Pack ships a readable book as the example.
+  - [ ] **A consume op for one-shot items** — a used item cannot yet be removed by
+    a script (`op_consume_item`), so a heal potion that vanishes on drink waits on
+    that primitive; today's item triggers are the reusable kind (read, toggle,
+    summon, emote). Removing an item needs the three location-specific client
+    updates (ground `0x1D`, contained `0x25`/remove, worn) behind one op.
 - [x] `combat` — swing timers, damage, resistances, notoriety
   - [x] **Hit points, damage and death.** Mobiles carry `Hitpoints`; scripts
     spawn creatures (`op_spawn_mobile` → `Command::SpawnMobile`, an entity with a
@@ -472,9 +487,33 @@ Roughly in dependency order, each script-first:
   - [ ] **Stamina as a real pool** — the status bar sends `stamina = dexterity`
     so the client will run at all; a real pool spends on running, refills on the
     tick counter like mana, and is the number a war-mode push-through should cost.
-  - [ ] **Combat visuals and sounds** — a swing lands with no animation (`0x6E`),
-    no blood, no sound (`0x54`); the encoders do not exist yet. Same protocol
-    slice as the spell effects below, worth doing together.
+  - [x] **Combat sounds, per creature, and the projectile.** A landed blow plays
+    the *attacker's own* sound — a creature's ServUO `BaseSoundID + 2`, a human's
+    fists thwack — so an orc growls its attack instead of punching like a man; a
+    death plays the victim's cry (`BaseSoundID + 4`, or a gendered human gasp), and
+    a creature growls (`+ 0`) the moment the `ai` aggros it. The sounds derive from
+    the body id via `creature_base_sound(body)` (keyed like `creature_name`,
+    ServUO's per-creature `BaseSoundID`), so the pack needs no sound data — it
+    falls out of the bodies it already spawns. A ranged volley also flies a real
+    arrow: a `0x70` moving graphical effect from shooter to mark. The `protocol`
+    feedback encoders (`0x54` sound, `0x70`/`0xC0` effect, `0x6E`/`0xE2` animation)
+    and `WorldState::broadcast_from`/`play_sound`/`animate` are the seam; every
+    source broadcasts to the players in view range.
+  - [x] **Swing, death and cast animation.** `WorldState::animate(mobile, Action)`
+    animates a swing, a death throe or a cast gesture for everyone in view range.
+    The modern client (7.0.0.0+, gated on `Feature::NewMobileAnimation`) gets the
+    `0xE2` new-animation packet, where the server names a body-agnostic
+    `AnimationType` (Attack/Die/Spell) and the *client* picks the frames — so no
+    body table is needed there, the path the test clients take. An older client
+    gets the `0x6E` classic packet, whose action id is body-specific, chosen off a
+    coarse humanoid-vs-creature split (`body_opens_doors`). Wired into the melee
+    and ranged swing, death (`combat::die`), and the cast. ServUO's ids: Wrestle
+    31, human die 21, human cast 16; monster attack 4, die 2, cast 12.
+  - [ ] **Exact per-weapon and per-body `0x6E` actions** — the classic-packet
+    action is a coarse humanoid/creature split, not the per-weapon (slash vs bash
+    vs pierce), mounted, or per-monster action ServUO computes from the body
+    tables. The modern `0xE2` path is exact; this only refines the old 2D client,
+    the minority path, and wants the body-animation tables.
 - [x] `skills` — usage checks, gain curves
   - [x] **The check and the gain.** A mobile carries `Skills` (a sparse map of id
     → tenths). A script sets one (`op_set_skill`) and uses it against a difficulty
@@ -566,6 +605,15 @@ Roughly in dependency order, each script-first:
     decides whether a blow mid-cast fizzles it; `cast_style = "sphere"` resolves
     the cast as it is made, walking. Both threaded from `openshard.toml` into
     `WorldState.gameplay`, never branched on `Era`.
+  - [x] **Spell cost, three more `[gameplay]` flags** (Sphere's magic model,
+    confirmed in `Source-X`). Sphere spends mana and reagents at *resolution* —
+    once the cast has succeeded or fizzled, not up front — so `pay_and_roll` now
+    checks availability, rolls, and only then spends: `reagents` (require and
+    consume reagents at all, off for a mana-only shard), `mana_loss_on_fail`
+    (Sphere's `ManaLossFail` — does a fizzle still burn the mana) and
+    `reagent_loss_on_fail` (`ReagentLossFail`). A successful cast always spends;
+    the UO/ServUO original is all three on. Orthogonal to `cast_style`, which is
+    the rooting/precast axis (`MAGICF_PRECAST`/`FREEZEONCAST`).
   - [x] **Poison, in the core.** Poison, Cure and Arch Cure run a `Poisoned`
     component that `combat::poison_tick` pulses like decay — typed poison damage
     cut by poison resistance, in the one place all damage passes — with a dose
@@ -589,12 +637,33 @@ Roughly in dependency order, each script-first:
     is already folded into the saved stats, so re-applying would double it).
     `World::effects_of`/`apply_effects` are the one seam; every future buff and
     debuff slots into the same `effects` list with no schema change.
-  - [ ] **Cast visuals and sounds** — a spell today resolves with no words spoken
-    over the caster's head, no particle effect (`0x70`/`0xC0`), no sound (`0x54`)
-    and no cast animation; the effect encoders do not exist in `protocol` yet.
-    ServUO's `SpellInfo` already carries the power words and each spell's
-    effect/sound ids, so this is data the table can grow. The single most visible
-    gap when testing with a real client.
+  - [x] **The spellbook gates the cast (schema v8).** A `Spellbook` is a `u64`
+    mask (bit _n_ = spell _n_) on the book item; `begin_cast` refuses a spell the
+    caster's book does not hold — classic UO, cast only what you scribed. A mage
+    sells an empty book (`0x0EFA`) and Magery scrolls (`0x1F2D + spell`); dragging
+    a scroll onto the book learns the spell and consumes it (Sphere's scribe
+    flow), and double-click opens it (`0x24` gump `0xFFFF` + the `0xBF 0x1B`
+    content packet). The mask persists on a nullable `spellbook` item column (a
+    `u64` bit-cast to the signed SQL integer so the full book's top bit survives),
+    swept in `item_record` and restored in `place_ground_item`/`restore_inventory`
+    — without it a relogged book silently refused to open. `.spellbook` is the
+    staff shortcut; the Community Pack's Britain mage stocks reagents, book and all
+    64 scrolls.
+  - [x] **Cast sound and visual.** A resolved spell now plays a sound and throws a
+    visual: a fire bolt for fire damage (0x36D4, sound 0x15E), an energy bolt for
+    energy (0x379F/0x20A), a magic-arrow bolt for the rest (0x36E4/0x1E5), a
+    sparkle on the mark for a heal, cure or buff (0x376A/0x374A/0x373A), an
+    explosion at the aimed spot for an area blast — ServUO's per-spell sound and
+    particle ids, resolved in `apply_spell_effect` where the core runs the effect.
+    Coarse (keyed on the effect variant, not exact per-spell art) but the cast is
+    no longer silent and invisible, which was the single most visible gap against a
+    real client. A `Scripted` spell voices itself in the pack, off `SpellCast`.
+  - [ ] **Per-spell exact art, power words, and the cast gesture** — the visual is
+    keyed on the coarse `SpellEffect` today (every fire spell throws the same
+    bolt); exact per-spell art wants the spell table to carry its own graphic/sound,
+    the power words want the `0x54`-adjacent overhead speech, and the cast gesture
+    is the same per-body animation the swing waits on. ServUO's `SpellInfo` carries
+    all of it, so this is data the table can grow.
   - [ ] **The non-stat magical buffs** — Protection, Reactive Armor, Night Sight,
     Magic Reflection: a different mechanic from the stat family (each modifies a
     behaviour, not a number), but the same `effects`-list persistence once each

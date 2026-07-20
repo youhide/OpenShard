@@ -36,7 +36,9 @@ use serde::{Deserialize, Serialize};
 /// - v7: a mobile's active effects — poison today, buffs and debuffs as they
 ///   land — so a relog cannot wash a debuff off, the way ServUO keeps a
 ///   logged-out mobile's timers running and Sphere saves its effect tags.
-pub const SCHEMA_VERSION: u32 = 7;
+/// - v8: a spellbook's learned-spell bitmask, so a bought book still opens to
+///   its spells after a relog.
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// An account, as saved.
 ///
@@ -222,6 +224,12 @@ pub struct ItemRecord {
     /// Defaulted so a v4 save loads.
     #[serde(default)]
     pub name: Option<String>,
+    /// The learned-spell bitmask if this item is a spellbook, else `None`. Saved
+    /// so a bought book still opens to its spells after a relog; without it a
+    /// restored spellbook is a graphic with no `Spellbook` component and refuses
+    /// to open. Defaulted so a pre-v8 save loads.
+    #[serde(default)]
+    pub spellbook: Option<u64>,
     /// Where it is.
     pub location: ItemLocation,
 }
@@ -462,6 +470,7 @@ mod tests {
                 container_gump: Some(0x003C),
                 price: Some(11),
                 name: Some("scissors".into()),
+                spellbook: Some(0x0000_0000_00FF_00FF),
                 location,
             };
             let json = serde_json::to_string(&record).expect("an item must serialise");

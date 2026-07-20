@@ -156,7 +156,9 @@ CREATE TABLE IF NOT EXISTS items (
     grid     INTEGER NOT NULL,
     layer    INTEGER NOT NULL,
     price    INTEGER,
-    name     TEXT
+    name     TEXT,
+    -- a spellbook's learned-spell bitmask, so a bought book still opens after a relog.
+    spellbook INTEGER
 );
 CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
 -- NPC mobiles and placed decoration, each a JSON record keyed by serial: a
@@ -343,8 +345,8 @@ impl Store for SqliteStore {
                     tx.execute(
                         "INSERT OR REPLACE INTO items \
                      (serial, owner, graphic, hue, amount, stackable, gump, \
-                      loc_kind, facet, x, y, z, parent, grid, layer, price, name) \
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+                      loc_kind, facet, x, y, z, parent, grid, layer, price, name, spellbook) \
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
                         params![
                             item.serial,
                             item.owner,
@@ -363,6 +365,10 @@ impl Store for SqliteStore {
                             f.layer,
                             item.price,
                             item.name,
+                            // A u64 mask reinterpreted as i64 (SQLite has no unsigned
+                            // 64-bit); read back the same way. The full book is
+                            // u64::MAX, which does not fit an i64 unless bit-cast.
+                            item.spellbook.map(|mask| mask as i64),
                         ],
                     )?;
                     Ok(())
@@ -509,7 +515,8 @@ impl Store for SqliteStore {
             let mut statement = guard
                 .prepare(
                     "SELECT serial, owner, graphic, hue, amount, stackable, gump, \
-                     loc_kind, facet, x, y, z, parent, grid, layer, price, name FROM items",
+                     loc_kind, facet, x, y, z, parent, grid, layer, price, name, spellbook \
+                     FROM items",
                 )
                 .map_err(database)?;
             let rows = statement
@@ -535,6 +542,8 @@ impl Store for SqliteStore {
                             container_gump: row.get(6)?,
                             price: row.get(15)?,
                             name: row.get(16)?,
+                            // Bit-cast back from the i64 the mask was stored as.
+                            spellbook: row.get::<_, Option<i64>>(17)?.map(|mask| mask as u64),
                             // A placeholder overwritten below; the location cannot be
                             // built inside `query_map`'s closure return type cleanly.
                             location: ItemLocation::Ground {
@@ -767,6 +776,7 @@ mod tests {
             container_gump: None,
             price: None,
             name: None,
+            spellbook: None,
             location: ItemLocation::Contained {
                 container,
                 x: 0,
@@ -993,6 +1003,34 @@ mod tests {
             assert_eq!(items.len(), 1);
             assert_eq!(items[0].price, Some(4));
             assert_eq!(items[0].name.as_deref(), Some("black pearl"));
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn a_spellbook_mask_survives_a_reopen() {
+        // The learned-spell bitmask round-trips through the i64 column even with
+        // the top bit set (u64::MAX, the full book) — a signed widen would lose
+        // it, so it is stored and read as a bit-cast. Without it a restored book
+        // has no spells and refuses to open.
+        let path = temp_db("spellbook-item");
+        let full = u64::MAX;
+        {
+            let store = SqliteStore::open(&path).expect("open");
+            let mut item = contained(0x4000_0001, 1, 1);
+            item.spellbook = Some(full);
+            let mut snap = snapshot(vec![character(1, 100)], vec![]);
+            snap.inventories = vec![crate::record::Inventory {
+                owner: 1,
+                items: vec![item],
+            }];
+            store.save(&snap).await.expect("save");
+        }
+        {
+            let store = SqliteStore::open(&path).expect("reopen");
+            let items = store.items().await.expect("read");
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].spellbook, Some(full));
         }
         let _ = std::fs::remove_file(&path);
     }

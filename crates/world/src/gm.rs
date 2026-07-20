@@ -14,7 +14,9 @@
 
 use openshard_entities::EntityId;
 use openshard_protocol::{encode_message, encode_target_cursor, Point};
-use openshard_state::components::{Client, Position, Stats};
+use openshard_state::components::{
+    Client, Equipped, Position, Spellbook, Stats, SPELLBOOK_GRAPHIC,
+};
 use openshard_state::{TargetPurpose, WorldState};
 
 use openshard_items as items;
@@ -47,6 +49,7 @@ pub fn run(state: &mut WorldState, actor: EntityId, rest: &str) {
         "tele" => teleport_cursor(state, actor),
         "go" => go_to(state, actor, &args),
         "add" => add_item(state, actor, &args),
+        "spellbook" => full_spellbook(state, actor),
         "set" => set_stat(state, actor, &args),
         "admin" => crate::admin::open_menu(state, actor),
         "save" => save_world(state, actor),
@@ -136,6 +139,29 @@ pub(crate) fn teleport_to(state: &mut WorldState, actor: EntityId, to: Point) {
         actor,
         &format!("Teleported to {}, {}, {}.", to.x, to.y, to.z),
     );
+}
+
+/// `.spellbook` — drop a full spellbook (every Magery spell) into the actor's
+/// pack, so a tester can cast anything without buying each scroll. The mage's
+/// book off the shelf is empty; this is the staff shortcut.
+fn full_spellbook(state: &mut WorldState, actor: EntityId) {
+    const BACKPACK_LAYER: u8 = 0x15;
+    let Some(actor_serial) = state.registry.serial_of(actor) else {
+        return;
+    };
+    let backpack = state
+        .registry
+        .query::<Equipped>()
+        .find(|(_, worn)| worn.mobile == actor_serial && worn.layer == BACKPACK_LAYER)
+        .and_then(|(entity, _)| state.registry.serial_of(entity));
+    let Some(backpack) = backpack else {
+        notify(state, actor, "You have no backpack.");
+        return;
+    };
+    if let Some(book) = items::give(state, backpack, SPELLBOOK_GRAPHIC, 0, 1) {
+        state.registry.insert(book, Spellbook::full());
+        notify(state, actor, "A full spellbook appears in your pack.");
+    }
 }
 
 /// `.add <graphic> [amount]` — drop an item at the actor's feet. Hex (`0x1bf2`)
