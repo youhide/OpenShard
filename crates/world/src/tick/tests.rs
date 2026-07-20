@@ -5901,6 +5901,132 @@ fn context_menus_off_sends_no_popup() {
     );
 }
 
+/// A terrain where the line of sight is never clear — every ray hits a wall.
+struct BlindTerrain;
+impl Terrain for BlindTerrain {
+    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
+        Some(to)
+    }
+    fn sight_clear(&self, _from: Point, _to: Point) -> bool {
+        false
+    }
+}
+
+/// Spawn a stocked vendor at `point` and return its serial.
+fn spawn_stocked_vendor(world: &mut World, point: Point, now: Instant) -> u32 {
+    world.queue(Command::SpawnMobile {
+        body: 0x0190,
+        hue: 0,
+        hits: 50,
+        notoriety: 1,
+        damage: 0,
+        resistance: 0,
+        swing: 0,
+        sight: 0,
+        aggression: 0,
+        beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
+        wander: false,
+        position: point,
+        facet: 0,
+        name: Some("the tailor".to_owned()),
+        banker: false,
+        vendor: true,
+        equipment: Vec::new(),
+    });
+    world.tick(now);
+    let vendor = world
+        .state
+        .registry
+        .query::<openshard_state::components::Vendor>()
+        .map(|(entity, _)| entity)
+        .next()
+        .expect("a vendor spawned");
+    let serial = world.registry().serial_of(vendor).unwrap().raw();
+    world.queue(Command::StockVendor {
+        serial,
+        stock: vec![npc::StockLine {
+            graphic: 0x0F7A,
+            hue: 0,
+            amount: 50,
+            price: 4,
+            name: "black pearl".to_owned(),
+        }],
+    });
+    world.tick(now);
+    serial
+}
+
+#[test]
+fn a_vendor_at_the_counter_sells() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let vendor = spawn_stocked_vendor(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::DoubleClick {
+        connection,
+        serial: vendor,
+    });
+    world.tick(now);
+
+    assert!(
+        packets_for(&mut world, connection)
+            .iter()
+            .any(|p| p[0] == 0x74),
+        "the buy window opens for a customer at the counter"
+    );
+}
+
+#[test]
+fn a_vendor_behind_a_wall_will_not_sell() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    // Adjacent, but with a wall between: line of sight is never clear.
+    let vendor = spawn_stocked_vendor(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    world.state.facet_state_mut(0).terrain = Some(Box::new(BlindTerrain));
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::DoubleClick {
+        connection,
+        serial: vendor,
+    });
+    world.tick(now);
+
+    assert!(
+        !packets_for(&mut world, connection)
+            .iter()
+            .any(|p| p[0] == 0x74),
+        "no buying through a wall, however near"
+    );
+}
+
+#[test]
+fn a_vendor_across_the_street_is_out_of_reach() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    // In the open (sight clear), but well beyond the trade range.
+    let vendor = spawn_stocked_vendor(&mut world, Point::new(START.0 + 10, START.1, 0), now);
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::DoubleClick {
+        connection,
+        serial: vendor,
+    });
+    world.tick(now);
+
+    assert!(
+        !packets_for(&mut world, connection)
+            .iter()
+            .any(|p| p[0] == 0x74),
+        "no buying from across the street"
+    );
+}
+
 #[test]
 fn saying_bank_with_no_banker_near_does_nothing() {
     let now = Instant::now();

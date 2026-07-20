@@ -10,6 +10,7 @@
 use openshard_entities::{EntityId, Serial, SerialKind};
 use openshard_gateway::ConnectionId;
 use openshard_items as items;
+use openshard_movement::Terrain;
 use openshard_protocol::{
     encode_buy_list, encode_container_contents, encode_open_container, encode_sell_list, BuyLine,
     Purchase, Sale, SellLine,
@@ -40,8 +41,10 @@ const STOCK_GUMP: u16 = 0x003E;
 /// The vendor buy gump the client opens over the stock container.
 const SHOP_GUMP: u16 = 0x0030;
 
-/// How near a customer must stand to trade.
-const TRADE_RANGE: u32 = 8;
+/// How near a customer must stand to trade — a few tiles, so a shopper reaches
+/// the counter but cannot buy from across the street. Trade also needs line of
+/// sight (see [`in_trade_range`]), which is what stops buying through a wall.
+const TRADE_RANGE: u32 = 4;
 
 /// One line of stock, as a script supplies it.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -80,7 +83,17 @@ fn in_trade_range(state: &WorldState, player: EntityId, vendor: EntityId) -> boo
     ) else {
         return false;
     };
-    state.facet_of(player) == state.facet_of(vendor) && in_range(at, vendor_at, TRADE_RANGE)
+    let facet = state.facet_of(player);
+    if facet != state.facet_of(vendor) || !in_range(at, vendor_at, TRADE_RANGE) {
+        return false;
+    }
+    // A wall between the shopper and the counter is a wall: the same line-of-sight
+    // ServUO and Sphere gate a vendor on, so there is no buying through it. The
+    // ray is the one aggro uses (`Terrain::sight_clear`).
+    state
+        .facet_state(facet)
+        .live_terrain()
+        .sight_clear(at, vendor_at)
 }
 
 /// Fill a vendor's stock from a script's lines. See `Command::StockVendor`.
@@ -413,15 +426,16 @@ fn stock_prices(state: &WorldState, stock_serial: Serial) -> Vec<(u16, u32)> {
 /// The nearest vendor within trade range of `actor`, if any.
 fn nearest_vendor(state: &WorldState, actor: EntityId) -> Option<EntityId> {
     let &Position(at) = state.registry.get::<Position>(actor)?;
-    let facet = state.facet_of(actor);
+    // The keyword path ("buy"/"sell") answers the closest vendor a shopper could
+    // reach — the same range-and-line-of-sight gate a double-click passes, so a
+    // shout does not carry through a wall either.
     state
         .registry
         .query::<Vendor>()
-        .filter(|(vendor, _)| state.facet_of(*vendor) == facet)
+        .filter(|(vendor, _)| in_trade_range(state, actor, *vendor))
         .filter_map(|(vendor, _)| {
             let &Position(pos) = state.registry.get::<Position>(vendor)?;
-            in_range(at, pos, TRADE_RANGE)
-                .then(|| (openshard_state::sectors::distance(at, pos), vendor))
+            Some((openshard_state::sectors::distance(at, pos), vendor))
         })
         .min_by_key(|(d, _)| *d)
         .map(|(_, vendor)| vendor)
