@@ -184,6 +184,10 @@ pub(crate) async fn run_shard(
     // Advertise AoS (0xB9) when the shard serves tooltips or context menus, so a
     // modern client turns them on rather than staying on single-click names.
     login.supported_features = crate::boot::supported_features_of(config);
+    // And the character-list (0xA9) flags — the packet ClassicUO actually reads to
+    // turn on object tooltips (0x20) and context menus (0x08). This is the one
+    // that makes a modern client send tooltip/context requests at all.
+    login.character_list_flags = crate::boot::character_list_flags_of(config);
 
     // Kept, not detached: shutdown hands it a final snapshot, closes the channel,
     // and awaits this task so every queued write lands before the process exits.

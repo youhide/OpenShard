@@ -74,6 +74,19 @@ pub trait Terrain {
         None
     }
 
+    /// Where to *place* a mobile on `(x, y)`, near `near_z` — like
+    /// [`stand_z`](Self::stand_z), but not bound by one step's reach.
+    ///
+    /// A spawn is not a step: a shopkeeper placed at ground level belongs on the
+    /// building's raised floor above it, which [`stand_z`](Self::stand_z) refuses
+    /// because it is more than a step up. This finds the surface a mobile actually
+    /// fits on regardless of how far it is from `near_z`, so an NPC stops sinking
+    /// through the shop floor. Defaults to [`stand_z`](Self::stand_z) for a terrain
+    /// with no map.
+    fn spawn_z(&self, x: u16, y: u16, near_z: i32) -> Option<i32> {
+        self.stand_z(x, y, near_z)
+    }
+
     /// Whether an object `height` tall can sit at `(x, y, z)` — nothing solid in
     /// its body, and a surface under it to rest on.
     ///

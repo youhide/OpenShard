@@ -4708,11 +4708,12 @@ fn entering_sends_the_sequence_the_client_needs() {
     let ids: Vec<u8> = world.drain_outbound().map(|out| out.packet[0]).collect();
     assert_eq!(
         ids,
-        vec![0x1B, 0xBF, 0x20, 0x4F, 0x11, 0x3A, 0x78, 0x55],
+        vec![0x1B, 0xBF, 0xB9, 0x20, 0x4F, 0x11, 0x3A, 0x78, 0x55],
         "0x1B first or there is no body; 0x55 last or the client draws early; \
-             0x11 status and the 0x78 of the player's own equipment before it, or the \
-             client has no stamina and no backpack serial to open; 0x3A fills the \
-             skill window"
+             0xB9 AoS features after the map change (ServUO's DoLogin order), or a \
+             modern client shows no tooltips; 0x11 status and the 0x78 of the \
+             player's own equipment before it, or the client has no stamina and no \
+             backpack serial to open; 0x3A fills the skill window"
     );
 }
 
@@ -5667,6 +5668,64 @@ fn tooltips_off_sends_no_revision() {
     );
 }
 
+/// A terrain whose only walkable surface is a raised floor out of one step's
+/// reach — a shop floor above the ground. `stand_z` (a step) cannot reach it;
+/// `spawn_z` (a placement) can.
+struct RaisedFloorTerrain;
+impl Terrain for RaisedFloorTerrain {
+    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
+        Some(to)
+    }
+    fn stand_z(&self, _x: u16, _y: u16, _near_z: i32) -> Option<i32> {
+        None
+    }
+    fn spawn_z(&self, _x: u16, _y: u16, _near_z: i32) -> Option<i32> {
+        Some(7)
+    }
+}
+
+#[test]
+fn a_spawn_stands_on_the_floor_not_under_it() {
+    let now = Instant::now();
+    let mut world = world();
+    world.state.facet_state_mut(0).terrain = Some(Box::new(RaisedFloorTerrain));
+    // Placed at z=0 (as the pack does), the shop floor is at z=7.
+    world.queue(Command::SpawnMobile {
+        body: 0x0190,
+        hue: 0,
+        hits: 100,
+        notoriety: 7,
+        damage: 0,
+        resistance: 0,
+        swing: 0,
+        sight: 0,
+        aggression: 0,
+        beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
+        wander: false,
+        position: Point::new(START.0, START.1, 0),
+        facet: 0,
+        name: Some("the tailor".to_owned()),
+        banker: false,
+        vendor: false,
+        equipment: Vec::new(),
+    });
+    world.tick(now);
+
+    let (entity, _) = world
+        .state
+        .registry
+        .query::<Body>()
+        .find(|(e, _)| !world.state.registry.has::<Client>(*e))
+        .expect("the tailor spawned");
+    assert_eq!(
+        world.registry().get::<Position>(entity).unwrap().0.z,
+        7,
+        "the NPC is placed on the shop floor, not the ground beneath it"
+    );
+}
+
 #[test]
 fn an_unnamed_creature_takes_its_body_default_name() {
     let now = Instant::now();
@@ -5718,6 +5777,34 @@ fn an_unnamed_creature_takes_its_body_default_name() {
     assert!(
         String::from_utf8_lossy(&label).contains("a chicken"),
         "an unnamed creature names itself from its body"
+    );
+}
+
+#[test]
+fn entering_the_world_advertises_aos_features() {
+    // The 0xB9 ClassicUO reads to turn on in-world tooltips and context menus —
+    // ServUO sends it at world entry, and without it a modern client never asks.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let packets = packets_for(&mut world, connection);
+    assert!(
+        packets.iter().any(|p| p[0] == 0xB9),
+        "world entry advertises AoS SupportedFeatures"
+    );
+}
+
+#[test]
+fn entering_with_aos_off_advertises_nothing() {
+    let now = Instant::now();
+    let mut world = world();
+    world.state.gameplay.tooltip_mode = openshard_state::TooltipMode::Off;
+    world.state.gameplay.context_menus = false;
+    let connection = enter(&mut world, now);
+    let packets = packets_for(&mut world, connection);
+    assert!(
+        !packets.iter().any(|p| p[0] == 0xB9),
+        "no AoS is advertised when both tooltips and context menus are off"
     );
 }
 

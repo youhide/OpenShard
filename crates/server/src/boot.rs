@@ -94,15 +94,34 @@ pub(crate) fn gameplay_of(config: &Config) -> Gameplay {
 /// object tooltips and context menus. The lower expansion bits ride along as
 /// ServUO's core-expansion default; a 2D client ignores the ones it does not use.
 pub(crate) fn supported_features_of(config: &Config) -> u32 {
-    const AOS_FEATURE_FLAGS: u32 = 0x1F;
     let g = &config.gameplay;
     let aos = openshard_world::TooltipMode::parse(&g.tooltips) != openshard_world::TooltipMode::Off
         || g.context_menus;
     if aos {
-        AOS_FEATURE_FLAGS
+        openshard_protocol::AOS_FEATURE_FLAGS
     } else {
         0
     }
+}
+
+/// The `0xA9` character-list flags this shard advertises, from the tooltip and
+/// context-menu config.
+///
+/// This is the packet ClassicUO actually reads to enable AoS object tooltips
+/// (bit `0x20`) and context menus (bit `0x08`) — its `ClientFeatures.SetFlags`
+/// keys on the character-list flags, not the `0xB9` SupportedFeatures. Without
+/// the right bits here a modern client never sends a tooltip (`0xD6`) or
+/// context-menu (`0xBF`) request, whatever its version.
+pub(crate) fn character_list_flags_of(config: &Config) -> u32 {
+    let g = &config.gameplay;
+    let mut flags = 0;
+    if openshard_world::TooltipMode::parse(&g.tooltips) != openshard_world::TooltipMode::Off {
+        flags |= openshard_protocol::CLF_TOOLTIPS;
+    }
+    if g.context_menus {
+        flags |= openshard_protocol::CLF_CONTEXT_MENU;
+    }
+    flags
 }
 
 /// Load the client's map, if it is configured.

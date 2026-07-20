@@ -90,11 +90,16 @@ impl World {
             else {
                 return;
             };
-            // A stack reads as "3 gold coins", a single as its bare name — Sphere's
-            // `GetNameFull` pluralisation, kept to the amount prefix.
-            let text = match self.state.registry.get::<Amount>(target) {
-                Some(Amount(n)) if *n > 1 => format!("{n} {name}"),
-                _ => name.to_string(),
+            // Resolve the tiledata name's `%s%` pluralisation markers, then read
+            // "3 bolts of cloth" for a stack, "a bolt of cloth" for a single —
+            // Sphere's `GetNameFull`. The amount count decides both the markers and
+            // the prefix.
+            let amount = self.state.registry.get::<Amount>(target).map_or(1, |a| a.0);
+            let resolved = crate::tiledata::pluralize_name(name, amount > 1);
+            let text = if amount > 1 {
+                format!("{amount} {resolved}")
+            } else {
+                resolved
             };
             (id, TEXT_HUE, text)
         };

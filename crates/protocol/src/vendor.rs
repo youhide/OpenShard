@@ -31,10 +31,14 @@ pub fn encode_buy_list(container: u32, lines: &[BuyLine]) -> Vec<u8> {
     writer.u8(lines.len() as u8);
     for line in lines {
         writer.u32(line.price);
+        // ServUO's `VendorBuyList`: the length counts a trailing NUL, and the
+        // description is written NUL-terminated. Cap at 254 so length + the NUL
+        // still fits a byte.
         let name = line.name.as_bytes();
-        let take = name.len().min(u8::MAX as usize);
-        writer.u8(take as u8);
+        let take = name.len().min(u8::MAX as usize - 1);
+        writer.u8((take + 1) as u8);
         writer.bytes(&name[..take]);
+        writer.u8(0);
     }
     let mut bytes = writer.into_bytes();
     let length = u16::try_from(bytes.len()).expect("a buy list outgrew its u16 length");
@@ -186,7 +190,10 @@ mod tests {
         assert_eq!(&bytes[3..7], &0x4000_0010u32.to_be_bytes());
         assert_eq!(bytes[7], 2, "two lines");
         assert_eq!(&bytes[8..12], &3u32.to_be_bytes());
-        assert_eq!(bytes[12] as usize, "black pearl".len());
+        // The length counts the trailing NUL, and the name is NUL-terminated.
+        assert_eq!(bytes[12] as usize, "black pearl".len() + 1);
+        assert_eq!(&bytes[13..13 + "black pearl".len()], b"black pearl");
+        assert_eq!(bytes[13 + "black pearl".len()], 0, "NUL-terminated");
     }
 
     #[test]

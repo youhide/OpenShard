@@ -164,6 +164,19 @@ impl World {
             },
         );
         self.state.players.insert(connection, entity);
+        // The AoS feature gates for this connection, at debug — tooltips and
+        // context menus are version-gated, so this is where to look if a modern
+        // client unexpectedly shows no hover names.
+        debug!(
+            %connection,
+            version = ?version,
+            tooltips = version.supports(Feature::Tooltips),
+            tooltip_hash = version.supports(Feature::TooltipHash),
+            context_menu = version.supports(Feature::NewContextMenu),
+            tooltip_mode = ?self.state.gameplay.tooltip_mode,
+            context_menus = self.state.gameplay.context_menus,
+            "player feature gates"
+        );
         self.state
             .facet_state_mut(facet)
             .sectors
@@ -235,6 +248,21 @@ impl World {
             .encode(),
         );
         self.state.send(connection, encode_map_change(facet));
+        // AoS SupportedFeatures, sent *again* at world entry — this is the copy
+        // ServUO's `DoLogin` sends right after the login confirm, and the one
+        // ClassicUO reads to turn on in-world object tooltips and context menus.
+        // The `0xB9` sent before the character list only configures the
+        // character-select screen; without this one a modern client never asks for
+        // an OPL or opens a context menu, no matter its version. Off only when the
+        // shard serves neither.
+        if self.state.gameplay.tooltip_mode != TooltipMode::Off || self.state.gameplay.context_menus
+        {
+            let extended = version.supports(Feature::ExtraFeatureMask);
+            self.state.send(
+                connection,
+                encode_supported_features(AOS_FEATURE_FLAGS, extended),
+            );
+        }
         self.state.send(
             connection,
             PlayerUpdate {

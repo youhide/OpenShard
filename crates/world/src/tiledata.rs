@@ -403,9 +403,52 @@ fn read_name(raw: &[u8]) -> String {
     field[..end].iter().map(|b| *b as char).collect()
 }
 
+/// Resolve the pluralization markers in a tiledata name, given whether the pile
+/// is plural (more than one).
+///
+/// UO item names carry `%...%` blocks the client normally interprets and the
+/// server has to as well when it draws the name itself (a single-click label):
+/// left raw, `"bolt%s% of cloth"` reaches the client verbatim. Inside a block a
+/// `/` splits the plural form (before it) from the singular (after it), so
+/// `%s%` adds an "s" when plural and nothing when singular, and `%ves/f%` gives
+/// "…ves" / "…f". Text outside a block is always kept. Ported from Sphere's
+/// `CItemBase::GetNamePluralize`.
+#[must_use]
+pub fn pluralize_name(name: &str, plural: bool) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut inside = false;
+    // Within a block, the part before a `/` is the plural form. A block with no
+    // `/` is a pure plural suffix (`%s%`), kept only when pluralizing.
+    let mut is_plural_part = true;
+    for ch in name.chars() {
+        match ch {
+            '%' => {
+                inside = !inside;
+                is_plural_part = true;
+            }
+            '/' if inside => is_plural_part = false,
+            _ if inside && (plural != is_plural_part) => {}
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pluralize_resolves_the_tiledata_markers() {
+        // The reported bug: "bolt%s% of cloth" reaching the client verbatim.
+        assert_eq!(pluralize_name("bolt%s% of cloth", false), "bolt of cloth");
+        assert_eq!(pluralize_name("bolt%s% of cloth", true), "bolts of cloth");
+        // A block with a slash: plural before, singular after.
+        assert_eq!(pluralize_name("loa%ves/f%", true), "loaves");
+        assert_eq!(pluralize_name("loa%ves/f%", false), "loaf");
+        // A name with no markers is untouched either way.
+        assert_eq!(pluralize_name("a torch", true), "a torch");
+    }
 
     #[test]
     fn the_two_layouts_are_told_apart_by_arithmetic_alone() {

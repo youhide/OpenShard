@@ -226,6 +226,7 @@ pub(crate) fn dispatch(
                 warn!(%id, "malformed 0xD6");
                 return false;
             };
+            debug!(%id, count = query.serials.len(), "0xD6 tooltip query");
             world.queue(Command::QueryProperties {
                 connection: id,
                 serials: query.serials,
@@ -327,6 +328,7 @@ pub(crate) fn dispatch(
                 // request and selection, told apart by their own subcommand word.
                 Ok(None) => {
                     if let Ok(Some(request)) = ContextMenuRequest::decode(packet) {
+                        debug!(%id, serial = request.serial, "0xBF context-menu request");
                         world.queue(Command::ContextMenuRequest {
                             connection: id,
                             serial: request.serial,

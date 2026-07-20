@@ -399,6 +399,45 @@ impl Terrain for MapTerrain {
         self.surface_at(x, y, near_z)
     }
 
+    fn spawn_z(&self, x: u16, y: u16, near_z: i32) -> Option<i32> {
+        // First the ordinary step check: from a ground-level placement it finds the
+        // ground floor and — crucially — cannot reach the storey above, so a banker
+        // placed at z=0 stays on the bank's ground floor rather than climbing to the
+        // second. Only when nothing is within a step (a shop's *raised* floor placed
+        // at ground level, the tailor) do we look further.
+        if let Some(z) = self.surface_at(x, y, near_z) {
+            return Some(z);
+        }
+
+        // Every surface a mobile could stand on here: the ground, and the top of
+        // each platform static. Unlike a step, this placement is not bound by reach —
+        // a shop floor several tiles above the ground is still where the NPC goes.
+        let mut candidates: Vec<i32> = Vec::new();
+        let (_, land_center, _) = self.land_heights(x, y);
+        if self.land_is_ground(x, y) {
+            candidates.push(land_center);
+        }
+        for item in self.map.statics_at(x, y) {
+            let tile = self.tiles.static_tile(item.tile);
+            if tile.flags.is_platform() {
+                let (_, our_z) = platform_surface(
+                    i32::from(item.z),
+                    i32::from(tile.height),
+                    tile.flags.is_climbable(),
+                );
+                candidates.push(our_z);
+            }
+        }
+        // Keep only the surfaces a body actually fits on — a floor below and
+        // headroom above — so the ground *under* a covering floor drops out (the
+        // body would poke through it) and the floor itself is chosen. Among those,
+        // the one nearest the requested height.
+        candidates
+            .into_iter()
+            .filter(|&z| MapTerrain::can_fit(self, x, y, z, PLAYER_HEIGHT))
+            .min_by_key(|&z| (z - near_z).abs())
+    }
+
     fn can_fit(&self, x: u16, y: u16, z: i32, height: i32) -> bool {
         MapTerrain::can_fit(self, x, y, z, height)
     }

@@ -821,10 +821,17 @@ Roughly in dependency order, each script-first:
     `DisplayContextMenu`, cross-checked against Sphere's `PacketPropertyList` and
     `Event_AOSPopupMenuRequest`. Two `[gameplay]` knobs shape it, Sphere's
     `TOOLTIPMODE` made an operator setting: `tooltips` (`"off"` | `"version"` |
-    `"full"`) and `context_menus` (bool). With both off no `0xB9` SupportedFeatures
-    is sent, so a modern client falls back to the classic single-click label; with
-    either on the AoS bit is advertised and ClassicUO turns on hover tooltips and
-    context menus. Still on the list: richer per-object menus, the old (`0x01`)
+    `"full"`) and `context_menus` (bool). **What actually enables them on a modern
+    client is the character-list (`0xA9`) flags — bit `0x20` tooltips, `0x08`
+    context menus — not `0xB9`** (ClassicUO's `ClientFeatures.SetFlags` reads the
+    `0xA9`; the `0xB9` AoS bit is sent too but does not gate OPL). Live testing
+    against ClassicUO cost several rounds on the wrong packet before its source
+    settled it. Menu-entry clilocs are the `3006xxx` range a modern `cliloc.enu`
+    carries (`3006103` Buy, `3006123` Open Paperdoll), not ServUO's short `6xxx`.
+    A vendor's buy window needs a crate on **both** shop layers `0x1A` and `0x1B`
+    (ClassicUO's buy loop dereferences each with no null check), the display
+    (`0x24`) keyed on the vendor and preceded by an equip per crate — ServUO's
+    `SendPacksTo`. Still on the list: richer per-object menus, the old (`0x01`)
     popup format for pre-6.0 clients, and a tooltip that refreshes mid-life when a
     property changes (names do not, so nothing needs it yet). **Two things a live
     test surfaced landed with this:** a creature with no name given now takes a

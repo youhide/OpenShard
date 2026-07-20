@@ -1,12 +1,15 @@
 use super::*;
 
-/// The cliloc numbers for the default context-menu entries. From ServUO's
-/// `ContextMenuEntry` uses: 6123 "Open Paperdoll", 3000362 "Open", 6103 "Buy",
-/// 6104 "Sell".
-const CLILOC_PAPERDOLL: u32 = 6123;
+/// The cliloc numbers for the default context-menu entries. These are the
+/// **`3006xxx`** context-menu range that lives in a modern `cliloc.enu` (verified
+/// against a live client) — `3006123` "Open Paperdoll", `3006103` "Buy",
+/// `3006104` "Sell", `3000362` "Open". ServUO's `ContextMenuEntry` stores the
+/// short `6xxx` form and the value is resolved `+3000000`; a modern client has
+/// only the full form, so sending `6123` shows "megacliloc: missing 6123".
+const CLILOC_PAPERDOLL: u32 = 3_006_123;
 const CLILOC_OPEN: u32 = 3_000_362;
-const CLILOC_BUY: u32 = 6103;
-const CLILOC_SELL: u32 = 6104;
+const CLILOC_BUY: u32 = 3_006_103;
+const CLILOC_SELL: u32 = 3_006_104;
 
 /// What a chosen context-menu entry does. Every one routes to a handler a
 /// double-click already reaches — the menu decides *what*, the existing rule does

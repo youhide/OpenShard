@@ -345,9 +345,16 @@ impl<A: Accounts> LoginServer<A> {
         // modern client falls back to single-click names. The four-byte mask is
         // for clients new enough to read it.
         if self.supported_features == 0 {
+            debug!("0xB9 SupportedFeatures not advertised (tooltips/context menus off)");
             Response::Send(character_list)
         } else {
             let extended = session.version.supports(Feature::ExtraFeatureMask);
+            debug!(
+                flags = format!("0x{:X}", self.supported_features),
+                extended,
+                version = %session.version,
+                "sending 0xB9 SupportedFeatures before the character list"
+            );
             let mut bytes = encode_supported_features(self.supported_features, extended);
             bytes.extend_from_slice(&character_list);
             Response::Send(bytes)

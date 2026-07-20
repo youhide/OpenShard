@@ -37,9 +37,9 @@ use openshard_persistence::{
 };
 use openshard_protocol::{
     encode_context_menu, encode_light_level, encode_login_complete, encode_map_change,
-    encode_message, encode_walk_ack, encode_walk_reject, AccessLevel, ClientVersion, Direction,
-    Facing, Feature, MobileStatus, Notoriety, PlayerStart, PlayerUpdate, Point, WalkRequest,
-    DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, LABEL_MODE,
+    encode_message, encode_supported_features, encode_walk_ack, encode_walk_reject, AccessLevel,
+    ClientVersion, Direction, Facing, Feature, MobileStatus, Notoriety, PlayerStart, PlayerUpdate,
+    Point, WalkRequest, AOS_FEATURE_FLAGS, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, LABEL_MODE,
 };
 use tracing::{debug, info, warn};
 
@@ -642,6 +642,11 @@ impl World {
                 }
             }
             Command::DoubleClick { connection, serial } => {
+                debug!(
+                    serial = format!("0x{serial:08X}"),
+                    paperdoll = serial & 0x8000_0000 != 0,
+                    "double-click"
+                );
                 // Bit 31 is the client's *paperdoll request* — the login-time
                 // paperdoll open, the paperdoll macro — and it is only that:
                 // ServUO's `UseReq` routes it straight to `OnPaperdollRequest`,

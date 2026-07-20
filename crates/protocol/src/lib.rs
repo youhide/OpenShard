@@ -95,8 +95,8 @@ pub use login::{
     encode_character_list, encode_login_denied, encode_relay, encode_shard_list,
     encode_supported_features, AccountLogin, CharacterEntry, ClientVersionReport, DenyReason,
     GameServerLogin, LoginDecodeError, SelectShard, ShardEntry, StartLocation, WrongPacket,
-    ACCOUNT_NAME_LENGTH, CHARACTER_NAME_LENGTH, MAX_SHARDS, MIN_CHARACTER_SLOTS, PASSWORD_LENGTH,
-    SHARD_NAME_LENGTH,
+    ACCOUNT_NAME_LENGTH, AOS_FEATURE_FLAGS, CHARACTER_NAME_LENGTH, CLF_CONTEXT_MENU, CLF_TOOLTIPS,
+    MAX_SHARDS, MIN_CHARACTER_SLOTS, PASSWORD_LENGTH, SHARD_NAME_LENGTH,
 };
 pub use mobile::{
     encode_open_paperdoll, encode_remove, Equipment, LookRequest, MobileIncoming, MobileMove,

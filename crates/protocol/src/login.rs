@@ -444,6 +444,27 @@ pub struct StartLocation {
 /// and mis-render a shorter list. Sphere calls this `MINCLIVER_PADCHARLIST`.
 pub const MIN_CHARACTER_SLOTS: usize = 5;
 
+/// Character-list (`0xA9`) flag: the client may open **context menus** (the
+/// `0xBF` popup). ClassicUO's `CharacterListFlags.CLF_CONTEXT_MENU`; it sets
+/// `ClientFeatures.PopupEnabled` from this bit — *this* packet, not the `0xB9`.
+pub const CLF_CONTEXT_MENU: u32 = 0x08;
+
+/// Character-list (`0xA9`) flag: the client may use **AoS object tooltips**
+/// (OPL). ClassicUO's `CLF_PALADIN_NECROMANCER_TOOLTIPS`; it sets
+/// `ClientFeatures.TooltipsEnabled` from this bit (plus its own client-version
+/// check, so the server just needs to offer it). This is what makes a modern
+/// client send `0xD6` tooltip requests at all — the flag lives in the character
+/// list, not in `0xB9`.
+pub const CLF_TOOLTIPS: u32 = 0x20;
+
+/// The `0xB9` SupportedFeatures mask that turns on AoS: ServUO's `FeatureFlags`
+/// `T2A|UOR|UOTD|LBR|AOS` (`0x1F`). The AOS bit (`0x10`) is what makes a modern
+/// client use object tooltips and context menus; the lower expansion bits ride
+/// along as the core-expansion default and a 2D client ignores the ones it does
+/// not use. Left out is `LiveAccount` (`0x8000`), which would ask for a sixth
+/// character slot the list is not sized for.
+pub const AOS_FEATURE_FLAGS: u32 = 0x1F;
+
 /// `0xB9` — the SupportedFeatures mask, sent before the character list.
 ///
 /// It tells the client which expansion feature sets to turn on — chiefly, for

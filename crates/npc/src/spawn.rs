@@ -112,7 +112,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
         .facet_state(facet)
         .terrain
         .as_ref()
-        .and_then(|t| t.stand_z(position.x, position.y, i32::from(position.z)))
+        .and_then(|t| t.spawn_z(position.x, position.y, i32::from(position.z)))
         .and_then(|z| i8::try_from(z).ok())
     {
         Some(z) => Point::new(position.x, position.y, z),

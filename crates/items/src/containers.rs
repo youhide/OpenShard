@@ -123,7 +123,12 @@ pub(crate) fn open_container(
         .entry(container_serial)
         .or_default()
         .insert(connection);
-    debug!(%container_serial, items = contents.len(), "container opened");
+    debug!(
+        %container_serial,
+        gump = format!("0x{gump:04X}"),
+        items = contents.len(),
+        "container opened"
+    );
 }
 
 /// Whether `player` may reach `container` to open it or drop into it.
