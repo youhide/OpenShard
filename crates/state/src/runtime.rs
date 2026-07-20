@@ -588,6 +588,19 @@ impl WorldState {
         };
         self.seen.entry(watcher).or_default().insert(other);
         self.outbox.push(Outbound { connection, packet });
+        // The health bar rides along with the draw. There is no "what is its
+        // health" packet the client can count on us answering — it opens the bar
+        // from what it was last told — so a mobile whose bar is never sent shows an
+        // empty frame until the first blow moves it. Send the scaled bar on sight
+        // and it reads full from the moment you see it, like every other client.
+        if let Some(&Hitpoints { current, max }) = self.registry.get::<Hitpoints>(other) {
+            if let Some(serial) = self.registry.serial_of(other) {
+                self.outbox.push(Outbound {
+                    connection,
+                    packet: encode_health(serial.raw(), max, current, false),
+                });
+            }
+        }
         // AoS tooltip: the drawn thing's property revision rides along, so the
         // client knows its cached tooltip is stale and can ask for a fresh one.
         if let Some(tooltip) = self.tooltip_packet(other, version) {

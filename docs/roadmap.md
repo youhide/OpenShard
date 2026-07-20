@@ -826,7 +826,14 @@ Roughly in dependency order, each script-first:
     either on the AoS bit is advertised and ClassicUO turns on hover tooltips and
     context menus. Still on the list: richer per-object menus, the old (`0x01`)
     popup format for pre-6.0 clients, and a tooltip that refreshes mid-life when a
-    property changes (names do not, so nothing needs it yet).
+    property changes (names do not, so nothing needs it yet). **Two things a live
+    test surfaced landed with this:** a creature with no name given now takes a
+    default from its body (`state::creature_name`, ServUO's ids — "a chicken", "a
+    horse"), so an unnamed animal or monster reads on single-click and in its
+    tooltip, the pack still free to override per spawn; and a mobile's health bar
+    (`0xA1`) is sent *on sight*, riding along with its `0x78` the way the tooltip
+    revision does, so the bar reads full from the moment you see a thing rather
+    than staying an empty frame until the first blow moved it.
 - [ ] `housing` — player houses: a multi placed on the map, a door with a real
   lock, decay unless refreshed, friends/co-owners. Wants multis (the client's
   `multi.mul`/UOP format, unread yet), a region concept and the door locks above.

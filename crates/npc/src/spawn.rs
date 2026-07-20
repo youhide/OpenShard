@@ -5,8 +5,8 @@ use openshard_entities::{EntityId, Serial, SerialKind};
 use openshard_movement::Walker;
 use openshard_protocol::{Direction, Facing, Notoriety, Point};
 use openshard_state::components::{
-    body_opens_doors, Aggression, Banker, Body, Brain, Facet, Heading, Hitpoints, MeleeDamage,
-    Movement, Name, Npc, Position, RangedAttack, Resistance, SwingSpeed,
+    body_opens_doors, creature_name, Aggression, Banker, Body, Brain, Facet, Heading, Hitpoints,
+    MeleeDamage, Movement, Name, Npc, Position, RangedAttack, Resistance, SwingSpeed,
 };
 use openshard_state::WorldState;
 use tracing::{debug, warn};
@@ -188,13 +188,17 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
             },
         );
     }
-    // A banker earns a generated name and title ("Rowena the banker") when the
-    // spawn did not name it, the townsperson AI base (so it greets, faces and
-    // keeps near its post), and the service mark that answers "bank".
-    let name = if banker && name.is_none() {
+    // A name, in order of authority: what the spawn asked for, then a banker's
+    // generated one ("Rowena the banker"), then the creature default its body
+    // gives it ("a chicken", "a horse") — so an unnamed animal or monster still
+    // reads on single-click. Nameless only when none of those apply (a plain
+    // human NPC, or an unlisted creature body).
+    let name = if let Some(name) = name {
+        Some(name)
+    } else if banker {
         Some(banker_name(&mut state.rng))
     } else {
-        name
+        creature_name(body).map(str::to_owned)
     };
     if let Some(name) = name {
         state.registry.insert(entity, Name(name));

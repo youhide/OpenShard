@@ -557,6 +557,67 @@ pub const fn mount_body_for(item_graphic: u16) -> Option<u16> {
     })
 }
 
+/// The default name a creature's body gives it — "a chicken", "a horse" —
+/// shown on single-click and in the tooltip when a spawn did not name it.
+///
+/// Creature names are not in any client file the way item names are (those come
+/// from tiledata); every emulator holds its own table, ServUO on each
+/// `BaseCreature`, Sphere in its chardefs. This is the core default that pack
+/// data overrides — the same "default in core, customise in pack" split item
+/// names and spells have — so the common Britannia wildlife and dungeon monsters
+/// read right out of the box and an unlisted body simply stays nameless rather
+/// than wearing a wrong label. Body ids are ServUO's. Expand as needed.
+#[must_use]
+pub const fn creature_name(body: u16) -> Option<&'static str> {
+    Some(match body {
+        // Farm and forest animals.
+        0x0006 => "a bird",
+        0x00C9 => "a cat",
+        0x00CA => "an alligator",
+        0x00CB => "a pig",
+        0x00CD => "a rabbit",
+        0x00CF => "a sheep",
+        0x00D0 => "a chicken",
+        0x00D1 => "a goat",
+        0x00D7 => "a giant rat",
+        0x00D8 | 0x00E7 => "a cow",
+        0x00D9 => "a dog",
+        0x00DD => "a walrus",
+        0x00EA => "a great hart",
+        0x00ED => "a hind",
+        0x00EE => "a rat",
+        0x0097 => "a dolphin",
+        0x0122 => "a boar",
+        // Mounts — the stable of [`mount_item_for`].
+        0x00C8 | 0x00CC | 0x00E2 | 0x00E4 => "a horse",
+        0x00DC => "a llama",
+        0x00DB => "a forest ostard",
+        0x00D2 => "a desert ostard",
+        0x00DA => "a frenzied ostard",
+        0x0123 => "a pack horse",
+        0x0124 => "a pack llama",
+        // Common monsters.
+        0x0003 => "a zombie",
+        0x0004 => "a gargoyle",
+        0x0011 => "an orc",
+        0x0012 => "an ettin",
+        0x0017 => "a dire wolf",
+        0x0019 | 0x001B => "a grey wolf",
+        0x001D => "a gorilla",
+        0x0023 | 0x0024 => "a lizardman",
+        0x002A => "a ratman",
+        0x0030 => "a scorpion",
+        0x0032 | 0x0038 => "a skeleton",
+        0x0034 => "a snake",
+        0x0035 | 0x0036 => "a troll",
+        0x00A7 => "a brown bear",
+        0x00D4 => "a grizzly bear",
+        0x00D5 => "a polar bear",
+        0x00E1 => "a timber wolf",
+        _ => return None,
+    })
+}
+
 /// A creature that fights at distance — an archer's bow, a mage's bolt, a
 /// dragon's breath, abstracted to what the tick needs: how far it reaches and
 /// what kind of hurt it is. The damage amount is the creature's `MeleeDamage`;

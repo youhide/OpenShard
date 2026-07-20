@@ -5668,6 +5668,84 @@ fn tooltips_off_sends_no_revision() {
 }
 
 #[test]
+fn an_unnamed_creature_takes_its_body_default_name() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    // A chicken (body 0xD0) with no name given.
+    world.queue(Command::SpawnMobile {
+        body: 0x00D0,
+        hue: 0,
+        hits: 10,
+        notoriety: 1,
+        damage: 0,
+        resistance: 0,
+        swing: 0,
+        sight: 0,
+        aggression: 0,
+        beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
+        wander: false,
+        position: Point::new(START.0 + 1, START.1, 0),
+        facet: 0,
+        name: None,
+        banker: false,
+        vendor: false,
+        equipment: Vec::new(),
+    });
+    world.tick(now);
+    let chicken = world
+        .state
+        .registry
+        .query::<Body>()
+        .filter(|(e, _)| !world.state.registry.has::<Client>(*e))
+        .filter_map(|(e, _)| world.state.registry.serial_of(e).map(|s| s.raw()))
+        .max()
+        .expect("a chicken was spawned");
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::SingleClick {
+        connection,
+        serial: chicken,
+    });
+    world.tick(now);
+
+    let label = packets_for(&mut world, connection)
+        .into_iter()
+        .find(|p| p[0] == 0x1C)
+        .expect("a name label was sent");
+    assert!(
+        String::from_utf8_lossy(&label).contains("a chicken"),
+        "an unnamed creature names itself from its body"
+    );
+}
+
+#[test]
+fn a_drawn_mobile_carries_its_health_bar() {
+    // The bar is populated on sight, so it reads full before any fight — not the
+    // empty frame you get when health is only sent on a blow.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let _ = packets_for(&mut world, connection);
+    // A placid creature (sight 0) so nothing but the draw sends a 0xA1.
+    spawn_creature(
+        &mut world,
+        Point::new(START.0 + 1, START.1, 0),
+        0,
+        false,
+        now,
+    );
+
+    let packets = packets_for(&mut world, connection);
+    assert!(
+        packets.iter().any(|p| p[0] == 0xA1),
+        "the health bar rides along with the draw"
+    );
+}
+
+#[test]
 fn a_context_menu_on_a_container_offers_open() {
     let now = Instant::now();
     let mut world = world();
