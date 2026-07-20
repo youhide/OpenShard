@@ -469,6 +469,20 @@ Roughly in dependency order, each script-first:
     re-caps both when a stat changes, dragging a current value down under a lowered
     cap and leaving room to heal into a raised one. Dexterity is stored now and
     read next, by the swing speed below.
+  - [x] **The skills window on the client** (`0x3A`, ported both ways from ServUO's
+    `SkillUpdate`/`SkillChange`). Login sends a player its whole list — every skill
+    the client's era knows, trained or not, each with value, base, lock arrow and
+    cap (`SkillCaps`-gated for the cap field) — a gain pushes the single-line update
+    so an open window follows it live (`SkillRaised`, from the one `roll_skill`
+    every gain passes through), and the up/down/lock arrow the player clicks rides
+    back as `SkillLockRequest`, stored per skill on `Skills`. Skills and stats
+    persist with the character (schema v6, §4), applied from the creation screen or
+    the save through the `CharacterSheet`.
+  - [ ] **Route client-initiated skill use** (`0x12` type `0x24`, decoded by
+    `UseSkillRequest`) — using a skill *from the client* is not wired yet. It wants
+    the same script-effect seam casting has, so the effect — the mined ore, the
+    picked lock — stays a script's, granted off a `SkillUsed`-style event rather
+    than baked into the engine.
   - [ ] **stat gain from skill use** — a skill that trains also nudges its
     governing stat; wants Sphere's per-skill stat map, so it rides with the
     `AdvRate` tables below
@@ -546,10 +560,24 @@ Roughly in dependency order, each script-first:
     is already folded into the saved stats, so re-applying would double it).
     `World::effects_of`/`apply_effects` are the one seam; every future buff and
     debuff slots into the same `effects` list with no schema change.
-  - Still deferred: the `Scripted` spells that want systems not built yet — fields,
-    summons with a lifetime, travel (Recall/Gate/Mark), dispel, polymorph,
-    resurrection — and the non-stat magical buffs (Protection, Reactive Armor, Night
-    Sight, Magic Reflection), a different mechanic from the stat family.
+  - [ ] **The non-stat magical buffs** — Protection, Reactive Armor, Night Sight,
+    Magic Reflection: a different mechanic from the stat family (each modifies a
+    behaviour, not a number), but the same `effects`-list persistence once each
+    carries a component. The nearest next step, and the smallest.
+  - [ ] **Persistent fields** — Fire/Poison/Energy/Paralyze Field and Wall of
+    Stone: a timed area that pulses damage or blocks movement, on the tick counter
+    like decay. Wants a field entity that the movement obstruction index and the
+    damage path both see.
+  - [ ] **Summons with a lifetime** — Blade Spirits, Energy Vortex, Summon
+    Creature/Daemon: a spawned creature that despawns on its own timer and counts
+    against the follower cap the status bar already carries.
+  - [ ] **Travel** — Recall, Gate Travel and Mark: needs runes/runebooks (item
+    data) and a cross-facet teleport; Gate also a paired physical object either end.
+  - [ ] **Dispel, polymorph, resurrection** — each waits on a subsystem of its own
+    (summon lifetimes, a body-swap that restores cleanly, the ghost/corpse slice).
+  - [ ] **The Poisoning skill for the deadlier doses** — the Magery-cast dose caps
+    at greater; the higher poison levels (deadly, lethal) want the Poisoning skill
+    to set them.
 - [x] `ai` — brains, aggro, wandering
   - [x] **A built-in brain, and room for scripted ones.** A creature spawned with
     a `sight` or `wander` gets a `Brain`, and `think()` gives it a beat every so
