@@ -80,7 +80,29 @@ pub(crate) fn gameplay_of(config: &Config) -> Gameplay {
         g.creature_step_ms,
         openshard_world::CastStyle::parse(&g.cast_style),
         g.spell_disturb,
+        openshard_world::TooltipMode::parse(&g.tooltips),
+        g.context_menus,
     )
+}
+
+/// The `0xB9` SupportedFeatures mask this shard advertises, from the tooltip and
+/// context-menu config.
+///
+/// Zero when both are off — no `0xB9` is sent, and a modern client stays on the
+/// classic single-click name label. Otherwise the AoS expansion set (ServUO's
+/// `FeatureFlags` `T2A|UOR|UOTD|LBR|AOS` = `0x1F`), whose AOS bit is what turns on
+/// object tooltips and context menus. The lower expansion bits ride along as
+/// ServUO's core-expansion default; a 2D client ignores the ones it does not use.
+pub(crate) fn supported_features_of(config: &Config) -> u32 {
+    const AOS_FEATURE_FLAGS: u32 = 0x1F;
+    let g = &config.gameplay;
+    let aos = openshard_world::TooltipMode::parse(&g.tooltips) != openshard_world::TooltipMode::Off
+        || g.context_menus;
+    if aos {
+        AOS_FEATURE_FLAGS
+    } else {
+        0
+    }
 }
 
 /// Load the client's map, if it is configured.

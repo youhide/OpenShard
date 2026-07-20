@@ -351,6 +351,17 @@ fn the_shipped_config_names_the_gameplay_knobs_and_validates() {
     default.validate().expect("the shipped config is valid");
     assert_eq!(default.gameplay.decay_seconds, 1200);
     assert_eq!(default.gameplay.criminal_seconds, 120);
+    assert_eq!(default.gameplay.tooltips, "version");
+    assert!(default.gameplay.context_menus);
+}
+
+#[test]
+fn tooltips_and_context_menus_default_on() {
+    // A config from before these knobs existed still parses, and means the modern
+    // AoS feel: version-mode tooltips and context menus both on.
+    let g = config(MINIMAL).gameplay;
+    assert_eq!(g.tooltips, "version");
+    assert!(g.context_menus);
 }
 
 #[test]

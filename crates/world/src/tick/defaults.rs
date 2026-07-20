@@ -18,6 +18,10 @@ pub(super) const BACKPACK_LAYER: u8 = 0x15;
 /// The skin hue a character gets when nothing else chose one — the same one
 /// Sphere hands a body with no stored colour.
 pub(super) const DEFAULT_HUE: u16 = 0x83EA;
+/// The colour overhead text takes when nothing else chose one — grey `0x03B2`,
+/// the default both references use for an object's single-click name (ServUO's
+/// `AsciiMessage` hue fallback, Sphere's `HUE_TEXT_DEF`).
+pub(super) const TEXT_HUE: u16 = 0x03B2;
 /// Full daylight. The scale runs backwards: 0 is brightest, 0x1F pitch dark.
 pub(super) const LIGHT_DAY: u8 = 0;
 /// The facet a new character spawns on, and the world's fallback for a facet it

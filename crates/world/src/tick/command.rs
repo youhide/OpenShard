@@ -408,6 +408,29 @@ pub enum Command {
         /// The clicked object, by serial.
         serial: u32,
     },
+    /// A client asked for the AoS tooltip of one or more objects (`0xD6`).
+    QueryProperties {
+        /// Which connection asked.
+        connection: ConnectionId,
+        /// The objects whose tooltips are wanted, by serial.
+        serials: Vec<u32>,
+    },
+    /// A client asked to open an object's context menu (`0xBF` `0x13`).
+    ContextMenuRequest {
+        /// Which connection asked.
+        connection: ConnectionId,
+        /// The object, by serial.
+        serial: u32,
+    },
+    /// A client picked a context-menu entry (`0xBF` `0x15`).
+    ContextMenuSelect {
+        /// Which connection asked.
+        connection: ConnectionId,
+        /// The object the menu was opened on.
+        serial: u32,
+        /// The chosen entry, by its tag (its position in the list).
+        index: u16,
+    },
     /// A client asked to wear the item on its cursor (`0x13`).
     EquipItem {
         /// Which connection.

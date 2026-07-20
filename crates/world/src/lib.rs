@@ -63,7 +63,7 @@ pub use openshard_state::{
     Decays, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, MurderDecay,
     Murders, Name, Position, Resistance, Scripted, Skills, Stackable, Stats, SwingSpeed,
 };
-pub use openshard_state::{CastStyle, Gameplay};
+pub use openshard_state::{CastStyle, Gameplay, TooltipMode};
 pub use terrain::{MapTerrain, MAX_STEP_UP, PLAYER_HEIGHT};
 pub use tick::{
     Appearance, CharacterSheet, Command, DecorContainer, DecorDoor, World, TICK_INTERVAL,

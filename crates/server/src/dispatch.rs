@@ -216,6 +216,22 @@ pub(crate) fn dispatch(
             });
             true
         }
+        Some(PropertyQueryRequest::ID) => {
+            // The AoS tooltip batch query: a client hovering wants these objects'
+            // property lists. Answered out of the tick like every other reply.
+            if !session.in_world {
+                return true;
+            }
+            let Ok(query) = PropertyQueryRequest::decode(packet) else {
+                warn!(%id, "malformed 0xD6");
+                return false;
+            };
+            world.queue(Command::QueryProperties {
+                connection: id,
+                serials: query.serials,
+            });
+            true
+        }
         Some(EquipItemRequest::ID) => {
             if !session.in_world {
                 return true;
@@ -307,7 +323,22 @@ pub(crate) fn dispatch(
                     connection: id,
                     spell: cast.spell,
                 }),
-                Ok(None) => {} // some other 0xBF — not ours to handle
+                // Not a cast — the same `0xBF` envelope carries the context-menu
+                // request and selection, told apart by their own subcommand word.
+                Ok(None) => {
+                    if let Ok(Some(request)) = ContextMenuRequest::decode(packet) {
+                        world.queue(Command::ContextMenuRequest {
+                            connection: id,
+                            serial: request.serial,
+                        });
+                    } else if let Ok(Some(select)) = ContextMenuSelect::decode(packet) {
+                        world.queue(Command::ContextMenuSelect {
+                            connection: id,
+                            serial: select.serial,
+                            index: select.index,
+                        });
+                    }
+                }
                 Err(_) => {
                     warn!(%id, "malformed 0xBF cast");
                     return false;

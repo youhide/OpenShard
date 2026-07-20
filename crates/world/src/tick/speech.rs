@@ -46,34 +46,78 @@ impl World {
         }
     }
 
-    /// Answer a single-click (`0x09`): draw the clicked mobile's name over its
-    /// head, seen only by the asker, in its notoriety colour.
+    /// Answer a single-click (`0x09`): draw the clicked object's name over it,
+    /// seen only by the asker.
     ///
-    /// Mobiles with a name only — a townsperson, a player. A nameless creature and
-    /// a plain item say nothing rather than a blank label; item names wait on a
-    /// tiledata name lookup.
+    /// A named mobile — a townsperson, a player — labels in its notoriety colour.
+    /// A plain item labels in the default text hue with its tiledata name (the
+    /// classic 2D "tooltip": what a modern client shows on hover, this client asks
+    /// for a click at a time). A nameless creature or an item on an unmapped world
+    /// says nothing rather than a blank label. Mirrors Sphere's `addCharName` /
+    /// `addItemName`.
     pub(super) fn single_click(&mut self, connection: ConnectionId, serial: u32) {
         let Some(target) = Serial::new(serial).and_then(|s| self.state.registry.entity_of(s))
         else {
             return;
         };
-        let Some(name) = self.state.registry.get::<Name>(target) else {
-            return;
+
+        // A mobile carries a `Name` and a `Body`; an item a `Graphic` and no
+        // `Name`. The two cases pick a different graphic, hue, and name source.
+        let (graphic, hue, text) = if let Some(name) = self.state.registry.get::<Name>(target) {
+            let name = name.0.clone();
+            let Some(body) = self.state.registry.get::<Body>(target).map(|b| b.id) else {
+                return;
+            };
+            let hue = self
+                .state
+                .registry
+                .get::<Notoriety>(target)
+                .copied()
+                .unwrap_or(Notoriety::Innocent)
+                .name_hue();
+            (body, hue, name)
+        } else {
+            let Some(&Graphic { id, .. }) = self.state.registry.get::<Graphic>(target) else {
+                return;
+            };
+            let facet = self.state.facet_of(target);
+            let Some(name) = self
+                .state
+                .facet_state(facet)
+                .terrain
+                .as_deref()
+                .and_then(|terrain| terrain.item_name(id))
+            else {
+                return;
+            };
+            // A stack reads as "3 gold coins", a single as its bare name — Sphere's
+            // `GetNameFull` pluralisation, kept to the amount prefix.
+            let text = match self.state.registry.get::<Amount>(target) {
+                Some(Amount(n)) if *n > 1 => format!("{n} {name}"),
+                _ => name.to_string(),
+            };
+            (id, TEXT_HUE, text)
         };
-        let name = name.0.clone();
-        let Some(body) = self.state.registry.get::<Body>(target).map(|b| b.id) else {
-            return;
-        };
-        let hue = self
-            .state
-            .registry
-            .get::<Notoriety>(target)
-            .copied()
-            .unwrap_or(Notoriety::Innocent)
-            .name_hue();
+
         // The object's own serial makes the client draw the text over it; an empty
         // speaker name and the label mode make it a name tag, not speech.
-        let packet = encode_message(serial, body, LABEL_MODE, hue, 3, "", &name);
+        let packet = encode_message(serial, graphic, LABEL_MODE, hue, 3, "", &text);
         self.state.send(connection, packet);
+    }
+
+    /// Answer an AoS tooltip request (`0xD6`): send each named object's property
+    /// list back to the asker. The client batches several serials as it hovers; a
+    /// serial it cannot see or that names nothing is simply skipped. Off entirely
+    /// when the shard serves no tooltips.
+    pub(super) fn query_properties(&mut self, connection: ConnectionId, serials: &[u32]) {
+        if self.state.gameplay.tooltip_mode == TooltipMode::Off {
+            return;
+        }
+        for &serial in serials {
+            if let Some(entity) = Serial::new(serial).and_then(|s| self.state.registry.entity_of(s))
+            {
+                self.state.send_property_list(connection, entity);
+            }
+        }
     }
 }

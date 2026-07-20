@@ -444,6 +444,29 @@ pub struct StartLocation {
 /// and mis-render a shorter list. Sphere calls this `MINCLIVER_PADCHARLIST`.
 pub const MIN_CHARACTER_SLOTS: usize = 5;
 
+/// `0xB9` — the SupportedFeatures mask, sent before the character list.
+///
+/// It tells the client which expansion feature sets to turn on — chiefly, for
+/// this engine, the AoS bit that enables object tooltips and context menus.
+/// Without it (or without that bit) a modern client stays on the classic
+/// single-click name path. The mask is the caller's to compose, since what a
+/// shard enables is configuration rather than protocol.
+///
+/// `extended` picks the wire width: newer clients ([`Feature::ExtraFeatureMask`],
+/// since 6.0.14.2) read a four-byte mask; older ones two. Mirrors ServUO's
+/// `SupportedFeatures` / `NetState.ExtendedSupportedFeatures`.
+#[must_use]
+pub fn encode_supported_features(flags: u32, extended: bool) -> Vec<u8> {
+    let mut writer = PacketWriter::with_capacity(5);
+    writer.u8(0xB9);
+    if extended {
+        writer.u32(flags);
+    } else {
+        writer.u16(flags as u16);
+    }
+    writer.into_bytes()
+}
+
 /// `0xA9` — the character list and starting cities.
 ///
 /// `flags` is the client-capability mask; it is the caller's to compose, since

@@ -181,6 +181,9 @@ pub(crate) async fn run_shard(
         &config.world.facets,
         (config.world.start.x, config.world.start.y),
     );
+    // Advertise AoS (0xB9) when the shard serves tooltips or context menus, so a
+    // modern client turns them on rather than staying on single-click names.
+    login.supported_features = crate::boot::supported_features_of(config);
 
     // Kept, not detached: shutdown hands it a final snapshot, closes the channel,
     // and awaits this task so every queued write lands before the process exits.

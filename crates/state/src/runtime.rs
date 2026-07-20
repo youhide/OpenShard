@@ -19,12 +19,12 @@ use openshard_events::EventBus;
 use openshard_gateway::ConnectionId;
 use openshard_movement::Terrain;
 use openshard_protocol::{
-    encode_health, encode_remove, ClientVersion, Equipment, MobileIncoming, MobileMove, Notoriety,
-    PlayerUpdate, Point, WorldItem,
+    encode_health, encode_opl_info, encode_remove, ClientVersion, Equipment, Feature,
+    MobileIncoming, MobileMove, Notoriety, PlayerUpdate, Point, PropertyList, WorldItem,
 };
 
 use crate::components::{
-    Amount, Body, Client, Contained, Equipped, Facet, Graphic, Heading, Hitpoints, Movement,
+    Amount, Body, Client, Contained, Equipped, Facet, Graphic, Heading, Hitpoints, Movement, Name,
     Position,
 };
 use crate::obstruct::{LiveTerrain, Obstructions};
@@ -74,6 +74,41 @@ pub struct Gameplay {
     /// Whether taking damage while casting disturbs the spell (UO's fizzle). Only
     /// meaningful in [`CastStyle::Stop`], where there is a cast to disturb.
     pub spell_disturb: bool,
+    /// How AoS object tooltips are served — Sphere's `TOOLTIPMODE`, plus an off
+    /// gate. Read by the interest substrate to decide what to send when a thing is
+    /// drawn, and by the world when the client asks for a full list.
+    pub tooltip_mode: TooltipMode,
+    /// Whether the server answers a context-menu request with a popup.
+    pub context_menus: bool,
+}
+
+/// How AoS object tooltips (the "cliloc" hover names) are served — Sphere's
+/// `TOOLTIPMODE`, with an added off state.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum TooltipMode {
+    /// No tooltips, and AoS is not advertised — a modern client falls back to the
+    /// classic single-click name label.
+    Off,
+    /// Send only a revision (`0xDC`) when a thing is drawn and wait for the client
+    /// to request the full list (`0xD6`). Sphere's `TOOLTIPMODE_SENDVERSION`, the
+    /// bandwidth-cheap standard.
+    #[default]
+    SendVersion,
+    /// Send the whole tooltip (`0xD6`) up front. Sphere's `TOOLTIPMODE_SENDFULL`.
+    SendFull,
+}
+
+impl TooltipMode {
+    /// Parse the operator's `tooltips` string. `"off"` disables them, `"full"`
+    /// sends the whole list up front; anything else is the send-version default.
+    #[must_use]
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" | "none" | "false" => Self::Off,
+            "full" | "sendfull" => Self::SendFull,
+            _ => Self::SendVersion,
+        }
+    }
 }
 
 /// How a spell is cast — the choice both reference emulators make differently.
@@ -121,6 +156,8 @@ impl Gameplay {
         creature_step_ms: u64,
         cast_style: CastStyle,
         spell_disturb: bool,
+        tooltip_mode: TooltipMode,
+        context_menus: bool,
     ) -> Self {
         Self {
             combat_era,
@@ -135,6 +172,8 @@ impl Gameplay {
             creature_step_ticks: (creature_step_ms / 50).max(1),
             cast_style,
             spell_disturb,
+            tooltip_mode,
+            context_menus,
         }
     }
 }
@@ -154,6 +193,8 @@ impl Default for Gameplay {
             31,
             400,
             CastStyle::Stop,
+            true,
+            TooltipMode::SendVersion,
             true,
         )
     }
@@ -547,6 +588,73 @@ impl WorldState {
         };
         self.seen.entry(watcher).or_default().insert(other);
         self.outbox.push(Outbound { connection, packet });
+        // AoS tooltip: the drawn thing's property revision rides along, so the
+        // client knows its cached tooltip is stale and can ask for a fresh one.
+        if let Some(tooltip) = self.tooltip_packet(other, version) {
+            self.outbox.push(Outbound {
+                connection,
+                packet: tooltip,
+            });
+        }
+    }
+
+    /// The tooltip packet to send *alongside* a draw, or `None` when tooltips are
+    /// off, the client is too old for them, or the object has no properties.
+    ///
+    /// In send-version mode a client new enough for revision hashes ([`0xDC`],
+    /// [`Feature::TooltipHash`]) gets just the revision and asks for the list on
+    /// hover; an older AoS client, or send-full mode, gets the whole list up front
+    /// — it cannot request one it was never told a revision for. Sphere's
+    /// `TOOLTIPMODE`.
+    fn tooltip_packet(&self, entity: EntityId, version: ClientVersion) -> Option<Vec<u8>> {
+        if self.gameplay.tooltip_mode == TooltipMode::Off || !version.supports(Feature::Tooltips) {
+            return None;
+        }
+        let (full, hash) = self.object_properties(entity)?;
+        let send_version = self.gameplay.tooltip_mode == TooltipMode::SendVersion
+            && version.supports(Feature::TooltipHash);
+        if send_version {
+            let serial = self.registry.serial_of(entity)?.raw();
+            Some(encode_opl_info(serial, hash))
+        } else {
+            Some(full)
+        }
+    }
+
+    /// The `0xD6` property list for an object and its revision hash, or `None` for
+    /// something with no name to show. Name-only for now: a mobile is cliloc
+    /// `1050045` (`~1_PREFIX~~2_NAME~~3_SUFFIX~`) with its [`Name`]; an item is
+    /// cliloc `1020000 + graphic` — the client's own tiledata-name range, so no
+    /// string is sent — pluralised through cliloc `1050039` when it is a stack.
+    /// The item-vs-mobile split is [`draw_packet`](Self::draw_packet)'s, read for
+    /// a tooltip rather than a draw. Ported from ServUO's `AddNameProperties` /
+    /// `Item.AddNameProperty`.
+    #[must_use]
+    pub fn object_properties(&self, entity: EntityId) -> Option<(Vec<u8>, u32)> {
+        let serial = self.registry.serial_of(entity)?.raw();
+        let mut list = PropertyList::new(serial);
+        if let Some(Name(name)) = self.registry.get::<Name>(entity) {
+            list.add_args(1_050_045, &format!(" \t{name}\t "));
+        } else if let Some(&Graphic { id, .. }) = self.registry.get::<Graphic>(entity) {
+            let cliloc = 1_020_000 + u32::from(id);
+            match self.registry.get::<Amount>(entity) {
+                Some(Amount(amount)) if *amount > 1 => {
+                    list.add_args(1_050_039, &format!("{amount}\t#{cliloc}"));
+                }
+                _ => list.add(cliloc),
+            }
+        } else {
+            return None;
+        }
+        Some(list.finish())
+    }
+
+    /// Send `entity`'s full `0xD6` property list to one connection — the answer to
+    /// a client's tooltip request. Nothing is sent for an object with no name.
+    pub fn send_property_list(&mut self, connection: ConnectionId, entity: EntityId) {
+        if let Some((packet, _)) = self.object_properties(entity) {
+            self.outbox.push(Outbound { connection, packet });
+        }
     }
 
     /// The packet that draws `entity` on a client, or `None` for something not

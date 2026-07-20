@@ -113,6 +113,19 @@ cast_style = "servuo"
 # bites in the "servuo" cast style, where there is a cast delay to interrupt.
 spell_disturb = true
 
+# AoS object tooltips — the "cliloc" hover names, Sphere's TOOLTIPMODE.
+#   "version"  send a revision when a thing is drawn, and the full tooltip only
+#              when the client asks for it (the bandwidth-cheap standard).
+#   "full"     send the whole tooltip up front.
+#   "off"      no tooltips, and do not advertise AoS — a modern client then falls
+#              back to the classic single-click name label.
+tooltips = "version"
+
+# Whether to offer right-click / single-click context menus (the 0xBF popup):
+# open a container, a vendor's buy/sell, a paperdoll. With tooltips = "off" and
+# this false, the classic client stays on plain single-click names.
+context_menus = true
+
 # Development accounts, in plaintext, until there is a database.
 [[accounts]]
 name = "admin"

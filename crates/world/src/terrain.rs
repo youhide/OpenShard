@@ -360,6 +360,13 @@ impl Terrain for MapTerrain {
         self.tiles.static_tile(graphic).height
     }
 
+    fn item_name(&self, graphic: u16) -> Option<&str> {
+        // The tiledata placeholder is "NoName"; an unfilled short table pads with
+        // an empty string. Neither is worth drawing over a clicked item.
+        let name = self.tiles.static_tile(graphic).name.as_str();
+        (!name.is_empty() && name != "NoName").then_some(name)
+    }
+
     fn can_step(&self, from: Point, to: Point) -> Option<Point> {
         let from_z = i32::from(from.z);
         // Reach the next tile from the top of what we stand on, not from our feet:

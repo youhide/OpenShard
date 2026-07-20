@@ -1281,6 +1281,8 @@ fn gameplay_config_reaches_the_systems() {
         400,
         openshard_state::CastStyle::Stop,
         true,
+        openshard_state::TooltipMode::SendVersion,
+        true,
     );
     let mut world = World::new(START).with_gameplay(gameplay);
     world.queue(Command::SpawnItem {
@@ -5564,6 +5566,176 @@ fn single_clicking_a_named_mobile_draws_its_name() {
     );
 }
 
+/// A terrain that knows one item's tiledata name — enough to test that a
+/// single-click on an item reads the name off the map's tiledata.
+struct NamedTerrain {
+    graphic: u16,
+    name: String,
+}
+impl Terrain for NamedTerrain {
+    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
+        Some(to)
+    }
+    fn item_name(&self, graphic: u16) -> Option<&str> {
+        (graphic == self.graphic).then_some(self.name.as_str())
+    }
+}
+
+#[test]
+fn single_clicking_an_item_draws_its_tiledata_name() {
+    let now = Instant::now();
+    let mut world = world();
+    world.state.facet_state_mut(0).terrain = Some(Box::new(NamedTerrain {
+        graphic: GOLD,
+        name: "gold coins".to_owned(),
+    }));
+    let connection = enter(&mut world, now);
+    // A stack of three on the player's tile, so it is drawn and clickable.
+    let serial = spawn_gold(&mut world, Point::new(START.0, START.1, 0), 3, now);
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::SingleClick { connection, serial });
+    world.tick(now);
+
+    let label = packets_for(&mut world, connection)
+        .into_iter()
+        .find(|p| p[0] == 0x1C)
+        .expect("a name label was sent");
+    assert!(
+        String::from_utf8_lossy(&label).contains("3 gold coins"),
+        "the label carries the amount and the tiledata name"
+    );
+}
+
+#[test]
+fn querying_a_stacks_properties_sends_the_amount_cliloc() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let serial = spawn_gold(&mut world, Point::new(START.0, START.1, 0), 3, now);
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::QueryProperties {
+        connection,
+        serials: vec![serial],
+    });
+    world.tick(now);
+
+    let opl = packets_for(&mut world, connection)
+        .into_iter()
+        .find(|p| p[0] == 0xD6)
+        .expect("a property list was sent");
+    // The first entry's cliloc sits at offset 15; a stack uses 1050039
+    // (~1_NUMBER~ ~2_ITEMNAME~), not the bare tiledata cliloc.
+    let cliloc = u32::from_be_bytes([opl[15], opl[16], opl[17], opl[18]]);
+    assert_eq!(
+        cliloc, 1_050_039,
+        "a stack labels through the amount cliloc"
+    );
+}
+
+#[test]
+fn a_drawn_object_carries_a_tooltip_revision() {
+    // A modern client (TOL) with the default send-version tooltips gets a 0xDC
+    // revision alongside the 0x78 that draws a mobile.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let _ = packets_for(&mut world, connection);
+    spawn_banker(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+
+    let packets = packets_for(&mut world, connection);
+    assert!(
+        packets.iter().any(|p| p[0] == 0xDC),
+        "the banker's tooltip revision rides along with its draw"
+    );
+}
+
+#[test]
+fn tooltips_off_sends_no_revision() {
+    let now = Instant::now();
+    let mut world = world();
+    world.state.gameplay.tooltip_mode = openshard_state::TooltipMode::Off;
+    let connection = enter(&mut world, now);
+    let _ = packets_for(&mut world, connection);
+    spawn_banker(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+
+    let packets = packets_for(&mut world, connection);
+    assert!(
+        !packets.iter().any(|p| p[0] == 0xDC),
+        "no tooltips means no revision packet"
+    );
+}
+
+#[test]
+fn a_context_menu_on_a_container_offers_open() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let container = spawn_container_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::ContextMenuRequest {
+        connection,
+        serial: container,
+    });
+    world.tick(now);
+
+    // A 0xBF display-popup (subcommand 0x14 at bytes 3..5).
+    let popup = packets_for(&mut world, connection)
+        .into_iter()
+        .find(|p| p[0] == 0xBF && p[3] == 0x00 && p[4] == 0x14)
+        .expect("a context menu was sent");
+    // The first entry's cliloc sits at offset 12: 3000362 "Open".
+    let cliloc = u32::from_be_bytes([popup[12], popup[13], popup[14], popup[15]]);
+    assert_eq!(cliloc, 3_000_362, "a container offers Open");
+}
+
+#[test]
+fn selecting_open_on_a_container_opens_it() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let container = spawn_container_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::ContextMenuSelect {
+        connection,
+        serial: container,
+        index: 0,
+    });
+    world.tick(now);
+
+    let packets = packets_for(&mut world, connection);
+    assert!(
+        packets.iter().any(|p| p[0] == 0x24),
+        "picking Open routes to the same use rule a double-click does"
+    );
+}
+
+#[test]
+fn context_menus_off_sends_no_popup() {
+    let now = Instant::now();
+    let mut world = world();
+    world.state.gameplay.context_menus = false;
+    let connection = enter(&mut world, now);
+    let container = spawn_container_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::ContextMenuRequest {
+        connection,
+        serial: container,
+    });
+    world.tick(now);
+
+    assert!(
+        !packets_for(&mut world, connection)
+            .iter()
+            .any(|p| p[0] == 0xBF),
+        "context menus off means no popup"
+    );
+}
+
 #[test]
 fn saying_bank_with_no_banker_near_does_nothing() {
     let now = Instant::now();
@@ -6562,6 +6734,8 @@ fn the_chase_pace_is_the_operators_knob() {
             31,
             step_ms,
             openshard_state::CastStyle::Stop,
+            true,
+            openshard_state::TooltipMode::SendVersion,
             true,
         );
         let mut world = World::new(START).with_gameplay(gameplay);

@@ -57,6 +57,7 @@ mod casting;
 mod codec;
 mod combat;
 mod containers;
+mod context;
 mod direction;
 mod feature;
 mod gump;
@@ -65,6 +66,7 @@ mod items;
 mod login;
 mod mobile;
 mod packet;
+mod properties;
 mod seed;
 mod skill;
 mod speech;
@@ -81,6 +83,7 @@ pub use containers::{
     encode_add_to_container, encode_container_contents, encode_open_container, ContainedItem,
     DoubleClick,
 };
+pub use context::{encode_context_menu, ContextMenuRequest, ContextMenuSelect};
 pub use direction::{Direction, Facing, RUNNING_BIT};
 pub use feature::{Feature, FeatureSet};
 pub use gump::{encode_gump_display, GumpResponse};
@@ -89,10 +92,11 @@ pub use items::{
     WorldItem, DROP_TO_GROUND,
 };
 pub use login::{
-    encode_character_list, encode_login_denied, encode_relay, encode_shard_list, AccountLogin,
-    CharacterEntry, ClientVersionReport, DenyReason, GameServerLogin, LoginDecodeError,
-    SelectShard, ShardEntry, StartLocation, WrongPacket, ACCOUNT_NAME_LENGTH,
-    CHARACTER_NAME_LENGTH, MAX_SHARDS, MIN_CHARACTER_SLOTS, PASSWORD_LENGTH, SHARD_NAME_LENGTH,
+    encode_character_list, encode_login_denied, encode_relay, encode_shard_list,
+    encode_supported_features, AccountLogin, CharacterEntry, ClientVersionReport, DenyReason,
+    GameServerLogin, LoginDecodeError, SelectShard, ShardEntry, StartLocation, WrongPacket,
+    ACCOUNT_NAME_LENGTH, CHARACTER_NAME_LENGTH, MAX_SHARDS, MIN_CHARACTER_SLOTS, PASSWORD_LENGTH,
+    SHARD_NAME_LENGTH,
 };
 pub use mobile::{
     encode_open_paperdoll, encode_remove, Equipment, LookRequest, MobileIncoming, MobileMove,
@@ -102,6 +106,7 @@ pub use packet::{
     client_packet_length, frame_client_packet, Frame, FrameError, PacketLength, MAX_PACKET_SIZE,
     SEED_LENGTH_NEW, SEED_LENGTH_OLD,
 };
+pub use properties::{encode_opl_info, PropertyList, PropertyQueryRequest};
 pub use seed::{Seed, SeedReader, SEED_COMMAND};
 pub use skill::{
     encode_skill_update, encode_skills_full, skill_count, SkillEntry, SkillLock, SkillLockRequest,

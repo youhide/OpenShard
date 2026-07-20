@@ -36,21 +36,23 @@ use openshard_persistence::{
     MobileRecord, Snapshot, SCHEMA_VERSION,
 };
 use openshard_protocol::{
-    encode_light_level, encode_login_complete, encode_map_change, encode_message, encode_walk_ack,
-    encode_walk_reject, AccessLevel, ClientVersion, Direction, Facing, MobileStatus, Notoriety,
-    PlayerStart, PlayerUpdate, Point, WalkRequest, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
-    LABEL_MODE,
+    encode_context_menu, encode_light_level, encode_login_complete, encode_map_change,
+    encode_message, encode_walk_ack, encode_walk_reject, AccessLevel, ClientVersion, Direction,
+    Facing, Feature, MobileStatus, Notoriety, PlayerStart, PlayerUpdate, Point, WalkRequest,
+    DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, LABEL_MODE,
 };
 use tracing::{debug, info, warn};
 
 use openshard_state::components::{
     Access, Account, Amount, Body, Brain, Client, Combat, Contained, Container, DamageType,
     Decoration, Door, Equipped, Facet, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement,
-    Name, Position, Resistance, Ridden, Riding, Scripted, SpawnedBy, Stackable, Stats,
+    Name, Position, Resistance, Ridden, Riding, Scripted, SpawnedBy, Stackable, Stats, Vendor,
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
-use openshard_state::{FacetState, Gameplay, Obstructions, Outbound, WorldState, TICKS_PER_SECOND};
+use openshard_state::{
+    FacetState, Gameplay, Obstructions, Outbound, TooltipMode, WorldState, TICKS_PER_SECOND,
+};
 
 use openshard_ai as ai;
 use openshard_chat as chat;
@@ -69,6 +71,7 @@ use crate::gm;
 use crate::terrain::MapTerrain;
 
 mod command;
+mod context;
 mod decor;
 mod defaults;
 mod enter;
@@ -656,6 +659,18 @@ impl World {
                 }
             }
             Command::SingleClick { connection, serial } => self.single_click(connection, serial),
+            Command::QueryProperties {
+                connection,
+                serials,
+            } => self.query_properties(connection, &serials),
+            Command::ContextMenuRequest { connection, serial } => {
+                self.context_menu_request(connection, serial);
+            }
+            Command::ContextMenuSelect {
+                connection,
+                serial,
+                index,
+            } => self.context_menu_select(connection, serial, index),
             Command::EquipItem {
                 connection,
                 item,

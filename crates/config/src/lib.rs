@@ -131,6 +131,21 @@ pub struct GameplayConfig {
     /// through the hits, Sphere-style.
     #[serde(default = "default_spell_disturb")]
     pub spell_disturb: bool,
+    /// AoS object tooltips (the "cliloc" hover names), Sphere's `TOOLTIPMODE`.
+    /// `"version"` (the default) sends only a revision when a thing is drawn and
+    /// waits for the client to ask for the full list — the bandwidth-cheap
+    /// standard. `"full"` sends the whole tooltip up front. `"off"` disables them
+    /// and does not advertise AoS, so a modern client falls back to the classic
+    /// single-click name label. The knob that picks the modern-vs-classic feel.
+    #[serde(default = "default_tooltips")]
+    pub tooltips: String,
+    /// Whether the server offers right-click / single-click context menus (the
+    /// `0xBF` popup). `true` answers a context-menu request with the object's
+    /// default entries (open a container, a vendor's buy/sell, a paperdoll);
+    /// `false` serves none, and — with `tooltips = "off"` — leaves the classic
+    /// client on plain single-click names.
+    #[serde(default = "default_context_menus")]
+    pub context_menus: bool,
 }
 
 /// Whether combat [`combat_era`](GameplayConfig::combat_era) is one the swing
@@ -173,6 +188,12 @@ fn default_cast_style() -> String {
 fn default_spell_disturb() -> bool {
     true
 }
+fn default_tooltips() -> String {
+    "version".to_owned()
+}
+fn default_context_menus() -> bool {
+    true
+}
 
 impl Default for GameplayConfig {
     fn default() -> Self {
@@ -188,6 +209,8 @@ impl Default for GameplayConfig {
             creature_step_ms: default_creature_step_ms(),
             cast_style: default_cast_style(),
             spell_disturb: default_spell_disturb(),
+            tooltips: default_tooltips(),
+            context_menus: default_context_menus(),
         }
     }
 }

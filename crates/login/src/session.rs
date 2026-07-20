@@ -4,9 +4,9 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::Instant;
 
 use openshard_protocol::{
-    encode_character_list, encode_login_denied, encode_relay, encode_shard_list, AccountLogin,
-    ClientVersion, ClientVersionReport, DenyReason, GameServerLogin, Seed, SelectShard, ShardEntry,
-    StartLocation,
+    encode_character_list, encode_login_denied, encode_relay, encode_shard_list,
+    encode_supported_features, AccountLogin, ClientVersion, ClientVersionReport, DenyReason,
+    Feature, GameServerLogin, Seed, SelectShard, ShardEntry, StartLocation,
 };
 use tracing::{debug, warn};
 
@@ -129,6 +129,11 @@ pub struct LoginServer<A: Accounts> {
     pub starts: Vec<StartLocation>,
     /// The client-capability mask for the 0xA9 list.
     pub character_list_flags: u32,
+    /// The AoS `0xB9` SupportedFeatures mask sent before the character list. Zero
+    /// means "do not advertise" — no `0xB9` is sent, and a modern client stays on
+    /// the classic single-click name path. The `server` crate sets the AoS bits
+    /// from the `[gameplay]` tooltip/context-menu config.
+    pub supported_features: u32,
 }
 
 impl<A: Accounts> LoginServer<A> {
@@ -146,6 +151,7 @@ impl<A: Accounts> LoginServer<A> {
             game_address,
             starts: Vec::new(),
             character_list_flags: 0,
+            supported_features: 0,
         }
     }
 
@@ -327,12 +333,25 @@ impl<A: Accounts> LoginServer<A> {
             "sending character list"
         );
         session.state = State::CharacterListSent;
-        Response::Send(encode_character_list(
+        let character_list = encode_character_list(
             &characters,
             &self.starts,
             self.character_list_flags,
             session.version,
-        ))
+        );
+        // AoS SupportedFeatures (0xB9) rides just ahead of the character list when
+        // the shard advertises any — the client reads self-framing packets in
+        // order, so one buffer carries both. Zero means "classic": no 0xB9, and a
+        // modern client falls back to single-click names. The four-byte mask is
+        // for clients new enough to read it.
+        if self.supported_features == 0 {
+            Response::Send(character_list)
+        } else {
+            let extended = session.version.supports(Feature::ExtraFeatureMask);
+            let mut bytes = encode_supported_features(self.supported_features, extended);
+            bytes.extend_from_slice(&character_list);
+            Response::Send(bytes)
+        }
     }
 }
 

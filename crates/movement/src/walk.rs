@@ -99,6 +99,13 @@ pub trait Terrain {
         0
     }
 
+    /// The tiledata name of static art `graphic`, for a single-click label — the
+    /// same table as [`item_blocks`](Self::item_blocks), read for its name rather
+    /// than its flags. A terrain with no tiledata (an open world) has no names.
+    fn item_name(&self, _graphic: u16) -> Option<&str> {
+        None
+    }
+
     /// Whether a straight sight line from `from` to `to` is clear of walls.
     ///
     /// What gates a creature noticing prey: both reference emulators require

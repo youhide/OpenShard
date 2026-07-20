@@ -797,12 +797,36 @@ Roughly in dependency order, each script-first:
     no map or no route within budget. The path *cache* this once named as a next
     step landed with the creature-behaviour work above (`ChasePath`, a 2s repath);
     adjacent-tile pathing is still open, listed under `ai`.
-  - [x] **A name on single-click.** Clicking a mobile (`0x09`) draws its name over
-    its head for the clicker alone — a `0x1C` label in the notoriety colour
-    (ServUO's `Notoriety.Hues`: blue innocent … yellow invulnerable), so a banker
-    reads as "the banker" before you know to ask. Named mobiles only; a plain
-    item's name waits on a tiledata name lookup. This is the 2D client's tooltip:
-    what a modern client shows on hover, it asks for a click at a time.
+  - [x] **A name on single-click, a tooltip on hover, a menu on right-click.**
+    Clicking a mobile (`0x09`) draws its name over its head for the clicker alone
+    — a `0x1C` label in the notoriety colour (ServUO's `Notoriety.Hues`: blue
+    innocent … yellow invulnerable), so a banker reads as "the banker" before you
+    know to ask. An item labels too now, in the default text hue with its tiledata
+    name (Sphere's `addItemName`, "3 gold coins" and all), read through a new
+    `Terrain::item_name` beside the `item_blocks`/`item_height` tile accessors.
+    That is the classic 2D feel — what a modern client shows on hover, this one
+    asks for a click at a time. **And the modern feel is here as well.** AoS object
+    tooltips are the "cliloc" system: when the server draws a thing it sends the
+    tooltip *revision* (`0xDC`), the client asks for the list (`0xD6` in), and the
+    server answers (`0xD6` out) with cliloc numbers the client localizes — a mobile
+    is cliloc `1050045` with its name, an item cliloc `1020000 + graphic` (the
+    client's own tiledata-name range, so no string travels), pluralised through
+    `1050039` for a stack. The revision hash is one value in both packets (Sphere),
+    and the whole thing is default-in-core the way names and spells are:
+    `WorldState::object_properties` builds the list from components. **Context menus**
+    round it out (`0xBF` `0x13` request → `0x14` popup → `0x15` select): a
+    container offers Open, a vendor Buy/Sell, any mobile a Paperdoll — each routed
+    to the very handler a double-click reaches, so the menu decides *what* and the
+    existing rule does *how*. Ported from ServUO's `ObjectPropertyList`/`OPLInfo`/
+    `DisplayContextMenu`, cross-checked against Sphere's `PacketPropertyList` and
+    `Event_AOSPopupMenuRequest`. Two `[gameplay]` knobs shape it, Sphere's
+    `TOOLTIPMODE` made an operator setting: `tooltips` (`"off"` | `"version"` |
+    `"full"`) and `context_menus` (bool). With both off no `0xB9` SupportedFeatures
+    is sent, so a modern client falls back to the classic single-click label; with
+    either on the AoS bit is advertised and ClassicUO turns on hover tooltips and
+    context menus. Still on the list: richer per-object menus, the old (`0x01`)
+    popup format for pre-6.0 clients, and a tooltip that refreshes mid-life when a
+    property changes (names do not, so nothing needs it yet).
 - [ ] `housing` — player houses: a multi placed on the map, a door with a real
   lock, decay unless refreshed, friends/co-owners. Wants multis (the client's
   `multi.mul`/UOP format, unread yet), a region concept and the door locks above.
