@@ -52,6 +52,15 @@ mistake this for a security feature when it lands.
 - [x] `crates/server` — a binary that runs and reaches a character list
 - [x] `config` — TOML, validated at load; accounts and addresses come from it
 - [x] A fresh checkout writes a default `openshard.toml` and runs
+- [ ] **Character deletion** (`0x83`) — the packet is in the length table but has
+  no handler; the delete button on the character-select screen does nothing. Needs
+  the store to forget the row and the serial to stay reserved (a packet in flight
+  may still name it).
+- [ ] **Store-backed accounts and password hashing** — the login still verifies
+  against `DevAccounts` from `openshard.toml`; the store half already exists
+  (`AccountRecord`, `Store::accounts`/`put_account`) but is not wired into the
+  `Accounts` trait the `LoginServer` reads, and the password is plaintext until a
+  slow hash (argon2/bcrypt) lands — `record.rs` and `accounts.rs` both say so.
 
 `config` refuses to start on a wildcard `advertise` rather than accepting it and
 failing silently for every remote client. That check is the reason the crate
@@ -390,6 +399,12 @@ Roughly in dependency order, each script-first:
     when the tick counter reaches it; lifting, containing or wearing takes the
     clock off, and `decay()` reads only its own counter, no wall clock.
     Containers do not decay with their contents inside.
+  - [ ] **Stack merge inside a container** — only ground stacks merge today; a
+    stack dropped onto an identical pile *inside* a container bounces instead of
+    merging (`items/stack.rs` says so). A refinement, not a redesign.
+  - [ ] **Partial lift honours the amount everywhere** — the `0x07` amount is
+    honoured for ground splits; a partial lift out of a container takes the whole
+    item.
 - [x] `combat` — swing timers, damage, resistances, notoriety
   - [x] **Hit points, damage and death.** Mobiles carry `Hitpoints`; scripts
     spawn creatures (`op_spawn_mobile` → `Command::SpawnMobile`, an entity with a
@@ -442,10 +457,24 @@ Roughly in dependency order, each script-first:
   - The **typed damage** this once deferred landed with `magic` below: `damage`
     takes a `DamageType` (physical, fire, cold, poison, energy) and cuts it by the
     target's `Resistance` for that type, in the one place all damage passes — melee,
-    spell, poison pulse and script alike. Still deferred: **weapon-derived swing
-    speed and damage** want weapon *properties* (the dexterity half is done above;
-    the weapon `base` still needs tiledata). The seams are in place — `SwingSpeed`
-    and `MeleeDamage` are already per-mobile — so it is a fill-in, not a redesign.
+    spell, poison pulse and script alike.
+  - [ ] **Weapon properties from tiledata** — weapon-derived swing speed and
+    damage (the dexterity half is done; the weapon `base` still needs the item's
+    tiledata properties). The seams are in place — `SwingSpeed` and `MeleeDamage`
+    are already per-mobile — so it is a fill-in, not a redesign. This is also what
+    gates **combat eras 3–5** in the `[gameplay]` config: only 1 (pre-AoS) and
+    2 (AoS) are accepted at load until weapons carry real properties.
+  - [ ] **Ghosts, corpses and resurrection** — a player who dies today stays
+    standing at zero hits (despawning someone connected is worse); the real slice
+    is a corpse container holding the gear, a ghost state the living cannot see
+    through, and resurrection (the spell is in the table, tagged `Scripted`,
+    waiting on exactly this).
+  - [ ] **Stamina as a real pool** — the status bar sends `stamina = dexterity`
+    so the client will run at all; a real pool spends on running, refills on the
+    tick counter like mana, and is the number a war-mode push-through should cost.
+  - [ ] **Combat visuals and sounds** — a swing lands with no animation (`0x6E`),
+    no blood, no sound (`0x54`); the encoders do not exist yet. Same protocol
+    slice as the spell effects below, worth doing together.
 - [x] `skills` — usage checks, gain curves
   - [x] **The check and the gain.** A mobile carries `Skills` (a sparse map of id
     → tenths). A script sets one (`op_set_skill`) and uses it against a difficulty
@@ -560,6 +589,12 @@ Roughly in dependency order, each script-first:
     is already folded into the saved stats, so re-applying would double it).
     `World::effects_of`/`apply_effects` are the one seam; every future buff and
     debuff slots into the same `effects` list with no schema change.
+  - [ ] **Cast visuals and sounds** — a spell today resolves with no words spoken
+    over the caster's head, no particle effect (`0x70`/`0xC0`), no sound (`0x54`)
+    and no cast animation; the effect encoders do not exist in `protocol` yet.
+    ServUO's `SpellInfo` already carries the power words and each spell's
+    effect/sound ids, so this is data the table can grow. The single most visible
+    gap when testing with a real client.
   - [ ] **The non-stat magical buffs** — Protection, Reactive Armor, Night Sight,
     Magic Reflection: a different mechanic from the stat family (each modifies a
     behaviour, not a number), but the same `effects`-list persistence once each
@@ -586,9 +621,39 @@ Roughly in dependency order, each script-first:
     a player fights with — chases when out of reach, drops a target that dies or
     flees, and drifts when idle. The decision uses the world's `Rng`, so a fight
     replays. Aggro range and wandering are spawn data (`op_spawn_mobile` grew
-    `sight`/`wander`), the script-first knobs; a wholly script-driven brain — a
-    per-mobile `onTick` hook, which the scripting benchmark exists to make
-    affordable — is the richer path this leaves open.
+    `sight`/`wander`), the script-first knobs.
+  - [x] **The fully script-driven brain** — the per-mobile `onTick` the scripting
+    benchmark sized. A mobile carries a `Scripted` marker; the built-in `think`
+    skips anything wearing it, and the server calls that mobile's `onTick` every
+    tick instead. A script takes control with `op_control` — which it can only do
+    once it knows a serial, so spawning a mobile emits `MobileSpawned`, delivered
+    like every other domain event. The built-in `ai` and a scripted brain are the
+    two paths, and a mobile is on one or the other, never fought over by both.
+  - [x] **Creatures behave like the references say they should.** Movement sees
+    the live world: each facet carries an obstruction index of shut doors and
+    impassable decoration, and `LiveTerrain` lays it over the map for every walk,
+    step and A\* plan — a closed door blocks players and NPCs alike. Aggro needs
+    **line of sight** (`Terrain::sight_clear`, a Bresenham ray; windows pass,
+    walls and NO_SHOOT statics do not, shut doors are opaque). A chase walks
+    naive-step-first, plans once when blocked, follows a **cached `ChasePath`**
+    with a 2s repath, and on an impossible route **gives up** — target dropped,
+    ~10s standing guard, then back to its life; never the fence-shuffle.
+    Humanoids (`body_opens_doors`) open unlocked doors in their way; so do
+    townsfolk heading home. Creatures carry an `Aggression` posture (passive
+    fauna flee when struck; defensive ones answer the first blow via
+    `ai::retaliate`; aggressive ones hunt on sight), break off badly hurt unless
+    too big to scare, and step at `gameplay.creature_step_ms` (400 classic — a
+    running player outruns a base monster on purpose), each spawn able to
+    override its beat.
+  - [x] **Ranged creatures volley and kite.** A spawn with `ranged` reach fires
+    through `combat::volleys` — typed damage, LOS-gated, sharing the swing timer —
+    and keeps its distance at `KITE_GAP` instead of walking into melee.
+  - [ ] **Body-type tables** — door-opening and rideability are body-id lists
+    until a real table (tiledata or data-driven config) names which bodies have
+    hands and which carry a rider.
+  - [ ] **Path to a tile *adjacent* to the quarry** rather than onto it — the
+    remaining refinement from the A\* work; today a chase plans onto the target's
+    own tile and stops one short by the reach check.
 - [x] `chat` — speech, journal routing
   - [x] **Speech, heard and answered.** A player says something (`0x03`), and the
     world puts it over their head for everyone within `SPEECH_RANGE` (`0x1C`,
@@ -697,6 +762,29 @@ Roughly in dependency order, each script-first:
     faces itself, and returns the idle steps the tick applies through its
     terrain-checked `step`. This is the first of the living NPCs; **vendors** (buy
     `0x74`/`0x3B`, sell `0x9E`/`0x9F`) reuse the `Npc` base.
+  - [x] **Vendors trade.** A `vendor` spawn wears a stock crate a script prices
+    (`op_stock` — price and name are item components, so stock is pack data, not
+    engine code); double-click opens the classic buy flow (`0x74` contents +
+    `0x3B` purchase), and saying "sell" nearby offers the mirror (`0x9E` list,
+    `0x9F` sale) at half price. Stock persists with the vendor (§4, schema v5) —
+    a restart does not restock the shelf.
+  - [x] **Mounts.** Double-click a horse, llama or ostard to ride: the creature
+    leaves the world into limbo and a `0x19`-layer saddle item draws the rider
+    mounted; double-click yourself to dismount, and the creature is reconstituted
+    whole — heading, walker, brain — beside you. The ride persists through the
+    saddle item saved with the character, so logging out mounted logs back in
+    mounted; the ridden creature itself is the one mobile the world sweep skips.
+  - [ ] **Vendor restock timers** — a bought-out shelf refills on a timer, the
+    references' economy heartbeat; today stock only changes by trade.
+  - [ ] **Locks and keys on doors** — every door opens to any NPC that can work
+    handles, and to any player; the pack already names locked doors it cannot yet
+    lock. Wants a lock component the obstruction index respects and key items.
+  - [ ] **Mounted movement speed at the pace budget** — a mounted rider should
+    earn the mounted run rate in `WalkPace`; today the saddle is visual and the
+    budget does not know about it.
+  - [ ] **Secure trade between players** (`0x6F`) — the drag-onto-a-player trade
+    window. The `NewSecureTrade` feature gate exists in `protocol`; the handler
+    and the escrow container do not.
   - [x] **A* pathfinding**, so pursuit and homing route *around* walls instead of
     shuffling into them — the thing Sphere does badly. `movement::find_path` is a
     bounded A* over the `Terrain` (the same `can_step` the client's walk uses), with
@@ -706,23 +794,27 @@ Roughly in dependency order, each script-first:
     same map and endpoints, same path — so a replay's monsters keep the same trail.
     The creature chase (`ai::step_toward`) and a townsperson heading back to its
     post both plan through it, falling back to the straight line only when there is
-    no map or no route within budget. Next AI refinements: caching a path rather
-    than re-planning each beat, and pathing to a tile *adjacent* to a quarry rather
-    than onto it.
+    no map or no route within budget. The path *cache* this once named as a next
+    step landed with the creature-behaviour work above (`ChasePath`, a 2s repath);
+    adjacent-tile pathing is still open, listed under `ai`.
   - [x] **A name on single-click.** Clicking a mobile (`0x09`) draws its name over
     its head for the clicker alone — a `0x1C` label in the notoriety colour
     (ServUO's `Notoriety.Hues`: blue innocent … yellow invulnerable), so a banker
     reads as "the banker" before you know to ask. Named mobiles only; a plain
     item's name waits on a tiledata name lookup. This is the 2D client's tooltip:
     what a modern client shows on hover, it asks for a click at a time.
-- [ ] `housing`, `guilds`
+- [ ] `housing` — player houses: a multi placed on the map, a door with a real
+  lock, decay unless refreshed, friends/co-owners. Wants multis (the client's
+  `multi.mul`/UOP format, unread yet), a region concept and the door locks above.
+- [ ] `guilds` — membership, titles, the guild notoriety rules (green/orange),
+  war declarations. Mostly data plus a notoriety hook; the abstract stub exists
+  so the dependency graph already names it.
 
-The bridge is event-driven today: the server calls the script's `onEvent`, not a
-per-mobile `onTick`. The per-entity hook the benchmark measured is what `ai`
-(wandering, aggro) will want, and wiring it is a server-loop change when that
-lands — the engine already supports it. The script vocabulary — the events in,
-the commands out — grows one gameplay area at a time, each new command mapped in
-`into_world`.
+The bridge is both event- and tick-driven now: the server calls the script's
+`onEvent` with each tick's domain events, and the per-mobile `onTick` for every
+mobile a script controls (`op_control`, the `Scripted` marker) — the hook the
+benchmark priced. The script vocabulary — the events in, the commands out — grows
+one gameplay area at a time, each new command mapped in `into_world`.
 
 The balance data comes from the SphereServer scriptpack (`Scripts-X`): `items/`,
 `skills/`, `spells/`, `npcs/`, `crafting/`. Numbers taken, arithmetic audited —

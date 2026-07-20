@@ -425,8 +425,9 @@ pub enum Command {
         connection: ConnectionId,
         /// The item's serial.
         serial: u32,
-        /// How many of a stack to lift. Ignored for now — the whole item is
-        /// lifted; splitting a pile is a stacking concern (§6 items).
+        /// How many of a stack to lift. Honoured for a ground pile — part is
+        /// taken, the remainder left as a new dupe — and ignored for a contained
+        /// or worn item, which lifts whole (the split there is still roadmap).
         amount: u16,
     },
     /// A client asked to put the item on its cursor down (`0x08`).

@@ -78,9 +78,9 @@ crate, owning its domain events:
 | Crate | System | Events |
 |---|---|---|
 | `chat` | `say`/`speak`, speech ranges | `MobileSpoke` |
-| `skills` | skill/stat checks, the gain curve, the shared `roll_skill` | `SkillUsed` |
-| `magic` | `cast_spell`/`heal`/`regen_mana` | `SpellCast` |
-| `combat` | `damage`/`die`/`swings`/`volleys`/`attack`, criminal flagging, the swing formula | `MobileDamaged`, `MobileDied` |
+| `skills` | skill/stat checks, the gain curve, the shared `roll_skill` | `SkillUsed`, `SkillRaised` |
+| `magic` | the 64-spell Magery table, `pay_and_roll`/`heal`/`regen_mana`, the timed stat buffs (`apply_stat_buff`/`expire_buffs`) | `SpellCast` |
+| `combat` | `damage`/`die`/`swings`/`volleys`/`attack`, poison pulses, criminal flagging, the swing formula | `MobileDamaged`, `MobileDied` |
 | `items` | spawn/drag/stack/decay/containers/equip/doors/mounts, one module each | `ItemSpawned` |
 | `ai` | the creature brain: LOS aggro, cached-path chase, give-up, kiting, fleeing, retaliation | — |
 | `npc` | townsfolk services (banker, vendor buy/sell) and the creature `spawn` rule | `MobileSpawned` |
@@ -255,26 +255,34 @@ customisable.
 Every boundary lives in `Feature::since`, ported from Sphere's `MINCLIVER_*`
 table. One table to fix when a boundary turns out to be off by a patch.
 
-## The world (planned)
+## The world
 
 The entire world is in memory. The database is persistence, never a query
 target during gameplay.
 
+The real tick, in order (`world/src/tick.rs`):
+
 ```
 tick:
-  drain network input
-  movement
-  combat
-  ai
-  timers
-  scripts
-  bus.update()
-  flush persistence queue
+  apply queued commands          network input, script output — one order
+  ai think / npc live            brains decide; the tick applies the steps
+  combat                         swings, volleys, criminal/murder expiry, poison
+  magic                          buff expiry, mana regen, casts in flight
+  items                          decay, doors swinging shut
+  spawners                       regions refill their dead
+  wire follow-ups                skill window updates, status redraws
+  journal.mark_dirty()           from the bus, not from call sites
+  bus.update()                   the two-tick swap
+  offer_snapshot()               a memcpy handed to the save task, off-tick
 ```
 
-The tick is deterministic and single-threaded per world region. Async lives at
-the edges — network, database, HTTP — never inside the simulation. That boundary
-is what makes replay and debugging tractable.
+The systems run in a fixed serial order, not parallel queries — that is the
+deliberate price of a deterministic, replayable simulation. The tick is
+single-threaded per world region; async lives at the edges — network, database,
+HTTP — never inside the simulation. That boundary is what makes replay and
+debugging tractable. Randomness inside a tick comes only from the world's seeded
+`Rng`, and every timer is a tick count, never a wall clock — a world constructed
+twice rolls and expires identically.
 
 ## Scripting (spike done)
 
@@ -311,16 +319,34 @@ the next tick. That keeps a script on the same side of the boundary as a network
 task — it never writes the world inside the tick that is running, only enqueues a
 command a later tick applies. World and scripting stay ignorant of each other;
 the server is the adapter, which is what an adapter is for. `Command::Step` —
-server-authoritative movement, terrain the only judge — is the first command a
-script can land, and the seam §6 gameplay grows from.
+server-authoritative movement, terrain the only judge — was the first command a
+script could land, and the seam §6 gameplay grew from.
 
-## Persistence (planned)
+Both hooks the benchmark priced are wired now: `onEvent` receives each tick's
+domain events, and the per-mobile `onTick` runs every tick for any mobile a
+script controls (`op_control` sets a `Scripted` marker; the built-in brain skips
+what wears it, so a mobile is on one brain or the other, never both).
+
+## Persistence
 
 ```
-entity changes → queue → async writer → database
+events → Journal (dirty marks) → Snapshot (a memcpy at one tick) → Store::save
+   the tick's side                  the handover                  a task nothing waits on
 ```
 
-Event-sourcing inspired. Autosave configurable. Crash recovery from the log.
+Implemented, end to end. The journal marks what changed *from the event bus* —
+emitting the event is the touch, so no call site can forget persistence exists.
+A snapshot is owned values taken at one instant; a `Store` (SQLite, PostgreSQL,
+or in-memory for development) writes it on a task the tick never waits for. Both
+reference emulators stop the world to save it — ServUO literally broadcasts
+"please wait" — and `persistence/src/journal.rs` is the argument for why this
+one does not.
+
+The save is the whole world, the Sphere/ServUO model: every character with its
+nested inventory, every NPC with its wounds and vendor stock, every decoration
+with its door state, every spawn region with its timer, every live effect —
+poison, buffs — so a relog or a restart changes nothing a player can see. A
+killed creature is simply absent from the next sweep and stays dead.
 
 The load path is why `Registry::bind_serial` exists: serials come from the save,
 not the allocator, and binding one reserves it so nothing fresh collides.

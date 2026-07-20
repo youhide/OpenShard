@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.png" alt="OpenShard" width="360">
+</p>
+
 # OpenShard
 
 Modern open-source MMORPG server engine compatible with classic Ultima Online
@@ -12,10 +16,14 @@ data-oriented, script-first, hot-reloadable, observable.
 > client's map and takes clients through login and character creation into a
 > ticking, shared world. Characters walk and run the same ground the client
 > draws (the step rules are the client's own), pick things up, fill backpacks,
-> wear clothes, fight creatures that fight back, gain skills, cast, chat, and
-> bank with a banker who knows their name. The world saves itself to SQLite or
-> PostgreSQL without ever pausing, and survives a restart. Gameplay is
-> TypeScript, hot-reloaded on save. See [`docs/roadmap.md`](docs/roadmap.md).
+> wear clothes, ride horses, and buy and sell with vendors. They fight creatures
+> that fight back with real behaviour — line-of-sight aggro, pathing around
+> walls, fleeing, kiting — gain skills into a live skill window, and cast from a
+> 64-spell Magery book whose poisons and Bless/Curse buffs persist through a
+> relog. The **whole world** saves itself to SQLite or PostgreSQL without ever
+> pausing — every NPC, every door, every debuff — and survives a restart.
+> Gameplay is TypeScript, hot-reloaded on save. See
+> [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Design
 
@@ -77,13 +85,13 @@ crates/
   login         accounts, auth keys, the whole login sequence
   movement      the walk handshake, terrain rules, A* pathfinding
   state         WorldState: components, sectors, rng, interest
-  combat        damage, swings, notoriety, murder counts
+  combat        damage, swings, ranged volleys, poison, notoriety, murder counts
   chat          speech in, speech out, speech ranges
-  items         containers, drag/drop, stacking, decay, doors
+  items         containers, drag/drop, stacking, decay, doors, mounts
   skills        checks, the gain curve
-  magic         casting, mana, typed damage
-  ai            creature brains: notice, chase, drift
-  npc           townsfolk: bankers, creature spawning
+  magic         the 64-spell table, casting, typed damage, timed buffs
+  ai            creature brains: LOS aggro, chase, kite, flee, give up
+  npc           townsfolk: bankers, vendors, creature spawning
   world         the tick, client map/tiledata formats, the journal
   persistence   journal, snapshots, SQLite and PostgreSQL stores
   scripting     the TypeScript runtime (deno_core)
@@ -116,6 +124,27 @@ The one setting worth reading before you touch anything else is
 `server.advertise`. It is **not** `server.listen`: it is the address the server
 tells clients to dial, so it defaults to `127.0.0.1` and only works on the
 machine running the shard. Behind NAT it must be your public address.
+
+## The Community Pack
+
+A shard's gameplay **data and logic** live in a script pack, not in the engine:
+which creatures spawn where, what the townsfolk say and sell, how a spell the
+core does not run resolves. The reference pack is the
+[**OpenShard Community Pack**](https://github.com/youhide/OpenShard-Community-Pack)
+— Britain's spawns, decoration, doors, bankers and vendors, migrated from
+ServUO's data and edited as plain JavaScript.
+
+```toml
+[scripting]
+main = "/path/to/OpenShard-Community-Pack"
+```
+
+`scripting.main` points at the pack's *directory*; the tree is watched, so
+editing a spawn takes effect on save — no rebuild, no restart. A script never
+touches the world directly: events in through `onEvent`, commands out through
+ops, applied by the tick in order — the same seam every engine system uses.
+Running without a pack works too; the engine's defaults (the spell table, the
+skill rolls) still stand. This is the Sphere `Scripts-X` idea, redone on V8.
 
 ## Building
 

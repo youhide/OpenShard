@@ -111,9 +111,49 @@ A crate depends downward or sideways at the same level, never upward.
 `entities` and `events` know nothing about gameplay and must stay that way —
 if `entities` ever needs to know what a house is, the layering broke.
 
+## Randomness and time
+
+The tick must replay: the same commands twice produce the same world. Two rules
+keep that true, and both are load-bearing:
+
+- **Randomness inside a tick comes from `self.rng`** — the world's seeded
+  xorshift, advanced only by the tick. Never `rand::thread_rng()`, never the OS.
+  A skill roll, a brain's drift, a generated name all draw from the one stream.
+- **Timers are tick counts, never wall clocks.** Decay, swing timers, criminal
+  flags, poison pulses, buff expiry — all `u64` ticks compared against
+  `state.ticks`. Saved timed state stores the *remaining* span and re-derives
+  the deadline from "now" on restore, so downtime pauses a timer rather than
+  eating it.
+
+A system that reads `Instant::now()` or a thread-local rng inside the tick has
+broken replay silently; no test without a replay in it will catch it.
+
+## Ports name their source
+
+Numbers and behaviour taken from the reference emulators cite the function they
+came from, so the next reader can check the port against the original:
+
+```rust
+// Read out of Sphere's `CItem::UnStackSplit` rather than guessed: the
+// original keeps its serial and holds the taken amount on the cursor.
+```
+
+`Calc_GetSCurve`, `PacketItemWorld`, ServUO's `GetStartZ` — the name is the
+provenance. Take the numbers; audit the arithmetic (see `CLAUDE.md` on Sphere's
+walk check). A port nobody can trace back is a magic constant with extra steps.
+
 ## Names
 
 Use the domain's words. `Serial`, `Mobile`, `Multi`, `Hue`, `Notoriety` are UO
 terms with precise meanings — use them exactly, and do not invent synonyms.
 
 Prefer explicit over clever. `spawn_with_serial` over `spawn2`.
+
+## Commits
+
+The subject line says what changed, in the imperative, colon-scoped when it
+helps: `Fix dismount: strip the self-double-click high bit`. The body — when the
+change needs one — says *why*, the same test a comment passes.
+
+Commit messages carry the message text only: no attribution lines, no
+tool signatures, no trailers naming who or what wrote the code.
