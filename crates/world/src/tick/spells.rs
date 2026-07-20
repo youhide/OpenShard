@@ -255,8 +255,44 @@ impl World {
                 self.state.teleport(caster, target_location);
                 self.state.broadcast_move(caster);
             }
+            SpellEffect::StatMod(kind) => {
+                // A Mobile-target spell, so it lands on the aimed mobile — or on
+                // the caster for a self-cast that answered its own cursor.
+                let who = if target_serial != 0 {
+                    target_serial
+                } else {
+                    by.map_or(0, |s| s.raw())
+                };
+                if who != 0 {
+                    let (offset, expires_at) = self.stat_buff_terms(caster, kind);
+                    magic::apply_stat_buff(&mut self.state, who, kind, offset, expires_at);
+                    self.refresh_status_of(who);
+                }
+            }
             SpellEffect::Scripted => {} // the pack's, off SpellCast
         }
+    }
+
+    /// How strong a stat buff the caster lands, and the tick it lifts.
+    ///
+    /// Both scale from the caster's Magery, ServUO's shape: the magnitude rises to
+    /// `+10` at grandmaster, the duration to a couple of minutes. A debuff kind
+    /// takes the same magnitude with the sign flipped — the negation the `magic`
+    /// crate then folds in and, later, backs out.
+    fn stat_buff_terms(&self, caster: EntityId, kind: u8) -> (i16, u64) {
+        let magery = self
+            .state
+            .registry
+            .get::<Skills>(caster)
+            .map_or(0, |s| s.get(MAGERY_SKILL));
+        let magnitude = (magery / 100).clamp(1, 10) as i16;
+        let offset = if openshard_state::is_debuff(kind) {
+            -magnitude
+        } else {
+            magnitude
+        };
+        let seconds = u64::from(magery / 10).clamp(10, 120);
+        (offset, self.state.ticks + seconds * TICKS_PER_SECOND)
     }
 
     /// The backpack serial reagents come out of, or `0` if the caster wears none.

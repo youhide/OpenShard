@@ -391,6 +391,14 @@ impl World {
         combat::expire_criminality(&mut self.state);
         combat::decay_murders(&mut self.state);
         combat::poison_tick(&mut self.state);
+        // Lift the stat buffs whose time is up, and redraw the bar for any player
+        // whose stats just changed back — the decide-then-apply split again.
+        let now = self.state.ticks;
+        for entity in magic::expire_buffs(&mut self.state, now) {
+            if let Some(serial) = self.state.registry.serial_of(entity) {
+                self.refresh_status_of(serial.raw());
+            }
+        }
         magic::regen_mana(&mut self.state);
         // Finish or break the ServUO-style casts whose delay is up or whose
         // caster was struck; the Sphere style resolves in `begin_cast` and never
@@ -791,7 +799,7 @@ impl World {
         // will be no entity to read. Logging out is when a save matters most —
         // it is the only moment a player's whole session is at stake — so the
         // record is taken at the one instant it still can be.
-        if let Some(record) = Self::record_of(&self.state.registry, entity) {
+        if let Some(record) = Self::record_of(&self.state.registry, entity, self.state.ticks) {
             // The journal copy is for the store; the departed copy is for the
             // server's in-memory character list, which a re-login reads before the
             // deferred store save has necessarily landed.

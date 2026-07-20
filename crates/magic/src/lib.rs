@@ -12,7 +12,7 @@
 
 use openshard_entities::{EntityId, Serial};
 use openshard_items::{count_in_container, take_from_container};
-use openshard_state::components::{Hitpoints, Mana};
+use openshard_state::components::{stat_shift, Hitpoints, Mana, StatMod, StatMods, Stats};
 use openshard_state::WorldState;
 
 mod spells;
@@ -207,6 +207,132 @@ pub fn heal(state: &mut WorldState, serial: u32, amount: u16) {
         },
     );
     state.broadcast_health(entity);
+}
+
+/// A stat shifted by `delta`, floored at 1 and capped at the type maximum.
+///
+/// The floor keeps a debuff from driving a stat (or a derived maximum) to zero,
+/// where a zero max-hits would read as dead. It costs exactness only for a mobile
+/// whose stat is already smaller than the modifier — no real character is — so a
+/// reversal of that clamped shift restores the base within that rounding.
+fn apply_delta(value: u16, delta: i16) -> u16 {
+    (i32::from(value) + i32::from(delta)).clamp(1, i32::from(u16::MAX)) as u16
+}
+
+/// Fold one stat modifier into (or, with a negated `offset`, back out of) a
+/// mobile's live stats and the maxima that hang off them.
+///
+/// Strength moves the hit-points cap, intelligence the mana cap; dexterity's
+/// stamina pool has no component yet, so it moves only the stat. A shrinking
+/// maximum clamps the current pool down with it; a growing one leaves the current
+/// where it is, to be healed or regenerated into.
+fn shift_stats(state: &mut WorldState, entity: EntityId, kind: u8, offset: i16) {
+    let (ds, dd, di) = stat_shift(kind, offset);
+    if let Some(&Stats {
+        strength,
+        dexterity,
+        intelligence,
+    }) = state.registry.get::<Stats>(entity)
+    {
+        state.registry.insert(
+            entity,
+            Stats {
+                strength: apply_delta(strength, ds),
+                dexterity: apply_delta(dexterity, dd),
+                intelligence: apply_delta(intelligence, di),
+            },
+        );
+    }
+    if ds != 0 {
+        if let Some(&Hitpoints { current, max }) = state.registry.get::<Hitpoints>(entity) {
+            let max = apply_delta(max, ds);
+            state.registry.insert(
+                entity,
+                Hitpoints {
+                    current: current.min(max),
+                    max,
+                },
+            );
+        }
+    }
+    if di != 0 {
+        if let Some(&Mana { current, max }) = state.registry.get::<Mana>(entity) {
+            let max = apply_delta(max, di);
+            state.registry.insert(
+                entity,
+                Mana {
+                    current: current.min(max),
+                    max,
+                },
+            );
+        }
+    }
+}
+
+/// Lay a timed stat modifier on a mobile — the Bless/Curse family.
+///
+/// The `offset` is signed (a debuff arrives negative), and `expires_at` is the
+/// tick it lifts. Re-casting the same `kind` refreshes it: the old entry is first
+/// backed out cleanly, then the new one applied, so a Bless recast never stacks a
+/// second bonus. The shift folds into the live [`Stats`] at once; the ledger entry
+/// remembers how to give it back.
+pub fn apply_stat_buff(
+    state: &mut WorldState,
+    serial: u32,
+    kind: u8,
+    offset: i16,
+    expires_at: u64,
+) {
+    let Some(entity) = Serial::new(serial).and_then(|s| state.registry.entity_of(s)) else {
+        return;
+    };
+    let mut mods = state
+        .registry
+        .get::<StatMods>(entity)
+        .cloned()
+        .unwrap_or_default();
+    // A recast backs out the standing entry of this kind before re-applying, so
+    // the bonus refreshes rather than doubling.
+    if let Some(pos) = mods.active.iter().position(|m| m.kind == kind) {
+        let old = mods.active.remove(pos);
+        shift_stats(state, entity, old.kind, -old.offset);
+    }
+    shift_stats(state, entity, kind, offset);
+    mods.active.push(StatMod {
+        kind,
+        offset,
+        expires_at,
+    });
+    state.registry.insert(entity, mods);
+}
+
+/// Lift every stat modifier whose tick has come, backing its shift out of the
+/// mobile it worked through. Returns whom it touched, so the caller can redraw a
+/// player's status bar. Runs on the tick counter, so it replays.
+#[must_use]
+pub fn expire_buffs(state: &mut WorldState, now: u64) -> Vec<EntityId> {
+    let ready: Vec<EntityId> = state
+        .registry
+        .query::<StatMods>()
+        .filter(|(_, mods)| mods.active.iter().any(|m| now >= m.expires_at))
+        .map(|(entity, _)| entity)
+        .collect();
+    for &entity in &ready {
+        let Some(mods) = state.registry.get::<StatMods>(entity).cloned() else {
+            continue;
+        };
+        let (expired, kept): (Vec<StatMod>, Vec<StatMod>) =
+            mods.active.into_iter().partition(|m| now >= m.expires_at);
+        for m in expired {
+            shift_stats(state, entity, m.kind, -m.offset);
+        }
+        if kept.is_empty() {
+            state.registry.remove::<StatMods>(entity);
+        } else {
+            state.registry.insert(entity, StatMods { active: kept });
+        }
+    }
+    ready
 }
 
 /// Trickle mana back for everyone who has any, one point each regen tick. Runs

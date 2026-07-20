@@ -57,8 +57,12 @@ pub enum SpellEffect {
     AreaCure,
     /// Move the caster to the targeted spot.
     Teleport,
+    /// A timed stat modifier — the Bless/Curse family. The `u8` is the effect
+    /// kind ([`openshard_state::effect`]); its magnitude and duration scale from
+    /// the caster's Magery when it lands.
+    StatMod(u8),
     /// The core does not run this one yet — the pack owns it (fields, summons,
-    /// buffs, travel, and the rest).
+    /// travel, and the rest).
     Scripted,
 }
 
@@ -80,8 +84,9 @@ pub struct SpellInfo {
     pub effect: SpellEffect,
 }
 
+use openshard_state::effect;
 use DamageType::{Cold, Energy, Fire, Physical};
-use SpellEffect::{AreaCure, AreaDamage, Cure, Damage, Heal, Poison, Scripted, Teleport};
+use SpellEffect::{AreaCure, AreaDamage, Cure, Damage, Heal, Poison, Scripted, StatMod, Teleport};
 use SpellTarget::{Location, Mobile, SelfCast};
 
 /// One table entry, kept terse so all 64 read at a glance.
@@ -106,7 +111,13 @@ const fn spell(
 /// spellbook: eight per circle, Clumsy first.
 pub static MAGERY: [SpellInfo; 64] = [
     // -- First circle --------------------------------------------------------
-    spell("Clumsy", 1, &[BLOOD_MOSS, NIGHTSHADE], Mobile, Scripted),
+    spell(
+        "Clumsy",
+        1,
+        &[BLOOD_MOSS, NIGHTSHADE],
+        Mobile,
+        StatMod(effect::CLUMSY),
+    ),
     spell(
         "Create Food",
         1,
@@ -114,7 +125,13 @@ pub static MAGERY: [SpellInfo; 64] = [
         SelfCast,
         Scripted,
     ),
-    spell("Feeblemind", 1, &[GINSENG, NIGHTSHADE], Mobile, Scripted),
+    spell(
+        "Feeblemind",
+        1,
+        &[GINSENG, NIGHTSHADE],
+        Mobile,
+        StatMod(effect::FEEBLEMIND),
+    ),
     spell(
         "Heal",
         1,
@@ -137,10 +154,28 @@ pub static MAGERY: [SpellInfo; 64] = [
         SelfCast,
         Scripted,
     ),
-    spell("Weaken", 1, &[GARLIC, NIGHTSHADE], Mobile, Scripted),
+    spell(
+        "Weaken",
+        1,
+        &[GARLIC, NIGHTSHADE],
+        Mobile,
+        StatMod(effect::WEAKEN),
+    ),
     // -- Second circle -------------------------------------------------------
-    spell("Agility", 2, &[BLOOD_MOSS, MANDRAKE_ROOT], Mobile, Scripted),
-    spell("Cunning", 2, &[GINSENG, MANDRAKE_ROOT], Mobile, Scripted),
+    spell(
+        "Agility",
+        2,
+        &[BLOOD_MOSS, MANDRAKE_ROOT],
+        Mobile,
+        StatMod(effect::AGILITY),
+    ),
+    spell(
+        "Cunning",
+        2,
+        &[GINSENG, MANDRAKE_ROOT],
+        Mobile,
+        StatMod(effect::CUNNING),
+    ),
     spell("Cure", 2, &[GARLIC, GINSENG], Mobile, Cure),
     spell(
         "Harm",
@@ -175,10 +210,16 @@ pub static MAGERY: [SpellInfo; 64] = [
         2,
         &[MANDRAKE_ROOT, NIGHTSHADE],
         Mobile,
-        Scripted,
+        StatMod(effect::STRENGTH),
     ),
     // -- Third circle --------------------------------------------------------
-    spell("Bless", 3, &[GARLIC, MANDRAKE_ROOT], Mobile, Scripted),
+    spell(
+        "Bless",
+        3,
+        &[GARLIC, MANDRAKE_ROOT],
+        Mobile,
+        StatMod(effect::BLESS),
+    ),
     spell("Fireball", 3, &[BLACK_PEARL], Mobile, Damage(Fire, 12)),
     spell(
         "Magic Lock",
@@ -236,7 +277,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         4,
         &[GARLIC, NIGHTSHADE, SPIDERS_SILK],
         Mobile,
-        Scripted,
+        StatMod(effect::CURSE),
     ),
     spell(
         "Fire Field",

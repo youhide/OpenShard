@@ -2912,6 +2912,238 @@ fn a_poisoned_creature_comes_back_poisoned() {
 }
 
 #[test]
+fn a_stat_buff_shifts_stats_and_pools_then_expires() {
+    use openshard_state::components::{Mana, StatMods, Stats};
+    use openshard_state::effect;
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = serial_of(&world, connection);
+
+    let base = *world.registry().get::<Stats>(entity).unwrap();
+    let base_hits_max = world.registry().get::<Hitpoints>(entity).unwrap().max;
+    let base_mana_max = world.registry().get::<Mana>(entity).unwrap().max;
+
+    // Bless folds into the live stats and the caps that hang off them at once.
+    let expires_at = world.state.ticks + 100;
+    magic::apply_stat_buff(&mut world.state, serial, effect::BLESS, 10, expires_at);
+    let blessed = *world.registry().get::<Stats>(entity).unwrap();
+    assert_eq!(blessed.strength, base.strength + 10, "str rose");
+    assert_eq!(blessed.dexterity, base.dexterity + 10, "dex rose");
+    assert_eq!(blessed.intelligence, base.intelligence + 10, "int rose");
+    assert_eq!(
+        world.registry().get::<Hitpoints>(entity).unwrap().max,
+        base_hits_max + 10,
+        "the hit-point cap rose with strength"
+    );
+    assert_eq!(
+        world.registry().get::<Mana>(entity).unwrap().max,
+        base_mana_max + 10,
+        "and the mana cap with intelligence"
+    );
+
+    // Run past the expiry: the ledger backs the shift out exactly.
+    let mut later = now;
+    while world.state.ticks <= expires_at {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert_eq!(
+        *world.registry().get::<Stats>(entity).unwrap(),
+        base,
+        "the stats came back exactly"
+    );
+    assert_eq!(
+        world.registry().get::<Hitpoints>(entity).unwrap().max,
+        base_hits_max,
+        "and so did the hit-point cap"
+    );
+    assert!(
+        world.registry().get::<StatMods>(entity).is_none(),
+        "the emptied ledger was removed"
+    );
+}
+
+#[test]
+fn recasting_a_buff_refreshes_rather_than_stacks() {
+    use openshard_state::components::{StatMods, Stats};
+    use openshard_state::effect;
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = serial_of(&world, connection);
+    let base = *world.registry().get::<Stats>(entity).unwrap();
+
+    let at = world.state.ticks;
+    magic::apply_stat_buff(&mut world.state, serial, effect::STRENGTH, 5, at + 100);
+    magic::apply_stat_buff(&mut world.state, serial, effect::STRENGTH, 5, at + 200);
+
+    assert_eq!(
+        world.registry().get::<Stats>(entity).unwrap().strength,
+        base.strength + 5,
+        "a recast refreshes the same +5, it does not stack a second"
+    );
+    assert_eq!(
+        world
+            .registry()
+            .get::<StatMods>(entity)
+            .unwrap()
+            .active
+            .len(),
+        1,
+        "one entry, not two"
+    );
+}
+
+#[test]
+fn a_debuff_clamps_the_current_pool_to_the_lowered_cap() {
+    use openshard_state::effect;
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = serial_of(&world, connection);
+    let full = world.registry().get::<Hitpoints>(entity).unwrap().max;
+
+    // Curse lowers strength, so the hit-point cap drops; a full bar must follow it
+    // down rather than sit above the new maximum.
+    let at = world.state.ticks;
+    magic::apply_stat_buff(&mut world.state, serial, effect::CURSE, -10, at + 100);
+    let hits = *world.registry().get::<Hitpoints>(entity).unwrap();
+    assert_eq!(hits.max, full - 10, "the cap dropped");
+    assert_eq!(hits.current, full - 10, "and the full bar dropped with it");
+}
+
+#[test]
+fn a_stat_buff_survives_a_relogin() {
+    // The buff half of the persistence rule: a Bless in flight is saved with the
+    // character (its shift folded into the saved stats, its timer on the effects
+    // list) and comes back on relog — still buffed, and still counting down to the
+    // same base it would have returned to.
+    use openshard_protocol::SkillLock;
+    use openshard_state::components::{StatMods, Stats};
+    use openshard_state::effect;
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let entity = world.state.players[&conn];
+    let serial = serial_of(&world, conn);
+    let base = *world.registry().get::<Stats>(entity).unwrap();
+
+    let at = world.state.ticks;
+    magic::apply_stat_buff(&mut world.state, serial, effect::BLESS, 10, at + 100);
+    let buffed = *world.registry().get::<Stats>(entity).unwrap();
+
+    world.take_snapshot();
+    let snapshot = world.drain_saves().next_back().expect("a snapshot");
+    let record = snapshot
+        .characters
+        .iter()
+        .find(|c| c.serial == serial)
+        .cloned()
+        .expect("saved");
+    assert_eq!(
+        record.strength, buffed.strength,
+        "the buffed stat went to disk"
+    );
+    assert!(
+        record.effects.iter().any(|e| e.kind == effect::BLESS),
+        "and the buff's ledger entry with it"
+    );
+
+    // Relogin, threading the record back the way the server does.
+    world.queue(Command::Disconnect { connection: conn });
+    world.tick(now);
+    let conn = connection();
+    world.queue(Command::Enter {
+        connection: conn,
+        version: ClientVersion::TOL,
+        account: "admin".to_owned(),
+        name: "Lord British".to_owned(),
+        serial: Some(serial),
+        position: Some(Point::new(START.0, START.1, 0)),
+        facet: 0,
+        appearance: None,
+        sheet: Some(CharacterSheet {
+            strength: record.strength,
+            dexterity: record.dexterity,
+            intelligence: record.intelligence,
+            skills: record
+                .skills
+                .iter()
+                .map(|s| (s.id, s.value, SkillLock::from_bits(s.lock)))
+                .collect(),
+            effects: record.effects.clone(),
+        }),
+        access: AccessLevel::Player,
+    });
+    world.tick(now);
+
+    let player = world.state.players[&conn];
+    assert_eq!(
+        *world.registry().get::<Stats>(player).unwrap(),
+        buffed,
+        "came back still blessed, not double-applied"
+    );
+    let expires_at = world
+        .registry()
+        .get::<StatMods>(player)
+        .expect("the ledger was restored")
+        .active[0]
+        .expires_at;
+
+    // And it still lifts, back to the same base it would have without the relog.
+    let mut later = now;
+    while world.state.ticks <= expires_at {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert_eq!(
+        *world.registry().get::<Stats>(player).unwrap(),
+        base,
+        "the restored buff wore off to the true base"
+    );
+}
+
+#[test]
+fn the_bless_spell_raises_the_targets_stats() {
+    use openshard_state::components::Stats;
+    const GARLIC: u16 = 0x0F84;
+    const MANDRAKE_ROOT: u16 = 0x0F86;
+    let now = Instant::now();
+    let mut world = sphere_world();
+    let (connection, entity) = ready_caster(&mut world, GARLIC, now);
+    let self_serial = serial_of(&world, connection);
+    let backpack = Serial::new(backpack_serial(&world, connection)).unwrap();
+    openshard_items::give(&mut world.state, backpack, MANDRAKE_ROOT, 0, 20);
+    let base = *world.registry().get::<Stats>(entity).unwrap();
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 16,
+    }); // Bless
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::TargetResponse {
+            cursor_id: 0,
+            serial: self_serial,
+            location: Point::new(0, 0, 0),
+            graphic: 0,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    assert!(
+        world.registry().get::<Stats>(entity).unwrap().strength > base.strength,
+        "the Bless spell raised the target's stats through the full cast"
+    );
+}
+
+#[test]
 fn the_poison_spell_poisons_what_it_is_aimed_at() {
     use openshard_state::components::Poisoned;
     let now = Instant::now();

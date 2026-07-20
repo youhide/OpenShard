@@ -278,6 +278,92 @@ pub struct Poisoned {
     pub pulses_left: u8,
 }
 
+/// The kind tag on a saved effect and a live [`StatMod`], canonical across the
+/// engine.
+///
+/// One numbering, shared by everything that reads or writes an effect: the
+/// persistence [`EffectRecord`](openshard_persistence) stores this `u8`, `magic`
+/// tags a [`StatMod`] with it, and the world's save/restore translates the two.
+/// Poison (`0`) is the odd one out — its live form is [`Poisoned`], not a
+/// `StatMod` — but it shares the numbering so one effects list carries the lot.
+/// The order is frozen: a saved `4` must always mean Bless, or old saves rot.
+pub mod effect {
+    /// Poison — [`Poisoned`](super::Poisoned), not a stat modifier.
+    pub const POISON: u8 = 0;
+    /// Strength: `+str`.
+    pub const STRENGTH: u8 = 1;
+    /// Agility: `+dex`.
+    pub const AGILITY: u8 = 2;
+    /// Cunning: `+int`.
+    pub const CUNNING: u8 = 3;
+    /// Bless: `+` all three.
+    pub const BLESS: u8 = 4;
+    /// Weaken: `-str`.
+    pub const WEAKEN: u8 = 5;
+    /// Clumsy: `-dex`.
+    pub const CLUMSY: u8 = 6;
+    /// Feeblemind: `-int`.
+    pub const FEEBLEMIND: u8 = 7;
+    /// Curse: `-` all three.
+    pub const CURSE: u8 = 8;
+}
+
+/// Which stats a stat-modifying effect shifts, and by how much.
+///
+/// The `kind` names *which* stats (Strength touches str, Bless all three); the
+/// signed `offset` carries the magnitude and direction. Returns the delta for
+/// `(strength, dexterity, intelligence)`. A debuff simply arrives with a negative
+/// `offset` — so the same function undoes a buff by being called with the offset
+/// negated, which is exactly how [`StatMod`] reversal works.
+#[must_use]
+pub fn stat_shift(kind: u8, offset: i16) -> (i16, i16, i16) {
+    use effect::*;
+    match kind {
+        STRENGTH | WEAKEN => (offset, 0, 0),
+        AGILITY | CLUMSY => (0, offset, 0),
+        CUNNING | FEEBLEMIND => (0, 0, offset),
+        BLESS | CURSE => (offset, offset, offset),
+        _ => (0, 0, 0),
+    }
+}
+
+/// Whether an effect kind lowers a stat rather than raising it — the sign the
+/// caster gives its magnitude.
+#[must_use]
+pub fn is_debuff(kind: u8) -> bool {
+    use effect::*;
+    matches!(kind, WEAKEN | CLUMSY | FEEBLEMIND | CURSE)
+}
+
+/// One timed stat modifier: which effect, how much, and the tick it lifts.
+///
+/// The `offset` is signed and pre-distributed by [`stat_shift`] from the `kind`;
+/// it is kept whole so expiry can reverse *exactly* what was applied, even if the
+/// base stat changed underneath it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct StatMod {
+    /// Which effect — an [`effect`] kind (Strength..Curse).
+    pub kind: u8,
+    /// The signed magnitude applied to each stat the kind selects.
+    pub offset: i16,
+    /// The tick it wears off.
+    pub expires_at: u64,
+}
+
+/// The stat modifiers working through a mobile — the Bless/Curse family.
+///
+/// A mobile can carry several at once (Bless stacked over Strength); re-casting
+/// one kind refreshes its entry rather than stacking a duplicate. The shift is
+/// folded into the live [`Stats`] (and the derived [`Hitpoints`]/[`Mana`] maxima)
+/// when the effect lands, so everything that reads a stat sees the buffed value;
+/// this component is the ledger that says how much to give back, and when. Tick
+/// counts, like every other timed effect, so a buffed fight replays.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct StatMods {
+    /// The active modifiers, at most one per kind.
+    pub active: Vec<StatMod>,
+}
+
 /// How many innocents a mobile has killed — the tally that turns it red.
 ///
 /// The deeper standing [`CriminalUntil`] left for later: a persistent count, not

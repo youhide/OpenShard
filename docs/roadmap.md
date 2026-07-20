@@ -227,6 +227,28 @@ connection takes the mobile off every screen that had it.
   for a rare spawn. Registering a region twice replaces it rather than stacking a
   second, and after a restart the regions come from the store, not the pack, so a
   re-populate is not needed and the timers hold.
+- [x] **The save is the whole world (schema v5), the Sphere/ServUO model.** Every
+  live NPC mobile — townsfolk, vendors with their priced stock, spawner creatures
+  with their current wounds and `SpawnedBy` link (`MobileRecord`) — and every
+  placed decoration, door open/shut state included (`DecorationRecord`), is swept
+  into each snapshot and restored at boot exactly as it stood. A killed creature is
+  simply absent from the sweep and stays dead, its region's saved timer counting
+  down; nothing re-populates at boot, so a staff `.admin` Populate/Decorate seeds a
+  fresh world **once** and the save is the truth thereafter. Both references walk
+  every mobile and item to save (ServUO's `World.Save`, Sphere's `CWorld::SaveStage`)
+  and never regenerate the world — this reaches the same end without stopping the
+  world to do it. A ridden mount in limbo is the one mobile not swept: its ride
+  persists through the saddle item on the rider, and `dismount` reconstitutes the
+  creature whole.
+- [x] **Stats and trained skills persist (schema v6).** A `CharacterRecord` carries
+  str/dex/int and every trained skill with its lock arrow; character creation finally
+  *applies* the stats and skills the player picked, threaded through
+  `Command::Enter` as a `CharacterSheet` — for a new character from the create packet
+  and for a played one from the save. The `0x3A` skills window follows a live gain.
+- [x] **Active effects persist (schema v7).** Poison and the timed stat buffs are
+  saved with their mobile as an `EffectRecord` list on the character or mobile row,
+  so a relog cannot wash a debuff off — see the `magic` effects work in §6 for the
+  shape (`World::effects_of`/`apply_effects`, the ledger-only restore for buffs).
 
 Two backends, one choice. A shard runs on SQLite or on PostgreSQL, and which is
 the operator's to make: neither is "the production one", and SQLite runs a real
@@ -397,8 +419,8 @@ Roughly in dependency order, each script-first:
     target's `Resistance { physical }`. Both are components a script sets when it
     spawns a mobile (`op_spawn_mobile` grew `damage` and `resistance`), so a
     hard-hitting ogre or an armoured knight is a data change, not a code one — the
-    script-first part. Physical only for now; the other damage types land with
-    magic.
+    script-first part. Melee is physical; the other damage types arrived with
+    `magic`.
   - [x] **Notoriety and criminal flagging.** Mobiles carry a `Notoriety` (the
     enum already in the protocol), drawn as the health-bar colour in every
     `0x78`/`0x77` — the world stopped hardcoding "innocent". A script sets it at
@@ -417,13 +439,13 @@ Roughly in dependency order, each script-first:
     `MurderDecay` clock ages one count off at a time, washing a reformed killer
     back to blue once it drops below the threshold. (Sphere's separate short- and
     long-term counts are a finer model this stands in for.)
-  - Deferred, on purpose, because each waits on something not built: **the other
-    damage types** (fire, cold, poison, energy) want a source of typed damage,
-    which is spells (`magic`); **weapon-derived swing speed and damage** want
-    weapon *properties* (the dexterity half is done above; the weapon `base` still
-    needs tiledata). The seams are in place — `Resistance` has room for more
-    types, `SwingSpeed` and `MeleeDamage` are already per-mobile — so each is a
-    fill-in, not a redesign.
+  - The **typed damage** this once deferred landed with `magic` below: `damage`
+    takes a `DamageType` (physical, fire, cold, poison, energy) and cuts it by the
+    target's `Resistance` for that type, in the one place all damage passes — melee,
+    spell, poison pulse and script alike. Still deferred: **weapon-derived swing
+    speed and damage** want weapon *properties* (the dexterity half is done above;
+    the weapon `base` still needs tiledata). The seams are in place — `SwingSpeed`
+    and `MeleeDamage` are already per-mobile — so it is a fill-in, not a redesign.
 - [x] `skills` — usage checks, gain curves
   - [x] **The check and the gain.** A mobile carries `Skills` (a sparse map of id
     → tenths). A script sets one (`op_set_skill`) and uses it against a difficulty
@@ -478,13 +500,56 @@ Roughly in dependency order, each script-first:
     logout clears it), and a consumed reagent is pushed to those watchers — a
     `0x1D` for an item burned whole, a re-sent `0x25` for a dipped stack.
   - [x] **the client cast path** — a spellbook cast (`0xBF.0x1C`, read from
-    ServUO's `PacketHandlers.CastSpell`) decodes to a `RequestCast`, which the
-    world turns into a `SpellRequested` event, delivered to the script. The engine
-    never learns what a spell costs: the script owns the spell's mana and reagents
-    (Sphere-scriptpack style) and does the actual `op_cast_spell` off the request —
-    the interactive layer for casting, the same shape `0x05`/`0x72` gave combat.
-    (The older `0x12` text-command form is a fill-in; a modern client sends the
-    `0xBF`.)
+    ServUO's `PacketHandlers.CastSpell`) decodes to a `RequestCast`. It once
+    became a `SpellRequested` event for the script to own the mana and reagents
+    (Sphere-scriptpack style); the core spell table below took that over, running
+    the whole cast itself, and `SpellRequested` is left dormant behind it. The
+    older `0x12` text-command form is a fill-in; a modern client sends the `0xBF`.
+  - [x] **The 64-spell core table and the full cast sequence.** All eight circles
+    of Magery live in a core table (`magic::spells`, ported from ServUO's
+    `SpellInfo` + the classic reagent lists): each spell's circle — which sets its
+    mana, cast delay and difficulty — its reagents, what it targets, and its
+    *default effect*. `RequestCast` → `World::begin_cast` runs the sequence in the
+    core: mana and reagents from the pack, the Magery roll (the same `roll_skill`
+    a mined ore uses), the target cursor, and the effect. The core runs the
+    archetypes the engine can do — direct and area typed damage, heal, teleport —
+    and tags the rest `SpellEffect::Scripted`: they still *cast* fully and emit
+    `SpellCast` for the pack to give an effect, the "default in core, customise in
+    the pack" split skills has. A pack overrides any spell the same way, off
+    `SpellCast`.
+  - [x] **Cast style, a `[gameplay]` flag** (the Sphere-vs-ServUO knob asked for).
+    `cast_style = "servuo"` roots the caster over a cast delay held in a `Casting`
+    component and only then raises the target — moving breaks it, and `spell_disturb`
+    decides whether a blow mid-cast fizzles it; `cast_style = "sphere"` resolves
+    the cast as it is made, walking. Both threaded from `openshard.toml` into
+    `WorldState.gameplay`, never branched on `Era`.
+  - [x] **Poison, in the core.** Poison, Cure and Arch Cure run a `Poisoned`
+    component that `combat::poison_tick` pulses like decay — typed poison damage
+    cut by poison resistance, in the one place all damage passes — with a dose
+    scaled from the caster's Magery. This is the first spell effect that is *stateful
+    over time* rather than instantaneous, the shape the timed buffs then reuse.
+  - [x] **Timed stat buffs — the Bless/Curse family.** Strength, Agility, Cunning
+    and Bless, and their opposites Weaken, Clumsy, Feeblemind and Curse, all moved
+    from `Scripted` into the core. `magic::apply_stat_buff` folds a Magery-scaled
+    offset into the target's `Stats` and the caps that hang off them (str→hits,
+    int→mana), a `StatMods` ledger remembers exactly how to give it back, and
+    `magic::expire_buffs` lifts it on the tick counter; a recast refreshes its kind
+    rather than stacking a second. The stat change redraws the player's status bar
+    (`0x11`), the one thing that re-sends str/dex/int. The effect kinds are
+    canonical in `state::effect`.
+  - [x] **Effects persist (schema v7).** A live effect is saved with its mobile —
+    a `Poisoned` or a `StatMods` entry becomes an `EffectRecord { kind, amount,
+    remaining }` on the character or mobile row — and restored on login and boot
+    alike, so a relog cannot wash a debuff off. The ServUO/Sphere model reached the
+    way this engine saves anything: a record, swept whole, not a stopped world.
+    Poison restores as the whole component; a buff as its ledger *only* (its shift
+    is already folded into the saved stats, so re-applying would double it).
+    `World::effects_of`/`apply_effects` are the one seam; every future buff and
+    debuff slots into the same `effects` list with no schema change.
+  - Still deferred: the `Scripted` spells that want systems not built yet — fields,
+    summons with a lifetime, travel (Recall/Gate/Mark), dispel, polymorph,
+    resurrection — and the non-stat magical buffs (Protection, Reactive Armor, Night
+    Sight, Magic Reflection), a different mechanic from the stat family.
 - [x] `ai` — brains, aggro, wandering
   - [x] **A built-in brain, and room for scripted ones.** A creature spawned with
     a `sight` or `wander` gets a `Brain`, and `think()` gives it a beat every so

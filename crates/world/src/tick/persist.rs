@@ -1,8 +1,8 @@
 use super::*;
-use openshard_persistence::{EffectRecord, EFFECT_POISON};
+use openshard_persistence::EffectRecord;
 use openshard_state::components::{
-    body_opens_doors, Aggression, Banker, Npc, Poisoned, Price, RangedAttack, Skills, SwingSpeed,
-    Vendor,
+    body_opens_doors, effect, Aggression, Banker, Npc, Poisoned, Price, RangedAttack, Skills,
+    StatMod, StatMods, SwingSpeed, Vendor,
 };
 
 impl World {
@@ -88,7 +88,7 @@ impl World {
         // depends on whether its owner happened to move this tick.
         let online: Vec<EntityId> = self.state.players.values().copied().collect();
         for entity in online {
-            if let Some(record) = Self::record_of(&self.state.registry, entity) {
+            if let Some(record) = Self::record_of(&self.state.registry, entity, self.state.ticks) {
                 let owner = record.serial;
                 snapshot.characters.push(record);
                 snapshot.inventories.push(Inventory {
@@ -330,7 +330,7 @@ impl World {
                 npc_home: npc.map(|n| (n.home.x, n.home.y, n.home.z)),
                 npc_wander: npc.map_or(0, |n| n.wander),
                 spawned_by: registry.get::<SpawnedBy>(entity).map(|s| s.0),
-                effects: Self::effects_of(registry, entity),
+                effects: Self::effects_of(registry, entity, self.state.ticks),
             });
         }
         records
@@ -378,52 +378,85 @@ impl World {
     /// journal tracks entities and the world will hold more than people.
     /// The active effects on a mobile, as they go to disk.
     ///
-    /// Poison is the only one today; buffs and debuffs slot in here as they
-    /// land, so a relog carries a debuff instead of washing it off. The stored
-    /// `remaining` is the pulse count — the time to the *next* pulse resets to a
-    /// full interval on restore, which is close enough and stays a tick count,
-    /// never a clock.
-    pub(super) fn effects_of(registry: &Registry, entity: EntityId) -> Vec<EffectRecord> {
+    /// Poison and the stat buffs (Bless/Curse and their kin) go to disk here, so
+    /// a relog carries a debuff instead of washing it off. For poison the
+    /// `remaining` is the pulse count; for a timed buff it is the ticks left until
+    /// it lifts, measured from `now`. A buff's `amount` is its signed stat offset.
+    pub(super) fn effects_of(registry: &Registry, entity: EntityId, now: u64) -> Vec<EffectRecord> {
         let mut effects = Vec::new();
         if let Some(poison) = registry.get::<Poisoned>(entity) {
             effects.push(EffectRecord {
-                kind: EFFECT_POISON,
-                amount: poison.level as i16,
-                remaining: poison.pulses_left as u16,
+                kind: effect::POISON,
+                amount: i16::from(poison.level),
+                remaining: u16::from(poison.pulses_left),
             });
+        }
+        if let Some(mods) = registry.get::<StatMods>(entity) {
+            for m in &mods.active {
+                effects.push(EffectRecord {
+                    kind: m.kind,
+                    amount: m.offset,
+                    remaining: m.expires_at.saturating_sub(now).min(u64::from(u16::MAX)) as u16,
+                });
+            }
         }
         effects
     }
 
     /// Put saved effects back on a restored mobile.
     ///
-    /// The mirror of [`effects_of`](Self::effects_of): a stored poison becomes a
+    /// The mirror of [`effects_of`](Self::effects_of). A stored poison becomes a
     /// live [`Poisoned`] again, its next pulse a full interval out from `now`
-    /// (boot, or the tick a character logs in). A tick count, so the restored
-    /// poison replays like every other timed thing.
+    /// (boot, or the tick a character logs in). A stat buff's *shift* is already
+    /// folded into the saved stats and maxima, so its ledger entry is restored
+    /// **without** re-applying — it only records how much to give back, and when.
+    /// A tick count throughout, so a restored effect replays like decay.
     pub(super) fn apply_effects(
         registry: &mut Registry,
         entity: EntityId,
         effects: &[EffectRecord],
         now: u64,
     ) {
-        for effect in effects {
-            // Poison is the only kind today; buffs and debuffs join it here, and
-            // an unknown kind from a newer save is skipped, not a crash.
-            if effect.kind == EFFECT_POISON {
+        let mut mods = StatMods::default();
+        for record in effects {
+            if record.kind == effect::POISON {
                 registry.insert(
                     entity,
                     Poisoned {
-                        level: effect.amount.clamp(0, i16::from(u8::MAX)) as u8,
+                        level: record.amount.clamp(0, i16::from(u8::MAX)) as u8,
                         next_pulse: now + combat::POISON_INTERVAL,
-                        pulses_left: effect.remaining.min(u16::from(u8::MAX)) as u8,
+                        pulses_left: record.remaining.min(u16::from(u8::MAX)) as u8,
                     },
                 );
+            } else if matches!(
+                record.kind,
+                effect::STRENGTH
+                    | effect::AGILITY
+                    | effect::CUNNING
+                    | effect::BLESS
+                    | effect::WEAKEN
+                    | effect::CLUMSY
+                    | effect::FEEBLEMIND
+                    | effect::CURSE
+            ) {
+                mods.active.push(StatMod {
+                    kind: record.kind,
+                    offset: record.amount,
+                    expires_at: now + u64::from(record.remaining),
+                });
             }
+            // An unrecognised kind from a newer save is skipped, not a crash.
+        }
+        if !mods.active.is_empty() {
+            registry.insert(entity, mods);
         }
     }
 
-    pub(super) fn record_of(registry: &Registry, entity: EntityId) -> Option<CharacterRecord> {
+    pub(super) fn record_of(
+        registry: &Registry,
+        entity: EntityId,
+        now: u64,
+    ) -> Option<CharacterRecord> {
         let serial = registry.serial_of(entity)?;
         let position = registry.get::<Position>(entity)?.0;
         let heading = registry.get::<Heading>(entity)?.0;
@@ -463,7 +496,7 @@ impl World {
             dexterity: stats.dexterity,
             intelligence: stats.intelligence,
             skills,
-            effects: Self::effects_of(registry, entity),
+            effects: Self::effects_of(registry, entity, now),
         })
     }
 

@@ -338,4 +338,28 @@ impl World {
         };
         self.state.send(connection, status.encode(version));
     }
+
+    /// The connection a mobile is played over, if it is a connected player.
+    pub(super) fn connection_of(&self, entity: EntityId) -> Option<ConnectionId> {
+        self.state
+            .players
+            .iter()
+            .find(|(_, &e)| e == entity)
+            .map(|(&connection, _)| connection)
+    }
+
+    /// Redraw a mobile's own status bar (`0x11`), if it is a connected player.
+    ///
+    /// Str/dex/int and the maxima do not move in ordinary play, so nothing
+    /// re-sends the status but this — a stat buff landing, or wearing off. An NPC,
+    /// or a player between sessions, is a no-op.
+    pub(super) fn refresh_status_of(&mut self, serial: u32) {
+        let Some(entity) = Serial::new(serial).and_then(|s| self.state.registry.entity_of(s))
+        else {
+            return;
+        };
+        if let Some(connection) = self.connection_of(entity) {
+            self.send_status(connection, entity);
+        }
+    }
 }
