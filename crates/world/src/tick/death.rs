@@ -62,8 +62,14 @@ impl World {
                 .map_or_else(|| "a corpse".to_owned(), |n| format!("a corpse of {}", n.0));
             if let Some(corpse) = self.spawn_corpse(at, facet, body, name) {
                 // A ghost keeps its backpack and bank box — worn containers, not
-                // loot. Only its armour and weapons fall to the corpse.
-                self.move_gear_to_corpse(serial, corpse, &[BACKPACK_LAYER, npc::BANK_LAYER]);
+                // loot — and its mount saddle, which the `Riding` link still points
+                // at (sweeping it into the corpse would strand the ridden creature
+                // in limbo). Only its armour and weapons fall to the corpse.
+                self.move_gear_to_corpse(
+                    serial,
+                    corpse,
+                    &[BACKPACK_LAYER, npc::BANK_LAYER, items::MOUNT_LAYER],
+                );
             }
         }
         self.enter_ghost_state(entity, serial, true);
