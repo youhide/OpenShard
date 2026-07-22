@@ -463,7 +463,13 @@ impl World {
         let serial = registry.serial_of(entity)?;
         let position = registry.get::<Position>(entity)?.0;
         let heading = registry.get::<Heading>(entity)?.0;
-        let body = registry.get::<Body>(entity)?;
+        let live_body = registry.get::<Body>(entity)?;
+        // A ghost is saved as *living*: its `Ghost` marker remembers the body it
+        // died in, and that is what goes on the row — the grey ghost body is
+        // re-derived on login. Saving the ghost body instead would lose the living
+        // one and leave a relogged ghost with nothing to resurrect back to.
+        let dead = registry.get::<Ghost>(entity);
+        let body = dead.map_or(*live_body, |g| g.body);
         let name = registry.get::<Name>(entity)?;
         // No account means this is not a player character — an NPC, say — so it
         // is not a `CharacterRecord`. Returning `None` drops it from the save,
@@ -500,6 +506,7 @@ impl World {
             intelligence: stats.intelligence,
             skills,
             effects: Self::effects_of(registry, entity, now),
+            dead: dead.is_some(),
         })
     }
 

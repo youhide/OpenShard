@@ -1,5 +1,8 @@
 use super::*;
-use openshard_state::components::{creature_name, Decays, CORPSE_GRAPHIC, CORPSE_GUMP};
+use openshard_protocol::encode_death_status;
+use openshard_state::components::{
+    creature_name, ghost_body, Decays, CORPSE_GRAPHIC, CORPSE_GUMP, DEATH_SHROUD_GRAPHIC,
+};
 
 /// Gold, the core's default corpse loot until the pack owns real loot tables.
 const GOLD_GRAPHIC: u16 = 0x0EED;
@@ -7,14 +10,17 @@ const GOLD_GRAPHIC: u16 = 0x0EED;
 /// seven minutes, in ticks.
 const CORPSE_DECAY_TICKS: u64 = 7 * 60 * TICKS_PER_SECOND;
 
+/// The outer-torso layer the death shroud wears at — ServUO's `Layer.OuterTorso`.
+const OUTER_TORSO_LAYER: u8 = 0x16;
+
 impl World {
-    /// Lay a corpse where each creature that died this tick fell, and take the
-    /// creature off the world.
+    /// Dispose of every mobile that died this tick: a creature becomes a corpse
+    /// and leaves the world; a player becomes a ghost, leaving a corpse but
+    /// staying connected.
     ///
     /// Reads the tick's [`MobileDied`](openshard_combat::MobileDied) events — the
     /// "emit, don't call" seam: combat announces a death, the world disposes of the
-    /// body. Only a bodied non-player becomes a corpse here; a player's death is
-    /// left standing at zero hits for now, since the ghost slice is later.
+    /// body.
     pub(super) fn reap(&mut self) {
         let dead: Vec<(EntityId, Serial)> = self
             .state
@@ -23,15 +29,224 @@ impl World {
             .map(|event| (event.entity, event.serial))
             .collect();
         for (entity, serial) in dead {
-            // Reap only creatures (ghosts are later); and a body already gone —
-            // reaped once, or removed another way this tick — is skipped.
-            if self.state.registry.has::<Client>(entity)
-                || self.state.registry.entity_of(serial).is_none()
+            // A body already gone — reaped once, or removed another way this tick —
+            // is skipped. A ghost that dies again (it cannot, guarded elsewhere) is
+            // likewise a no-op.
+            if self.state.registry.entity_of(serial).is_none()
+                || self.state.registry.has::<Ghost>(entity)
             {
                 continue;
             }
-            self.lay_corpse(entity, serial);
+            if self.state.registry.has::<Client>(entity) {
+                self.become_ghost(entity, serial);
+            } else {
+                self.lay_corpse(entity, serial);
+            }
         }
+    }
+
+    /// Turn a dead player into a ghost: lay a corpse holding their gear (no gold —
+    /// that is monster loot), then enter the ghost state, wearing a fresh death
+    /// shroud. The player keeps their connection and can walk as a ghost;
+    /// resurrection reverses every step of this.
+    fn become_ghost(&mut self, entity: EntityId, serial: Serial) {
+        // The corpse first, while the gear is still worn — `move_gear_to_corpse`
+        // reads the `Equipped` items off the mobile.
+        if let Some(&Position(at)) = self.state.registry.get::<Position>(entity) {
+            let facet = self.state.facet_of(entity);
+            let body = self.state.registry.get::<Body>(entity).copied();
+            let name = self
+                .state
+                .registry
+                .get::<Name>(entity)
+                .map_or_else(|| "a corpse".to_owned(), |n| format!("a corpse of {}", n.0));
+            if let Some(corpse) = self.spawn_corpse(at, facet, body, name) {
+                // A ghost keeps its backpack and bank box — worn containers, not
+                // loot. Only its armour and weapons fall to the corpse.
+                self.move_gear_to_corpse(serial, corpse, &[BACKPACK_LAYER, npc::BANK_LAYER]);
+            }
+        }
+        self.enter_ghost_state(entity, serial, true);
+    }
+
+    /// Put a player into the ghost state: grey the body, remember the living one
+    /// on the [`Ghost`] marker, drop war and target, tell the client it is dead,
+    /// and rebuild every screen. Shared by a fresh death (`equip_shroud` true,
+    /// which puts a new shroud on) and a relog of an already-dead character
+    /// (`equip_shroud` false — its saved shroud came back with its inventory).
+    pub(super) fn enter_ghost_state(
+        &mut self,
+        entity: EntityId,
+        serial: Serial,
+        equip_shroud: bool,
+    ) {
+        // The living body, remembered so resurrection can restore it exactly —
+        // colour and race included.
+        let living = self
+            .state
+            .registry
+            .get::<Body>(entity)
+            .copied()
+            .unwrap_or(Body {
+                id: BODY_HUMAN_MALE,
+                hue: 0,
+            });
+
+        // War is over, and a ghost holds no target. Clearing `Combat` also stops
+        // `swings` from striking on with a dead body.
+        self.state
+            .registry
+            .remove::<openshard_state::components::Combat>(entity);
+        self.state.registry.insert(entity, Ghost { body: living });
+        // Rise in the ghost body.
+        let ghost = Body {
+            id: ghost_body(living.id),
+            hue: 0,
+        };
+        self.state.registry.insert(entity, ghost);
+        if equip_shroud {
+            self.equip_death_shroud(serial);
+        }
+
+        // Tell the client it is dead (greys the world, gives the ghost walk),
+        // redraw its own greyed body, and refresh its paperdoll (armour gone to
+        // the corpse, a shroud in its place). Then rebuild every screen — the
+        // living forget the ghost, ghosts and staff see it in its new body.
+        self.tell_own_client_body(entity, serial, true, ghost);
+        self.redraw_after_body_change(entity, serial);
+    }
+
+    /// Tell a player's own client its body just changed: the death status
+    /// (`0x2C`), a fresh `0x20` that redraws its own avatar, and its own `0x78` so
+    /// the paperdoll shows the right body and worn items. [`reveal`] never draws a
+    /// mobile to itself, so this is the only place the player hears about its own
+    /// change — the death-and-resurrection counterpart of what `enter` sends once.
+    ///
+    /// [`reveal`]: openshard_state::WorldState::reveal
+    fn tell_own_client_body(&mut self, entity: EntityId, serial: Serial, dead: bool, body: Body) {
+        let Some(&Client {
+            connection,
+            version,
+        }) = self.state.registry.get::<Client>(entity)
+        else {
+            return;
+        };
+        self.state.send(connection, encode_death_status(dead));
+        if let (Some(&Position(at)), Some(&Heading(facing))) = (
+            self.state.registry.get::<Position>(entity),
+            self.state.registry.get::<Heading>(entity),
+        ) {
+            self.state.send(
+                connection,
+                PlayerUpdate {
+                    serial: serial.raw(),
+                    body: body.id,
+                    hue: body.hue,
+                    flags: 0,
+                    position: at,
+                    facing,
+                }
+                .encode(),
+            );
+        }
+        if let Some(mine) = self.state.mobile_incoming(entity) {
+            self.state.send(connection, mine.encode(version));
+        }
+    }
+
+    /// Bring a ghost back to life: lift the [`Ghost`] marker, restore the living
+    /// body it remembered, strip the death shroud, and tell the client it is alive
+    /// again. Restores a share of hit points so the raised player is not standing
+    /// at zero, one blow from dying again. Nothing happens to a mobile that is not
+    /// a ghost. The corpse stays where it lies — a resurrected player walks back to
+    /// loot it, as in UO.
+    pub(super) fn resurrect(&mut self, entity: EntityId) {
+        let Some(&Ghost { body: living }) = self.state.registry.get::<Ghost>(entity) else {
+            return;
+        };
+        let Some(serial) = self.state.registry.serial_of(entity) else {
+            return;
+        };
+        self.state.registry.remove::<Ghost>(entity);
+        self.state.registry.insert(entity, living);
+        self.strip_death_shroud(serial);
+
+        // Back on its feet with a fraction of its hit points, not zero — ServUO
+        // resurrects to roughly a tenth of the max, enough to not re-die on sight.
+        if let Some(hits) = self.state.registry.get::<Hitpoints>(entity).copied() {
+            let revived = (hits.max / 10).max(1);
+            self.state.registry.insert(
+                entity,
+                Hitpoints {
+                    current: revived,
+                    max: hits.max,
+                },
+            );
+        }
+
+        // Tell its own client it is alive again, then let the living see it once
+        // more: forget the ghost body everywhere, reveal the living one. The
+        // refreshed health bar rides the fresh `0x78` draw.
+        self.tell_own_client_body(entity, serial, false, living);
+        self.redraw_after_body_change(entity, serial);
+    }
+
+    /// Despawn the death shroud a ghost wears, if any. The mobile's fresh `0x78`
+    /// in [`redraw_after_body_change`](Self::redraw_after_body_change) is what tells
+    /// watchers it is no longer worn — a worn item rides the mobile's equipment
+    /// list, not the `seen` set, so despawning it here and redrawing the mobile is
+    /// the whole of taking it off.
+    fn strip_death_shroud(&mut self, mobile: Serial) {
+        let shroud: Option<EntityId> = self
+            .state
+            .registry
+            .query::<Equipped>()
+            .find(|(item, worn)| {
+                worn.mobile == mobile
+                    && self
+                        .state
+                        .registry
+                        .get::<Graphic>(*item)
+                        .is_some_and(|g| g.id == DEATH_SHROUD_GRAPHIC)
+            })
+            .map(|(item, _)| item);
+        if let Some(item) = shroud {
+            self.state.registry.despawn(item);
+        }
+    }
+
+    /// Equip a fresh death shroud on a ghost, at the outer-torso layer — the grey
+    /// robe a dead player rises in. Resurrection strips it.
+    fn equip_death_shroud(&mut self, mobile: Serial) {
+        let Ok((item, _)) = self.state.registry.spawn_with_serial(SerialKind::Item) else {
+            return;
+        };
+        self.state.registry.insert(
+            item,
+            Graphic {
+                id: DEATH_SHROUD_GRAPHIC,
+                hue: 0,
+            },
+        );
+        self.state.registry.insert(
+            item,
+            Equipped {
+                mobile,
+                layer: OUTER_TORSO_LAYER,
+            },
+        );
+    }
+
+    /// Forget a mobile whose body just changed from every screen, then reveal it
+    /// afresh — the only way to restyle a mobile the client already drew, since
+    /// there is no "change body" packet for someone else's mobile. The visibility
+    /// gate in [`show`](openshard_state::WorldState::show) decides who gets the new
+    /// draw: for a fresh ghost, the living do not.
+    fn redraw_after_body_change(&mut self, entity: EntityId, serial: Serial) {
+        for watcher in self.state.watchers_of(entity) {
+            self.state.forget(watcher, entity, serial);
+        }
+        self.state.reveal(entity);
     }
 
     /// Turn one dead creature into a corpse holding its gear and a little gold,
@@ -59,7 +274,7 @@ impl World {
         };
         // Its worn gear falls into the corpse, and a little gold — the core's
         // default until the pack owns loot tables off a corpse event.
-        self.move_gear_to_corpse(serial, corpse);
+        self.move_gear_to_corpse(serial, corpse, &[]);
         let gold = self.corpse_gold(max_hits);
         if gold > 0 {
             let _ = items::give(&mut self.state, corpse, GOLD_GRAPHIC, 0, gold);
@@ -113,13 +328,16 @@ impl World {
         Some(serial)
     }
 
-    /// Move every item worn by `mobile` into the corpse `container`.
-    fn move_gear_to_corpse(&mut self, mobile: Serial, container: Serial) {
+    /// Move every item worn by `mobile` into the corpse `container`, skipping any
+    /// layer in `keep`. A creature keeps nothing; a player keeps its backpack and
+    /// bank box — those are worn containers it walks away (as a ghost) still
+    /// holding, not loot for the corpse. The worn *gear* still drops.
+    fn move_gear_to_corpse(&mut self, mobile: Serial, container: Serial, keep: &[u8]) {
         let worn: Vec<EntityId> = self
             .state
             .registry
             .query::<Equipped>()
-            .filter(|(_, equipped)| equipped.mobile == mobile)
+            .filter(|(_, equipped)| equipped.mobile == mobile && !keep.contains(&equipped.layer))
             .map(|(entity, _)| entity)
             .collect();
         for (slot, item) in worn.into_iter().enumerate() {

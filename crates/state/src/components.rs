@@ -555,6 +555,22 @@ pub const CORPSE_GRAPHIC: u16 = 0x2006;
 /// The gump the client opens for a corpse — the loot window, not a chest.
 pub const CORPSE_GUMP: u16 = 0x0009;
 
+/// The death shroud a fresh ghost wears — item `0x204E` on the outer-torso
+/// layer, the grey robe a dead player rises in. ServUO's `deathShroud`.
+pub const DEATH_SHROUD_GRAPHIC: u16 = 0x204E;
+
+/// The ghost body a dead player wears — ServUO's `Race.GhostBody`. Female bodies
+/// rise as `0x0193`, every other as `0x0192`; the client greys the world once it
+/// draws the player in one.
+#[must_use]
+pub const fn ghost_body(body: u16) -> u16 {
+    if body_is_female(body) {
+        0x0193
+    } else {
+        0x0192
+    }
+}
+
 /// The item graphic of the scroll for a Magery spell, `0-based` — the classic
 /// run `0x1F2D..` (Reactive Armor, Clumsy, …), one per spell.
 #[must_use]
@@ -870,6 +886,23 @@ pub struct ChasePath {
 /// the built-in `ai` stays out of its way.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Scripted;
+
+/// Marks a player who has died and walks as a ghost: greyed, silent to the
+/// living, waiting on resurrection.
+///
+/// Only players become ghosts — a creature is reaped into a corpse and gone. The
+/// world draws a ghost only to other ghosts and to staff
+/// (`WorldState::can_see_mobile`), so the living see an empty tile where a dead
+/// player stands. A ghost wears the [`ghost_body`] and a death shroud in place of
+/// its living body; resurrection lifts the marker and restores both. The living
+/// `body` it rose from is remembered here — the ghost body hides it, and without
+/// it a raised player would rise the wrong colour or race, and a relogged one
+/// could never be brought back at all.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Ghost {
+    /// The living body to restore on resurrection.
+    pub body: Body,
+}
 
 /// Marks a mobile as a banker: a townsperson who opens your bank box when you ask,
 /// and greets those who come near.

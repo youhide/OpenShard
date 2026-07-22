@@ -129,7 +129,7 @@ pub use vendor::{
 };
 pub use version::{ClientVersion, Era, ParseVersionError};
 pub use world::{
-    encode_light_level, encode_login_complete, encode_map_change, encode_walk_ack,
-    encode_walk_reject, CharacterPlay, CreateCharacter, PlayerStart, PlayerUpdate, Point, Race,
-    SkillChoice, WalkRequest, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
+    encode_death_status, encode_light_level, encode_login_complete, encode_map_change,
+    encode_walk_ack, encode_walk_reject, CharacterPlay, CreateCharacter, PlayerStart, PlayerUpdate,
+    Point, Race, SkillChoice, WalkRequest, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH,
 };

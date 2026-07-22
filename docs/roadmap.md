@@ -489,11 +489,25 @@ Roughly in dependency order, each script-first:
     nothing is orphaned). `combat::die` stopped despawning — it announces, `reap`
     disposes. The corpse persists as a ground container; a restored one gets a
     fresh decay timer (the tick is not saved).
-  - [ ] **Ghosts and resurrection** — a player who dies still stands at zero hits
-    (`reap` only takes creatures; despawning someone connected is worse). The
-    slice: a player corpse holding the gear, a ghost state the living cannot see
-    through, and resurrection (the spell is in the table, tagged `Scripted`,
-    waiting on exactly this).
+  - [x] **Ghosts and resurrection.** A player who dies no longer stands at zero
+    hits: `reap` now lays a **player corpse** holding their worn armour (the
+    backpack and bank box stay on them — worn containers, not loot) and puts them
+    into a **ghost state**. The ghost wears the grey ghost body (`0x0192` male /
+    `0x0193` female, ServUO's `Race.GhostBody`) and a death shroud (`0x204E`), and
+    the client is told it is dead (`0x2C`), which greys the world and gives the
+    gliding ghost walk. **The living cannot see the dead:** the interest gate
+    `WorldState::can_see_mobile` draws a ghost only to another ghost or to staff —
+    ServUO's `CanSee(Mobile)` clause — so a living watcher is told to forget it
+    (`0x1D`) the moment it dies. The AI already ignores it (a 0-hit mobile is
+    neither acquired nor pursued). **Resurrection** lifts the `Ghost` marker,
+    restores the living body it remembered, strips the shroud, and hands back a
+    tenth of the hit points; the corpse stays where it fell to be walked back to
+    and looted. Two paths reach it: the **Resurrection spell** (moved out of
+    `Scripted` into a core `SpellEffect::Resurrect`, the effect the table was
+    "waiting on") and a staff `.res`. **It persists (schema v9):** a `dead` flag
+    rides the character row while the `body`/`hue` stay the *living* ones, so a
+    ghost that logs out logs back a ghost — the grey body re-derived, the corpse
+    already a saved ground item, no duplicate laid.
   - [ ] **Pack loot tables** — the corpse gold is a flat core default; real loot
     (per-creature gold ranges, items, rares) is the pack's, off a `CorpseCreated`
     event carrying the corpse serial — the "default in core, customise in the
@@ -692,8 +706,11 @@ Roughly in dependency order, each script-first:
     against the follower cap the status bar already carries.
   - [ ] **Travel** — Recall, Gate Travel and Mark: needs runes/runebooks (item
     data) and a cross-facet teleport; Gate also a paired physical object either end.
-  - [ ] **Dispel, polymorph, resurrection** — each waits on a subsystem of its own
-    (summon lifetimes, a body-swap that restores cleanly, the ghost/corpse slice).
+  - [x] **Resurrection** — landed with the ghost slice: `SpellEffect::Resurrect`
+    raises the aimed ghost through the core `resurrect` path (a no-op on the
+    living).
+  - [ ] **Dispel, polymorph** — each waits on a subsystem of its own (summon
+    lifetimes, a body-swap that restores cleanly).
   - [ ] **The Poisoning skill for the deadlier doses** — the Magery-cast dose caps
     at greater; the higher poison levels (deadly, lethal) want the Poisoning skill
     to set them.

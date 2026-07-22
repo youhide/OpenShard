@@ -293,6 +293,15 @@ impl World {
                     self.refresh_status_of(who);
                 }
             }
+            SpellEffect::Resurrect => {
+                // Raise the aimed ghost. A no-op on the living (or on a bad
+                // target), so a misfired Resurrection wastes the cast, no more.
+                if let Some(entity) =
+                    Serial::new(target_serial).and_then(|s| self.state.registry.entity_of(s))
+                {
+                    self.resurrect(entity);
+                }
+            }
             SpellEffect::Scripted => {} // the pack's, off SpellCast
         }
     }
@@ -331,6 +340,8 @@ impl World {
             SpellEffect::Cure | SpellEffect::AreaCure => (0x01E0, Visual::OnTarget(0x373A)),
             SpellEffect::Teleport => (0x01FE, Visual::AtSpot(0x3728)),
             SpellEffect::StatMod(_) => (0x01EA, Visual::OnTarget(0x373A)),
+            // Resurrection: ServUO's `0x214` chime and a sparkle on the raised body.
+            SpellEffect::Resurrect => (0x0214, Visual::OnTarget(0x376A)),
             SpellEffect::Scripted => return, // the pack's to voice
         };
 

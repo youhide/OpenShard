@@ -136,7 +136,9 @@ CREATE TABLE IF NOT EXISTS characters (
     skills  TEXT NOT NULL,
     -- Active effects as a JSON array (poison today, buffs and debuffs later),
     -- so a relog cannot wash a debuff off.
-    effects  TEXT NOT NULL
+    effects  TEXT NOT NULL,
+    -- Whether it logged out dead: a ghost relogs a ghost. 0 for the living.
+    dead     INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS items (
     serial    INTEGER PRIMARY KEY,
@@ -289,8 +291,8 @@ impl Store for SqliteStore {
                     .execute(
                         "INSERT OR REPLACE INTO characters \
                          (serial, account, name, body, hue, facet, x, y, z, facing, \
-                          strength, dexterity, intelligence, skills, effects) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                          strength, dexterity, intelligence, skills, effects, dead) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                         params![
                             record.serial,
                             record.account,
@@ -307,6 +309,7 @@ impl Store for SqliteStore {
                             record.intelligence,
                             skills,
                             effects,
+                            record.dead,
                         ],
                     )
                     .map_err(database)?;
@@ -462,7 +465,7 @@ impl Store for SqliteStore {
             let mut statement = guard
                 .prepare(
                     "SELECT serial, account, name, body, hue, facet, x, y, z, facing, \
-                     strength, dexterity, intelligence, skills, effects FROM characters",
+                     strength, dexterity, intelligence, skills, effects, dead FROM characters",
                 )
                 .map_err(database)?;
             let rows = statement
@@ -486,6 +489,7 @@ impl Store for SqliteStore {
                             intelligence: row.get(12)?,
                             skills: Vec::new(),
                             effects: Vec::new(),
+                            dead: row.get(15)?,
                         },
                         skills,
                         effects,
@@ -748,6 +752,7 @@ mod tests {
             intelligence: 100,
             skills: Vec::new(),
             effects: Vec::new(),
+            dead: false,
         }
     }
 

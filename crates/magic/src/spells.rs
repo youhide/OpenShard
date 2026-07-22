@@ -61,6 +61,10 @@ pub enum SpellEffect {
     /// kind ([`openshard_state::effect`]); its magnitude and duration scale from
     /// the caster's Magery when it lands.
     StatMod(u8),
+    /// Bring the targeted ghost back to life — Resurrection. The core runs it off
+    /// the ghost slice: lifts the `Ghost` state, restores the living body, and
+    /// hands back a fraction of the target's hit points. A no-op on the living.
+    Resurrect,
     /// The core does not run this one yet — the pack owns it (fields, summons,
     /// travel, and the rest).
     Scripted,
@@ -505,7 +509,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         8,
         &[BLOOD_MOSS, GARLIC, GINSENG],
         Mobile,
-        Scripted,
+        SpellEffect::Resurrect,
     ),
     spell(
         "Air Elemental",

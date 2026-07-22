@@ -22,6 +22,23 @@ impl World {
                     .get::<Access>(actor)
                     .is_some_and(|access| access.0 >= AccessLevel::GameMaster);
                 if is_gm {
+                    // `.res` resurrects the actor. Handled here, not in `gm`:
+                    // resurrection redraws the ghost across every screen, a
+                    // World-level operation, while `gm::run` works on `WorldState`.
+                    // The one-account way to test the ghost round-trip solo.
+                    if rest
+                        .split_whitespace()
+                        .next()
+                        .is_some_and(|c| c.eq_ignore_ascii_case("res"))
+                    {
+                        if self.state.registry.has::<Ghost>(actor) {
+                            self.resurrect(actor);
+                            self.notify_self(actor, "You are alive again.");
+                        } else {
+                            self.notify_self(actor, "You are not dead.");
+                        }
+                        return;
+                    }
                     gm::run(&mut self.state, actor, rest);
                     return;
                 }

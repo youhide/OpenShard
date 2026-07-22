@@ -307,6 +307,7 @@ mod tests {
             intelligence: 100,
             skills: Vec::new(),
             effects: Vec::new(),
+            dead: false,
         }
     }
 

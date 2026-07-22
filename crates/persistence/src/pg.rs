@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS characters (
     dexterity    INTEGER NOT NULL,
     intelligence INTEGER NOT NULL,
     skills  TEXT NOT NULL,
-    effects  TEXT NOT NULL
+    effects  TEXT NOT NULL,
+    dead    BOOLEAN NOT NULL
 );
 CREATE TABLE IF NOT EXISTS items (
     serial    BIGINT PRIMARY KEY,
@@ -228,15 +229,15 @@ impl Store for PgStore {
                 .execute(
                     "INSERT INTO characters \
                      (serial, account, name, body, hue, facet, x, y, z, facing, \
-                      strength, dexterity, intelligence, skills, effects) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) \
+                      strength, dexterity, intelligence, skills, effects, dead) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) \
                      ON CONFLICT (serial) DO UPDATE SET \
                      account = EXCLUDED.account, name = EXCLUDED.name, \
                      body = EXCLUDED.body, hue = EXCLUDED.hue, facet = EXCLUDED.facet, \
                      x = EXCLUDED.x, y = EXCLUDED.y, z = EXCLUDED.z, facing = EXCLUDED.facing, \
                      strength = EXCLUDED.strength, dexterity = EXCLUDED.dexterity, \
                      intelligence = EXCLUDED.intelligence, skills = EXCLUDED.skills, \
-                     effects = EXCLUDED.effects",
+                     effects = EXCLUDED.effects, dead = EXCLUDED.dead",
                     &[
                         &i64::from(record.serial),
                         &record.account,
@@ -253,6 +254,7 @@ impl Store for PgStore {
                         &i32::from(record.intelligence),
                         &skills,
                         &effects,
+                        &record.dead,
                     ],
                 )
                 .await
@@ -379,7 +381,7 @@ impl Store for PgStore {
         let rows = client
             .query(
                 "SELECT serial, account, name, body, hue, facet, x, y, z, facing, \
-                 strength, dexterity, intelligence, skills, effects FROM characters",
+                 strength, dexterity, intelligence, skills, effects, dead FROM characters",
                 &[],
             )
             .await
@@ -498,6 +500,7 @@ fn character_from_row(row: &Row) -> Result<CharacterRecord, StoreError> {
             .map_err(|e| StoreError::Corrupt(e.to_string()))?,
         effects: serde_json::from_str(row.get::<_, &str>(14))
             .map_err(|e| StoreError::Corrupt(e.to_string()))?,
+        dead: row.get::<_, bool>(15),
     })
 }
 
@@ -696,6 +699,7 @@ mod tests {
             intelligence: 100,
             skills: Vec::new(),
             effects: Vec::new(),
+            dead: false,
         }
     }
 

@@ -1717,9 +1717,10 @@ fn a_dead_mobile_is_not_killed_again() {
 }
 
 #[test]
-fn a_player_who_dies_stays_in_the_world() {
-    // Ghosts and corpses are a later slice; for now death is announced but a
-    // connected player is not yanked out of the world.
+fn a_player_who_dies_becomes_a_ghost() {
+    // A dead player is not yanked from the world (despawning someone connected is
+    // worse than a ghost) — they stay, at zero hits, wearing the grey ghost body,
+    // and the client is told it is dead so it greys the world.
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
@@ -1738,15 +1739,218 @@ fn a_player_who_dies_stays_in_the_world() {
     assert_eq!(world.bus().read(&mut died).count(), 1, "death is announced");
     assert!(
         world.state.registry.contains(player_entity),
-        "but the player is still here"
+        "the player is still here"
+    );
+    assert!(
+        world.state.registry.has::<Ghost>(player_entity),
+        "and it is a ghost now"
+    );
+    assert_eq!(
+        world.registry().get::<Body>(player_entity).map(|b| b.id),
+        Some(0x0192),
+        "wearing the male ghost body"
     );
     assert_eq!(
         world
-            .state
-            .registry
+            .registry()
+            .get::<Ghost>(player_entity)
+            .map(|g| g.body.id),
+        Some(0x0190),
+        "with its living body remembered for resurrection"
+    );
+    assert!(
+        !world.state.registry.has::<Combat>(player_entity),
+        "war and target are dropped"
+    );
+    assert_eq!(
+        world
+            .registry()
             .get::<Hitpoints>(player_entity)
             .map(|h| h.current),
         Some(0),
+    );
+    let packets = packets_for(&mut world, player);
+    assert!(
+        packets.iter().any(|p| p.as_slice() == [0x2C, 0x00]),
+        "the client is told it is dead (0x2C)"
+    );
+}
+
+#[test]
+fn a_dead_player_leaves_a_corpse_but_keeps_its_backpack() {
+    // The corpse holds the worn armour; the backpack (a worn container, not loot)
+    // stays on the ghost so a resurrected player is not left empty-handed.
+    use openshard_entities::SerialKind;
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let serial = serial_of(&world, player);
+    let serial_obj = Serial::new(serial).unwrap();
+    let player_entity = world.state.players[&player];
+
+    // Wear a robe (outer torso) so there is gear to fall to the corpse.
+    let (robe, robe_serial) = world
+        .state
+        .registry
+        .spawn_with_serial(SerialKind::Item)
+        .unwrap();
+    world
+        .state
+        .registry
+        .insert(robe, Graphic { id: 0x1F03, hue: 0 });
+    world.state.registry.insert(
+        robe,
+        Equipped {
+            mobile: serial_obj,
+            layer: 0x16,
+        },
+    );
+
+    world.queue(Command::Damage {
+        serial,
+        amount: 500,
+        damage_type: 0,
+        by: 0,
+    });
+    world.tick(now);
+
+    // The corpse is a container drawn as the player's body.
+    let corpse = world
+        .state
+        .registry
+        .query::<Graphic>()
+        .find(|(_, g)| g.id == 0x2006)
+        .map(|(entity, _)| entity)
+        .expect("a player corpse was laid");
+    let corpse_serial = world.registry().serial_of(corpse).unwrap();
+    assert_eq!(
+        world.registry().get::<Amount>(corpse).unwrap().0,
+        0x0190,
+        "a human corpse draws right"
+    );
+
+    // The robe fell into the corpse.
+    assert_eq!(
+        world.registry().get::<Contained>(robe).map(|c| c.container),
+        Some(corpse_serial),
+        "the worn robe is in the corpse"
+    );
+    assert!(
+        world.registry().get::<Equipped>(robe).is_none(),
+        "and no longer worn"
+    );
+
+    // The backpack is still worn on the (now ghost) player.
+    let keeps_backpack = world
+        .state
+        .registry
+        .query::<Equipped>()
+        .any(|(_, worn)| worn.mobile == serial_obj && worn.layer == 0x15);
+    assert!(keeps_backpack, "the ghost keeps its backpack");
+    let _ = (player_entity, robe_serial);
+}
+
+#[test]
+fn resurrection_brings_a_ghost_back() {
+    // The staff `.res` command (and the Resurrection spell) call the same core
+    // path: the ghost marker lifts, the living body returns, and the client is
+    // told it is alive again.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter_gm(&mut world, now);
+    let serial = serial_of(&world, player);
+    let player_entity = world.state.players[&player];
+
+    world.queue(Command::Damage {
+        serial,
+        amount: 500,
+        damage_type: 0,
+        by: 0,
+    });
+    world.tick(now);
+    assert!(
+        world.state.registry.has::<Ghost>(player_entity),
+        "dead first"
+    );
+    let _ = packets_for(&mut world, player);
+
+    // `.res` spoken by the (GM) ghost raises it.
+    world.queue(Command::Say {
+        connection: player,
+        mode: 0,
+        hue: 0,
+        font: 0,
+        text: ".res".to_owned(),
+    });
+    world.tick(now);
+
+    assert!(
+        !world.state.registry.has::<Ghost>(player_entity),
+        "no longer a ghost"
+    );
+    assert_eq!(
+        world.registry().get::<Body>(player_entity).map(|b| b.id),
+        Some(0x0190),
+        "the living body is back"
+    );
+    assert!(
+        world
+            .registry()
+            .get::<Hitpoints>(player_entity)
+            .is_some_and(|h| h.current > 0),
+        "and it is not standing at zero hits"
+    );
+    let packets = packets_for(&mut world, player);
+    assert!(
+        packets.iter().any(|p| p.as_slice() == [0x2C, 0x02]),
+        "the client is told it is alive again (0x2C 0x02)"
+    );
+}
+
+#[test]
+fn a_ghost_is_hidden_from_the_living() {
+    // The living cannot see the dead: when a player dies, every living watcher is
+    // told to forget it (0x1D) and it drops off their screen.
+    let now = Instant::now();
+    let mut world = world();
+    let watcher = enter_as(&mut world, ConnectionId::from_raw(1), now);
+    let dying = enter_as(&mut world, ConnectionId::from_raw(2), now);
+    let dying_serial = serial_of(&world, dying);
+    let dying_entity = world.state.players[&dying];
+    let watcher_entity = world.state.players[&watcher];
+
+    assert!(
+        world
+            .state
+            .seen
+            .get(&watcher_entity)
+            .is_some_and(|s| s.contains(&dying_entity)),
+        "the living watcher sees the living player first"
+    );
+    let _ = packets_for(&mut world, watcher);
+
+    world.queue(Command::Damage {
+        serial: dying_serial,
+        amount: 500,
+        damage_type: 0,
+        by: 0,
+    });
+    world.tick(now);
+
+    assert!(
+        !world
+            .state
+            .seen
+            .get(&watcher_entity)
+            .is_some_and(|s| s.contains(&dying_entity)),
+        "the living watcher no longer sees the ghost"
+    );
+    let packets = packets_for(&mut world, watcher);
+    assert!(
+        packets
+            .iter()
+            .any(|p| p[0] == 0x1D && mentions(p, dying_serial)),
+        "and was told to remove it (0x1D)"
     );
 }
 
@@ -2826,6 +3030,7 @@ fn a_characters_stats_and_skills_survive_a_relogin() {
                 .map(|s| (s.id, s.value, SkillLock::from_bits(s.lock)))
                 .collect(),
             effects: record.effects.clone(),
+            dead: record.dead,
         }),
         access: AccessLevel::Player,
     });
@@ -3200,6 +3405,7 @@ fn poison_survives_a_relogin() {
                 .map(|s| (s.id, s.value, SkillLock::from_bits(s.lock)))
                 .collect(),
             effects: record.effects.clone(),
+            dead: record.dead,
         }),
         access: AccessLevel::Player,
     });
@@ -3420,6 +3626,7 @@ fn a_stat_buff_survives_a_relogin() {
                 .map(|s| (s.id, s.value, SkillLock::from_bits(s.lock)))
                 .collect(),
             effects: record.effects.clone(),
+            dead: record.dead,
         }),
         access: AccessLevel::Player,
     });

@@ -38,7 +38,9 @@ use serde::{Deserialize, Serialize};
 ///   logged-out mobile's timers running and Sphere saves its effect tags.
 /// - v8: a spellbook's learned-spell bitmask, so a bought book still opens to
 ///   its spells after a relog.
-pub const SCHEMA_VERSION: u32 = 8;
+/// - v9: a character's `dead` flag, so a player who logged out a ghost logs back
+///   in a ghost — the ghost body is re-derived, but the fact of death is saved.
+pub const SCHEMA_VERSION: u32 = 9;
 
 /// An account, as saved.
 ///
@@ -107,6 +109,12 @@ pub struct CharacterRecord {
     /// relog cannot wash them off. Empty for a clean character.
     #[serde(default)]
     pub effects: Vec<EffectRecord>,
+    /// Whether it logged out dead. A ghost that relogs comes back a ghost — the
+    /// grey body and death shroud are re-derived on login; only the fact of death
+    /// rides here. The `body`/`hue` above stay the *living* ones, so resurrection
+    /// restores the character exactly. `false` for the living, the common case.
+    #[serde(default)]
+    pub dead: bool,
 }
 
 /// A timed effect on a mobile that a relog must not wash off — poison today,
@@ -516,6 +524,7 @@ mod tests {
                 amount: 2,
                 remaining: 5,
             }],
+            dead: true,
         };
         let json = serde_json::to_string(&record).expect("a record must serialise");
         let back: CharacterRecord = serde_json::from_str(&json).expect("and come back");
@@ -543,6 +552,7 @@ mod tests {
             intelligence: 100,
             skills: Vec::new(),
             effects: Vec::new(),
+            dead: false,
         };
         let json = serde_json::to_string(&record).expect("a record must serialise");
         let back: CharacterRecord = serde_json::from_str(&json).expect("and come back");

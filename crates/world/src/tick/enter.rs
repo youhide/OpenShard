@@ -100,6 +100,10 @@ impl World {
                 max: DEFAULT_MANA,
             },
         );
+        // Did this character log out dead? Read it before the sheet is consumed;
+        // the ghost state is re-applied at the end, once the body and inventory
+        // (its saved death shroud included) are in place.
+        let logged_out_dead = sheet.as_ref().is_some_and(|s| s.dead);
         // A created or restored character brings its own stats and skills, over
         // the flat defaults above: strength re-caps hit points, intelligence
         // mana, and the trained skills (with their lock arrows) come back as they
@@ -305,6 +309,15 @@ impl World {
         // directions, because arriving is symmetric: the newcomer has an empty
         // screen and everyone nearby has a gap where it now stands.
         self.state.refresh_around(entity);
+
+        // A character that logged out dead comes back a ghost. Applied last, after
+        // the living body was drawn and the saved death shroud re-equipped: it
+        // swaps in the grey body, remembers the living one for resurrection, tells
+        // the client it is dead, and redraws (the living forget it, ghosts see it).
+        // No corpse is laid — that one still lies where it fell, a saved item.
+        if logged_out_dead {
+            self.enter_ghost_state(entity, serial, false);
+        }
     }
 
     /// Send a player its own `0x11` status — the paperdoll numbers, and the only

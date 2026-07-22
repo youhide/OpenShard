@@ -20,13 +20,13 @@ use openshard_gateway::ConnectionId;
 use openshard_movement::Terrain;
 use openshard_protocol::{
     encode_action, encode_health, encode_new_action, encode_opl_info, encode_play_sound,
-    encode_remove, ClientVersion, Equipment, Feature, MobileIncoming, MobileMove, Notoriety,
-    PlayerUpdate, Point, PropertyList, WorldItem,
+    encode_remove, AccessLevel, ClientVersion, Equipment, Feature, MobileIncoming, MobileMove,
+    Notoriety, PlayerUpdate, Point, PropertyList, WorldItem,
 };
 
 use crate::components::{
-    body_opens_doors, Amount, Body, Client, Contained, Equipped, Facet, Graphic, Heading,
-    Hitpoints, Movement, Name, Position,
+    body_opens_doors, Access, Amount, Body, Client, Contained, Equipped, Facet, Ghost, Graphic,
+    Heading, Hitpoints, Movement, Name, Position,
 };
 use crate::obstruct::{LiveTerrain, Obstructions};
 use crate::rng::Rng;
@@ -738,6 +738,12 @@ impl WorldState {
         {
             return;
         }
+        // The living cannot see the dead: a ghost is drawn only to another ghost
+        // or to staff. Skip it here, before it ever enters `seen`, so a living
+        // watcher never has it on screen to move or forget.
+        if !self.can_see_mobile(watcher, other) {
+            return;
+        }
         let Some(packet) = self.draw_packet(other, version) else {
             return;
         };
@@ -871,6 +877,28 @@ impl WorldState {
                 packet: encode_remove(serial.raw()),
             });
         }
+    }
+
+    /// Whether `watcher` has staff authority — a GameMaster or above. Staff see
+    /// the dead and are held to none of the interest rules the living obey.
+    #[must_use]
+    pub fn is_staff(&self, watcher: EntityId) -> bool {
+        self.registry
+            .get::<Access>(watcher)
+            .is_some_and(|access| access.0 >= AccessLevel::GameMaster)
+    }
+
+    /// Whether `watcher` may see mobile `other`. The living cannot see the dead: a
+    /// ghost is drawn only to itself, to another ghost, or to staff — ServUO's
+    /// `CanSee(Mobile)` (`this == m || m.Alive || !Alive || IsStaff`). Every other
+    /// mobile in range is visible to everyone; an item is never a ghost, so this
+    /// bites only mobiles.
+    #[must_use]
+    fn can_see_mobile(&self, watcher: EntityId, other: EntityId) -> bool {
+        if !self.registry.has::<Ghost>(other) {
+            return true;
+        }
+        watcher == other || self.registry.has::<Ghost>(watcher) || self.is_staff(watcher)
     }
 
     /// A mobile's standing — the colour of its health bar. Absent reads as

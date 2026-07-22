@@ -434,6 +434,23 @@ impl PlayerUpdate {
     }
 }
 
+// -- 0x2C death status ----------------------------------------------------
+
+/// `0x2C` — tell a client its own character just died, or came back. 2 bytes.
+///
+/// A death byte of `0` puts the client into ghost mode: it greys the world and
+/// switches to the gliding ghost walk. `2` is the "alive again" answer that
+/// resurrection sends to lift it. ServUO's `DeathStatus` — the one packet that
+/// makes the whole screen read as death, so a ghost body drawn without it looks
+/// merely like a recoloured player.
+#[must_use]
+pub fn encode_death_status(dead: bool) -> Vec<u8> {
+    let mut writer = PacketWriter::with_capacity(2);
+    writer.u8(0x2C);
+    writer.u8(if dead { 0 } else { 2 });
+    writer.into_bytes()
+}
+
 // -- 0x02 walk request ----------------------------------------------------
 
 /// `0x02` — the client asks to take one step. 7 bytes.
@@ -736,6 +753,14 @@ mod tests {
         assert_eq!(&bytes[8..10], &0x83EAu16.to_be_bytes(), "hue");
         assert_eq!(bytes[17], facing().to_bits());
         assert_eq!(bytes[18] as i8, -5, "z is one signed byte here");
+    }
+
+    #[test]
+    fn death_status_is_two_bytes_dead_is_zero() {
+        let dead = encode_death_status(true);
+        assert_eq!(dead, vec![0x2C, 0x00], "0 puts the client in ghost mode");
+        let alive = encode_death_status(false);
+        assert_eq!(alive, vec![0x2C, 0x02], "2 is the alive-again answer");
     }
 
     #[test]

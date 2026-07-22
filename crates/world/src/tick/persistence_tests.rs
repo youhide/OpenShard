@@ -173,6 +173,91 @@ fn logging_out_does_not_delete_the_character() {
 }
 
 #[test]
+fn a_dead_players_save_is_flagged_but_keeps_the_living_body() {
+    // A ghost is saved as living-and-dead: the row carries the living body (so
+    // resurrection restores it) and a `dead` flag (so the relog rises a ghost).
+    let mut world = eager();
+    let now = Instant::now();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = world.registry().serial_of(entity).unwrap().raw();
+    let _ = only_snapshot(&mut world); // drop the enter's save
+
+    world.queue(Command::Damage {
+        serial,
+        amount: 500,
+        damage_type: 0,
+        by: 0,
+    });
+    world.tick(now);
+
+    let snapshot = only_snapshot(&mut world).expect("death is a change worth saving");
+    let record = snapshot
+        .characters
+        .iter()
+        .find(|c| c.serial == serial)
+        .expect("the ghost is in the save");
+    assert!(record.dead, "saved as dead");
+    assert_eq!(
+        record.body, 0x0190,
+        "with the living body, not the grey ghost one"
+    );
+}
+
+#[test]
+fn a_character_that_logged_out_dead_returns_a_ghost() {
+    // The other half: a saved `dead` character re-enters a ghost, grey body and
+    // all, without a fresh corpse (its own still lies where it fell).
+    let mut world = eager();
+    let now = Instant::now();
+    let connection = ConnectionId::from_raw(7);
+    world.queue(Command::Enter {
+        connection,
+        version: ClientVersion::TOL,
+        account: "admin".to_owned(),
+        name: "Revenant".to_owned(),
+        serial: None,
+        position: None,
+        facet: 0,
+        appearance: Some(Appearance {
+            body: 0x0190,
+            hue: 0,
+        }),
+        sheet: Some(CharacterSheet {
+            strength: 100,
+            dexterity: 100,
+            intelligence: 100,
+            skills: Vec::new(),
+            effects: Vec::new(),
+            dead: true,
+        }),
+        access: AccessLevel::Player,
+    });
+    world.tick(now);
+
+    let entity = world.state.players[&connection];
+    assert!(world.registry().has::<Ghost>(entity), "re-enters a ghost");
+    assert_eq!(
+        world.registry().get::<Body>(entity).map(|b| b.id),
+        Some(0x0192),
+        "in the ghost body"
+    );
+    assert_eq!(
+        world.registry().get::<Ghost>(entity).map(|g| g.body.id),
+        Some(0x0190),
+        "remembering the living body to resurrect back to"
+    );
+    // No fresh corpse laid on re-entry — that would duplicate the saved one.
+    assert!(
+        world
+            .registry()
+            .query::<Graphic>()
+            .all(|(_, g)| g.id != 0x2006),
+        "no corpse is laid on relog"
+    );
+}
+
+#[test]
 fn a_world_with_nowhere_to_save_keeps_no_journal_anyone_waits_on() {
     // save_every = 0 is a real mode. What it must not do is quietly grow a
     // journal forever, which is a leak that looks like a working shard.

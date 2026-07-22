@@ -30,6 +30,9 @@ pub struct CharacterSheet {
     /// Active effects — a poison a relog must not wash off, and the buffs and
     /// debuffs that will join it. Empty for a clean character.
     pub effects: Vec<openshard_persistence::EffectRecord>,
+    /// Whether the character logged out dead — a ghost relogs a ghost. `false`
+    /// for a new character and for any living one.
+    pub dead: bool,
 }
 
 /// One door in a [`Command::Decorate`] batch. The closed/open graphics and the

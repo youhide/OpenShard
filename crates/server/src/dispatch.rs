@@ -43,6 +43,7 @@ pub(crate) fn dispatch(
                             .map(|s| (s.id, s.value, SkillLock::from_bits(s.lock)))
                             .collect(),
                         effects: record.effects.clone(),
+                        dead: record.dead,
                     }),
                 ),
                 None => (None, None, None, None),
@@ -511,6 +512,7 @@ pub(crate) fn create_character(
                 .collect(),
             // A new character is clean.
             effects: Vec::new(),
+            dead: false,
         }),
         access,
     });
