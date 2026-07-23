@@ -2619,6 +2619,140 @@ fn no_swing_out_of_reach() {
 }
 
 #[test]
+fn a_wielded_weapon_sets_the_swing_pace() {
+    // A player derives their pace from the weapon in hand; bare hands stay
+    // wrestling. Read directly, no fight needed — `swing_speed` is the seam.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(entity).unwrap();
+    let scale = world.state.gameplay.speed_scale_factor;
+
+    assert_eq!(
+        combat::swing_speed(&world.state, entity),
+        WRESTLING_SWING_TICKS,
+        "bare-handed is wrestling pace"
+    );
+
+    // Longsword (old_speed 35) beats wrestling (base 50): fewer ticks per swing.
+    let sword = items::equip_worn_item(&mut world.state, serial, 0x0F61, 0, 1).unwrap();
+    assert_eq!(
+        combat::swing_speed(&world.state, entity),
+        swing_ticks(100, 35, 1, scale),
+        "a longsword swings by its own speed, not wrestling's"
+    );
+
+    // A katana (58) is faster than a mace (30): the table drives the ordering.
+    world.state.registry.despawn(sword);
+    let katana = items::equip_worn_item(&mut world.state, serial, 0x13FF, 0, 1).unwrap();
+    let katana_pace = combat::swing_speed(&world.state, entity);
+    world.state.registry.despawn(katana);
+    items::equip_worn_item(&mut world.state, serial, 0x0F5C, 0, 1).unwrap();
+    assert!(
+        katana_pace < combat::swing_speed(&world.state, entity),
+        "the katana swings sooner than the mace"
+    );
+}
+
+#[test]
+fn taking_the_weapon_off_reverts_to_wrestling() {
+    // The read-site derivation means there is nothing to undo on unequip: the
+    // weapon gone, the next read finds none and falls back on its own.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(entity).unwrap();
+
+    let sword = items::equip_worn_item(&mut world.state, serial, 0x0F61, 0, 1).unwrap();
+    assert_ne!(
+        combat::swing_speed(&world.state, entity),
+        WRESTLING_SWING_TICKS
+    );
+    world.state.registry.despawn(sword);
+    assert_eq!(
+        combat::swing_speed(&world.state, entity),
+        WRESTLING_SWING_TICKS,
+        "the pace reverts with no other bookkeeping"
+    );
+}
+
+#[test]
+fn a_wielded_weapon_rolls_its_damage_within_range_and_replays() {
+    // A longsword hits for old_min..=old_max (5..=33), rolled off the world's
+    // seeded rng — so two identically-built worlds roll the same sequence.
+    fn setup() -> (World, EntityId) {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        let entity = world.state.players[&connection];
+        let serial = world.state.registry.serial_of(entity).unwrap();
+        items::equip_worn_item(&mut world.state, serial, 0x0F61, 0, 1).unwrap();
+        (world, entity)
+    }
+
+    let (mut a, ea) = setup();
+    let (mut b, eb) = setup();
+    let mut seq_a = Vec::new();
+    for _ in 0..64 {
+        let blow = combat::melee_blow(&mut a.state, ea);
+        assert!(
+            (5..=33).contains(&blow),
+            "blow {blow} out of the weapon's range"
+        );
+        seq_a.push(blow);
+    }
+    let seq_b: Vec<u16> = (0..64)
+        .map(|_| combat::melee_blow(&mut b.state, eb))
+        .collect();
+    assert_eq!(seq_a, seq_b, "the damage roll replays for a fixed seed");
+}
+
+#[test]
+fn a_natural_blow_beats_a_wielded_weapon() {
+    // A creature's `MeleeDamage` (its natural blow, or a script's pin) wins over
+    // whatever it happens to hold — the override precedence combat already had.
+    let now = Instant::now();
+    let mut world = world();
+    let spot = Point::new(START.0, START.1, 0);
+    let mob = spawn_mobile_full(&mut world, spot, 50, 4, 7, 0, now);
+    let mob_entity = entity(&world, mob);
+    let serial = world.state.registry.serial_of(mob_entity).unwrap();
+    items::equip_worn_item(&mut world.state, serial, 0x0F61, 0, 1).unwrap();
+    for _ in 0..20 {
+        assert_eq!(
+            combat::melee_blow(&mut world.state, mob_entity),
+            7,
+            "the natural blow ignores the sword in its hand"
+        );
+    }
+}
+
+#[test]
+fn era_two_reads_the_aos_weapon_numbers() {
+    // The same katana, an AoS shard: speed 46 (not 58) and damage 10..=14.
+    let now = Instant::now();
+    let mut world = world();
+    world.state.gameplay.combat_era = 2;
+    let scale = world.state.gameplay.speed_scale_factor;
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(entity).unwrap();
+    items::equip_worn_item(&mut world.state, serial, 0x13FF, 0, 1).unwrap();
+
+    assert_eq!(
+        combat::swing_speed(&world.state, entity),
+        swing_ticks(100, 46, 2, scale),
+        "era 2 uses the katana's AoS speed"
+    );
+    for _ in 0..20 {
+        let blow = combat::melee_blow(&mut world.state, entity);
+        assert!((10..=14).contains(&blow), "AoS damage band");
+    }
+}
+
+#[test]
 fn a_creatures_notoriety_colours_its_health_bar() {
     // Spawn an orange enemy and read the notoriety byte out of the 0x78 that
     // draws it — the health-bar colour on the wire.

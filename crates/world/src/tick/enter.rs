@@ -173,15 +173,11 @@ impl World {
         }
         self.state.registry.insert(entity, Combat::default());
         self.state.registry.insert(entity, Notoriety::Innocent);
-        self.state.registry.insert(
-            entity,
-            MeleeDamage {
-                amount: combat::SWING_DAMAGE,
-            },
-        );
         self.state.registry.insert(entity, Resistance::default());
-        // No explicit `SwingSpeed`: a player swings at the pace their dexterity
-        // dictates, through `swing_speed`.
+        // No explicit `MeleeDamage` or `SwingSpeed`: a player's blow and pace come
+        // from the weapon they wield (or the bare-hands default), derived fresh in
+        // `melee_blow`/`swing_speed`. Those components stay a creature's/script's
+        // override — a fixed one here would make every weapon hit for the same 5.
         self.state
             .registry
             .insert(entity, Movement(Walker::new(position, facing)));

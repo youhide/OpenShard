@@ -466,8 +466,8 @@ Roughly in dependency order, each script-first:
     from the wielder's dexterity through Sphere's pre-AoS formula
     (`CResourceCalc.cpp`, era 1): swing tenths = `(15000 · 10) / ((dex + 100) ·
     base)`, wrestling base 50, so a `dex 100` mobile swings every 1.5s and a
-    nimbler one sooner. Weapon `base` is still wrestling for everyone — the one
-    input left, waiting on weapon tiledata properties.
+    nimbler one sooner. The weapon `base` is now the wielded weapon's, not always
+    wrestling — see **Weapon properties** below.
   - [x] **Resistances and the damage formula.** A swing's damage is no longer
     flat: `melee_blow` takes the attacker's `MeleeDamage` and cuts it by the
     target's `Resistance { physical }`. Both are components a script sets when it
@@ -497,12 +497,34 @@ Roughly in dependency order, each script-first:
     takes a `DamageType` (physical, fire, cold, poison, energy) and cuts it by the
     target's `Resistance` for that type, in the one place all damage passes — melee,
     spell, poison pulse and script alike.
-  - [ ] **Weapon properties from tiledata** — weapon-derived swing speed and
-    damage (the dexterity half is done; the weapon `base` still needs the item's
-    tiledata properties). The seams are in place — `SwingSpeed` and `MeleeDamage`
-    are already per-mobile — so it is a fill-in, not a redesign. This is also what
-    gates **combat eras 3–5** in the `[gameplay]` config: only 1 (pre-AoS) and
-    2 (AoS) are accepted at load until weapons carry real properties.
+  - [x] **Weapon properties — swing speed and damage from the wielded weapon.**
+    The weapon a mobile holds now drives its swing pace and its damage roll, so a
+    katana strikes faster than a maul and a longsword hits harder than a dagger.
+    **Not from tiledata**, despite the old heading: weapon speed/damage genuinely
+    are *not* in `tiledata.mul` (the reader drops the layer/quality byte, and the
+    numbers were never there) — in classic UO they are per-weapon-*class* constants.
+    So they live in a **core table keyed by graphic** (`combat::weapons`, ~40
+    classic weapons ported from ServUO's `BaseWeapon` subclasses, both the pre-AoS
+    `Old*` and the AoS `Aos*` sets, `by_era` picking between them), the same
+    "data keyed by graphic, default in core" shape as `creature_name`. The seam was
+    already right and stayed put: `swing_speed`/`melee_blow` are **read-site
+    derivations**, recomputed fresh each swing, so they consult the item on the
+    wielder's weapon layer (`equipped_weapon`) with no mirror stamped on the mobile
+    — a weapon coming *off* reverts to wrestling with nothing to undo, none of the
+    per-mutation bookkeeping the persistence rule warns against. Precedence is
+    **explicit override → weapon → default**: a creature's `MeleeDamage`/`SwingSpeed`
+    (its natural blow, a script's pin) still wins, a player (who no longer carries a
+    fixed `MeleeDamage`) derives from the weapon, and bare hands stay wrestling and
+    `SWING_DAMAGE`. The damage roll uses the world's seeded `rng`, so a fight
+    replays. Deferred: the weapon `skill` is carried but not yet consumed (hit
+    chance and skill-gain are a later slice), archery still rolls flat damage
+    through `volleys` (it takes the weapon *speed* for free), AoS strength/tactics
+    damage bonuses are unwritten, and a pack per-item override (a magic sword) is a
+    later additive change.
+  - [ ] **Combat eras 3–5** — still gated at load (`config` accepts only 1|2). The
+    weapon-property data half above is now in hand, but the era-0/3/4 swing
+    *formulas* (weapon-weight / ML-format speeds) are unwritten, so the rejection
+    stands until they are.
   - [x] **Creature corpses and loot.** A slain creature no longer vanishes: the
     tick's `reap` (reading `MobileDied` — combat emits the death, the world
     disposes of the body) lays a corpse where it fell — item `0x2006` with

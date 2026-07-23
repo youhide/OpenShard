@@ -26,12 +26,14 @@ use openshard_state::components::{
 use openshard_state::sectors::in_range;
 use openshard_state::{Action, WorldState};
 
+pub mod weapons;
+
 /// How near, in tiles (Chebyshev), a mobile must be to land a melee blow: the
 /// next tile over, diagonals included.
 pub const MELEE_RANGE: u32 = 1;
-/// The base swing speed of bare hands — Sphere's wrestling value. A real weapon's
-/// speed (from its tiledata) will replace it once equipment carries properties;
-/// until then every mobile swings wrestling-fast, modulated by dexterity alone.
+/// The swing base of bare hands — Sphere's wrestling value. A wielded weapon
+/// supplies its own base from [`weapons`]; a mobile holding nothing (or holding
+/// something not in the weapon table) falls back to this, modulated by dexterity.
 pub const WRESTLING_SPEED: u64 = 50;
 /// The dexterity a mobile with no [`Stats`] swings at.
 const DEFAULT_DEXTERITY: u16 = 100;
@@ -788,21 +790,39 @@ pub fn swing_speed(state: &WorldState, mobile: EntityId) -> u64 {
         .registry
         .get::<Stats>(mobile)
         .map_or(DEFAULT_DEXTERITY, |s| s.dexterity);
+    // A wielded weapon lends its speed base; bare hands (or an off-table item) keep
+    // wrestling. Read fresh here — no cache to invalidate when the weapon swaps.
+    let base = weapons::equipped_weapon(state, mobile).map_or(WRESTLING_SPEED, |weapon| {
+        u64::from(weapons::by_era(
+            weapon.old_speed,
+            weapon.aos_speed,
+            state.gameplay.combat_era,
+        ))
+    });
     swing_ticks(
         dex,
-        WRESTLING_SPEED,
+        base,
         state.gameplay.combat_era,
         state.gameplay.speed_scale_factor,
     )
 }
 
-/// The base damage a blow from `attacker` carries, before armour — its
-/// [`MeleeDamage`], or the default. The target's resistance is applied later, in
-/// [`damage`], the one place all damage passes through.
+/// The base damage a blow from `attacker` carries, before armour. Precedence:
+/// an explicit [`MeleeDamage`] (a creature's natural blow, a script's pin) wins;
+/// else a wielded weapon rolls its era's min..=max; else the bare-hands default.
+/// The roll uses the world's seeded [`rng`](WorldState::rng), never a wall clock,
+/// so a fight replays. The target's resistance is applied later, in [`damage`].
 #[must_use]
-pub fn melee_blow(state: &WorldState, attacker: EntityId) -> u16 {
-    state
-        .registry
-        .get::<MeleeDamage>(attacker)
-        .map_or(SWING_DAMAGE, |d| d.amount)
+pub fn melee_blow(state: &mut WorldState, attacker: EntityId) -> u16 {
+    if let Some(damage) = state.registry.get::<MeleeDamage>(attacker) {
+        return damage.amount;
+    }
+    if let Some(weapon) = weapons::equipped_weapon(state, attacker) {
+        let era = state.gameplay.combat_era;
+        let min = weapons::by_era(weapon.old_min, weapon.aos_min, era);
+        let max = weapons::by_era(weapon.old_max, weapon.aos_max, era);
+        let span = u32::from(max.saturating_sub(min)) + 1;
+        return min + state.rng.below(span) as u16;
+    }
+    SWING_DAMAGE
 }
