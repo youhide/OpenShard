@@ -1122,10 +1122,14 @@ Roughly in dependency order, each script-first:
   `op_take_item` that draws N of an item from the backpack all-or-nothing and
   reports back with an `ItemsTaken` event, which pays the reward only if the whole
   lot was there. The shipped example gathers five spiders' silk for the
-  spellwright's apprentice. Deferred: wiring the converter's Felucca escortables
-  (`escortablemage`/`escortablehealer`, ~27 in `felucca.xml`) as escort givers
-  instead of the one hand-placed sample, and atomic multi-collect turn-ins (each
-  collect objective is taken independently today).
+  spellwright's apprentice. And the **real Felucca escortables are wired**: the
+  converter's escort pass places every `BaseEscortable` spawn from `felucca.xml`
+  (~63 — wandering mages, seekers, nobles, peasants, merchants) as an escort
+  giver, and the pack picks a random destination town on accept (ServUO's
+  `PickRandomDestination`) and pays `Gold(500, 1000)`. Deferred: atomic
+  multi-collect turn-ins (each collect objective is taken independently today),
+  and escort niceties — a follow-me abandon timer, the escortable refusing a
+  second escorter mid-walk, town names the client localizes.
 
 ### Deferred / not yet ported (the Felucca converter)
 
