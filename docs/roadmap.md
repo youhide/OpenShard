@@ -1109,11 +1109,17 @@ Roughly in dependency order, each script-first:
   (`quests/`): a giver placed on a tile offers its quest on double-click, an
   accept starts it, `MobileDied`/`ItemUsed` advance it, and a turn-in pays the
   reward — progress mirrored to the saved blob after every change, restored on
-  login. The shipped example is *A Plague of Rats* for the Britain town herald.
-  Deferred: the gump **offer on speech** (the `MobileSpoke` half — only
-  double-click is wired), the **collect** objective (wants an inventory-read op),
-  and **escort** as an objective kind (reuses the creature follow/step machinery;
-  the ~27 Felucca escortables are its natural givers).
+  login. Offered on **double-click and on speech** (a "quest" keyword near a
+  giver, resolved with `op_position` the way the banker resolves reach). The
+  shipped example is *A Plague of Rats* for the Britain town herald. And **escort
+  quests run** — the objective kind that walks: an escortable is a giver the pack
+  takes off the built-in AI with `op_control`, and its `onTick` steps it after the
+  escorter (`op_position` + `op_move`, the server-authoritative step) and pays on
+  reaching the destination town; entirely pack code over the scripted-brain seam,
+  no new engine surface. The shipped example is a Britain traveller bound for
+  Minoc. Deferred: the **collect** objective (wants an inventory-read op), and
+  wiring the converter's Felucca escortables (`escortablemage`/`escortablehealer`,
+  ~27 in `felucca.xml`) as escort givers instead of the one hand-placed sample.
 
 ### Deferred / not yet ported (the Felucca converter)
 
