@@ -510,6 +510,15 @@ pub enum Command {
         /// (a weapon, a suit of armour).
         stackable: bool,
     },
+    /// Remove an item by serial, wherever it lives — a used item vanishing (a
+    /// drunk potion, a read-once scroll). From a script.
+    ConsumeItem {
+        /// The item's wire serial.
+        serial: u32,
+        /// How many to take: 0 (or the whole stack) removes the item; a smaller
+        /// amount decrements a stackable pile.
+        amount: u16,
+    },
     /// A client bought from a vendor's shop (`0x3B`).
     Buy {
         /// Which connection.

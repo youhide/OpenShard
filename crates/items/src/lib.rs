@@ -26,6 +26,7 @@ use openshard_state::sectors::in_range;
 use openshard_state::{HeldItem, Origin, Outbound, WorldState, TICKS_PER_SECOND};
 use tracing::{debug, warn};
 
+mod consume;
 mod containers;
 mod decay;
 mod doors;
@@ -36,6 +37,7 @@ mod spawn;
 mod stack;
 mod trigger;
 
+pub use consume::*;
 pub use containers::*;
 pub use decay::*;
 pub use doors::*;

@@ -619,6 +619,20 @@ fn op_add_loot(
     });
 }
 
+/// Remove an item by serial, wherever it is — the one-shot primitive a used item
+/// needs to vanish (a drunk potion, a read-once scroll). `amount == 0` removes
+/// the whole item; a smaller amount takes that many off a stackable pile.
+#[op2(fast)]
+fn op_consume_item(state: &mut OpState, serial: u32, amount: u32) {
+    state
+        .borrow_mut::<Host>()
+        .outbox
+        .push(Command::ConsumeItem {
+            serial,
+            amount: amount.min(u32::from(u16::MAX)) as u16,
+        });
+}
+
 extension!(
     openshard_ops,
     ops = [
@@ -629,6 +643,7 @@ extension!(
         op_spawn_mobile,
         op_stock,
         op_add_loot,
+        op_consume_item,
         op_damage,
         op_heal,
         op_cast_spell,

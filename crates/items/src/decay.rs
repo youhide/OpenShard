@@ -30,23 +30,29 @@ pub fn decay(state: &mut WorldState) {
         let Some(serial) = state.registry.serial_of(item) else {
             continue;
         };
-        let facet = state.facet_of(item);
-        for watcher in state.watchers_of(item) {
-            state.forget(watcher, item, serial);
-        }
-        // A decaying container takes its contents with it — a corpse rots away
-        // with whatever loot was never lifted, classic UO. Without this the loot
-        // would outlive the corpse as orphaned items pointing at a gone serial.
-        despawn_contents(state, serial);
-        state.facet_state_mut(facet).sectors.remove(item);
-        state.registry.despawn(item);
+        remove_ground_item(state, item, serial);
         debug!(%serial, "decayed");
     }
 }
 
+/// Take a ground item off every screen that has it (`0x1D`), off the sector grid,
+/// and out of the registry — cascading into its contents if it is a container.
+/// The shared tail of [`decay`] and [`consume`](crate::consume): a decaying
+/// container takes its loot with it (classic UO), and so does a consumed one,
+/// rather than leaving orphans pointing at a gone serial.
+pub(crate) fn remove_ground_item(state: &mut WorldState, item: EntityId, serial: Serial) {
+    let facet = state.facet_of(item);
+    for watcher in state.watchers_of(item) {
+        state.forget(watcher, item, serial);
+    }
+    despawn_contents(state, serial);
+    state.facet_state_mut(facet).sectors.remove(item);
+    state.registry.despawn(item);
+}
+
 /// Despawn everything directly inside `container`, and recursively inside any
-/// container among them. Used when a decaying container rots away.
-fn despawn_contents(state: &mut WorldState, container: Serial) {
+/// container among them. Used when a decaying or consumed container rots away.
+pub(crate) fn despawn_contents(state: &mut WorldState, container: Serial) {
     let contained: Vec<EntityId> = state
         .registry
         .query::<Contained>()

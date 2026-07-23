@@ -415,11 +415,20 @@ Roughly in dependency order, each script-first:
     the "default in core, customise in the pack" split — except the core default
     here is nothing, because a graphic has no behaviour until a shard gives it one.
     The Community Pack ships a readable book as the example.
-  - [ ] **A consume op for one-shot items** — a used item cannot yet be removed by
-    a script (`op_consume_item`), so a heal potion that vanishes on drink waits on
-    that primitive; today's item triggers are the reusable kind (read, toggle,
-    summon, emote). Removing an item needs the three location-specific client
-    updates (ground `0x1D`, contained `0x25`/remove, worn) behind one op.
+  - [x] **A consume op for one-shot items.** `op_consume_item` (→
+    `Command::ConsumeItem` → `items::consume`) removes an item wherever it lives,
+    behind one op with the three location-specific client updates: on the ground
+    the decay path (off the sector grid, a `0x1D` to every screen, shared with
+    `decay` through `remove_ground_item`); in a container the reagent-burn path (a
+    `0x1D` to whoever has the gump open, `tell_watchers_removed`); worn it forgets
+    the item on the wearer *and* every onlooker (`broadcast_unequip`, the mirror of
+    `broadcast_equip` — no "remove from paperdoll" packet exists, so the client
+    drops it by serial, and unlike a lift the wearer's own client is told too).
+    `amount` 0 removes the whole item; a smaller amount decrements a stackable pile
+    (one potion out of a lot) via `remove_from_stack`. Consuming a container
+    cascades into its contents (`despawn_contents`, shared with decay), and a stray
+    serial removes nothing — the `add_loot` guard. The Community Pack's `items.js`
+    ships a heal potion: `op_heal` the drinker, then `op_consume_item(e.item, 1)`.
 - [x] `combat` — swing timers, damage, resistances, notoriety
   - [x] **Hit points, damage and death.** Mobiles carry `Hitpoints`; scripts
     spawn creatures (`op_spawn_mobile` → `Command::SpawnMobile`, an entity with a

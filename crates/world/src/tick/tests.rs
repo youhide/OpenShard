@@ -1177,6 +1177,224 @@ fn unequipping_lifts_the_item_off_and_forgets_it_for_others() {
 }
 
 #[test]
+fn consuming_a_ground_item_removes_it_and_clears_every_screen() {
+    // The one-shot primitive: a used item vanishes wherever it is. On the ground
+    // that is the decay path — off the sector grid, out of the registry, a 0x1D
+    // to everyone who had it drawn.
+    let now = Instant::now();
+    let mut world = world();
+    let watcher = enter(&mut world, now);
+    let serial = spawn_plain_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let item = entity(&world, serial);
+    let _ = packets_for(&mut world, watcher);
+
+    world.queue(Command::ConsumeItem { serial, amount: 0 });
+    world.tick(now);
+
+    assert!(
+        !world.state.registry.contains(item),
+        "the item is gone from the world"
+    );
+    assert!(
+        packets_for(&mut world, watcher)
+            .iter()
+            .any(|p| p == &encode_remove(serial)),
+        "and off the watcher's screen"
+    );
+}
+
+#[test]
+fn consuming_a_contained_item_removes_it_from_the_open_gump() {
+    // In a container the only client that need hear is one with the gump open —
+    // the reagent-burn path. Put an item in, open the bag, consume it, and the
+    // viewer is told to forget it live.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let here = Point::new(START.0, START.1, 0);
+    let container = spawn_container_at(&mut world, here, now);
+    spawn_item_at(&mut world, here, now);
+    let item_serial = loose_item_serial(&world);
+    let item = entity(&world, item_serial);
+
+    world.queue(Command::PickUpItem {
+        connection: player,
+        serial: item_serial,
+        amount: 1,
+    });
+    world.tick(now);
+    world.queue(Command::DropItem {
+        connection: player,
+        serial: item_serial,
+        position: Point::new(50, 60, 0),
+        container,
+    });
+    world.tick(now);
+    world.queue(Command::DoubleClick {
+        connection: player,
+        serial: container,
+    });
+    world.tick(now);
+    let _ = packets_for(&mut world, player);
+
+    world.queue(Command::ConsumeItem {
+        serial: item_serial,
+        amount: 0,
+    });
+    world.tick(now);
+
+    assert!(
+        !world.state.registry.contains(item),
+        "the contained item is gone"
+    );
+    assert!(
+        packets_for(&mut world, player)
+            .iter()
+            .any(|p| p == &encode_remove(item_serial)),
+        "and the open gump is told to forget it"
+    );
+}
+
+#[test]
+fn consuming_a_worn_item_takes_it_off_for_everyone_including_the_wearer() {
+    // Worn is the third place. There is no "remove from paperdoll" packet, so
+    // everyone forgets the item by its serial — and unlike a lift, the wearer's
+    // own client is told too, because it is not the one holding it on a cursor.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let watcher = enter_as(&mut world, ConnectionId::from_raw(2), now);
+    let me = serial_of(&world, player);
+    let (item_serial, item) = take_loose_item(&mut world, player, now);
+    world.queue(Command::EquipItem {
+        connection: player,
+        item: item_serial,
+        layer: LAYER_TORSO,
+        mobile: me,
+    });
+    world.tick(now);
+    let _ = packets_for(&mut world, player);
+    let _ = packets_for(&mut world, watcher);
+
+    world.queue(Command::ConsumeItem {
+        serial: item_serial,
+        amount: 0,
+    });
+    world.tick(now);
+
+    assert!(
+        !world.state.registry.contains(item),
+        "the worn item is gone"
+    );
+    // One drain: `packets_for` empties the whole outbox, so checking two
+    // connections means partitioning a single sweep, not calling it twice.
+    let forget = encode_remove(item_serial);
+    let mut watcher_forgot = false;
+    let mut wearer_forgot = false;
+    for out in world.drain_outbound() {
+        if out.packet == forget {
+            watcher_forgot |= out.connection == watcher;
+            wearer_forgot |= out.connection == player;
+        }
+    }
+    assert!(watcher_forgot, "the onlooker forgets it");
+    assert!(wearer_forgot, "and so does the wearer");
+}
+
+#[test]
+fn consuming_part_of_a_stack_leaves_the_rest() {
+    // A potion out of a lot of five: an amount smaller than the pile decrements
+    // it rather than deleting the stack. The realistic case lives in a pack, but
+    // a ground pile is the simplest to assert against.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let serial = spawn_gold(&mut world, Point::new(START.0, START.1, 0), 5, now);
+    let item = entity(&world, serial);
+    let _ = packets_for(&mut world, player);
+
+    world.queue(Command::ConsumeItem { serial, amount: 2 });
+    world.tick(now);
+
+    assert!(
+        world.state.registry.contains(item),
+        "the pile is still there"
+    );
+    assert_eq!(
+        world.state.registry.get::<Amount>(item).map(|a| a.0),
+        Some(3),
+        "with two taken off"
+    );
+}
+
+#[test]
+fn consuming_a_container_takes_its_contents_with_it() {
+    // Consuming a container cascades into its contents, the same as a decaying
+    // corpse — no orphan loot pointing at a gone serial.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let here = Point::new(START.0, START.1, 0);
+    let container = spawn_container_at(&mut world, here, now);
+    spawn_item_at(&mut world, here, now);
+    let item_serial = loose_item_serial(&world);
+    let item = entity(&world, item_serial);
+    let container_entity = entity(&world, container);
+
+    world.queue(Command::PickUpItem {
+        connection: player,
+        serial: item_serial,
+        amount: 1,
+    });
+    world.tick(now);
+    world.queue(Command::DropItem {
+        connection: player,
+        serial: item_serial,
+        position: Point::new(50, 60, 0),
+        container,
+    });
+    world.tick(now);
+
+    world.queue(Command::ConsumeItem {
+        serial: container,
+        amount: 0,
+    });
+    world.tick(now);
+
+    assert!(
+        !world.state.registry.contains(container_entity),
+        "the container is gone"
+    );
+    assert!(
+        !world.state.registry.contains(item),
+        "and its contents with it, not left orphaned"
+    );
+}
+
+#[test]
+fn consuming_a_stray_serial_does_nothing() {
+    // Guarded like add_loot: a stale or bogus serial removes nothing rather than
+    // erroring, and touches no other item.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let serial = spawn_plain_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+    let item = entity(&world, serial);
+    let _ = packets_for(&mut world, player);
+
+    world.queue(Command::ConsumeItem {
+        serial: 0x4000_0000,
+        amount: 0,
+    });
+    world.tick(now);
+
+    assert!(
+        world.state.registry.contains(item),
+        "the real item is untouched"
+    );
+}
+
+#[test]
 fn a_layer_holds_only_one_item() {
     let now = Instant::now();
     let mut world = world();

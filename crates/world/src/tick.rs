@@ -714,6 +714,11 @@ impl World {
                 amount,
                 stackable,
             } => self.add_loot(container, graphic, hue, amount, stackable),
+            Command::ConsumeItem { serial, amount } => {
+                if let Some(serial) = Serial::new(serial) {
+                    items::consume(&mut self.state, serial, amount);
+                }
+            }
             Command::Buy {
                 connection,
                 vendor,

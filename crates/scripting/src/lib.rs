@@ -296,6 +296,15 @@ pub enum Command {
         /// Whether it stacks or is a discrete piece.
         stackable: bool,
     },
+    /// Remove an item by serial, wherever it is — a used item vanishing (a drunk
+    /// potion, a read-once scroll).
+    ConsumeItem {
+        /// The item's wire serial.
+        serial: u32,
+        /// How many to take: 0 (or the whole stack) removes the item, a smaller
+        /// amount decrements a stackable pile.
+        amount: u16,
+    },
     /// Deal damage to a mobile, of a kind (0 physical, 1 fire, 2 cold, 3 poison,
     /// 4 energy) the target's resistance to that kind reduces.
     Damage {

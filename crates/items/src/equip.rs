@@ -149,6 +149,23 @@ pub fn broadcast_equip(state: &mut WorldState, item: EntityId, mobile: EntityId)
     }
 }
 
+/// Tell everyone who can see `mobile`, and the mobile itself, to forget a worn
+/// item just taken off it — a `0x1D` each. The mirror of [`broadcast_equip`]:
+/// there is no "remove from paperdoll" packet, so the client drops a worn item
+/// the same way it drops any object, by its serial. Unlike the lift path in
+/// `pick_up`, the wearer's own client is included here, because it is not the one
+/// holding the item on a cursor.
+pub(crate) fn broadcast_unequip(state: &mut WorldState, item: Serial, mobile: EntityId) {
+    for watcher in equip_audience(state, mobile) {
+        if let Some(&Client { connection, .. }) = state.registry.get::<Client>(watcher) {
+            state.outbox.push(Outbound {
+                connection,
+                packet: encode_remove(item.raw()),
+            });
+        }
+    }
+}
+
 /// Everyone who should hear about a change to `mobile`'s outfit: those who
 /// can see it, and the mobile itself.
 pub fn equip_audience(state: &WorldState, mobile: EntityId) -> Vec<EntityId> {

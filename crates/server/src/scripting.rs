@@ -397,6 +397,7 @@ fn into_world(command: ScriptCommand) -> Command {
             amount,
             stackable,
         },
+        ScriptCommand::ConsumeItem { serial, amount } => Command::ConsumeItem { serial, amount },
         ScriptCommand::RegisterSpawner {
             x,
             y,
