@@ -18,8 +18,8 @@ use openshard_scripting::{
     Command as ScriptCommand, DenoEngine, Event as ScriptEvent, ScriptEngine,
 };
 use openshard_world::events::{
-    AdminMenuAction, MobileMoved, MobileSpawned, PlayerEntered, PlayerLeft, SpellRequested,
-    StepRefused,
+    AdminMenuAction, CorpseCreated, MobileMoved, MobileSpawned, PlayerEntered, PlayerLeft,
+    SpellRequested, StepRefused,
 };
 use openshard_world::{Command, ItemUsed, MobileDied, MobileSpoke, SkillUsed, SpellCast, World};
 use tracing::{error, info, warn};
@@ -38,6 +38,7 @@ pub struct Scripts {
     cast: Cursor<SpellCast>,
     spoke: Cursor<MobileSpoke>,
     item_used: Cursor<ItemUsed>,
+    corpse: Cursor<CorpseCreated>,
     admin: Cursor<AdminMenuAction>,
 }
 
@@ -83,6 +84,7 @@ impl Scripts {
             cast: world.bus().cursor(),
             spoke: world.bus().cursor(),
             item_used: world.bus().cursor(),
+            corpse: world.bus().cursor(),
             admin: world.bus().cursor(),
             engine,
         })
@@ -176,6 +178,12 @@ impl Scripts {
                     item: e.item.raw(),
                     graphic: e.graphic,
                     by: e.by.raw(),
+                });
+            }
+            for e in bus.read(&mut self.corpse) {
+                events.push(ScriptEvent::CorpseCreated {
+                    corpse: e.corpse.raw(),
+                    body: e.body,
                 });
             }
             for e in bus.read(&mut self.admin) {
@@ -375,6 +383,19 @@ fn into_world(command: ScriptCommand) -> Command {
                     name: line.name,
                 })
                 .collect(),
+        },
+        ScriptCommand::AddLoot {
+            container,
+            graphic,
+            hue,
+            amount,
+            stackable,
+        } => Command::AddLoot {
+            container,
+            graphic,
+            hue,
+            amount,
+            stackable,
         },
         ScriptCommand::RegisterSpawner {
             x,

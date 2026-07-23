@@ -255,6 +255,37 @@ impl World {
         self.state.reveal(entity);
     }
 
+    /// Put a loot item into a container by serial — the pack filling a corpse off
+    /// a [`CorpseCreated`](crate::events::CorpseCreated) event. Guarded on the
+    /// target being a real container, so a stray or stale serial adds nothing
+    /// rather than conjuring a floating item. A stackable merges (gold, reagents);
+    /// a discrete piece (a weapon) is placed whole.
+    pub(super) fn add_loot(
+        &mut self,
+        container: u32,
+        graphic: u16,
+        hue: u16,
+        amount: u16,
+        stackable: bool,
+    ) {
+        let Some(container) = Serial::new(container) else {
+            return;
+        };
+        let is_container = self
+            .state
+            .registry
+            .entity_of(container)
+            .is_some_and(|entity| self.state.registry.has::<Container>(entity));
+        if !is_container || amount == 0 {
+            return;
+        }
+        if stackable {
+            let _ = items::give(&mut self.state, container, graphic, hue, amount);
+        } else {
+            let _ = items::place_one(&mut self.state, container, graphic, hue, amount);
+        }
+    }
+
     /// Turn one dead creature into a corpse holding its gear and a little gold,
     /// then despawn the creature.
     fn lay_corpse(&mut self, entity: EntityId, serial: Serial) {
@@ -278,13 +309,20 @@ impl World {
             self.despawn_creature(entity, serial);
             return;
         };
-        // Its worn gear falls into the corpse, and a little gold — the core's
-        // default until the pack owns loot tables off a corpse event.
+        // Its worn gear falls into the corpse, and a flat baseline of gold — the
+        // core's default so a bare shard still loots.
         self.move_gear_to_corpse(serial, corpse, &[]);
         let gold = self.corpse_gold(max_hits);
         if gold > 0 {
             let _ = items::give(&mut self.state, corpse, GOLD_GRAPHIC, 0, gold);
         }
+        // The loot hook: a pack adds the real per-creature table on top of the
+        // baseline, by serial, off this event. Emitted before the creature is
+        // despawned so `body` is still readable if a listener wants it live.
+        self.state.bus.send(CorpseCreated {
+            corpse,
+            body: body.map_or(0, |b| b.id),
+        });
         self.despawn_creature(entity, serial);
     }
 

@@ -112,6 +112,25 @@ pub struct PlayerLeft {
     pub serial: Serial,
 }
 
+/// A creature's corpse was laid — the loot hook.
+///
+/// The tick's `reap` emits this the instant a slain creature's corpse hits the
+/// ground, carrying the corpse's serial and the body it was, so a script can fill
+/// it with per-creature loot: the "default in core, customise in the pack" split
+/// combat and magic already use. The core drops a flat baseline of gold first
+/// (so a bare shard still loots); the pack *adds* the real table — items, rares,
+/// a richer gold roll — off this event, by serial, through `op_add_loot`. Only a
+/// creature corpse fires it; a player corpse holds the player's own gear, not
+/// generated loot.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CorpseCreated {
+    /// The corpse item's wire identity — what a script fills.
+    pub corpse: Serial,
+    /// The body the creature was, so a pack matches its loot table with no
+    /// lookup — the same key `creature_name`/`creature_base_sound` use.
+    pub body: u16,
+}
+
 /// A game master pressed a button in the `.admin` menu.
 ///
 /// The engine carries the verb across; the script pack decides what it does —

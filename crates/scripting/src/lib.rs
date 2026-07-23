@@ -112,6 +112,15 @@ pub enum Event {
         /// Its wire identity.
         serial: Serial,
     },
+    /// A creature's corpse was laid — the loot hook. A pack matches on `body` and
+    /// fills the corpse (by `corpse` serial) with its per-creature table, on top
+    /// of the flat gold the core already dropped, through `op_add_loot`.
+    CorpseCreated {
+        /// The corpse item's wire identity — what to fill.
+        corpse: Serial,
+        /// The body the creature was, the pack's loot-table key.
+        body: u16,
+    },
     /// A skill was used: the check is resolved and any gain applied. A script
     /// reads this to grant what the use was *for* — the ore, the pick's turn.
     SkillUsed {
@@ -272,6 +281,20 @@ pub enum Command {
         serial: u32,
         /// The goods, priced and labelled.
         stock: Vec<StockItem>,
+    },
+    /// Put an item into a container by serial — a pack dropping loot into a
+    /// corpse off a [`CorpseCreated`](Event::CorpseCreated) event.
+    AddLoot {
+        /// The container's wire serial.
+        container: u32,
+        /// The item graphic.
+        graphic: u16,
+        /// Its hue, or 0.
+        hue: u16,
+        /// How many; a stackable merges, a single is one item.
+        amount: u16,
+        /// Whether it stacks or is a discrete piece.
+        stackable: bool,
     },
     /// Deal damage to a mobile, of a kind (0 physical, 1 fire, 2 cold, 3 poison,
     /// 4 energy) the target's resistance to that kind reduces.

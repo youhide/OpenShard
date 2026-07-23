@@ -350,6 +350,39 @@ pub fn take_from_container(
     true
 }
 
+/// Put a discrete, non-stacking item into a container — a looted weapon, a suit
+/// of armour, a gem. Unlike [`give`], it never merges: two identical swords are
+/// two swords, not a stack of two. `amount` rides along for the odd counted
+/// single, but no [`Stackable`] is set. Returns the item, or `None` when the
+/// serial pool is dry. The counterpart of `give` for loot the pack drops.
+pub fn place_one(
+    state: &mut WorldState,
+    container: Serial,
+    graphic: u16,
+    hue: u16,
+    amount: u16,
+) -> Option<EntityId> {
+    let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
+        warn!("out of item serials; nothing placed");
+        return None;
+    };
+    state.registry.insert(entity, Graphic { id: graphic, hue });
+    state.registry.insert(
+        entity,
+        Contained {
+            container,
+            x: 60,
+            y: 60,
+            grid: 0,
+        },
+    );
+    if amount > 1 {
+        state.registry.insert(entity, Amount(amount));
+    }
+    tell_watchers_updated(state, container, entity);
+    Some(entity)
+}
+
 /// Put `amount` of an item into a container by decree — a vendor handing over
 /// goods, a sale paying out gold. Merges onto an existing stackable pile of the
 /// same art and hue; otherwise a fresh stackable item appears. Everyone with

@@ -598,6 +598,27 @@ fn op_stock(state: &mut OpState, #[serde] spec: StockSpec) {
         });
 }
 
+/// Put an item into a container by serial — a pack dropping loot into a corpse
+/// off a `CorpseCreated` event. `stackable` merges gold/reagents onto a like
+/// pile; a discrete piece (a weapon) is placed whole.
+#[op2(fast)]
+fn op_add_loot(
+    state: &mut OpState,
+    container: u32,
+    graphic: u32,
+    hue: u32,
+    amount: u32,
+    stackable: bool,
+) {
+    state.borrow_mut::<Host>().outbox.push(Command::AddLoot {
+        container,
+        graphic: graphic.min(u32::from(u16::MAX)) as u16,
+        hue: hue.min(u32::from(u16::MAX)) as u16,
+        amount: amount.min(u32::from(u16::MAX)) as u16,
+        stackable,
+    });
+}
+
 extension!(
     openshard_ops,
     ops = [
@@ -607,6 +628,7 @@ extension!(
         op_spawn_container,
         op_spawn_mobile,
         op_stock,
+        op_add_loot,
         op_damage,
         op_heal,
         op_cast_spell,

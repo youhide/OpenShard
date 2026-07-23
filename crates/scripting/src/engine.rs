@@ -742,6 +742,39 @@ mod tests {
     }
 
     #[test]
+    fn a_corpse_hook_fills_by_body_through_op_add_loot() {
+        // The loot seam from the script's side: `onEvent` sees a `CorpseCreated`
+        // as a plain object, switches on `body`, and enqueues `op_add_loot` to
+        // fill the corpse by serial — the "default in core, customise in pack"
+        // split for loot.
+        let mut engine = DenoEngine::new();
+        engine
+            .load(
+                "function onEvent(e) {\n\
+                 if (e.type === \"CorpseCreated\" && e.body === 400)\n\
+                 Deno.core.ops.op_add_loot(e.corpse, 3823, 0, 25, true);\n\
+                 }",
+            )
+            .unwrap();
+        engine
+            .deliver(&Event::CorpseCreated {
+                corpse: 0x4000_0009,
+                body: 400,
+            })
+            .unwrap();
+        assert_eq!(
+            engine.take_commands(),
+            vec![Command::AddLoot {
+                container: 0x4000_0009,
+                graphic: 3823,
+                hue: 0,
+                amount: 25,
+                stackable: true,
+            }]
+        );
+    }
+
+    #[test]
     fn reloading_rebinds_the_hook_in_the_live_isolate() {
         // Hot reload's core claim: the second load replaces the first hook's
         // behaviour without a new isolate.

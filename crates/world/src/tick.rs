@@ -65,8 +65,8 @@ use openshard_skills as skills;
 
 use crate::doorgen;
 use crate::events::{
-    AdminMenuAction, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft, RefusedReason,
-    StepRefused,
+    AdminMenuAction, CorpseCreated, MobileMoved, MobileTurned, PlayerEntered, PlayerLeft,
+    RefusedReason, StepRefused,
 };
 use crate::gm;
 use crate::terrain::MapTerrain;
@@ -707,6 +707,13 @@ impl World {
             Command::StockVendor { serial, stock } => {
                 npc::stock(&mut self.state, serial, stock);
             }
+            Command::AddLoot {
+                container,
+                graphic,
+                hue,
+                amount,
+                stackable,
+            } => self.add_loot(container, graphic, hue, amount, stackable),
             Command::Buy {
                 connection,
                 vendor,

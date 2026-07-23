@@ -2204,6 +2204,102 @@ fn a_slain_creature_leaves_a_corpse_with_loot() {
 }
 
 #[test]
+fn a_slain_creature_fires_the_loot_hook() {
+    // The seam the pack fills: a corpse laid emits `CorpseCreated` carrying the
+    // corpse serial and the body, so a script can add the real per-creature loot
+    // on top of the core's baseline gold.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let spot = Point::new(START.0, START.1, 0);
+    let mob = spawn_mobile_at(&mut world, spot, 8, now);
+    let mut corpses: Cursor<CorpseCreated> = world.bus().cursor();
+    engage(&mut world, player, mob, now);
+
+    // Read every tick, so the event is caught the frame it fires rather than
+    // after the double-buffer has retired it.
+    let mut fired: Vec<CorpseCreated> = Vec::new();
+    for _ in 0..(2 * WRESTLING_SWING_TICKS) {
+        world.tick(now);
+        fired.extend(world.bus().read(&mut corpses).copied());
+    }
+    assert_eq!(fired.len(), 1, "one corpse, one hook");
+    assert_eq!(fired[0].body, 0x0190, "the hook carries the body");
+    let corpse_entity = world
+        .registry()
+        .entity_of(fired[0].corpse)
+        .expect("the hook's serial names a live corpse");
+    assert!(
+        world.registry().has::<Container>(corpse_entity),
+        "and that corpse is a container to fill"
+    );
+}
+
+#[test]
+fn add_loot_fills_a_container_and_ignores_a_stray_serial() {
+    // The op behind the loot hook: `AddLoot` drops an item into a container by
+    // serial — a stackable merges, a discrete piece is placed whole — and a
+    // serial that is not a container adds nothing rather than a floating item.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let serial = serial_of(&world, player);
+    let serial_obj = Serial::new(serial).unwrap();
+    let backpack = world
+        .state
+        .registry
+        .query::<Equipped>()
+        .find(|(_, w)| w.mobile == serial_obj && w.layer == 0x15)
+        .map(|(e, _)| world.registry().serial_of(e).unwrap())
+        .expect("the player wears a backpack");
+
+    world.queue(Command::AddLoot {
+        container: backpack.raw(),
+        graphic: 0x0EED, // gold
+        hue: 0,
+        amount: 50,
+        stackable: true,
+    });
+    world.queue(Command::AddLoot {
+        container: backpack.raw(),
+        graphic: 0x0F5E, // a broadsword
+        hue: 0,
+        amount: 1,
+        stackable: false,
+    });
+    // A stray serial: nothing exists at it, so nothing is placed.
+    world.queue(Command::AddLoot {
+        container: 0xDEAD_BEEF,
+        graphic: 0x0EED,
+        hue: 0,
+        amount: 999,
+        stackable: true,
+    });
+    world.tick(now);
+
+    let in_pack: Vec<u16> = world
+        .state
+        .registry
+        .query::<Contained>()
+        .filter(|(_, c)| c.container == backpack)
+        .filter_map(|(e, _)| world.registry().get::<Graphic>(e).map(|g| g.id))
+        .collect();
+    assert!(in_pack.contains(&0x0EED), "the gold landed");
+    assert!(in_pack.contains(&0x0F5E), "and the sword");
+    // The stray-serial gold never appeared anywhere.
+    let gold_piles = world
+        .state
+        .registry
+        .query::<Graphic>()
+        .filter(|(_, g)| g.id == 0x0EED)
+        .count();
+    assert_eq!(
+        gold_piles, 1,
+        "the stray-serial loot was dropped, not floated"
+    );
+}
+
+#[test]
 fn a_decaying_corpse_takes_its_loot_with_it() {
     // A corpse rots away with whatever was never lifted — no gold left orphaned,
     // pointing at a container that is gone.

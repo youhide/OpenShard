@@ -508,10 +508,18 @@ Roughly in dependency order, each script-first:
     rides the character row while the `body`/`hue` stay the *living* ones, so a
     ghost that logs out logs back a ghost — the grey body re-derived, the corpse
     already a saved ground item, no duplicate laid.
-  - [ ] **Pack loot tables** — the corpse gold is a flat core default; real loot
-    (per-creature gold ranges, items, rares) is the pack's, off a `CorpseCreated`
-    event carrying the corpse serial — the "default in core, customise in the
-    pack" split, needing an op to fill a corpse by serial.
+  - [x] **Pack loot tables.** The corpse gold stays a flat core baseline (so a
+    bare shard still loots); the real per-creature loot is the pack's, off a
+    `CorpseCreated` event `reap` emits when a creature's corpse is laid — carrying
+    the corpse serial and the body, the pack's loot-table key. A script fills the
+    corpse by serial through a new `op_add_loot` (→ `Command::AddLoot` →
+    `items::give` for a stackable, `items::place_one` for a discrete piece),
+    guarded so a stray serial adds nothing. The "default in core, customise in the
+    pack" split, same as spell and skill effects. The Community Pack ships
+    `loot.js`: a `Pack.loot[body]` table of `{ graphic, amount, stackable, chance }`
+    drops (an orc, a spectre), rolled in `index.js` — pack loot may use
+    `Math.random`, since determinism is the core's seeded rng and a script is an
+    external input to it.
   - [ ] **Stamina as a real pool** — the status bar sends `stamina = dexterity`
   - [ ] **Stamina as a real pool** — the status bar sends `stamina = dexterity`
     so the client will run at all; a real pool spends on running, refills on the

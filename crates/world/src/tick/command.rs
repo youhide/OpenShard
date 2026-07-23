@@ -495,6 +495,21 @@ pub enum Command {
         /// The goods, priced and labelled.
         stock: Vec<npc::StockLine>,
     },
+    /// Put an item into a container — a pack filling a corpse with loot off a
+    /// [`CorpseCreated`](crate::events::CorpseCreated) event. From a script.
+    AddLoot {
+        /// The container's wire serial — a corpse, a chest.
+        container: u32,
+        /// The item graphic.
+        graphic: u16,
+        /// Its hue, or 0.
+        hue: u16,
+        /// How many; a stackable merges, a single is one item.
+        amount: u16,
+        /// Whether it stacks (gold, reagents, arrows) or is a discrete piece
+        /// (a weapon, a suit of armour).
+        stackable: bool,
+    },
     /// A client bought from a vendor's shop (`0x3B`).
     Buy {
         /// Which connection.
