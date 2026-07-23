@@ -511,10 +511,7 @@ pub fn encode_character_list(
 
     for slot in 0..slots {
         let name = characters.get(slot).map_or("", |entry| entry.name.as_str());
-        writer.fixed_string(name, CHARACTER_NAME_LENGTH);
-        // The password field is vestigial: the client sends it back but no
-        // modern server puts anything in it.
-        writer.fixed_string("", PASSWORD_LENGTH);
+        write_character_slot(&mut writer, name);
     }
 
     writer.u8(starts.len().min(u8::MAX as usize) as u8);
@@ -542,6 +539,94 @@ pub fn encode_character_list(
         writer.u32(flags);
     }
 
+    patch_length(writer.into_bytes())
+}
+
+/// Write one 60-byte character slot: a 30-byte name and the vestigial 30-byte
+/// password field. Shared by the `0xA9` list and the `0x86` post-delete resend,
+/// so the two never disagree about the slot width.
+fn write_character_slot(writer: &mut PacketWriter, name: &str) {
+    writer.fixed_string(name, CHARACTER_NAME_LENGTH);
+    // The password field is vestigial: the client sends it back but no modern
+    // server puts anything in it.
+    writer.fixed_string("", PASSWORD_LENGTH);
+}
+
+// -- 0x83 delete character ------------------------------------------------
+
+/// `0x83` — the client asks to delete a character by slot. 39 bytes.
+///
+/// The client sends a vestigial 30-byte password field (which no modern server
+/// trusts), then the slot index, then its own IP (which we ignore). ServUO's
+/// `PacketHandlers.DeleteCharacter` seeks past the 30 and reads only the index;
+/// this does the same, so only the slot survives decoding.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DeleteCharacter {
+    /// The slot to delete, as an index into the character list.
+    pub slot: u32,
+}
+
+impl DeleteCharacter {
+    /// The packet id.
+    pub const ID: u8 = 0x83;
+
+    /// Decode a whole 0x83 packet, id included.
+    pub fn decode(bytes: &[u8]) -> Result<Self, LoginDecodeError> {
+        let mut reader = expect_id(bytes, Self::ID)?;
+        reader.skip(PASSWORD_LENGTH)?; // vestigial password field
+        let slot = reader.u32()?;
+        // The trailing client IP is unused.
+        Ok(Self { slot })
+    }
+}
+
+// -- 0x85 delete rejected -------------------------------------------------
+
+/// Why a character deletion was refused — the `0x85` result code.
+///
+/// The client renders each as its own message on the character-select screen.
+/// From ServUO's `DeleteResultType`; the codes are the client's, not ours.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DeleteResult {
+    /// The account password did not check out.
+    PasswordInvalid = 0,
+    /// No character in that slot.
+    CharNotExist = 1,
+    /// The character is logged in and cannot be deleted.
+    CharBeingPlayed = 2,
+    /// The character is too young to delete (the newbie window).
+    CharTooYoung = 3,
+    /// The character is queued for deletion.
+    CharQueued = 4,
+    /// The request made no sense.
+    BadRequest = 5,
+}
+
+/// `0x85` — a character deletion was refused, with the reason. 2 bytes.
+#[must_use]
+pub fn encode_delete_reject(result: DeleteResult) -> Vec<u8> {
+    vec![0x85, result as u8]
+}
+
+// -- 0x86 character list update -------------------------------------------
+
+/// `0x86` — resend the character list after a successful deletion.
+///
+/// The character block of `0xA9` on its own, no city list: a count byte then
+/// `count` 60-byte slots. The count is padded to [`MIN_CHARACTER_SLOTS`] like
+/// the full list, so the client redraws all five rows. Ported from ServUO's
+/// `CharacterListUpdate`.
+#[must_use]
+pub fn encode_character_list_update(characters: &[CharacterEntry]) -> Vec<u8> {
+    let slots = characters.len().max(MIN_CHARACTER_SLOTS);
+    let mut writer = PacketWriter::with_capacity(4 + slots * 60);
+    writer.u8(0x86);
+    writer.u16(0); // length, patched below
+    writer.u8(slots as u8);
+    for slot in 0..slots {
+        let name = characters.get(slot).map_or("", |entry| entry.name.as_str());
+        write_character_slot(&mut writer, name);
+    }
     patch_length(writer.into_bytes())
 }
 
@@ -685,6 +770,54 @@ mod tests {
             AccountLogin::decode(&bytes),
             Err(LoginDecodeError::Codec(_))
         ));
+    }
+
+    #[test]
+    fn delete_character_reads_the_slot_past_the_vestigial_fields() {
+        // 39 bytes: id + 30 pad + u32 slot + 4 client IP.
+        let mut bytes = vec![DeleteCharacter::ID];
+        bytes.extend(std::iter::repeat_n(0u8, PASSWORD_LENGTH));
+        bytes.extend_from_slice(&3u32.to_be_bytes());
+        bytes.extend_from_slice(&[192, 168, 0, 1]);
+        assert_eq!(
+            client_packet_length(DeleteCharacter::ID, None),
+            Some(PacketLength::Fixed(39))
+        );
+        assert_eq!(bytes.len(), 39, "the table and the wire form must agree");
+        assert_eq!(DeleteCharacter::decode(&bytes).unwrap().slot, 3);
+    }
+
+    #[test]
+    fn delete_character_rejects_the_wrong_packet() {
+        let bytes = [0x91u8; 39];
+        assert!(matches!(
+            DeleteCharacter::decode(&bytes),
+            Err(LoginDecodeError::WrongPacket(_))
+        ));
+    }
+
+    #[test]
+    fn delete_reject_is_two_bytes_carrying_the_reason() {
+        assert_eq!(
+            encode_delete_reject(DeleteResult::CharBeingPlayed),
+            vec![0x85, 2]
+        );
+    }
+
+    #[test]
+    fn character_list_update_pads_to_five_slots() {
+        let characters = [CharacterEntry {
+            name: "Dupre".to_owned(),
+        }];
+        let bytes = encode_character_list_update(&characters);
+        assert_eq!(bytes[0], 0x86);
+        assert_eq!(declared_length(&bytes), bytes.len(), "self-declared length");
+        assert_eq!(bytes[3], MIN_CHARACTER_SLOTS as u8, "padded to five rows");
+        assert_eq!(bytes.len(), 4 + MIN_CHARACTER_SLOTS * 60);
+        // The first slot's name sits right after the count byte.
+        assert_eq!(&bytes[4..9], b"Dupre");
+        // The second slot is empty.
+        assert_eq!(bytes[64], 0);
     }
 
     #[test]

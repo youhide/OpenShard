@@ -32,8 +32,9 @@ use openshard_persistence::{
     AccountRecord, CharacterRecord, MemoryStore, PgStore, Snapshot, SqliteStore, Store,
 };
 use openshard_protocol::{
-    encode_login_denied, huffman, AccessLevel, AttackRequest, CastSpellRequest, CharacterPlay,
-    ClientVersion, ContextMenuRequest, ContextMenuSelect, CreateCharacter, DoubleClick, DropItem,
+    encode_character_list_update, encode_delete_reject, encode_login_denied, huffman, AccessLevel,
+    AttackRequest, CastSpellRequest, CharacterPlay, ClientVersion, ContextMenuRequest,
+    ContextMenuSelect, CreateCharacter, DeleteCharacter, DeleteResult, DoubleClick, DropItem,
     EquipItemRequest, GameServerLogin, GumpResponse, LookRequest, PickUpItem, Point,
     PropertyQueryRequest, SkillLock, SkillLockRequest, StartLocation, TalkRequest, TargetResponse,
     UnicodeTalkRequest, WalkRequest, WarModeRequest,
@@ -55,7 +56,7 @@ mod session;
 mod shard;
 
 use boot::{load_config, load_world, open_store};
-use dispatch::{create_character, dispatch, start_cities};
+use dispatch::{create_character, delete_character, dispatch, start_cities};
 use session::Session;
 use shard::run_shard;
 

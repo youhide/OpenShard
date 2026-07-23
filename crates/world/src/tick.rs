@@ -338,6 +338,32 @@ impl World {
         self.departed.drain(..)
     }
 
+    /// Whether a serial belongs to a character that is in the world right now.
+    ///
+    /// The server asks before deleting a character (`0x83`): a character being
+    /// played cannot be deleted out from under its own session. This reads live
+    /// world state, which is safe between ticks — the shard loop owns the world.
+    pub fn is_online(&self, serial: u32) -> bool {
+        self.state
+            .players
+            .values()
+            .any(|&entity| self.state.registry.serial_of(entity).map(|s| s.raw()) == Some(serial))
+    }
+
+    /// Delete a logged-out character's saved state.
+    ///
+    /// The server has already dropped it from the account's in-memory list and
+    /// its own restore map; this forgets the store row and inventory so the
+    /// deletion lands on the next save. The serial is *not* unbound — a packet in
+    /// flight may still name it — so `reserve_serial` keeps it out of circulation
+    /// for the rest of the run.
+    pub fn delete_character(&mut self, serial: u32) {
+        self.journal.forget_serial(serial);
+        // Drop the fast-relogin inventory cache: the character is gone, not
+        // coming back this run.
+        self.pending_inventories.remove(&serial);
+    }
+
     /// How many entities are waiting to be saved.
     pub fn unsaved(&self) -> usize {
         self.journal.len()
@@ -719,6 +745,7 @@ impl World {
                 container,
             } => items::drop_item(&mut self.state, connection, serial, position, container),
             Command::Disconnect { connection } => self.disconnect(connection),
+            Command::DeleteCharacter { serial } => self.delete_character(serial),
             Command::Control { serial } => self.control(serial),
             Command::RequestCast { connection, spell } => self.begin_cast(connection, spell),
             Command::StockVendor { serial, stock } => {

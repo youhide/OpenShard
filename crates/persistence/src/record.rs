@@ -40,21 +40,25 @@ use serde::{Deserialize, Serialize};
 ///   its spells after a relog.
 /// - v9: a character's `dead` flag, so a player who logged out a ghost logs back
 ///   in a ghost — the ghost body is re-derived, but the fact of death is saved.
-pub const SCHEMA_VERSION: u32 = 9;
+/// - v10: an account's credential is an argon2 hash, not plaintext. A mismatched
+///   older database is recreated (the account rows re-seed from config, hashed),
+///   which is the convention every bump above shares.
+pub const SCHEMA_VERSION: u32 = 10;
 
 /// An account, as saved.
 ///
-/// # The password is not here, and that is deliberate
+/// # The credential is a hash, not a password
 ///
-/// This carries whatever the account store uses to check a login, and nothing
-/// says that is a password. Today it is plaintext, because there is no hashing
-/// yet and pretending otherwise in the type name would be worse than admitting
-/// it. When hashing lands, this field changes and [`SCHEMA_VERSION`] moves.
+/// [`credential`](Self::credential) is an argon2 PHC string
+/// (`$argon2id$v=19$...`), never the plaintext. The UO login sends the password
+/// in the clear and that cannot be fixed; what is fixed is that it is hashed
+/// before it reaches here and the plaintext is dropped. See
+/// `openshard_login::password`.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct AccountRecord {
     /// The login name. Unique; this is the key.
     pub name: String,
-    /// The credential, as the account store stores it.
+    /// The credential — an argon2 PHC hash of the password.
     pub credential: String,
 }
 

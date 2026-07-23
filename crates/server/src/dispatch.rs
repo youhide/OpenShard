@@ -519,6 +519,82 @@ pub(crate) fn create_character(
     true
 }
 
+/// Delete a character from the character-select screen (`0x83`).
+///
+/// Like create, this crosses the login/world line: it drops the character from
+/// the account's list *and* tells the world to forget its saved row. Returns
+/// `false` only to drop the connection (a malformed packet or no game login);
+/// a refused delete — bad slot, or a character being played — keeps the
+/// connection and answers with `0x85`, and a good one resends the list with
+/// `0x86`.
+pub(crate) fn delete_character(
+    session: &mut Session,
+    login: &mut LoginServer<DevAccounts>,
+    world: &mut World,
+    saved: &mut HashMap<(String, String), CharacterRecord>,
+    packet: &[u8],
+    id: ConnectionId,
+) -> bool {
+    let slot = match DeleteCharacter::decode(packet) {
+        Ok(delete) => delete.slot,
+        Err(error) => {
+            warn!(%id, %error, "malformed delete-character");
+            return false;
+        }
+    };
+    let Some(account) = session.login.account().map(str::to_owned) else {
+        warn!(%id, "delete-character before a game login");
+        return false;
+    };
+
+    // The slot indexes the very list the client was last sent, which is the
+    // account's in-memory character list.
+    let Some(entry) = login
+        .accounts
+        .characters(&account)
+        .into_iter()
+        .nth(slot as usize)
+    else {
+        let _ = session.send_packet(encode_delete_reject(DeleteResult::CharNotExist));
+        return true;
+    };
+    let name = entry.name;
+    let key = (account.to_lowercase(), name.to_lowercase());
+
+    // A character being played cannot be deleted out from under its session. The
+    // serial to check comes from the saved record; a character with no saved row
+    // has never entered the world and so cannot be online.
+    if let Some(record) = saved.get(&key) {
+        if world.is_online(record.serial) {
+            let _ = session.send_packet(encode_delete_reject(DeleteResult::CharBeingPlayed));
+            return true;
+        }
+    }
+
+    // Drop it from the authoritative in-memory list. A failure here is a bad slot.
+    if let Err(reason) = login.accounts.delete_character(&account, slot) {
+        warn!(%id, account, name, ?reason, "delete refused");
+        let _ = session.send_packet(encode_delete_reject(DeleteResult::CharNotExist));
+        return true;
+    }
+
+    // Forget the saved row so a re-login this run does not restore it, and tell
+    // the world to forget the store row and inventory on the next save. The
+    // serial stays reserved — a packet in flight may still name it.
+    if let Some(record) = saved.remove(&key) {
+        world.queue(Command::DeleteCharacter {
+            serial: record.serial,
+        });
+    }
+    info!(%id, account, name, "character deleted");
+
+    // Resend the updated list so the select screen redraws.
+    let _ = session.send_packet(encode_character_list_update(
+        &login.accounts.characters(&account),
+    ));
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

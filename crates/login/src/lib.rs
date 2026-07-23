@@ -59,6 +59,7 @@
 
 mod accounts;
 pub mod auth;
+pub mod password;
 mod session;
 
 pub use accounts::{Accounts, DevAccount, DevAccounts};

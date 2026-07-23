@@ -52,15 +52,30 @@ mistake this for a security feature when it lands.
 - [x] `crates/server` — a binary that runs and reaches a character list
 - [x] `config` — TOML, validated at load; accounts and addresses come from it
 - [x] A fresh checkout writes a default `openshard.toml` and runs
-- [ ] **Character deletion** (`0x83`) — the packet is in the length table but has
-  no handler; the delete button on the character-select screen does nothing. Needs
-  the store to forget the row and the serial to stay reserved (a packet in flight
-  may still name it).
-- [ ] **Store-backed accounts and password hashing** — the login still verifies
-  against `DevAccounts` from `openshard.toml`; the store half already exists
-  (`AccountRecord`, `Store::accounts`/`put_account`) but is not wired into the
-  `Accounts` trait the `LoginServer` reads, and the password is plaintext until a
-  slow hash (argon2/bcrypt) lands — `record.rs` and `accounts.rs` both say so.
+- [x] **Character deletion** (`0x83`). The delete button on the character-select
+  screen works: `DeleteCharacter::decode` reads the slot, and the handler (beside
+  `create_character`, where both login and world are in reach) drops it from the
+  account's list and queues a `Command::DeleteCharacter` the tick turns into a
+  `Journal::forget_serial` — so the next snapshot carries the serial in `removed`
+  and the store drops the character row and its whole inventory, off the tick like
+  every other write. The **serial stays reserved** (`reserve_serial` at boot is
+  never undone — a packet in flight may still name it). A character *being played*
+  cannot be deleted (`World::is_online`, a synchronous read between ticks): the
+  reply is `0x85 CharBeingPlayed`; a bad slot is `0x85 CharNotExist`; a good delete
+  resends the list with `0x86` (the `0xA9` character block reused). Ported from
+  ServUO's `DeleteCharacter`/`DeleteResult`/`CharacterListUpdate`.
+- [x] **Store-backed accounts and password hashing.** Credentials are argon2 PHC
+  hashes now, never plaintext (`crates/login/src/password.rs`, over the `argon2`
+  crate; the salt comes from the `getrandom` the auth keys already use). Boot reads
+  `store.accounts()` into the in-memory `DevAccounts` as the source of truth for
+  `verify`, and config `[[accounts]]` **seeds only what the store has never seen** —
+  the plaintext hashed once, written to both memory and the store, and thereafter
+  the store wins (changing a config password does nothing). `verify` runs argon2 in
+  the sync `Accounts` path (hashing is CPU-only, so no async bridge into the sans-io
+  `LoginServer`); `SCHEMA_VERSION` moved to 10, so an older database is recreated and
+  re-seeds hashed. `access` stays config-derived and re-looked-up each login, never
+  saved. The `constant_time_eq` shim is gone — argon2's own verify is constant-time
+  over the digest.
 
 `config` refuses to start on a wildcard `advertise` rather than accepting it and
 failing silently for every remote client. That check is the reason the crate

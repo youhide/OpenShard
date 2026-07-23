@@ -216,7 +216,17 @@ impl Journal {
         // in the same save window as it moved gets written back by its own
         // gravestone.
         self.dirty.remove(&entity);
-        self.removed.insert(serial.raw());
+        self.forget_serial(serial.raw());
+    }
+
+    /// Mark a bare serial deleted, with no entity behind it.
+    ///
+    /// A character deleted from the select screen is logged out — there is no
+    /// live entity to pass [`forget`](Self::forget), only the serial from its
+    /// saved record. The next snapshot carries it in `removed`, and the store
+    /// drops the character row and its inventory.
+    pub fn forget_serial(&mut self, serial: u32) {
+        self.removed.insert(serial);
     }
 
     /// Whether a save would write nothing.

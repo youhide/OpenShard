@@ -57,9 +57,38 @@ pub(crate) async fn run_shard(
     let (saves, snapshots) = mpsc::unbounded_channel();
     let (failed, mut failures) = mpsc::unbounded_channel();
 
+    // Accounts come from the store first — their credentials are the argon2
+    // hashes saved there — and config seeds the rest. The store is authoritative
+    // for a password once it has one, so a config `[[accounts]]` line only
+    // creates an account the store has never seen; changing a config password
+    // after the first boot does nothing (the shard says as much in the docs).
     let mut accounts = DevAccounts::new();
+    match store.accounts().await {
+        Ok(stored) => {
+            for record in stored {
+                accounts = accounts.with_credential(&record.name, &record.credential);
+            }
+        }
+        Err(error) => error!(%error, "could not read saved accounts; config seeds them instead"),
+    }
     for account in &config.accounts {
-        accounts = accounts.with_account(&account.name, &account.password);
+        // Seed a config account only if the store has never seen it, hashing the
+        // plaintext once and writing that same hash both in memory and to the
+        // store — never the plaintext.
+        if !accounts.contains(&account.name) {
+            let credential = openshard_login::password::hash(&account.password);
+            accounts = accounts.with_credential(&account.name, &credential);
+            let record = AccountRecord {
+                name: account.name.clone(),
+                credential,
+            };
+            if let Err(error) = store.put_account(&record).await {
+                warn!(account = account.name, %error, "could not persist a configured account");
+            }
+        }
+        // Characters and access come from config every boot regardless: access is
+        // deliberately not persisted (re-derived each login), and config
+        // characters are folded in beside the stored ones below, deduped.
         for character in &account.characters {
             accounts = accounts.with_character(&account.name, character);
         }
@@ -79,15 +108,6 @@ pub(crate) async fn run_shard(
     // play, and keep their records so playing one restores it where it was. This
     // borrows the store; the save task takes ownership after, so the load has to
     // come first.
-    for account in &config.accounts {
-        let record = AccountRecord {
-            name: account.name.clone(),
-            credential: account.password.clone(),
-        };
-        if let Err(error) = store.put_account(&record).await {
-            warn!(account = account.name, %error, "could not persist a configured account");
-        }
-    }
     let mut saved: HashMap<(String, String), CharacterRecord> = HashMap::new();
     match store.characters().await {
         Ok(characters) => {
@@ -261,7 +281,7 @@ pub(crate) async fn run_shard(
                     error!("the gateway stopped; saving the world");
                     break;
                 };
-                handle(&mut sessions, &mut login, &mut world, advertised, &saved, event);
+                handle(&mut sessions, &mut login, &mut world, advertised, &mut saved, event);
             }
         }
 
@@ -312,7 +332,7 @@ pub(crate) fn handle(
     login: &mut LoginServer<DevAccounts>,
     world: &mut World,
     advertised: SocketAddrV4,
-    saved: &HashMap<(String, String), CharacterRecord>,
+    saved: &mut HashMap<(String, String), CharacterRecord>,
     event: ServerEvent,
 ) {
     match event {
@@ -371,6 +391,14 @@ pub(crate) fn handle(
                         Some(CreateCharacter::ID_CLASSIC | CreateCharacter::ID_HIGH_SEAS)
                     ) {
                         if !create_character(session, login, world, &packet, id) {
+                            sessions.remove(&id);
+                        }
+                        return;
+                    }
+                    // Character deletion crosses the same line: it drops the
+                    // character from the account list and forgets its saved row.
+                    if packet.first().copied() == Some(DeleteCharacter::ID) {
+                        if !delete_character(session, login, world, saved, &packet, id) {
                             sessions.remove(&id);
                         }
                         return;

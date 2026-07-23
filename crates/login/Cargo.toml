@@ -16,4 +16,8 @@ openshard-protocol.workspace = true
 # Auth keys must come from the OS entropy pool, not a counter. `getrandom` is
 # exactly that and nothing else; `rand` would pull in a PRNG we have no use for.
 getrandom = "0.2"
+# Passwords are stored as an argon2 PHC hash, never plaintext. The UO protocol
+# sends the password in the clear, which we cannot fix; what we can fix is never
+# persisting it. The salt comes from `getrandom` above, so no extra RNG feature.
+argon2 = { version = "0.5", features = ["std"] }
 tracing.workspace = true

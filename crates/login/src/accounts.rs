@@ -7,6 +7,8 @@ use openshard_protocol::{
     MIN_CHARACTER_SLOTS, PASSWORD_LENGTH,
 };
 
+use crate::password;
+
 /// Somewhere accounts live.
 ///
 /// A trait because the in-memory store below is a placeholder: real shards keep
@@ -46,6 +48,17 @@ pub trait Accounts {
     /// for a freshly created character to show up in the list on reconnect.
     fn create_character(&mut self, account: &str, name: &str) -> Result<u32, DenyReason>;
 
+    /// Delete the character in a slot and return its name.
+    ///
+    /// The client sends this as `0x83` on the game connection. Slots are
+    /// positional: removing one shifts the later slots down, which is exactly
+    /// what the `0x86` resend that follows expects. An out-of-range or empty slot
+    /// is [`DenyReason::BadCharacter`] — the caller maps it to the client's
+    /// delete-reject code. Whether the character may be deleted *at all* (it is
+    /// not being played, it is old enough) is the caller's to check: this store
+    /// does not know who is in the world.
+    fn delete_character(&mut self, account: &str, slot: u32) -> Result<String, DenyReason>;
+
     /// The authority the account's characters play with — what staff commands
     /// they may run. Defaults to [`AccessLevel::Player`] so a store that has no
     /// notion of staff grants none, which is the safe direction to be wrong in.
@@ -57,33 +70,11 @@ pub trait Accounts {
     }
 }
 
-/// Compare two strings without leaking their contents through timing.
-///
-/// `==` on strings returns at the first differing byte, so how long it takes
-/// tells an attacker how much of the password was right. That turns a
-/// 2^n search into an n-by-256 one.
-///
-/// This is a small win — the network jitter in front of it dwarfs the signal,
-/// and the real answer is a slow hash whose comparison is over fixed-width
-/// digests. It costs three lines, so there is no reason to skip it.
-fn constant_time_eq(left: &str, right: &str) -> bool {
-    let (left, right) = (left.as_bytes(), right.as_bytes());
-    // Length is not secret: it is visible in the packet either way.
-    if left.len() != right.len() {
-        return false;
-    }
-    let mut difference = 0u8;
-    for (a, b) in left.iter().zip(right.iter()) {
-        difference |= a ^ b;
-    }
-    difference == 0
-}
-
 /// One account in the dev store.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct DevAccount {
-    /// The password, in plaintext.
-    pub password: String,
+    /// The credential — an argon2 PHC hash, never plaintext. See [`password`].
+    pub credential: String,
     /// Whether logins are refused.
     pub blocked: bool,
     /// The characters on this account.
@@ -92,15 +83,14 @@ pub struct DevAccount {
     pub access: AccessLevel,
 }
 
-/// An in-memory account store, for development only.
+/// An in-memory account store.
 ///
-/// # Not for production
-///
-/// It holds plaintext passwords, because the TOML file it is built from does
-/// too. That is acceptable for a shard you are testing on a laptop and is not
-/// acceptable anywhere else. When `openshard-persistence` lands, the real
-/// [`Accounts`] implementation hashes and this one keeps its current job:
-/// letting a test spin up a login server in one line.
+/// The credentials it holds are argon2 hashes, not plaintext — the plaintext a
+/// config file or a login packet carries is hashed on the way in and never
+/// kept. The store itself is in memory: the server loads it from the persistent
+/// [`Store`](openshard_persistence::Store) at boot and seeds it from config, and
+/// write-through to the database happens off the tick. A test can still spin one
+/// up in one line with [`with_account`](Self::with_account).
 #[derive(Clone, Default, Debug)]
 pub struct DevAccounts {
     /// Keyed by lowercased name — the client does not preserve case reliably
@@ -114,18 +104,37 @@ impl DevAccounts {
         Self::default()
     }
 
-    /// Add an account with a password and no characters.
-    pub fn with_account(mut self, account: &str, password: &str) -> Self {
+    /// Add an account with a plaintext password, which is hashed before storage.
+    ///
+    /// For config seeding and tests, where the password is known in the clear.
+    /// An account loaded from the store already carries a hash and comes in
+    /// through [`with_credential`](Self::with_credential) instead.
+    pub fn with_account(self, account: &str, password: &str) -> Self {
+        self.with_credential(account, &password::hash(password))
+    }
+
+    /// Add an account with an already-hashed credential and no characters.
+    ///
+    /// The path a stored account takes at boot: its PHC hash is loaded as-is,
+    /// never re-hashed. A blank credential (which verifies against nothing)
+    /// stands for an account row with no password set.
+    pub fn with_credential(mut self, account: &str, credential: &str) -> Self {
         self.accounts.insert(
             account.to_lowercase(),
             DevAccount {
-                password: password.to_owned(),
+                credential: credential.to_owned(),
                 blocked: false,
                 characters: Vec::new(),
                 access: AccessLevel::Player,
             },
         );
         self
+    }
+
+    /// Whether an account already exists — for "seed from config only if absent",
+    /// so the store's credential wins over a stale config password.
+    pub fn contains(&self, account: &str) -> bool {
+        self.accounts.contains_key(&account.to_lowercase())
     }
 
     /// Grant an existing account an access level. Ignored if there is no account.
@@ -172,7 +181,10 @@ impl Accounts for DevAccounts {
         if entry.blocked {
             return Err(DenyReason::Blocked);
         }
-        if !constant_time_eq(&entry.password, password) {
+        // argon2 verify is constant-time over the digest and rejects a credential
+        // that is not a valid hash, so an account row with no real password set
+        // can never be logged into.
+        if !password::verify(password, &entry.credential) {
             return Err(DenyReason::BadPassword);
         }
         Ok(())
@@ -222,6 +234,17 @@ impl Accounts for DevAccounts {
             name: trimmed.to_owned(),
         });
         Ok(slot)
+    }
+
+    fn delete_character(&mut self, account: &str, slot: u32) -> Result<String, DenyReason> {
+        let Some(entry) = self.accounts.get_mut(&account.to_lowercase()) else {
+            return Err(DenyReason::NoAccount);
+        };
+        let index = slot as usize;
+        if index >= entry.characters.len() {
+            return Err(DenyReason::BadCharacter);
+        }
+        Ok(entry.characters.remove(index).name)
     }
 }
 
@@ -409,13 +432,55 @@ mod tests {
     }
 
     #[test]
-    fn constant_time_eq_still_compares_correctly() {
-        // It is only useful if it is also right.
-        assert!(constant_time_eq("", ""));
-        assert!(constant_time_eq("abc", "abc"));
-        assert!(!constant_time_eq("abc", "abd"));
-        assert!(!constant_time_eq("abc", "ab"));
-        assert!(!constant_time_eq("ab", "abc"));
-        assert!(!constant_time_eq("abc", ""));
+    fn delete_character_removes_the_slot_and_shifts_the_rest() {
+        let mut store = DevAccounts::new().with_account("a", "p");
+        let _ = store.create_character("a", "First");
+        let _ = store.create_character("a", "Second");
+        let _ = store.create_character("a", "Third");
+        assert_eq!(store.delete_character("a", 1), Ok("Second".to_owned()));
+        let names: Vec<_> = store.characters("a").into_iter().map(|c| c.name).collect();
+        assert_eq!(names, vec!["First", "Third"], "later slots shift down");
+    }
+
+    #[test]
+    fn delete_character_refuses_an_empty_or_out_of_range_slot() {
+        let mut store = DevAccounts::new().with_account("a", "p");
+        let _ = store.create_character("a", "Only");
+        assert_eq!(
+            store.delete_character("a", 1),
+            Err(DenyReason::BadCharacter)
+        );
+        assert_eq!(
+            store.delete_character("nobody", 0),
+            Err(DenyReason::NoAccount)
+        );
+    }
+
+    #[test]
+    fn the_stored_credential_is_a_hash_not_the_plaintext() {
+        // A shard's account file is a plausible leak; the password must not be
+        // recoverable from it.
+        let store = DevAccounts::new().with_account("admin", "hunter2");
+        assert_eq!(store.verify("admin", "hunter2"), Ok(()));
+        let credential = &store.accounts["admin"].credential;
+        assert!(
+            !credential.contains("hunter2"),
+            "plaintext must not survive"
+        );
+        assert!(credential.starts_with("$argon2"), "an argon2 PHC hash");
+    }
+
+    #[test]
+    fn a_credential_loaded_as_a_hash_is_not_re_hashed() {
+        // The boot path: an account already carrying a hash is loaded as-is and
+        // still verifies. Re-hashing it (treating it as a plaintext) would lock
+        // the account out.
+        let phc = password::hash("secret");
+        let store = DevAccounts::new().with_credential("returning", &phc);
+        assert_eq!(store.verify("returning", "secret"), Ok(()));
+        assert_eq!(
+            store.accounts["returning"].credential, phc,
+            "loaded verbatim"
+        );
     }
 }

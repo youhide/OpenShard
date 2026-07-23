@@ -474,6 +474,15 @@ pub enum Command {
         /// Which connection.
         connection: ConnectionId,
     },
+    /// A character was deleted from the character-select screen (`0x83`). The
+    /// server has already dropped it from the account's list; this tells the
+    /// world to forget its saved row and inventory so the deletion reaches the
+    /// store on the next save. The serial stays reserved — a packet still in
+    /// flight may name it — so nothing is unbound here.
+    DeleteCharacter {
+        /// The deleted character's wire serial.
+        serial: u32,
+    },
     /// Hand a mobile's brain to the script: the built-in `ai` stops driving it and
     /// its `onTick` takes over. A script controls a creature it spawned.
     Control {

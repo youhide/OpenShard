@@ -52,6 +52,34 @@ fn entering_the_world_is_worth_saving() {
 }
 
 #[test]
+fn deleting_a_character_forgets_its_row_on_the_next_save() {
+    // The `0x83` path: once a character is deleted, the next snapshot names its
+    // serial in `removed`, and the store drops the row and its inventory.
+    let mut world = eager();
+    let now = Instant::now();
+    let connection = enter(&mut world, now);
+    let serial = world
+        .state
+        .registry
+        .serial_of(world.state.players[&connection])
+        .unwrap()
+        .raw();
+    // Log it out first: a deleted character is one at the select screen, not in
+    // the world, and the save that carries the deletion comes after the logout.
+    world.queue(Command::Disconnect { connection });
+    world.tick(now + WALK_INTERVAL);
+    let _ = world.drain_saves().count();
+
+    world.delete_character(serial);
+    world.tick(now + WALK_INTERVAL * 2);
+    let snapshot = only_snapshot(&mut world).expect("a deletion is a change worth saving");
+    assert!(
+        snapshot.removed.contains(&serial),
+        "the deleted serial is marked removed so the store drops it"
+    );
+}
+
+#[test]
 fn an_empty_world_offers_nothing() {
     // No transaction just to say a shard is idle. With nobody online and
     // nothing loose on the ground, a save writes nothing and so is skipped.

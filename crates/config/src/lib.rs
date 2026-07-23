@@ -407,17 +407,27 @@ impl Default for ServerConfig {
 
 /// One account.
 ///
-/// # Plaintext, and knowingly so
+/// # Plaintext here, hashed once inside
 ///
 /// The password sits in a file on disk. That is what a dev config is; it is not
-/// a model for production, where accounts belong in a database behind a slow
-/// hash. See `openshard-login`'s `Accounts` trait.
+/// a model for production. The binary hashes it (argon2) on the way into the
+/// store, and never keeps the plaintext. See `openshard-login`'s `Accounts`
+/// trait and its `password` module.
+///
+/// # It seeds, it does not override
+///
+/// A config account creates a store row only the first time the shard sees it.
+/// After that the store is authoritative for the password: changing this line
+/// does *not* change an existing account's password (there is no re-hash of a
+/// row that already has one). To rotate a password, clear the account from the
+/// store, not the config.
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AccountConfig {
     /// The account name. Case-insensitive at login.
     pub name: String,
-    /// The password, in plaintext.
+    /// The password, in plaintext. Hashed on first boot and then ignored; see
+    /// the type docs.
     pub password: String,
     /// Character names on this account.
     #[serde(default)]
