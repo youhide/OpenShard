@@ -13,7 +13,7 @@
 //! delay, target all resolve), but its effect is left to the pack until the
 //! subsystem lands.
 
-use openshard_state::DamageType;
+use openshard_state::{DamageType, FieldKind};
 
 /// A reagent's item graphic — the eight classic Magery reagents.
 const BLACK_PEARL: u16 = 0x0F7A;
@@ -70,6 +70,9 @@ pub enum SpellEffect {
     /// effect kind (`NIGHT_SIGHT`..`MAGIC_REFLECT`); its magnitude and duration
     /// scale from the caster's Magery when it lands.
     BehaviourBuff(u8),
+    /// A persistent field — a row of ground tiles laid at the aimed spot that pulse
+    /// harm (Fire, Poison) or bar the way (Energy, Stone) until their tick comes.
+    Field(FieldKind),
     /// The core does not run this one yet — the pack owns it (fields, summons,
     /// travel, and the rest).
     Scripted,
@@ -96,7 +99,8 @@ pub struct SpellInfo {
 use openshard_state::effect;
 use DamageType::{Cold, Energy, Fire, Physical};
 use SpellEffect::{
-    AreaCure, AreaDamage, BehaviourBuff, Cure, Damage, Heal, Poison, Scripted, StatMod, Teleport,
+    AreaCure, AreaDamage, BehaviourBuff, Cure, Damage, Field, Heal, Poison, Scripted, StatMod,
+    Teleport,
 };
 use SpellTarget::{Location, Mobile, SelfCast};
 
@@ -266,7 +270,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         3,
         &[BLOOD_MOSS, GARLIC],
         Location,
-        Scripted,
+        Field(FieldKind::Stone),
     ),
     // -- Fourth circle -------------------------------------------------------
     spell(
@@ -295,7 +299,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         4,
         &[BLACK_PEARL, SULFUROUS_ASH, SPIDERS_SILK],
         Location,
-        Scripted,
+        Field(FieldKind::Fire),
     ),
     spell(
         "Greater Heal",
@@ -373,7 +377,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         5,
         &[BLACK_PEARL, NIGHTSHADE, SPIDERS_SILK],
         Location,
-        Scripted,
+        Field(FieldKind::Poison),
     ),
     spell(
         "Summon Creature",
@@ -452,7 +456,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         7,
         &[BLOOD_MOSS, MANDRAKE_ROOT, SULFUROUS_ASH, SPIDERS_SILK],
         Location,
-        Scripted,
+        Field(FieldKind::Energy),
     ),
     spell(
         "Flamestrike",
@@ -606,6 +610,11 @@ mod tests {
         assert_eq!(info(17).unwrap().name, "Fireball");
         assert_eq!(info(50).unwrap().name, "Flamestrike");
         assert_eq!(info(21).unwrap().name, "Teleport");
+        // The field spells, whose ids the field tests cast by.
+        assert_eq!(info(23).unwrap().name, "Wall of Stone");
+        assert_eq!(info(27).unwrap().name, "Fire Field");
+        assert_eq!(info(38).unwrap().name, "Poison Field");
+        assert_eq!(info(49).unwrap().name, "Energy Field");
         assert!(info(64).is_none(), "there is no 65th spell");
     }
 

@@ -278,6 +278,62 @@ pub struct Poisoned {
     pub pulses_left: u8,
 }
 
+/// What a persistent field does — the behaviour a field-tile entity carries.
+///
+/// A spell lays a row of ground tiles that either pulse harm or bar the way, on
+/// the tick counter like [`Poisoned`] and decay. Paralyze Field is not here yet:
+/// it freezes whoever crosses it, and there is no freeze mechanic until the
+/// Paralyze spell brings one.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum FieldKind {
+    /// Fire Field — pulses fire damage to whoever stands on it; not a wall.
+    Fire,
+    /// Poison Field — poisons whoever stands on it; not a wall.
+    Poison,
+    /// Energy Field — an impassable wall; no damage.
+    Energy,
+    /// Wall of Stone — an impassable wall; no damage.
+    Stone,
+}
+
+impl FieldKind {
+    /// Whether a mobile cannot walk onto this field — a wall (Energy, Stone), not
+    /// a hazard you cross and are hurt by (Fire, Poison).
+    #[must_use]
+    pub fn blocks(self) -> bool {
+        matches!(self, Self::Energy | Self::Stone)
+    }
+
+    /// Whether this field pulses harm each cadence (Fire, Poison).
+    #[must_use]
+    pub fn pulses(self) -> bool {
+        matches!(self, Self::Fire | Self::Poison)
+    }
+}
+
+/// One tile of a persistent field — a ground entity that pulses harm or blocks the
+/// way until its tick comes. The field counterpart of [`Poisoned`]: `next_pulse`
+/// and `expires_at` are tick counts, so a field replays like decay.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Field {
+    /// What the field does.
+    pub kind: FieldKind,
+    /// Who laid it — a Fire Field's damage is credited to the caster, so a field
+    /// kill counts.
+    pub caster: Serial,
+    /// The tick the next pulse of harm lands (Fire, Poison); unused for a wall.
+    pub next_pulse: u64,
+    /// The tick the tile vanishes.
+    pub expires_at: u64,
+    /// Whether the tile is registered in the obstruction index (Energy, Stone).
+    pub blocks: bool,
+}
+
+/// The z-span a wall-like field tile occupies in the obstruction index — tall
+/// enough that a mobile's own span always intersects it, so it bars the way like a
+/// shut door.
+pub const FIELD_HEIGHT: u8 = 20;
+
 /// The kind tag on a saved effect and a live [`StatMod`], canonical across the
 /// engine.
 ///

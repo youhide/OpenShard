@@ -77,6 +77,7 @@ mod death;
 mod decor;
 mod defaults;
 mod enter;
+mod fields;
 mod motion;
 mod persist;
 mod skills_wire;
@@ -399,6 +400,9 @@ impl World {
         combat::expire_criminality(&mut self.state);
         combat::decay_murders(&mut self.state);
         combat::poison_tick(&mut self.state);
+        // Pulse and expire persistent fields — fire burns, poison seeps, walls hold
+        // — before `reap`, so a field kill lays its corpse this tick.
+        self.field_tick();
         // Lift the stat buffs whose time is up, and redraw the bar for any player
         // whose stats just changed back — the decide-then-apply split again.
         let now = self.state.ticks;

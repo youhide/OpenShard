@@ -22,7 +22,7 @@ use openshard_protocol::{
     encode_graphical_effect, encode_play_sound, encode_target_cursor, EffectKind, EffectPoint,
 };
 use openshard_state::components::{Casting, Skills};
-use openshard_state::{CastStyle, DamageType, TargetPurpose};
+use openshard_state::{CastStyle, DamageType, FieldKind, TargetPurpose};
 
 /// The skill a spell rolls — Magery, id 25.
 const MAGERY_SKILL: u8 = 25;
@@ -357,6 +357,11 @@ impl World {
                     }
                 }
             }
+            SpellEffect::Field(kind) => {
+                // Lay the row of tiles at the aimed spot; the tiles themselves are
+                // the visual, so `spell_feedback` only voiced the cast.
+                self.lay_field(caster, kind, target_location);
+            }
             SpellEffect::Scripted => {} // the pack's, off SpellCast
         }
     }
@@ -377,6 +382,16 @@ impl World {
         target_location: Point,
         effect: SpellEffect,
     ) {
+        // A field has no bolt or sparkle — the row of tiles it lays is its own
+        // visual — so it only sounds its cast and plays the gesture.
+        if let SpellEffect::Field(kind) = effect {
+            let sound = field_cast_sound(kind);
+            let at = self.caster_position(caster);
+            self.state
+                .broadcast_from(caster, encode_play_sound(sound, at.x, at.y, at.z));
+            self.state.animate(caster, openshard_state::Action::Cast);
+            return;
+        }
         // A bolt flies caster→mark; a sparkle sits on the mark; a blast plants
         // itself at the aimed spot. The graphic and sound are ServUO's per-spell.
         enum Visual {
@@ -407,6 +422,8 @@ impl World {
                     _ => (0x01E9, Visual::OnTarget(0x375A)), // Magic Reflection
                 }
             }
+            // Handled above, before this match — a field voices itself and returns.
+            SpellEffect::Field(_) => return,
             SpellEffect::Scripted => return, // the pack's to voice
         };
 
@@ -596,5 +613,15 @@ impl World {
             );
             self.state.send(connection, packet);
         }
+    }
+}
+
+/// ServUO's cast sound for each field spell — the field tiles are the visual, so
+/// this is all the cast announces beyond the gesture.
+fn field_cast_sound(kind: FieldKind) -> u16 {
+    match kind {
+        FieldKind::Fire => 0x020C,
+        FieldKind::Poison | FieldKind::Energy => 0x020B,
+        FieldKind::Stone => 0x01F6,
     }
 }

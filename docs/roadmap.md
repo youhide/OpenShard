@@ -728,10 +728,25 @@ Roughly in dependency order, each script-first:
     restored correctly for the moment one does. Each plays ServUO's per-spell sound
     and sparkle. Deferred: the AoS (era 2) resist-swap variants, and a day/night
     cycle for Night Sight to fight.
-  - [ ] **Persistent fields** — Fire/Poison/Energy/Paralyze Field and Wall of
-    Stone: a timed area that pulses damage or blocks movement, on the tick counter
-    like decay. Wants a field entity that the movement obstruction index and the
-    damage path both see.
+  - [x] **Persistent fields — Fire, Poison, Energy Field and Wall of Stone.** A
+    spell lays a row of ground-tile entities (each a `Graphic`+`Position` drawn like
+    a dropped item, carrying a `Field` component), perpendicular to the line of fire
+    (ServUO's `eastToWest` from the caster→target vector), Magery-scaled in
+    duration. A new `World::field_tick` (`tick/fields.rs`) pulses and expires them on
+    the tick counter — the `combat::poison_tick` shape, so a field replays like
+    decay, and it runs before `reap` so a field kill lays its corpse the same tick.
+    **Fire** pulses fire damage (through the one `combat::damage` door, credited to
+    the caster) and **Poison** applies poison to whoever stands on a tile
+    (`sectors.nearby(pos, 0)`); **Energy** and **Wall of Stone** register each tile
+    in the per-facet obstruction index (`obstructions.block`, `door: false`) so they
+    bar players and A\* alike, and free it on expiry — the door-toggle/decoration
+    pattern. Fields are transient (10–54 s), so like a cast in flight they are
+    **excluded from the save sweep** rather than restored as eternal statics. The
+    cast voices only its ServUO sound and gesture; the tiles are the visual.
+    **Deferred: Paralyze Field** — it freezes whoever crosses it, which needs a
+    freeze mechanic shared with the Paralyze spell; the smallest next step. Also
+    deferred: Dispel Field (Dispel is still `Scripted`), the 300 ms row stagger, and
+    per-tile `stand_z` on slopes.
   - [ ] **Summons with a lifetime** — Blade Spirits, Energy Vortex, Summon
     Creature/Daemon: a spawned creature that despawns on its own timer and counts
     against the follower cap the status bar already carries.

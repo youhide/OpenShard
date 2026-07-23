@@ -1,8 +1,8 @@
 use super::*;
 use openshard_persistence::EffectRecord;
 use openshard_state::components::{
-    body_opens_doors, effect, Aggression, Banker, BehaviourBuff, BehaviourBuffs, Npc, Poisoned,
-    Price, RangedAttack, Skills, Spellbook, StatMod, StatMods, SwingSpeed, Vendor,
+    body_opens_doors, effect, Aggression, Banker, BehaviourBuff, BehaviourBuffs, Field, Npc,
+    Poisoned, Price, RangedAttack, Skills, Spellbook, StatMod, StatMods, SwingSpeed, Vendor,
 };
 
 impl World {
@@ -211,10 +211,14 @@ impl World {
         let mut records = Vec::new();
         for (item, Position(at)) in registry.query::<Position>() {
             // A drawable thing on the ground: a graphic, not a mobile (which carries
-            // a Body), and not decoration (which the pack owns and re-lays).
+            // a Body), not decoration (which the pack owns and re-lays), and not a
+            // field tile (transient like a cast in flight — it does not persist, and
+            // restoring one would leave an eternal static that no longer expires or
+            // blocks).
             if !registry.has::<Graphic>(item)
                 || registry.has::<Body>(item)
                 || registry.has::<Decoration>(item)
+                || registry.has::<Field>(item)
             {
                 continue;
             }

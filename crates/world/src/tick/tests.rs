@@ -4325,6 +4325,202 @@ fn a_behaviour_buff_survives_a_relogin() {
     );
 }
 
+/// A world whose spells cast Sphere-style with reagents off — the field spells
+/// carry several reagents the one-reagent test caster does not stock.
+fn field_world() -> World {
+    World::new(START).with_gameplay(Gameplay {
+        cast_style: openshard_state::CastStyle::Walk,
+        reagents: false,
+        ..Default::default()
+    })
+}
+
+#[test]
+fn fire_field_lays_a_row_and_burns_who_stands_in_it() {
+    use openshard_state::components::Field;
+    let now = Instant::now();
+    let mut world = field_world();
+    let (connection, _caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    let spot = Point::new(START.0 + 3, START.1, 0);
+    let victim = spawn_mobile_at(&mut world, spot, 50, now);
+    let victim_entity = entity(&world, victim);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 27,
+    }); // Fire Field
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::TargetResponse {
+            cursor_id: 0,
+            serial: 0,
+            location: spot,
+            graphic: 0,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world.state.registry.query::<Field>().count(),
+        5,
+        "a five-tile row was laid"
+    );
+
+    // Burn for a couple of seconds — two pulses at a one-second cadence.
+    let mut later = now;
+    for _ in 0..45 {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert!(
+        world
+            .registry()
+            .get::<Hitpoints>(victim_entity)
+            .unwrap()
+            .current
+            < 50,
+        "the fire field burned who stood in it"
+    );
+}
+
+#[test]
+fn poison_field_poisons_who_stands_in_it() {
+    use openshard_state::components::Poisoned;
+    let now = Instant::now();
+    let mut world = field_world();
+    let (connection, _caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    let spot = Point::new(START.0 + 3, START.1, 0);
+    let victim = spawn_mobile_at(&mut world, spot, 50, now);
+    let victim_entity = entity(&world, victim);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 38,
+    }); // Poison Field
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::TargetResponse {
+            cursor_id: 0,
+            serial: 0,
+            location: spot,
+            graphic: 0,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    // The poison pulse lands a second and a half in.
+    let mut later = now;
+    for _ in 0..35 {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert!(
+        world.registry().get::<Poisoned>(victim_entity).is_some(),
+        "the poison field poisoned who stood in it"
+    );
+}
+
+#[test]
+fn wall_of_stone_blocks_the_way_then_clears() {
+    use openshard_state::components::Field;
+    use openshard_state::FieldKind;
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let caster = world.state.players[&connection];
+    // Aim due south: the line of fire runs north–south, so the wall runs east–west.
+    let spot = Point::new(START.0, START.1 + 3, 0);
+    world.lay_field(caster, FieldKind::Stone, spot);
+
+    assert!(
+        world
+            .state
+            .facet_state(0)
+            .obstructions
+            .is_blocked(spot.x, spot.y),
+        "the wall blocks its centre tile"
+    );
+
+    // Force expiry rather than run ten seconds of ticks.
+    let soon = world.state.ticks + 1;
+    let tiles: Vec<EntityId> = world
+        .state
+        .registry
+        .query::<Field>()
+        .map(|(e, _)| e)
+        .collect();
+    for e in tiles {
+        let mut field = world.state.registry.get::<Field>(e).copied().unwrap();
+        field.expires_at = soon;
+        world.state.registry.insert(e, field);
+    }
+    world.tick(now + TICK_INTERVAL);
+
+    assert_eq!(
+        world.state.registry.query::<Field>().count(),
+        0,
+        "the tiles are gone"
+    );
+    assert!(
+        !world
+            .state
+            .facet_state(0)
+            .obstructions
+            .is_blocked(spot.x, spot.y),
+        "and the way is free again"
+    );
+}
+
+#[test]
+fn a_field_row_lies_perpendicular_to_the_line_of_fire() {
+    use openshard_state::components::Field;
+    use openshard_state::FieldKind;
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now); // caster at START
+    let caster = world.state.players[&connection];
+    // Aim due east: the row should run north–south (vary Y, share X).
+    let spot = Point::new(START.0 + 5, START.1, 0);
+    world.lay_field(caster, FieldKind::Fire, spot);
+
+    let tiles: Vec<Point> = world
+        .state
+        .registry
+        .query::<Field>()
+        .filter_map(|(e, _)| world.state.registry.get::<Position>(e).map(|p| p.0))
+        .collect();
+    assert_eq!(tiles.len(), 5);
+    assert!(
+        tiles.iter().all(|p| p.x == spot.x),
+        "every tile shares the caster–target X axis"
+    );
+    assert!(
+        tiles.iter().any(|p| p.y == spot.y - 2) && tiles.iter().any(|p| p.y == spot.y + 2),
+        "and the row spreads along Y, perpendicular to the line of fire"
+    );
+}
+
+#[test]
+fn a_field_tile_is_not_saved() {
+    use openshard_state::FieldKind;
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let caster = world.state.players[&connection];
+    world.lay_field(caster, FieldKind::Fire, Point::new(START.0 + 3, START.1, 0));
+
+    world.take_snapshot();
+    let snapshot = world.drain_saves().next_back().expect("a snapshot");
+    assert!(
+        snapshot.ground.unwrap_or_default().is_empty(),
+        "a transient field tile is not swept into the save"
+    );
+}
+
 #[test]
 fn the_bless_spell_raises_the_targets_stats() {
     use openshard_state::components::Stats;
