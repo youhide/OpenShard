@@ -138,7 +138,9 @@ CREATE TABLE IF NOT EXISTS characters (
     -- so a relog cannot wash a debuff off.
     effects  TEXT NOT NULL,
     -- Whether it logged out dead: a ghost relogs a ghost. 0 for the living.
-    dead     INTEGER NOT NULL
+    dead     INTEGER NOT NULL,
+    -- The player's quest log — an opaque JSON blob the pack owns. '' for none.
+    quest_blob TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS items (
     serial    INTEGER PRIMARY KEY,
@@ -291,8 +293,8 @@ impl Store for SqliteStore {
                     .execute(
                         "INSERT OR REPLACE INTO characters \
                          (serial, account, name, body, hue, facet, x, y, z, facing, \
-                          strength, dexterity, intelligence, skills, effects, dead) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                          strength, dexterity, intelligence, skills, effects, dead, quest_blob) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
                         params![
                             record.serial,
                             record.account,
@@ -310,6 +312,7 @@ impl Store for SqliteStore {
                             skills,
                             effects,
                             record.dead,
+                            record.quest_blob,
                         ],
                     )
                     .map_err(database)?;
@@ -465,7 +468,8 @@ impl Store for SqliteStore {
             let mut statement = guard
                 .prepare(
                     "SELECT serial, account, name, body, hue, facet, x, y, z, facing, \
-                     strength, dexterity, intelligence, skills, effects, dead FROM characters",
+                     strength, dexterity, intelligence, skills, effects, dead, quest_blob \
+                     FROM characters",
                 )
                 .map_err(database)?;
             let rows = statement
@@ -490,6 +494,7 @@ impl Store for SqliteStore {
                             skills: Vec::new(),
                             effects: Vec::new(),
                             dead: row.get(15)?,
+                            quest_blob: row.get(16)?,
                         },
                         skills,
                         effects,
@@ -753,6 +758,7 @@ mod tests {
             skills: Vec::new(),
             effects: Vec::new(),
             dead: false,
+            quest_blob: String::new(),
         }
     }
 

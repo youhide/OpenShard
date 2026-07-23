@@ -2,7 +2,8 @@ use super::*;
 use openshard_persistence::EffectRecord;
 use openshard_state::components::{
     body_opens_doors, effect, Aggression, Banker, BehaviourBuff, BehaviourBuffs, Field, Frozen,
-    Npc, Poisoned, Price, RangedAttack, Skills, Spellbook, StatMod, StatMods, SwingSpeed, Vendor,
+    Npc, Poisoned, Price, QuestLog, RangedAttack, Skills, Spellbook, StatMod, StatMods, SwingSpeed,
+    Vendor,
 };
 
 impl World {
@@ -556,6 +557,10 @@ impl World {
             skills,
             effects: Self::effects_of(registry, entity, now),
             dead: dead.is_some(),
+            quest_blob: registry
+                .get::<QuestLog>(entity)
+                .map(|q| q.0.clone())
+                .unwrap_or_default(),
         })
     }
 

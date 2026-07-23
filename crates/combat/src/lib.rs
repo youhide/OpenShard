@@ -157,6 +157,13 @@ pub struct MobileDied {
     pub entity: EntityId,
     /// Its wire identity.
     pub serial: Serial,
+    /// Its body — so a pack can tell *what* died (a rat, an orc) for a kill quest
+    /// without a second lookup. `0` if it somehow has none.
+    pub body: u16,
+    /// Who dealt the killing blow, if known — carried so a pack can attribute a
+    /// kill (a quest's "slay N", a bounty). `None` for a death with no attacker: a
+    /// field or a reflected blow, a script's unattributed damage.
+    pub killer: Option<Serial>,
 }
 
 /// Ticks between swings for a mobile of dexterity `dex` wielding a weapon of base
@@ -294,7 +301,7 @@ pub fn damage(
                 record_murder(state, killer);
             }
         }
-        die(state, entity, serial);
+        die(state, entity, serial, attacker);
     }
 }
 
@@ -304,7 +311,7 @@ pub fn damage(
 /// for a creature, takes it off the world. A *player* who dies stays put for now:
 /// ghosts, corpses and resurrection are a later slice, and despawning someone
 /// still connected is worse than leaving them standing.
-pub fn die(state: &mut WorldState, entity: EntityId, serial: Serial) {
+pub fn die(state: &mut WorldState, entity: EntityId, serial: Serial, killer: Option<Serial>) {
     // The death throe and cry, while the mobile is still on screen to play them:
     // a wolf's yelp, a human's death gasp.
     state.animate(entity, Action::Die);
@@ -316,7 +323,13 @@ pub fn die(state: &mut WorldState, entity: EntityId, serial: Serial) {
     // combat reports the death, it does not dispose of the body. A player is left
     // standing at zero hits for now (ghosts are a later slice); a creature the
     // world turns into a corpse and takes off the map.
-    state.bus.send(MobileDied { entity, serial });
+    let body = state.registry.get::<Body>(entity).map_or(0, |b| b.id);
+    state.bus.send(MobileDied {
+        entity,
+        serial,
+        body,
+        killer,
+    });
 }
 
 /// Set a player's war stance and tell it the settled one.

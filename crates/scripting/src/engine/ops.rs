@@ -315,6 +315,72 @@ fn op_control(state: &mut OpState, serial: u32) {
         .push(Command::Control { serial });
 }
 
+/// Show a gump (a dialog window) to a mobile's client:
+/// `op_gump({ serial, gumpId, x, y, layout, lines })`. The reply returns as a
+/// `GumpAnswered` event keyed on `gumpId`.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GumpSpec {
+    serial: u32,
+    gump_id: u32,
+    #[serde(default)]
+    x: u16,
+    #[serde(default)]
+    y: u16,
+    layout: String,
+    #[serde(default)]
+    lines: Vec<String>,
+}
+
+/// Send a pack-built gump to a mobile's client.
+#[op2]
+fn op_gump(state: &mut OpState, #[serde] spec: GumpSpec) {
+    state.borrow_mut::<Host>().outbox.push(Command::ShowGump {
+        serial: spec.serial,
+        gump_id: spec.gump_id,
+        x: spec.x,
+        y: spec.y,
+        layout: spec.layout,
+        lines: spec.lines,
+    });
+}
+
+/// A quest reward or handout: `op_give_item({ serial, graphic, hue, amount,
+/// stackable })` — dropped into the player's backpack.
+#[derive(serde::Deserialize)]
+struct GiveSpec {
+    serial: u32,
+    graphic: u16,
+    #[serde(default)]
+    hue: u16,
+    #[serde(default = "one")]
+    amount: u16,
+    #[serde(default)]
+    stackable: bool,
+}
+
+/// Put an item into a player's backpack.
+#[op2]
+fn op_give_item(state: &mut OpState, #[serde] spec: GiveSpec) {
+    state.borrow_mut::<Host>().outbox.push(Command::GiveItem {
+        serial: spec.serial,
+        graphic: spec.graphic,
+        hue: spec.hue,
+        amount: spec.amount,
+        stackable: spec.stackable,
+    });
+}
+
+/// Store a player's opaque quest blob — the pack's own JSON, kept and persisted by
+/// the engine and handed back on the next login.
+#[op2(fast)]
+fn op_set_quest(state: &mut OpState, serial: u32, #[string] blob: String) {
+    state
+        .borrow_mut::<Host>()
+        .outbox
+        .push(Command::SetQuest { serial, blob });
+}
+
 /// One creature template inside a [`SpawnerSpec`]. Mirrors [`MobileSpec`] minus
 /// the position, which the region supplies.
 #[derive(serde::Deserialize)]
@@ -656,7 +722,10 @@ extension!(
         op_clear_spawners,
         op_decorate,
         op_clear_decorations,
-        op_generate_doors
+        op_generate_doors,
+        op_gump,
+        op_give_item,
+        op_set_quest
     ],
     docs = "OpenShard's script-facing ops: read entity state, enqueue commands.",
 );

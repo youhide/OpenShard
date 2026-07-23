@@ -44,6 +44,7 @@ pub(crate) fn dispatch(
                             .collect(),
                         effects: record.effects.clone(),
                         dead: record.dead,
+                        quest_blob: record.quest_blob.clone(),
                     }),
                 ),
                 None => (None, None, None, None),
@@ -513,6 +514,7 @@ pub(crate) fn create_character(
             // A new character is clean.
             effects: Vec::new(),
             dead: false,
+            quest_blob: String::new(),
         }),
         access,
     });

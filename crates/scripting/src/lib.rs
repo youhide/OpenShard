@@ -63,6 +63,15 @@ pub enum Event {
         /// Where it appeared.
         z: i8,
     },
+    /// A player logged in carrying a saved quest log — the blob handed back so the
+    /// pack rebuilds its in-memory quest state. Fires right after `PlayerEntered`,
+    /// only when the log is non-empty. The pack owns the blob's shape.
+    QuestLoaded {
+        /// Whose log, by wire identity.
+        serial: Serial,
+        /// The pack's serialized quest state, exactly as `op_set_quest` stored it.
+        blob: String,
+    },
     /// A creature or NPC appeared — the mobile a script can take control of.
     MobileSpawned {
         /// Its wire identity.
@@ -111,6 +120,11 @@ pub enum Event {
     MobileDied {
         /// Its wire identity.
         serial: Serial,
+        /// Its body — what died, for a kill quest.
+        body: u16,
+        /// Who dealt the killing blow, if known — `0` when unattributed. Lets a
+        /// pack credit a kill to a player (a quest's "slay N").
+        killer: Serial,
     },
     /// A creature's corpse was laid — the loot hook. A pack matches on `body` and
     /// fills the corpse (by `corpse` serial) with its per-creature table, on top
@@ -164,6 +178,18 @@ pub enum Event {
         /// Who used it, by wire identity.
         by: Serial,
     },
+    /// A mobile was double-clicked — the mobile counterpart of `ItemUsed`. Fires
+    /// beside the paperdoll open, so a pack can make a quest giver offer its quest
+    /// or a trainer its lessons. A pack matches on `body`, or on `mobile` for a
+    /// specific NPC.
+    MobileUsed {
+        /// The mobile's wire identity.
+        mobile: Serial,
+        /// Its body, so a pack matches on the kind with no lookup.
+        body: u16,
+        /// Who used it, by wire identity.
+        by: Serial,
+    },
     /// A game master pressed a button in the `.admin` menu. The engine only
     /// carries the verb across; the pack decides what it does — which spawn set to
     /// register, what to clear. This is how staff tools reach the script pack.
@@ -172,6 +198,19 @@ pub enum Event {
         serial: Serial,
         /// The action the button asked for, e.g. `"populate:britain"`.
         action: String,
+    },
+    /// A player answered a pack-built gump (from `op_gump`) — the reply seam. The
+    /// pack matches on `gump_id` and reads `button` (0 = closed) to know the
+    /// choice: accept or decline a quest, pick a menu entry.
+    GumpAnswered {
+        /// Who answered, by wire identity.
+        serial: Serial,
+        /// Which dialog — the `gump_id` the pack sent.
+        gump_id: u32,
+        /// The button pressed; `0` is the close box.
+        button: u32,
+        /// Any text fields' contents, in field order.
+        text: Vec<String>,
     },
 }
 
@@ -442,6 +481,46 @@ pub enum Command {
         width: u16,
         /// Region height.
         height: u16,
+    },
+    /// Show a gump (a dialog window) to a mobile's client — a quest offer, a
+    /// notice board. The reply comes back as a `GumpAnswered` event.
+    ShowGump {
+        /// Who sees it.
+        serial: Serial,
+        /// The gump id the reply is keyed on — the pack picks it and matches it.
+        gump_id: u32,
+        /// Window x.
+        x: u16,
+        /// Window y.
+        y: u16,
+        /// The gump layout string (`{ resizepic … }{ button … }…`).
+        layout: String,
+        /// The text lines the layout's `{ text }`/`{ croppedtext }` index into.
+        lines: Vec<String>,
+    },
+    /// Put an item into a player's backpack — a quest reward, a handout. Merges
+    /// onto a like pile when `stackable` (gold, reagents); otherwise a discrete
+    /// piece.
+    GiveItem {
+        /// Whose backpack.
+        serial: Serial,
+        /// The item graphic.
+        graphic: u16,
+        /// Its hue, or 0.
+        hue: u16,
+        /// How many.
+        amount: u16,
+        /// Whether it merges onto a like pile.
+        stackable: bool,
+    },
+    /// Store a player's opaque quest blob — the pack's own JSON of accepted quests
+    /// and objective progress. The engine keeps and persists it; only the pack
+    /// reads it (handed back on the next login).
+    SetQuest {
+        /// Whose quest log.
+        serial: Serial,
+        /// The pack's serialized quest state.
+        blob: String,
     },
 }
 

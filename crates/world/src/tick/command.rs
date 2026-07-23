@@ -33,6 +33,10 @@ pub struct CharacterSheet {
     /// Whether the character logged out dead — a ghost relogs a ghost. `false`
     /// for a new character and for any living one.
     pub dead: bool,
+    /// The player's saved quest log — an opaque JSON blob the pack owns, restored
+    /// onto the character so a relog keeps quest progress. Empty for a new or
+    /// quest-less character.
+    pub quest_blob: String,
 }
 
 /// One door in a [`Command::Decorate`] batch. The closed/open graphics and the
@@ -488,6 +492,43 @@ pub enum Command {
     Control {
         /// The mobile, by wire serial.
         serial: u32,
+    },
+    /// Show a gump to a mobile's client — a pack-built dialog (a quest offer). The
+    /// reply comes back as a [`GumpAnswered`](crate::events::GumpAnswered) event.
+    ShowGump {
+        /// Who sees it, by wire serial.
+        serial: u32,
+        /// The gump id the reply is keyed on.
+        gump_id: u32,
+        /// Window x.
+        x: u16,
+        /// Window y.
+        y: u16,
+        /// The gump layout string.
+        layout: String,
+        /// The text lines the layout indexes into.
+        lines: Vec<String>,
+    },
+    /// Put an item into a player's backpack — a quest reward. From a script.
+    GiveItem {
+        /// Whose backpack, by wire serial.
+        serial: u32,
+        /// The item graphic.
+        graphic: u16,
+        /// Its hue, or 0.
+        hue: u16,
+        /// How many.
+        amount: u16,
+        /// Whether it merges onto a like pile.
+        stackable: bool,
+    },
+    /// Store a player's opaque quest blob — the pack's own JSON, kept and
+    /// persisted by the engine. From a script.
+    SetQuest {
+        /// Whose quest log, by wire serial.
+        serial: u32,
+        /// The pack's serialized quest state.
+        blob: String,
     },
     /// A client asked to cast a spell (from its spellbook or a macro). The world
     /// only says it happened, via [`SpellRequested`]; a script does the casting.

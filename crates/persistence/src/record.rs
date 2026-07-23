@@ -43,7 +43,10 @@ use serde::{Deserialize, Serialize};
 /// - v10: an account's credential is an argon2 hash, not plaintext. A mismatched
 ///   older database is recreated (the account rows re-seed from config, hashed),
 ///   which is the convention every bump above shares.
-pub const SCHEMA_VERSION: u32 = 10;
+/// - v11: a character's quest log — an opaque JSON blob the community pack owns
+///   and the engine only stores, so quest progress survives a relog. Empty for a
+///   character with no quests, and old saves default it, so the bump is additive.
+pub const SCHEMA_VERSION: u32 = 11;
 
 /// An account, as saved.
 ///
@@ -119,6 +122,11 @@ pub struct CharacterRecord {
     /// restores the character exactly. `false` for the living, the common case.
     #[serde(default)]
     pub dead: bool,
+    /// The player's quest log — an opaque JSON blob the community pack owns (the
+    /// engine stores and hands it back on login, never reads it). Empty string for
+    /// a character with no quests; old saves default it.
+    #[serde(default)]
+    pub quest_blob: String,
 }
 
 /// A timed effect on a mobile that a relog must not wash off — poison today,
@@ -529,6 +537,7 @@ mod tests {
                 remaining: 5,
             }],
             dead: true,
+            quest_blob: r#"{"active":[1]}"#.into(),
         };
         let json = serde_json::to_string(&record).expect("a record must serialise");
         let back: CharacterRecord = serde_json::from_str(&json).expect("and come back");
@@ -557,6 +566,7 @@ mod tests {
             skills: Vec::new(),
             effects: Vec::new(),
             dead: false,
+            quest_blob: String::new(),
         };
         let json = serde_json::to_string(&record).expect("a record must serialise");
         let back: CharacterRecord = serde_json::from_str(&json).expect("and come back");

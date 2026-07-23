@@ -145,6 +145,26 @@ pub struct AdminMenuAction {
     pub action: String,
 }
 
+/// A player answered a pack-built gump (a `0xB1` for a gump that is *not* the
+/// engine's own admin menu) — the reply seam for [`op_gump`]. The pack that
+/// opened the dialog matches on `gump_id` and reads the `button` (and any text or
+/// switches) to know what was chosen. Carries owned `String`s, so `Clone`.
+///
+/// [`op_gump`]: the `op_gump` scripting op.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct GumpAnswered {
+    /// Who answered, by wire identity.
+    pub serial: Serial,
+    /// Which dialog — the `gump_id` the pack sent.
+    pub gump_id: u32,
+    /// The button pressed; `0` is the close box (dismissed without a choice).
+    pub button: u32,
+    /// The switch (checkbox/radio) ids left on.
+    pub switches: Vec<u32>,
+    /// Any text fields, as `(field id, contents)`.
+    pub text_entries: Vec<(u16, String)>,
+}
+
 // `MobileDamaged` and `MobileDied` moved to `openshard-combat` with the combat
 // system that emits them. `world` re-exports both.
 

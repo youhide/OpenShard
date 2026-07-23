@@ -3348,6 +3348,7 @@ fn a_characters_stats_and_skills_survive_a_relogin() {
                 .collect(),
             effects: record.effects.clone(),
             dead: record.dead,
+            quest_blob: record.quest_blob.clone(),
         }),
         access: AccessLevel::Player,
     });
@@ -3723,6 +3724,7 @@ fn poison_survives_a_relogin() {
                 .collect(),
             effects: record.effects.clone(),
             dead: record.dead,
+            quest_blob: record.quest_blob.clone(),
         }),
         access: AccessLevel::Player,
     });
@@ -3944,6 +3946,7 @@ fn a_stat_buff_survives_a_relogin() {
                 .collect(),
             effects: record.effects.clone(),
             dead: record.dead,
+            quest_blob: record.quest_blob.clone(),
         }),
         access: AccessLevel::Player,
     });
@@ -4315,6 +4318,7 @@ fn a_behaviour_buff_survives_a_relogin() {
                 .collect(),
             effects: record.effects.clone(),
             dead: record.dead,
+            quest_blob: record.quest_blob.clone(),
         }),
         access: AccessLevel::Player,
     });
@@ -4748,6 +4752,7 @@ fn paralysis_survives_a_relogin() {
                 .collect(),
             effects: record.effects.clone(),
             dead: record.dead,
+            quest_blob: record.quest_blob.clone(),
         }),
         access: AccessLevel::Player,
     });
@@ -6035,7 +6040,7 @@ fn an_admin_button_from_a_game_master_is_answered() {
     let gm = enter_gm(&mut world, now);
     let _ = packets_for(&mut world, gm);
 
-    world.queue(admin_response(gm, 10)); // Populate Britain
+    world.queue(admin_response(gm, 13)); // Populate Felucca
     world.tick(now);
 
     assert!(
@@ -6345,12 +6350,12 @@ fn the_deco_button_emits_the_pack_verb() {
     let gm = enter_gm(&mut world, now);
     let mut actions: Cursor<AdminMenuAction> = world.bus().cursor();
 
-    world.queue(admin_response(gm, 20)); // Decorate Britain
+    world.queue(admin_response(gm, 22)); // Decorate Felucca
     world.tick(now);
 
     let events: Vec<AdminMenuAction> = world.bus().read(&mut actions).cloned().collect();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].action, "decorate:britain");
+    assert_eq!(events[0].action, "decorate:felucca");
 }
 
 #[test]
@@ -6363,12 +6368,12 @@ fn the_populate_button_emits_an_admin_action_for_the_pack() {
     let gm = enter_gm(&mut world, now);
     let mut actions: Cursor<AdminMenuAction> = world.bus().cursor();
 
-    world.queue(admin_response(gm, 10)); // Populate Britain
+    world.queue(admin_response(gm, 13)); // Populate Felucca
     world.tick(now);
 
     let events: Vec<AdminMenuAction> = world.bus().read(&mut actions).cloned().collect();
     assert_eq!(events.len(), 1, "one admin action was emitted");
-    assert_eq!(events[0].action, "populate:britain");
+    assert_eq!(events[0].action, "populate:felucca");
 }
 
 #[test]
@@ -7183,6 +7188,8 @@ fn a_wounded_spawner_creature_survives_a_restart_and_is_counted() {
     home.queue(Command::RegisterSpawner {
         spawner: Spawner::new(0, area, vec![creature], 1, 1000),
     });
+    home.tick(now); // applies the register (its first spawn is jittered out)
+    home.spawners[0].next_spawn = 0; // this test wants the creature now, not the jitter
     for _ in 0..3 {
         home.tick(now);
     }
@@ -9859,4 +9866,181 @@ fn lod_an_engaged_creature_keeps_simulating() {
         brain.next_think - world.state.ticks < base * factor,
         "an engaged creature is not dozed, even with no player near"
     );
+}
+
+#[test]
+fn lod_a_spawner_with_no_player_near_stays_dormant_then_wakes() {
+    use crate::spawner::{CreatureTemplate, SpawnArea, Spawner};
+    // With LOD on, a spawn region no player is near keeps its timer held and puts
+    // nothing down — the freeze a whole-facet Populate caused was a thousand such
+    // regions all filling at once. It fills the moment a player arrives.
+    let now = Instant::now();
+    let mut world = lod_world();
+    let conn = enter(&mut world, now); // player at START
+    let creature = CreatureTemplate {
+        body: 0x0009,
+        hue: 0,
+        hits: 10,
+        notoriety: 3,
+        damage: 0,
+        resistance: 0,
+        swing: 0,
+        sight: 0,
+        aggression: 2,
+        beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
+        wander: false,
+    };
+    // Far beyond the LOD radius of the player at START.
+    let area = SpawnArea {
+        x: START.0,
+        y: START.1 + 300,
+        width: 2,
+        height: 2,
+        facet: 0,
+    };
+    world.queue(Command::RegisterSpawner {
+        spawner: Spawner::new(0, area, vec![creature], 3, 40),
+    });
+    world.tick(now);
+    world.spawners[0].next_spawn = 0; // isolate the proximity gate from the jitter
+
+    for _ in 0..12 {
+        world.tick(now);
+    }
+    assert_eq!(
+        world.registry().query::<SpawnedBy>().count(),
+        0,
+        "LOD on, no player near: the region stays dormant"
+    );
+
+    // Walk the player onto the region; the next passes fill it.
+    teleport(&mut world, conn, Point::new(area.x, area.y, 0));
+    for _ in 0..12 {
+        world.tick(now);
+    }
+    assert!(
+        world.registry().query::<SpawnedBy>().count() > 0,
+        "a player arriving within range wakes the region"
+    );
+}
+
+// --- Quest seams (MobileUsed, gump, give-item, quest persistence) ---------
+
+#[test]
+fn double_clicking_an_npc_fires_mobile_used_and_still_opens_the_paperdoll() {
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let npc = spawn_mobile_at(&mut world, Point::new(START.0, START.1 + 1, 0), 50, now);
+    let mut used: Cursor<crate::MobileUsed> = world.bus().cursor();
+    let _ = packets_for(&mut world, conn);
+
+    world.queue(Command::DoubleClick {
+        connection: conn,
+        serial: npc,
+    });
+    world.tick(now);
+
+    let events: Vec<crate::MobileUsed> = world.bus().read(&mut used).copied().collect();
+    assert_eq!(events.len(), 1, "the click reached the pack as MobileUsed");
+    assert_eq!(events[0].mobile.raw(), npc);
+    assert!(
+        packets_for(&mut world, conn).iter().any(|p| p[0] == 0x88),
+        "and the paperdoll still opened alongside it"
+    );
+}
+
+#[test]
+fn give_item_lands_in_the_players_backpack() {
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let player = world.state.players[&conn];
+    let serial = world.registry().serial_of(player).unwrap();
+    // The backpack the enter equipped (worn container on the 0x15 layer).
+    let backpack = world
+        .registry()
+        .query::<Equipped>()
+        .find(|(item, eq)| {
+            eq.mobile == serial && eq.layer == 0x15 && world.registry().has::<Container>(*item)
+        })
+        .and_then(|(item, _)| world.registry().serial_of(item))
+        .expect("a backpack");
+    let count = |world: &World| {
+        world
+            .registry()
+            .query::<Contained>()
+            .filter(|(_, c)| c.container == backpack)
+            .count()
+    };
+    let before = count(&world);
+
+    world.queue(Command::GiveItem {
+        serial: serial.raw(),
+        graphic: 0x0EED, // gold
+        hue: 0,
+        amount: 100,
+        stackable: true,
+    });
+    world.tick(now);
+
+    assert_eq!(count(&world), before + 1, "the reward is in the backpack");
+}
+
+#[test]
+fn set_quest_stores_the_blob_on_the_character() {
+    use openshard_state::components::QuestLog;
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let player = world.state.players[&conn];
+    let serial = world.registry().serial_of(player).unwrap().raw();
+
+    world.queue(Command::SetQuest {
+        serial,
+        blob: r#"{"active":[7]}"#.to_owned(),
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world
+            .registry()
+            .get::<QuestLog>(player)
+            .map(|q| q.0.as_str()),
+        Some(r#"{"active":[7]}"#),
+        "the quest blob rode onto the character, ready to persist"
+    );
+}
+
+#[test]
+fn a_non_admin_gump_reply_reaches_the_pack_as_gump_answered() {
+    use crate::events::GumpAnswered;
+    use openshard_protocol::GumpResponse as WireGumpResponse;
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let player = world.state.players[&conn];
+    let serial = world.registry().serial_of(player).unwrap();
+    let mut answered: Cursor<GumpAnswered> = world.bus().cursor();
+
+    // A reply to a *pack* gump — a gump id that is not the engine's admin menu.
+    world.queue(Command::GumpResponse {
+        connection: conn,
+        response: WireGumpResponse {
+            serial: serial.raw(),
+            gump_id: 0x1234_5678,
+            button: 2,
+            switches: vec![],
+            text_entries: vec![],
+        },
+    });
+    world.tick(now);
+
+    let events: Vec<GumpAnswered> = world.bus().read(&mut answered).cloned().collect();
+    assert_eq!(events.len(), 1, "the pack heard the reply");
+    assert_eq!(events[0].gump_id, 0x1234_5678);
+    assert_eq!(events[0].button, 2);
+    assert_eq!(events[0].serial, serial);
 }

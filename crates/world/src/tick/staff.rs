@@ -49,6 +49,24 @@ impl World {
         connection: ConnectionId,
         response: openshard_protocol::GumpResponse,
     ) {
+        // A reply to a gump that is *not* the engine's admin menu belongs to the
+        // pack that opened it (a quest offer, a notice board). Forward it as a
+        // `GumpAnswered` rather than dropping it, then stop — only the admin gump
+        // runs the staff path below.
+        if response.gump_id != crate::admin::ADMIN_GUMP {
+            if let Some(&actor) = self.state.players.get(&connection) {
+                if let Some(serial) = self.state.registry.serial_of(actor) {
+                    self.state.bus.send(crate::events::GumpAnswered {
+                        serial,
+                        gump_id: response.gump_id,
+                        button: response.button,
+                        switches: response.switches,
+                        text_entries: response.text_entries,
+                    });
+                }
+            }
+            return;
+        }
         let Some((actor, verb)) = crate::admin::button_action(&self.state, connection, &response)
         else {
             return;

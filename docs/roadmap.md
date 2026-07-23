@@ -864,6 +864,35 @@ Roughly in dependency order, each script-first:
     the players, so ten thousand creatures cost barely more than two thousand once
     the frontier dozes. The benchmark is also the project's first whole-`tick`
     timing harness — the scripting one measured a script call in isolation.
+  - [x] **A whole Felucca to run it against.** The `.admin` menu grew a
+    **Populate Felucca** and **Decorate Felucca** button (verbs `populate:felucca`
+    / `decorate:felucca`), and the Community Pack answers them from
+    `felucca/_generated/` — ~1,400 monster spawn regions and ~18,400 statics /
+    ~640 doors / ~5,600 containers laying the whole facet in one click. The data
+    is not hand-entered: a one-shot converter (`tools/convert-servuo.cjs`, the
+    "build tool, not an engine feature" the scriptpack note calls for) reads a
+    ServUO checkout — `Spawns/felucca.xml` for the spawns, resolving creature
+    class names to body ids by scraping `Body`/`SetHits`/`Karma` out of
+    `Scripts/Mobiles`, and `Data/Decoration/**.cfg` for the deco, classifying each
+    entry by class name (door offsets from ServUO's `BaseDoor` facing table). It
+    also generates the town **vendors** — the `Vendors`/`TownsPeople` regions the
+    spawn pass skips, placed with a body, dress and shop stock curated per
+    profession in `tools/vendor-data.cjs` — and the shop **signs** (`signs.cfg`,
+    its own flat format). At full population that is on the order of ten thousand
+    creatures across the map — exactly the load the LOD numbers above are drawn
+    from, and the reason it was built first.
+  - [x] **And a full facet no longer freezes the tick to populate.** Laying ~1,400
+    spawn regions at once exposed two costs a small world hid. First, every region
+    started due the same tick — a thundering herd — so `register_spawner` now
+    **jitters** each fresh region's first spawn across its respawn window (a
+    restored region keeps its saved timer). Second, and worse, `maintain_spawners`
+    counted each region's live members by scanning *all* creatures, O(regions ×
+    creatures) — millions of comparisons a tick, the freeze itself. It now tallies
+    every region in **one sweep** (a `HashMap<id, count>`), O(regions + creatures).
+    And LOD reaches spawners too: with `lod` on, a region **no player is near is
+    left dormant** — its timer held, nothing spawned — until someone approaches,
+    the standard "smart spawning". The three together turn a whole-facet Populate
+    from a stall into a shrug.
   - [ ] **Body-type tables** — door-opening and rideability are body-id lists
     until a real table (tiledata or data-driven config) names which bodies have
     hands and which carry a rider.
@@ -1063,6 +1092,64 @@ Roughly in dependency order, each script-first:
 - [ ] `guilds` — membership, titles, the guild notoriety rules (green/orange),
   war declarations. Mostly data plus a notoriety hook; the abstract stub exists
   so the dependency graph already names it.
+- [x] `quests` — **the seams landed and the first quest runs**, pack-driven, the
+  "default in core, customise in the pack" split once more. The engine grew four
+  thin seams and nothing quest-shaped in a signature: a **`MobileUsed`** event so
+  double-clicking an NPC reaches the pack (the mobile counterpart of `ItemUsed`,
+  fired beside the paperdoll open); a **pack-driven gump** (`op_gump` + a
+  `GumpAnswered` event, generalising the admin gump's own encode/decode — a
+  non-admin `0xB1` now becomes an event instead of being dropped); an
+  **`op_give_item`** that drops a reward into the player's backpack (the worn-
+  container lookup a vendor payout uses); and a **per-character quest blob** the
+  pack owns (`CharacterRecord.quest_blob`, schema v11, the `effects` persistence
+  pattern) stored via `op_set_quest` and handed back on login as a `QuestLoaded`
+  event. `MobileDied` grew a `body` and a `killer`, so a kill can be attributed to
+  a player and matched by what died. The quest *data* (title, objectives of
+  kill/deliver, rewards, giver) and all the logic live in the Community Pack
+  (`quests/`): a giver placed on a tile offers its quest on double-click, an
+  accept starts it, `MobileDied`/`ItemUsed` advance it, and a turn-in pays the
+  reward — progress mirrored to the saved blob after every change, restored on
+  login. The shipped example is *A Plague of Rats* for the Britain town herald.
+  Deferred: the gump **offer on speech** (the `MobileSpoke` half — only
+  double-click is wired), the **collect** objective (wants an inventory-read op),
+  and **escort** as an objective kind (reuses the creature follow/step machinery;
+  the ~27 Felucca escortables are its natural givers).
+
+### Deferred / not yet ported (the Felucca converter)
+
+The one-shot converter (`OpenShard-Community-Pack/tools/convert-servuo.cjs`) lays
+the whole facet, but it skips or approximates a few things by design. Recorded
+here so the gaps are visible, not silent:
+
+- **Creatures with no literal body** are dropped from the spawns. `resolveBody`
+  reads only a literal `Body =`, `Utility.RandomList(first, …)`, `SetBody(n)` or
+  the first element of an `int[]` mount table. So `WanderingHealer`/`evilhealer`
+  (body set indirectly), the **camp meta-spawners** `Orccamp`/`Ratcamp`/
+  `LizardmenCamp` (a `BaseCamp` spawns creatures and tents but has no body of its
+  own, so *its* creatures are lost with it), `Ridablellama`/`Forestostard` (mount
+  tables / odd casing) and `Shadowfiend` fall through. `TreasureLevel1-4` are the
+  loudest "unresolved" names but are not creatures at all — XmlSpawner sub-tier
+  tokens. Where a body *does* resolve, `RandomList` keeps only the first, and
+  `SetHits`/`SetDamage` are averaged.
+- **Decoration whose point is a function, not art**, is dropped (`SKIP_DECO`):
+  teleporters, blockers, warning/hint items, traps, levers, obelisks, serpent
+  pillars. Placing the graphic as scenery would show a tile the client draws as
+  nothing; the teleport destination, blocking volume and trap trigger are lost,
+  not just the art.
+- **Containers** are placed **empty** (no loot), and a container graphic not in
+  the seeded gump table falls back to the plain wooden-box gump `0x3C`.
+- **Signs** place the board art; the localized **cliloc text** is read past and
+  discarded (a later slice).
+- **Vendors**: town NPC types with no vendor class and no shop are skipped — which
+  is where the quest NPCs (escortables, the Bard-Mastery knights) land today until
+  `quests` claims them. Expansion-gated (`Core.AOS`/SE/SA) shop items are dropped
+  (this is a pre-AoS shard), and `SBMage`'s scroll stock is circles 1–3 only, as
+  ServUO ships it.
+- **Notoriety** is a karma-sign heuristic (`Karma < 0` → enemy-orange, else grey),
+  not ServUO's full alignment/fame computation.
+- **Door generation** skips a town whose decoration bbox exceeds `MAX_DOOR_REGION`
+  (350k tiles), so a stray far-flung entry can cost that town its generated shop
+  doors rather than make `op_generate_doors` sweep millions of tiles.
 
 The bridge is both event- and tick-driven now: the server calls the script's
 `onEvent` with each tick's domain events, and the per-mobile `onTick` for every

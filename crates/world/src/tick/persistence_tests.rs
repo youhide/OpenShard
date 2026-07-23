@@ -258,6 +258,7 @@ fn a_character_that_logged_out_dead_returns_a_ghost() {
             skills: Vec::new(),
             effects: Vec::new(),
             dead: true,
+            quest_blob: String::new(),
         }),
         access: AccessLevel::Player,
     });

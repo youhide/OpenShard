@@ -37,7 +37,11 @@ pub fn double_click(state: &mut WorldState, connection: ConnectionId, serial: u3
         // A rideable, riderless creature in reach: the double-click was a leg
         // over the saddle, not a paperdoll request.
     } else if state.registry.has::<Body>(target) {
+        // The paperdoll still opens — but the pack also hears it, so a mobile the
+        // engine has no deeper interaction for (a quest giver, a trainer) can be
+        // given one, the way `item_used` gives a bare item a meaning.
         open_paperdoll(state, connection, player, target, target_serial);
+        mobile_used(state, player, target, target_serial);
     } else {
         // Not a door, container, spellbook, mount or mobile: an ordinary item.
         // Hand its "use" to the pack, keyed by graphic — Sphere's @DClick. The

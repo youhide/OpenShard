@@ -18,10 +18,12 @@ use openshard_scripting::{
     Command as ScriptCommand, DenoEngine, Event as ScriptEvent, ScriptEngine,
 };
 use openshard_world::events::{
-    AdminMenuAction, CorpseCreated, MobileMoved, MobileSpawned, PlayerEntered, PlayerLeft,
-    SpellRequested, StepRefused,
+    AdminMenuAction, CorpseCreated, GumpAnswered, MobileMoved, MobileSpawned, PlayerEntered,
+    PlayerLeft, SpellRequested, StepRefused,
 };
-use openshard_world::{Command, ItemUsed, MobileDied, MobileSpoke, SkillUsed, SpellCast, World};
+use openshard_world::{
+    Command, ItemUsed, MobileDied, MobileSpoke, MobileUsed, SkillUsed, SpellCast, World,
+};
 use tracing::{error, info, warn};
 
 /// The gameplay script, driven around the world's tick.
@@ -38,8 +40,10 @@ pub struct Scripts {
     cast: Cursor<SpellCast>,
     spoke: Cursor<MobileSpoke>,
     item_used: Cursor<ItemUsed>,
+    mobile_used: Cursor<MobileUsed>,
     corpse: Cursor<CorpseCreated>,
     admin: Cursor<AdminMenuAction>,
+    gump: Cursor<GumpAnswered>,
 }
 
 impl Scripts {
@@ -84,8 +88,10 @@ impl Scripts {
             cast: world.bus().cursor(),
             spoke: world.bus().cursor(),
             item_used: world.bus().cursor(),
+            mobile_used: world.bus().cursor(),
             corpse: world.bus().cursor(),
             admin: world.bus().cursor(),
+            gump: world.bus().cursor(),
             engine,
         })
     }
@@ -111,6 +117,25 @@ impl Scripts {
                     y: e.position.y,
                     z: e.position.z,
                 });
+                // Hand back the saved quest log so the pack rebuilds its state.
+                // Read straight off the entity — no new world event, no cursor.
+                let blob = world
+                    .registry()
+                    .entity_of(e.serial)
+                    .and_then(|ent| {
+                        world
+                            .registry()
+                            .get::<openshard_world::components::QuestLog>(ent)
+                    })
+                    .map(|q| q.0.clone());
+                if let Some(blob) = blob {
+                    if !blob.is_empty() {
+                        events.push(ScriptEvent::QuestLoaded {
+                            serial: e.serial.raw(),
+                            blob,
+                        });
+                    }
+                }
             }
             for e in bus.read(&mut self.spawned) {
                 events.push(ScriptEvent::MobileSpawned {
@@ -149,6 +174,8 @@ impl Scripts {
             for e in bus.read(&mut self.died) {
                 events.push(ScriptEvent::MobileDied {
                     serial: e.serial.raw(),
+                    body: e.body,
+                    killer: e.killer.map_or(0, |k| k.raw()),
                 });
             }
             for e in bus.read(&mut self.used) {
@@ -180,6 +207,13 @@ impl Scripts {
                     by: e.by.raw(),
                 });
             }
+            for e in bus.read(&mut self.mobile_used) {
+                events.push(ScriptEvent::MobileUsed {
+                    mobile: e.mobile.raw(),
+                    body: e.body,
+                    by: e.by.raw(),
+                });
+            }
             for e in bus.read(&mut self.corpse) {
                 events.push(ScriptEvent::CorpseCreated {
                     corpse: e.corpse.raw(),
@@ -190,6 +224,14 @@ impl Scripts {
                 events.push(ScriptEvent::AdminAction {
                     serial: e.serial.raw(),
                     action: e.action.clone(),
+                });
+            }
+            for e in bus.read(&mut self.gump) {
+                events.push(ScriptEvent::GumpAnswered {
+                    serial: e.serial.raw(),
+                    gump_id: e.gump_id,
+                    button: e.button,
+                    text: e.text_entries.iter().map(|(_, s)| s.clone()).collect(),
                 });
             }
         }
@@ -493,6 +535,35 @@ fn into_world(command: ScriptCommand) -> Command {
             width,
             height,
         },
+        ScriptCommand::ShowGump {
+            serial,
+            gump_id,
+            x,
+            y,
+            layout,
+            lines,
+        } => Command::ShowGump {
+            serial,
+            gump_id,
+            x,
+            y,
+            layout,
+            lines,
+        },
+        ScriptCommand::GiveItem {
+            serial,
+            graphic,
+            hue,
+            amount,
+            stackable,
+        } => Command::GiveItem {
+            serial,
+            graphic,
+            hue,
+            amount,
+            stackable,
+        },
+        ScriptCommand::SetQuest { serial, blob } => Command::SetQuest { serial, blob },
     }
 }
 

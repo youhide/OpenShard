@@ -139,6 +139,16 @@ pub struct Decays {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Name(pub String);
 
+/// A player's quest log — an opaque JSON string the community pack owns.
+///
+/// The engine neither reads nor understands it: it stores it, persists it with the
+/// character, and hands it back to the pack on login. Quests are pack gameplay
+/// (the "default in core, customise in the pack" split), so their *shape* is the
+/// pack's business; this is just the box it rides home in — the same bargain as an
+/// item's `Spellbook` mask or a mobile's saved `effects`.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct QuestLog(pub String);
+
 /// The account a player character belongs to.
 ///
 /// Kept out of [`Client`] so that stays `Copy` — this is a heap string, and the

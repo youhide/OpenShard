@@ -162,6 +162,14 @@ impl World {
             // this tick.
             let now = self.state.ticks;
             Self::apply_effects(&mut self.state.registry, entity, &sheet.effects, now);
+            // The saved quest log rides back onto the character as an opaque blob;
+            // the pack reads it when the login's `QuestLoaded` event reaches it.
+            if !sheet.quest_blob.is_empty() {
+                self.state.registry.insert(
+                    entity,
+                    openshard_state::components::QuestLog(sheet.quest_blob),
+                );
+            }
         }
         self.state.registry.insert(entity, Combat::default());
         self.state.registry.insert(entity, Notoriety::Innocent);

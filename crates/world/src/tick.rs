@@ -36,17 +36,18 @@ use openshard_persistence::{
     MobileRecord, Snapshot, SCHEMA_VERSION,
 };
 use openshard_protocol::{
-    encode_context_menu, encode_light_level, encode_login_complete, encode_map_change,
-    encode_message, encode_supported_features, encode_walk_ack, encode_walk_reject, AccessLevel,
-    ClientVersion, Direction, Facing, Feature, MobileStatus, Notoriety, PlayerStart, PlayerUpdate,
-    Point, WalkRequest, AOS_FEATURE_FLAGS, DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, LABEL_MODE,
+    encode_context_menu, encode_gump_display, encode_light_level, encode_login_complete,
+    encode_map_change, encode_message, encode_supported_features, encode_walk_ack,
+    encode_walk_reject, AccessLevel, ClientVersion, Direction, Facing, Feature, MobileStatus,
+    Notoriety, PlayerStart, PlayerUpdate, Point, WalkRequest, AOS_FEATURE_FLAGS,
+    DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, LABEL_MODE,
 };
 use tracing::{debug, info, warn};
 
 use openshard_state::components::{
     Access, Account, Amount, Body, Brain, Client, Combat, Contained, Container, DamageType,
     Decoration, Door, Equipped, Facet, Ghost, Graphic, Heading, Hitpoints, Mana, MeleeDamage,
-    Movement, Name, Position, Resistance, Ridden, Riding, Scripted, SpawnedBy, Spellbook,
+    Movement, Name, Position, QuestLog, Resistance, Ridden, Riding, Scripted, SpawnedBy, Spellbook,
     Stackable, Stamina, Stats, Vendor,
 };
 use openshard_state::rng::Rng;
@@ -748,6 +749,28 @@ impl World {
             Command::Disconnect { connection } => self.disconnect(connection),
             Command::DeleteCharacter { serial } => self.delete_character(serial),
             Command::Control { serial } => self.control(serial),
+            Command::ShowGump {
+                serial,
+                gump_id,
+                x,
+                y,
+                layout,
+                lines,
+            } => self.show_gump(serial, gump_id, x, y, &layout, &lines),
+            Command::GiveItem {
+                serial,
+                graphic,
+                hue,
+                amount,
+                stackable,
+            } => self.give_item(serial, graphic, hue, amount, stackable),
+            Command::SetQuest { serial, blob } => {
+                if let Some(entity) =
+                    Serial::new(serial).and_then(|s| self.state.registry.entity_of(s))
+                {
+                    self.state.registry.insert(entity, QuestLog(blob));
+                }
+            }
             Command::RequestCast { connection, spell } => self.begin_cast(connection, spell),
             Command::StockVendor { serial, stock } => {
                 npc::stock(&mut self.state, serial, stock);
@@ -884,6 +907,58 @@ impl World {
     fn control(&mut self, serial: u32) {
         if let Some(entity) = Serial::new(serial).and_then(|s| self.state.registry.entity_of(s)) {
             self.state.registry.insert(entity, Scripted);
+        }
+    }
+
+    /// Send a pack-built gump to a mobile's client — the pack-facing counterpart
+    /// of the admin menu's own `encode_gump_display`. Silent if the serial names
+    /// no mobile, or it has no client to draw on.
+    fn show_gump(
+        &mut self,
+        serial: u32,
+        gump_id: u32,
+        x: u16,
+        y: u16,
+        layout: &str,
+        lines: &[String],
+    ) {
+        let Some(entity) = Serial::new(serial).and_then(|s| self.state.registry.entity_of(s))
+        else {
+            return;
+        };
+        let Some(&Client { connection, .. }) = self.state.registry.get::<Client>(entity) else {
+            return;
+        };
+        let packet =
+            encode_gump_display(serial, gump_id, i32::from(x), i32::from(y), layout, lines);
+        self.state.send(connection, packet);
+    }
+
+    /// Drop an item into a player's backpack — a quest reward. Merges onto a like
+    /// pile when `stackable` (gold), else a discrete piece. Silent if the serial
+    /// names no mobile or it wears no backpack.
+    fn give_item(&mut self, serial: u32, graphic: u16, hue: u16, amount: u16, stackable: bool) {
+        const BACKPACK_LAYER: u8 = 0x15;
+        let Some(mobile) = Serial::new(serial) else {
+            return;
+        };
+        let backpack = self
+            .state
+            .registry
+            .query::<Equipped>()
+            .find(|(item, eq)| {
+                eq.mobile == mobile
+                    && eq.layer == BACKPACK_LAYER
+                    && self.state.registry.has::<Container>(*item)
+            })
+            .and_then(|(item, _)| self.state.registry.serial_of(item));
+        let Some(backpack) = backpack else {
+            return;
+        };
+        if stackable {
+            items::give(&mut self.state, backpack, graphic, hue, amount);
+        } else {
+            items::place_one(&mut self.state, backpack, graphic, hue, amount);
         }
     }
 
