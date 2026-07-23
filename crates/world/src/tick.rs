@@ -807,6 +807,41 @@ impl World {
             if self.state.registry.has::<Ridden>(creature) {
                 continue;
             }
+            // Level of detail: a creature no player is near need not pay for the
+            // full decision (line of sight, target scan, pathfinding) this beat.
+            // One already engaged keeps simulating — a fight must not freeze
+            // because the player stepped a tile out of range — otherwise it
+            // dozes, its next think pushed out by `lod_idle_factor`. Because
+            // `lod_radius` sits above the largest sight, "no player near" implies
+            // "no player in sight", so nothing is acquired or chased by skipping.
+            if self.state.gameplay.lod {
+                let engaged = self
+                    .state
+                    .registry
+                    .get::<Combat>(creature)
+                    .and_then(|c| c.target)
+                    .is_some();
+                if !engaged {
+                    let facet = self.state.facet_of(creature);
+                    let pos = self.state.registry.get::<Position>(creature).map(|p| p.0);
+                    let near = pos.is_some_and(|p| {
+                        self.state
+                            .any_player_near(p, self.state.gameplay.lod_radius, facet)
+                    });
+                    if !near {
+                        let default_beat = self.state.gameplay.creature_step_ticks.max(1);
+                        if let Some(brain) = self.state.registry.get_mut::<Brain>(creature) {
+                            let base = if brain.beat_ticks > 0 {
+                                brain.beat_ticks
+                            } else {
+                                default_beat
+                            };
+                            brain.next_think = now + base * self.state.gameplay.lod_idle_factor;
+                        }
+                        continue;
+                    }
+                }
+            }
             if let Some(dir) = ai::think_one(&mut self.state, creature) {
                 if let Some(serial) = self.state.registry.serial_of(creature) {
                     self.step(serial.raw(), dir);

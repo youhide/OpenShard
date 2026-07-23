@@ -85,6 +85,9 @@ pub(crate) fn gameplay_of(config: &Config) -> Gameplay {
         g.reagents,
         g.mana_loss_on_fail,
         g.reagent_loss_on_fail,
+        g.lod,
+        g.lod_radius,
+        g.lod_idle_factor,
     )
 }
 

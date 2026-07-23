@@ -1584,6 +1584,9 @@ fn gameplay_config_reaches_the_systems() {
         true,
         true,
         true,
+        false, // lod
+        32,    // lod_radius
+        8,     // lod_idle_factor
     );
     let mut world = World::new(START).with_gameplay(gameplay);
     world.queue(Command::SpawnItem {
@@ -8991,6 +8994,9 @@ fn the_chase_pace_is_the_operators_knob() {
             true,
             true,
             true,
+            false, // lod
+            32,    // lod_radius
+            8,     // lod_idle_factor
         );
         let mut world = World::new(START).with_gameplay(gameplay);
         let _gm = enter_gm(&mut world, now);
@@ -9718,4 +9724,139 @@ fn no_volley_passes_a_shut_door() {
     }
     let after = world.registry().get::<Hitpoints>(player).unwrap().current;
     assert_eq!(after, before, "a shut door stops arrows too");
+}
+
+// --- Level of detail (LOD) ------------------------------------------------
+//
+// `state.ticks` is bumped at the very top of `tick`, and `think` reschedules
+// `next_think = now + gap` reading that same counter, so right after the tick a
+// creature thought in, `next_think - state.ticks` is exactly the gap it chose.
+// A far creature that has no player near is spawned beyond `lod_radius`; a near
+// one within it. `spawn_brained` runs one tick, and its brain starts at
+// `next_think = 0`, so it thinks (and reschedules) on that very tick.
+
+/// A world with LOD on at the shipped-default radius (32) and idle factor (8).
+fn lod_world() -> World {
+    World::new(START).with_gameplay(Gameplay {
+        lod: true,
+        lod_radius: 32,
+        lod_idle_factor: 8,
+        ..Default::default()
+    })
+}
+
+#[test]
+fn lod_off_a_far_creature_still_ambles() {
+    // Baseline: with LOD off, a creature no one is near still thinks each idle
+    // beat — twice the hunting beat, the amble the default has always used.
+    let now = Instant::now();
+    let mut world = world();
+    let _conn = enter(&mut world, now);
+    let creature = spawn_brained(
+        &mut world,
+        0x00D1,
+        Point::new(START.0, START.1 + 60, 0),
+        5,
+        now,
+    );
+    let base = world.state.gameplay.creature_step_ticks.max(1);
+    let brain = *world.registry().get::<Brain>(creature).unwrap();
+    assert_eq!(
+        brain.next_think - world.state.ticks,
+        base * 2,
+        "LOD off: a far creature ambles at twice the beat, as it always has"
+    );
+}
+
+#[test]
+fn lod_a_far_creature_dozes() {
+    // With LOD on and no player within the radius, the creature skips the costly
+    // decision and dozes: its next think is pushed out by the idle factor.
+    let now = Instant::now();
+    let mut world = lod_world();
+    let _conn = enter(&mut world, now);
+    let creature = spawn_brained(
+        &mut world,
+        0x00D1,
+        Point::new(START.0, START.1 + 60, 0),
+        5,
+        now,
+    );
+    let base = world.state.gameplay.creature_step_ticks.max(1);
+    let factor = world.state.gameplay.lod_idle_factor;
+    let brain = *world.registry().get::<Brain>(creature).unwrap();
+    assert_eq!(
+        brain.next_think - world.state.ticks,
+        base * factor,
+        "LOD on, no player near: the far creature dozes at the stretched beat"
+    );
+}
+
+#[test]
+fn lod_a_near_creature_thinks_at_full_rate() {
+    // A creature a player is close to is never dozed — it thinks at full rate,
+    // so the LOD gap never appears on it.
+    let now = Instant::now();
+    let mut world = lod_world();
+    let _conn = enter(&mut world, now);
+    // Well inside `lod_radius` (32) of the player at START.
+    let creature = spawn_brained(
+        &mut world,
+        0x00D1,
+        Point::new(START.0, START.1 + 5, 0),
+        5,
+        now,
+    );
+    let base = world.state.gameplay.creature_step_ticks.max(1);
+    let factor = world.state.gameplay.lod_idle_factor;
+    let brain = *world.registry().get::<Brain>(creature).unwrap();
+    assert!(
+        brain.next_think - world.state.ticks <= base * 2,
+        "LOD on but a player is near: the creature thinks at full rate, not dozed"
+    );
+    assert!(
+        brain.next_think - world.state.ticks < base * factor,
+        "a near creature is never given the doze gap"
+    );
+}
+
+#[test]
+fn lod_an_engaged_creature_keeps_simulating() {
+    // A creature already in a fight keeps simulating even with no player near —
+    // a fight must not freeze because the target stepped a tile out of range.
+    let now = Instant::now();
+    let mut world = lod_world();
+    let conn = enter(&mut world, now);
+    let player = world.state.players[&conn];
+    let target = world.state.registry.serial_of(player).unwrap();
+    let creature = spawn_brained(
+        &mut world,
+        0x00D1,
+        Point::new(START.0, START.1 + 60, 0),
+        5,
+        now,
+    );
+    // Engage it and let it think again this coming tick.
+    world.state.registry.insert(
+        creature,
+        Combat {
+            warmode: true,
+            target: Some(target),
+            next_swing: 0,
+        },
+    );
+    world
+        .state
+        .registry
+        .get_mut::<Brain>(creature)
+        .unwrap()
+        .next_think = 0;
+    world.tick(now);
+    let base = world.state.gameplay.creature_step_ticks.max(1);
+    let factor = world.state.gameplay.lod_idle_factor;
+    let brain = *world.registry().get::<Brain>(creature).unwrap();
+    assert!(
+        brain.next_think - world.state.ticks < base * factor,
+        "an engaged creature is not dozed, even with no player near"
+    );
 }

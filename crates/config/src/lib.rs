@@ -165,6 +165,25 @@ pub struct GameplayConfig {
     /// on. A successful cast always consumes.
     #[serde(default = "default_true")]
     pub reagent_loss_on_fail: bool,
+    /// Level-of-detail: when `true`, a creature with no player within
+    /// [`lod_radius`](Self::lod_radius) stops paying for the full AI decision
+    /// (line-of-sight, target scan, pathfinding) each beat — it dozes at a
+    /// stretched beat instead. `false` (the default) simulates every creature at
+    /// full rate, whether or not anyone is near. Opt-in: it trades a little
+    /// off-screen liveliness for tick budget in a populated world.
+    #[serde(default = "default_false")]
+    pub lod: bool,
+    /// How close (tiles, Chebyshev) a player must be for a creature to think at
+    /// full rate under [`lod`](Self::lod). Kept comfortably above the view range
+    /// (18) and the largest creature sight, so a creature a player can see is
+    /// never dozed. Only meaningful when `lod` is on.
+    #[serde(default = "default_lod_radius")]
+    pub lod_radius: u32,
+    /// How much to stretch a dozing creature's beat under [`lod`](Self::lod): its
+    /// next think is pushed out this many times its normal beat. `8` is eight
+    /// times slower. Only meaningful when `lod` is on; must be at least 1.
+    #[serde(default = "default_lod_idle_factor")]
+    pub lod_idle_factor: u64,
 }
 
 /// Whether combat [`combat_era`](GameplayConfig::combat_era) is one the swing
@@ -218,6 +237,16 @@ fn default_context_menus() -> bool {
 fn default_true() -> bool {
     true
 }
+/// The shared default for opt-in flags that ship off — LOD.
+fn default_false() -> bool {
+    false
+}
+fn default_lod_radius() -> u32 {
+    32
+}
+fn default_lod_idle_factor() -> u64 {
+    8
+}
 
 impl Default for GameplayConfig {
     fn default() -> Self {
@@ -238,6 +267,9 @@ impl Default for GameplayConfig {
             reagents: default_true(),
             mana_loss_on_fail: default_true(),
             reagent_loss_on_fail: default_true(),
+            lod: default_false(),
+            lod_radius: default_lod_radius(),
+            lod_idle_factor: default_lod_idle_factor(),
         }
     }
 }
@@ -488,6 +520,12 @@ pub enum ConfigError {
     },
     /// `gameplay.speed_scale_factor` is zero, which the swing formula divides by.
     ZeroSpeedScaleFactor,
+    /// `gameplay.lod` is on but `lod_radius` is zero, so no creature would ever
+    /// think — a player is never within zero tiles of one.
+    ZeroLodRadius,
+    /// `gameplay.lod` is on but `lod_idle_factor` is zero, which would leave a
+    /// dozing creature's next-think unmoved and busy-loop the gate.
+    ZeroLodIdleFactor,
 }
 
 impl fmt::Display for ConfigError {
@@ -519,6 +557,12 @@ impl fmt::Display for ConfigError {
             ),
             Self::ZeroSpeedScaleFactor => {
                 f.write_str("gameplay.speed_scale_factor must not be zero")
+            }
+            Self::ZeroLodRadius => {
+                f.write_str("gameplay.lod_radius must not be zero when gameplay.lod is on")
+            }
+            Self::ZeroLodIdleFactor => {
+                f.write_str("gameplay.lod_idle_factor must be at least 1 when gameplay.lod is on")
             }
         }
     }
@@ -590,6 +634,16 @@ impl Config {
         // The swing formula divides by this; zero would panic mid-tick.
         if self.gameplay.speed_scale_factor == 0 {
             return Err(ConfigError::ZeroSpeedScaleFactor);
+        }
+        // LOD's two knobs only bite when it is on; a zero either freezes every
+        // creature or spins the gate, so reject them rather than run them.
+        if self.gameplay.lod {
+            if self.gameplay.lod_radius == 0 {
+                return Err(ConfigError::ZeroLodRadius);
+            }
+            if self.gameplay.lod_idle_factor == 0 {
+                return Err(ConfigError::ZeroLodIdleFactor);
+            }
         }
         Ok(())
     }

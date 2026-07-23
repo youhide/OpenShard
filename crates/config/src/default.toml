@@ -141,6 +141,17 @@ reagents = true
 mana_loss_on_fail = true
 reagent_loss_on_fail = true
 
+# Level of detail — an opt-in performance knob. When lod is on, a creature with
+# no player within lod_radius tiles stops paying for the full AI decision (line
+# of sight, target scan, pathfinding) each beat, and dozes at a beat stretched
+# lod_idle_factor times slower instead — it wakes the instant a player comes
+# within range. Off by default: every creature simulates at full rate whether or
+# not anyone is near. lod_radius is kept above the view range (18) and the
+# largest creature sight, so a creature a player can see is never dozed.
+# lod = false
+# lod_radius = 32
+# lod_idle_factor = 8
+
 # Development accounts, in plaintext, until there is a database.
 [[accounts]]
 name = "admin"

@@ -385,3 +385,46 @@ fn a_zero_speed_scale_factor_is_refused() {
         Err(ConfigError::ZeroSpeedScaleFactor)
     ));
 }
+
+#[test]
+fn lod_is_off_by_default_with_sane_knobs() {
+    // A config from before LOD existed still parses: the optimization is opt-in,
+    // and its two knobs carry the shipped defaults.
+    let g = config(MINIMAL).gameplay;
+    assert!(!g.lod);
+    assert_eq!(g.lod_radius, 32);
+    assert_eq!(g.lod_idle_factor, 8);
+}
+
+#[test]
+fn lod_knobs_are_only_checked_when_lod_is_on() {
+    // With LOD off, degenerate knobs are inert, so they are not rejected.
+    let mut config = config(MINIMAL);
+    config.gameplay.lod = false;
+    config.gameplay.lod_radius = 0;
+    config.gameplay.lod_idle_factor = 0;
+    config.validate().expect("off LOD ignores its knobs");
+}
+
+#[test]
+fn a_zero_lod_radius_is_refused_when_lod_is_on() {
+    // No creature is ever within zero tiles of a player, so every one would doze
+    // forever — refuse it rather than run a frozen world.
+    let mut config = config(MINIMAL);
+    config.gameplay.lod = true;
+    config.gameplay.lod_radius = 0;
+    assert!(matches!(config.validate(), Err(ConfigError::ZeroLodRadius)));
+}
+
+#[test]
+fn a_zero_lod_idle_factor_is_refused_when_lod_is_on() {
+    // A factor of zero leaves a dozing creature's next-think unmoved, spinning
+    // the gate every tick — refuse it.
+    let mut config = config(MINIMAL);
+    config.gameplay.lod = true;
+    config.gameplay.lod_idle_factor = 0;
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::ZeroLodIdleFactor)
+    ));
+}

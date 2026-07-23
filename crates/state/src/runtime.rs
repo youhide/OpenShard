@@ -89,6 +89,18 @@ pub struct Gameplay {
     pub mana_loss_on_fail: bool,
     /// Whether a failed cast still consumes reagents — Sphere's `ReagentLossFail`.
     pub reagent_loss_on_fail: bool,
+    /// Level-of-detail: when on, a creature with no player within
+    /// [`lod_radius`](Self::lod_radius) dozes at a stretched beat instead of
+    /// paying for the full AI decision each beat. Off simulates every creature at
+    /// full rate. Read by `World::think`.
+    pub lod: bool,
+    /// How close (tiles, Chebyshev) a player must be for a creature to think at
+    /// full rate under [`lod`](Self::lod). Above the view range and the largest
+    /// sight, so a visible creature is never dozed.
+    pub lod_radius: u32,
+    /// How many times its normal beat a dozing creature's next think is pushed
+    /// out under [`lod`](Self::lod). At least 1.
+    pub lod_idle_factor: u64,
 }
 
 /// How AoS object tooltips (the "cliloc" hover names) are served — Sphere's
@@ -170,6 +182,9 @@ impl Gameplay {
         reagents: bool,
         mana_loss_on_fail: bool,
         reagent_loss_on_fail: bool,
+        lod: bool,
+        lod_radius: u32,
+        lod_idle_factor: u64,
     ) -> Self {
         Self {
             combat_era,
@@ -189,6 +204,9 @@ impl Gameplay {
             reagents,
             mana_loss_on_fail,
             reagent_loss_on_fail,
+            lod,
+            lod_radius,
+            lod_idle_factor,
         }
     }
 }
@@ -211,9 +229,12 @@ impl Default for Gameplay {
             true,
             TooltipMode::SendVersion,
             true,
-            true, // reagents
-            true, // mana_loss_on_fail
-            true, // reagent_loss_on_fail
+            true,  // reagents
+            true,  // mana_loss_on_fail
+            true,  // reagent_loss_on_fail
+            false, // lod (opt-in, off)
+            32,    // lod_radius
+            8,     // lod_idle_factor
         )
     }
 }
@@ -413,6 +434,21 @@ impl WorldState {
             .and_then(|terrain| terrain.ground_z(x, y))
             .unwrap_or(Z_WITHOUT_A_MAP);
         Point::new(x, y, z)
+    }
+
+    /// Is any connected player within `range` tiles (Chebyshev) of `centre` on
+    /// `facet`? Cheap: players are few, so this walks the player table rather than
+    /// the sector grid, and stops at the first hit. The primitive level-of-detail
+    /// gates a creature's AI on — a creature no player is near need not think.
+    #[must_use]
+    pub fn any_player_near(&self, centre: Point, range: u32, facet: u8) -> bool {
+        self.players.values().any(|&entity| {
+            self.facet_of(entity) == facet
+                && self
+                    .registry
+                    .get::<Position>(entity)
+                    .is_some_and(|pos| crate::sectors::in_range(pos.0, centre, range))
+        })
     }
 
     /// Everyone who currently has `entity` on their screen — the mobiles whose

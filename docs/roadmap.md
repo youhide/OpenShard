@@ -833,6 +833,37 @@ Roughly in dependency order, each script-first:
   - [x] **Ranged creatures volley and kite.** A spawn with `ranged` reach fires
     through `combat::volleys` — typed damage, LOS-gated, sharing the swing timer —
     and keeps its distance at `KITE_GAP` instead of walking into melee.
+  - [x] **Level of detail — the AI dozes where no one is watching.** `think` is
+    the tick's most expensive per-mobile work: for every `Brain` it runs
+    `ai::think_one`, which scans sectors, casts a Bresenham line of sight and
+    plans a path. In a populated world most creatures are nowhere near a player,
+    and no one sees what they do — so an opt-in `[gameplay]` flag skips that cost
+    for them. When `lod` is on, a creature with no player within `lod_radius`
+    tiles (and not already in a fight — a fight must not freeze because the target
+    stepped a tile away) does not think this beat; its next think is pushed out by
+    `lod_idle_factor`, and it wakes the instant a player comes within range. The
+    gate leans on a new `WorldState::any_player_near`, cheap because players are
+    few (it walks the player table, not the sector grid). `lod_radius` sits above
+    the view range and the largest sight, so a creature a player can see is never
+    dozed — "no player near" implies "no player in sight", so nothing is missed by
+    skipping. Off by default; a shard turns it on to trade a little off-screen
+    liveliness for tick budget. Determinism holds — the gate reads only
+    `state.ticks` and positions, never a clock.
+
+    The numbers (`cargo run -p openshard-world --example lod_bench --release`,
+    Apple-silicon dev machine, release, 5 players clustered in one corner and
+    creatures spread across a wide square — the lopsided load LOD is for; 81
+    creatures fall within the radius and stay awake):
+
+    | creatures | LOD off | LOD on | speedup |
+    |---|---|---|---|
+    | 2,000 | 0.44 ms/tick | 0.04 ms/tick | ~12× |
+    | 10,000 | 2.23 ms/tick | 0.09 ms/tick | ~25× |
+
+    The gain scales with how much of the world is idle: the awake set is fixed by
+    the players, so ten thousand creatures cost barely more than two thousand once
+    the frontier dozes. The benchmark is also the project's first whole-`tick`
+    timing harness — the scripting one measured a script call in isolation.
   - [ ] **Body-type tables** — door-opening and rideability are body-id lists
     until a real table (tiledata or data-driven config) names which bodies have
     hands and which carry a rider.
