@@ -280,6 +280,14 @@ impl World {
             .encode(),
         );
         self.state.send(connection, encode_light_level(LIGHT_DAY));
+        // A relogged Night Sight is still lit — the buff persisted (restored above)
+        // — so re-send the bright personal light over the ambient just sent.
+        if magic::behaviour_buff(&self.state, entity, openshard_state::effect::NIGHT_SIGHT)
+            .is_some()
+        {
+            self.state
+                .send(connection, encode_light_level(LIGHT_NIGHTSIGHT));
+        }
         // The status bar, stamina and all. Without it the client believes it has
         // zero stamina and refuses to run — see `MobileStatus`. Sent before the
         // login-complete that starts the client drawing, so the numbers are there

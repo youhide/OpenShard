@@ -12,7 +12,9 @@
 
 use openshard_entities::{EntityId, Serial};
 use openshard_items::{count_in_container, take_from_container};
-use openshard_state::components::{stat_shift, Hitpoints, Mana, StatMod, StatMods, Stats};
+use openshard_state::components::{
+    stat_shift, BehaviourBuff, BehaviourBuffs, Hitpoints, Mana, StatMod, StatMods, Stats,
+};
 use openshard_state::WorldState;
 
 mod spells;
@@ -348,6 +350,99 @@ pub fn expire_buffs(state: &mut WorldState, now: u64) -> Vec<EntityId> {
         }
     }
     ready
+}
+
+/// Put a timed behaviour buff on a mobile — Night Sight, Protection, Reactive
+/// Armor, Magic Reflection. The [`StatMods`] pattern for effects that change a
+/// behaviour, not a stat: nothing folds into a number, so a recast of the same
+/// `kind` just replaces its entry (refresh, never stack), and there is nothing to
+/// back out — expiry only stops the buff being read.
+pub fn apply_behaviour_buff(
+    state: &mut WorldState,
+    serial: u32,
+    kind: u8,
+    amount: i16,
+    expires_at: u64,
+) {
+    let Some(entity) = Serial::new(serial).and_then(|s| state.registry.entity_of(s)) else {
+        return;
+    };
+    let mut buffs = state
+        .registry
+        .get::<BehaviourBuffs>(entity)
+        .cloned()
+        .unwrap_or_default();
+    buffs.active.retain(|b| b.kind != kind);
+    buffs.active.push(BehaviourBuff {
+        kind,
+        amount,
+        expires_at,
+    });
+    state.registry.insert(entity, buffs);
+}
+
+/// Lift every behaviour buff whose tick has come, returning `(entity, kind)` for
+/// each so the caller can react — Night Sight, say, must re-send the ambient light
+/// when it lifts. Runs on the tick counter, so it replays.
+#[must_use]
+pub fn expire_behaviour_buffs(state: &mut WorldState, now: u64) -> Vec<(EntityId, u8)> {
+    let ready: Vec<EntityId> = state
+        .registry
+        .query::<BehaviourBuffs>()
+        .filter(|(_, buffs)| buffs.active.iter().any(|b| now >= b.expires_at))
+        .map(|(entity, _)| entity)
+        .collect();
+    let mut lifted = Vec::new();
+    for entity in ready {
+        let Some(buffs) = state.registry.get::<BehaviourBuffs>(entity).cloned() else {
+            continue;
+        };
+        let (expired, kept): (Vec<BehaviourBuff>, Vec<BehaviourBuff>) =
+            buffs.active.into_iter().partition(|b| now >= b.expires_at);
+        for b in expired {
+            lifted.push((entity, b.kind));
+        }
+        if kept.is_empty() {
+            state.registry.remove::<BehaviourBuffs>(entity);
+        } else {
+            state
+                .registry
+                .insert(entity, BehaviourBuffs { active: kept });
+        }
+    }
+    lifted
+}
+
+/// Take one behaviour buff off a mobile before its time — Magic Reflection is
+/// spent the moment it bounces a spell. Returns whether the buff was there.
+pub fn consume_behaviour_buff(state: &mut WorldState, entity: EntityId, kind: u8) -> bool {
+    let Some(mut buffs) = state.registry.get::<BehaviourBuffs>(entity).cloned() else {
+        return false;
+    };
+    let before = buffs.active.len();
+    buffs.active.retain(|b| b.kind != kind);
+    if buffs.active.len() == before {
+        return false;
+    }
+    if buffs.active.is_empty() {
+        state.registry.remove::<BehaviourBuffs>(entity);
+    } else {
+        state.registry.insert(entity, buffs);
+    }
+    true
+}
+
+/// Read the magnitude of an active behaviour buff, if the mobile carries it — the
+/// Reactive Armor reflect percent, the Protection chance. `None` when absent.
+#[must_use]
+pub fn behaviour_buff(state: &WorldState, entity: EntityId, kind: u8) -> Option<i16> {
+    state
+        .registry
+        .get::<BehaviourBuffs>(entity)?
+        .active
+        .iter()
+        .find(|b| b.kind == kind)
+        .map(|b| b.amount)
 }
 
 /// Trickle mana back for everyone who has any, one point each regen tick. Runs

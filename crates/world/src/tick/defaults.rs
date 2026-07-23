@@ -24,6 +24,11 @@ pub(super) const DEFAULT_HUE: u16 = 0x83EA;
 pub(super) const TEXT_HUE: u16 = 0x03B2;
 /// Full daylight. The scale runs backwards: 0 is brightest, 0x1F pitch dark.
 pub(super) const LIGHT_DAY: u8 = 0;
+/// The personal light a Night Sight caster sees by — the brightest level, so the
+/// dark lifts. Distinct name from [`LIGHT_DAY`] though both are 0 today: the
+/// ambient is daylight only until a day/night cycle exists, and Night Sight is
+/// the override that will matter the moment one does.
+pub(super) const LIGHT_NIGHTSIGHT: u8 = 0;
 /// The facet a new character spawns on, and the world's fallback for a facet it
 /// has not loaded. Zero is Felucca.
 pub(super) const DEFAULT_FACET: u8 = 0;

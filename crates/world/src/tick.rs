@@ -407,6 +407,15 @@ impl World {
                 self.refresh_status_of(serial.raw());
             }
         }
+        // Lift the behaviour buffs whose time is up. Night Sight restores the
+        // ambient light on its way out; the rest just stop being read.
+        for (entity, kind) in magic::expire_behaviour_buffs(&mut self.state, now) {
+            if kind == openshard_state::effect::NIGHT_SIGHT {
+                if let Some(serial) = self.state.registry.serial_of(entity) {
+                    self.send_light(serial.raw(), LIGHT_DAY);
+                }
+            }
+        }
         magic::regen_mana(&mut self.state);
         // Finish or break the ServUO-style casts whose delay is up or whose
         // caster was struck; the Sphere style resolves in `begin_cast` and never

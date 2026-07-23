@@ -19,9 +19,9 @@ use openshard_protocol::{
     encode_attack, encode_graphical_effect, encode_war_mode, EffectKind, EffectPoint, Notoriety,
 };
 use openshard_state::components::{
-    body_is_female, body_opens_doors, creature_base_sound, Body, Combat, CriminalUntil, DamageType,
-    Hitpoints, MeleeDamage, MurderDecay, Murders, Poisoned, Position, RangedAttack, Resistance,
-    Stats, SwingSpeed,
+    body_is_female, body_opens_doors, creature_base_sound, effect, BehaviourBuffs, Body, Combat,
+    CriminalUntil, DamageType, Hitpoints, MeleeDamage, MurderDecay, Murders, Poisoned, Position,
+    RangedAttack, Resistance, Stats, SwingSpeed,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{Action, WorldState};
@@ -225,6 +225,31 @@ pub fn damage(
         by: attacker,
     });
     state.broadcast_health(entity);
+    // Reactive Armor bounces a share of a melee physical blow back at the
+    // attacker. The reflected hit is unattributed (attacker `None`), which both
+    // breaks the recursion — a reflected blow never reflects again — and keeps a
+    // reflect kill blameless.
+    if kind == DamageType::Physical && amount > 0 {
+        if let Some(attacker_serial) = attacker {
+            if let Some(pct) = state
+                .registry
+                .get::<BehaviourBuffs>(entity)
+                .and_then(|b| b.active.iter().find(|x| x.kind == effect::REACTIVE_ARMOR))
+                .map(|x| x.amount)
+            {
+                let reflected = (u32::from(amount) * pct.max(0) as u32 / 100) as u16;
+                if reflected > 0 {
+                    damage(
+                        state,
+                        attacker_serial.raw(),
+                        reflected,
+                        DamageType::Physical,
+                        None,
+                    );
+                }
+            }
+        }
+    }
     if remaining == 0 {
         if victim_was_blue {
             if let Some(killer) = attacker.and_then(|s| state.registry.entity_of(s)) {

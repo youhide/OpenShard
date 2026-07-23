@@ -85,9 +85,22 @@ impl World {
                 .map(|event| event.entity)
                 .collect();
             for entity in hurt {
-                if self.state.registry.remove::<Casting>(entity).is_some() {
-                    self.notify_self(entity, "Your concentration is broken.");
+                if !self.state.registry.has::<Casting>(entity) {
+                    continue;
                 }
+                // Protection holds concentration: roll the caster's chance (the
+                // seeded tick generator, so it replays) and, on a pass, the blow
+                // does not break the cast.
+                if let Some(chance) =
+                    magic::behaviour_buff(&self.state, entity, openshard_state::effect::PROTECTION)
+                {
+                    if self.state.rng.below(100) < chance.max(0) as u32 {
+                        self.notify_self(entity, "Your protection holds your concentration.");
+                        continue;
+                    }
+                }
+                self.state.registry.remove::<Casting>(entity);
+                self.notify_self(entity, "Your concentration is broken.");
             }
         }
         // Then the casts whose delay is up.
@@ -187,13 +200,34 @@ impl World {
         &mut self,
         caster: EntityId,
         spell: u16,
-        target_serial: u32,
-        target_location: Point,
+        mut target_serial: u32,
+        mut target_location: Point,
     ) {
         let Some(info) = magic::info(spell) else {
             return;
         };
         let by = self.state.registry.serial_of(caster);
+        // Magic Reflection: an offensive spell aimed at a mobile that carries the
+        // reflect bounces back at its own caster, and the buff is spent. Redirect
+        // before the feedback, so the bolt flies at whoever actually takes it.
+        if matches!(info.effect, SpellEffect::Damage(..) | SpellEffect::Poison)
+            && target_serial != 0
+        {
+            if let Some(target) =
+                Serial::new(target_serial).and_then(|s| self.state.registry.entity_of(s))
+            {
+                if magic::consume_behaviour_buff(
+                    &mut self.state,
+                    target,
+                    openshard_state::effect::MAGIC_REFLECT,
+                ) {
+                    if let Some(caster_serial) = by {
+                        target_serial = caster_serial.raw();
+                        target_location = self.caster_position(caster);
+                    }
+                }
+            }
+        }
         // The sound and bolt/sparkle that make the cast land — before the effect,
         // so a target killed by the blow is still there for the bolt to fly at.
         self.spell_feedback(caster, target_serial, target_location, info.effect);
@@ -302,6 +336,27 @@ impl World {
                     self.resurrect(entity);
                 }
             }
+            SpellEffect::BehaviourBuff(kind) => {
+                // Night Sight can land on another mobile; the self-cast trio
+                // (Protection, Reactive Armor, Magic Reflection) answers its own
+                // cursor and lands on the caster.
+                let who = if target_serial != 0 {
+                    target_serial
+                } else {
+                    by.map_or(0, |s| s.raw())
+                };
+                if who != 0 {
+                    let (amount, expires_at) = self.behaviour_buff_terms(caster, kind);
+                    magic::apply_behaviour_buff(&mut self.state, who, kind, amount, expires_at);
+                    // Night Sight lights the buffed mobile's own screen. (Ambient
+                    // is always daylight until a day/night cycle exists, so this is
+                    // presently a no-op the moment one lands — it is sent correctly
+                    // regardless.)
+                    if kind == openshard_state::effect::NIGHT_SIGHT {
+                        self.send_light(who, LIGHT_NIGHTSIGHT);
+                    }
+                }
+            }
             SpellEffect::Scripted => {} // the pack's, off SpellCast
         }
     }
@@ -342,6 +397,16 @@ impl World {
             SpellEffect::StatMod(_) => (0x01EA, Visual::OnTarget(0x373A)),
             // Resurrection: ServUO's `0x214` chime and a sparkle on the raised body.
             SpellEffect::Resurrect => (0x0214, Visual::OnTarget(0x376A)),
+            // The non-stat buffs, ServUO's per-spell sound and sparkle.
+            SpellEffect::BehaviourBuff(kind) => {
+                use openshard_state::effect;
+                match kind {
+                    effect::PROTECTION => (0x01ED, Visual::OnTarget(0x375A)),
+                    effect::REACTIVE_ARMOR => (0x01F2, Visual::OnTarget(0x376A)),
+                    effect::NIGHT_SIGHT => (0x01E3, Visual::OnTarget(0x376A)),
+                    _ => (0x01E9, Visual::OnTarget(0x375A)), // Magic Reflection
+                }
+            }
             SpellEffect::Scripted => return, // the pack's to voice
         };
 
@@ -429,6 +494,51 @@ impl World {
         };
         let seconds = u64::from(magery / 10).clamp(10, 120);
         (offset, self.state.ticks + seconds * TICKS_PER_SECOND)
+    }
+
+    /// How strong a behaviour buff the caster lands, and the tick it lifts. The
+    /// `amount` carries what the buff's decision point reads — a Protection chance,
+    /// a Reactive Armor reflect percent — and is unused for the bare markers. All
+    /// scale from the caster's Magery (in tenths, grandmaster `1000`), ServUO's
+    /// classic pre-AoS shape approximated.
+    fn behaviour_buff_terms(&self, caster: EntityId, kind: u8) -> (i16, u64) {
+        use openshard_state::effect;
+        let magery = i32::from(
+            self.state
+                .registry
+                .get::<Skills>(caster)
+                .map_or(0, |s| s.get(MAGERY_SKILL)),
+        );
+        let (amount, seconds): (i16, u64) = match kind {
+            // Night Sight: a marker; 15–25 minutes, Magery-scaled.
+            effect::NIGHT_SIGHT => (0, (900 + (magery * 6 / 10) as u64).clamp(900, 1500)),
+            // Protection: the chance a blow does not break a cast, capped 75%.
+            effect::PROTECTION => (
+                (magery * 75 / 1000).clamp(0, 75) as i16,
+                (magery / 5).clamp(15, 240) as u64,
+            ),
+            // Reactive Armor: the percent of a melee blow bounced back, capped 50%.
+            effect::REACTIVE_ARMOR => (
+                (magery * 50 / 1000).clamp(5, 50) as i16,
+                (magery / 5).clamp(15, 240) as u64,
+            ),
+            // Magic Reflection: a marker, spent on the first bounce; the timer is a
+            // fallback if no spell arrives.
+            _ => (0, (magery / 5).clamp(15, 240) as u64),
+        };
+        (amount, self.state.ticks + seconds * TICKS_PER_SECOND)
+    }
+
+    /// Send a mobile its personal light level, if it has a client — the seam Night
+    /// Sight lights and its expiry restores. A creature (no `Client`) is a no-op.
+    pub(super) fn send_light(&mut self, serial: u32, level: u8) {
+        let Some(entity) = Serial::new(serial).and_then(|s| self.state.registry.entity_of(s))
+        else {
+            return;
+        };
+        if let Some(&Client { connection, .. }) = self.state.registry.get::<Client>(entity) {
+            self.state.send(connection, encode_light_level(level));
+        }
     }
 
     /// Whether the caster carries a spellbook that holds `spell` — a book in its

@@ -3973,6 +3973,359 @@ fn a_stat_buff_survives_a_relogin() {
 }
 
 #[test]
+fn reactive_armor_reflects_a_share_of_a_blow_to_the_attacker() {
+    // A melee physical blow on a mobile wearing Reactive Armor bounces a share
+    // back at the swinger — read at the one damage door, off the buff's percent.
+    use openshard_state::effect;
+    let now = Instant::now();
+    let mut world = world();
+    let victim = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 100, now);
+    let attacker = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 100, now);
+    let victim_entity = entity(&world, victim);
+    let attacker_entity = entity(&world, attacker);
+    let until = world.state.ticks + 1000;
+    magic::apply_behaviour_buff(
+        &mut world.state,
+        victim,
+        effect::REACTIVE_ARMOR,
+        50, // half
+        until,
+    );
+    let attacker_before = world
+        .registry()
+        .get::<Hitpoints>(attacker_entity)
+        .unwrap()
+        .current;
+
+    combat::damage(
+        &mut world.state,
+        victim,
+        20,
+        openshard_state::DamageType::Physical,
+        Serial::new(attacker),
+    );
+
+    assert_eq!(
+        world
+            .registry()
+            .get::<Hitpoints>(victim_entity)
+            .unwrap()
+            .current,
+        80,
+        "the victim took the whole blow"
+    );
+    assert_eq!(
+        attacker_before
+            - world
+                .registry()
+                .get::<Hitpoints>(attacker_entity)
+                .unwrap()
+                .current,
+        10,
+        "and half of it bounced back at the attacker"
+    );
+}
+
+#[test]
+fn reactive_armor_does_not_ping_pong() {
+    // Both sides armored: the reflected blow is unattributed, so it cannot reflect
+    // a second time — no infinite bounce.
+    use openshard_state::effect;
+    let now = Instant::now();
+    let mut world = world();
+    let victim = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 100, now);
+    let attacker = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 100, now);
+    let victim_entity = entity(&world, victim);
+    let attacker_entity = entity(&world, attacker);
+    let at = world.state.ticks + 1000;
+    magic::apply_behaviour_buff(&mut world.state, victim, effect::REACTIVE_ARMOR, 50, at);
+    magic::apply_behaviour_buff(&mut world.state, attacker, effect::REACTIVE_ARMOR, 50, at);
+
+    combat::damage(
+        &mut world.state,
+        victim,
+        20,
+        openshard_state::DamageType::Physical,
+        Serial::new(attacker),
+    );
+
+    assert_eq!(
+        world
+            .registry()
+            .get::<Hitpoints>(victim_entity)
+            .unwrap()
+            .current,
+        80,
+        "the victim took the blow but no bounce came back"
+    );
+    assert_eq!(
+        world
+            .registry()
+            .get::<Hitpoints>(attacker_entity)
+            .unwrap()
+            .current,
+        90,
+        "the attacker took only the one reflected hit"
+    );
+}
+
+#[test]
+fn protection_holds_a_cast_against_a_blow() {
+    // Protection is the chance a blow does not break concentration. With a certain
+    // chance, a hit mid-cast leaves the Casting standing where it would otherwise
+    // fizzle (compare `a_blow_disturbs_a_cast_when_the_shard_says_so`).
+    use openshard_state::components::Casting;
+    use openshard_state::effect;
+    let now = Instant::now();
+    let mut world = world(); // spell_disturb on by default
+    let (connection, entity) = ready_caster(&mut world, BLACK_PEARL, now);
+    let serial = serial_of(&world, connection);
+    let until = world.state.ticks + 1000;
+    magic::apply_behaviour_buff(
+        &mut world.state,
+        serial,
+        effect::PROTECTION,
+        100, // certain
+        until,
+    );
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 17,
+    });
+    world.tick(now);
+    assert!(world.registry().get::<Casting>(entity).is_some());
+
+    world.queue(Command::Damage {
+        serial,
+        amount: 5,
+        damage_type: 0,
+        by: 0,
+    });
+    world.tick(now);
+    assert!(
+        world.registry().get::<Casting>(entity).is_some(),
+        "protection held the concentration"
+    );
+}
+
+#[test]
+fn magic_reflection_bounces_a_spell_back_at_the_caster() {
+    // An offensive spell aimed at a mobile carrying Magic Reflection lands on the
+    // caster instead, and the buff is spent doing it.
+    use openshard_state::effect;
+    let now = Instant::now();
+    let mut world = sphere_world();
+    let (connection, caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    let target = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let target_entity = entity(&world, target);
+    let until = world.state.ticks + 1000;
+    magic::apply_behaviour_buff(&mut world.state, target, effect::MAGIC_REFLECT, 0, until);
+    let caster_before = world.registry().get::<Hitpoints>(caster).unwrap().current;
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 17,
+    }); // Fireball
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::TargetResponse {
+            cursor_id: 0,
+            serial: target,
+            location: Point::new(0, 0, 0),
+            graphic: 0,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    assert!(
+        world.registry().get::<Hitpoints>(caster).unwrap().current < caster_before,
+        "the caster took his own fireball"
+    );
+    assert_eq!(
+        world
+            .registry()
+            .get::<Hitpoints>(target_entity)
+            .unwrap()
+            .current,
+        50,
+        "the reflecting target was untouched"
+    );
+    assert!(
+        magic::behaviour_buff(&world.state, target_entity, effect::MAGIC_REFLECT).is_none(),
+        "and the reflect was spent"
+    );
+}
+
+#[test]
+fn night_sight_lights_the_targets_screen() {
+    // Night Sight sends the caster its personal light (0x4F, level 0 — brightest).
+    // Reagents off so the one-reagent test caster can cast a two-reagent spell.
+    use openshard_state::components::BehaviourBuffs;
+    let now = Instant::now();
+    let mut world = World::new(START).with_gameplay(Gameplay {
+        cast_style: openshard_state::CastStyle::Walk,
+        reagents: false,
+        ..Default::default()
+    });
+    let (connection, caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    let caster_serial = serial_of(&world, connection);
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 5,
+    }); // Night Sight
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::TargetResponse {
+            cursor_id: 0,
+            serial: caster_serial,
+            location: Point::new(0, 0, 0),
+            graphic: 0,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    assert!(
+        packets_for(&mut world, connection)
+            .iter()
+            .any(|p| p.as_slice() == [0x4F, 0]),
+        "the overall-light packet lit the screen"
+    );
+    assert!(
+        world.registry().get::<BehaviourBuffs>(caster).is_some(),
+        "and the buff is on the mobile"
+    );
+}
+
+#[test]
+fn a_behaviour_buff_expires_on_its_tick_and_a_recast_refreshes() {
+    use openshard_state::components::BehaviourBuffs;
+    use openshard_state::effect;
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = serial_of(&world, connection);
+
+    let at = world.state.ticks;
+    magic::apply_behaviour_buff(
+        &mut world.state,
+        serial,
+        effect::REACTIVE_ARMOR,
+        30,
+        at + 50,
+    );
+    magic::apply_behaviour_buff(
+        &mut world.state,
+        serial,
+        effect::REACTIVE_ARMOR,
+        40,
+        at + 100,
+    );
+    assert_eq!(
+        world
+            .registry()
+            .get::<BehaviourBuffs>(entity)
+            .unwrap()
+            .active
+            .len(),
+        1,
+        "a recast refreshes rather than stacking a second entry"
+    );
+    assert_eq!(
+        magic::behaviour_buff(&world.state, entity, effect::REACTIVE_ARMOR),
+        Some(40),
+        "and it is the fresh magnitude and timer"
+    );
+
+    let mut later = now;
+    while world.state.ticks <= at + 100 {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert!(
+        world.registry().get::<BehaviourBuffs>(entity).is_none(),
+        "the buff lifted on its tick"
+    );
+}
+
+#[test]
+fn a_behaviour_buff_survives_a_relogin() {
+    // The non-stat buffs ride the same effects list a poison or a Bless does: saved
+    // with the character, restored on relog, still counting down.
+    use openshard_protocol::SkillLock;
+    use openshard_state::effect;
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let serial = serial_of(&world, conn);
+    let at = world.state.ticks;
+    magic::apply_behaviour_buff(
+        &mut world.state,
+        serial,
+        effect::REACTIVE_ARMOR,
+        40,
+        at + 500,
+    );
+
+    world.take_snapshot();
+    let snapshot = world.drain_saves().next_back().expect("a snapshot");
+    let record = snapshot
+        .characters
+        .iter()
+        .find(|c| c.serial == serial)
+        .cloned()
+        .expect("saved");
+    assert!(
+        record
+            .effects
+            .iter()
+            .any(|e| e.kind == effect::REACTIVE_ARMOR && e.amount == 40),
+        "the buff went to disk"
+    );
+
+    world.queue(Command::Disconnect { connection: conn });
+    world.tick(now);
+    let conn = connection();
+    world.queue(Command::Enter {
+        connection: conn,
+        version: ClientVersion::TOL,
+        account: "admin".to_owned(),
+        name: "Lord British".to_owned(),
+        serial: Some(serial),
+        position: Some(Point::new(START.0, START.1, 0)),
+        facet: 0,
+        appearance: None,
+        sheet: Some(CharacterSheet {
+            strength: record.strength,
+            dexterity: record.dexterity,
+            intelligence: record.intelligence,
+            skills: record
+                .skills
+                .iter()
+                .map(|s| (s.id, s.value, SkillLock::from_bits(s.lock)))
+                .collect(),
+            effects: record.effects.clone(),
+            dead: record.dead,
+        }),
+        access: AccessLevel::Player,
+    });
+    world.tick(now);
+
+    let player = world.state.players[&conn];
+    assert_eq!(
+        magic::behaviour_buff(&world.state, player, effect::REACTIVE_ARMOR),
+        Some(40),
+        "and came back on relog"
+    );
+}
+
+#[test]
 fn the_bless_spell_raises_the_targets_stats() {
     use openshard_state::components::Stats;
     const GARLIC: u16 = 0x0F84;

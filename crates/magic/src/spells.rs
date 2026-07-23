@@ -65,6 +65,11 @@ pub enum SpellEffect {
     /// the ghost slice: lifts the `Ghost` state, restores the living body, and
     /// hands back a fraction of the target's hit points. A no-op on the living.
     Resurrect,
+    /// A timed behaviour buff — the non-stat magical family
+    /// ([`BehaviourBuffs`](openshard_state::BehaviourBuffs)). The `u8` is the
+    /// effect kind (`NIGHT_SIGHT`..`MAGIC_REFLECT`); its magnitude and duration
+    /// scale from the caster's Magery when it lands.
+    BehaviourBuff(u8),
     /// The core does not run this one yet — the pack owns it (fields, summons,
     /// travel, and the rest).
     Scripted,
@@ -90,7 +95,9 @@ pub struct SpellInfo {
 
 use openshard_state::effect;
 use DamageType::{Cold, Energy, Fire, Physical};
-use SpellEffect::{AreaCure, AreaDamage, Cure, Damage, Heal, Poison, Scripted, StatMod, Teleport};
+use SpellEffect::{
+    AreaCure, AreaDamage, BehaviourBuff, Cure, Damage, Heal, Poison, Scripted, StatMod, Teleport,
+};
 use SpellTarget::{Location, Mobile, SelfCast};
 
 /// One table entry, kept terse so all 64 read at a glance.
@@ -149,14 +156,14 @@ pub static MAGERY: [SpellInfo; 64] = [
         1,
         &[SULFUROUS_ASH, SPIDERS_SILK],
         Mobile,
-        Scripted,
+        BehaviourBuff(effect::NIGHT_SIGHT),
     ),
     spell(
         "Reactive Armor",
         1,
         &[GARLIC, SPIDERS_SILK, SULFUROUS_ASH],
         SelfCast,
-        Scripted,
+        BehaviourBuff(effect::REACTIVE_ARMOR),
     ),
     spell(
         "Weaken",
@@ -207,7 +214,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         2,
         &[GARLIC, GINSENG, SULFUROUS_ASH, SPIDERS_SILK],
         SelfCast,
-        Scripted,
+        BehaviourBuff(effect::PROTECTION),
     ),
     spell(
         "Strength",
@@ -345,7 +352,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         5,
         &[GARLIC, MANDRAKE_ROOT, SPIDERS_SILK],
         SelfCast,
-        Scripted,
+        BehaviourBuff(effect::MAGIC_REFLECT),
     ),
     spell(
         "Mind Blast",

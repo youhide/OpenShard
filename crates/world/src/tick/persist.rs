@@ -1,8 +1,8 @@
 use super::*;
 use openshard_persistence::EffectRecord;
 use openshard_state::components::{
-    body_opens_doors, effect, Aggression, Banker, Npc, Poisoned, Price, RangedAttack, Skills,
-    Spellbook, StatMod, StatMods, SwingSpeed, Vendor,
+    body_opens_doors, effect, Aggression, Banker, BehaviourBuff, BehaviourBuffs, Npc, Poisoned,
+    Price, RangedAttack, Skills, Spellbook, StatMod, StatMods, SwingSpeed, Vendor,
 };
 
 impl World {
@@ -403,6 +403,18 @@ impl World {
                 });
             }
         }
+        // The non-stat behaviour buffs ride the same list — kind, magnitude, and
+        // the ticks left until it lifts. A Night Sight relights on login (see the
+        // enter path); the rest are read straight off the restored component.
+        if let Some(buffs) = registry.get::<BehaviourBuffs>(entity) {
+            for b in &buffs.active {
+                effects.push(EffectRecord {
+                    kind: b.kind,
+                    amount: b.amount,
+                    remaining: b.expires_at.saturating_sub(now).min(u64::from(u16::MAX)) as u16,
+                });
+            }
+        }
         effects
     }
 
@@ -421,6 +433,7 @@ impl World {
         now: u64,
     ) {
         let mut mods = StatMods::default();
+        let mut buffs = BehaviourBuffs::default();
         for record in effects {
             if record.kind == effect::POISON {
                 registry.insert(
@@ -447,11 +460,28 @@ impl World {
                     offset: record.amount,
                     expires_at: now + u64::from(record.remaining),
                 });
+            } else if matches!(
+                record.kind,
+                effect::NIGHT_SIGHT
+                    | effect::PROTECTION
+                    | effect::REACTIVE_ARMOR
+                    | effect::MAGIC_REFLECT
+            ) {
+                // A behaviour buff nothing is folded into — just restore the
+                // ledger entry with its time remaining out from `now`.
+                buffs.active.push(BehaviourBuff {
+                    kind: record.kind,
+                    amount: record.amount,
+                    expires_at: now + u64::from(record.remaining),
+                });
             }
             // An unrecognised kind from a newer save is skipped, not a crash.
         }
         if !mods.active.is_empty() {
             registry.insert(entity, mods);
+        }
+        if !buffs.active.is_empty() {
+            registry.insert(entity, buffs);
         }
     }
 

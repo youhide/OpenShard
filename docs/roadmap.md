@@ -710,10 +710,24 @@ Roughly in dependency order, each script-first:
     the power words want the `0x54`-adjacent overhead speech, and the cast gesture
     is the same per-body animation the swing waits on. ServUO's `SpellInfo` carries
     all of it, so this is data the table can grow.
-  - [ ] **The non-stat magical buffs** — Protection, Reactive Armor, Night Sight,
-    Magic Reflection: a different mechanic from the stat family (each modifies a
-    behaviour, not a number), but the same `effects`-list persistence once each
-    carries a component. The nearest next step, and the smallest.
+  - [x] **The non-stat magical buffs — Protection, Reactive Armor, Night Sight,
+    Magic Reflection.** The family that modifies a *behaviour*, not a number, moved
+    from `Scripted` into the core. All four ride one `BehaviourBuffs` component (the
+    sibling of `StatMods`: a ledger, at most one entry per kind, a recast refreshes;
+    kinds `9..12` in `state::effect`), timed on the tick counter and swept into the
+    same saved `effects` list with **no schema change** — a relog keeps them. Each
+    is read where its behaviour is decided, pre-AoS (era 1) classic, Magery-scaled:
+    **Reactive Armor** bounces a percent of a melee physical blow back at the
+    attacker in `combat::damage` (the one damage door; the reflected hit is
+    unattributed, which both breaks the recursion and keeps a reflect kill
+    blameless); **Protection** rolls its chance to hold concentration in
+    `advance_casts` where a blow would else break a cast; **Magic Reflection** bounces
+    the next offensive spell back at its caster at the top of `apply_spell_effect`
+    and is spent doing it; **Night Sight** sends the caster its personal light
+    (`0x4F`, brightest) — a visual no-op until a day/night cycle exists, but sent and
+    restored correctly for the moment one does. Each plays ServUO's per-spell sound
+    and sparkle. Deferred: the AoS (era 2) resist-swap variants, and a day/night
+    cycle for Night Sight to fight.
   - [ ] **Persistent fields** — Fire/Poison/Energy/Paralyze Field and Wall of
     Stone: a timed area that pulses damage or blocks movement, on the tick counter
     like decay. Wants a field entity that the movement obstruction index and the

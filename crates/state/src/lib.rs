@@ -30,11 +30,11 @@ pub mod runtime;
 pub mod sectors;
 
 pub use components::{
-    effect, is_debuff, stat_shift, Access, Account, Amount, Banker, Body, Brain, Client, Combat,
-    Contained, Container, CriminalUntil, DamageType, Decays, Decoration, Door, Equipped, Facet,
-    Ghost, Graphic, Heading, Hitpoints, Mana, MeleeDamage, Movement, MurderDecay, Murders, Name,
-    Npc, Position, Resistance, Scripted, Skills, SpawnedBy, Stackable, StatMod, StatMods, Stats,
-    SwingSpeed,
+    effect, is_debuff, stat_shift, Access, Account, Amount, Banker, BehaviourBuff, BehaviourBuffs,
+    Body, Brain, Client, Combat, Contained, Container, CriminalUntil, DamageType, Decays,
+    Decoration, Door, Equipped, Facet, Ghost, Graphic, Heading, Hitpoints, Mana, MeleeDamage,
+    Movement, MurderDecay, Murders, Name, Npc, Position, Resistance, Scripted, Skills, SpawnedBy,
+    Stackable, StatMod, StatMods, Stats, SwingSpeed,
 };
 pub use obstruct::{LiveTerrain, Obstacle, Obstructions, DOOR_HEIGHT};
 pub use rng::Rng;

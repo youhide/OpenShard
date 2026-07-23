@@ -306,6 +306,15 @@ pub mod effect {
     pub const FEEBLEMIND: u8 = 7;
     /// Curse: `-` all three.
     pub const CURSE: u8 = 8;
+    /// Night Sight — a personal light override, not a stat. See
+    /// [`BehaviourBuffs`](super::BehaviourBuffs).
+    pub const NIGHT_SIGHT: u8 = 9;
+    /// Protection — a chance a blow does not break concentration mid-cast.
+    pub const PROTECTION: u8 = 10;
+    /// Reactive Armor — a share of melee physical damage reflected to the attacker.
+    pub const REACTIVE_ARMOR: u8 = 11;
+    /// Magic Reflection — bounces the next offensive spell back at its caster.
+    pub const MAGIC_REFLECT: u8 = 12;
 }
 
 /// Which stats a stat-modifying effect shifts, and by how much.
@@ -362,6 +371,38 @@ pub struct StatMod {
 pub struct StatMods {
     /// The active modifiers, at most one per kind.
     pub active: Vec<StatMod>,
+}
+
+/// One timed behaviour buff — a spell that changes *how* a mobile acts rather than
+/// a stat number: Night Sight, Protection, Reactive Armor, Magic Reflection.
+///
+/// Unlike a [`StatMod`], nothing is folded into a stat, so there is nothing to
+/// back out on expiry — the buff simply stops being read at its decision point.
+/// The `amount` carries what that point needs (a Protection chance, a Reactive
+/// Armor reflect percent); it is unused for the markers (Night Sight, Magic
+/// Reflect). Tick counts, like every timed effect, so it replays.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct BehaviourBuff {
+    /// Which buff — an [`effect`] kind (`NIGHT_SIGHT`..`MAGIC_REFLECT`).
+    pub kind: u8,
+    /// The magnitude the buff's decision point reads (chance, reflect percent),
+    /// or `0` for a bare marker.
+    pub amount: i16,
+    /// The tick it wears off.
+    pub expires_at: u64,
+}
+
+/// The behaviour buffs working through a mobile — the non-stat magical family.
+///
+/// The sibling of [`StatMods`] for effects that modify a behaviour, not a stat:
+/// at most one entry per kind, a recast refreshes rather than stacks, and each
+/// entry rides the same saved effects list. Read at the point the behaviour is
+/// decided — Reactive Armor in the damage door, Protection at cast disturbance,
+/// Magic Reflection where a spell resolves.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct BehaviourBuffs {
+    /// The active buffs, at most one per kind.
+    pub active: Vec<BehaviourBuff>,
 }
 
 /// How many innocents a mobile has killed — the tally that turns it red.
