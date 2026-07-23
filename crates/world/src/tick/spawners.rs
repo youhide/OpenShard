@@ -9,20 +9,48 @@ impl World {
     /// seeded rng, so a replay repopulates the same.
     pub(super) fn maintain_spawners(&mut self) {
         let now = self.state.ticks;
+        // Nothing due this tick? Then skip the whole pass — no counting, no
+        // proximity checks. The common case once a facet has settled.
+        if !self.spawners.iter().any(|s| now >= s.next_spawn) {
+            return;
+        }
+        // Count every region's live members in one sweep, keyed by owner id,
+        // rather than re-scanning all creatures once per region. That turned the
+        // cost from O(regions × creatures) — millions of comparisons a tick on a
+        // full facet, the freeze a staff Populate caused — into O(regions +
+        // creatures). The key is the same `index as u32` stored in `SpawnedBy`.
+        let mut live_counts: HashMap<u32, u16> = HashMap::new();
+        for (_, owner) in self.state.registry.query::<SpawnedBy>() {
+            *live_counts.entry(owner.0).or_default() += 1;
+        }
+        let lod = self.state.gameplay.lod;
+        let lod_radius = self.state.gameplay.lod_radius;
         for index in 0..self.spawners.len() {
             if now < self.spawners[index].next_spawn {
                 continue;
             }
             let id = index as u32;
-            let live = self
-                .state
-                .registry
-                .query::<SpawnedBy>()
-                .filter(|(_, owner)| owner.0 == id)
-                .count() as u16;
+            let live = live_counts.get(&id).copied().unwrap_or(0);
             let spawner = &self.spawners[index];
             if spawner.creatures.is_empty() || live >= spawner.max_count {
                 continue;
+            }
+            // Level of detail: a region no player is near need not be kept
+            // populated — nobody sees it. It stays dormant (its timer held, not
+            // advanced) until a player comes within range, then fills. The range
+            // is the radius plus the region's own reach, so a player anywhere the
+            // region could put a creature counts. Opt-in with the AI's `lod`.
+            if lod {
+                let area = spawner.area;
+                let centre = Point::new(
+                    area.x.wrapping_add(area.width / 2),
+                    area.y.wrapping_add(area.height / 2),
+                    0,
+                );
+                let reach = lod_radius + u32::from(area.width.max(area.height));
+                if !self.state.any_player_near(centre, reach, area.facet) {
+                    continue;
+                }
             }
 
             // Pick a creature and a tile with the tick's rng.
@@ -95,6 +123,18 @@ impl World {
         }
         spawner.id = self.next_spawner_id;
         self.next_spawner_id += 1;
+        // Stagger the first spawn across the respawn window. Populating a whole
+        // facet registers hundreds of regions in one tick; without this they are
+        // all due at once and fire together, a thundering herd that spikes the
+        // tick the moment a staff member presses Populate. A jittered start
+        // spreads that first fill over the respawn window instead. Only a fresh
+        // register jitters — a restore from the save keeps its saved timer, set
+        // by the caller after this returns.
+        let delay = spawner.respawn_delay;
+        if delay > 1 {
+            let jitter = self.state.rng.below(delay.min(u64::from(u32::MAX)) as u32);
+            spawner.next_spawn = self.state.ticks + u64::from(jitter);
+        }
         self.spawners.push(spawner);
     }
 

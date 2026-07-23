@@ -2,10 +2,12 @@
 //! handler for the buttons it comes back with.
 //!
 //! The menu is engine-owned — it is an operator tool, not gameplay. Its buttons
-//! register spawn regions (see [`crate::spawner`]) the tick then keeps populated.
-//! The spawn *sets* here are scaffolding: a small, curated Britain and cemetery to
-//! exercise the machinery end to end. The real, point-faithful sets belong in the
-//! community pack, registered through a script op — this is the shape they take.
+//! carry a *verb* the community pack acts on: "populate" registers the spawn
+//! regions (see [`crate::spawner`]) the tick then keeps populated, "decorate"
+//! lays the static/door/container art, and the two "clear" verbs undo them. The
+//! engine holds no spawn or decoration data of its own — a whole facet's worth
+//! comes from the pack, registered through a script op under the verb a button
+//! sends. One click each lays or clears the world.
 
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
@@ -18,10 +20,9 @@ use openshard_state::WorldState;
 pub const ADMIN_GUMP: u32 = 0x00AD_0001;
 
 /// Button ids the layout gives its reply buttons. `0` is the client's close box.
-const BTN_POPULATE_BRITAIN: u32 = 10;
-const BTN_POPULATE_CEMETERY: u32 = 11;
+const BTN_POPULATE_FELUCCA: u32 = 13;
+const BTN_DECORATE_FELUCCA: u32 = 22;
 const BTN_CLEAR: u32 = 12;
-const BTN_DECORATE_BRITAIN: u32 = 20;
 const BTN_CLEAR_DECO: u32 = 21;
 
 /// Open the admin menu for `actor`. The caller has already checked the authority
@@ -30,29 +31,20 @@ pub fn open_menu(state: &mut WorldState, actor: EntityId) {
     let Some(&Client { connection, .. }) = state.registry.get::<Client>(actor) else {
         return;
     };
-    // A tabbed window: page 0 is always drawn (the title and the tab buttons that
-    // switch pages), and each further page is a tab's contents.
+    // One flat page: two actions that lay the whole facet, and the two that clear
+    // them. Nothing to switch between, so there are no tabs to fall out of sync.
     let layout = "\
-{ resizepic 0 0 5054 320 260 }\
-{ page 0 }\
-{ text 120 12 2100 0 }\
-{ button 18 44 4005 4007 0 1 0 }{ text 52 46 1153 1 }\
-{ button 130 44 4005 4007 0 2 0 }{ text 164 46 1153 5 }\
-{ page 1 }\
-{ button 30 92 4005 4007 1 0 10 }{ text 66 94 1153 2 }\
-{ button 30 124 4005 4007 1 0 11 }{ text 66 126 1153 3 }\
-{ button 30 168 4017 4019 1 0 12 }{ text 66 170 33 4 }\
-{ page 2 }\
-{ button 30 92 4005 4007 1 0 20 }{ text 66 94 1153 6 }\
-{ button 30 136 4017 4019 1 0 21 }{ text 66 138 33 7 }";
+{ resizepic 0 0 5054 300 210 }\
+{ text 105 14 2100 0 }\
+{ button 30 54 4005 4007 1 0 13 }{ text 66 56 1153 1 }\
+{ button 30 88 4005 4007 1 0 22 }{ text 66 90 1153 2 }\
+{ button 30 130 4017 4019 1 0 12 }{ text 66 132 33 3 }\
+{ button 30 164 4017 4019 1 0 21 }{ text 66 166 33 4 }";
     let lines = [
         "Admin".to_owned(),
-        "Spawn".to_owned(),
-        "Populate Britain".to_owned(),
-        "Populate cemetery".to_owned(),
+        "Populate Felucca".to_owned(),
+        "Decorate Felucca".to_owned(),
         "Clear spawns".to_owned(),
-        "Deco".to_owned(),
-        "Decorate Britain".to_owned(),
         "Clear deco".to_owned(),
     ];
     // The context serial is the game master's own — a non-zero value the client
@@ -89,10 +81,9 @@ pub fn button_action(
     }
 
     let verb = match response.button {
-        BTN_POPULATE_BRITAIN => "populate:britain",
-        BTN_POPULATE_CEMETERY => "populate:cemetery",
+        BTN_POPULATE_FELUCCA => "populate:felucca",
+        BTN_DECORATE_FELUCCA => "decorate:felucca",
         BTN_CLEAR => "clear",
-        BTN_DECORATE_BRITAIN => "decorate:britain",
         BTN_CLEAR_DECO => "clear:deco",
         _ => return None, // the close box, or a button we do not know
     };
