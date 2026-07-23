@@ -1,8 +1,8 @@
 use super::*;
 use openshard_persistence::EffectRecord;
 use openshard_state::components::{
-    body_opens_doors, effect, Aggression, Banker, BehaviourBuff, BehaviourBuffs, Field, Npc,
-    Poisoned, Price, RangedAttack, Skills, Spellbook, StatMod, StatMods, SwingSpeed, Vendor,
+    body_opens_doors, effect, Aggression, Banker, BehaviourBuff, BehaviourBuffs, Field, Frozen,
+    Npc, Poisoned, Price, RangedAttack, Skills, Spellbook, StatMod, StatMods, SwingSpeed, Vendor,
 };
 
 impl World {
@@ -419,6 +419,14 @@ impl World {
                 });
             }
         }
+        // Paralysis rides the same list — a relog does not thaw it.
+        if let Some(frozen) = registry.get::<Frozen>(entity) {
+            effects.push(EffectRecord {
+                kind: effect::PARALYZE,
+                amount: 0,
+                remaining: frozen.until.saturating_sub(now).min(u64::from(u16::MAX)) as u16,
+            });
+        }
         effects
     }
 
@@ -478,6 +486,13 @@ impl World {
                     amount: record.amount,
                     expires_at: now + u64::from(record.remaining),
                 });
+            } else if record.kind == effect::PARALYZE {
+                registry.insert(
+                    entity,
+                    Frozen {
+                        until: now + u64::from(record.remaining),
+                    },
+                );
             }
             // An unrecognised kind from a newer save is skipped, not a crash.
         }

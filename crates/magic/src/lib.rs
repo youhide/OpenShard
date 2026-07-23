@@ -13,7 +13,7 @@
 use openshard_entities::{EntityId, Serial};
 use openshard_items::{count_in_container, take_from_container};
 use openshard_state::components::{
-    stat_shift, BehaviourBuff, BehaviourBuffs, Hitpoints, Mana, StatMod, StatMods, Stats,
+    stat_shift, BehaviourBuff, BehaviourBuffs, Frozen, Hitpoints, Mana, StatMod, StatMods, Stats,
 };
 use openshard_state::WorldState;
 
@@ -443,6 +443,37 @@ pub fn behaviour_buff(state: &WorldState, entity: EntityId, kind: u8) -> Option<
         .iter()
         .find(|b| b.kind == kind)
         .map(|b| b.amount)
+}
+
+/// Freeze a mobile in place until `until` — the Paralyze spell and Paralyze Field
+/// alike. A no-op if it is already frozen, matching ServUO's `Paralyze()`: a fresh
+/// cast (or a field pulse over someone already caught) does not extend the hold, so
+/// a field cannot pin a target forever.
+pub fn apply_paralyze(state: &mut WorldState, serial: u32, until: u64) {
+    let Some(entity) = Serial::new(serial).and_then(|s| state.registry.entity_of(s)) else {
+        return;
+    };
+    if state.registry.has::<Frozen>(entity) {
+        return;
+    }
+    state.registry.insert(entity, Frozen { until });
+}
+
+/// Lift the paralysis of every mobile whose tick has come, returning whom it
+/// thawed so the caller can tell a player it can move again. Runs on the tick
+/// counter, so it replays.
+#[must_use]
+pub fn expire_frozen(state: &mut WorldState, now: u64) -> Vec<EntityId> {
+    let thawed: Vec<EntityId> = state
+        .registry
+        .query::<Frozen>()
+        .filter(|(_, frozen)| now >= frozen.until)
+        .map(|(entity, _)| entity)
+        .collect();
+    for &entity in &thawed {
+        state.registry.remove::<Frozen>(entity);
+    }
+    thawed
 }
 
 /// Trickle mana back for everyone who has any, one point each regen tick. Runs

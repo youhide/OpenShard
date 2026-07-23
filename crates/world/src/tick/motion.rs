@@ -11,6 +11,25 @@ impl World {
         let Some(serial) = self.state.registry.serial_of(entity) else {
             return;
         };
+        // Paralysis refuses the walk before anything else — so it does not even
+        // break a cast the player cannot then follow with a step.
+        if let Some(&openshard_state::components::Frozen { until }) =
+            self.state
+                .registry
+                .get::<openshard_state::components::Frozen>(entity)
+        {
+            if self.state.ticks < until {
+                if let Some(Movement(walker)) = self.state.registry.get::<Movement>(entity).copied()
+                {
+                    self.state.send(
+                        connection,
+                        encode_walk_reject(request.sequence, walker.position, walker.facing),
+                    );
+                }
+                self.notify_self(entity, "You are frozen and cannot move.");
+                return;
+            }
+        }
         // A step breaks a spell mid-cast: the ServUO style roots the caster, so
         // stepping is choosing the walk over the spell. (The Sphere style never
         // sets `Casting`, so this is a no-op there.)
@@ -115,6 +134,15 @@ impl World {
         let Some(entity) = self.state.registry.entity_of(serial) else {
             return;
         };
+        // A frozen mobile does not move — its AI, an NPC routine, or a decree alike.
+        if self
+            .state
+            .registry
+            .get::<openshard_state::components::Frozen>(entity)
+            .is_some_and(|frozen| self.state.ticks < frozen.until)
+        {
+            return;
+        }
         let Some(Movement(mut walker)) = self.state.registry.get::<Movement>(entity).copied()
         else {
             return;

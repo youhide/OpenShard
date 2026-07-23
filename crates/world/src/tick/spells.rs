@@ -210,8 +210,10 @@ impl World {
         // Magic Reflection: an offensive spell aimed at a mobile that carries the
         // reflect bounces back at its own caster, and the buff is spent. Redirect
         // before the feedback, so the bolt flies at whoever actually takes it.
-        if matches!(info.effect, SpellEffect::Damage(..) | SpellEffect::Poison)
-            && target_serial != 0
+        if matches!(
+            info.effect,
+            SpellEffect::Damage(..) | SpellEffect::Poison | SpellEffect::Paralyze
+        ) && target_serial != 0
         {
             if let Some(target) =
                 Serial::new(target_serial).and_then(|s| self.state.registry.entity_of(s))
@@ -362,6 +364,13 @@ impl World {
                 // the visual, so `spell_feedback` only voiced the cast.
                 self.lay_field(caster, kind, target_location);
             }
+            SpellEffect::Paralyze => {
+                // A Mobile-target spell: it freezes the aimed mobile in place.
+                if target_serial != 0 {
+                    let until = self.paralyze_until(Some(caster));
+                    magic::apply_paralyze(&mut self.state, target_serial, until);
+                }
+            }
             SpellEffect::Scripted => {} // the pack's, off SpellCast
         }
     }
@@ -412,6 +421,8 @@ impl World {
             SpellEffect::StatMod(_) => (0x01EA, Visual::OnTarget(0x373A)),
             // Resurrection: ServUO's `0x214` chime and a sparkle on the raised body.
             SpellEffect::Resurrect => (0x0214, Visual::OnTarget(0x376A)),
+            // Paralyze: ServUO's chime and the freeze sparkle on the caught mobile.
+            SpellEffect::Paralyze => (0x0204, Visual::OnTarget(0x376A)),
             // The non-stat buffs, ServUO's per-spell sound and sparkle.
             SpellEffect::BehaviourBuff(kind) => {
                 use openshard_state::effect;
@@ -546,6 +557,18 @@ impl World {
         (amount, self.state.ticks + seconds * TICKS_PER_SECOND)
     }
 
+    /// The tick a paralysis this caster lands would lift — ServUO's pre-AoS
+    /// `7 + Magery*0.2` seconds (grandmaster `1000` tenths → 27s). Reused by both
+    /// the Paralyze spell and a Paralyze Field's pulse; a missing caster (a field
+    /// whose caster has gone) falls to the 7-second floor.
+    pub(super) fn paralyze_until(&self, caster: Option<EntityId>) -> u64 {
+        let magery = caster
+            .and_then(|c| self.state.registry.get::<Skills>(c))
+            .map_or(0, |s| s.get(MAGERY_SKILL));
+        let seconds = 7 + u64::from(magery) / 50;
+        self.state.ticks + seconds * TICKS_PER_SECOND
+    }
+
     /// Send a mobile its personal light level, if it has a client — the seam Night
     /// Sight lights and its expiry restores. A creature (no `Client`) is a no-op.
     pub(super) fn send_light(&mut self, serial: u32, level: u8) {
@@ -621,7 +644,7 @@ impl World {
 fn field_cast_sound(kind: FieldKind) -> u16 {
     match kind {
         FieldKind::Fire => 0x020C,
-        FieldKind::Poison | FieldKind::Energy => 0x020B,
+        FieldKind::Poison | FieldKind::Energy | FieldKind::Paralyze => 0x020B,
         FieldKind::Stone => 0x01F6,
     }
 }

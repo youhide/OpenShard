@@ -420,6 +420,10 @@ impl World {
                 }
             }
         }
+        // Thaw the paralyzed whose time is up, and tell a player it can move again.
+        for entity in magic::expire_frozen(&mut self.state, now) {
+            self.notify_self(entity, "You are no longer frozen.");
+        }
         magic::regen_mana(&mut self.state);
         // Finish or break the ServUO-style casts whose delay is up or whose
         // caster was struck; the Sphere style resolves in `begin_cast` and never

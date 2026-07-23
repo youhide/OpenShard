@@ -20,8 +20,8 @@ use openshard_protocol::{
 };
 use openshard_state::components::{
     body_is_female, body_opens_doors, creature_base_sound, effect, BehaviourBuffs, Body, Combat,
-    CriminalUntil, DamageType, Hitpoints, MeleeDamage, MurderDecay, Murders, Poisoned, Position,
-    RangedAttack, Resistance, Stats, SwingSpeed,
+    CriminalUntil, DamageType, Frozen, Hitpoints, MeleeDamage, MurderDecay, Murders, Poisoned,
+    Position, RangedAttack, Resistance, Stats, SwingSpeed,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{Action, WorldState};
@@ -225,6 +225,11 @@ pub fn damage(
         by: attacker,
     });
     state.broadcast_health(entity);
+    // A blow wakes a paralyzed mobile — ServUO clears `Paralyzed` inline in
+    // `Mobile.Damage`. Any real (post-resist) damage lifts it at once.
+    if amount > 0 {
+        state.registry.remove::<Frozen>(entity);
+    }
     // Reactive Armor bounces a share of a melee physical blow back at the
     // attacker. The reflected hit is unattributed (attacker `None`), which both
     // breaks the recursion — a reflected blow never reflects again — and keeps a

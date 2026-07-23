@@ -264,6 +264,18 @@ pub struct CriminalUntil {
     pub tick: u64,
 }
 
+/// A mobile that cannot move until its tick — paralysis, from the Paralyze spell
+/// or a Paralyze Field. The one hard rule of paralysis: the walk and the step both
+/// refuse while it holds; a blow lifts it (damage wakes you); it lapses on the tick
+/// counter. Casting and swinging are *not* barred (the classic engine leaves those
+/// to the client), only movement. A tick number, like [`CriminalUntil`], so it
+/// replays.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Frozen {
+    /// The tick the mobile can move again.
+    pub until: u64,
+}
+
 /// Poison working through a mobile: its strength, the tick its next pulse lands,
 /// and how many pulses remain before it clears. Tick counts, never a clock — a
 /// poisoned fight replays like decay and the criminal flag — so `poison_tick`
@@ -281,9 +293,7 @@ pub struct Poisoned {
 /// What a persistent field does — the behaviour a field-tile entity carries.
 ///
 /// A spell lays a row of ground tiles that either pulse harm or bar the way, on
-/// the tick counter like [`Poisoned`] and decay. Paralyze Field is not here yet:
-/// it freezes whoever crosses it, and there is no freeze mechanic until the
-/// Paralyze spell brings one.
+/// the tick counter like [`Poisoned`] and decay.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum FieldKind {
     /// Fire Field — pulses fire damage to whoever stands on it; not a wall.
@@ -294,20 +304,24 @@ pub enum FieldKind {
     Energy,
     /// Wall of Stone — an impassable wall; no damage.
     Stone,
+    /// Paralyze Field — freezes whoever walks onto it ([`Frozen`](super::Frozen));
+    /// not a wall, because you must be able to step on to be caught.
+    Paralyze,
 }
 
 impl FieldKind {
     /// Whether a mobile cannot walk onto this field — a wall (Energy, Stone), not
-    /// a hazard you cross and are hurt by (Fire, Poison).
+    /// a hazard you cross and are caught by (Fire, Poison, Paralyze).
     #[must_use]
     pub fn blocks(self) -> bool {
         matches!(self, Self::Energy | Self::Stone)
     }
 
-    /// Whether this field pulses harm each cadence (Fire, Poison).
+    /// Whether this field acts on whoever stands on it each cadence (damage for
+    /// Fire/Poison, a freeze for Paralyze) — as opposed to a passive wall.
     #[must_use]
     pub fn pulses(self) -> bool {
-        matches!(self, Self::Fire | Self::Poison)
+        matches!(self, Self::Fire | Self::Poison | Self::Paralyze)
     }
 }
 
@@ -371,6 +385,8 @@ pub mod effect {
     pub const REACTIVE_ARMOR: u8 = 11;
     /// Magic Reflection — bounces the next offensive spell back at its caster.
     pub const MAGIC_REFLECT: u8 = 12;
+    /// Paralyze — a [`Frozen`](super::Frozen) mobile that cannot move until it lifts.
+    pub const PARALYZE: u8 = 13;
 }
 
 /// Which stats a stat-modifying effect shifts, and by how much.

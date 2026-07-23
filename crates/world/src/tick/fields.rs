@@ -131,6 +131,13 @@ impl World {
                 .filter(|(entity, _)| self.state.registry.has::<Body>(*entity))
                 .filter_map(|(entity, _)| self.state.registry.serial_of(entity).map(|s| s.raw()))
                 .collect();
+            // A Paralyze Field freezes for the tick its caster's Magery dictates —
+            // computed once per pulse, not per victim.
+            let paralyze_until = if matches!(kind, FieldKind::Paralyze) {
+                self.paralyze_until(self.state.registry.entity_of(caster))
+            } else {
+                0
+            };
             for victim in victims {
                 match kind {
                     FieldKind::Fire => combat::damage(
@@ -142,6 +149,10 @@ impl World {
                     ),
                     FieldKind::Poison => {
                         combat::apply_poison(&mut self.state, victim, POISON_FIELD_LEVEL, now);
+                    }
+                    FieldKind::Paralyze => {
+                        // No-op if already caught, so the field cannot pin forever.
+                        magic::apply_paralyze(&mut self.state, victim, paralyze_until);
                     }
                     FieldKind::Energy | FieldKind::Stone => {}
                 }
@@ -232,6 +243,13 @@ fn field_graphic(kind: FieldKind, east_to_west: bool) -> u16 {
                 0x3956
             }
         }
+        FieldKind::Paralyze => {
+            if east_to_west {
+                0x3967
+            } else {
+                0x3979
+            }
+        }
         FieldKind::Stone => 0x0082,
     }
 }
@@ -244,16 +262,18 @@ fn field_duration_ticks(kind: FieldKind, magery: u16) -> u64 {
         FieldKind::Fire => 4 + m / 20,          // 4s + mag/2, grandmaster ~54s
         FieldKind::Poison => 3 + m / 25,        // 3s + mag*0.4, grandmaster ~43s
         FieldKind::Energy => 2 + m * 28 / 1000, // 2s + mag*0.28, grandmaster ~30s
+        FieldKind::Paralyze => 3 + m / 30,      // 3s + mag/3, grandmaster ~36s
         FieldKind::Stone => 10,                 // fixed
     };
     seconds * TICKS_PER_SECOND
 }
 
-/// The ticks between a hazard field's pulses (`0` for a wall, which never pulses).
+/// The ticks between a field's pulses (`0` for a wall, which never pulses).
 fn field_pulse_ticks(kind: FieldKind) -> u64 {
     match kind {
         FieldKind::Fire => TICKS_PER_SECOND,           // 1s
         FieldKind::Poison => TICKS_PER_SECOND * 3 / 2, // 1.5s
+        FieldKind::Paralyze => TICKS_PER_SECOND / 2,   // 0.5s — catch who steps on quickly
         FieldKind::Energy | FieldKind::Stone => 0,
     }
 }

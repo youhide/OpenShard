@@ -73,6 +73,9 @@ pub enum SpellEffect {
     /// A persistent field — a row of ground tiles laid at the aimed spot that pulse
     /// harm (Fire, Poison) or bar the way (Energy, Stone) until their tick comes.
     Field(FieldKind),
+    /// Paralyze — freezes the target mobile in place for a Magery-scaled span; a
+    /// blow lifts it. See [`Frozen`](openshard_state::Frozen).
+    Paralyze,
     /// The core does not run this one yet — the pack owns it (fields, summons,
     /// travel, and the rest).
     Scripted,
@@ -99,8 +102,8 @@ pub struct SpellInfo {
 use openshard_state::effect;
 use DamageType::{Cold, Energy, Fire, Physical};
 use SpellEffect::{
-    AreaCure, AreaDamage, BehaviourBuff, Cure, Damage, Field, Heal, Poison, Scripted, StatMod,
-    Teleport,
+    AreaCure, AreaDamage, BehaviourBuff, Cure, Damage, Field, Heal, Paralyze, Poison, Scripted,
+    StatMod, Teleport,
 };
 use SpellTarget::{Location, Mobile, SelfCast};
 
@@ -370,7 +373,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         5,
         &[GARLIC, MANDRAKE_ROOT, SPIDERS_SILK],
         Mobile,
-        Scripted,
+        Paralyze,
     ),
     spell(
         "Poison Field",
@@ -434,7 +437,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         6,
         &[BLOOD_MOSS, GARLIC, SULFUROUS_ASH, SPIDERS_SILK],
         Location,
-        Scripted,
+        Field(FieldKind::Paralyze),
     ),
     spell(
         "Reveal",
@@ -615,6 +618,9 @@ mod tests {
         assert_eq!(info(27).unwrap().name, "Fire Field");
         assert_eq!(info(38).unwrap().name, "Poison Field");
         assert_eq!(info(49).unwrap().name, "Energy Field");
+        // Paralysis, whose ids the paralyze tests cast by.
+        assert_eq!(info(37).unwrap().name, "Paralyze");
+        assert_eq!(info(46).unwrap().name, "Paralyze Field");
         assert!(info(64).is_none(), "there is no 65th spell");
     }
 

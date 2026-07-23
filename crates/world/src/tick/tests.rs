@@ -4522,6 +4522,286 @@ fn a_field_tile_is_not_saved() {
 }
 
 #[test]
+fn a_frozen_player_cannot_walk_and_can_again_when_it_lifts() {
+    use openshard_state::components::Frozen;
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let Position(start) = *world.registry().get::<Position>(entity).unwrap();
+    let until = world.state.ticks + 5;
+    world.state.registry.insert(entity, Frozen { until });
+    let _ = world.drain_outbound().count();
+
+    world.queue(Command::Walk {
+        connection,
+        request: walk(0, Direction::South),
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world.registry().get::<Position>(entity).unwrap().0,
+        start,
+        "a frozen player does not move"
+    );
+    assert!(
+        world
+            .drain_outbound()
+            .any(|out| out.packet.first() == Some(&0x21)),
+        "and gets a walk reject"
+    );
+
+    // Run past the freeze, then the same step lands.
+    let mut later = now;
+    while world.state.ticks <= until {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    let _ = world.drain_outbound().count();
+    world.queue(Command::Walk {
+        connection,
+        request: walk(0, Direction::South),
+    });
+    world.tick(later);
+    assert_ne!(
+        world.registry().get::<Position>(entity).unwrap().0,
+        start,
+        "once it lifts, the player walks"
+    );
+}
+
+#[test]
+fn a_frozen_creature_does_not_step() {
+    use openshard_state::components::Frozen;
+    let now = Instant::now();
+    let mut world = world();
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 5, START.1, 0), 50, now);
+    let entity = entity(&world, mob);
+    // Face it south first (turn-as-step), so a further south step would move it.
+    world.queue(Command::Step {
+        serial: mob,
+        direction: Direction::South.to_bits(),
+    });
+    world.tick(now);
+    let Position(before) = *world.registry().get::<Position>(entity).unwrap();
+
+    world.state.registry.insert(
+        entity,
+        Frozen {
+            until: world.state.ticks + 100,
+        },
+    );
+    world.queue(Command::Step {
+        serial: mob,
+        direction: Direction::South.to_bits(),
+    });
+    world.tick(now);
+    assert_eq!(
+        world.registry().get::<Position>(entity).unwrap().0,
+        before,
+        "a frozen creature stays put"
+    );
+
+    world.state.registry.remove::<Frozen>(entity);
+    world.queue(Command::Step {
+        serial: mob,
+        direction: Direction::South.to_bits(),
+    });
+    world.tick(now);
+    assert_ne!(
+        world.registry().get::<Position>(entity).unwrap().0,
+        before,
+        "thawed, it moves"
+    );
+}
+
+#[test]
+fn the_paralyze_spell_freezes_its_target() {
+    use openshard_state::components::Frozen;
+    let now = Instant::now();
+    let mut world = field_world(); // reagents off, so the one-reagent caster can cast it
+    let (connection, _caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    let victim = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let victim_entity = entity(&world, victim);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 37,
+    }); // Paralyze
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::TargetResponse {
+            cursor_id: 0,
+            serial: victim,
+            location: Point::new(0, 0, 0),
+            graphic: 0,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    assert!(
+        world.registry().get::<Frozen>(victim_entity).is_some(),
+        "the target is paralyzed"
+    );
+}
+
+#[test]
+fn a_blow_breaks_paralysis() {
+    use openshard_state::components::Frozen;
+    let now = Instant::now();
+    let mut world = world();
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
+    let entity = entity(&world, mob);
+    world.state.registry.insert(
+        entity,
+        Frozen {
+            until: world.state.ticks + 100,
+        },
+    );
+
+    combat::damage(
+        &mut world.state,
+        mob,
+        5,
+        openshard_state::DamageType::Physical,
+        None,
+    );
+
+    assert!(
+        world.registry().get::<Frozen>(entity).is_none(),
+        "a blow wakes a paralyzed mobile"
+    );
+}
+
+#[test]
+fn paralysis_lifts_on_its_tick() {
+    use openshard_state::components::Frozen;
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let until = world.state.ticks + 5;
+    world.state.registry.insert(entity, Frozen { until });
+
+    let mut later = now;
+    while world.state.ticks <= until {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert!(
+        world.registry().get::<Frozen>(entity).is_none(),
+        "the paralysis lifted on its tick"
+    );
+}
+
+#[test]
+fn paralysis_survives_a_relogin() {
+    use openshard_protocol::SkillLock;
+    use openshard_state::components::Frozen;
+    use openshard_state::effect;
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let entity = world.state.players[&conn];
+    let serial = serial_of(&world, conn);
+    let until = world.state.ticks + 500;
+    world.state.registry.insert(entity, Frozen { until });
+
+    world.take_snapshot();
+    let snapshot = world.drain_saves().next_back().expect("a snapshot");
+    let record = snapshot
+        .characters
+        .iter()
+        .find(|c| c.serial == serial)
+        .cloned()
+        .expect("saved");
+    assert!(
+        record.effects.iter().any(|e| e.kind == effect::PARALYZE),
+        "the paralysis went to disk"
+    );
+
+    world.queue(Command::Disconnect { connection: conn });
+    world.tick(now);
+    let conn = connection();
+    world.queue(Command::Enter {
+        connection: conn,
+        version: ClientVersion::TOL,
+        account: "admin".to_owned(),
+        name: "Lord British".to_owned(),
+        serial: Some(serial),
+        position: Some(Point::new(START.0, START.1, 0)),
+        facet: 0,
+        appearance: None,
+        sheet: Some(CharacterSheet {
+            strength: record.strength,
+            dexterity: record.dexterity,
+            intelligence: record.intelligence,
+            skills: record
+                .skills
+                .iter()
+                .map(|s| (s.id, s.value, SkillLock::from_bits(s.lock)))
+                .collect(),
+            effects: record.effects.clone(),
+            dead: record.dead,
+        }),
+        access: AccessLevel::Player,
+    });
+    world.tick(now);
+
+    let player = world.state.players[&conn];
+    assert!(
+        world.registry().get::<Frozen>(player).is_some(),
+        "and came back on relog, still frozen"
+    );
+}
+
+#[test]
+fn paralyze_field_freezes_who_stands_in_it() {
+    use openshard_state::components::Frozen;
+    use openshard_state::FieldKind;
+    assert!(
+        !FieldKind::Paralyze.blocks(),
+        "you must be able to step onto a paralyze field to be caught"
+    );
+    let now = Instant::now();
+    let mut world = field_world();
+    let (connection, _caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    let spot = Point::new(START.0 + 3, START.1, 0);
+    let victim = spawn_mobile_at(&mut world, spot, 50, now);
+    let victim_entity = entity(&world, victim);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: 46,
+    }); // Paralyze Field
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::TargetResponse {
+            cursor_id: 0,
+            serial: 0,
+            location: spot,
+            graphic: 0,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    // The pulse catches who stands on it within a beat.
+    let mut later = now;
+    for _ in 0..15 {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert!(
+        world.registry().get::<Frozen>(victim_entity).is_some(),
+        "the field froze who stood in it"
+    );
+}
+
+#[test]
 fn the_bless_spell_raises_the_targets_stats() {
     use openshard_state::components::Stats;
     const GARLIC: u16 = 0x0F84;
