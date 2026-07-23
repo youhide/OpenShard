@@ -22,7 +22,7 @@ use openshard_world::events::{
     PlayerLeft, SpellRequested, StepRefused,
 };
 use openshard_world::{
-    Command, ItemUsed, MobileDied, MobileSpoke, MobileUsed, SkillUsed, SpellCast, World,
+    Command, ItemUsed, ItemsTaken, MobileDied, MobileSpoke, MobileUsed, SkillUsed, SpellCast, World,
 };
 use tracing::{error, info, warn};
 
@@ -41,6 +41,7 @@ pub struct Scripts {
     spoke: Cursor<MobileSpoke>,
     item_used: Cursor<ItemUsed>,
     mobile_used: Cursor<MobileUsed>,
+    items_taken: Cursor<ItemsTaken>,
     corpse: Cursor<CorpseCreated>,
     admin: Cursor<AdminMenuAction>,
     gump: Cursor<GumpAnswered>,
@@ -89,6 +90,7 @@ impl Scripts {
             spoke: world.bus().cursor(),
             item_used: world.bus().cursor(),
             mobile_used: world.bus().cursor(),
+            items_taken: world.bus().cursor(),
             corpse: world.bus().cursor(),
             admin: world.bus().cursor(),
             gump: world.bus().cursor(),
@@ -212,6 +214,13 @@ impl Scripts {
                     mobile: e.mobile.raw(),
                     body: e.body,
                     by: e.by.raw(),
+                });
+            }
+            for e in bus.read(&mut self.items_taken) {
+                events.push(ScriptEvent::ItemsTaken {
+                    player: e.player.raw(),
+                    graphic: e.graphic,
+                    taken: e.taken,
                 });
             }
             for e in bus.read(&mut self.corpse) {
@@ -564,6 +573,15 @@ fn into_world(command: ScriptCommand) -> Command {
             stackable,
         },
         ScriptCommand::SetQuest { serial, blob } => Command::SetQuest { serial, blob },
+        ScriptCommand::TakeItem {
+            serial,
+            graphic,
+            amount,
+        } => Command::TakeItem {
+            serial,
+            graphic,
+            amount,
+        },
     }
 }
 

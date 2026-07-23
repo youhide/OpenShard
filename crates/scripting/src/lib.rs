@@ -190,6 +190,17 @@ pub enum Event {
         /// Who used it, by wire identity.
         by: Serial,
     },
+    /// The result of an `op_take_item` — how many of a graphic were taken from a
+    /// player's backpack. `taken` is the amount asked (the collect quest turned
+    /// in) or `0` (the player was short and nothing was removed).
+    ItemsTaken {
+        /// Whose backpack, by wire identity.
+        player: Serial,
+        /// The graphic asked for.
+        graphic: u16,
+        /// How many were taken — the amount asked, or `0`.
+        taken: u16,
+    },
     /// A game master pressed a button in the `.admin` menu. The engine only
     /// carries the verb across; the pack decides what it does — which spawn set to
     /// register, what to clear. This is how staff tools reach the script pack.
@@ -521,6 +532,17 @@ pub enum Command {
         serial: Serial,
         /// The pack's serialized quest state.
         blob: String,
+    },
+    /// Take up to `amount` of an item from a player's backpack — a quest's
+    /// "collect N" hand-over. All-or-nothing; the result comes back as an
+    /// `ItemsTaken` event.
+    TakeItem {
+        /// Whose backpack.
+        serial: Serial,
+        /// The item graphic to take.
+        graphic: u16,
+        /// How many to take.
+        amount: u16,
     },
 }
 

@@ -381,6 +381,17 @@ fn op_set_quest(state: &mut OpState, serial: u32, #[string] blob: String) {
         .push(Command::SetQuest { serial, blob });
 }
 
+/// Take up to `amount` of a graphic from a player's backpack — a quest's "collect
+/// N" turn-in. All-or-nothing; the result returns as an `ItemsTaken` event.
+#[op2(fast)]
+fn op_take_item(state: &mut OpState, serial: u32, graphic: u32, amount: u32) {
+    state.borrow_mut::<Host>().outbox.push(Command::TakeItem {
+        serial,
+        graphic: graphic.min(u32::from(u16::MAX)) as u16,
+        amount: amount.min(u32::from(u16::MAX)) as u16,
+    });
+}
+
 /// One creature template inside a [`SpawnerSpec`]. Mirrors [`MobileSpec`] minus
 /// the position, which the region supplies.
 #[derive(serde::Deserialize)]
@@ -725,7 +736,8 @@ extension!(
         op_generate_doors,
         op_gump,
         op_give_item,
-        op_set_quest
+        op_set_quest,
+        op_take_item
     ],
     docs = "OpenShard's script-facing ops: read entity state, enqueue commands.",
 );

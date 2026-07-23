@@ -1117,9 +1117,15 @@ Roughly in dependency order, each script-first:
   escorter (`op_position` + `op_move`, the server-authoritative step) and pays on
   reaching the destination town; entirely pack code over the scripted-brain seam,
   no new engine surface. The shipped example is a Britain traveller bound for
-  Minoc. Deferred: the **collect** objective (wants an inventory-read op), and
-  wiring the converter's Felucca escortables (`escortablemage`/`escortablehealer`,
-  ~27 in `felucca.xml`) as escort givers instead of the one hand-placed sample.
+  Minoc. And **collect quests** — since the engine has no inventory events, a
+  collect objective hands in at the counter: talking to the giver calls a new
+  `op_take_item` that draws N of an item from the backpack all-or-nothing and
+  reports back with an `ItemsTaken` event, which pays the reward only if the whole
+  lot was there. The shipped example gathers five spiders' silk for the
+  spellwright's apprentice. Deferred: wiring the converter's Felucca escortables
+  (`escortablemage`/`escortablehealer`, ~27 in `felucca.xml`) as escort givers
+  instead of the one hand-placed sample, and atomic multi-collect turn-ins (each
+  collect objective is taken independently today).
 
 ### Deferred / not yet ported (the Felucca converter)
 

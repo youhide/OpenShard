@@ -41,6 +41,22 @@ pub struct MobileUsed {
     pub by: Serial,
 }
 
+/// The result of an `op_take_item` — how many of an item were taken from a
+/// player's backpack, so a pack can verify a quest's "collect N" at turn-in.
+///
+/// The take is all-or-nothing: `taken` is the amount asked for when the player had
+/// at least that many, otherwise `0` and nothing was removed. A collect quest
+/// reads this to know the hand-over succeeded (or that the player is short).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ItemsTaken {
+    /// Whose backpack it was taken from.
+    pub player: Serial,
+    /// The item graphic asked for.
+    pub graphic: u16,
+    /// How many were actually taken — the amount asked, or `0`.
+    pub taken: u16,
+}
+
 /// Emit [`MobileUsed`] for a double-clicked mobile — fired beside the paperdoll
 /// open in [`double_click`](crate::double_click), never in place of it. Skips a
 /// self-click (opening your own paperdoll is not "using an NPC").

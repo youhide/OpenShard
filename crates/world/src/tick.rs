@@ -771,6 +771,11 @@ impl World {
                     self.state.registry.insert(entity, QuestLog(blob));
                 }
             }
+            Command::TakeItem {
+                serial,
+                graphic,
+                amount,
+            } => self.take_item(serial, graphic, amount),
             Command::RequestCast { connection, spell } => self.begin_cast(connection, spell),
             Command::StockVendor { serial, stock } => {
                 npc::stock(&mut self.state, serial, stock);
@@ -960,6 +965,73 @@ impl World {
         } else {
             items::place_one(&mut self.state, backpack, graphic, hue, amount);
         }
+    }
+
+    /// Take up to `amount` of a graphic from a player's backpack — all-or-nothing,
+    /// so a collect quest either completes cleanly or takes nothing. Reports the
+    /// result with an [`ItemsTaken`](crate::ItemsTaken) event the pack reads next
+    /// tick. Nothing (and `taken: 0`) if the serial names no mobile or it wears no
+    /// backpack.
+    fn take_item(&mut self, serial: u32, graphic: u16, amount: u16) {
+        const BACKPACK_LAYER: u8 = 0x15;
+        let Some(player) = Serial::new(serial) else {
+            return;
+        };
+        let backpack = self
+            .state
+            .registry
+            .query::<Equipped>()
+            .find(|(item, eq)| {
+                eq.mobile == player
+                    && eq.layer == BACKPACK_LAYER
+                    && self.state.registry.has::<Container>(*item)
+            })
+            .and_then(|(item, _)| self.state.registry.serial_of(item));
+        let taken = if let Some(backpack) = backpack {
+            // Every matching pile in the pack, with its serial and count.
+            let piles: Vec<(Serial, u16)> = self
+                .state
+                .registry
+                .query::<Contained>()
+                .filter(|(item, held)| {
+                    held.container == backpack
+                        && self
+                            .state
+                            .registry
+                            .get::<Graphic>(*item)
+                            .is_some_and(|g| g.id == graphic)
+                })
+                .filter_map(|(item, _)| {
+                    self.state
+                        .registry
+                        .serial_of(item)
+                        .map(|s| (s, items::amount_of(&self.state, item)))
+                })
+                .collect();
+            let total: u32 = piles.iter().map(|(_, a)| u32::from(*a)).sum();
+            if total >= u32::from(amount) {
+                // Enough — draw `amount` down across the piles, oldest first.
+                let mut remaining = amount;
+                for (pile, have) in &piles {
+                    if remaining == 0 {
+                        break;
+                    }
+                    let take = remaining.min(*have);
+                    items::consume(&mut self.state, *pile, take);
+                    remaining -= take;
+                }
+                amount
+            } else {
+                0 // Short — take nothing, so the player keeps what they have.
+            }
+        } else {
+            0
+        };
+        self.state.bus.send(openshard_items::ItemsTaken {
+            player,
+            graphic,
+            taken,
+        });
     }
 
     fn disconnect(&mut self, connection: ConnectionId) {

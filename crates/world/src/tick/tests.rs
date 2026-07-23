@@ -9990,6 +9990,72 @@ fn give_item_lands_in_the_players_backpack() {
 }
 
 #[test]
+fn take_item_is_all_or_nothing_and_reports_what_it_took() {
+    let now = Instant::now();
+    let mut world = world();
+    let conn = enter(&mut world, now);
+    let serial = world
+        .registry()
+        .serial_of(world.state.players[&conn])
+        .unwrap()
+        .raw();
+    let mut taken: Cursor<crate::ItemsTaken> = world.bus().cursor();
+    // Put five gold in the backpack.
+    world.queue(Command::GiveItem {
+        serial,
+        graphic: 0x0eed,
+        hue: 0,
+        amount: 5,
+        stackable: true,
+    });
+    world.tick(now);
+    let backpack_gold = |world: &World| -> u16 {
+        world
+            .registry()
+            .query::<Contained>()
+            .filter(|(item, _)| {
+                world
+                    .registry()
+                    .get::<Graphic>(*item)
+                    .is_some_and(|g| g.id == 0x0eed)
+            })
+            .map(|(item, _)| openshard_items::amount_of(&world.state, item))
+            .sum()
+    };
+    assert_eq!(backpack_gold(&world), 5);
+
+    // Take three: enough, so three go and two remain.
+    world.queue(Command::TakeItem {
+        serial,
+        graphic: 0x0eed,
+        amount: 3,
+    });
+    world.tick(now);
+    let events: Vec<crate::ItemsTaken> = world.bus().read(&mut taken).copied().collect();
+    assert_eq!(
+        events.last().map(|e| e.taken),
+        Some(3),
+        "it reported taking three"
+    );
+    assert_eq!(backpack_gold(&world), 2, "two gold remain");
+
+    // Take ten: short, so nothing is taken and the two are kept.
+    world.queue(Command::TakeItem {
+        serial,
+        graphic: 0x0eed,
+        amount: 10,
+    });
+    world.tick(now);
+    let events: Vec<crate::ItemsTaken> = world.bus().read(&mut taken).copied().collect();
+    assert_eq!(
+        events.last().map(|e| e.taken),
+        Some(0),
+        "short: it took nothing"
+    );
+    assert_eq!(backpack_gold(&world), 2, "and left the two untouched");
+}
+
+#[test]
 fn set_quest_stores_the_blob_on_the_character() {
     use openshard_state::components::QuestLog;
     let now = Instant::now();

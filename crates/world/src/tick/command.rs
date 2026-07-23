@@ -530,6 +530,17 @@ pub enum Command {
         /// The pack's serialized quest state.
         blob: String,
     },
+    /// Take up to `amount` of a graphic from a player's backpack — a quest
+    /// collect turn-in. All-or-nothing; reports back with an
+    /// [`ItemsTaken`](crate::ItemsTaken) event. From a script.
+    TakeItem {
+        /// Whose backpack, by wire serial.
+        serial: u32,
+        /// The item graphic to take.
+        graphic: u16,
+        /// How many to take.
+        amount: u16,
+    },
     /// A client asked to cast a spell (from its spellbook or a macro). The world
     /// only says it happened, via [`SpellRequested`]; a script does the casting.
     RequestCast {
