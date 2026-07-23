@@ -21,7 +21,7 @@ use openshard_protocol::{
 use openshard_state::components::{
     body_is_female, body_opens_doors, creature_base_sound, effect, BehaviourBuffs, Body, Combat,
     CriminalUntil, DamageType, Frozen, Hitpoints, MeleeDamage, MurderDecay, Murders, Poisoned,
-    Position, RangedAttack, Resistance, Stats, SwingSpeed,
+    Position, RangedAttack, Resistance, Stamina, Stats, SwingSpeed,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{Action, WorldState};
@@ -45,6 +45,39 @@ pub const MELEE_HIT_SOUND: u16 = 0x0137;
 /// The twang of a bow — ServUO's `BaseRanged.DefHitSound`, the fallback for a
 /// humanoid archer; a creature that shoots uses its own sound.
 pub const RANGED_HIT_SOUND: u16 = 0x0234;
+
+/// How many ticks between the stamina trickle — a point back roughly every 1.5s,
+/// faster than mana's (a mobile winded from a fight recovers its footing sooner
+/// than its spells). A tick count, like decay, so a fight replays.
+pub const STAMINA_REGEN_TICKS: u64 = 30;
+
+/// Trickle stamina back for everyone below their maximum, one point each regen
+/// tick — the mirror of `magic::regen_mana`, run from the tick. Nothing spends
+/// stamina on foot in the classic era, so today this only tops a pool off after a
+/// stat change lowered and re-raised the cap; it is the seam the combat and
+/// overweight drains regenerate against once they land.
+pub fn regen_stamina(state: &mut WorldState) {
+    if !state.ticks.is_multiple_of(STAMINA_REGEN_TICKS) {
+        return;
+    }
+    let winded: Vec<EntityId> = state
+        .registry
+        .query::<Stamina>()
+        .filter(|(_, stamina)| stamina.current < stamina.max)
+        .map(|(entity, _)| entity)
+        .collect();
+    for entity in winded {
+        if let Some(&Stamina { current, max }) = state.registry.get::<Stamina>(entity) {
+            state.registry.insert(
+                entity,
+                Stamina {
+                    current: (current + 1).min(max),
+                    max,
+                },
+            );
+        }
+    }
+}
 
 /// A creature's `BaseSoundID` from its body, or `None` for a human or an unlisted
 /// body — the key both [`attack_sound`] and [`death_sound`] read.

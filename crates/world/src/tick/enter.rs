@@ -100,6 +100,16 @@ impl World {
                 max: DEFAULT_MANA,
             },
         );
+        // Stamina is dexterity's pool, and starts full: the client reads its
+        // run-eligibility from here, so anything less than max needlessly slows
+        // the first run out of the gate.
+        self.state.registry.insert(
+            entity,
+            Stamina {
+                current: DEFAULT_DEXTERITY,
+                max: DEFAULT_DEXTERITY,
+            },
+        );
         // Did this character log out dead? Read it before the sheet is consumed;
         // the ghost state is re-applied at the end, once the body and inventory
         // (its saved death shroud included) are in place.
@@ -130,6 +140,13 @@ impl World {
                 Mana {
                     current: sheet.intelligence,
                     max: sheet.intelligence,
+                },
+            );
+            self.state.registry.insert(
+                entity,
+                Stamina {
+                    current: sheet.dexterity,
+                    max: sheet.dexterity,
                 },
             );
             if !sheet.skills.is_empty() {
@@ -349,6 +366,7 @@ impl World {
         let stats = self.state.registry.get::<Stats>(entity).copied();
         let hits = self.state.registry.get::<Hitpoints>(entity).copied();
         let mana = self.state.registry.get::<Mana>(entity).copied();
+        let stamina = self.state.registry.get::<Stamina>(entity).copied();
         let (strength, dexterity, intelligence) = stats
             .map_or((DEFAULT_HITPOINTS, DEFAULT_DEXTERITY, DEFAULT_MANA), |s| {
                 (s.strength, s.dexterity, s.intelligence)
@@ -358,6 +376,10 @@ impl World {
         });
         let (mana_now, mana_max) =
             mana.map_or((DEFAULT_MANA, DEFAULT_MANA), |m| (m.current, m.max));
+        // The real pool if the mobile carries one; otherwise dexterity, so an NPC
+        // or a bare test mobile still reads as able to run.
+        let (stamina_now, stamina_max) =
+            stamina.map_or((dexterity, dexterity), |s| (s.current, s.max));
 
         let status = MobileStatus {
             serial: serial.raw(),
@@ -368,10 +390,8 @@ impl World {
             strength,
             dexterity,
             intelligence,
-            // Stamina is dexterity's pool and starts full — anything less than max
-            // here needlessly slows the first run out of the gate.
-            stamina: dexterity,
-            stamina_max: dexterity,
+            stamina: stamina_now,
+            stamina_max,
             mana: mana_now,
             mana_max,
             gold: 0,

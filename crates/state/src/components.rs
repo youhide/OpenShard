@@ -1162,6 +1162,24 @@ pub struct Mana {
     pub max: u16,
 }
 
+/// A mobile's stamina: the pool the client reads run-eligibility from, and how
+/// much it can hold.
+///
+/// `max` is dexterity — the UO identity, where the stamina bar *is* dexterity —
+/// so a dexterity change re-caps it the way strength re-caps hit points. It
+/// trickles back over time like [`Mana`]. Unencumbered foot movement does not
+/// spend it in the classic (pre-AoS) era — running is free on open ground — so
+/// the pool sits full in normal play; its consumers are combat, being struck,
+/// and moving overweight or mounted, which land later. The client refuses to run
+/// at zero, so a real pool is what a future push-through mechanic spends against.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Stamina {
+    /// What it has now.
+    pub current: u16,
+    /// The most it can have — dexterity.
+    pub max: u16,
+}
+
 /// A mobile that can walk: its position, facing, sequence and pace.
 ///
 /// Wraps [`Walker`] rather than replacing [`Position`]: the walk state and the

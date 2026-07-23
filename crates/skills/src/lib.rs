@@ -15,7 +15,7 @@ mod curves;
 pub use curves::SKILL_CAP;
 
 use openshard_entities::{EntityId, Serial};
-use openshard_state::components::{Hitpoints, Mana, Skills, Stats};
+use openshard_state::components::{Hitpoints, Mana, Skills, Stamina, Stats};
 use openshard_state::WorldState;
 
 /// A mobile's skill went up a notch.
@@ -92,6 +92,16 @@ pub fn set_stats(
             Mana {
                 current: current.min(intelligence),
                 max: intelligence,
+            },
+        );
+    }
+    // Dexterity caps stamina, the same way.
+    if let Some(&Stamina { current, .. }) = state.registry.get::<Stamina>(entity) {
+        state.registry.insert(
+            entity,
+            Stamina {
+                current: current.min(dexterity),
+                max: dexterity,
             },
         );
     }

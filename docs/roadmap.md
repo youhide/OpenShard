@@ -544,10 +544,21 @@ Roughly in dependency order, each script-first:
     drops (an orc, a spectre), rolled in `index.js` — pack loot may use
     `Math.random`, since determinism is the core's seeded rng and a script is an
     external input to it.
-  - [ ] **Stamina as a real pool** — the status bar sends `stamina = dexterity`
-  - [ ] **Stamina as a real pool** — the status bar sends `stamina = dexterity`
-    so the client will run at all; a real pool spends on running, refills on the
-    tick counter like mana, and is the number a war-mode push-through should cost.
+  - [x] **Stamina as a real pool.** The status bar sent `stamina = dexterity`
+    outright, a placeholder that only existed so the client would run at all; now a
+    real `Stamina { current, max }` component (`state`, the sibling of `Mana` and
+    `Hitpoints`) carries the pool, `max` = dexterity — the UO identity where the
+    bar *is* the stat — full at enter, and `send_status` reads it. A dexterity
+    change re-caps it the way strength re-caps hit points, both from
+    `skills::set_stats` and from an Agility/Clumsy buff (`magic::shift_stats`, whose
+    "dexterity's stamina pool has no component yet" comment this retires).
+    `combat::regen_stamina` trickles it back from the tick like `magic::regen_mana`,
+    a touch faster (`STAMINA_REGEN_TICKS`). **Unencumbered foot running does not
+    spend it** — that is faithful pre-AoS (stamina falls from swings, being struck,
+    and moving overweight or mounted, not from open-ground running), so the pool
+    sits full in normal play and you run indefinitely, as classic. The real
+    consumers — a combat/overweight drain and the war-mode push-through cost — are
+    follow-ups that now have a pool to spend against and a regen to recover into.
   - [x] **Combat sounds, per creature, and the projectile.** A landed blow plays
     the *attacker's own* sound — a creature's ServUO `BaseSoundID + 2`, a human's
     fists thwack — so an orc growls its attack instead of punching like a man; a

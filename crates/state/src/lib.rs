@@ -34,7 +34,8 @@ pub use components::{
     Body, Brain, Client, Combat, Contained, Container, CriminalUntil, DamageType, Decays,
     Decoration, Door, Equipped, Facet, Field, FieldKind, Frozen, Ghost, Graphic, Heading,
     Hitpoints, Mana, MeleeDamage, Movement, MurderDecay, Murders, Name, Npc, Position, Resistance,
-    Scripted, Skills, SpawnedBy, Stackable, StatMod, StatMods, Stats, SwingSpeed, FIELD_HEIGHT,
+    Scripted, Skills, SpawnedBy, Stackable, Stamina, StatMod, StatMods, Stats, SwingSpeed,
+    FIELD_HEIGHT,
 };
 pub use obstruct::{LiveTerrain, Obstacle, Obstructions, DOOR_HEIGHT};
 pub use rng::Rng;

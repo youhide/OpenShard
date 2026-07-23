@@ -47,7 +47,7 @@ use openshard_state::components::{
     Access, Account, Amount, Body, Brain, Client, Combat, Contained, Container, DamageType,
     Decoration, Door, Equipped, Facet, Ghost, Graphic, Heading, Hitpoints, Mana, MeleeDamage,
     Movement, Name, Position, Resistance, Ridden, Riding, Scripted, SpawnedBy, Spellbook,
-    Stackable, Stats, Vendor,
+    Stackable, Stamina, Stats, Vendor,
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
@@ -451,6 +451,7 @@ impl World {
             self.notify_self(entity, "You are no longer frozen.");
         }
         magic::regen_mana(&mut self.state);
+        combat::regen_stamina(&mut self.state);
         // Finish or break the ServUO-style casts whose delay is up or whose
         // caster was struck; the Sphere style resolves in `begin_cast` and never
         // reaches here.

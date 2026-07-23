@@ -5446,6 +5446,40 @@ fn mana_trickles_back() {
     );
 }
 
+#[test]
+fn stamina_is_a_real_pool_that_trickles_back() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let entity = world.state.players[&player];
+
+    // It exists as its own pool, full at dexterity, not a stand-in for the stat.
+    let full = world
+        .state
+        .registry
+        .get::<Stamina>(entity)
+        .copied()
+        .unwrap();
+    assert_eq!(full.current, full.max, "a new character starts rested");
+    assert!(full.max > 0, "the pool is dexterity, not zero");
+
+    // Drain it (a future combat or overweight cost), then let it recover.
+    world.state.registry.insert(
+        entity,
+        Stamina {
+            current: 1,
+            max: full.max,
+        },
+    );
+    for _ in 0..combat::STAMINA_REGEN_TICKS {
+        world.tick(now);
+    }
+    assert!(
+        world.state.registry.get::<Stamina>(entity).unwrap().current > 1,
+        "stamina came back over time"
+    );
+}
+
 /// Spawn a creature with a brain (sight, wander) and return its serial.
 fn spawn_creature(world: &mut World, point: Point, sight: u8, wander: bool, now: Instant) -> u32 {
     world.queue(Command::SpawnMobile {

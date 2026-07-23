@@ -13,7 +13,8 @@
 use openshard_entities::{EntityId, Serial};
 use openshard_items::{count_in_container, take_from_container};
 use openshard_state::components::{
-    stat_shift, BehaviourBuff, BehaviourBuffs, Frozen, Hitpoints, Mana, StatMod, StatMods, Stats,
+    stat_shift, BehaviourBuff, BehaviourBuffs, Frozen, Hitpoints, Mana, Stamina, StatMod, StatMods,
+    Stats,
 };
 use openshard_state::WorldState;
 
@@ -239,10 +240,9 @@ fn apply_delta(value: u16, delta: i16) -> u16 {
 /// Fold one stat modifier into (or, with a negated `offset`, back out of) a
 /// mobile's live stats and the maxima that hang off them.
 ///
-/// Strength moves the hit-points cap, intelligence the mana cap; dexterity's
-/// stamina pool has no component yet, so it moves only the stat. A shrinking
-/// maximum clamps the current pool down with it; a growing one leaves the current
-/// where it is, to be healed or regenerated into.
+/// Strength moves the hit-points cap, intelligence the mana cap, and dexterity
+/// the stamina cap. A shrinking maximum clamps the current pool down with it; a
+/// growing one leaves the current where it is, to be healed or regenerated into.
 fn shift_stats(state: &mut WorldState, entity: EntityId, kind: u8, offset: i16) {
     let (ds, dd, di) = stat_shift(kind, offset);
     if let Some(&Stats {
@@ -278,6 +278,18 @@ fn shift_stats(state: &mut WorldState, entity: EntityId, kind: u8, offset: i16) 
             state.registry.insert(
                 entity,
                 Mana {
+                    current: current.min(max),
+                    max,
+                },
+            );
+        }
+    }
+    if dd != 0 {
+        if let Some(&Stamina { current, max }) = state.registry.get::<Stamina>(entity) {
+            let max = apply_delta(max, dd);
+            state.registry.insert(
+                entity,
+                Stamina {
                     current: current.min(max),
                     max,
                 },
