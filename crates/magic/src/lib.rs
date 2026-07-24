@@ -196,7 +196,7 @@ fn has_reagents(state: &WorldState, pack: u32, reagents: &[(u16, u16)]) -> bool 
 fn consume_reagents(state: &mut WorldState, pack: u32, reagents: &[(u16, u16)]) {
     if let Some(pack) = Serial::new(pack) {
         for &(graphic, count) in reagents {
-            take_from_container(state, pack, graphic, count);
+            take_from_container(state, pack, graphic, u32::from(count));
         }
     }
 }

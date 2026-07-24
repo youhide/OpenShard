@@ -214,6 +214,21 @@ pub struct SpawnedBy(pub u32);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Access(pub AccessLevel);
 
+/// A mobile that is *acting* as staff right now — Sphere's `PRIV_GM` flag.
+///
+/// The other half of the split [`Access`] starts: the level says who *may*
+/// command, this says who is currently held to none of the game's rules. A staff
+/// account gets it at login and `.gm` takes it off, so a game master can walk
+/// under a player's rules — tiring, blind to ghosts — without giving up the
+/// commands that let them switch back. Never saved: like [`Access`], it is
+/// derived from the account, not from the character.
+///
+/// Every in-game exemption reads it through
+/// [`WorldState::is_staff`](crate::WorldState::is_staff); nothing should test
+/// `Access` for one, or the two halves drift apart.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Staff;
+
 /// Which facet a mobile is on: 0 Felucca, 1 Trammel, and so on.
 ///
 /// A mobile only ever interacts with others on the same facet — the world keeps
@@ -1098,6 +1113,24 @@ pub struct Weapon {
     pub min: u16,
     /// Maximum damage before resistance.
     pub max: u16,
+}
+
+/// How many steps a mobile has taken — ServUO's `PlayerMobile.StepsTaken`, and
+/// only ever read modulo the stride between stamina points (`combat::spend_step_stamina`).
+///
+/// Not saved: a fresh count after a restart costs a player at most one point of
+/// stamina, and a saved one would be a column that means nothing to anything else.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Steps(pub u32);
+
+/// A per-item armour override — the pack's enchanted breastplate. Placed on a
+/// *worn armour item*, its rating replaces what the core armour table gives that
+/// graphic (`combat::armor` reads it first); where the piece sits on the body
+/// still comes from the layer it is worn on. Era-independent, like [`Weapon`].
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Armor {
+    /// The piece's rating before body coverage — ServUO's `ArmorBase`.
+    pub rating: u16,
 }
 
 /// How many ticks a mobile waits between swings.

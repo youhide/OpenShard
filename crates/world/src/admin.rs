@@ -11,8 +11,8 @@
 
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
-use openshard_protocol::{encode_gump_display, AccessLevel, GumpResponse};
-use openshard_state::components::{Access, Client};
+use openshard_protocol::{encode_gump_display, GumpResponse};
+use openshard_state::components::Client;
 use openshard_state::WorldState;
 
 /// The id the admin gump answers under. High byte `0xAD` for "admin", so a stray
@@ -72,11 +72,10 @@ pub fn button_action(
         return None;
     }
     let &actor = state.players.get(&connection)?;
-    let is_staff = state
-        .registry
-        .get::<Access>(actor)
-        .is_some_and(|access| access.0 >= AccessLevel::GameMaster);
-    if !is_staff {
+    // Re-checked on the button, not only on open — and on the account's
+    // authority, the same gate the `.` commands use, so a game master testing
+    // with their staff mode off can still press it.
+    if !state.staff_authority(actor) {
         return None;
     }
 

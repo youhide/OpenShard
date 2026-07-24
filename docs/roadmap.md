@@ -626,12 +626,89 @@ Roughly in dependency order, each script-first:
     `skills::set_stats` and from an Agility/Clumsy buff (`magic::shift_stats`, whose
     "dexterity's stamina pool has no component yet" comment this retires).
     `combat::regen_stamina` trickles it back from the tick like `magic::regen_mana`,
-    a touch faster (`STAMINA_REGEN_TICKS`). **Unencumbered foot running does not
-    spend it** — that is faithful pre-AoS (stamina falls from swings, being struck,
-    and moving overweight or mounted, not from open-ground running), so the pool
-    sits full in normal play and you run indefinitely, as classic. The real
-    consumers — a combat/overweight drain and the war-mode push-through cost — are
-    follow-ups that now have a pool to spend against and a regen to recover into.
+    a touch faster (`STAMINA_REGEN_TICKS`). The first real consumer — the
+    overweight drain — landed with the status-bar slice below; the war-mode
+    push-through cost is still a follow-up.
+  - [x] **Hit points regenerate.** Mana and stamina trickled back and hits never
+    did, so a wounded character could only ever be mended by someone else — a gap
+    nothing in the roadmap had recorded. `combat::regen_hits` is the third of the
+    trio, the same tick-counter shape: a point every eleven seconds (ServUO's
+    pre-AoS `Mobile.DefaultHitsRate`), and none at all for the dead or the
+    poisoned, which is literally ServUO's `CanRegenHits` (`Alive && !Poisoned`).
+  - [x] **Armour, worn and felt.** Armour rating is not in `tiledata.mul` either —
+    the same finding the weapon table recorded — so it is a core table keyed by
+    graphic (`combat::armor`, the classic leather/studded/ring/chain/plate/bone
+    suits, helms and shields from ServUO's `BaseArmor` subclasses), with an
+    `Armor { rating }` component the pack can lay over one item. Where a piece
+    sits comes from the layer it is *worn* on, not from the table, because the
+    wearer already carries that fact — ServUO derives its own `BodyPosition` the
+    same way. `worn_armor_rating` is the read-site derivation (each piece scaled by
+    how much of a body it covers, ServUO's `ArmorScalars`), shown on the status bar
+    and spent in combat: pre-AoS a swing gives up a share of it through
+    `absorb_physical`, ServUO's `BaseWeapon.AbsorbDamage` — a rolled hit location,
+    that piece and any shield eating their own bite, then a cut of the wearer's
+    total. Rolled on the seeded `rng`, so a fight still replays; a mobile wearing
+    nothing rates zero, which is why no existing combat test moved. One tidy-up is
+    recorded in the code: ServUO's two ladders disagree by a swap (its
+    piece-selection gives the arms the 14%-wide band while its scalar array gives
+    the helm 0.14), and this port uses the scalars array for both.
+  - [x] **The status bar stops lying.** Four of its numbers were constants — gold
+    `0`, armour `0`, weight a flat body weight, followers `0` — read by a player
+    every session with no way to check them. They are read-site derivations now,
+    the shape `equipped_weapon` established: gold and weight from `items::carried`
+    walking the worn tree (a pouch inside the pack counts), armour from the table
+    above, followers from whether a mount is under the rider. Gold weighs ServUO's
+    `0.02` stones a coin, not the tile's weight, or a bank run would pin a
+    character to the floor. Two edges are ServUO's `Mobile.UpdateTotals` exactly,
+    and both were wrong in the first cut: **the bank box is not carried** (it is
+    `IsVirtualItem`, so neither its weight nor its gold reaches its owner — which
+    is why the banker has to *tell* you your balance), and **a held item is** (it
+    adds `m_Holding` explicitly, so lifting the anvil onto the cursor is not how
+    you carry it home). The re-send is a **diffing pass** (`tick/status.rs`,
+    twice a second over the online players) rather than a call beside every item
+    mutation — the pattern that decays, the same argument the persistence rule
+    makes. And the female flag now follows the body rather than calling every
+    character male.
+  - [x] **A staff account can put the staff down (`.gm`).** Sphere's split, which
+    the fatigue rule above made necessary: its `PLEVEL` says who may command and
+    its `PRIV_GM` flag says who is currently exempt from the game's rules, and
+    `.GM` toggles the second without touching the first
+    (`Source-X/src/game/clients/CClient.cpp:836`). Here that is `Access` (the
+    account's authority, re-derived each login) and a new `Staff` marker (the
+    mode, given at login to a game master and taken off by `.gm`).
+    `WorldState::is_staff` reads the marker and is the one choke point every
+    exemption already went through, so the whole behaviour change is two rules:
+    with the mode off a game master **tires under its load** and **cannot see or
+    hear the dead**. The command gate stays on `staff_authority` — the `.`-prefix
+    split and the admin gump's re-check both — or `.gm off` would lock a game
+    master out of `.gm on`. The screen is rebuilt on the spot (`refresh_around`,
+    the call death and resurrection make), so ghosts appear or are forgotten as
+    the mode flips. Without this there is no way to *test* a player-facing rule
+    from the only kind of account that can set one up.
+  - [x] **The bank is a wallet, on two `[gameplay]` flags.** Taking the bank box
+    out of what a character carries (see above) left banked gold buying nothing.
+    ServUO does the other half: `BaseVendor` tries the pack, then the bank, and
+    says which paid. So `vendor_bank_payment` (default **on**, UO and ServUO) lets
+    a purchase fall back to the bank whole — never split across the two, the
+    reference's rule and the honest one — and `bank_gold_in_status` (default
+    **off**, ServUO's truth) decides whether the status bar's gold adds the box.
+    Weight is on neither switch: banked goods are never carried, or banking a pile
+    would make you overweight. One rule counts the coins for all three readers
+    (`items::banked_gold` — the banker's "balance", the bar, the vendor), and it
+    walks the box's whole tree, so a purse *inside* the bank counts where the old
+    one-level scan missed it. `take_from_container` widened to `u32` with it: a
+    bank purchase runs past what one `u16` stack can hold, and the old cap refused
+    it with "thou canst not afford that", which was a lie.
+  - [x] **Carrying too much costs something.** ServUO's
+    `WeightOverloading.EventSink_Movement`, ported into `combat::spend_step_stamina`
+    and consulted by the player walk: over the cap (plus a four-stone allowance) a
+    step costs `5 + over/25` stamina — a third of that mounted, double at a run —
+    a pool under a tenth full costs an extra point, and every sixteenth step on
+    foot (forty-eighth mounted) costs one anyway. A pool at zero refuses the step
+    with the reason, through the same `0x21` reject path paralysis uses. Staff never
+    tire. This corrects the earlier claim that unencumbered running is free: ServUO
+    charges the baseline, and against the regen it is very nearly a wash, which is
+    why classic running feels endless without being free.
   - [x] **Combat sounds, per creature, and the projectile.** A landed blow plays
     the *attacker's own* sound — a creature's ServUO `BaseSoundID + 2`, a human's
     fists thwack — so an orc growls its attack instead of punching like a man; a
@@ -998,6 +1075,21 @@ Roughly in dependency order, each script-first:
     eighteen-tile screen — Sphere's `DISTANCEWHISPER`/`DISTANCETALK`/`DISTANCEYELL`
     defaults, chosen by the mode byte the client already sends. `speak` picks the
     range; the rest of the path is unchanged.
+  - [x] **The living do not hear the dead.** A ghost was drawn only to other
+    ghosts and to staff but was still *audible* to everyone in earshot — invisible
+    and talking, which reads as a client bug and was an engine one. `chat::speak`
+    filters its listeners through the same `WorldState::can_see_mobile` that gates
+    drawing (ServUO's `CanSee` decides both), so the gate stays one choke point
+    rather than a second rule that can drift from the first.
+  - [x] **The logout ack** (`0xD1`). The client's "Log Out" is a *notification*
+    that then waits to be told it may go; the id was in the length table and
+    nothing answered it, so the paperdoll button hung until the client timed out
+    with nothing anywhere to say why. Both references ack it with the same two
+    bytes (Sphere's `PacketLogoutAck`, ServUO's `LogoutAck`), queued like every
+    other reply so it comes out of a tick. The one entry the two references
+    *disagree* about is how long the incoming packet is — Sphere reads one byte,
+    ServUO two — and the table takes ServUO's, with the reasoning written where the
+    length is.
   - [x] **the guarded staff-command layer** (`.`-prefixed speech, Sphere's
     convention). An account carries an `AccessLevel` — `player`, `gamemaster`,
     `administrator` — set in `[[accounts]]` config (`access = "gm"`), looked up at
@@ -1203,6 +1295,45 @@ Roughly in dependency order, each script-first:
   multi-collect turn-ins (each collect objective is taken independently today),
   and escort niceties — a follow-me abandon timer, the escortable refusing a
   second escorter mid-walk, town names the client localizes.
+
+### Not built, and until now not written down
+
+A sweep of this file against the code turned up a set of gaps that were not
+missing on purpose — they were simply never recorded, which is the difference
+between a decision and an oversight. Listed here so they are visible; none is
+started.
+
+- **Regions.** There is no region concept at all: no guarded zones and so no
+  guards, no no-recall or no-teleport areas, no per-area light, music or name.
+  Both references have one (ServUO's `Region`, Sphere's `REGION` blocks), and
+  three things already on this list want it — `housing` needs a region to place
+  a house in, escort quests want town names, and "call the guards" is the classic
+  answer to a criminal flag the engine can already set.
+- **Day and night, seasons, weather, ambient music.** The ambient is permanent
+  daylight: `0x4F` is sent only as Night Sight's personal light (which is why that
+  buff is a documented visual no-op), and `0x65` weather, `0xBC` season and `0x6D`
+  music are unwritten. A shard with no night is missing the reason half of UO's
+  item list exists.
+- **Fame, karma and titles.** Absent, which is why the Felucca converter falls
+  back to a karma-sign heuristic for notoriety and why a murder count is the only
+  standing a character accumulates.
+- **Crafting and resource gathering.** Mining, lumberjacking and fishing, and the
+  craft gumps behind blacksmithy, tailoring, carpentry, alchemy and inscription —
+  a whole pillar with no line anywhere in this file. It sits directly on the
+  already-listed "route client-initiated skill use (`0x12` type `0x24`)", which is
+  its first step and the reason it was worth listing separately.
+- **Party (`0xBF 0x06`) and chat channels (`0xB3`/`0xB5`).** Group play has no
+  protocol surface at all.
+- **Pets and taming.** Animal Taming and Lore, ownership, control commands,
+  stabling. The status bar's follower slots read a mount today and nothing else,
+  because a mount is the only follower the engine can have.
+- **CI.** `.github/workflows` holds a release workflow and nothing that runs
+  `cargo test` / `clippy` / `fmt` on a push, though "all three silent" is a stated
+  rule of the project. The one gap here that is about the project rather than the
+  game.
+- Smaller, and each a slice of an hour or two: dyes and hues on crafted and
+  looted items, writable books, the localized text on the signs the converter
+  already places, and rate limiting beyond the walk-pace bucket.
 
 ### Deferred / not yet ported (the Felucca converter)
 

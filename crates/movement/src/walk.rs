@@ -119,6 +119,18 @@ pub trait Terrain {
         None
     }
 
+    /// The tiledata weight of `graphic` in stones, for what a mobile carries —
+    /// the same table again, read for its weight byte.
+    ///
+    /// A terrain with no tiledata reports zero, so a shard running without client
+    /// files has no encumbrance at all: the same bargain as its terrain allowing
+    /// every step. Tiledata's `255` means *immovable*, not "heavy", and an
+    /// implementation is expected to report zero for it — nothing immovable is
+    /// ever in a pack.
+    fn item_weight(&self, _graphic: u16) -> u8 {
+        0
+    }
+
     /// Whether a straight sight line from `from` to `to` is clear of walls.
     ///
     /// What gates a creature noticing prey: both reference emulators require

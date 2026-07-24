@@ -16,12 +16,10 @@ impl World {
     ) {
         if let Some(rest) = text.strip_prefix(gm::COMMAND_PREFIX) {
             if let Some(&actor) = self.state.players.get(&connection) {
-                let is_gm = self
-                    .state
-                    .registry
-                    .get::<Access>(actor)
-                    .is_some_and(|access| access.0 >= AccessLevel::GameMaster);
-                if is_gm {
+                // The *authority*, not the staff mode: a game master who has
+                // turned their mode off with `.gm` still commands, which is what
+                // lets them turn it back on.
+                if self.state.staff_authority(actor) {
                     // `.res` resurrects the actor. Handled here, not in `gm`:
                     // resurrection redraws the ghost across every screen, a
                     // World-level operation, while `gm::run` works on `WorldState`.

@@ -288,12 +288,28 @@ pub fn buy(
     if basket.is_empty() {
         return;
     }
-    let gold = items::count_in_container(state, backpack, GOLD_GRAPHIC);
-    if u32::from(u16::MAX) < total || gold < total {
+    // ServUO's `BaseVendor` order: the pack whole, then — if the operator allows
+    // it — the bank whole. Never split across the two, which is the reference's
+    // rule and also the honest one: a purchase either comes out of your hand or
+    // out of your account, and the vendor says which.
+    let in_pack = items::count_in_container(state, backpack, GOLD_GRAPHIC);
+    let from_bank = if in_pack >= total {
+        false
+    } else if state.gameplay.vendor_bank_payment && items::banked_gold(state, player) >= total {
+        true
+    } else {
         vendor_says(state, vendor, "Thou canst not afford that.");
         return;
-    }
-    items::take_from_container(state, backpack, GOLD_GRAPHIC, total as u16);
+    };
+    let purse = if from_bank {
+        let Some(bank) = worn_container(state, player, items::BANK_LAYER) else {
+            return;
+        };
+        bank
+    } else {
+        backpack
+    };
+    items::take_from_container(state, purse, GOLD_GRAPHIC, total);
     for (item, take, graphic, hue, _) in basket {
         items::remove_from_stack(state, stock_serial, item, take);
         items::give(state, backpack, graphic, hue, take);
@@ -301,7 +317,11 @@ pub fn buy(
     vendor_says(
         state,
         vendor,
-        &format!("The total of thy purchase is {total} gold."),
+        &if from_bank {
+            format!("The total of thy purchase is {total} gold, withdrawn from thy bank account.")
+        } else {
+            format!("The total of thy purchase is {total} gold.")
+        },
     );
 }
 

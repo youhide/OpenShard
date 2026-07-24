@@ -275,3 +275,38 @@ fn two_hundred_players_in_one_place_do_not_stop_the_tick() {
         "a step in Vesper sent packets to a crowd in Britain"
     );
 }
+
+#[test]
+fn the_living_do_not_hear_the_dead() {
+    // A ghost is drawn only to other ghosts and to staff — and speech runs
+    // through the same `can_see_mobile` gate, because a mobile nobody can see
+    // must not be a disembodied voice either. ServUO's `CanSee` decides both.
+    let mut world = World::new(START);
+    let now = Instant::now();
+
+    enter_as(&mut world, ALICE, now);
+    enter_as(&mut world, BOB, now);
+    let alice = world.state.players[&ALICE];
+    let alice_serial = world.state.registry.serial_of(alice).unwrap();
+    world.enter_ghost_state(alice, alice_serial, true);
+    world.tick(now);
+    let _ = world.drain_outbound().count();
+
+    world.queue(Command::Say {
+        connection: ALICE,
+        mode: 0,
+        hue: 0,
+        font: 3,
+        text: "can anyone hear me".to_owned(),
+    });
+    world.tick(now);
+
+    // One drain, both readings: `packets_for` empties the whole outbox.
+    let out: Vec<_> = world.drain_outbound().collect();
+    let spoken = |connection| {
+        out.iter()
+            .any(|o| o.connection == connection && o.packet[0] == 0xAE)
+    };
+    assert!(!spoken(BOB), "a living player heard a ghost");
+    assert!(spoken(ALICE), "a ghost still hears itself");
+}

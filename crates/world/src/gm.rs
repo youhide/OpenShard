@@ -15,7 +15,7 @@
 use openshard_entities::EntityId;
 use openshard_protocol::{encode_message, encode_target_cursor, Point};
 use openshard_state::components::{
-    Client, Equipped, Position, Spellbook, Stats, SPELLBOOK_GRAPHIC,
+    Client, Equipped, Position, Spellbook, Staff, Stats, SPELLBOOK_GRAPHIC,
 };
 use openshard_state::{TargetPurpose, WorldState};
 
@@ -45,6 +45,7 @@ pub fn run(state: &mut WorldState, actor: EntityId, rest: &str) {
     let args: Vec<&str> = words.collect();
 
     match command.to_lowercase().as_str() {
+        "gm" => toggle_gm_mode(state, actor, &args),
         "where" => where_am_i(state, actor),
         "tele" => teleport_cursor(state, actor),
         "go" => go_to(state, actor, &args),
@@ -55,6 +56,40 @@ pub fn run(state: &mut WorldState, actor: EntityId, rest: &str) {
         "save" => save_world(state, actor),
         other => notify(state, actor, &format!("Unknown command '{other}'.")),
     }
+}
+
+/// `.gm [on|off]` — turn staff mode on or off, or toggle it.
+///
+/// Sphere's `.GM`, and the reason it exists: its `PLEVEL` says who may command
+/// and its `PRIV_GM` flag says who is currently held to none of the game's rules,
+/// and the two are separate so a game master can *play*. With the mode off a
+/// staff character tires under its load and cannot see the dead, exactly as a
+/// player does — which is the only way to test those rules from a staff account.
+/// The commands keep working either way: they are gated on the authority, which
+/// this never touches.
+///
+/// The screen is rebuilt on the spot ([`WorldState::refresh_around`], the same
+/// call death and resurrection make), so ghosts appear or are forgotten as the
+/// mode flips rather than at the next step.
+fn toggle_gm_mode(state: &mut WorldState, actor: EntityId, args: &[&str]) {
+    let on = match args.first().map(|word| word.to_lowercase()) {
+        None => !state.is_staff(actor),
+        Some(word) => match word.as_str() {
+            "on" | "1" | "true" | "yes" => true,
+            "off" | "0" | "false" | "no" => false,
+            _ => {
+                notify(state, actor, "Usage: .gm [on|off]");
+                return;
+            }
+        },
+    };
+    if on {
+        state.registry.insert(actor, Staff);
+    } else {
+        state.registry.remove::<Staff>(actor);
+    }
+    notify(state, actor, if on { "GM mode ON" } else { "GM mode OFF" });
+    state.refresh_around(actor);
 }
 
 /// `.save` — force an immediate world save. No pause: the snapshot is an instant

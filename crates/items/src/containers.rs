@@ -100,6 +100,14 @@ pub(crate) fn open_spellbook(
     );
 }
 
+/// The layer a bank box is worn on — UO's `Layer.Bank`.
+///
+/// Here rather than with the banker that opens it, because two rules need it and
+/// only one of them is the banker's: what a character *carries* stops at the bank
+/// box (see [`carried`](crate::carried)). `npc` re-exports this, so there is one
+/// number and the two rules cannot drift apart.
+pub const BANK_LAYER: u8 = 0x1D;
+
 /// Open the container a player wears at `layer` — its backpack, or its bank box.
 ///
 /// The service path a banker uses: find the worn container and open it onto the
@@ -304,7 +312,7 @@ pub fn take_from_container(
     state: &mut WorldState,
     container: Serial,
     graphic: u16,
-    count: u16,
+    count: u32,
 ) -> bool {
     if count == 0 {
         return true;
@@ -327,12 +335,15 @@ pub fn take_from_container(
         })
         .collect();
     let total: u32 = matches.iter().map(|(_, amount)| u32::from(*amount)).sum();
-    if total < u32::from(count) {
+    if total < count {
         return false;
     }
 
+    // Counted in `u32` because a total can exceed one stack's `u16` — a bank
+    // purchase runs to six figures of gold, spread over as many piles as it takes.
     let mut remaining = count;
     for (entity, amount) in matches {
+        let amount = u32::from(amount);
         if remaining == 0 {
             break;
         }
@@ -346,7 +357,9 @@ pub fn take_from_container(
                 tell_watchers_removed(state, container, serial);
             }
         } else {
-            set_stack_amount(state, entity, amount - remaining);
+            // The remainder fits a stack by construction: it is what is left of an
+            // `Amount` after taking less than all of it.
+            set_stack_amount(state, entity, (amount - remaining) as u16);
             remaining = 0;
             tell_watchers_updated(state, container, entity);
         }

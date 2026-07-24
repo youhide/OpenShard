@@ -367,6 +367,16 @@ impl Terrain for MapTerrain {
         (!name.is_empty() && name != "NoName").then_some(name)
     }
 
+    fn item_weight(&self, graphic: u16) -> u8 {
+        // 255 is tiledata's "immovable" sentinel — a wall, a tree, a signpost —
+        // not a quarter-ton object. Nothing immovable can be in a pack, so it
+        // weighs nothing rather than instantly overloading whoever holds it.
+        match self.tiles.static_tile(graphic).weight {
+            255 => 0,
+            weight => weight,
+        }
+    }
+
     fn can_step(&self, from: Point, to: Point) -> Option<Point> {
         let from_z = i32::from(from.z);
         // Reach the next tile from the top of what we stand on, not from our feet:

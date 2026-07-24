@@ -85,6 +85,15 @@ pub(crate) fn dispatch(
             });
             true
         }
+        Some(0xD1) => {
+            // "Log Out" on the paperdoll. The client tells the server it is
+            // leaving and then waits to be told it may — see `encode_logout_ack`.
+            // Queued like everything else, so the answer comes out of a tick.
+            if session.in_world {
+                world.queue(Command::LogoutRequest { connection: id });
+            }
+            true
+        }
         Some(0x34) => {
             // A status/skills query: a magic word (4), a type byte, and a serial.
             // Type 0x05 asks for the skill list — the client sends it when the

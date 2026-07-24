@@ -36,6 +36,7 @@ mod mounts;
 mod spawn;
 mod stack;
 mod trigger;
+mod weight;
 
 pub use consume::*;
 pub use containers::*;
@@ -47,3 +48,4 @@ pub use mounts::*;
 pub use spawn::*;
 pub use stack::*;
 pub use trigger::*;
+pub use weight::*;

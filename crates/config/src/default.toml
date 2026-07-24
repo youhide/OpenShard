@@ -141,6 +141,20 @@ reagents = true
 mana_loss_on_fail = true
 reagent_loss_on_fail = true
 
+# The bank box, and what it is good for.
+#
+# UO's own answer to both is what these ship as. A bank box is a *virtual* item
+# in ServUO: its contents are not carried, so they weigh nothing (always true
+# here, whatever these say) and its gold is not on the status bar — which is the
+# reason a banker has to be asked for a balance. But a vendor does reach it: a
+# purchase takes from the pack, and failing that from the bank, saying which
+# paid.
+#
+# bank_gold_in_status    add the bank's gold to the status bar's gold field.
+# vendor_bank_payment    let an NPC purchase fall back to the bank.
+bank_gold_in_status = false
+vendor_bank_payment = true
+
 # Level of detail — an opt-in performance knob. When lod is on, a creature with
 # no player within lod_radius tiles stops paying for the full AI decision (line
 # of sight, target scan, pathfinding) each beat, and dozes at a beat stretched

@@ -4,8 +4,6 @@ use openshard_state::components::{
     creature_name, ghost_body, Decays, CORPSE_GRAPHIC, CORPSE_GUMP, DEATH_SHROUD_GRAPHIC,
 };
 
-/// Gold, the core's default corpse loot until the pack owns real loot tables.
-const GOLD_GRAPHIC: u16 = 0x0EED;
 /// How long a corpse lies before it rots away with its loot — ServUO's default
 /// seven minutes, in ticks.
 const CORPSE_DECAY_TICKS: u64 = 7 * 60 * TICKS_PER_SECOND;
@@ -314,7 +312,7 @@ impl World {
         self.move_gear_to_corpse(serial, corpse, &[]);
         let gold = self.corpse_gold(max_hits);
         if gold > 0 {
-            let _ = items::give(&mut self.state, corpse, GOLD_GRAPHIC, 0, gold);
+            let _ = items::give(&mut self.state, corpse, items::GOLD_GRAPHIC, 0, gold);
         }
         // The loot hook: a pack adds the real per-creature table on top of the
         // baseline, by serial, off this event. Emitted before the creature is

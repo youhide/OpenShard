@@ -1584,6 +1584,8 @@ fn gameplay_config_reaches_the_systems() {
         true,
         true,
         true,
+        false, // bank_gold_in_status
+        true,  // vendor_bank_payment
         false, // lod
         32,    // lod_radius
         8,     // lod_idle_factor
@@ -8466,7 +8468,7 @@ impl Terrain for BlindTerrain {
 }
 
 /// Spawn a stocked vendor at `point` and return its serial.
-fn spawn_stocked_vendor(world: &mut World, point: Point, now: Instant) -> u32 {
+pub(super) fn spawn_stocked_vendor(world: &mut World, point: Point, now: Instant) -> u32 {
     world.queue(Command::SpawnMobile {
         body: 0x0190,
         hue: 0,
@@ -9588,6 +9590,8 @@ fn the_chase_pace_is_the_operators_knob() {
             true,
             true,
             true,
+            false, // bank_gold_in_status
+            true,  // vendor_bank_payment
             false, // lod
             32,    // lod_radius
             8,     // lod_idle_factor

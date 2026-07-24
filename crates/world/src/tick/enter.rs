@@ -75,6 +75,14 @@ impl World {
         // The account's authority, re-derived each login and never saved with the
         // character — so it is what the GM command gate reads.
         self.state.registry.insert(entity, Access(access));
+        // And its staff *mode*, on by default so a staff login behaves as it
+        // always has. `.gm` takes it off to walk under a player's rules; the
+        // authority above is untouched, which is what lets `.gm` put it back.
+        if access >= AccessLevel::GameMaster {
+            self.state
+                .registry
+                .insert(entity, openshard_state::components::Staff);
+        }
         // Strength caps hit points, intelligence caps mana — the first derived
         // numbers. Character creation will choose the stats; until it does, the
         // defaults reproduce the flat hundreds the world had before.
@@ -352,62 +360,18 @@ impl World {
     /// Send a player its own `0x11` status — the paperdoll numbers, and the only
     /// packet that carries stamina. A client with no status believes it has zero
     /// stamina and will only ever walk, so this goes out on world entry and again
-    /// whenever the client asks (`0x34`). Reads the mobile's own components;
-    /// stamina tracks dexterity, as it does in UO, until a stamina system exists.
+    /// whenever the client asks (`0x34`).
+    ///
+    /// The numbers themselves are [`World::status_of`]'s: stats and pools read off
+    /// components, gold, weight, armour and followers derived from what the
+    /// character carries, wears and rides.
     pub(super) fn send_status(&mut self, connection: ConnectionId, entity: EntityId) {
         let Some(Client { version, .. }) = self.state.registry.get::<Client>(entity).copied()
         else {
             return;
         };
-        let Some(serial) = self.state.registry.serial_of(entity) else {
+        let Some(status) = self.status_of(entity) else {
             return;
-        };
-        let name = self
-            .state
-            .registry
-            .get::<Name>(entity)
-            .map_or_else(String::new, |n| n.0.clone());
-        let stats = self.state.registry.get::<Stats>(entity).copied();
-        let hits = self.state.registry.get::<Hitpoints>(entity).copied();
-        let mana = self.state.registry.get::<Mana>(entity).copied();
-        let stamina = self.state.registry.get::<Stamina>(entity).copied();
-        let (strength, dexterity, intelligence) = stats
-            .map_or((DEFAULT_HITPOINTS, DEFAULT_DEXTERITY, DEFAULT_MANA), |s| {
-                (s.strength, s.dexterity, s.intelligence)
-            });
-        let (hits_now, hits_max) = hits.map_or((DEFAULT_HITPOINTS, DEFAULT_HITPOINTS), |h| {
-            (h.current, h.max)
-        });
-        let (mana_now, mana_max) =
-            mana.map_or((DEFAULT_MANA, DEFAULT_MANA), |m| (m.current, m.max));
-        // The real pool if the mobile carries one; otherwise dexterity, so an NPC
-        // or a bare test mobile still reads as able to run.
-        let (stamina_now, stamina_max) =
-            stamina.map_or((dexterity, dexterity), |s| (s.current, s.max));
-
-        let status = MobileStatus {
-            serial: serial.raw(),
-            name,
-            hits: hits_now,
-            hits_max,
-            female: false,
-            strength,
-            dexterity,
-            intelligence,
-            stamina: stamina_now,
-            stamina_max,
-            mana: mana_now,
-            mana_max,
-            gold: 0,
-            armor: 0,
-            // A body's own weight, well under the cap: an overloaded client will
-            // not run either, so this is deliberately light until an inventory
-            // weight system replaces it.
-            weight: BODY_WEIGHT,
-            max_weight: max_weight(strength),
-            stat_cap: STAT_CAP,
-            followers: 0,
-            followers_max: MAX_FOLLOWERS,
         };
         self.state.send(connection, status.encode(version));
     }

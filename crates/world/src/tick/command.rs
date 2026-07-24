@@ -122,6 +122,13 @@ pub enum Command {
         /// Which connection asked.
         connection: ConnectionId,
     },
+    /// A client announced it is logging out — a `0xD1`. It waits for the ack
+    /// before returning to the character screen, so a shard that never answers
+    /// hangs it on "logging out" until it times out.
+    LogoutRequest {
+        /// Which connection asked.
+        connection: ConnectionId,
+    },
     /// A client asked for its skill list — a `0x34` type `0x05`, sent when the
     /// skill window opens. Without this the window opens empty: the login list is
     /// long gone by the time a player clicks the skill button.

@@ -37,9 +37,9 @@ use openshard_persistence::{
 };
 use openshard_protocol::{
     encode_context_menu, encode_gump_display, encode_light_level, encode_login_complete,
-    encode_map_change, encode_message, encode_supported_features, encode_walk_ack,
-    encode_walk_reject, AccessLevel, ClientVersion, Direction, Facing, Feature, MobileStatus,
-    Notoriety, PlayerStart, PlayerUpdate, Point, WalkRequest, AOS_FEATURE_FLAGS,
+    encode_logout_ack, encode_map_change, encode_message, encode_supported_features,
+    encode_walk_ack, encode_walk_reject, AccessLevel, ClientVersion, Direction, Facing, Feature,
+    MobileStatus, Notoriety, PlayerStart, PlayerUpdate, Point, WalkRequest, AOS_FEATURE_FLAGS,
     DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, LABEL_MODE,
 };
 use tracing::{debug, info, warn};
@@ -86,6 +86,7 @@ mod spawners;
 mod speech;
 mod spells;
 mod staff;
+mod status;
 
 pub use command::{Appearance, CharacterSheet, Command, DecorContainer, DecorDoor};
 use defaults::*;
@@ -164,6 +165,9 @@ pub struct World {
     ///
     /// [`restore_inventory`]: World::restore_inventory
     pending_inventories: HashMap<u32, Vec<ItemRecord>>,
+    /// The derived status numbers last sent to each connected player, so the
+    /// refresh pass can send only what changed. See `tick/status.rs`.
+    last_status: HashMap<ConnectionId, status::StatusSnapshot>,
 }
 
 impl std::fmt::Debug for World {
@@ -222,6 +226,7 @@ impl World {
             spawners: Vec::new(),
             next_spawner_id: 1,
             pending_inventories: HashMap::new(),
+            last_status: HashMap::new(),
         }
     }
 
@@ -453,6 +458,7 @@ impl World {
         }
         magic::regen_mana(&mut self.state);
         combat::regen_stamina(&mut self.state);
+        combat::regen_hits(&mut self.state);
         // Finish or break the ServUO-style casts whose delay is up or whose
         // caster was struck; the Sphere style resolves in `begin_cast` and never
         // reaches here.
@@ -467,6 +473,9 @@ impl World {
         // Follow this tick's skill gains on any open window. Before `update`
         // retires the events, like `mark_dirty`.
         self.send_skill_updates();
+        // And follow what a player is carrying: gold spent, loot lifted, armour
+        // worn. Diffed against what was last sent, so a still player costs nothing.
+        self.refresh_statuses();
         // Before the bus retires anything: what happened is what needs saving,
         // and reading it after `update` would read it a tick late.
         self.mark_dirty();
@@ -516,6 +525,12 @@ impl World {
                 if let Some(&entity) = self.state.players.get(&connection) {
                     self.send_status(connection, entity);
                 }
+            }
+            Command::LogoutRequest { connection } => {
+                // Say yes and stop. The client closes the connection itself, and
+                // the disconnect path saves and despawns as it does for any other
+                // way of leaving — there is no second logout rule here.
+                self.state.send(connection, encode_logout_ack());
             }
             Command::RequestSkills { connection } => {
                 if let Some(&entity) = self.state.players.get(&connection) {
@@ -1130,5 +1145,7 @@ impl World {
 mod interest_tests;
 #[cfg(test)]
 mod persistence_tests;
+#[cfg(test)]
+mod status_tests;
 #[cfg(test)]
 pub(crate) mod tests;

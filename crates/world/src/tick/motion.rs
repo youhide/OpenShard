@@ -30,6 +30,19 @@ impl World {
                 return;
             }
         }
+        // What the step costs in stamina, and whether there is any left to pay
+        // with. Checked before the walk is attempted, like ServUO's movement
+        // event, so a refusal costs the sequence nothing.
+        if let Some(refusal) = self.spend_step_stamina(entity, request.facing.running) {
+            if let Some(Movement(walker)) = self.state.registry.get::<Movement>(entity).copied() {
+                self.state.send(
+                    connection,
+                    encode_walk_reject(request.sequence, walker.position, walker.facing),
+                );
+            }
+            self.notify_self(entity, refusal);
+            return;
+        }
         // A step breaks a spell mid-cast: the ServUO style roots the caster, so
         // stepping is choosing the walk over the spell. (The Sphere style never
         // sets `Casting`, so this is a no-op there.)

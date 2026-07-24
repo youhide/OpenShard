@@ -20,12 +20,13 @@ use openshard_protocol::{
 };
 use openshard_state::components::{
     body_is_female, body_opens_doors, creature_base_sound, effect, BehaviourBuffs, Body, Client,
-    Combat, CriminalUntil, DamageType, Frozen, Hitpoints, MeleeDamage, MurderDecay, Murders,
-    Poisoned, Position, RangedAttack, Resistance, Skills, Stamina, Stats, SwingSpeed,
+    Combat, CriminalUntil, DamageType, Frozen, Ghost, Hitpoints, MeleeDamage, MurderDecay, Murders,
+    Poisoned, Position, RangedAttack, Resistance, Skills, Stamina, Stats, Steps, SwingSpeed,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{Action, WorldState};
 
+pub mod armor;
 pub mod weapons;
 
 /// How near, in tiles (Chebyshev), a mobile must be to land a melee blow: the
@@ -51,6 +52,132 @@ pub const MELEE_MISS_SOUND: u16 = 0x0238;
 /// The twang of a bow — ServUO's `BaseRanged.DefHitSound`, the fallback for a
 /// humanoid archer; a creature that shoots uses its own sound.
 pub const RANGED_HIT_SOUND: u16 = 0x0234;
+
+/// How many stones over its carry cap a mobile may be before it starts to tire —
+/// ServUO's `WeightOverloading.OverloadAllowance`. Four stones of slack, so a
+/// character who picks up one thing too many is warned by fatigue rather than
+/// pinned to the spot.
+pub const OVERLOAD_ALLOWANCE: u16 = 4;
+/// Steps on foot between the baseline stamina point a walk costs — ServUO's
+/// non-SA `StepsTaken % 16`. Against `STAMINA_REGEN_TICKS` this very nearly
+/// balances at a run, which is why classic running feels endless without being
+/// free.
+pub const STEPS_PER_STAMINA: u32 = 16;
+/// The same mounted: a horse does the walking, so three times as far per point.
+pub const MOUNTED_STEPS_PER_STAMINA: u32 = 48;
+/// Below this percentage of its stamina pool, every step costs an extra point —
+/// ServUO's "under 10%" clause, the wall a fleeing player hits.
+const WINDED_PERCENT: u16 = 10;
+
+/// Spend what one step costs in stamina, and say whether the mobile may take it.
+///
+/// ServUO's `WeightOverloading.EventSink_Movement`, in its order: being over the
+/// cap costs `5 + over/25` (a third of that mounted, double at a run), a nearly
+/// empty pool costs an extra point, and every sixteenth step on foot costs one
+/// anyway. `Some(message)` refuses the step and says why — the one thing that
+/// stops a mule: a mobile at zero stamina cannot move at all.
+///
+/// `over_weight` is how many stones past its cap (allowance included) the mobile
+/// is carrying; the caller weighs the pack, since what an item weighs is the
+/// item crate's business, not combat's. A mobile with no [`Stamina`] pool — an
+/// NPC, a bare test mobile — never tires.
+pub fn spend_step_stamina(
+    state: &mut WorldState,
+    mobile: EntityId,
+    running: bool,
+    mounted: bool,
+    over_weight: u16,
+) -> Option<&'static str> {
+    let &Stamina { current, max } = state.registry.get::<Stamina>(mobile)?;
+    let mut left = current;
+    let spend = |cost: u16, left: &mut u16| *left = left.saturating_sub(cost);
+
+    if over_weight > 0 {
+        let mut loss = 5 + over_weight / 25;
+        if mounted {
+            loss /= 3;
+        }
+        if running {
+            loss *= 2;
+        }
+        spend(loss, &mut left);
+        if left == 0 {
+            store_stamina(state, mobile, left, max);
+            return Some("You are too fatigued to move, because you are carrying too much weight!");
+        }
+    }
+    if max > 0 && (u32::from(left) * 100 / u32::from(max)) < u32::from(WINDED_PERCENT) {
+        spend(1, &mut left);
+    }
+    if left == 0 {
+        store_stamina(state, mobile, left, max);
+        return Some(if mounted {
+            "Your mount is too fatigued to move."
+        } else {
+            "You are too fatigued to move."
+        });
+    }
+    // The baseline: walking costs something, eventually. Counted in steps rather
+    // than ticks so a slow walker and a sprinter pay the same per tile.
+    let every = if mounted {
+        MOUNTED_STEPS_PER_STAMINA
+    } else {
+        STEPS_PER_STAMINA
+    };
+    let steps = state.registry.get::<Steps>(mobile).map_or(0, |s| s.0) + 1;
+    state.registry.insert(mobile, Steps(steps));
+    if steps.is_multiple_of(every) {
+        spend(1, &mut left);
+    }
+    store_stamina(state, mobile, left, max);
+    None
+}
+
+/// Write a stamina pool back, if it moved.
+fn store_stamina(state: &mut WorldState, mobile: EntityId, current: u16, max: u16) {
+    state.registry.insert(mobile, Stamina { current, max });
+}
+
+/// How many ticks between the hit-point trickle — a point back every 11 seconds,
+/// ServUO's pre-AoS `Mobile.DefaultHitsRate`. Slow on purpose: it is what makes a
+/// bandage, a heal spell and an inn worth anything, and it is the number both
+/// references shipped for the classic era. A tick count, like decay, so a
+/// wounded mobile heals identically in a replay.
+pub const HITS_REGEN_TICKS: u64 = 220;
+
+/// Heal everyone below their maximum, one point each regen tick.
+///
+/// The dead do not mend and the poisoned only get worse — ServUO's `CanRegenHits`
+/// is literally `Alive && !Poisoned`, which here is "no [`Ghost`] marker and no
+/// [`Poisoned`] component". A mobile at zero hits is not yet a ghost (`reap`
+/// disposes of it a beat later) and must not be healed back out of its own death,
+/// so it is skipped too.
+pub fn regen_hits(state: &mut WorldState) {
+    if !state.ticks.is_multiple_of(HITS_REGEN_TICKS) {
+        return;
+    }
+    let wounded: Vec<EntityId> = state
+        .registry
+        .query::<Hitpoints>()
+        .filter(|(_, hits)| hits.current > 0 && hits.current < hits.max)
+        .map(|(entity, _)| entity)
+        .filter(|&entity| {
+            !state.registry.has::<Poisoned>(entity) && !state.registry.has::<Ghost>(entity)
+        })
+        .collect();
+    for entity in wounded {
+        if let Some(&Hitpoints { current, max }) = state.registry.get::<Hitpoints>(entity) {
+            state.registry.insert(
+                entity,
+                Hitpoints {
+                    current: (current + 1).min(max),
+                    max,
+                },
+            );
+            state.broadcast_health(entity);
+        }
+    }
+}
 
 /// How many ticks between the stamina trickle — a point back roughly every 1.5s,
 /// faster than mana's (a mobile winded from a fight recovers its footing sooner
@@ -983,5 +1110,16 @@ fn scaled_blow(state: &mut WorldState, attacker: EntityId, defender: EntityId) -
         scaled
     };
     // Truncate like ServUO's `(int)`, floored at 1.
-    final_damage.max(1.0) as u16
+    let blow = final_damage.max(1.0) as u16;
+    // Then the defender's worn armour takes its bite — ServUO's
+    // `BaseWeapon.AbsorbDamage`, which is a *weapon* rule, not a `Mobile.Damage`
+    // one: a sword is stopped by a breastplate where a fireball is not. Pre-AoS
+    // only; from AoS armour speaks through resistances instead, which `damage`
+    // already applies. A blow that armour swallows whole still lands for 1
+    // (`if (!Core.AOS && damage < 1) damage = 1`).
+    if era < 2 {
+        armor::absorb_physical(state, defender, blow).max(1)
+    } else {
+        blow
+    }
 }

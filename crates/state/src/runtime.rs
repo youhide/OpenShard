@@ -26,7 +26,7 @@ use openshard_protocol::{
 
 use crate::components::{
     body_opens_doors, Access, Amount, Body, Client, Contained, Equipped, Facet, Ghost, Graphic,
-    Heading, Hitpoints, Movement, Name, Position,
+    Heading, Hitpoints, Movement, Name, Position, Staff,
 };
 use crate::obstruct::{LiveTerrain, Obstructions};
 use crate::rng::Rng;
@@ -89,6 +89,13 @@ pub struct Gameplay {
     pub mana_loss_on_fail: bool,
     /// Whether a failed cast still consumes reagents — Sphere's `ReagentLossFail`.
     pub reagent_loss_on_fail: bool,
+    /// Whether the status bar's gold adds the bank box. Off is ServUO's truth (a
+    /// virtual box, whose gold never reaches the character's total); on sums both.
+    /// Never affects weight — banked goods are not carried either way.
+    pub bank_gold_in_status: bool,
+    /// Whether an NPC purchase falls back to the bank when the pack is short —
+    /// ServUO's `BaseVendor`, which tries the pack, then the bank.
+    pub vendor_bank_payment: bool,
     /// Level-of-detail: when on, a creature with no player within
     /// [`lod_radius`](Self::lod_radius) dozes at a stretched beat instead of
     /// paying for the full AI decision each beat. Off simulates every creature at
@@ -182,6 +189,8 @@ impl Gameplay {
         reagents: bool,
         mana_loss_on_fail: bool,
         reagent_loss_on_fail: bool,
+        bank_gold_in_status: bool,
+        vendor_bank_payment: bool,
         lod: bool,
         lod_radius: u32,
         lod_idle_factor: u64,
@@ -204,6 +213,8 @@ impl Gameplay {
             reagents,
             mana_loss_on_fail,
             reagent_loss_on_fail,
+            bank_gold_in_status,
+            vendor_bank_payment,
             lod,
             lod_radius,
             lod_idle_factor,
@@ -232,6 +243,8 @@ impl Default for Gameplay {
             true,  // reagents
             true,  // mana_loss_on_fail
             true,  // reagent_loss_on_fail
+            false, // bank_gold_in_status (the bank is not on the bar)
+            true,  // vendor_bank_payment (a vendor falls back to the bank)
             false, // lod (opt-in, off)
             32,    // lod_radius
             8,     // lod_idle_factor
@@ -915,13 +928,30 @@ impl WorldState {
         }
     }
 
-    /// Whether `watcher` has staff authority — a GameMaster or above. Staff see
-    /// the dead and are held to none of the interest rules the living obey.
+    /// Whether `watcher`'s *account* may command — a GameMaster or above.
+    ///
+    /// The authority half of Sphere's split: `PLEVEL` says who may run a staff
+    /// command, and it never moves within a session. Every `.`-command gate reads
+    /// this, which is what lets a game master who has turned their staff mode
+    /// *off* turn it back on again.
     #[must_use]
-    pub fn is_staff(&self, watcher: EntityId) -> bool {
+    pub fn staff_authority(&self, watcher: EntityId) -> bool {
         self.registry
             .get::<Access>(watcher)
             .is_some_and(|access| access.0 >= AccessLevel::GameMaster)
+    }
+
+    /// Whether `watcher` is *acting* as staff right now — the exemptions half.
+    ///
+    /// Sphere's `PRIV_GM`, which its `.GM` toggles and every in-game rule reads
+    /// (`IsPriv(PRIV_GM)`), never the level. Here it is the [`Staff`] marker,
+    /// given at login to an account with [`staff_authority`](Self::staff_authority)
+    /// and taken off by `.gm`. Staff see the dead and do not tire; a game master
+    /// with the mode off walks the world under exactly the rules a player does,
+    /// which is the only way to test them from a staff account.
+    #[must_use]
+    pub fn is_staff(&self, watcher: EntityId) -> bool {
+        self.registry.has::<Staff>(watcher)
     }
 
     /// Whether `watcher` may see mobile `other`. The living cannot see the dead: a
@@ -929,8 +959,12 @@ impl WorldState {
     /// `CanSee(Mobile)` (`this == m || m.Alive || !Alive || IsStaff`). Every other
     /// mobile in range is visible to everyone; an item is never a ghost, so this
     /// bites only mobiles.
+    ///
+    /// It gates *hearing* as well as drawing (`chat::speak`), because ServUO's
+    /// speech runs through the same `CanSee`: a ghost nobody can see should not be
+    /// a disembodied voice either.
     #[must_use]
-    fn can_see_mobile(&self, watcher: EntityId, other: EntityId) -> bool {
+    pub fn can_see_mobile(&self, watcher: EntityId, other: EntityId) -> bool {
         if !self.registry.has::<Ghost>(other) {
             return true;
         }

@@ -29,9 +29,7 @@
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::{encode_message, Direction, Facing, Point, SYSTEM_SERIAL};
-use openshard_state::components::{
-    Amount, Banker, Contained, Container, Equipped, Graphic, Heading, Name, Npc, Position,
-};
+use openshard_state::components::{Banker, Heading, Name, Npc, Position};
 use openshard_state::rng::Rng;
 use openshard_state::sectors::in_range;
 use openshard_state::WorldState;
@@ -43,19 +41,22 @@ pub use vendor::{
     buy, buy_keyword, offer_sell_list, open_shop, sell, stock, StockLine, STOCK_LAYER,
 };
 
-/// The bank box graphic, gump and layer — ServUO's `BankBox` on `Layer.Bank`. A
+/// The bank box graphic and gump — ServUO's `BankBox` on `Layer.Bank`. A
 /// character wears one; a banker opens it. Exported so the world equips it on the
 /// same layer this crate opens.
 pub const BANK_GRAPHIC: u16 = 0x0E7C;
 /// The bank box gump.
 pub const BANK_GUMP: u16 = 0x004A;
-/// The bank layer, `Layer.Bank`.
-pub const BANK_LAYER: u8 = 0x1D;
+/// The bank layer, `Layer.Bank`. Defined by `items`, which also has to know where
+/// a character's own load stops; re-exported here so a banker still reads as
+/// owning its own box.
+pub use openshard_items::BANK_LAYER;
 
 /// How near a banker a player must be for "bank" to open the box — ServUO's 12.
 const BANK_RANGE: u32 = 12;
-/// The gold-coin graphic, `Gold`'s itemid in ServUO. What a balance counts.
-pub(crate) const GOLD_GRAPHIC: u16 = 0x0EED;
+/// The gold-coin graphic — `items`', so a banker counts the same coin the status
+/// bar weighs and a corpse drops.
+pub(crate) use openshard_items::GOLD_GRAPHIC;
 /// How near a player has to come for a townsperson to greet them.
 const GREET_RANGE: u32 = 4;
 /// The muted grey the client draws townsfolk chatter in.
@@ -310,34 +311,10 @@ fn banker_in_reach(state: &WorldState, actor: EntityId) -> bool {
     })
 }
 
-/// The gold in a mobile's bank box — the amounts of every gold pile inside it.
-fn bank_gold(state: &WorldState, actor: EntityId) -> u32 {
-    let Some(owner) = state.registry.serial_of(actor) else {
-        return 0;
-    };
-    let Some(bank) = state
-        .registry
-        .query::<Equipped>()
-        .find(|(item, eq)| {
-            eq.mobile == owner && eq.layer == BANK_LAYER && state.registry.has::<Container>(*item)
-        })
-        .and_then(|(item, _)| state.registry.serial_of(item))
-    else {
-        return 0;
-    };
-    state
-        .registry
-        .query::<Contained>()
-        .filter(|(item, held)| {
-            held.container == bank
-                && state
-                    .registry
-                    .get::<Graphic>(*item)
-                    .is_some_and(|g| g.id == GOLD_GRAPHIC)
-        })
-        .map(|(item, _)| u32::from(state.registry.get::<Amount>(item).map_or(1, |a| a.0)))
-        .sum()
-}
+/// The gold in a mobile's bank box — `items`', because the status bar and a
+/// vendor's bank payment count the same coins the banker reports, and three
+/// copies of "what is in the box" would drift.
+use openshard_items::banked_gold as bank_gold;
 
 /// Send a private system line to a connection — a `0x1C` from the system serial,
 /// the "the bank says" reply a keyword earns.

@@ -529,6 +529,23 @@ pub fn encode_light_level(level: u8) -> Vec<u8> {
     vec![0x4F, level]
 }
 
+/// `0xD1` — the logout the client asked for is granted. 2 bytes.
+///
+/// The client's own `0xD1` is a *notification*: it announces that the player
+/// pressed "Log Out" on the paperdoll and then waits to be told it may go. Both
+/// references answer with this same two-byte packet and nothing else — Sphere's
+/// `PacketLogout::onReceive` constructs a `PacketLogoutAck`, ServUO's `LogoutReq`
+/// sends a `LogoutAck` — and a server that stays silent leaves the client sitting
+/// on the "logging out" screen until it times out, with nothing in any log to say
+/// why.
+///
+/// The `0x01` is the accept. Refusing (a `0x00`, "you are in combat") is a rule
+/// this shard does not have: the disconnect path already saves whatever state the
+/// character is in, so there is nothing to protect by holding a player hostage.
+pub fn encode_logout_ack() -> Vec<u8> {
+    vec![0xD1, 0x01]
+}
+
 /// `0xBF` subcommand 0x08 — which map the client should draw. 6 bytes.
 ///
 /// Without this the client draws Felucca whatever the server thinks.
@@ -812,6 +829,13 @@ mod tests {
     fn the_small_entry_packets_are_the_right_shape() {
         assert_eq!(encode_login_complete(), vec![0x55]);
         assert_eq!(encode_light_level(0), vec![0x4F, 0]);
+        // The logout ack is the same two bytes in both references, and the same
+        // length the client's own table gives the id it comes back on.
+        assert_eq!(encode_logout_ack(), vec![0xD1, 0x01]);
+        assert_eq!(
+            crate::client_packet_length(0xD1, None),
+            Some(crate::PacketLength::Fixed(2))
+        );
 
         // 0xBF is variable-length, so it declares its own length at offset 1.
         let map = encode_map_change(1);

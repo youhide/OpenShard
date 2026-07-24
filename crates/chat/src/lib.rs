@@ -117,6 +117,14 @@ pub fn speak(state: &mut WorldState, entity: EntityId, mode: u8, hue: u16, font:
         .filter(|(_, listener_pos)| in_range(pos, *listener_pos, range))
         .map(|(id, _)| id)
         .collect();
+    // The living do not hear the dead. A ghost is already drawn only to other
+    // ghosts and to staff (`can_see_mobile`, ServUO's `CanSee`), and speech runs
+    // through the same gate there — without it a ghost is invisible but audible,
+    // which reads as a bug in the client and is one here.
+    let listeners: Vec<EntityId> = listeners
+        .into_iter()
+        .filter(|&listener| state.can_see_mobile(listener, entity))
+        .collect();
     for listener in listeners {
         if let Some(&Client { connection, .. }) = state.registry.get::<Client>(listener) {
             state.outbox.push(Outbound {

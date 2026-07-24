@@ -166,6 +166,20 @@ pub struct GameplayConfig {
     /// on. A successful cast always consumes.
     #[serde(default = "default_true")]
     pub reagent_loss_on_fail: bool,
+    /// Whether the status bar's gold field adds what is in the bank box. `false`
+    /// (the default) is what UO does: ServUO marks the box a virtual item, so its
+    /// gold never reaches the character's total — which is the reason a banker has
+    /// to *say* your balance. `true` sums pack and bank, a convenience some shards
+    /// prefer. Weight is never affected: banked goods are not carried whatever
+    /// this says, or banking a pile would make you overweight.
+    #[serde(default = "default_false")]
+    pub bank_gold_in_status: bool,
+    /// Whether a purchase from an NPC vendor falls back to the bank box when the
+    /// backpack is short. `true` (the default) is UO and ServUO's `BaseVendor`,
+    /// which tries the pack and then the bank and says which paid; `false` keeps
+    /// the money strictly in hand, so a bank balance buys nothing.
+    #[serde(default = "default_true")]
+    pub vendor_bank_payment: bool,
     /// Level-of-detail: when `true`, a creature with no player within
     /// [`lod_radius`](Self::lod_radius) stops paying for the full AI decision
     /// (line-of-sight, target scan, pathfinding) each beat — it dozes at a
@@ -269,6 +283,8 @@ impl Default for GameplayConfig {
             reagents: default_true(),
             mana_loss_on_fail: default_true(),
             reagent_loss_on_fail: default_true(),
+            bank_gold_in_status: default_false(),
+            vendor_bank_payment: default_true(),
             lod: default_false(),
             lod_radius: default_lod_radius(),
             lod_idle_factor: default_lod_idle_factor(),

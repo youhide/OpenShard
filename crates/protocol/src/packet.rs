@@ -133,6 +133,16 @@ pub enum Frame {
 ///
 /// Ported from Sphere's `network/receive.h`. Server-to-client packets are not
 /// here — the server knows the length of what it writes.
+///
+/// **`0xD1` is the one entry the two references disagree about.** Sphere reads
+/// the logout notification as one byte (`PacketLogout : Packet(1)`); ServUO
+/// registers it as two (`Register(0xD1, 2, …)`). Neither reads a payload, so
+/// neither is self-correcting, and a wrong length here desynchronises the stream
+/// rather than erroring. Two is taken: it is what ServUO and the client's own
+/// packet table have carried for two decades, and the packet the *server* sends
+/// back on the same id is two bytes in both references — an id whose two
+/// directions are the same length is the norm, not the exception. The cost of
+/// being wrong is bounded to the moment a player is leaving anyway.
 // The column alignment is load-bearing: this is a lookup table that gets read
 // against Sphere's, and rustfmt would reflow it into an unscannable list.
 #[rustfmt::skip]
@@ -199,7 +209,7 @@ pub fn client_packet_length(id: u8, version: Option<ClientVersion>) -> Option<Pa
         0xBF => Variable,    // extended command
         0xC2 => Variable,    // prompt response (unicode)
         0xC8 => Fixed(2),    // view range
-        0xD1 => Fixed(1),    // logout notification
+        0xD1 => Fixed(2),    // logout notification — see the note below
         0xD4 => Variable,    // book header edit (new)
         0xD6 => Variable,    // AoS tooltip request
         0xD7 => Variable,    // encoded command
