@@ -984,7 +984,7 @@ impl World {
             return;
         };
         if stackable {
-            items::give(&mut self.state, backpack, graphic, hue, amount);
+            items::give(&mut self.state, backpack, graphic, hue, u32::from(amount));
         } else {
             items::place_one(&mut self.state, backpack, graphic, hue, amount);
         }

@@ -312,7 +312,7 @@ pub fn buy(
     items::take_from_container(state, purse, GOLD_GRAPHIC, total);
     for (item, take, graphic, hue, _) in basket {
         items::remove_from_stack(state, stock_serial, item, take);
-        items::give(state, backpack, graphic, hue, take);
+        items::give(state, backpack, graphic, hue, u32::from(take));
     }
     vendor_says(
         state,
@@ -415,7 +415,10 @@ pub fn sell(state: &mut WorldState, connection: ConnectionId, vendor_serial: u32
     if earned == 0 {
         return;
     }
-    let paid = earned.min(u32::from(u16::MAX)) as u16;
+    // Paid whole, however large: `give` spreads it over as many piles as it
+    // needs. Clamping it to one stack's worth here was the same silent loss as
+    // clamping a merge.
+    let paid = earned;
     items::give(state, backpack, GOLD_GRAPHIC, 0, paid);
     vendor_says(
         state,

@@ -1505,6 +1505,94 @@ fn dropping_a_stack_onto_an_identical_one_merges_them() {
 }
 
 #[test]
+fn merging_past_the_stack_cap_keeps_the_remainder() {
+    // The bug this exists to not have again: two 50,000 piles merged into one
+    // clamped 65,535 and the difference was simply gone. Sphere's `CItem::Stack`
+    // is the model — fill the destination to its maximum and leave the rest on
+    // the source, which loses nothing. (ServUO refuses the merge outright; either
+    // is honest, and this one is kinder.)
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let here = Point::new(START.0, START.1, 0);
+    let pile = spawn_gold(&mut world, here, 50_000, now);
+    let loose = spawn_gold(&mut world, here, 50_000, now);
+    let pile_item = entity(&world, pile);
+    let loose_item = entity(&world, loose);
+
+    world.queue(Command::PickUpItem {
+        connection: player,
+        serial: loose,
+        amount: 50_000,
+    });
+    world.tick(now);
+    world.queue(Command::DropItem {
+        connection: player,
+        serial: loose,
+        position: here,
+        container: pile,
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world.state.registry.get::<Amount>(pile_item).map(|a| a.0),
+        Some(openshard_items::MAX_STACK),
+        "the target filled to the cap"
+    );
+    assert!(
+        world.state.registry.contains(loose_item),
+        "and the source still exists"
+    );
+    assert_eq!(
+        world.state.registry.get::<Amount>(loose_item).map(|a| a.0),
+        Some(100_000u32.saturating_sub(u32::from(openshard_items::MAX_STACK)) as u16),
+        "holding exactly what did not fit — no coin lost"
+    );
+}
+
+#[test]
+fn a_payout_past_the_stack_cap_lands_in_a_second_pile() {
+    // The same rule where the world hands gold over rather than a player: a sale
+    // or a loot drop bigger than one pile leaves two, the way a container in UO
+    // ends up with two piles of gold. Clamping here paid 65,535 for a 100,000
+    // sale and said nothing about the rest.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+    let backpack = backpack_serial(&world, connection);
+
+    let backpack = Serial::new(backpack).unwrap();
+    openshard_items::give(&mut world.state, backpack, GOLD, 0, 100_000);
+
+    let piles: Vec<u16> = world
+        .state
+        .registry
+        .query::<Contained>()
+        .filter(|(entity, held)| {
+            held.container == backpack
+                && world
+                    .state
+                    .registry
+                    .get::<Graphic>(*entity)
+                    .is_some_and(|g| g.id == GOLD)
+        })
+        .map(|(entity, _)| openshard_items::amount_of(&world.state, entity))
+        .collect();
+    assert_eq!(piles.len(), 2, "one full pile and a second for the rest");
+    assert_eq!(
+        piles.iter().map(|&a| u32::from(a)).sum::<u32>(),
+        100_000,
+        "and every coin arrived"
+    );
+    assert_eq!(
+        openshard_items::total_gold(&world.state, player),
+        100_000,
+        "the status bar counts them together"
+    );
+}
+
+#[test]
 fn a_non_stackable_item_does_not_merge() {
     let now = Instant::now();
     let mut world = world();

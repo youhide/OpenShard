@@ -436,16 +436,20 @@ pub fn spawn_contained_leftover(
 }
 
 /// Put `amount` of an item into a container by decree — a vendor handing over
-/// goods, a sale paying out gold. Merges onto an existing stackable pile of the
-/// same art and hue; otherwise a fresh stackable item appears. Everyone with
-/// the container open sees the change. Returns the pile touched, or `None`
-/// when the serial pool is dry.
+/// goods, a sale paying out gold. Merges onto the existing stackable piles of the
+/// same art and hue, and starts as many new ones as the remainder needs; everyone
+/// with the container open sees each change. Returns the last pile touched, or
+/// `None` when the serial pool is dry.
+///
+/// `amount` is a `u32` because a payout is not bounded by what one pile holds: a
+/// large sale earns more gold than [`MAX_STACK`], and taking a `u16` here made
+/// the caller clamp — paying 65,535 for a 100,000 sale and saying nothing.
 pub fn give(
     state: &mut WorldState,
     container: Serial,
     graphic: u16,
     hue: u16,
-    amount: u16,
+    amount: u32,
 ) -> Option<EntityId> {
     if amount == 0 {
         return None;
@@ -473,42 +477,66 @@ pub fn give(
         tell_watchers_updated(state, container, entity);
         return Some(entity);
     }
-    let existing = state
+    // Every pile of the same art already in there, in registry order.
+    let piles: Vec<EntityId> = state
         .registry
         .query::<Contained>()
         .filter(|(_, held)| held.container == container)
-        .find(|(entity, _)| {
+        .filter(|(entity, _)| {
             state.registry.has::<Stackable>(*entity)
                 && state
                     .registry
                     .get::<Graphic>(*entity)
                     .is_some_and(|g| g.id == graphic && g.hue == hue)
         })
-        .map(|(entity, _)| entity);
-    if let Some(pile) = existing {
-        let total = amount_of(state, pile).saturating_add(amount);
-        state.registry.insert(pile, Amount(total));
-        tell_watchers_updated(state, container, pile);
-        return Some(pile);
+        .map(|(entity, _)| entity)
+        .collect();
+
+    // Fill them in turn, and let whatever is left over start a pile of its own —
+    // the way a container ends up holding two gold piles after a large payout.
+    // Clamping the sum instead would quietly destroy the difference, which is the
+    // bug this exists to not have.
+    let mut left = amount;
+    let mut last = None;
+    for pile in piles {
+        if left == 0 {
+            break;
+        }
+        let room = u32::from(MAX_STACK.saturating_sub(amount_of(state, pile)));
+        let moved = left.min(room);
+        if moved > 0 {
+            let total = amount_of(state, pile) + moved as u16;
+            state.registry.insert(pile, Amount(total));
+            tell_watchers_updated(state, container, pile);
+            last = Some(pile);
+            left -= moved;
+        }
     }
-    let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
-        warn!("out of item serials; nothing given");
-        return None;
-    };
-    state.registry.insert(entity, Graphic { id: graphic, hue });
-    state.registry.insert(
-        entity,
-        Contained {
-            container,
-            x: 60,
-            y: 60,
-            grid: 0,
-        },
-    );
-    state.registry.insert(entity, Amount(amount));
-    state.registry.insert(entity, Stackable);
-    tell_watchers_updated(state, container, entity);
-    Some(entity)
+
+    // Whatever is still in hand starts new piles, one full one at a time.
+    while left > 0 {
+        let take = left.min(u32::from(MAX_STACK)) as u16;
+        let Ok((entity, _serial)) = state.registry.spawn_with_serial(SerialKind::Item) else {
+            warn!("out of item serials; the rest of the payout is lost");
+            return last;
+        };
+        state.registry.insert(entity, Graphic { id: graphic, hue });
+        state.registry.insert(
+            entity,
+            Contained {
+                container,
+                x: 60,
+                y: 60,
+                grid: 0,
+            },
+        );
+        state.registry.insert(entity, Amount(take));
+        state.registry.insert(entity, Stackable);
+        tell_watchers_updated(state, container, entity);
+        left -= u32::from(take);
+        last = Some(entity);
+    }
+    last
 }
 
 /// Take `amount` off a contained stack by decree — stock sold out of a

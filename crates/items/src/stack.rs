@@ -37,11 +37,20 @@ pub fn merge_onto(
             bounce(state, connection, held, DragCancelReason::OutOfRange);
             return;
         }
-        let total = merge_amounts(state, held.entity, target);
+        let left = merge_amounts(state, held.entity, target);
+        redraw_ground_item(state, target);
+        if left > 0 {
+            // The target filled up. What did not fit goes back where it came
+            // from rather than onto the floor under the pile — the drop is
+            // refused, in Sphere's sense of "the item did not all stack, do
+            // something else with it", and the player keeps every coin.
+            debug!(left, "stack filled; the remainder bounced");
+            bounce(state, connection, held, DragCancelReason::Other);
+            return;
+        }
         state.held.remove(&connection);
         state.registry.despawn(held.entity);
-        redraw_ground_item(state, target);
-        debug!(total, "stacks merged");
+        debug!("stacks merged");
     } else if let Some(&contained) = state.registry.get::<Contained>(target) {
         let container = contained.container;
         let reachable = state
@@ -52,25 +61,50 @@ pub fn merge_onto(
             bounce(state, connection, held, DragCancelReason::OutOfRange);
             return;
         }
-        let total = merge_amounts(state, held.entity, target);
+        let left = merge_amounts(state, held.entity, target);
+        tell_watchers_updated(state, container, target);
+        if left > 0 {
+            debug!(left, "stack filled in a container; the remainder bounced");
+            bounce(state, connection, held, DragCancelReason::Other);
+            return;
+        }
         state.held.remove(&connection);
         // The dragged stack was on a cursor, on no screen and in no gump, so
         // despawning it needs no packet of its own.
         state.registry.despawn(held.entity);
-        tell_watchers_updated(state, container, target);
-        debug!(total, "stacks merged in a container");
+        debug!("stacks merged in a container");
     } else {
         // Worn, or nowhere placeable: nothing to merge onto.
         bounce(state, connection, held, DragCancelReason::Other);
     }
 }
 
-/// Fold the held stack's amount into the target's, clamped: a pile cannot count
-/// past what its amount word can hold. Returns the target's new total.
+/// The most one pile may hold — ServUO's `Item.WillStack` cap.
+///
+/// Below the `u16` an [`Amount`] is stored in and the wire carries, on purpose:
+/// the ceiling has to be a number the arithmetic can pass without wrapping, and
+/// 60,000 is the one both this engine and the reference can name.
+pub const MAX_STACK: u16 = 60_000;
+
+/// Fold as much of the held stack into the target as the target can hold.
+/// Returns what is **left on the held item** — zero when it all went in.
+///
+/// The references disagree here and Sphere has the better answer. ServUO refuses
+/// the merge outright when the sum would pass its cap (`WillStack`), so a full
+/// pile simply will not take a drop. Sphere's `CItem::Stack` fills the
+/// destination to its maximum, leaves the remainder on the source, and reports
+/// that it did not all fit — which loses nothing and needs no explanation to the
+/// player. What must not happen is what happened here before: clamping the sum
+/// and despawning the source, which quietly destroyed the difference. Dropping
+/// 50,000 gold onto 50,000 left one pile of 65,535 and 34,465 gone.
 fn merge_amounts(state: &mut WorldState, held: EntityId, target: EntityId) -> u16 {
-    let total = amount_of(state, held).saturating_add(amount_of(state, target));
-    set_stack_amount(state, target, total);
-    total
+    let held_amount = amount_of(state, held);
+    let room = MAX_STACK.saturating_sub(amount_of(state, target));
+    let moved = held_amount.min(room);
+    set_stack_amount(state, target, amount_of(state, target) + moved);
+    let left = held_amount - moved;
+    set_stack_amount(state, held, left);
+    left
 }
 
 /// How many an item is: its [`Amount`], or one if it has none.

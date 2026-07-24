@@ -278,7 +278,7 @@ impl World {
             return;
         }
         if stackable {
-            let _ = items::give(&mut self.state, container, graphic, hue, amount);
+            let _ = items::give(&mut self.state, container, graphic, hue, u32::from(amount));
         } else {
             let _ = items::place_one(&mut self.state, container, graphic, hue, amount);
         }
@@ -312,7 +312,13 @@ impl World {
         self.move_gear_to_corpse(serial, corpse, &[]);
         let gold = self.corpse_gold(max_hits);
         if gold > 0 {
-            let _ = items::give(&mut self.state, corpse, items::GOLD_GRAPHIC, 0, gold);
+            let _ = items::give(
+                &mut self.state,
+                corpse,
+                items::GOLD_GRAPHIC,
+                0,
+                u32::from(gold),
+            );
         }
         // The loot hook: a pack adds the real per-creature table on top of the
         // baseline, by serial, off this event. Emitted before the creature is

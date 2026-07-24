@@ -418,10 +418,22 @@ Roughly in dependency order, each script-first:
     longer bounces on a target with no `Position`: it branches on where the target
     lives, and a `Contained` target is reach-checked through its container
     (`container_in_reach`, the same gate `drop_into_container` uses), the amounts
-    summed with the same `saturating_add` clamp as the ground path, and every open
-    gump told the new total with a `0x25` (`tell_watchers_updated`, mirroring
-    `give`). The drop already routed here — `drop_onto_item`'s `can_stack` arm fires
-    regardless of location.
+    summed as on the ground path, and every open gump told the new total with a
+    `0x25` (`tell_watchers_updated`, mirroring `give`). The drop already routed
+    here — `drop_onto_item`'s `can_stack` arm fires regardless of location.
+  - [x] **A pile has a ceiling, and nothing falls off it.** Both merge paths used
+    a `saturating_add` on the `u16` an `Amount` is stored in, so dropping 50,000
+    gold onto 50,000 left one pile of 65,535 and destroyed the other 34,465 — the
+    engine's first item-loss bug, found in play. The cap is now an explicit
+    `items::MAX_STACK` (60,000, ServUO's `Item.WillStack` number, kept clear of the
+    `u16` edge) and the overflow goes back to the player, not to nowhere: Sphere's
+    `CItem::Stack` fills the destination to its maximum and leaves the remainder on
+    the source, which is the kinder of the two references (ServUO refuses the merge
+    outright). A drag whose remainder will not fit bounces it home. Where the
+    *world* hands goods over, `items::give` spreads a payout across as many piles
+    as it needs — a container ends up with two gold piles, as in UO — and takes a
+    `u32` now, because a large sale earns more than one pile holds and the old
+    `u16` made the vendor clamp the payout to 65,535 and say nothing.
   - [x] **Partial lift honours the amount everywhere.** `pick_up`'s container
     branch (`items/drag.rs`) reads the `0x07` amount now: a partial lift of a
     `Stackable` contained pile leaves the remainder behind *in the same grid slot*
