@@ -39,6 +39,8 @@ pub const ARCHERY_SKILL: u8 = 31;
 pub const WRESTLING_SKILL: u8 = 34;
 /// Swordsmanship.
 pub const SWORDS_SKILL: u8 = 41;
+/// Lumberjacking — lends an axe a damage bonus.
+pub const LUMBERJACKING_SKILL: u8 = 44;
 
 /// Which combat skill a weapon trains and hits with. Carried from ServUO's
 /// `DefSkill` for the slice that wires hit chance and gain; unused today, but free
@@ -94,15 +96,34 @@ pub struct WeaponData {
     pub aos_min: u16,
     /// AoS maximum damage.
     pub aos_max: u16,
+    /// ML (era 4) swing speed, in hundredths of a second (ServUO's `MlSpeed`).
+    pub ml_speed: u16,
+    /// The sound a whiff makes — ServUO's `DefMissSound` for this weapon class.
+    pub miss_sound: u16,
+    /// Whether Lumberjacking lends this weapon a damage bonus (an axe).
+    pub is_axe: bool,
 }
 
-/// Pick the era-appropriate value: AoS (era 2) or pre-AoS (era 1 and the fallback).
+/// Pick the era-appropriate damage value: the AoS family (eras 2 AoS, 3 SE, 4 ML)
+/// uses the `aos` numbers, the pre-AoS family (eras 0 custom, 1 pre-AoS) the `old`.
 #[must_use]
 pub const fn by_era(old: u16, aos: u16, era: u8) -> u16 {
-    if era == 2 {
+    if era >= 2 {
         aos
     } else {
         old
+    }
+}
+
+/// The swing-speed base a weapon lends under each era's formula: `ml_speed` for ML
+/// (era 4), `aos_speed` for AoS/SE (2, 3), `old_speed` for the pre-AoS family
+/// (0, 1). Fed to [`super::swing_ticks`].
+#[must_use]
+pub const fn swing_base(weapon: &WeaponData, era: u8) -> u16 {
+    match era {
+        4 => weapon.ml_speed,
+        2 | 3 => weapon.aos_speed,
+        _ => weapon.old_speed,
     }
 }
 
@@ -146,6 +167,12 @@ pub fn equipped_weapon(state: &WorldState, mobile: EntityId) -> Option<WeaponDat
             aos_speed: speed,
             aos_min: min,
             aos_max: max,
+            // ML speed in hundredths-of-a-second is a different unit from the swing
+            // base; lacking a better value, mirror the base's, and inherit the
+            // graphic's miss sound and axe flag.
+            ml_speed: base.map_or(speed, |weapon| weapon.ml_speed),
+            miss_sound: base.map_or(0, |weapon| weapon.miss_sound),
+            is_axe: base.is_some_and(|weapon| weapon.is_axe),
         }),
         None => base,
     }
@@ -158,53 +185,55 @@ pub fn equipped_weapon(state: &WorldState, mobile: EntityId) -> Option<WeaponDat
 /// BaseBashing/Staff → Macing, BaseSpear → Fencing, BaseRanged → Archery). Kryss is
 /// Fencing here: ServUO files it under `BaseSword`, but classic UO trains it with
 /// Fencing, and the numbers-taken/arithmetic-audited rule favours the client's truth.
+// Columns after the AoS block: `ml` ML-speed (hundredths of a second), `miss` the
+// weapon-class miss sound, `axe` the Lumberjacking flag.
 #[rustfmt::skip]
 static WEAPONS: &[WeaponData] = &[
-    // -- Swords ----------------------------------------------------------------
-    w(0x0F61, WeaponSkill::Swords,  35,  5, 33, 30, 14, 18), // Longsword
-    w(0x0F5E, WeaponSkill::Swords,  45,  5, 29, 33, 13, 17), // Broadsword
-    w(0x13FF, WeaponSkill::Swords,  58,  5, 26, 46, 10, 14), // Katana
-    w(0x13B9, WeaponSkill::Swords,  30,  6, 34, 28, 15, 19), // Viking sword
-    w(0x1441, WeaponSkill::Swords,  45,  6, 28, 44, 10, 14), // Cutlass
-    w(0x13B6, WeaponSkill::Swords,  43,  4, 30, 37, 12, 16), // Scimitar
-    w(0x0F52, WeaponSkill::Swords,  55,  3, 15, 56, 10, 12), // Dagger
-    w(0x13F6, WeaponSkill::Swords,  40,  2, 14, 49, 10, 13), // Butcher knife
-    w(0x0EC3, WeaponSkill::Swords,  40,  2, 13, 46, 10, 14), // Cleaver
-    w(0x0EC4, WeaponSkill::Swords,  40,  1, 10, 49, 10, 13), // Skinning knife
-    // -- Axes (Swords skill) ---------------------------------------------------
-    w(0x0F43, WeaponSkill::Swords,  40,  2, 17, 41, 13, 16), // Hatchet
-    w(0x0F49, WeaponSkill::Swords,  37,  6, 33, 37, 14, 17), // Axe
-    w(0x0F47, WeaponSkill::Swords,  30,  6, 38, 31, 16, 19), // Battle axe
-    w(0x0F4B, WeaponSkill::Swords,  37,  5, 35, 33, 15, 18), // Double axe
-    w(0x0F45, WeaponSkill::Swords,  37,  6, 33, 33, 15, 18), // Executioner's axe
-    w(0x13FB, WeaponSkill::Swords,  30,  6, 38, 29, 17, 20), // Large battle axe
-    w(0x1443, WeaponSkill::Swords,  30,  5, 39, 31, 16, 19), // Two-handed axe
-    w(0x13B0, WeaponSkill::Swords,  40,  9, 27, 33, 12, 16), // War axe
-    w(0x0E86, WeaponSkill::Swords,  35,  1, 15, 35, 12, 16), // Pickaxe
-    // -- Polearms (Swords skill) -----------------------------------------------
-    w(0x0F4D, WeaponSkill::Swords,  26,  5, 43, 28, 17, 20), // Bardiche
-    w(0x143E, WeaponSkill::Swords,  25,  5, 49, 25, 18, 21), // Halberd
-    // -- Maces & staves --------------------------------------------------------
-    w(0x13B4, WeaponSkill::Macing,  40,  8, 24, 44, 10, 14), // Club
-    w(0x0F5C, WeaponSkill::Macing,  30,  8, 32, 40, 11, 15), // Mace
-    w(0x143B, WeaponSkill::Macing,  30, 10, 30, 32, 14, 18), // Maul
-    w(0x1407, WeaponSkill::Macing,  32, 10, 30, 26, 16, 20), // War mace
-    w(0x1439, WeaponSkill::Macing,  31,  8, 36, 28, 17, 20), // War hammer
-    w(0x143D, WeaponSkill::Macing,  30,  6, 33, 28, 13, 17), // Hammer pick
-    w(0x0E89, WeaponSkill::Macing,  48,  8, 28, 48, 11, 14), // Quarter staff
-    w(0x0DF0, WeaponSkill::Macing,  35,  8, 33, 39, 13, 16), // Black staff
-    w(0x13F8, WeaponSkill::Macing,  33, 10, 30, 33, 15, 18), // Gnarled staff
-    w(0x0E81, WeaponSkill::Macing,  30,  3, 12, 40, 13, 16), // Shepherd's crook
-    // -- Fencing ---------------------------------------------------------------
-    w(0x1401, WeaponSkill::Fencing, 53,  3, 28, 53, 10, 12), // Kryss
-    w(0x1405, WeaponSkill::Fencing, 45,  4, 32, 43, 10, 14), // War fork
-    w(0x0F62, WeaponSkill::Fencing, 46,  2, 36, 42, 13, 16), // Spear
-    w(0x1403, WeaponSkill::Fencing, 50,  4, 32, 55, 10, 13), // Short spear
-    w(0x0E87, WeaponSkill::Fencing, 45,  4, 16, 43, 12, 15), // Pitchfork
-    // -- Archery ---------------------------------------------------------------
-    w(0x13B2, WeaponSkill::Archery, 20,  9, 41, 25, 25, 25), // Bow
-    w(0x0F50, WeaponSkill::Archery, 18,  8, 43, 24, 18, 24), // Crossbow
-    w(0x13FD, WeaponSkill::Archery, 10, 11, 56, 22, 22, 22), // Heavy crossbow
+    // -- Swords -------------------  spd  min  max  aos speeds     ml  miss   axe
+    w(0x0F61, WeaponSkill::Swords,  35,  5, 33, 30, 14, 18, 350, 0x23A, false), // Longsword
+    w(0x0F5E, WeaponSkill::Swords,  45,  5, 29, 33, 13, 17, 325, 0x23A, false), // Broadsword
+    w(0x13FF, WeaponSkill::Swords,  58,  5, 26, 46, 10, 14, 250, 0x23A, false), // Katana
+    w(0x13B9, WeaponSkill::Swords,  30,  6, 34, 28, 15, 19, 375, 0x23A, false), // Viking sword
+    w(0x1441, WeaponSkill::Swords,  45,  6, 28, 44, 10, 14, 250, 0x23A, false), // Cutlass
+    w(0x13B6, WeaponSkill::Swords,  43,  4, 30, 37, 12, 16, 300, 0x23A, false), // Scimitar
+    w(0x0F52, WeaponSkill::Swords,  55,  3, 15, 56, 10, 12, 200, 0x238, false), // Dagger
+    w(0x13F6, WeaponSkill::Swords,  40,  2, 14, 49, 10, 13, 225, 0x238, false), // Butcher knife
+    w(0x0EC3, WeaponSkill::Swords,  40,  2, 13, 46, 10, 14, 250, 0x238, false), // Cleaver
+    w(0x0EC4, WeaponSkill::Swords,  40,  1, 10, 49, 10, 13, 225, 0x238, false), // Skinning knife
+    // -- Axes (Swords skill) -------------------------------------------------------
+    w(0x0F43, WeaponSkill::Swords,  40,  2, 17, 41, 13, 16, 275, 0x23A, true ), // Hatchet
+    w(0x0F49, WeaponSkill::Swords,  37,  6, 33, 37, 14, 17, 300, 0x23A, true ), // Axe
+    w(0x0F47, WeaponSkill::Swords,  30,  6, 38, 31, 16, 19, 350, 0x23A, true ), // Battle axe
+    w(0x0F4B, WeaponSkill::Swords,  37,  5, 35, 33, 15, 18, 325, 0x23A, true ), // Double axe
+    w(0x0F45, WeaponSkill::Swords,  37,  6, 33, 33, 15, 18, 325, 0x23A, true ), // Executioner's axe
+    w(0x13FB, WeaponSkill::Swords,  30,  6, 38, 29, 17, 20, 375, 0x23A, true ), // Large battle axe
+    w(0x1443, WeaponSkill::Swords,  30,  5, 39, 31, 16, 19, 350, 0x23A, true ), // Two-handed axe
+    w(0x13B0, WeaponSkill::Swords,  40,  9, 27, 33, 12, 16, 300, 0x239, true ), // War axe
+    w(0x0E86, WeaponSkill::Swords,  35,  1, 15, 35, 12, 16, 300, 0x23A, true ), // Pickaxe
+    // -- Polearms (Swords skill) ---------------------------------------------------
+    w(0x0F4D, WeaponSkill::Swords,  26,  5, 43, 28, 17, 20, 375, 0x238, false), // Bardiche
+    w(0x143E, WeaponSkill::Swords,  25,  5, 49, 25, 18, 21, 400, 0x238, false), // Halberd
+    // -- Maces & staves ------------------------------------------------------------
+    w(0x13B4, WeaponSkill::Macing,  40,  8, 24, 44, 10, 14, 250, 0x239, false), // Club
+    w(0x0F5C, WeaponSkill::Macing,  30,  8, 32, 40, 11, 15, 275, 0x239, false), // Mace
+    w(0x143B, WeaponSkill::Macing,  30, 10, 30, 32, 14, 18, 350, 0x239, false), // Maul
+    w(0x1407, WeaponSkill::Macing,  32, 10, 30, 26, 16, 20, 400, 0x239, false), // War mace
+    w(0x1439, WeaponSkill::Macing,  31,  8, 36, 28, 17, 20, 375, 0x239, false), // War hammer
+    w(0x143D, WeaponSkill::Macing,  30,  6, 33, 28, 13, 17, 325, 0x239, false), // Hammer pick
+    w(0x0E89, WeaponSkill::Macing,  48,  8, 28, 48, 11, 14, 225, 0x239, false), // Quarter staff
+    w(0x0DF0, WeaponSkill::Macing,  35,  8, 33, 39, 13, 16, 275, 0x239, false), // Black staff
+    w(0x13F8, WeaponSkill::Macing,  33, 10, 30, 33, 15, 18, 325, 0x239, false), // Gnarled staff
+    w(0x0E81, WeaponSkill::Macing,  30,  3, 12, 40, 13, 16, 275, 0x239, false), // Shepherd's crook
+    // -- Fencing -------------------------------------------------------------------
+    w(0x1401, WeaponSkill::Fencing, 53,  3, 28, 53, 10, 12, 200, 0x238, false), // Kryss
+    w(0x1405, WeaponSkill::Fencing, 45,  4, 32, 43, 10, 14, 250, 0x238, false), // War fork
+    w(0x0F62, WeaponSkill::Fencing, 46,  2, 36, 42, 13, 16, 275, 0x238, false), // Spear
+    w(0x1403, WeaponSkill::Fencing, 50,  4, 32, 55, 10, 13, 200, 0x238, false), // Short spear
+    w(0x0E87, WeaponSkill::Fencing, 45,  4, 16, 43, 12, 15, 250, 0x238, false), // Pitchfork
+    // -- Archery -------------------------------------------------------------------
+    w(0x13B2, WeaponSkill::Archery, 20,  9, 41, 25, 25, 25, 425, 0x238, false), // Bow
+    w(0x0F50, WeaponSkill::Archery, 18,  8, 43, 24, 18, 24, 450, 0x238, false), // Crossbow
+    w(0x13FD, WeaponSkill::Archery, 10, 11, 56, 22, 22, 22, 500, 0x238, false), // Heavy crossbow
 ];
 
 /// A terse constructor so the table above stays one weapon per readable line.
@@ -220,6 +249,9 @@ const fn w(
     aos_speed: u16,
     aos_min: u16,
     aos_max: u16,
+    ml_speed: u16,
+    miss_sound: u16,
+    is_axe: bool,
 ) -> WeaponData {
     WeaponData {
         graphic,
@@ -230,6 +262,9 @@ const fn w(
         aos_speed,
         aos_min,
         aos_max,
+        ml_speed,
+        miss_sound,
+        is_axe,
     }
 }
 
@@ -247,10 +282,35 @@ mod tests {
     }
 
     #[test]
-    fn by_era_picks_aos_only_for_era_two() {
-        assert_eq!(by_era(35, 30, 1), 35);
-        assert_eq!(by_era(35, 30, 2), 30);
-        assert_eq!(by_era(35, 30, 0), 35); // the fallback is pre-AoS
+    fn by_era_splits_the_pre_aos_and_aos_families() {
+        assert_eq!(by_era(35, 30, 0), 35); // custom → pre-AoS numbers
+        assert_eq!(by_era(35, 30, 1), 35); // pre-AoS
+        assert_eq!(by_era(35, 30, 2), 30); // AoS
+        assert_eq!(by_era(35, 30, 3), 30); // SE → AoS family
+        assert_eq!(by_era(35, 30, 4), 30); // ML → AoS family
+    }
+
+    #[test]
+    fn swing_base_picks_the_eras_speed_column() {
+        let sword = weapon_data(0x0F61).unwrap(); // old 35, aos 30, ml 350
+        assert_eq!(swing_base(sword, 0), 35);
+        assert_eq!(swing_base(sword, 1), 35);
+        assert_eq!(swing_base(sword, 2), 30);
+        assert_eq!(swing_base(sword, 3), 30);
+        assert_eq!(swing_base(sword, 4), 350);
+    }
+
+    #[test]
+    fn the_se_and_ml_formulas_match_their_arithmetic() {
+        // Era 3 (SE), longsword aos_speed 30, dex 100, scale 80000:
+        // 80000/((100+100)·30) - 2 = 13 - 2 = 11 ticks → 11·10/4 = 27 tenths → 54.
+        assert_eq!(crate::swing_ticks(100, 30, 3, 80000), 54);
+        // Era 4 (ML), longsword ml_speed 350 (3.50s), dex 100 (scale ignored):
+        // 350·4/100 - 100/30 = 14 - 3 = 11 ticks → 27 tenths → 54.
+        assert_eq!(crate::swing_ticks(100, 350, 4, 0), 54);
+        // Era 0 floors at 5 tenths where pre-AoS (era 1) would go faster.
+        assert_eq!(crate::swing_ticks(255, 255, 0, 15000), 10); // 5 tenths ·2
+        assert!(crate::swing_ticks(255, 255, 1, 15000) < 10);
     }
 
     #[test]

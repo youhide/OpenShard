@@ -1811,6 +1811,7 @@ fn spawn_mobile_full(
         banker: false,
         vendor: false,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
     // The newest mobile that no client drives — the creature just made.
@@ -2331,6 +2332,7 @@ fn a_creature_dies_with_its_own_voice() {
         banker: false,
         vendor: false,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
     let orc = world
@@ -2818,14 +2820,19 @@ fn an_even_unskilled_duel_sometimes_misses() {
     }
     let packets = packets_for(&mut world, connection);
     let hit = combat::MELEE_HIT_SOUND.to_be_bytes();
-    let miss = combat::MELEE_MISS_SOUND.to_be_bytes();
+    // A longsword whiffs with its own class sound (ServUO's DefMissSound), not the
+    // generic bare-hands swish.
+    let miss = combat::weapons::weapon_data(0x0F61)
+        .unwrap()
+        .miss_sound
+        .to_be_bytes();
     let sound = |id: [u8; 2]| {
         packets
             .iter()
             .any(|p| p[0] == 0x54 && p.len() >= 4 && p[2..4] == id)
     };
     assert!(sound(hit), "some blows landed (a thwack)");
-    assert!(sound(miss), "and some whiffed (a swish)");
+    assert!(sound(miss), "and some whiffed (the sword's swish)");
 }
 
 #[test]
@@ -2862,6 +2869,93 @@ fn tactics_scales_the_blow() {
         total_dealt(1000) > total_dealt(0),
         "grandmaster Tactics hits harder than none"
     );
+}
+
+#[test]
+fn lumberjacking_lends_an_axe_its_bite() {
+    // Same axe, same seed: a lumberjack swings harder — but only with an axe. A
+    // sword ignores Lumberjacking entirely.
+    use combat::weapons::{LUMBERJACKING_SKILL, SWORDS_SKILL};
+    fn total_dealt(graphic: u16, lumber: u16) -> u16 {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        let player_entity = world.state.players[&connection];
+        let serial = world.state.registry.serial_of(player_entity).unwrap();
+        openshard_skills::set_skill(&mut world.state, serial.raw(), SWORDS_SKILL, 1000);
+        openshard_skills::set_skill(&mut world.state, serial.raw(), LUMBERJACKING_SKILL, lumber);
+        items::equip_worn_item(&mut world.state, serial, graphic, 0, 1).unwrap();
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 60000, now);
+        let mob_entity = entity(&world, mob);
+        engage(&mut world, connection, mob, now);
+        for _ in 0..(10 * WRESTLING_SWING_TICKS) {
+            world.tick(now);
+        }
+        60000
+            - world
+                .state
+                .registry
+                .get::<Hitpoints>(mob_entity)
+                .unwrap()
+                .current
+    }
+    // 0x0F49 is the Axe (is_axe); 0x0F61 the Longsword (not).
+    assert!(
+        total_dealt(0x0F49, 1000) > total_dealt(0x0F49, 0),
+        "Lumberjacking sharpens an axe"
+    );
+    assert_eq!(
+        total_dealt(0x0F61, 1000),
+        total_dealt(0x0F61, 0),
+        "but does nothing for a sword"
+    );
+}
+
+#[test]
+fn a_creature_can_be_given_combat_skills() {
+    // The pack can hand a monster Wrestling and Tactics; the creature then carries
+    // a Skills sheet — which is exactly what turns on its to-hit roll and damage
+    // scaling, so a skilled monster fights the way a skilled player does.
+    use combat::weapons::{TACTICS_SKILL, WRESTLING_SKILL};
+    let now = Instant::now();
+    let mut world = world();
+    world.queue(Command::SpawnMobile {
+        body: 0x0190,
+        hue: 0,
+        hits: 50,
+        notoriety: 5,
+        damage: 8,
+        resistance: 0,
+        swing: 0,
+        sight: 0,
+        aggression: 2,
+        beat: 0,
+        ranged: 0,
+        ranged_kind: 0,
+        wander: false,
+        position: Point::new(START.0, START.1, 0),
+        facet: 0,
+        name: None,
+        banker: false,
+        vendor: false,
+        equipment: Vec::new(),
+        skills: vec![(WRESTLING_SKILL, 700), (TACTICS_SKILL, 500)],
+    });
+    world.tick(now);
+    let creature = world
+        .state
+        .registry
+        .query::<Body>()
+        .find(|(entity, _)| !world.state.registry.has::<Client>(*entity))
+        .map(|(entity, _)| entity)
+        .expect("a creature was spawned");
+    let skills = world
+        .state
+        .registry
+        .get::<Skills>(creature)
+        .expect("the creature carries the skills it was spawned with");
+    assert_eq!(skills.get(WRESTLING_SKILL), 700);
+    assert_eq!(skills.get(TACTICS_SKILL), 500);
 }
 
 #[test]
@@ -5822,6 +5916,7 @@ fn spawn_creature(world: &mut World, point: Point, sight: u8, wander: bool, now:
         banker: false,
         vendor: false,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
     world
@@ -6725,6 +6820,7 @@ fn a_spawner_fills_to_its_ceiling_and_clear_empties_it() {
         ranged: 0,
         ranged_kind: 0,
         wander: false,
+        skills: Vec::new(),
     };
     let area = SpawnArea {
         x: START.0,
@@ -6788,6 +6884,7 @@ fn clear_also_removes_placed_npcs_and_their_gear_but_not_players() {
         banker: false,
         vendor: true,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
     let vendor = world
@@ -7376,6 +7473,7 @@ fn a_vendor_and_its_priced_stock_survive_a_restart() {
         banker: false,
         vendor: true,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     home.tick(now);
     let vendor = home
@@ -7489,6 +7587,7 @@ fn a_wounded_spawner_creature_survives_a_restart_and_is_counted() {
         ranged: 0,
         ranged_kind: 0,
         wander: false,
+        skills: Vec::new(),
     };
     let area = SpawnArea {
         x: START.0,
@@ -7743,6 +7842,7 @@ fn spawn_banker(world: &mut World, at: Point, now: Instant) {
         banker: true,
         vendor: false,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
 }
@@ -7992,6 +8092,7 @@ fn a_spawn_stands_on_the_floor_not_under_it() {
         banker: false,
         vendor: false,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
 
@@ -8034,6 +8135,7 @@ fn an_unnamed_creature_takes_its_body_default_name() {
         banker: false,
         vendor: false,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
     let chicken = world
@@ -8216,6 +8318,7 @@ fn spawn_stocked_vendor(world: &mut World, point: Point, now: Instant) -> u32 {
         banker: false,
         vendor: true,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
     let vendor = world
@@ -8915,6 +9018,7 @@ fn a_creature_does_not_notice_prey_through_a_shut_door() {
         banker: false,
         vendor: false,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
     let creature = world
@@ -8980,6 +9084,7 @@ fn spawn_brained(world: &mut World, body: u16, at: Point, sight: u8, now: Instan
         banker: false,
         vendor: false,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
     world
@@ -9178,6 +9283,7 @@ fn spawn_postured(
         banker: false,
         vendor: false,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
     world
@@ -9378,6 +9484,7 @@ fn spawn_horse(world: &mut World, at: Point, now: Instant) -> (EntityId, u32) {
         banker: false,
         vendor: false,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
     let horse = world
@@ -9709,6 +9816,7 @@ fn a_shop_sells_goods_and_buys_them_back() {
         banker: false,
         vendor: true,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
     let vendor = world
@@ -9855,6 +9963,7 @@ fn saying_buy_opens_the_shop_and_an_empty_sell_answers_overhead() {
         banker: false,
         vendor: true,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
     let vendor = world
@@ -9933,6 +10042,7 @@ fn spawn_archer_bodied(world: &mut World, body: u16, at: Point, now: Instant) ->
         banker: false,
         vendor: false,
         equipment: Vec::new(),
+        skills: Vec::new(),
     });
     world.tick(now);
     world
@@ -10203,6 +10313,7 @@ fn lod_a_spawner_with_no_player_near_stays_dormant_then_wakes() {
         ranged: 0,
         ranged_kind: 0,
         wander: false,
+        skills: Vec::new(),
     };
     // Far beyond the LOD radius of the player at START.
     let area = SpawnArea {

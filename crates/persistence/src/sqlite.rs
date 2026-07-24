@@ -938,6 +938,7 @@ mod tests {
                 npc_wander: 2,
                 spawned_by: None,
                 effects: Vec::new(),
+                skills: Vec::new(),
             }
         }
         let decoration = DecorationRecord {

@@ -339,6 +339,9 @@ impl World {
                 npc_wander: npc.map_or(0, |n| n.wander),
                 spawned_by: registry.get::<SpawnedBy>(entity).map(|s| s.0),
                 effects: Self::effects_of(registry, entity, self.state.ticks),
+                skills: registry.get::<Skills>(entity).map_or_else(Vec::new, |s| {
+                    s.entries().map(|(id, value, _)| (id, value)).collect()
+                }),
             });
         }
         records
@@ -883,6 +886,15 @@ impl World {
             // poisoned. Its pulses resume at boot's tick.
             let now = self.state.ticks;
             Self::apply_effects(&mut self.state.registry, entity, &record.effects, now);
+            // Its combat skills come back too, so a restored monster still rolls to
+            // hit and scales damage rather than reverting to a skill-less brawler.
+            if !record.skills.is_empty() {
+                let mut sheet = Skills::default();
+                for (id, value) in &record.skills {
+                    sheet.set(*id, *value);
+                }
+                self.state.registry.insert(entity, sheet);
+            }
             self.state
                 .facet_state_mut(facet)
                 .sectors

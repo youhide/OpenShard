@@ -110,6 +110,7 @@ fn populate(gameplay: Gameplay, creatures: u32, players: u32) -> (World, u32) {
                 banker: false,
                 vendor: false,
                 equipment: Vec::new(),
+                skills: Vec::new(),
             });
             placed += 1;
         }

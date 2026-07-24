@@ -278,6 +278,9 @@ pub enum Command {
         /// Worn clothing and gear, as `(graphic, layer, hue)` — so an NPC is not
         /// naked. Drawn in its `0x78`.
         equipment: Vec<(u16, u8, u16)>,
+        /// Trained combat skills, `(skill id, value in tenths)` — what turns on the
+        /// to-hit roll and damage scaling for the creature.
+        skills: Vec<(u8, u16)>,
     },
     /// Deal damage to a mobile — a script or another mobile's blow.
     Damage {

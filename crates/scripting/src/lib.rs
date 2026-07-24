@@ -324,6 +324,8 @@ pub enum Command {
         vendor: bool,
         /// Worn clothing and gear, so it is not naked.
         equipment: Vec<WornItem>,
+        /// Trained combat skills, `(skill id, value in tenths)`.
+        skills: Vec<(u8, u16)>,
     },
     /// Fill a vendor's stock crate with priced goods.
     StockVendor {
@@ -656,6 +658,8 @@ pub struct SpawnCreature {
     pub ranged_kind: u8,
     /// Whether it wanders when idle.
     pub wander: bool,
+    /// Trained combat skills, `(skill id, value in tenths)`.
+    pub skills: Vec<(u8, u16)>,
 }
 
 /// One line of vendor stock, as `op_stock` supplies it.

@@ -295,6 +295,10 @@ pub struct CreatureData {
     pub ranged_kind: u8,
     /// Whether it drifts when idle.
     pub wander: bool,
+    /// Trained combat skills, `(skill id, value in tenths)`. Defaulted so an older
+    /// save (no skills) restores as a skill-less creature.
+    #[serde(default)]
+    pub skills: Vec<(u8, u16)>,
 }
 
 /// A spawn region, as saved.
@@ -398,6 +402,10 @@ pub struct MobileRecord {
     /// Every timed effect working through it — poison and the rest.
     #[serde(default)]
     pub effects: Vec<EffectRecord>,
+    /// Trained combat skills, `(skill id, value in tenths)`. Defaulted so an older
+    /// save restores a skill-less creature.
+    #[serde(default)]
+    pub skills: Vec<(u8, u16)>,
 }
 
 /// A shut-and-openable door's live state, inside a [`DecorationRecord`].

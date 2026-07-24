@@ -335,6 +335,7 @@ fn into_world(command: ScriptCommand) -> Command {
             banker,
             vendor,
             equipment,
+            skills,
         } => Command::SpawnMobile {
             body,
             hue,
@@ -359,6 +360,7 @@ fn into_world(command: ScriptCommand) -> Command {
                 .into_iter()
                 .map(|w| (w.graphic, w.layer, w.hue))
                 .collect(),
+            skills,
         },
         ScriptCommand::Damage {
             serial,
@@ -497,6 +499,7 @@ fn into_world(command: ScriptCommand) -> Command {
                         ranged: c.ranged,
                         ranged_kind: c.ranged_kind,
                         wander: c.wander,
+                        skills: c.skills,
                     })
                     .collect(),
                 max_count,
@@ -826,6 +829,7 @@ mod tests {
             banker: false,
             vendor: false,
             equipment: Vec::new(),
+            skills: Vec::new(),
         });
         world.tick(now);
         let mob = world
@@ -894,6 +898,7 @@ mod tests {
             banker: false,
             vendor: false,
             equipment: Vec::new(),
+            skills: Vec::new(),
         });
         world.tick(now); // the mobile spawns, MobileSpawned emitted
 

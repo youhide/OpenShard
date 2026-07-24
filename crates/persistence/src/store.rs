@@ -504,6 +504,7 @@ mod tests {
             npc_wander: 0,
             spawned_by: Some(1),
             effects: Vec::new(),
+            skills: Vec::new(),
         }
     }
 

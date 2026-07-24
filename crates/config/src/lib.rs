@@ -83,11 +83,12 @@ pub struct Config {
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GameplayConfig {
-    /// Which swing-speed formula combat uses, Sphere's `m_iCombatSpeedEra`.
-    /// `1` (pre-AoS) and `2` (AoS) are implemented — they turn dexterity and a
-    /// weapon's base speed into a swing interval. Sphere's `0`, `3` and `4` need
-    /// weapon weight or ML-format speeds the shard has no data for yet, so they
-    /// are rejected rather than silently run as `1`.
+    /// Which swing-speed formula combat uses, Sphere's `m_iCombatSpeedEra`:
+    /// `0` (Sphere custom), `1` (pre-AoS), `2` (AoS), `3` (SE) and `4` (ML) are all
+    /// implemented — each turns dexterity and a weapon's era-appropriate speed
+    /// (`old`/`aos`/`ml`) into a swing interval. Anything else is rejected rather
+    /// than silently run as pre-AoS. Set `speed_scale_factor` to match the era
+    /// (15000 pre-AoS, 40000 AoS, 80000 SE; ML ignores it).
     #[serde(default = "default_combat_era")]
     pub combat_era: u8,
     /// Sphere's `SpeedScaleFactor`: the numerator of the swing formula. Larger is
@@ -187,9 +188,10 @@ pub struct GameplayConfig {
 }
 
 /// Whether combat [`combat_era`](GameplayConfig::combat_era) is one the swing
-/// formula implements: pre-AoS (`1`) or AoS (`2`).
+/// formula implements: Sphere custom (`0`), pre-AoS (`1`), AoS (`2`), SE (`3`) or
+/// ML (`4`).
 const fn combat_era_is_implemented(era: u8) -> bool {
-    matches!(era, 1 | 2)
+    matches!(era, 0..=4)
 }
 
 fn default_combat_era() -> u8 {
@@ -551,9 +553,8 @@ impl fmt::Display for ConfigError {
             Self::EmptyAccountName => f.write_str("an account has an empty name"),
             Self::UnknownCombatEra { era } => write!(
                 f,
-                "gameplay.combat_era is {era}; only 1 (pre-AoS) and 2 (AoS) are \
-                 implemented — Sphere's 0, 3 and 4 need weapon properties the \
-                 shard has no data for yet",
+                "gameplay.combat_era is {era}; only Sphere's 0 (custom), 1 (pre-AoS), \
+                 2 (AoS), 3 (SE) and 4 (ML) are implemented",
             ),
             Self::ZeroSpeedScaleFactor => {
                 f.write_str("gameplay.speed_scale_factor must not be zero")

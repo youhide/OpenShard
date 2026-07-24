@@ -98,6 +98,7 @@ impl World {
                     banker: false,
                     vendor: false,
                     equipment: Vec::new(),
+                    skills: creature.skills.clone(),
                 },
             ) {
                 self.state.registry.insert(entity, SpawnedBy(id));
@@ -173,6 +174,7 @@ impl World {
                         ranged: c.ranged,
                         ranged_kind: c.ranged_kind,
                         wander: c.wander,
+                        skills: c.skills.clone(),
                     })
                     .collect(),
             })
@@ -211,6 +213,7 @@ impl World {
                     ranged: c.ranged,
                     ranged_kind: c.ranged_kind,
                     wander: c.wander,
+                    skills: c.skills,
                 })
                 .collect();
             let mut spawner = crate::spawner::Spawner::new(

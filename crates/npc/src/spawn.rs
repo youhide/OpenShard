@@ -6,7 +6,7 @@ use openshard_movement::Walker;
 use openshard_protocol::{Direction, Facing, Notoriety, Point};
 use openshard_state::components::{
     body_opens_doors, creature_name, Aggression, Banker, Body, Brain, Facet, Heading, Hitpoints,
-    MeleeDamage, Movement, Name, Npc, Position, RangedAttack, Resistance, SwingSpeed,
+    MeleeDamage, Movement, Name, Npc, Position, RangedAttack, Resistance, Skills, SwingSpeed,
 };
 use openshard_state::WorldState;
 use tracing::{debug, warn};
@@ -66,6 +66,11 @@ pub struct SpawnSpec {
     pub vendor: bool,
     /// Worn clothing and gear, `(graphic, layer, hue)` — so it is not naked.
     pub equipment: Vec<(u16, u8, u16)>,
+    /// Trained combat skills, `(skill id, value in tenths)` — Wrestling, Tactics,
+    /// Anatomy and the weapon skills. Without these a creature has no `Skills`
+    /// sheet, so its blows always land unscaled (the combat gate); with them it
+    /// rolls to hit and scales damage like a player.
+    pub skills: Vec<(u8, u16)>,
 }
 
 /// Put a mobile in the world. See `Command::SpawnMobile`.
@@ -96,6 +101,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
         banker,
         vendor,
         equipment,
+        skills,
     } = spec;
     let facet = if state.facets.contains_key(&facet) {
         facet
@@ -144,6 +150,15 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
     state
         .registry
         .insert(entity, MeleeDamage { amount: damage });
+    // Combat skills, if the pack gave any: a sheet is what turns on the to-hit
+    // roll and damage scaling for this creature (see `combat::check_hit`).
+    if !skills.is_empty() {
+        let mut sheet = Skills::default();
+        for (id, value) in skills {
+            sheet.set(id, value);
+        }
+        state.registry.insert(entity, sheet);
+    }
     state.registry.insert(
         entity,
         Resistance {

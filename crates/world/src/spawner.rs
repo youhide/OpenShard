@@ -42,6 +42,9 @@ pub struct CreatureTemplate {
     pub ranged_kind: u8,
     /// Whether it drifts when idle.
     pub wander: bool,
+    /// Trained combat skills, `(skill id, value in tenths)` — what makes a
+    /// spawner's monsters roll to hit and scale damage like a player.
+    pub skills: Vec<(u8, u16)>,
 }
 
 /// The box a region spawns within: a top-left tile, a size, and a facet.

@@ -19,9 +19,9 @@ use openshard_protocol::{
     encode_attack, encode_graphical_effect, encode_war_mode, EffectKind, EffectPoint, Notoriety,
 };
 use openshard_state::components::{
-    body_is_female, body_opens_doors, creature_base_sound, effect, BehaviourBuffs, Body, Combat,
-    CriminalUntil, DamageType, Frozen, Hitpoints, MeleeDamage, MurderDecay, Murders, Poisoned,
-    Position, RangedAttack, Resistance, Skills, Stamina, Stats, SwingSpeed,
+    body_is_female, body_opens_doors, creature_base_sound, effect, BehaviourBuffs, Body, Client,
+    Combat, CriminalUntil, DamageType, Frozen, Hitpoints, MeleeDamage, MurderDecay, Murders,
+    Poisoned, Position, RangedAttack, Resistance, Skills, Stamina, Stats, SwingSpeed,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{Action, WorldState};
@@ -188,11 +188,19 @@ pub struct MobileDied {
 /// Eras 0, 3 and 4 need weapon weight or ML-format speeds the shard has no data
 /// for yet, so config validation accepts only 1 and 2; an
 /// unknown era here falls back to era 1.
+///
+/// The eras are Sphere's `m_iCombatSpeedEra` (`CResourceCalc.cpp`): `0` custom,
+/// `1` pre-AoS, `2` AoS, `3` SE, `4` ML. Each takes a different `base` — pre-AoS
+/// eras the `old_speed`, AoS/SE the `aos_speed`, ML the `ml_speed` in hundredths of
+/// a second — which [`weapons::swing_base`] picks. `scale` is the operator's
+/// `speed_scale_factor` (15000 pre-AoS, 40000 AoS, 80000 SE; ML ignores it).
 #[must_use]
 pub const fn swing_ticks(dex: u16, base: u64, era: u8, scale: u64) -> u64 {
     let base = if base == 0 { 1 } else { base };
-    let denom = (dex as u64 + 100) * base;
+    let dex = dex as u64;
+    let denom = (dex + 100) * base;
     let tenths = match era {
+        // AoS: half the pre-AoS interval, floored at 1.25s (12 tenths).
         2 => {
             let t = ((scale * 10) / denom) / 2;
             if t < 12 {
@@ -201,7 +209,31 @@ pub const fn swing_ticks(dex: u16, base: u64, era: u8, scale: u64) -> u64 {
                 t
             }
         }
-        // Era 1 and the fallback.
+        // SE: `scale/((dex+100)·speed) - 2` in 0.25s ticks, floored at 5, then
+        // converted to tenths (`·10/4`). `scale` is 80000.
+        3 => {
+            let ticks = (scale / denom).saturating_sub(2);
+            let ticks = if ticks < 5 { 5 } else { ticks };
+            (ticks * 10) / 4
+        }
+        // ML: `speed·4 - dex/30` in 0.25s ticks, floored at 5, then tenths. `base`
+        // is `ml_speed` in hundredths of a second (so `·4/100`), and ML ignores
+        // `scale` entirely.
+        4 => {
+            let ticks = ((base * 4) / 100).saturating_sub(dex / 30);
+            let ticks = if ticks < 5 { 5 } else { ticks };
+            (ticks * 10) / 4
+        }
+        // Sphere custom (0): pre-AoS with a 0.5s (5-tenths) floor.
+        0 => {
+            let t = (scale * 10) / denom;
+            if t < 5 {
+                5
+            } else {
+                t
+            }
+        }
+        // Pre-AoS (1) and the fallback.
         _ => {
             let t = (scale * 10) / denom;
             if t == 0 {
@@ -479,7 +511,7 @@ pub fn volleys(state: &mut WorldState) {
         // hit roll trains the shooter's Archery the same as a melee swing trains
         // its weapon. Damage precedence matches melee via `scaled_blow`.
         if check_hit(state, attacker, target) {
-            let amount = scaled_blow(state, attacker);
+            let amount = scaled_blow(state, attacker, target);
             if let Some(raw) = state.registry.serial_of(target).map(Serial::raw) {
                 damage(state, raw, amount, DamageType::from_u8(kind), by);
             }
@@ -526,11 +558,11 @@ pub fn swings(state: &mut WorldState) {
         // Roll to hit (and train the weapon skill by trying). A miss whistles past
         // and does no damage; the timer resets either way.
         if !check_hit(state, attacker, target) {
-            state.play_sound(attacker, MELEE_MISS_SOUND);
+            state.play_sound(attacker, miss_sound(state, attacker));
             set_next_swing(state, attacker, now + swing_speed(state, attacker));
             continue;
         }
-        let blow = scaled_blow(state, attacker);
+        let blow = scaled_blow(state, attacker, target);
         // The blow lands with the attacker's own thwack — a creature's growl, a
         // human's fist — from the attacker, who is still here even when the blow
         // just killed the target.
@@ -804,14 +836,12 @@ pub fn swing_speed(state: &WorldState, mobile: EntityId) -> u64 {
         .registry
         .get::<Stats>(mobile)
         .map_or(DEFAULT_DEXTERITY, |s| s.dexterity);
-    // A wielded weapon lends its speed base; bare hands (or an off-table item) keep
-    // wrestling. Read fresh here — no cache to invalidate when the weapon swaps.
+    // A wielded weapon lends its speed base (which value depends on the era); bare
+    // hands (or an off-table item) keep wrestling. Read fresh here — no cache to
+    // invalidate when the weapon swaps.
+    let era = state.gameplay.combat_era;
     let base = weapons::equipped_weapon(state, mobile).map_or(WRESTLING_SPEED, |weapon| {
-        u64::from(weapons::by_era(
-            weapon.old_speed,
-            weapon.aos_speed,
-            state.gameplay.combat_era,
-        ))
+        u64::from(weapons::swing_base(&weapon, era))
     });
     swing_ticks(
         dex,
@@ -874,6 +904,15 @@ fn check_hit(state: &mut WorldState, attacker: EntityId, defender: EntityId) -> 
     openshard_skills::roll_skill_chance(state, attacker, attack_skill, chance)
 }
 
+/// The sound a whiffed swing makes: the wielded weapon's own miss sound (ServUO's
+/// `DefMissSound`), or the generic swish for bare hands / an off-table item.
+fn miss_sound(state: &WorldState, attacker: EntityId) -> u16 {
+    weapons::equipped_weapon(state, attacker)
+        .map(|weapon| weapon.miss_sound)
+        .filter(|&sound| sound != 0)
+        .unwrap_or(MELEE_MISS_SOUND)
+}
+
 /// ServUO's AoS `GetBonus`: `value·scalar` per point, plus `offset` once the skill
 /// reaches `threshold`, as a fraction (the `/100`).
 fn get_bonus(value: f64, scalar: f64, threshold: f64, offset: f64) -> f64 {
@@ -890,36 +929,59 @@ fn get_bonus(value: f64, scalar: f64, threshold: f64, offset: f64) -> f64 {
 /// as before; a trained fighter scales it. Era 1 uses the pre-AoS coefficients
 /// (Tactics its own ±50% about parity, then Str and Anatomy summed), era 2 the AoS
 /// bonuses. At least 1, so a heavily-nerfed blow still stings.
-fn scaled_blow(state: &mut WorldState, attacker: EntityId) -> u16 {
-    let base = melee_blow(state, attacker);
-    if !state.registry.has::<Skills>(attacker) {
-        return base;
-    }
-    let tactics = f64::from(skill_value(state, attacker, weapons::TACTICS_SKILL)) / 10.0;
-    let anatomy = f64::from(skill_value(state, attacker, weapons::ANATOMY_SKILL)) / 10.0;
-    let strength = f64::from(
-        state
-            .registry
-            .get::<Stats>(attacker)
-            .map_or(0, |s| s.strength),
-    );
-    let base = f64::from(base);
-    let scaled = if state.gameplay.combat_era == 2 {
-        let bonus = get_bonus(strength, 0.30, 100.0, 5.0)
-            + get_bonus(anatomy, 0.50, 100.0, 5.0)
-            + get_bonus(tactics, 0.625, 100.0, 6.25);
-        base + base * bonus
-    } else {
-        // Tactics is its own multiplier about the 50-point parity, then Strength
-        // (1%/5) and Anatomy (1%/5, +10% at GM) sum into a second.
-        let mut damage = base + base * ((tactics - 50.0) / 100.0);
-        let mut modifiers = (strength / 5.0) / 100.0 + (anatomy / 5.0) / 100.0;
-        if anatomy >= 100.0 {
-            modifiers += 0.1;
+fn scaled_blow(state: &mut WorldState, attacker: EntityId, defender: EntityId) -> u16 {
+    let base = f64::from(melee_blow(state, attacker));
+    let era = state.gameplay.combat_era;
+    // Skill scaling — a trained fighter only; a creature/untrained mobile deals raw.
+    let scaled = if state.registry.has::<Skills>(attacker) {
+        let tactics = f64::from(skill_value(state, attacker, weapons::TACTICS_SKILL)) / 10.0;
+        let anatomy = f64::from(skill_value(state, attacker, weapons::ANATOMY_SKILL)) / 10.0;
+        let strength = f64::from(
+            state
+                .registry
+                .get::<Stats>(attacker)
+                .map_or(0, |s| s.strength),
+        );
+        // Lumberjacking lends an axe a bonus, nothing else.
+        let is_axe = weapons::equipped_weapon(state, attacker).is_some_and(|weapon| weapon.is_axe);
+        let lumber = if is_axe {
+            f64::from(skill_value(state, attacker, weapons::LUMBERJACKING_SKILL)) / 10.0
+        } else {
+            0.0
+        };
+        if era >= 2 {
+            // The AoS family (AoS, SE, ML) shares the AoS damage-bonus formula.
+            let bonus = get_bonus(strength, 0.30, 100.0, 5.0)
+                + get_bonus(anatomy, 0.50, 100.0, 5.0)
+                + get_bonus(tactics, 0.625, 100.0, 6.25)
+                + get_bonus(lumber, 0.20, 100.0, 10.0);
+            base + base * bonus
+        } else {
+            // Tactics is its own multiplier about the 50-point parity, then Strength
+            // (1%/5), Anatomy (1%/5, +10% at GM) and axe Lumberjacking (1%/5, capped
+            // 20%) sum into a second.
+            let mut damage = base + base * ((tactics - 50.0) / 100.0);
+            let mut modifiers = (strength / 5.0) / 100.0 + (anatomy / 5.0) / 100.0;
+            if anatomy >= 100.0 {
+                modifiers += 0.1;
+            }
+            modifiers += ((lumber / 5.0) / 100.0).min(0.2);
+            damage += damage * modifiers;
+            damage
         }
-        damage += damage * modifiers;
-        damage
+    } else {
+        base
+    };
+    // ServUO's pre-AoS `ComputeDamage`: outside AoS, full damage lands only when a
+    // player strikes a non-player — every other pairing (a monster's blow, PvP) is
+    // halved. "Player" is a mobile with a client. Applies to every blow, skilled or
+    // not, so it sits past the skill gate.
+    let is_player = |entity| state.registry.has::<Client>(entity);
+    let final_damage = if era < 2 && (is_player(defender) || !is_player(attacker)) {
+        scaled / 2.0
+    } else {
+        scaled
     };
     // Truncate like ServUO's `(int)`, floored at 1.
-    scaled.max(1.0) as u16
+    final_damage.max(1.0) as u16
 }

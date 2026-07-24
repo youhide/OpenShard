@@ -528,6 +528,7 @@ mod tests {
                     ranged: 0,
                     ranged_kind: 0,
                     wander: false,
+                    skills: Vec::new(),
                 }],
             }]
         );

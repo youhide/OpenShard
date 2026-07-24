@@ -148,6 +148,8 @@ struct MobileSpec {
     vendor: bool,
     #[serde(default)]
     equipment: Vec<WornItemSpec>,
+    #[serde(default)]
+    skills: Vec<SkillSpec>,
 }
 
 /// One worn item in a [`MobileSpec`]: `{ graphic, layer, hue }`.
@@ -157,6 +159,13 @@ struct WornItemSpec {
     layer: u8,
     #[serde(default)]
     hue: u16,
+}
+
+/// One trained skill in a [`MobileSpec`]: `{ id, value }`, value in tenths.
+#[derive(serde::Deserialize)]
+struct SkillSpec {
+    id: u8,
+    value: u16,
 }
 
 /// Put a creature or NPC in the world.
@@ -171,6 +180,7 @@ fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
             hue: w.hue,
         })
         .collect();
+    let skills = spec.skills.into_iter().map(|s| (s.id, s.value)).collect();
     state
         .borrow_mut::<Host>()
         .outbox
@@ -196,6 +206,7 @@ fn op_spawn_mobile(state: &mut OpState, #[serde] spec: MobileSpec) {
             banker: spec.banker,
             vendor: spec.vendor,
             equipment,
+            skills,
         });
 }
 
@@ -433,6 +444,8 @@ struct CreatureSpec {
     ranged_kind: u8,
     #[serde(default)]
     wander: bool,
+    #[serde(default)]
+    skills: Vec<SkillSpec>,
 }
 
 /// A spawn region, from the script: `op_register_spawner({ x, y, width, height,
@@ -471,6 +484,7 @@ fn op_register_spawner(state: &mut OpState, #[serde] spec: SpawnerSpec) {
             ranged: c.ranged,
             ranged_kind: c.ranged_kind,
             wander: c.wander,
+            skills: c.skills.into_iter().map(|s| (s.id, s.value)).collect(),
         })
         .collect();
     state

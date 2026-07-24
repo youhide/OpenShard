@@ -531,28 +531,42 @@ Roughly in dependency order, each script-first:
       Anatomy — ServUO's `ScaleDamageOld` (era 1: Tactics its own ±50% about parity,
       then Str 1%/5 and Anatomy 1%/5 +10% at GM) and `ScaleDamageAOS` (era 2 the
       `GetBonus` coefficients).
-    - **Gated on a `Skills` sheet.** Applying these to a mobile with no skills (every
-      creature today, an untrained player) would make it miss half the time and deal
-      half damage. So both the to-hit roll and the scaling engage only when the
-      *attacker* carries a `Skills` component; without one it keeps the pre-feature
-      certainty — its natural blow always lands, unscaled. A clean, forward-compatible
-      boundary: the moment creatures gain skills (a converter slice), they start
-      rolling. Combat gained a dependency on `skills` for the shared roll (the same
-      `roll_skill` call site magic already uses, not a cross-system call).
+    - **Gated on a `Skills` sheet.** Applying these to a mobile with no skills (an
+      untrained player) would make it miss half the time and deal half damage. So both
+      the to-hit roll and the scaling engage only when the *attacker* carries a
+      `Skills` component; without one it keeps the pre-feature certainty — its natural
+      blow always lands, unscaled. A clean, forward-compatible boundary: the moment a
+      creature is given skills it starts rolling.
     - **Archery** rolls the wielded bow's damage band now (through `scaled_blow`, the
       same path as melee), not the flat default.
     - **Pack per-item override** — a `Weapon { speed, min, max }` component (set by
       `op_set_weapon` → `Command::SetWeapon` → `items::set_weapon`) on a weapon item
       replaces the core table's stats for a magic sword, `equipped_weapon` reading it
       first while keeping the graphic's skill; era-independent.
-
-    Still deferred: pre-AoS's PvE damage-halving and the Axe/Lumberjacking bonus, the
-    per-weapon `DefMissSound` (one swish for all today), and giving creatures real
-    combat skills (the converter slice that makes the gate bite for monsters).
-  - [ ] **Combat eras 3–5** — still gated at load (`config` accepts only 1|2). The
-    weapon-property data half above is now in hand, but the era-0/3/4 swing
-    *formulas* (weapon-weight / ML-format speeds) are unwritten, so the rejection
-    stands until they are.
+  - [x] **The rest of the combat deferrals landed too.**
+    - **Pre-AoS PvE damage-halving.** ServUO's `ComputeDamage`: outside AoS, full
+      damage lands only when a player strikes a non-player — every other pairing (a
+      monster's blow, PvP) is halved. In `scaled_blow`, past the skill gate, keyed on
+      a `Client` component, era `< 2` only.
+    - **Per-weapon miss sounds and the Axe/Lumberjacking bonus.** The weapon table
+      grew `miss_sound` (ServUO's `DefMissSound`, resolved through the base classes)
+      and an `is_axe` flag; a whiff plays the wielded weapon's own swish, and an axe
+      in a lumberjack's hands hits harder (era 1 capped 20%, era 2 the AoS `GetBonus`).
+    - **Creatures carry combat skills.** The spawn path — `op_spawn_mobile` /
+      `Command::SpawnMobile` / the spawner's `CreatureTemplate` — grew a `skills` list
+      that `npc::spawn` turns into a `Skills` sheet, and it **persists** (a `skills`
+      field on `MobileRecord` and the spawner's `CreatureData`, both JSON records, so
+      no schema bump). A monster given Wrestling/Tactics rolls to hit and scales
+      damage exactly as a player does. The remaining half is data: the converter
+      scraping ServUO's `SetSkill` per creature, a Community-Pack follow-up — the
+      engine is ready for it.
+  - [x] **Combat eras 3–5** — Sphere's `m_iCombatSpeedEra` `0` (custom), `3` (SE) and
+    `4` (ML) join the implemented `1`/`2`, ported from `CResourceCalc.cpp` into
+    `swing_ticks`: SE `scale/((dex+100)·aos_speed) - 2`, ML `ml_speed·4 - dex/30` (a
+    third speed column on the weapon table, from ServUO's `MlSpeed`), era 0 pre-AoS
+    with a 0.5s floor. `by_era` and the damage scaling follow the family split (0/1
+    pre-AoS, 2/3/4 AoS), and `config` accepts `0..=4`. Set `speed_scale_factor` to
+    match (15000 pre-AoS, 40000 AoS, 80000 SE; ML ignores it).
   - [x] **Creature corpses and loot.** A slain creature no longer vanishes: the
     tick's `reap` (reading `MobileDied` — combat emits the death, the world
     disposes of the body) lays a corpse where it fell — item `0x2006` with

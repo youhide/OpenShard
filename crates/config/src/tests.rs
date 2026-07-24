@@ -375,6 +375,16 @@ fn an_unknown_combat_era_is_refused() {
 }
 
 #[test]
+fn every_sphere_combat_era_is_accepted() {
+    // 0 (custom), 1 (pre-AoS), 2 (AoS), 3 (SE), 4 (ML) all have a swing formula.
+    for era in 0..=4 {
+        let mut config = config(MINIMAL);
+        config.gameplay.combat_era = era;
+        assert!(config.validate().is_ok(), "era {era} should load");
+    }
+}
+
+#[test]
 fn a_zero_speed_scale_factor_is_refused() {
     // The swing formula divides by it — a zero would panic mid-tick, so the
     // shard refuses to start instead.

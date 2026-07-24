@@ -592,6 +592,7 @@ impl World {
                 banker,
                 vendor,
                 equipment,
+                skills,
             } => {
                 npc::spawn(
                     &mut self.state,
@@ -615,6 +616,7 @@ impl World {
                         banker,
                         vendor,
                         equipment,
+                        skills,
                     },
                 );
             }
