@@ -1775,6 +1775,175 @@ fn picking_up_a_whole_stack_does_not_split_it() {
     );
 }
 
+/// Put a pile of `amount` gold inside a fresh ground container and open it, so a
+/// gump watcher exists. Returns `(container_serial, gold_serial)`; the gold keeps
+/// its serial across the move into the container.
+fn gold_in_open_container(
+    world: &mut World,
+    player: ConnectionId,
+    point: Point,
+    amount: u16,
+    now: Instant,
+) -> (u32, u32) {
+    let container = spawn_container_at(world, point, now);
+    let gold = spawn_gold(world, point, amount, now);
+    world.queue(Command::PickUpItem {
+        connection: player,
+        serial: gold,
+        amount, // the whole pile, so no split and the serial is kept
+    });
+    world.tick(now);
+    world.queue(Command::DropItem {
+        connection: player,
+        serial: gold,
+        position: Point::new(50, 60, 0), // gump coordinates
+        container,
+    });
+    world.tick(now);
+    world.queue(Command::DoubleClick {
+        connection: player,
+        serial: container,
+    });
+    world.tick(now);
+    (container, gold)
+}
+
+#[test]
+fn dropping_a_stack_onto_an_identical_one_inside_a_container_merges_them() {
+    // The ground merge, but the target pile is inside a container: the amounts
+    // add, the dropped pile is gone, and every open gump is told the new total.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let here = Point::new(START.0, START.1, 0);
+    let (_container, pile) = gold_in_open_container(&mut world, player, here, 100, now);
+    let pile_item = entity(&world, pile);
+    let loose = spawn_gold(&mut world, here, 50, now);
+    let loose_item = entity(&world, loose);
+    let _ = packets_for(&mut world, player);
+
+    world.queue(Command::PickUpItem {
+        connection: player,
+        serial: loose,
+        amount: 50,
+    });
+    world.tick(now);
+    world.queue(Command::DropItem {
+        connection: player,
+        serial: loose,
+        position: here,
+        container: pile, // onto the contained stack
+    });
+    world.tick(now);
+
+    assert_eq!(
+        openshard_items::amount_of(&world.state, pile_item),
+        150,
+        "the amounts add"
+    );
+    assert!(
+        !world.state.registry.contains(loose_item),
+        "and the dropped pile is gone"
+    );
+    assert!(
+        world.state.registry.has::<Contained>(pile_item),
+        "the survivor is still in the container"
+    );
+    assert!(
+        packets_for(&mut world, player).iter().any(|p| p[0] == 0x25),
+        "the open gump is told the new amount"
+    );
+}
+
+#[test]
+fn picking_up_part_of_a_stack_from_a_container_splits_it() {
+    // Take 30 of 100 out of a container: the original keeps its serial and holds
+    // 30 on the cursor, and a new pile of 70 stays behind in the container — the
+    // ground split's UnStackSplit, but the remainder stays contained.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let here = Point::new(START.0, START.1, 0);
+    let (container, pile) = gold_in_open_container(&mut world, player, here, 100, now);
+    let pile_item = entity(&world, pile);
+    let _ = packets_for(&mut world, player);
+
+    world.queue(Command::PickUpItem {
+        connection: player,
+        serial: pile,
+        amount: 30,
+    });
+    world.tick(now);
+
+    assert!(
+        world.state.held.contains_key(&player),
+        "the original is held"
+    );
+    assert_eq!(openshard_items::amount_of(&world.state, pile_item), 30);
+    assert!(
+        !world.state.registry.has::<Contained>(pile_item),
+        "the held original is out of the container"
+    );
+
+    let container_serial = Serial::new(container).unwrap();
+    let (leftover, _) = world
+        .state
+        .registry
+        .query::<Contained>()
+        .find(|(entity, held)| {
+            held.container == container_serial
+                && world.state.registry.has::<Stackable>(*entity)
+                && *entity != pile_item
+        })
+        .expect("a leftover pile in the container");
+    assert_eq!(openshard_items::amount_of(&world.state, leftover), 70);
+    assert_ne!(
+        world.state.registry.serial_of(leftover).unwrap().raw(),
+        pile,
+        "the leftover is a new object with a new serial"
+    );
+    assert!(
+        packets_for(&mut world, player).iter().any(|p| p[0] == 0x25),
+        "the open gump is drawn the leftover pile"
+    );
+}
+
+#[test]
+fn picking_up_a_whole_stack_from_a_container_does_not_split_it() {
+    // Asking for the whole amount lifts the pile itself — no leftover, one
+    // object, nothing left contained.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let here = Point::new(START.0, START.1, 0);
+    let (container, pile) = gold_in_open_container(&mut world, player, here, 100, now);
+    let pile_item = entity(&world, pile);
+
+    world.queue(Command::PickUpItem {
+        connection: player,
+        serial: pile,
+        amount: 100,
+    });
+    world.tick(now);
+
+    assert_eq!(
+        openshard_items::amount_of(&world.state, pile_item),
+        100,
+        "the whole pile is held"
+    );
+    let container_serial = Serial::new(container).unwrap();
+    assert_eq!(
+        world
+            .state
+            .registry
+            .query::<Contained>()
+            .filter(|(_, held)| held.container == container_serial)
+            .count(),
+        0,
+        "nothing is left in the container"
+    );
+}
+
 /// Spawn a creature at `point` with `hits` and return its serial. An orange
 /// enemy, no armour — the plain punching bag most combat tests want.
 fn spawn_mobile_at(world: &mut World, point: Point, hits: u16, now: Instant) -> u32 {

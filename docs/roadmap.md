@@ -414,12 +414,21 @@ Roughly in dependency order, each script-first:
     when the tick counter reaches it; lifting, containing or wearing takes the
     clock off, and `decay()` reads only its own counter, no wall clock.
     Containers do not decay with their contents inside.
-  - [ ] **Stack merge inside a container** — only ground stacks merge today; a
-    stack dropped onto an identical pile *inside* a container bounces instead of
-    merging (`items/stack.rs` says so). A refinement, not a redesign.
-  - [ ] **Partial lift honours the amount everywhere** — the `0x07` amount is
-    honoured for ground splits; a partial lift out of a container takes the whole
-    item.
+  - [x] **Stack merge inside a container.** `merge_onto` (`items/stack.rs`) no
+    longer bounces on a target with no `Position`: it branches on where the target
+    lives, and a `Contained` target is reach-checked through its container
+    (`container_in_reach`, the same gate `drop_into_container` uses), the amounts
+    summed with the same `saturating_add` clamp as the ground path, and every open
+    gump told the new total with a `0x25` (`tell_watchers_updated`, mirroring
+    `give`). The drop already routed here — `drop_onto_item`'s `can_stack` arm fires
+    regardless of location.
+  - [x] **Partial lift honours the amount everywhere.** `pick_up`'s container
+    branch (`items/drag.rs`) reads the `0x07` amount now: a partial lift of a
+    `Stackable` contained pile leaves the remainder behind *in the same grid slot*
+    as a new dupe (`items::spawn_contained_leftover`, the container sibling of
+    `spawn_leftover`) and lifts the original reduced to what was taken — Sphere's
+    `UnStackSplit`, the original keeping its serial for the cursor, the remainder a
+    new serial drawn into the open gump. A whole lift is unchanged.
   - [x] **The item-trigger seam (Sphere's `@DClick`).** The engine handles the
     double-clicks it knows — door, container, spellbook, mount, mobile — and hands
     every *other* item to the pack as an `ItemUsed { item, graphic, by }` event

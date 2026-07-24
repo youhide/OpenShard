@@ -9,43 +9,68 @@ pub fn can_stack(state: &WorldState, a: EntityId, b: EntityId) -> bool {
         && state.registry.get::<Graphic>(a) == state.registry.get::<Graphic>(b)
 }
 
-/// Merge a held stack onto a stack on the ground. See `can_stack`.
+/// Merge a held stack onto another stack, on the ground or inside a container.
+/// See `can_stack`.
 pub fn merge_onto(
     state: &mut WorldState,
     connection: ConnectionId,
     held: HeldItem,
     target: EntityId,
 ) {
-    // Only ground stacks merge for now; merging onto a stack inside a
-    // container is a later refinement, and until then it bounces.
-    let Some(&Position(target_pos)) = state.registry.get::<Position>(target) else {
-        bounce(state, connection, held, DragCancelReason::Other);
-        return;
-    };
     let Some(&player) = state.players.get(&connection) else {
         bounce(state, connection, held, DragCancelReason::Other);
         return;
     };
-    let Some(&Position(player_pos)) = state.registry.get::<Position>(player) else {
-        bounce(state, connection, held, DragCancelReason::Other);
-        return;
-    };
-    if state.facet_of(target) != state.facet_of(player)
-        || !in_range(target_pos, player_pos, ITEM_REACH)
-    {
-        bounce(state, connection, held, DragCancelReason::OutOfRange);
-        return;
-    }
 
-    // Sum, clamped: a pile cannot count past what its amount word can hold.
-    let total = amount_of(state, held.entity).saturating_add(amount_of(state, target));
+    // Where the target lives decides how it is reached and redrawn. On the
+    // ground it is reach-checked against the player's tile and redrawn with a
+    // `0x1A`; inside a container it is reach-checked through its container and
+    // redrawn with a `0x25` to every open gump, as `give` does.
+    if let Some(&Position(target_pos)) = state.registry.get::<Position>(target) {
+        let Some(&Position(player_pos)) = state.registry.get::<Position>(player) else {
+            bounce(state, connection, held, DragCancelReason::Other);
+            return;
+        };
+        if state.facet_of(target) != state.facet_of(player)
+            || !in_range(target_pos, player_pos, ITEM_REACH)
+        {
+            bounce(state, connection, held, DragCancelReason::OutOfRange);
+            return;
+        }
+        let total = merge_amounts(state, held.entity, target);
+        state.held.remove(&connection);
+        state.registry.despawn(held.entity);
+        redraw_ground_item(state, target);
+        debug!(total, "stacks merged");
+    } else if let Some(&contained) = state.registry.get::<Contained>(target) {
+        let container = contained.container;
+        let reachable = state
+            .registry
+            .entity_of(container)
+            .is_some_and(|c| container_in_reach(state, c, player));
+        if !reachable {
+            bounce(state, connection, held, DragCancelReason::OutOfRange);
+            return;
+        }
+        let total = merge_amounts(state, held.entity, target);
+        state.held.remove(&connection);
+        // The dragged stack was on a cursor, on no screen and in no gump, so
+        // despawning it needs no packet of its own.
+        state.registry.despawn(held.entity);
+        tell_watchers_updated(state, container, target);
+        debug!(total, "stacks merged in a container");
+    } else {
+        // Worn, or nowhere placeable: nothing to merge onto.
+        bounce(state, connection, held, DragCancelReason::Other);
+    }
+}
+
+/// Fold the held stack's amount into the target's, clamped: a pile cannot count
+/// past what its amount word can hold. Returns the target's new total.
+fn merge_amounts(state: &mut WorldState, held: EntityId, target: EntityId) -> u16 {
+    let total = amount_of(state, held).saturating_add(amount_of(state, target));
     set_stack_amount(state, target, total);
-    state.held.remove(&connection);
-    // The dragged stack is gone into the other; it was on a cursor, on
-    // nobody's ground, so despawning it needs no packet.
-    state.registry.despawn(held.entity);
-    redraw_ground_item(state, target);
-    debug!(total, "stacks merged");
+    total
 }
 
 /// How many an item is: its [`Amount`], or one if it has none.

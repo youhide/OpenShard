@@ -387,6 +387,41 @@ pub fn place_one(
     Some(entity)
 }
 
+/// Leave the remainder of a split stack behind *inside a container*, at the same
+/// grid slot the original is vacating. The container sibling of `spawn_leftover`
+/// (Sphere's `CItem::UnStackSplit`): the original keeps its serial and goes onto
+/// the cursor with the taken amount, and this dupe — a new serial — holds the
+/// remainder in the container, drawn into every open gump with a `0x25`.
+pub fn spawn_contained_leftover(
+    state: &mut WorldState,
+    original: EntityId,
+    amount: u16,
+    contained: Contained,
+) -> Option<EntityId> {
+    let &Graphic { id, hue } = state.registry.get::<Graphic>(original)?;
+    let leftover = match state.registry.spawn_with_serial(SerialKind::Item) {
+        Ok((entity, _)) => entity,
+        Err(error) => {
+            warn!(?error, "out of item serials; a split remainder is lost");
+            return None;
+        }
+    };
+    state.registry.insert(leftover, Graphic { id, hue });
+    state.registry.insert(leftover, Stackable);
+    set_stack_amount(state, leftover, amount);
+    state.registry.insert(
+        leftover,
+        Contained {
+            container: contained.container,
+            x: contained.x,
+            y: contained.y,
+            grid: contained.grid,
+        },
+    );
+    tell_watchers_updated(state, contained.container, leftover);
+    Some(leftover)
+}
+
 /// Put `amount` of an item into a container by decree — a vendor handing over
 /// goods, a sale paying out gold. Merges onto an existing stackable pile of the
 /// same art and hue; otherwise a fresh stackable item appears. Everyone with

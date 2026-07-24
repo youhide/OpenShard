@@ -80,8 +80,17 @@ pub fn pick_up(state: &mut WorldState, connection: ConnectionId, serial: u32, am
             },
         );
     } else if let Some(&contained) = state.registry.get::<Contained>(item) {
-        // Out of a container. The client with the gump open removes it from
-        // the gump itself; the server just drops the containment.
+        // Taking part of a stack out of a container: leave the remainder behind
+        // in the same slot as a new pile and lift the original, reduced to what
+        // was taken — the ground split's `UnStackSplit`, but the leftover stays
+        // contained rather than dropping to the floor.
+        let total = amount_of(state, item);
+        if amount > 0 && amount < total && state.registry.has::<Stackable>(item) {
+            spawn_contained_leftover(state, item, total - amount, contained);
+            set_stack_amount(state, item, amount);
+        }
+        // Out of a container. The client with the gump open removes the lifted
+        // item from the gump itself; the server just drops the containment.
         state.registry.remove::<Contained>(item);
         state.held.insert(
             connection,
