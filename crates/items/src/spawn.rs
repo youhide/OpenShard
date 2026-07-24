@@ -15,6 +15,17 @@ pub struct ItemSpawned {
     pub position: Point,
 }
 
+/// Override a weapon item's speed and damage — the pack's magic sword, its stats
+/// standing in for the core weapon table's for that graphic. See
+/// `Command::SetWeapon`. A stray or non-existent serial sets nothing.
+pub fn set_weapon(state: &mut WorldState, serial: u32, speed: u16, min: u16, max: u16) {
+    let Some(entity) = Serial::new(serial).and_then(|serial| state.registry.entity_of(serial))
+    else {
+        return;
+    };
+    state.registry.insert(entity, Weapon { speed, min, max });
+}
+
 /// Put an item on the ground. See `Command::SpawnItem`.
 ///
 /// Returns the entity so `spawn_container` can make

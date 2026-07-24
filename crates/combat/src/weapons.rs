@@ -17,13 +17,28 @@
 //! flat through `volleys`, and AoS strength/tactics damage bonuses are unwritten.
 
 use openshard_entities::EntityId;
-use openshard_state::components::{Equipped, Graphic};
+use openshard_state::components::{Equipped, Graphic, Weapon};
 use openshard_state::WorldState;
 
 /// The paperdoll layer a one-handed weapon sits on (UO layer 1).
 pub const LAYER_ONE_HANDED: u8 = 1;
 /// The paperdoll layer a two-handed weapon or shield sits on (UO layer 2).
 pub const LAYER_TWO_HANDED: u8 = 2;
+
+/// Classic UO skill ids the combat rolls read (`Skills` is keyed by these `u8`s).
+pub const ANATOMY_SKILL: u8 = 1;
+/// Fencing.
+pub const FENCING_SKILL: u8 = 13;
+/// Mace fighting.
+pub const MACING_SKILL: u8 = 15;
+/// Tactics — the damage-scaling skill both eras read.
+pub const TACTICS_SKILL: u8 = 30;
+/// Archery.
+pub const ARCHERY_SKILL: u8 = 31;
+/// Wrestling — the bare-hands weapon skill, and the defender's fallback.
+pub const WRESTLING_SKILL: u8 = 34;
+/// Swordsmanship.
+pub const SWORDS_SKILL: u8 = 41;
 
 /// Which combat skill a weapon trains and hits with. Carried from ServUO's
 /// `DefSkill` for the slice that wires hit chance and gain; unused today, but free
@@ -36,6 +51,28 @@ pub enum WeaponSkill {
     Archery,
     /// Bare hands — the fallback for a mobile wielding nothing in the table.
     Wrestling,
+}
+
+impl WeaponSkill {
+    /// The `Skills` id this weapon trains and rolls its to-hit against.
+    #[must_use]
+    pub const fn skill_id(self) -> u8 {
+        match self {
+            Self::Swords => SWORDS_SKILL,
+            Self::Macing => MACING_SKILL,
+            Self::Fencing => FENCING_SKILL,
+            Self::Archery => ARCHERY_SKILL,
+            Self::Wrestling => WRESTLING_SKILL,
+        }
+    }
+}
+
+/// The weapon skill a mobile fights with: its wielded weapon's, or Wrestling for
+/// bare hands (or anything not in the table). The id the to-hit roll and the swing
+/// gain both key on.
+#[must_use]
+pub fn combat_skill_id(state: &WorldState, mobile: EntityId) -> u8 {
+    equipped_weapon(state, mobile).map_or(WRESTLING_SKILL, |weapon| weapon.skill.skill_id())
 }
 
 /// One weapon's combat numbers, keyed by its item [`Graphic`] id.
@@ -76,11 +113,13 @@ pub fn weapon_data(graphic: u16) -> Option<&'static WeaponData> {
     WEAPONS.iter().find(|w| w.graphic == graphic)
 }
 
-/// The weapon `mobile` wields, if any — the item on a weapon layer whose graphic is
-/// in the table. Read fresh each swing (no mirror stamped on the mobile), so a
-/// weapon coming off reverts the bearer to wrestling with nothing else to undo.
+/// The weapon `mobile` wields, if any — the item on a weapon layer. Its stats are
+/// the core table's for the item's graphic, unless the item carries a [`Weapon`]
+/// override (the pack's magic sword), which replaces speed and damage while
+/// keeping the graphic's skill. Read fresh each swing (no mirror on the mobile),
+/// so a weapon coming off reverts the bearer to wrestling with nothing to undo.
 #[must_use]
-pub fn equipped_weapon(state: &WorldState, mobile: EntityId) -> Option<&'static WeaponData> {
+pub fn equipped_weapon(state: &WorldState, mobile: EntityId) -> Option<WeaponData> {
     let serial = state.registry.serial_of(mobile)?;
     let item = state
         .registry
@@ -90,8 +129,26 @@ pub fn equipped_weapon(state: &WorldState, mobile: EntityId) -> Option<&'static 
                 && (worn.layer == LAYER_ONE_HANDED || worn.layer == LAYER_TWO_HANDED)
         })
         .map(|(entity, _)| entity)?;
-    let graphic = state.registry.get::<Graphic>(item)?.id;
-    weapon_data(graphic)
+    let base = state
+        .registry
+        .get::<Graphic>(item)
+        .and_then(|graphic| weapon_data(graphic.id))
+        .copied();
+    match state.registry.get::<Weapon>(item) {
+        // An override stands the item's stats up, keeping the base graphic's skill
+        // (a magic longsword is still a Swords weapon); same numbers either era.
+        Some(&Weapon { speed, min, max }) => Some(WeaponData {
+            graphic: 0,
+            skill: base.map_or(WeaponSkill::Wrestling, |weapon| weapon.skill),
+            old_speed: speed,
+            old_min: min,
+            old_max: max,
+            aos_speed: speed,
+            aos_min: min,
+            aos_max: max,
+        }),
+        None => base,
+    }
 }
 
 /// The classic pre-AoS weapon set, ported from

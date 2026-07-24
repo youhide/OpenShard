@@ -157,7 +157,34 @@ pub fn roll_skill(state: &mut WorldState, entity: EntityId, skill: u8, difficult
         .registry
         .get::<Skills>(entity)
         .map_or(0, |s| s.get(skill));
-    let success = curves::success_chance(value, difficulty) >= state.rng.below(1000);
+    let chance = curves::success_chance(value, difficulty);
+    roll_against(state, entity, skill, value, chance)
+}
+
+/// Roll a skill against a success chance already worked out (per-mille), and teach
+/// from the attempt — ServUO's `CheckSkill(skill, chance)`. Where [`roll_skill`]
+/// turns a *difficulty* into a chance through the S-curve, this takes the chance
+/// straight, for a caller that computes its own: combat's to-hit is a weapon-skill
+/// formula, not an S-curve, but a swing still trains the skill the same way.
+pub fn roll_skill_chance(state: &mut WorldState, entity: EntityId, skill: u8, chance: u32) -> bool {
+    let value = state
+        .registry
+        .get::<Skills>(entity)
+        .map_or(0, |s| s.get(skill));
+    roll_against(state, entity, skill, value, chance)
+}
+
+/// The shared heart: draw success against `chance` (per-mille), then draw a gain —
+/// in that fixed order, so the sequence replays — bumping the value and announcing
+/// a `SkillRaised` on a rise.
+fn roll_against(
+    state: &mut WorldState,
+    entity: EntityId,
+    skill: u8,
+    value: u16,
+    chance: u32,
+) -> bool {
+    let success = chance >= state.rng.below(1000);
     if value < state.gameplay.skill_cap && state.rng.below(1000) < curves::gain_chance(value) {
         let raised = value + 1;
         let mut skills = state

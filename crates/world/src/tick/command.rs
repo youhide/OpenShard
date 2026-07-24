@@ -346,6 +346,17 @@ pub enum Command {
         /// The value in tenths.
         value: u16,
     },
+    /// Override a weapon item's speed and damage — the pack's magic sword.
+    SetWeapon {
+        /// The weapon item, by wire serial.
+        serial: u32,
+        /// Swing-speed base (higher swings faster).
+        speed: u16,
+        /// Minimum damage before resistance.
+        min: u16,
+        /// Maximum damage before resistance.
+        max: u16,
+    },
     /// Use a skill against a difficulty (0–100): roll it, gain from it, and say
     /// what happened with a [`SkillUsed`](openshard_skills::SkillUsed) event.
     UseSkill {

@@ -21,7 +21,7 @@ use openshard_protocol::{
 use openshard_state::components::{
     body_is_female, body_opens_doors, creature_base_sound, effect, BehaviourBuffs, Body, Combat,
     CriminalUntil, DamageType, Frozen, Hitpoints, MeleeDamage, MurderDecay, Murders, Poisoned,
-    Position, RangedAttack, Resistance, Stamina, Stats, SwingSpeed,
+    Position, RangedAttack, Resistance, Skills, Stamina, Stats, SwingSpeed,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{Action, WorldState};
@@ -44,6 +44,10 @@ pub const SWING_DAMAGE: u16 = 5;
 /// with no creature sound of its own (a player, a townsperson). A creature makes
 /// its own attack sound instead; see [`attack_sound`].
 pub const MELEE_HIT_SOUND: u16 = 0x0137;
+/// The whistle of a blow that finds only air — a swing that missed. Coarse (one
+/// swish for every weapon, not ServUO's per-weapon `DefMissSound`), but a miss is
+/// no longer silent, so the client reads the whiff.
+pub const MELEE_MISS_SOUND: u16 = 0x0238;
 /// The twang of a bow — ServUO's `BaseRanged.DefHitSound`, the fallback for a
 /// humanoid archer; a creature that shoots uses its own sound.
 pub const RANGED_HIT_SOUND: u16 = 0x0234;
@@ -439,10 +443,6 @@ pub fn volleys(state: &mut WorldState) {
         {
             continue; // no shooting through walls
         }
-        let amount = state
-            .registry
-            .get::<MeleeDamage>(attacker)
-            .map_or(SWING_DAMAGE, |d| d.amount);
         let by = state.registry.serial_of(attacker);
         let pace = swing_speed(state, attacker);
         if let Some(combat) = state.registry.get_mut::<Combat>(attacker) {
@@ -475,8 +475,14 @@ pub fn volleys(state: &mut WorldState) {
         state.broadcast_from(attacker, arrow);
         let sound = attack_sound(state, attacker, RANGED_HIT_SOUND);
         state.play_sound(attacker, sound);
-        if let Some(raw) = state.registry.serial_of(target).map(Serial::raw) {
-            damage(state, raw, amount, DamageType::from_u8(kind), by);
+        // The bolt still flew and twanged; on a miss it simply finds no mark. The
+        // hit roll trains the shooter's Archery the same as a melee swing trains
+        // its weapon. Damage precedence matches melee via `scaled_blow`.
+        if check_hit(state, attacker, target) {
+            let amount = scaled_blow(state, attacker);
+            if let Some(raw) = state.registry.serial_of(target).map(Serial::raw) {
+                damage(state, raw, amount, DamageType::from_u8(kind), by);
+            }
         }
     }
 }
@@ -512,14 +518,22 @@ pub fn swings(state: &mut WorldState) {
         {
             continue;
         }
-        let blow = melee_blow(state, attacker);
         // The attacker's serial rides along so a lethal blow can be blamed —
         // `damage` is the one place murder is tallied, melee or spell alike.
         let by = state.registry.serial_of(attacker);
-        // The swing animation, then the blow lands with the attacker's own thwack
-        // — a creature's growl, a human's fist — both from the attacker, who is
-        // still here even when the blow just killed the target.
+        // The swing animates whether it lands or not — a miss still gestures.
         state.animate(attacker, Action::Attack);
+        // Roll to hit (and train the weapon skill by trying). A miss whistles past
+        // and does no damage; the timer resets either way.
+        if !check_hit(state, attacker, target) {
+            state.play_sound(attacker, MELEE_MISS_SOUND);
+            set_next_swing(state, attacker, now + swing_speed(state, attacker));
+            continue;
+        }
+        let blow = scaled_blow(state, attacker);
+        // The blow lands with the attacker's own thwack — a creature's growl, a
+        // human's fist — from the attacker, who is still here even when the blow
+        // just killed the target.
         let sound = attack_sound(state, attacker, MELEE_HIT_SOUND);
         damage(state, target_serial.raw(), blow, DamageType::Physical, by);
         state.play_sound(attacker, sound);
@@ -825,4 +839,87 @@ pub fn melee_blow(state: &mut WorldState, attacker: EntityId) -> u16 {
         return min + state.rng.below(span) as u16;
     }
     SWING_DAMAGE
+}
+
+/// A mobile's value in a skill, in tenths (0 for untrained or no sheet).
+fn skill_value(state: &WorldState, mobile: EntityId, skill: u8) -> u16 {
+    state
+        .registry
+        .get::<Skills>(mobile)
+        .map_or(0, |skills| skills.get(skill))
+}
+
+/// Whether `attacker`'s swing at `defender` lands — and, as it rolls, trains the
+/// attacker's weapon skill (ServUO's hit roll *is* a `CheckSkill`). Pre-AoS
+/// `CheckHit`: `chance = (atk + 50) / ((def + 50) · 2)`, `atk`/`def` the two
+/// mobiles' weapon-skill standings, the defender's own weapon skill (Wrestling
+/// unarmed) its guard.
+///
+/// Gated on the attacker carrying a `Skills` sheet: a creature or an untrained
+/// mobile has none and keeps the pre-feature certainty — its natural blow always
+/// lands and trains nothing. The moment a mobile has skills (a trained player, a
+/// creature the pack equips with them) its swings roll and gain.
+fn check_hit(state: &mut WorldState, attacker: EntityId, defender: EntityId) -> bool {
+    if !state.registry.has::<Skills>(attacker) {
+        return true;
+    }
+    let attack_skill = weapons::combat_skill_id(state, attacker);
+    let attack = skill_value(state, attacker, attack_skill);
+    let defend_skill = weapons::combat_skill_id(state, defender);
+    let defend = skill_value(state, defender, defend_skill);
+    // Values are tenths, so ServUO's `(v/10 + 50)` is `(v + 500)/10`; the tenths
+    // cancel, leaving `chance = (atk + 500) / (2·(def + 500))`, per-mille below and
+    // clamped to certainty (pre-AoS lets a wide skill gap always land).
+    let chance = (1000 * (u32::from(attack) + 500) / (2 * (u32::from(defend) + 500))).min(1000);
+    openshard_skills::roll_skill_chance(state, attacker, attack_skill, chance)
+}
+
+/// ServUO's AoS `GetBonus`: `value·scalar` per point, plus `offset` once the skill
+/// reaches `threshold`, as a fraction (the `/100`).
+fn get_bonus(value: f64, scalar: f64, threshold: f64, offset: f64) -> f64 {
+    let mut bonus = value * scalar;
+    if value >= threshold {
+        bonus += offset;
+    }
+    bonus / 100.0
+}
+
+/// The blow after the attacker's skills scale it — Tactics, Strength and Anatomy,
+/// ServUO's `ScaleDamage`. Gated on a `Skills` sheet, the same boundary as
+/// [`check_hit`]: a creature or untrained mobile deals its raw weapon/natural blow
+/// as before; a trained fighter scales it. Era 1 uses the pre-AoS coefficients
+/// (Tactics its own ±50% about parity, then Str and Anatomy summed), era 2 the AoS
+/// bonuses. At least 1, so a heavily-nerfed blow still stings.
+fn scaled_blow(state: &mut WorldState, attacker: EntityId) -> u16 {
+    let base = melee_blow(state, attacker);
+    if !state.registry.has::<Skills>(attacker) {
+        return base;
+    }
+    let tactics = f64::from(skill_value(state, attacker, weapons::TACTICS_SKILL)) / 10.0;
+    let anatomy = f64::from(skill_value(state, attacker, weapons::ANATOMY_SKILL)) / 10.0;
+    let strength = f64::from(
+        state
+            .registry
+            .get::<Stats>(attacker)
+            .map_or(0, |s| s.strength),
+    );
+    let base = f64::from(base);
+    let scaled = if state.gameplay.combat_era == 2 {
+        let bonus = get_bonus(strength, 0.30, 100.0, 5.0)
+            + get_bonus(anatomy, 0.50, 100.0, 5.0)
+            + get_bonus(tactics, 0.625, 100.0, 6.25);
+        base + base * bonus
+    } else {
+        // Tactics is its own multiplier about the 50-point parity, then Strength
+        // (1%/5) and Anatomy (1%/5, +10% at GM) sum into a second.
+        let mut damage = base + base * ((tactics - 50.0) / 100.0);
+        let mut modifiers = (strength / 5.0) / 100.0 + (anatomy / 5.0) / 100.0;
+        if anatomy >= 100.0 {
+            modifiers += 0.1;
+        }
+        damage += damage * modifiers;
+        damage
+    };
+    // Truncate like ServUO's `(int)`, floored at 1.
+    scaled.max(1.0) as u16
 }

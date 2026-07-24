@@ -1,6 +1,6 @@
 use super::*;
 use openshard_chat::{MobileSpoke, TALKMODE_WHISPER, TALKMODE_YELL};
-use openshard_combat::{swing_ticks, MobileDied, WRESTLING_SPEED};
+use openshard_combat::{swing_ticks, MobileDamaged, MobileDied, WRESTLING_SPEED};
 use openshard_events::Cursor;
 use openshard_magic::{SpellCast, MANA_REGEN_TICKS};
 use openshard_movement::WALK_INTERVAL;
@@ -2750,6 +2750,184 @@ fn era_two_reads_the_aos_weapon_numbers() {
         let blow = combat::melee_blow(&mut world.state, entity);
         assert!((10..=14).contains(&blow), "AoS damage band");
     }
+}
+
+#[test]
+fn a_skilled_swing_lands_and_trains_its_weapon_skill() {
+    // A trained fighter's swing rolls to hit (and, whether it lands or whiffs,
+    // trains the weapon skill by the attempt). Against a skill-less creature the
+    // odds are high, so damage lands; and the swordsman's Swords creeps up.
+    use combat::weapons::SWORDS_SKILL;
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(player_entity).unwrap();
+    openshard_skills::set_skill(&mut world.state, serial.raw(), SWORDS_SKILL, 300);
+    items::equip_worn_item(&mut world.state, serial, 0x0F61, 0, 1).unwrap();
+    // A tough, skill-less dummy so the fight runs long enough to train.
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 1000, now);
+    let mob_entity = entity(&world, mob);
+    engage(&mut world, connection, mob, now);
+
+    for _ in 0..(20 * WRESTLING_SWING_TICKS) {
+        world.tick(now);
+    }
+    assert!(
+        world
+            .state
+            .registry
+            .get::<Hitpoints>(mob_entity)
+            .unwrap()
+            .current
+            < 1000,
+        "a skilled swordsman's blows land on a skill-less dummy"
+    );
+    let swords = world
+        .state
+        .registry
+        .get::<Skills>(player_entity)
+        .unwrap()
+        .get(SWORDS_SKILL);
+    assert!(
+        swords > 300,
+        "the swings trained Swords past its start (got {swords})"
+    );
+}
+
+#[test]
+fn an_even_unskilled_duel_sometimes_misses() {
+    // Two poorly-matched fighters (low attacker skill, a guarded defender) do not
+    // land every blow: over a run of swings the attacker's own client hears both
+    // the thwack of a hit and the whistle of a miss.
+    use combat::weapons::{SWORDS_SKILL, WRESTLING_SKILL};
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(player_entity).unwrap();
+    openshard_skills::set_skill(&mut world.state, serial.raw(), SWORDS_SKILL, 200);
+    items::equip_worn_item(&mut world.state, serial, 0x0F61, 0, 1).unwrap();
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 2000, now);
+    openshard_skills::set_skill(&mut world.state, mob, WRESTLING_SKILL, 1000);
+    engage(&mut world, connection, mob, now);
+    let _ = packets_for(&mut world, connection);
+
+    for _ in 0..(30 * WRESTLING_SWING_TICKS) {
+        world.tick(now);
+    }
+    let packets = packets_for(&mut world, connection);
+    let hit = combat::MELEE_HIT_SOUND.to_be_bytes();
+    let miss = combat::MELEE_MISS_SOUND.to_be_bytes();
+    let sound = |id: [u8; 2]| {
+        packets
+            .iter()
+            .any(|p| p[0] == 0x54 && p.len() >= 4 && p[2..4] == id)
+    };
+    assert!(sound(hit), "some blows landed (a thwack)");
+    assert!(sound(miss), "and some whiffed (a swish)");
+}
+
+#[test]
+fn tactics_scales_the_blow() {
+    // The one difference between two otherwise-identical fights is the attacker's
+    // Tactics; the same seed rolls the same base damage, so more Tactics must mean
+    // more damage dealt. Swords is pinned at the cap so every blow lands and no
+    // gain draw perturbs the shared rng sequence.
+    use combat::weapons::{SWORDS_SKILL, TACTICS_SKILL};
+    fn total_dealt(tactics: u16) -> u16 {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        let player_entity = world.state.players[&connection];
+        let serial = world.state.registry.serial_of(player_entity).unwrap();
+        openshard_skills::set_skill(&mut world.state, serial.raw(), SWORDS_SKILL, 1000);
+        openshard_skills::set_skill(&mut world.state, serial.raw(), TACTICS_SKILL, tactics);
+        items::equip_worn_item(&mut world.state, serial, 0x0F61, 0, 1).unwrap();
+        let mob = spawn_mobile_at(&mut world, Point::new(START.0, START.1, 0), 60000, now);
+        let mob_entity = entity(&world, mob);
+        engage(&mut world, connection, mob, now);
+        for _ in 0..(10 * WRESTLING_SWING_TICKS) {
+            world.tick(now);
+        }
+        60000
+            - world
+                .state
+                .registry
+                .get::<Hitpoints>(mob_entity)
+                .unwrap()
+                .current
+    }
+    assert!(
+        total_dealt(1000) > total_dealt(0),
+        "grandmaster Tactics hits harder than none"
+    );
+}
+
+#[test]
+fn a_bow_deals_its_own_damage_band() {
+    // A ranged attacker with a bow rolls the bow's damage (9..=41), not the flat
+    // bare-hands 5 — the weapon table drives volleys the way it drives swings.
+    use openshard_state::components::RangedAttack;
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player_entity = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(player_entity).unwrap();
+    items::equip_worn_item(&mut world.state, serial, 0x13B2, 0, 2).unwrap(); // bow
+    world
+        .state
+        .registry
+        .insert(player_entity, RangedAttack { range: 6, kind: 0 });
+    // A target three tiles off: out of melee reach, inside bow range.
+    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 3, START.1, 0), 4000, now);
+    engage(&mut world, connection, mob, now);
+    let mut damaged: Cursor<MobileDamaged> = world.bus().cursor();
+
+    // Read every tick: the bus is double-buffered, so events age out if left.
+    let mut blows: Vec<u16> = Vec::new();
+    for _ in 0..(12 * WRESTLING_SWING_TICKS) {
+        world.tick(now);
+        blows.extend(world.bus().read(&mut damaged).map(|d| d.amount));
+    }
+    assert!(!blows.is_empty(), "the archer's volleys landed");
+    assert!(
+        blows.iter().all(|&b| (9..=41).contains(&b)),
+        "every arrow hits for the bow's band, not the flat default: {blows:?}"
+    );
+}
+
+#[test]
+fn a_weapon_override_beats_the_core_table() {
+    // The pack's magic sword: a longsword item stamped with its own speed and
+    // damage, which `equipped_weapon` reads ahead of the core table. Faster and
+    // harder than a plain longsword (35 / 5..33), it keeps the graphic's skill.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = world.state.registry.serial_of(entity).unwrap();
+    let sword = items::equip_worn_item(&mut world.state, serial, 0x0F61, 0, 1).unwrap();
+    let sword_serial = world.state.registry.serial_of(sword).unwrap().raw();
+    let scale = world.state.gameplay.speed_scale_factor;
+
+    // A plain longsword first, for contrast.
+    assert_eq!(
+        combat::swing_speed(&world.state, entity),
+        swing_ticks(100, 35, 1, scale)
+    );
+    // Now the enchantment: speed 60 (faster), damage a fixed 40..40.
+    items::set_weapon(&mut world.state, sword_serial, 60, 40, 40);
+    assert_eq!(
+        combat::swing_speed(&world.state, entity),
+        swing_ticks(100, 60, 1, scale),
+        "the override's speed wins over the table's 35"
+    );
+    assert_eq!(
+        combat::melee_blow(&mut world.state, entity),
+        40,
+        "and its damage band (40..=40) wins over 5..33"
+    );
 }
 
 #[test]

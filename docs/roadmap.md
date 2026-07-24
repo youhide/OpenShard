@@ -516,11 +516,39 @@ Roughly in dependency order, each script-first:
     (its natural blow, a script's pin) still wins, a player (who no longer carries a
     fixed `MeleeDamage`) derives from the weapon, and bare hands stay wrestling and
     `SWING_DAMAGE`. The damage roll uses the world's seeded `rng`, so a fight
-    replays. Deferred: the weapon `skill` is carried but not yet consumed (hit
-    chance and skill-gain are a later slice), archery still rolls flat damage
-    through `volleys` (it takes the weapon *speed* for free), AoS strength/tactics
-    damage bonuses are unwritten, and a pack per-item override (a magic sword) is a
-    later additive change.
+    replays.
+  - [x] **Hit chance, skill gain, damage scaling, and a pack override.** The follow-ups
+    the weapon table set up, all ServUO-faithful:
+    - **To-hit.** A swing now rolls to land — pre-AoS `CheckHit`, `chance = (atk + 50)
+      / ((def + 50)·2)`, the two mobiles' weapon-skill standings (the defender's own
+      weapon skill, Wrestling unarmed, its guard). A miss whistles past (`MELEE_MISS_SOUND`,
+      the swing still animates) and does no damage; the timer resets either way. The
+      roll **is** a `CheckSkill`, so the same call trains the weapon skill — a new
+      `skills::roll_skill_chance` (ServUO's `CheckSkill(skill, chance)`) shares the
+      gain half with `roll_skill`, and a player's Swords/Archery/… creeps up with use,
+      surfacing in the `0x3A` window with no extra wiring.
+    - **Damage scaling.** A landed blow scales by the attacker's Tactics, Strength and
+      Anatomy — ServUO's `ScaleDamageOld` (era 1: Tactics its own ±50% about parity,
+      then Str 1%/5 and Anatomy 1%/5 +10% at GM) and `ScaleDamageAOS` (era 2 the
+      `GetBonus` coefficients).
+    - **Gated on a `Skills` sheet.** Applying these to a mobile with no skills (every
+      creature today, an untrained player) would make it miss half the time and deal
+      half damage. So both the to-hit roll and the scaling engage only when the
+      *attacker* carries a `Skills` component; without one it keeps the pre-feature
+      certainty — its natural blow always lands, unscaled. A clean, forward-compatible
+      boundary: the moment creatures gain skills (a converter slice), they start
+      rolling. Combat gained a dependency on `skills` for the shared roll (the same
+      `roll_skill` call site magic already uses, not a cross-system call).
+    - **Archery** rolls the wielded bow's damage band now (through `scaled_blow`, the
+      same path as melee), not the flat default.
+    - **Pack per-item override** — a `Weapon { speed, min, max }` component (set by
+      `op_set_weapon` → `Command::SetWeapon` → `items::set_weapon`) on a weapon item
+      replaces the core table's stats for a magic sword, `equipped_weapon` reading it
+      first while keeping the graphic's skill; era-independent.
+
+    Still deferred: pre-AoS's PvE damage-halving and the Axe/Lumberjacking bonus, the
+    per-weapon `DefMissSound` (one swish for all today), and giving creatures real
+    combat skills (the converter slice that makes the gate bite for monsters).
   - [ ] **Combat eras 3–5** — still gated at load (`config` accepts only 1|2). The
     weapon-property data half above is now in hand, but the era-0/3/4 swing
     *formulas* (weapon-weight / ML-format speeds) are unwritten, so the rejection

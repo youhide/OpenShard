@@ -664,6 +664,12 @@ impl World {
                 skill,
                 value,
             } => skills::set_skill(&mut self.state, serial, skill, value),
+            Command::SetWeapon {
+                serial,
+                speed,
+                min,
+                max,
+            } => items::set_weapon(&mut self.state, serial, speed, min, max),
             Command::UseSkill {
                 serial,
                 skill,

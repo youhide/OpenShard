@@ -265,6 +265,18 @@ fn op_set_skill(state: &mut OpState, serial: u32, skill: u32, value: u32) {
     });
 }
 
+/// Override a weapon item's speed and damage — the pack's magic sword.
+#[op2(fast)]
+fn op_set_weapon(state: &mut OpState, serial: u32, speed: u32, min: u32, max: u32) {
+    let clamp = |v: u32| v.min(u32::from(u16::MAX)) as u16;
+    state.borrow_mut::<Host>().outbox.push(Command::SetWeapon {
+        serial,
+        speed: clamp(speed),
+        min: clamp(min),
+        max: clamp(max),
+    });
+}
+
 /// Set a mobile's stats; strength re-caps hits, intelligence re-caps mana.
 #[op2(fast)]
 fn op_set_stats(
@@ -727,6 +739,7 @@ extension!(
         op_control,
         op_set_stats,
         op_set_skill,
+        op_set_weapon,
         op_use_skill,
         op_say,
         op_register_spawner,

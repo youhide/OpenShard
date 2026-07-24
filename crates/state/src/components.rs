@@ -1078,12 +1078,26 @@ pub struct Combat {
 /// How hard a mobile hits in melee — the base a swing deals before the target's
 /// armour takes its cut.
 ///
-/// A mobile-level number for now: a creature's natural blow. Weapon-derived
-/// damage is a later refinement that sets this from what the mobile wields.
+/// A mobile-level number: a creature's natural blow, or a script's pin. A player
+/// carries none and derives the blow from the weapon wielded (`combat::melee_blow`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct MeleeDamage {
     /// The blow before resistance.
     pub amount: u16,
+}
+
+/// A per-item weapon override — the pack's magic sword. Placed on a *weapon item*,
+/// its speed and damage replace what the core weapon table gives that graphic
+/// (`combat::equipped_weapon` reads it first); the weapon's skill still comes from
+/// the base graphic. Era-independent: the same numbers whichever combat era runs.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Weapon {
+    /// Ticks-formula speed base (Sphere's weapon `base`); higher swings faster.
+    pub speed: u16,
+    /// Minimum damage before resistance.
+    pub min: u16,
+    /// Maximum damage before resistance.
+    pub max: u16,
 }
 
 /// How many ticks a mobile waits between swings.

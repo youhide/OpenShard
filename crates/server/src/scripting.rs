@@ -411,6 +411,17 @@ fn into_world(command: ScriptCommand) -> Command {
             skill,
             value,
         },
+        ScriptCommand::SetWeapon {
+            serial,
+            speed,
+            min,
+            max,
+        } => Command::SetWeapon {
+            serial,
+            speed,
+            min,
+            max,
+        },
         ScriptCommand::UseSkill {
             serial,
             skill,
