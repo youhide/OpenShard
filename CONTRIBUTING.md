@@ -68,3 +68,17 @@ decades of hard-won knowledge about which client breaks on what. They are not
 worth reading for architecture — where the two of them agree about *engine*
 design, that is usually the strongest available argument for doing it
 differently here.
+
+## Licence
+
+The engine is GPL-3.0 ([`LICENSE`](LICENSE)) with one additional permission
+([`LICENSE-EXCEPTION`](LICENSE-EXCEPTION)) that puts TypeScript content loaded
+into the embedded runtime outside it. Unless you say otherwise in the pull
+request, what you submit is offered under exactly those terms, with nothing
+added — inbound equals outbound, so there is no CLA to sign and nothing to
+countersign.
+
+The practical consequence for a patch: code that ends up in the binary has to
+arrive under terms GPL-3.0 can take. A snippet lifted from an MIT or BSD project
+is fine and needs its attribution kept; a new dependency is worth a glance at
+its licence field before it lands, because nothing in CI checks that yet.

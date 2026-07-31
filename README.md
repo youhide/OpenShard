@@ -191,10 +191,38 @@ Other Rust work on the same client, worth reading before reinventing a wheel:
 
 - [broker0/path_server](https://github.com/broker0/path_server) — a UO server
   in Rust.
+- [broker0/ungine7](https://github.com/broker0/ungine7) — the same author's
+  later Rust workspace: packet definitions, protocol detection and encryption,
+  client data-file parsers, and server-side world and movement systems, plus
+  example servers, clients and proxies. Research-oriented and early, but it
+  covers the same wire and the same file formats we do.
 - [AngryLawyer/uo-rust-libs](https://github.com/AngryLawyer/uo-rust-libs) —
   Rust libraries for the client's data files (`.mul` / `.uop` art, map,
   tiledata); the same ground `crates/server/world` covers.
 
 ## Licence
 
-This project is licensed under the GNU General Public License v3.0
+GNU General Public License, version 3 ([`LICENSE`](LICENSE)) — plus one
+additional permission, in [`LICENSE-EXCEPTION`](LICENSE-EXCEPTION).
+
+**Your script pack is yours.** Gameplay is TypeScript on an embedded V8, and
+whether content loaded into a GPL process becomes a derivative work is the
+oldest unsettled question in that licence. It is not left unsettled here: the
+exception says in writing that scripts the runtime loads, and the data and
+assets shipped with them, are a separate work, and may be licensed on any terms
+— including commercial ones, including terms the GPL would otherwise forbid.
+Whatever is compiled or linked into the binary is not covered by it, and stays
+GPL whether or not a script calls it.
+
+That line is the whole reason for copyleft here. What we want returned is
+changes to the *engine*, and this scene distributes engines constantly —
+prepackaged shard bundles, binaries, somebody's build handed to somebody else.
+Each of those is a distribution, and each of them owes its recipients the source.
+An operator running the server for players does not distribute anything and owes
+nothing; that case is deliberately outside the licence rather than overlooked by
+it, which is why this is GPL and not AGPL. A content ecosystem cannot grow if
+hosting a pack is what triggers the obligation.
+
+Unless you state otherwise, any contribution you intentionally submit for
+inclusion in this work is licensed as above, with no additional terms — which
+is what makes a CLA unnecessary.

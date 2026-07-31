@@ -2453,6 +2453,32 @@ and edited as normal source afterwards — there is no ongoing `.scp` dependency
 - [ ] `tools/dashboard` — Next.js admin panel
 - [ ] `tools/launcher`, `tools/map-editor`
 
+### Licensing — backlog
+
+The repository shipped a GPL-3.0 `LICENSE` while `Cargo.toml` declared
+`MIT OR Apache-2.0`, so every crate's metadata contradicted the file at the root
+for as long as both existed. Resolved in favour of the file: GPL-3.0-only, plus
+the §7 additional permission in `LICENSE-EXCEPTION` that puts script packs
+outside it. The reasoning is the `## Licence` section of the README. Two things
+it leaves open:
+
+- **A licence gate in CI.** Nothing notices when a dependency arrives under
+  terms the workspace cannot take. `cargo-deny` with a `[licenses] allow` list
+  is the usual answer, and it belongs beside the three commands CI already runs.
+  Today's audit of the tree, for the record: nothing in the graph is
+  GPL-3.0-incompatible — MIT, Apache-2.0, BSD-2, BSD-3, ISC, Zlib, 0BSD,
+  BSL-1.0, Unlicense and Unicode-3.0, with Apache-2.0's one-way compatibility
+  running in our direction — and no package is missing a licence field. The one
+  copyleft dependency is `cooked-waker` (MPL-2.0, via `deno_core`), and it
+  carries no Exhibit B *"Incompatible With Secondary Licenses"* notice, which
+  makes GPL-3.0 a Secondary License for it and MPL §3.3 the clause that permits
+  the Larger Work outright. Under a permissive licence that crate would have
+  owed a notice; under this one it owes nothing.
+- **A third-party notices file on a binary release.** Independent of our own
+  licence: MIT, BSD and Apache-2.0 dependencies all carry attribution
+  obligations that a distributed artefact owes its recipients. Whatever builds
+  the release should generate the file rather than leaving it to be remembered.
+
 ## 9. The client — planned, see [`docs/client.md`](client.md)
 
 Our own client, starting with the only part that has to exist either way: the

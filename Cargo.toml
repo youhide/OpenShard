@@ -6,7 +6,11 @@ members = ["crates/common/*", "crates/server/*", "crates/client/*", "crates/e2e/
 version = "0.0.1"
 edition = "2021"
 rust-version = "1.88"
-license = "MIT OR Apache-2.0"
+# GPL-3.0, plus the additional permission in `LICENSE-EXCEPTION` covering the
+# TypeScript loaded into the embedded runtime. SPDX only spells `WITH` for
+# exceptions on its own registry, so the field names the licence alone and the
+# grant lives in the file beside `LICENSE`.
+license = "GPL-3.0-only"
 repository = "https://github.com/hideOut/OpenShard"
 authors = ["OpenShard contributors"]
 

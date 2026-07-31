@@ -168,6 +168,7 @@ These are settled. Don't relitigate them without being asked.
 | Language | Rust + Tokio | |
 | Persistence | **SQLite or PostgreSQL**, operator's choice | Same `Store` trait; neither is a tier — SQLite runs a live shard fine. Never queried inside a tick. |
 | Tooling | TypeScript, React, Next.js | |
+| Licence | **GPL-3.0-only**, plus a §7 exception for script packs | A forked engine gets distributed in this scene and owes its source back. Content loaded into the embedded V8 is a separate work, written down in `LICENSE-EXCEPTION` rather than left to the oldest unsettled question in the GPL. |
 
 ## Where things stand
 

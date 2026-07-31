@@ -1,0 +1,23 @@
+OpenShard Scripting and Content Exception
+
+Additional permission under GNU GPL version 3 section 7.
+
+The copyright holders of OpenShard grant you the additional permission below.
+It applies to OpenShard as a whole, in addition to the terms of the GNU General
+Public License, version 3.
+
+Gameplay content — scripts written in JavaScript or TypeScript that OpenShard's
+embedded runtime loads and executes, together with the data files, assets and
+configuration that accompany them — is an independent and separate work.
+Loading, executing or interpreting such content does not, of itself, make it a
+work based on OpenShard. You may license and distribute your content on terms of
+your choosing, including terms incompatible with the GNU General Public License.
+
+This permission does not extend to OpenShard itself. Code compiled or linked
+into an OpenShard binary remains covered by the GNU General Public License,
+version 3, whether or not it is invoked by such content, and whether or not it
+was written to be.
+
+If you modify OpenShard, you may extend this permission to your version, but you
+are not obligated to do so. If you do not wish to do so, delete this exception
+statement from your version.
