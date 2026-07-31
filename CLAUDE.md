@@ -162,13 +162,13 @@ These are settled. Don't relitigate them without being asked.
 | Decision | Choice | Why |
 |---|---|---|
 | Client eras | **Multi-era from day one** | Retrofitting versioning means auditing every packet encoder twice. |
-| Scripting runtime | **`deno_core` (V8) embedded** | Real JIT in-process. QuickJS is too slow for hot gameplay code; a Node sidecar puts IPC latency inside the tick. |
+| Scripting runtime | **A language of our own** — reversing `deno_core` (V8) | The tick's rules (seeded rng, timers in ticks, no wall clock) cannot be enforced in a general-purpose language: `Math.random()` and `Date.now()` are in it and the seam cannot tell that call from a legitimate one. Plus a borrowed runtime's weight, an altitude that fits gameplay, and a Sphere converter that loses less. Not built yet — `crates/server/scripting` is still V8 and the docs say so. [`docs/roadmap.md`](docs/roadmap.md) §5. |
 | Sphere scriptpack | **One-shot `.scp` → TS/TOML converter** | Keeps years of balance data without a runtime SphereScript parser. A build tool, not an engine feature. |
 | First milestone | **Foundation first** (workspace, ECS, events) | Chosen over a login-to-walk vertical slice. |
 | Language | Rust + Tokio | |
 | Persistence | **SQLite or PostgreSQL**, operator's choice | Same `Store` trait; neither is a tier — SQLite runs a live shard fine. Never queried inside a tick. |
 | Tooling | TypeScript, React, Next.js | |
-| Licence | **GPL-3.0-only**, plus a §7 exception for script packs | A forked engine gets distributed in this scene and owes its source back. Content loaded into the embedded V8 is a separate work, written down in `LICENSE-EXCEPTION` rather than left to the oldest unsettled question in the GPL. |
+| Licence | **GPL-3.0-only**, plus a §7 exception for script packs | A forked engine gets distributed in this scene and owes its source back. Content the embedded runtime loads is a separate work, written down in `LICENSE-EXCEPTION` rather than left to the oldest unsettled question in the GPL. The grant names the seam and not the language, so the row above does not narrow it. |
 
 ## Where things stand
 

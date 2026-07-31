@@ -551,10 +551,13 @@ and on logout, through the same journal the tick already feeds.
   the crate floats on `"0.7"` again. See the `Cargo.lock` note in
   [`development.md`](development.md).
 
-## 5. Scripting — spike done
+## 5. Scripting — spike done, the runtime is being replaced
 
 The largest open technical risk. Proven before building gameplay on top, and it
 holds. The engine is `crates/server/scripting`; `engine.rs` explains the seam.
+The host is changing — a language of our own, not V8 — and the argument is at
+the end of this section; the boxes below are what the spike proved and remain
+true of what runs today.
 
 - [x] `deno_core` embedded, one V8 isolate — `DenoEngine`, one `JsRuntime`
 - [x] `ScriptEngine` trait — four methods, nothing V8-shaped in a signature, so
@@ -591,6 +594,56 @@ a design that calls one hook over a batch of entities will always beat one that
 crosses per entity; that is a knob for §6, not a problem for the spike.
 
 The design does not have to change. Gameplay can depend on it.
+
+### The runtime is being replaced by a language of our own
+
+The spike answered the question it was asked — *can a per-entity hook fit the
+tick* — and the answer stands. It is not the question that decides the runtime,
+and four things since have said V8 is the wrong host. This reverses the
+`deno_core` row in `CLAUDE.md`'s decisions table; the trait it was chosen behind
+is what makes the reversal cheap.
+
+- **The tick's rules cannot be enforced in a general-purpose language.**
+  Randomness inside a tick comes from the world's seeded rng and timers are tick
+  counts, never wall clocks — that is what makes the tick replay, and it is the
+  first thing this repository asks of a contributor. In TypeScript it is
+  unenforceable. `Math.random()` and `Date.now()` are in the language, a script
+  that reaches for either breaks replay silently, and nothing at the seam can
+  tell that call from a legitimate one. Shadowing them is a fence a script steps
+  over with `globalThis`. A language written for this can simply not have them,
+  and give the script the seeded draw and the tick counter as the ordinary way
+  to ask.
+- **V8 brings a whole world along.** GC pauses land wherever they land, and they
+  land inside a 50ms budget. The isolate's memory, the build time and the
+  dependency tree are all paid on every machine that compiles this, for a
+  language nobody chose for the domain. It also drags the only copyleft crate in
+  the graph in behind it (`cooked-waker`, see §8) — not a reason on its own, but
+  it is the shape of the problem: a large borrowed runtime brings decisions that
+  are not ours.
+- **A gameplay language can say gameplay things.** Skills, spell effects, loot
+  tables, dialogue and triggers are a narrow domain with a lot of repetition,
+  and TypeScript expresses them at the wrong altitude — every pack re-invents the
+  same scaffolding. The domain also wants things a general-purpose language
+  actively fights: a hook that cannot block, a rule that is data as often as it
+  is code, and a script that is safe to hot-reload because it could not have kept
+  hidden state in the first place.
+- **The Sphere converter loses less.** `.scp` is already a declarative rule
+  language for exactly this domain (§7). Converting it into TypeScript means
+  rewriting its shape into a general-purpose one and hoping the balance data
+  survives the translation; converting it into a language built for the same
+  job is closer to a re-spelling. That is a one-shot build tool either way, but
+  the fidelity of the one shot is the whole point of it.
+
+Not yet built, and the order is not settled. What is settled is that the seam
+does not move: `ScriptEngine` stays four methods with nothing runtime-shaped
+in its signatures, a script still acts only by enqueuing a `Command` the tick
+applies in order, and the benchmark above is the bar the replacement has to
+clear rather than a number it inherits. Until it exists, `crates/server/scripting`
+is `deno_core` and the docs say so.
+
+The licence exception is written to survive this: `LICENSE-EXCEPTION` grants
+against whatever runtime is embedded rather than naming a language, so a pack
+author's terms do not change under them when the language does.
 
 ## 6. Gameplay
 

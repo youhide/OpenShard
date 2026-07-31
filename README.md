@@ -185,6 +185,14 @@ They are copyrighted. Point the engine at whatever install you already have.
 Rust + Tokio. SQLite or PostgreSQL, operator's choice. TypeScript via embedded
 V8 (`deno_core`) for gameplay. React and Next.js for tooling.
 
+**The scripting runtime is being replaced by a language of our own**, and V8
+goes with it. The reasoning is in [`docs/roadmap.md`](docs/roadmap.md) §5; the
+short version is that the tick's rules — seeded randomness, timers counted in
+ticks, no wall clock — are rules a general-purpose language cannot be made to
+keep, and that a language written for shard rules can express them instead of
+forbidding them. What exists today is still `deno_core`, and this section will
+say so until it does not.
+
 ## Related projects
 
 Other Rust work on the same client, worth reading before reinventing a wheel:
@@ -205,14 +213,18 @@ Other Rust work on the same client, worth reading before reinventing a wheel:
 GNU General Public License, version 3 ([`LICENSE`](LICENSE)) — plus one
 additional permission, in [`LICENSE-EXCEPTION`](LICENSE-EXCEPTION).
 
-**Your script pack is yours.** Gameplay is TypeScript on an embedded V8, and
-whether content loaded into a GPL process becomes a derivative work is the
-oldest unsettled question in that licence. It is not left unsettled here: the
-exception says in writing that scripts the runtime loads, and the data and
-assets shipped with them, are a separate work, and may be licensed on any terms
-— including commercial ones, including terms the GPL would otherwise forbid.
-Whatever is compiled or linked into the binary is not covered by it, and stays
-GPL whether or not a script calls it.
+**Your script pack is yours.** Gameplay is scripted, and whether content loaded
+into a GPL process becomes a derivative work is the oldest unsettled question in
+that licence. It is not left unsettled here: the exception says in writing that
+scripts the runtime loads, and the data and assets shipped with them, are a
+separate work, and may be licensed on any terms — including commercial ones,
+including terms the GPL would otherwise forbid. Whatever is compiled or linked
+into the binary is not covered by it, and stays GPL whether or not a script
+calls it.
+
+It is written to the seam and not to the runtime, deliberately: the scripting
+language is going to change (see the *Stack* section), and a permission that
+named TypeScript would have expired with it.
 
 That line is the whole reason for copyleft here. What we want returned is
 changes to the *engine*, and this scene distributes engines constantly —

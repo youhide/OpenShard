@@ -6,17 +6,24 @@ The copyright holders of OpenShard grant you the additional permission below.
 It applies to OpenShard as a whole, in addition to the terms of the GNU General
 Public License, version 3.
 
-Gameplay content — scripts written in JavaScript or TypeScript that OpenShard's
-embedded runtime loads and executes, together with the data files, assets and
-configuration that accompany them — is an independent and separate work.
-Loading, executing or interpreting such content does not, of itself, make it a
-work based on OpenShard. You may license and distribute your content on terms of
-your choosing, including terms incompatible with the GNU General Public License.
+Gameplay content — scripts, in whatever language OpenShard's embedded scripting
+runtime accepts, that the runtime loads, interprets or executes, together with
+the data files, assets and configuration that accompany them — is an independent
+and separate work. Loading, interpreting or executing such content does not, of
+itself, make it a work based on OpenShard. You may license and distribute your
+content on terms of your choosing, including terms incompatible with the GNU
+General Public License.
+
+This permission is written to the seam rather than to any one runtime. It holds
+whatever scripting language OpenShard embeds, now or later, and a change of
+language or interpreter does not narrow it.
 
 This permission does not extend to OpenShard itself. Code compiled or linked
 into an OpenShard binary remains covered by the GNU General Public License,
 version 3, whether or not it is invoked by such content, and whether or not it
-was written to be.
+was written to be. An implementation of the scripting language — its parser,
+compiler, interpreter or runtime — is part of OpenShard and not content, even
+where it is distributed separately.
 
 If you modify OpenShard, you may extend this permission to your version, but you
 are not obligated to do so. If you do not wish to do so, delete this exception

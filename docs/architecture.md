@@ -498,6 +498,15 @@ nanoseconds, so ten thousand mobiles each firing a hook per tick spend a low
 single-digit-millisecond slice of the 50ms budget. It fits. Numbers and method
 are in `docs/roadmap.md` §5.
 
+**V8 is being replaced by a scripting language of our own.** The seam above is
+what survives it, and describing it was worth the paragraphs even so: the trait
+was written with nothing V8-shaped in its signatures precisely so the runtime
+could go, and this is that going. The decision and its four arguments are in
+`docs/roadmap.md` §5 — the load-bearing one being that a tick promising replay
+cannot host a language with `Math.random()` and `Date.now()` in it. Everything
+above describes what `crates/server/scripting` is today, which is still
+`deno_core`; what changes is the host, not the shape.
+
 `ScriptEngine::load` doubles as hot reload — re-evaluating rebinds the hooks in
 the live isolate — and `DenoEngine::reload_if_changed` polls a watched file's
 mtime so iterating on a hook is save-the-file, not bounce-the-shard.
