@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use openshard_entities::{EntityId, Registry};
 use openshard_events::EventBus;
 use openshard_gateway::ConnectionId;
-use openshard_movement::Terrain;
+use openshard_movement::{Terrain, Tile};
 use openshard_protocol::combat::HealthBar;
 use openshard_protocol::feedback::{Animation, NewAnimation, PlaySound};
 use openshard_protocol::items::WorldItem;
@@ -800,7 +800,7 @@ impl WorldState {
             .facets
             .get(&facet)
             .and_then(|state| state.terrain.as_ref())
-            .and_then(|terrain| terrain.ground_z(x, y))
+            .and_then(|terrain| terrain.ground_z(Tile::new(x, y)))
             .unwrap_or(Z_WITHOUT_A_MAP);
         Point::new(x, y, z)
     }
@@ -1327,27 +1327,94 @@ impl WorldState {
             }
         }
 
-        if let Some(&Client { connection, .. }) = self.registry.get::<Client>(entity) {
-            // The serial joins the body and the facing in the `if let`: a
-            // `0x20` addressed to nothing is not worth sending, and the old
-            // `map_or(0, …)` sent one — zero is not a serial, it is the wire's
-            // word for "no object".
-            let serial = self.registry.serial_of(entity);
-            let body = self.registry.get::<Body>(entity).copied();
-            let facing = self.registry.get::<Heading>(entity).map(|h| h.0);
-            if let (Some(serial), Some(body), Some(facing)) = (serial, body, facing) {
-                self.send_packet(
-                    connection,
-                    &ServerPacket::PlayerUpdate(PlayerUpdate {
-                        serial,
-                        body: body.id,
-                        hue: body.hue,
-                        flags: StatusFlags::NONE,
-                        position: to,
-                        facing,
-                    }),
-                );
+        self.send_player_update(entity, to);
+        self.refresh_around(entity);
+    }
+
+    /// Tell `entity`'s own client where it is standing: the `0x20`.
+    ///
+    /// The packet the client cannot deduce. A `0x22` ack carries no position, so
+    /// this is the only thing that ever *states* one for the player's own body —
+    /// which is why both a decreed move and a resync end with it.
+    ///
+    /// `at` rather than the position on the row, because [`Self::move_to`] calls
+    /// this in the middle of a relocation and the two must not be able to
+    /// disagree about which tile is being announced.
+    fn send_player_update(&mut self, entity: EntityId, at: Point) {
+        let Some(&Client { connection, .. }) = self.registry.get::<Client>(entity) else {
+            return;
+        };
+        // The serial joins the body and the facing in the `if let`: a `0x20`
+        // addressed to nothing is not worth sending, and the old `map_or(0, …)`
+        // sent one — zero is not a serial, it is the wire's word for "no object".
+        let serial = self.registry.serial_of(entity);
+        let body = self.registry.get::<Body>(entity).copied();
+        let facing = self.registry.get::<Heading>(entity).map(|h| h.0);
+        if let (Some(serial), Some(body), Some(facing)) = (serial, body, facing) {
+            self.send_packet(
+                connection,
+                &ServerPacket::PlayerUpdate(PlayerUpdate {
+                    serial,
+                    body: body.id,
+                    hue: body.hue,
+                    flags: StatusFlags::NONE,
+                    position: at,
+                    facing,
+                }),
+            );
+        }
+    }
+
+    /// Answer a client's `0x22` resync: where it really is, what is really around
+    /// it, and the walk sequence back to zero on both ends.
+    ///
+    /// # Why a client asks
+    ///
+    /// It has lost track of the walk handshake — an ack it cannot place — and a
+    /// `0x22` ack carries no position, so there is nothing local it can work the
+    /// answer out from. Our own client stops walking when that happens and waits
+    /// for this; so does ClassicUO (`WalkerManager.ConfirmWalk`'s bad-step path
+    /// sets `WalkingFailed` and sends the request, and its `0x20` handler is what
+    /// clears the flag). Which means a shard that ignores the request leaves such
+    /// a client frozen for good — this is not optional politeness, it is the other
+    /// half of a handshake.
+    ///
+    /// # What it sends, and why the screen is cleared first
+    ///
+    /// ServUO's `Resynchronize`: `MobileUpdate`, `MobileIncoming`,
+    /// `SendEverything`, `state.Sequence = 0`, `ClearFastwalkStack`. The list
+    /// here is the same one in our own terms — the sequence, then everything on
+    /// this client's screen forgotten so that [`Self::refresh_around`] sends it
+    /// again, then the `0x20`.
+    ///
+    /// Forgetting the screen is the part that looks like waste and is not: a
+    /// client that has lost the walk may have lost more than the walk, and
+    /// `seen` exists precisely so that nothing is re-sent to a client that
+    /// already has it — so without this, "resend everything" sends nothing at
+    /// all. It costs one full redraw of a screen's worth of mobiles, once, on an
+    /// event that should be rare enough to be worth logging.
+    pub fn resync(&mut self, entity: EntityId) {
+        if let Some(Movement(mut walker)) = self.registry.get::<Movement>(entity).copied() {
+            // Both ends fresh: the client zeroes its own counter when it asks,
+            // and a server still expecting the old byte would refuse the first
+            // step after the repair — which is the freeze this exists to end,
+            // arrived at by a different road.
+            walker.sequence.reset();
+            self.registry.insert(entity, Movement(walker));
+        }
+        let remembered: Vec<EntityId> = self
+            .seen
+            .get(&entity)
+            .map(|seen| seen.iter().copied().collect())
+            .unwrap_or_default();
+        for other in remembered {
+            if let Some(serial) = self.registry.serial_of(other) {
+                self.forget(entity, other, serial);
             }
+        }
+        let at = self.registry.get::<Position>(entity).map(|position| position.0);
+        if let Some(at) = at {
+            self.send_player_update(entity, at);
         }
         self.refresh_around(entity);
     }

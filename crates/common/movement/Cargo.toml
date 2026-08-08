@@ -13,3 +13,4 @@ workspace = true
 
 [dependencies]
 openshard-protocol.workspace = true
+openshard-uofiles.workspace = true

@@ -16,7 +16,7 @@
 //! ends up when the pack will not take it, which is `items`' door.
 
 use openshard_entities::EntityId;
-use openshard_movement::Terrain;
+use openshard_movement::{Terrain, Tile};
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::target::{TargetCursor, TargetKind};
 use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue};
@@ -550,12 +550,12 @@ pub fn resolve_harvest_target(
     if graphic == 0 {
         return Some(HarvestTarget {
             at,
-            tile: terrain.land_tile(at.x, at.y)?,
+            tile: terrain.land_tile(Tile::new(at.x, at.y))?,
             source: TileSource::Land,
         });
     }
     let mut statics = Vec::new();
-    terrain.statics_at(at.x, at.y, &mut statics);
+    terrain.statics_at(Tile::new(at.x, at.y), &mut statics);
     statics
         .iter()
         .any(|&(id, z)| id == graphic && i32::from(z) == i32::from(at.z))

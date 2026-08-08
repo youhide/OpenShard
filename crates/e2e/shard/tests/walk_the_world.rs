@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use openshard_client_net::connection::Event;
 use openshard_client_net::transport::enter_world;
-use openshard_client_net::walk::{Moved, Walk};
+use openshard_client_net::walk::{MAX_IN_FLIGHT, Moved, Walk};
 use openshard_movement::WALK_BUFFER;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::world::Point;
@@ -46,15 +46,14 @@ async fn a_client_walks_and_the_shard_agrees_on_where_it_ended_up() {
     // More than the pace budget, so a refusal is certain. Everything up to it is
     // allowed and acked, which is what makes the comparison afterwards worth
     // anything.
+    //
+    // Sent a few at a time rather than all at once, because the client caps its
+    // own unanswered steps at [`MAX_IN_FLIGHT`] — that cap is for a shard that
+    // has gone quiet, and this one is answering as fast as a loopback can. The
+    // budget is spent on *time* either way: these leave as fast as the round trip
+    // allows, which is far faster than a body walks.
     let burst = WALK_BUFFER as usize + 10;
-    for _ in 0..burst {
-        // No ground function: this test is about the sequence seam, and the
-        // client here has no map of its own to predict a height from — the
-        // window is what loads one and hands it to `Walk`.
-        let request = walk.step(heading, |_, _| None).expect("room on the map to walk");
-        socket.send(&request).await.expect("the shard is listening");
-    }
-
+    let mut sent = 0usize;
     let mut acked = 0usize;
     // Where the client believes it is, built only out of its own predictions and
     // the acks that confirmed them.
@@ -62,7 +61,26 @@ async fn a_client_walks_and_the_shard_agrees_on_where_it_ended_up() {
     let mut refused_at = None;
 
     tokio::time::timeout(Duration::from_secs(20), async {
-        while let Some(event) = socket.next_event().await.expect("the socket stayed up") {
+        loop {
+            // Keep the wire as full as the client is willing to have it.
+            while sent < burst && walk.in_flight() < MAX_IN_FLIGHT {
+                // No ground function: this test is about the sequence seam, and
+                // the client here has no map of its own to predict a height from
+                // — the window is what loads one and hands it to `Walk`.
+                let request = walk
+                    .step(heading, |_, _, _| None)
+                    .expect("room on the map to walk");
+                socket.send(&request).await.expect("the shard is listening");
+                sent += 1;
+            }
+            if sent == burst && walk.in_flight() == 0 {
+                // Every step answered and none refused. The assertions below say
+                // what that means.
+                return;
+            }
+            let Some(event) = socket.next_event().await.expect("the socket stayed up") else {
+                return;
+            };
             let Event::Packet(packet) = event else {
                 continue;
             };

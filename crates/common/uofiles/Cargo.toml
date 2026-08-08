@@ -13,3 +13,9 @@ workspace = true
 
 [dependencies]
 openshard-protocol.workspace = true
+# For gumpart: every entry in `gumpartLegacyMUL.uop` is zlib-compressed. See
+# the note on this dependency in the workspace `Cargo.toml`.
+miniz_oxide.workspace = true
+# For `ttf_font`: rasterizing an operator-supplied Unicode fallback face. See
+# the note on this dependency in the workspace `Cargo.toml`.
+fontdue.workspace = true

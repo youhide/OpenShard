@@ -36,6 +36,10 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
         // and then waits to be told it may — see `world::LogoutAck`. Queued like
         // everything else, so the answer comes out of a tick.
         ClientPacket::LogoutRequest => Some(Command::LogoutRequest { connection: id }),
+        // "Where am I?" — the walk handshake's repair leg. Queued like everything
+        // else, so the answer is built from the world at one instant rather than
+        // from whatever a socket thread could see.
+        ClientPacket::ResyncRequest => Some(Command::Resync { connection: id }),
         ClientPacket::StatusQuery(query) => Some(match query.kind {
             StatusQueryKind::Skills => Command::RequestSkills { connection: id },
             StatusQueryKind::Status => Command::RequestStatus { connection: id },

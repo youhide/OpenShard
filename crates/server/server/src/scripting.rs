@@ -238,7 +238,7 @@ impl Scripts {
             }
             for e in bus.read(&mut self.admin) {
                 events.push(ScriptEvent::AdminAction {
-                    serial: e.serial.raw(),
+                    serial: e.serial.map(Serial::raw),
                     action: e.action.clone(),
                 });
             }

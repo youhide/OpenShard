@@ -7617,13 +7617,13 @@ impl Terrain for FrameTerrain {
     fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
         Some(to)
     }
-    fn statics_at(&self, x: u16, y: u16, out: &mut Vec<(u16, i8)>) {
-        if y == 100 && (x == 100 || x == 102) {
+    fn statics_at(&self, tile: Tile, out: &mut Vec<(u16, i8)>) {
+        if tile.y == 100 && (tile.x == 100 || tile.x == 102) {
             out.push((0x0007, 0)); // 0x0007 is both a west and an east frame
         }
     }
-    fn can_fit(&self, x: u16, y: u16, _z: i32, _height: i32) -> bool {
-        !(self.walled && (x, y) == (101, 100))
+    fn can_fit(&self, tile: Tile, _z: i32, _height: i32) -> bool {
+        !(self.walled && (tile.x, tile.y) == (101, 100))
     }
 }
 
@@ -7760,6 +7760,49 @@ fn the_populate_button_emits_an_admin_action_for_the_pack() {
     let events: Vec<AdminMenuAction> = world.bus().read(&mut actions).cloned().collect();
     assert_eq!(events.len(), 1, "one admin action was emitted");
     assert_eq!(events[0].action, "populate:felucca");
+}
+
+#[test]
+fn a_seeded_verb_is_the_button_without_a_game_master() {
+    // What `--seed` is: the same event the button sends, from a shard with no
+    // client attached at all. The serial is `None` and must stay so — a
+    // placeholder there would name whichever entity happened to hold it, and a
+    // pack reading it would be told a lie rather than "nobody".
+    let now = Instant::now();
+    let mut world = world();
+    let mut actions: Cursor<AdminMenuAction> = world.bus().cursor();
+
+    world.seed("decorate:felucca");
+    world.tick(now);
+
+    let events: Vec<AdminMenuAction> = world.bus().read(&mut actions).cloned().collect();
+    assert_eq!(events.len(), 1, "one admin action was emitted");
+    assert_eq!(events[0].action, "decorate:felucca");
+    assert_eq!(events[0].serial, None, "nobody pressed it");
+}
+
+#[test]
+fn a_verb_seeded_before_the_first_tick_survives_that_tick() {
+    // The window `run_shard` seeds in: after the script host takes its cursors,
+    // before any tick has run. The bus retires events at the *end* of a tick, so
+    // a verb sent here has to still be readable after the first one — if it were
+    // retired with the tick it was sent before, a seeded shard would lay nothing
+    // and say nothing about it.
+    let now = Instant::now();
+    let mut world = world();
+    // The cursor a script bridge would hold, taken before the seed as `Scripts`
+    // is built before it.
+    let mut actions: Cursor<AdminMenuAction> = world.bus().cursor();
+
+    world.seed("regions:felucca");
+    world.tick(now);
+
+    let events: Vec<AdminMenuAction> = world.bus().read(&mut actions).cloned().collect();
+    assert_eq!(
+        events.iter().map(|e| e.action.as_str()).collect::<Vec<_>>(),
+        ["regions:felucca"],
+        "the verb survived the tick it was sent before"
+    );
 }
 
 #[test]
@@ -10199,10 +10242,10 @@ impl Terrain for RaisedFloorTerrain {
     fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
         Some(to)
     }
-    fn stand_z(&self, _x: u16, _y: u16, _near_z: i32) -> Option<i32> {
+    fn stand_z(&self, _tile: Tile, _near_z: i32) -> Option<i32> {
         None
     }
-    fn spawn_z(&self, _x: u16, _y: u16, _near_z: i32) -> Option<i32> {
+    fn spawn_z(&self, _tile: Tile, _near_z: i32) -> Option<i32> {
         Some(7)
     }
 }

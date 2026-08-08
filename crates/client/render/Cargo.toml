@@ -17,7 +17,13 @@ description = "Draws what the client has been shown: isometric ground, and event
 [dependencies]
 openshard-uofiles.workspace = true
 openshard-protocol.workspace = true
+# For the walk's pace, and for nothing else: the camera bench walks a scripted
+# body at the rate `common/movement` says a body walks at.
+openshard-movement.workspace = true
 wgpu = { version = "30", default-features = false, features = ["wgsl"] }
+# One log line: decision 38.2's ring radius. Emits nothing without a
+# subscriber, so this costs no I/O and keeps the crate's own header true.
+tracing.workspace = true
 
 # On the web the only backend is the browser's own. WebGL2 is the fallback for
 # browsers without WebGPU, and keeping it in the feature set here is what makes
@@ -35,5 +41,21 @@ wgpu = { version = "30", default-features = false, features = ["wgsl", "webgl"] 
 [lints]
 workspace = true
 
+# Compiles `src/shaders/*.wesl` — a shared, `import`-able module for the
+# `place` attachment's bit format (`docs/lighting_raymarch.md`'s backlog) —
+# into plain WGSL at build time. This crate's first build-dependency: under
+# plain WGSL each shader module is its own compilation unit with no
+# `#include`, so the format was five hand-copied `const` blocks, one per
+# shader, free to drift silently — session 23's ground-shadow bug was
+# exactly that (`ground.wgsl` never copied the bit `STANCE_FLAT` lives at).
+[build-dependencies]
+wesl = "0.4"
+
 [dev-dependencies]
 pollster = "0.4.0"
+proptest.workspace = true
+# The reference path tracer `examples/boxes.rs` lays beside the rendered frame.
+# A dev-dependency and never a real one: it is a third opinion about a scene
+# this crate drew, and the direction of the arrow is what keeps it one — that
+# crate cannot see this one, so it cannot accidentally share an answer with it.
+openshard-client-pathtrace.workspace = true

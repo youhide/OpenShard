@@ -12,7 +12,7 @@
 
 use super::tests::{START, enter, packets_for, world};
 use super::*;
-use openshard_movement::Terrain;
+use openshard_movement::{Terrain, Tile};
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::RawSerial;
@@ -46,7 +46,7 @@ impl Terrain for Shop {
         Some(to)
     }
 
-    fn statics_at(&self, _x: u16, _y: u16, out: &mut Vec<(u16, i8)>) {
+    fn statics_at(&self, _tile: Tile, out: &mut Vec<(u16, i8)>) {
         out.extend(self.0.iter().copied());
     }
 }

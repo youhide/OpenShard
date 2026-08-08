@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 use openshard_entities::{EntityId, Registry};
 use openshard_events::{Cursor, EventBus};
 use openshard_gateway::ConnectionId;
-use openshard_movement::{Terrain, Walk, Walker, step_from};
+use openshard_movement::{Terrain, Tile, Walk, Walker, step_from};
 use openshard_persistence::{
     CharacterRecord, DecorationRecord, DoorState, Inventory, ItemLocation, ItemRecord, Journal, MobileRecord,
     SCHEMA_VERSION, Snapshot,
@@ -399,6 +399,16 @@ impl World {
         &self.state.bus
     }
 
+    /// Ask the script pack for an admin verb nobody clicked — see [`crate::admin::seed`].
+    ///
+    /// Called between the script host being loaded and the first tick, which is
+    /// the one window where the cursors exist and no tick has retired anything
+    /// yet: the bus keeps an event for a tick past the `update` that follows it,
+    /// so a verb sent here is read by the first delivery and not a tick late.
+    pub fn seed(&mut self, action: &str) {
+        crate::admin::seed(&mut self.state, action);
+    }
+
     /// Everything in the world.
     pub const fn registry(&self) -> &Registry {
         &self.state.registry
@@ -741,6 +751,17 @@ impl World {
                 if let Some(&entity) = self.state.players.get(&connection) {
                     self.send_status(connection, entity);
                 }
+            }
+            Command::Resync { connection } => {
+                let Some(&entity) = self.state.players.get(&connection) else {
+                    debug!(%connection, "0x22 from a connection with no character");
+                    return;
+                };
+                // Worth a line in the log: a client only asks when the walk
+                // handshake has broken down, and the two ends disagreeing about a
+                // sequence is a thing to know about rather than a routine event.
+                debug!(%connection, "resync asked for: the walk fell out of step");
+                self.state.resync(entity);
             }
             Command::LogoutRequest { connection } => {
                 // Say yes and stop. The client closes the connection itself, and

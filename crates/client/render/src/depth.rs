@@ -26,6 +26,7 @@
 //! mobiles, corpses, effects and multis all adjust it, and each one belongs
 //! with whatever draws it.
 
+use openshard_protocol::world::Point;
 use openshard_uofiles::tiledata::StaticTile;
 
 /// Key units one step of tile depth (`x + y`) is worth.
@@ -149,6 +150,46 @@ pub fn mobile_priority_z(z: i8) -> i32 {
     i32::from(z) + 1
 }
 
+/// Which tile depth a mobile sorts at, given the one it is walking off.
+///
+/// # A body between two tiles belongs to the nearer of them
+///
+/// `View.CalculateDepthZ` is where the client says so, and it says it in a form
+/// that hides the rule: the reference keeps `Mobile.X/Y` on the tile a step
+/// *started* from until the step finishes, and then eight arms of a `switch`
+/// advance `x` and `y` by the direction the sprite is drifting. Read as a whole,
+/// the eight arms compute one thing — the larger of the two tiles' `x + y`.
+///
+/// Which is the only choice that can be right. The sprite spans both tiles for
+/// the whole crossing, so whichever tile it sorts behind will be drawn over it;
+/// the far tile is the one that is *behind* the body on screen, so sorting there
+/// puts the ground the body is walking onto, and every wall standing on it, in
+/// front of the walker. Taking the destination unconditionally does exactly that
+/// for the four headings that climb the screen — north, west, north-west and the
+/// north-east half of the horizontal pair — where the destination is the farther
+/// tile. The body sinks into the ground it is stepping off, for as long as the
+/// step lasts, and stands up again when it lands.
+///
+/// The `+ 1` when the two tiles share a depth is the reference's, and it is the
+/// two headings that move straight across the screen: north-east and south-west
+/// swap a step of `x` for a step of `y`, so both tiles are at one depth and the
+/// client lifts the walker one clear of *both*. Nothing else is at that key, so
+/// it costs nothing and it stops a body crossing a wall's own row from being
+/// swallowed by it.
+///
+/// `from` is absent when nothing is in flight, which is the still body's case:
+/// its own tile, and no adjustment.
+pub fn mobile_tile(at: Point, from: Option<Point>) -> i32 {
+    let key = |p: Point| i32::from(p.x) + i32::from(p.y);
+    let Some(from) = from else {
+        return key(at);
+    };
+    match key(from) == key(at) {
+        true => key(at) + 1,
+        false => key(from).max(key(at)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use openshard_uofiles::tiledata::TileFlags;
@@ -184,6 +225,33 @@ mod tests {
         assert_eq!(static_priority_z(5, &tile(TileFlags::FLOOR, 20)), 5);
     }
 
+    /// `Order` — and the depth value it becomes — is a sort key, not a linear
+    /// world height: two statics at different `z` on the same tile can fold to
+    /// the same `priority_z`, and once they do, `to_depth` cannot tell them
+    /// apart either. Nothing downstream can walk this value back to a `z`, and
+    /// nothing today tries to — `blit.wgsl` never samples the depth texture,
+    /// only `place`. See `docs/gbuffer.md`'s first "Not settled" item, answered
+    /// against this.
+    #[test]
+    fn priority_z_can_collide_for_two_different_world_heights() {
+        // A flat, backgroundless static at z=5 and a wall (a nonzero height)
+        // one lower at z=4: the wall's own +1 lands it on the same key.
+        let flat = static_priority_z(5, &tile(0, 0));
+        let wall = static_priority_z(4, &tile(0, 20));
+        assert_eq!(flat, wall, "two different world heights folded to one key");
+
+        let same_tile = base_for(100, 100);
+        let order_flat = Order {
+            tile: same_tile,
+            priority_z: flat,
+        };
+        let order_wall = Order {
+            tile: same_tile,
+            priority_z: wall,
+        };
+        assert_eq!(order_flat.to_depth(same_tile), order_wall.to_depth(same_tile));
+    }
+
     /// Ground goes under the things standing on it, and it is the *subtraction*
     /// that puts it there rather than the pass order.
     #[test]
@@ -209,6 +277,42 @@ mod tests {
         // `(-5 + -2) >> 1` is -4 where `/ 2` would be -3, and a dungeon floor
         // is full of odd negative pairs.
         assert_eq!(land_priority_z([-5, 10, 0, -2]), -4 - 2);
+    }
+
+    /// A body mid-step sorts at the nearer of the two tiles it is between, and
+    /// the table is `View.CalculateDepthZ`'s eight arms read back as keys.
+    ///
+    /// The four headings up the screen are the ones this is really about: the
+    /// destination is *behind* the walker there, and sorting him at it draws the
+    /// tile he is leaving — and every wall standing on it — over him.
+    #[test]
+    fn a_body_mid_step_sorts_at_the_nearer_of_the_two_tiles() {
+        let from = Point::new(100, 100, 0);
+        let step = |dx: i32, dy: i32| {
+            let at = Point::new((100 + dx) as u16, (100 + dy) as u16, 0);
+            mobile_tile(at, Some(from))
+        };
+        let here = 200;
+        // Down the screen: the destination is nearer, and taken at once.
+        assert_eq!(step(1, 0), here + 1, "east");
+        assert_eq!(step(0, 1), here + 1, "south");
+        assert_eq!(step(1, 1), here + 2, "south-east");
+        // Up the screen: the tile being left is nearer, and kept for the whole
+        // crossing. This is the bug the rule exists for.
+        assert_eq!(step(-1, 0), here, "west");
+        assert_eq!(step(0, -1), here, "north");
+        assert_eq!(step(-1, -1), here, "north-west");
+        // Straight across: one tile depth, and the walker is lifted clear of it.
+        assert_eq!(step(1, -1), here + 1, "north-east");
+        assert_eq!(step(-1, 1), here + 1, "south-west");
+    }
+
+    /// A body with nothing in flight is on its own tile, with no lift: the
+    /// mid-step rule must not leak into standing, or every idle body would sort
+    /// one tile nearer than the ground under it.
+    #[test]
+    fn a_standing_body_sorts_at_its_own_tile() {
+        assert_eq!(mobile_tile(Point::new(100, 100, 0), None), 200);
     }
 
     /// Nearer is a smaller depth, which is what makes the `Less` test and the

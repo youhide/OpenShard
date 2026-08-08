@@ -14,13 +14,25 @@
 //! `OPENSHARD_CLIENT` and skip when it is unset; `tests/client_files.rs` is
 //! where the readers are held against a shipped install rather than against a
 //! fixture they agree with by construction.
+//!
+//! [`ttf_font`] reads one more file this crate does not ship: a TrueType or
+//! OpenType face, for the code points [`font`]'s `fonts.mul` never shipped.
+//! Not a client file — any face will do, so nothing about it belongs to
+//! Electronic Arts — but it is still an operator's own, on their own machine,
+//! named the same way `OPENSHARD_CLIENT` names an install, rather than
+//! bundled with the engine.
 
 pub mod anim;
+pub mod animdata;
 pub mod art;
 pub mod color;
+pub mod equipconv;
+pub mod font;
+pub mod gumpart;
 pub mod hues;
 pub mod image;
 pub mod map;
 pub mod texmaps;
 pub mod tiledata;
+pub mod ttf_font;
 pub mod uop;

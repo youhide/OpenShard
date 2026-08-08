@@ -208,6 +208,71 @@ impl BodyKind {
     }
 }
 
+/// The body an animation is *read* under, which is not always the body the
+/// shard named.
+///
+/// `Mobile.GetGraphicForAnimation`. A handful of body ids exist on the wire and
+/// nowhere in `anim.mul`, and the client quietly reads a different one for them.
+/// The ghosts are the pair that matters here: a dead player is `0x0192` or
+/// `0x0193` — 402 and 403, male and female — and the index has no block for
+/// either, so a client that asks for what it was told draws *nothing at all*.
+/// The living body two below it is the picture; what makes it a ghost is the
+/// translucency the drawing decides, not the animation.
+///
+/// Silent in both directions, which is why it is a named function on the file
+/// reader rather than a `match` at a call site: a missing index block is `None`
+/// from [`Anim::frames`] and an absent mobile on screen, with nothing logged and
+/// nothing failing. It was found by a player dying and disappearing.
+/// Whether a body is a dead player's.
+///
+/// The same two ids [`animation_body`] remaps, asked as the question the drawing
+/// has: a ghost is not a different animation, it is the living body drawn
+/// differently — translucent, and with neither hair nor beard on it. Here rather
+/// than at the renderer that asks, because it is a fact about the client's body
+/// ids and the pair must not be written down twice.
+pub const fn is_ghost(body: u16) -> bool {
+    matches!(body, 0x0192 | 0x0193)
+}
+
+/// Whether a body is a female one.
+///
+/// `Mobile.CheckGraphicChange` in the reference client, which is the *only*
+/// place a client decides this: nothing on the wire says a mobile's sex — not
+/// `0x78`, not `0x88` — and what the drawing needs it for is which of two
+/// pictures to reach for. Four ids, the female half of each playable race and
+/// the female ghost among them, because a ghost's paperdoll is still hers.
+///
+/// Here rather than in the renderer that asks, for [`is_ghost`]'s reason: it is
+/// a fact about the client's body ids, and a body id table written down twice
+/// is a body id table that disagrees with itself.
+pub const fn is_female(body: u16) -> bool {
+    matches!(body, 0x0191 | 0x0193 | 0x025E | 0x029B)
+}
+
+/// Whether a body is a gargoyle one, living or dead.
+///
+/// Asked by exactly one thing — the paperdoll's layer ordering, which puts a
+/// gargoyle's torso where a female body's goes
+/// (`PaperDollInteractable.IsGargoyleBody`) — and it is the four ids rather
+/// than the two, because `0x02B6`/`0x02B7` are the dead pair of `0x029A`/
+/// `0x029B` and a corpse is drawn on a paperdoll like anything else.
+pub const fn is_gargoyle(body: u16) -> bool {
+    matches!(body, 0x029A | 0x029B | 0x02B6 | 0x02B7)
+}
+
+pub const fn animation_body(body: u16) -> u16 {
+    match body {
+        // The ghosts, drawn from the living body of the same sex.
+        0x0192 | 0x0193 => body - 2,
+        // The other two the client remaps, kept because the reason is the same
+        // — an id with no block of its own — and because leaving half a port
+        // behind is how the next one gets re-derived.
+        0x02B6 => 667,
+        0x02B7 => 666,
+        _ => body,
+    }
+}
+
 /// The stored direction a facing is drawn from, and whether it is mirrored.
 ///
 /// `Animation.GetAnimDirection`. Facing 3 is the one stored as direction 0, and
@@ -582,6 +647,57 @@ mod tests {
         assert_eq!(BodyKind::Monster.running(), None, "High has no run");
         assert_eq!(BodyKind::Animal.running(), Some(1));
         assert_eq!(BodyKind::Human.running(), Some(2), "RunUnarmed");
+    }
+
+    /// A ghost is read under the living body of the same sex, and the living
+    /// bodies are read under themselves.
+    ///
+    /// The pairs are `Mobile.GetGraphicForAnimation`'s. Written as a *relation*
+    /// between the two ids rather than four literals, because the relation is
+    /// the client's rule: the ghost is the body two above the living one, male
+    /// and female alike.
+    #[test]
+    fn a_ghost_is_drawn_from_the_living_body_two_below_it() {
+        assert_eq!(animation_body(0x0192), 0x0190, "the male ghost");
+        assert_eq!(animation_body(0x0193), 0x0191, "the female ghost");
+        for living in [0x0190u16, 0x0191] {
+            assert_eq!(animation_body(living), living, "a living body is itself");
+            assert_eq!(animation_body(living + 2), living, "and its ghost is it");
+        }
+        assert_eq!(animation_body(0x02B6), 667);
+        assert_eq!(animation_body(0x02B7), 666);
+    }
+
+    /// And the half of that the file has to agree with: the ghost ids have no
+    /// index block at all, so asking for what the shard named draws *nothing*.
+    ///
+    /// This is the test the defect deserved. A dead player simply stopped being
+    /// on screen — no error, no log, the mobile silently dropped for want of a
+    /// frame — and the only thing that says the remap is necessary rather than
+    /// decorative is the file itself.
+    ///
+    /// Skipped without the client's files.
+    #[test]
+    fn the_ghost_bodies_are_in_no_index_block_and_the_bodies_they_map_to_are() {
+        let Some(dir) = std::env::var_os("OPENSHARD_CLIENT").map(std::path::PathBuf::from) else {
+            return;
+        };
+        let mut anim = Anim::open(&dir).expect("anim.idx and anim.mul");
+        for ghost in [0x0192u16, 0x0193] {
+            assert!(
+                anim.frames(ghost, BodyKind::Human.standing(), 0)
+                    .expect("reading the index")
+                    .is_none(),
+                "body {ghost:#06x} has frames after all, and the remap is hiding them",
+            );
+            let drawn = animation_body(ghost);
+            assert!(
+                anim.frames(drawn, BodyKind::Human.standing(), 0)
+                    .expect("reading the index")
+                    .is_some_and(|frames| !frames.is_empty()),
+                "body {drawn:#06x} is what a ghost is drawn from and has no frames either",
+            );
+        }
     }
 
     /// Eight facings, five pictures, and the mirror is the whole difference.

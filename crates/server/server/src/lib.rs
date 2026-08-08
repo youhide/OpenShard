@@ -101,9 +101,13 @@ pub const CONFIG_PATH: &str = "openshard.toml";
 /// The binary's whole body, kept here so that what an operator starts and what
 /// a test could start are the same code.
 ///
+/// `seed` is the admin verbs this run was asked to send itself before the first
+/// tick — `--seed` on the command line. Empty is the normal case: a shard whose
+/// world is already laid, or one an operator will lay through `.admin`.
+///
 /// Returns once the world has been saved: [`run_shard`] does not return before
 /// that, and neither does this.
-pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run(seed: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let config = load_config(CONFIG_PATH)?;
 
     // One stop for the whole process — the listener, every connection, and the
@@ -147,7 +151,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     tokio::spawn(gateway_server.run());
-    run_shard(events, &config, world, store, reins).await;
+    run_shard(events, &config, world, store, reins, seed).await;
 
     Ok(())
 }

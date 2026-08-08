@@ -18,6 +18,8 @@ openshard-entities.workspace = true
 openshard-items.workspace = true
 # The roll a craft makes is the roll a mined vein and a swung sword make.
 openshard-skills.workspace = true
+# For `Tile`, when scanning the map's own statics for a forge.
+openshard-movement.workspace = true
 # For the gump builder and `Point`.
 openshard-protocol.workspace = true
 openshard-state.workspace = true

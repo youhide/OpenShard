@@ -36,6 +36,29 @@ pub const RUN_INTERVAL: Duration = Duration::from_millis(100);
 /// a long gallop.
 pub const MOUNTED_RUN_INTERVAL: Duration = Duration::from_millis(50);
 
+/// How long one step actually takes, on foot, at a walk.
+///
+/// [`WALK_INTERVAL`] twice, and derived from it rather than written out: the
+/// interval above is a *floor* — how often the server will allow a step — and
+/// twice it is the real pace, 400ms, which this module's own test pins against
+/// ServUO's `WalkFoot`.
+///
+/// Here rather than in either end that needs it, because it is a rule about
+/// movement and both ends read it: the client glides a body over it and holds
+/// its walking animation for it, and the camera bench walks a scripted body at
+/// it. Written down twice, the two copies drift and the bench is then tuned on
+/// a walk nobody does.
+pub const WALK_HOLD: Duration = Duration::from_millis(2 * WALK_INTERVAL.as_millis() as u64);
+
+/// The same, for a body the wire says is running.
+///
+/// [`RUN_INTERVAL`] doubled for the reason [`WALK_HOLD`] doubles its own, and
+/// ServUO's `RunFoot` is this. It has to be the real rate and not the floor
+/// because it is also how long a glide takes: held for twice the step, a runner
+/// would be a whole tile behind itself and would jump forward half a tile every
+/// time the next step arrived.
+pub const RUN_HOLD: Duration = Duration::from_millis(2 * RUN_INTERVAL.as_millis() as u64);
+
 /// How many steps of credit a mobile may bank.
 ///
 /// The burst a client may spend at once after standing still. It has to be
@@ -247,6 +270,16 @@ mod tests {
         assert_eq!(WALK_INTERVAL.as_millis() * 2, 400, "ServUO WalkFoot");
         assert_eq!(RUN_INTERVAL.as_millis() * 2, 200, "ServUO RunFoot/WalkMount");
         assert_eq!(MOUNTED_RUN_INTERVAL.as_millis() * 2, 100, "ServUO RunMount");
+    }
+
+    #[test]
+    fn the_holds_are_the_references_real_rates() {
+        // The other half of the test above, from the side that has to be the
+        // real gap rather than the floor: a glide and a walking animation last
+        // exactly one step, so these are ServUO's numbers and not Sphere's.
+        assert_eq!(WALK_HOLD.as_millis(), 400, "ServUO WalkFoot");
+        assert_eq!(RUN_HOLD.as_millis(), 200, "ServUO RunFoot");
+        assert_eq!(RUN_HOLD * 2, WALK_HOLD, "a run is a walk doubled");
     }
 
     #[test]

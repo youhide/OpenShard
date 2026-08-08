@@ -166,7 +166,7 @@ pub(crate) fn open_container(
     state.send_packet(
         connection,
         &ServerPacket::ContainerContents(ContainerContents {
-            container: container_serial,
+            container: Some(container_serial),
             items: contents.clone(),
         }),
     );

@@ -2,7 +2,7 @@
 //! living mobile, and the event that announces it.
 
 use openshard_entities::EntityId;
-use openshard_movement::Walker;
+use openshard_movement::{Tile, Walker};
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::{Serial, SerialKind};
@@ -157,7 +157,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
         .facet_state(facet)
         .terrain
         .as_ref()
-        .and_then(|t| t.spawn_z(position.x, position.y, i32::from(position.z)))
+        .and_then(|t| t.spawn_z(Tile::new(position.x, position.y), i32::from(position.z)))
         .and_then(|z| i8::try_from(z).ok())
     {
         Some(z) => Point::new(position.x, position.y, z),

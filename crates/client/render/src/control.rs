@@ -1,8 +1,8 @@
 //! What the mouse, the wheel and the lock key do to a [`Camera`].
 //!
-//! The arithmetic between an input event and an eye: a drag's fractional
-//! remainder, a wheel notch's anchor, the device's refusal to allocate the image
-//! a zoom asks for, and whether the eye is the body's or the mouse's. All of it
+//! The arithmetic between an input event and an eye: a drag in real pixels, a
+//! wheel notch's anchor, the device's refusal to allocate the image a zoom asks
+//! for, and whether the eye is the body's or the mouse's. All of it
 //! used to live in `client/app`, where it could not be reached from a test
 //! because the thing that owned it also owned a window, a GPU and a `Map`. None
 //! of it needs any of the three.
@@ -12,9 +12,10 @@
 //! a redraw and printing the refusal are the caller's, because a renderer with a
 //! stderr is a renderer that cannot be run twice in one process.
 
-use openshard_protocol::world::Point;
+use std::time::Duration;
 
-use crate::camera::{Camera, WorldPixel, Zoom};
+use crate::camera::{Camera, WorldPoint, Zoom};
+use crate::follow::{Follower, Gaze, Rig};
 
 /// Whether the camera is tied to the body or the mouse.
 ///
@@ -32,13 +33,13 @@ pub enum Follow {
 
 /// What the mouse is doing to the camera.
 ///
-/// The fraction is the reason this is a struct and not a flag. At zoom 2 a
-/// one-pixel drag is half a world pixel, and an eye that carried the fraction
-/// would put every sprite on a half-texel boundary for half of all camera
-/// positions — the same class of defect as the half-texel inset the atlases
-/// apply, spread across the whole frame instead of one edge. So the remainder is
-/// accumulated here, in the input handler, and only whole world pixels reach
-/// [`Camera::look_at_pixel`].
+/// It used to carry a third field: the fraction of a virtual pixel a drag had
+/// dragged and not yet spent, because at `2x` a one-real-pixel drag was half a
+/// virtual one and the eye could only hold whole ones. Under D11 the eye is on
+/// the real pixel's lattice, so a drag of one real pixel is a position the eye
+/// can express exactly — there is no remainder to keep, and the drag that used
+/// to move nothing three times out of four now moves the world by exactly what
+/// the hand moved.
 #[derive(Clone, Copy, Default, Debug)]
 struct Drag {
     /// Where the cursor was last seen, in physical pixels from the viewport's
@@ -46,8 +47,6 @@ struct Drag {
     cursor: (i32, i32),
     /// Whether the middle button is down.
     panning: bool,
-    /// Viewport pixels dragged and not yet spent, numerator over the zoom's.
-    remainder: (i32, i32),
 }
 
 /// A zoom the device would not allocate the offscreen image for.
@@ -71,11 +70,16 @@ pub struct TooLarge {
     pub settled: Zoom,
 }
 
-/// A camera, who is allowed to move it, and what the mouse has not yet spent.
+/// A camera, who is allowed to move it, and where the mouse last was.
 #[derive(Clone, Copy, Debug)]
 pub struct Control {
     camera: Camera,
     follow: Follow,
+    /// How the eye follows the body while [`Follow::Body`] holds — the rig and
+    /// where it has got to. Arbitrating *who* may move the eye is this type's
+    /// job; how it moves is [`crate::follow`]'s, and the two are separated
+    /// because only the second one can be put on a bench.
+    follower: Follower,
     drag: Drag,
     /// How far the ladder may be walked down before the offscreen texture is
     /// larger than the GPU allows.
@@ -86,11 +90,16 @@ pub struct Control {
 }
 
 impl Control {
-    /// A locked camera on this device.
-    pub fn new(camera: Camera, max_texture: u32) -> Self {
+    /// A locked camera on this device, following with this rig.
+    ///
+    /// The rig is an argument and not a default: which camera this client ships
+    /// is undecided, and a `new` that quietly picked one would be the decision
+    /// (`docs/camera.md`, D9).
+    pub fn new(camera: Camera, max_texture: u32, rig: Rig) -> Self {
         Self {
             camera,
             follow: Follow::Body,
+            follower: Follower::new(rig),
             drag: Drag::default(),
             max_texture,
         }
@@ -99,6 +108,31 @@ impl Control {
     /// The camera, for everything that draws from it.
     pub fn camera(&self) -> &Camera {
         &self.camera
+    }
+
+    /// The rig the eye is following with.
+    pub fn rig(&self) -> Rig {
+        self.follower.rig()
+    }
+
+    /// Where the eye is to a fraction of a pixel, channel by channel, for a
+    /// bench or a scope — see [`Follower::exact`]. `None` before the first
+    /// frame.
+    pub fn eye_exact(&self) -> Option<Gaze> {
+        self.follower.exact()
+    }
+
+    /// Whether the eye still owes the screen a pixel — see
+    /// [`Follower::settling`]. Only while it is the body's: an unlocked eye is
+    /// wherever the hand left it and is converging on nothing.
+    pub fn settling(&self) -> bool {
+        self.follow == Follow::Body && self.follower.settling(self.camera.quantum())
+    }
+
+    /// Follow with another one, without moving the eye — see
+    /// [`Follower::set_rig`].
+    pub fn set_rig(&mut self, rig: Rig) {
+        self.follower.set_rig(rig);
     }
 
     /// Whether the eye is the body's or the mouse's.
@@ -137,9 +171,21 @@ impl Control {
     /// interpolate across — easing it would be a second kind of motion, over a
     /// distance nothing bounds. A body's own step is [`Control::follow_body`],
     /// which glides.
-    pub fn relock(&mut self, at: Point) {
+    ///
+    /// The cut is what makes that true for a rig that eases. Moving the camera
+    /// without it would leave the follower's own idea of where the eye is on the
+    /// far side of the map, and the next frame would ease all the way back.
+    ///
+    /// A [`Gaze`] and not a tile, for the same reason [`Control::follow_body`]
+    /// takes one: a body relocked to mid-glide is between two tiles, and the
+    /// tile it is nominally on is up to half a tile from where it is drawn. The
+    /// pixel the eye is put on has to be the pixel the sprite is on, or the
+    /// first frame after a relock is off by that much and the second corrects
+    /// it — which is the jump the cut was there to avoid, one frame late.
+    pub fn relock(&mut self, gaze: Gaze) {
         self.follow = Follow::Body;
-        self.camera.look_at(at);
+        self.follower.cut();
+        self.camera.look_at(gaze.eye());
     }
 
     /// Let the body walk off screen: the eye stops following it.
@@ -153,24 +199,25 @@ impl Control {
     /// than an `if` at each call site: `App::step` and `App::entered` are two
     /// writers of the same eye, and a third would forget.
     ///
-    /// A world pixel and not a tile, because a body between two tiles is where
-    /// the eye has to be: a camera that only moved when a `0x77` arrived would
-    /// jump the whole world a tile at a time under a character gliding smoothly
+    /// A [`Gaze`] and not a tile, because a body between two tiles is where the
+    /// eye has to be: a camera that only moved when a `0x77` arrived would jump
+    /// the whole world a tile at a time under a character gliding smoothly
     /// across it — which is worse than the teleport the glide removed, since it
-    /// is the *world* that jerks. `mobiles::world_position` is what to hand it.
-    pub fn follow_body(&mut self, at: WorldPixel) {
+    /// is the *world* that jerks. `mobiles::gaze` is what to hand it.
+    ///
+    /// Called every frame and not only when a step lands, whatever the rig: a
+    /// glide moves the body between packets, and a filtered rig is still
+    /// converging on frames where nothing arrived at all.
+    pub fn follow_body(&mut self, gaze: Gaze, dt: Duration) {
         if self.follow == Follow::Body {
-            self.camera.look_at_pixel(at);
+            let eye = self.follower.advance(gaze, dt);
+            self.camera.look_at(eye);
         }
     }
 
     /// The middle button went down or came up.
-    ///
-    /// Whatever a previous drag was saving up is not owed to this one, so the
-    /// remainder is dropped on either edge.
     pub fn set_panning(&mut self, down: bool) {
         self.drag.panning = down;
-        self.drag.remainder = (0, 0);
     }
 
     /// The cursor moved to a viewport pixel, panning if the button is down.
@@ -184,30 +231,27 @@ impl Control {
         self.drag.panning && self.pan(dx, dy)
     }
 
-    /// Move the eye by a drag, in viewport pixels, spending whole world pixels.
+    /// Move the eye by a drag, in real pixels.
+    ///
+    /// One real pixel of hand is one real pixel of world, at every rung of the
+    /// ladder: the eye's lattice *is* the real pixel, so the conversion below is
+    /// exact and there is nothing left over. Before D11 this was the arithmetic
+    /// with the remainder in it, and what it bought was a camera that ignored
+    /// three drags in four at `4x` and then jumped four pixels.
     ///
     /// Unlocks: a hand on the camera outranks the server, until `Home` says
     /// otherwise. Answers whether the eye moved.
     pub fn pan(&mut self, dx: i32, dy: i32) -> bool {
         self.follow = Follow::Free;
-        let num = self.camera.zoom().numerator() as i32;
-        let den = self.camera.zoom().denominator() as i32;
-        // Viewport pixels times the denominator, kept as a numerator over `num`:
-        // the fraction stays here rather than in the eye.
-        let owed_x = self.drag.remainder.0 + dx * den;
-        let owed_y = self.drag.remainder.1 + dy * den;
-        // Towards zero, so the remainder keeps the sign of the debt and a drag
-        // back and forth ends where it started.
-        let (whole_x, whole_y) = (owed_x / num, owed_y / num);
-        self.drag.remainder = (owed_x - whole_x * num, owed_y - whole_y * num);
-        if whole_x == 0 && whole_y == 0 {
+        if dx == 0 && dy == 0 {
             return false;
         }
-        let eye = self.camera.eye();
+        let quantum = self.camera.quantum();
+        let eye = self.camera.eye_at();
         // The world follows the cursor, so the eye goes the other way.
-        self.camera.look_at_pixel(WorldPixel {
-            x: eye.x - whole_x,
-            y: eye.y - whole_y,
+        self.camera.look_at(WorldPoint {
+            x: eye.x - f64::from(dx) * quantum,
+            y: eye.y - f64::from(dy) * quantum,
         });
         true
     }
@@ -242,8 +286,6 @@ impl Control {
             return Err(refusal);
         }
         self.camera = probe;
-        // The fraction a drag was saving up belongs to the old zoom.
-        self.drag.remainder = (0, 0);
         Ok(true)
     }
 
@@ -286,7 +328,11 @@ impl Control {
     /// Whether the offscreen image this camera wants is larger than the device
     /// allows, and by how much.
     fn refuses(&self, camera: &Camera) -> Option<TooLarge> {
-        let (width, height) = (camera.render_width(), camera.render_height());
+        // The image as it will actually be allocated, which above 1:1 is the
+        // viewport's own size rather than the world's extent — a magnified
+        // camera asks for *less* texture than an unmagnified one, and asking
+        // `render_width` here would refuse a zoom that fits.
+        let (width, height) = camera.image_size();
         if width <= self.max_texture && height <= self.max_texture {
             return None;
         }
@@ -304,6 +350,8 @@ impl Control {
 
 #[cfg(test)]
 mod tests {
+    use openshard_protocol::world::Point;
+
     use super::*;
 
     /// A device that will hold anything, so a test about panning is not also a
@@ -311,8 +359,11 @@ mod tests {
     const HUGE: u32 = 1 << 20;
 
     fn control() -> Control {
-        Control::new(Camera::new(Point::new(100, 100, 0), 800, 600), HUGE)
+        Control::new(Camera::new(Point::new(100, 100, 0), 800, 600), HUGE, Rig::HARD)
     }
+
+    /// A frame's worth of time, for the calls that take one and do not care.
+    const FRAME: Duration = Duration::from_millis(16);
 
     /// Zooming out four rungs from `1:1` and back in four lands on the same
     /// zoom, which is the ladder's whole promise.
@@ -331,89 +382,97 @@ mod tests {
             assert!(back < 100, "the ladder has no top");
         }
         assert_eq!(control.camera().zoom().to_string(), "4x");
-        assert_eq!((out, back), (3, 8), "nine rungs, with 1:1 the fourth");
+        assert_eq!((out, back), (3, 6), "seven rungs, with 1:1 the fourth");
     }
 
-    /// The remainder is the point of `Drag`, and this is what it buys: at zoom 4
-    /// a single viewport pixel is a quarter of a world pixel, so three drags
-    /// move nothing and the fourth moves one.
+    /// The gate D11 names, on the input side: one real pixel of hand is one real
+    /// pixel of world, at every rung of the ladder.
+    ///
+    /// This is the test the old one is the negative of. Before D11 the eye held
+    /// whole *virtual* pixels, so at `4x` three drags in four moved nothing and
+    /// the fourth moved four real pixels at once — which read as a camera that
+    /// ignored small movements and then lurched, and which the remainder in
+    /// `Drag` was there to make orderly rather than to remove.
+    ///
+    /// Measured through `to_viewport`, and deliberately: `eye()` is rounded to a
+    /// virtual pixel and at `4x` it does not change at all for three drags out
+    /// of four, so an assertion on it would pass on the old arithmetic too. What
+    /// is asserted is where a fixed point of the *world* lands on the display.
     #[test]
-    fn a_drag_finer_than_a_world_pixel_accumulates() {
+    fn a_drag_of_one_real_pixel_moves_the_world_one_real_pixel() {
         let mut control = control();
-        for _ in 0..5 {
-            assert!(control.zoom(true).unwrap());
+        // From the bottom of the ladder, so the minifying rungs are walked too:
+        // there a real pixel is *coarser* than a virtual one and the eye moves
+        // by two at a time, which is the other side of the same promise and the
+        // side that goes through the blit rather than through the transform.
+        while control.zoom(false).unwrap() {}
+        let mut rung = 0;
+        loop {
+            // A tile well away from the eye, so nothing about this is a
+            // property of the origin.
+            let fixed = Point::new(340, 360, 0);
+            let before = control.camera().to_viewport(control.camera().to_screen(fixed));
+            assert!(control.pan(1, 1), "a real pixel is always a position at {rung}");
+            let after = control.camera().to_viewport(control.camera().to_screen(fixed));
+            assert_eq!(
+                (after.x - before.x, after.y - before.y),
+                (1.0, 1.0),
+                "the world did not follow the hand at rung {rung}",
+            );
+            if !control.zoom(true).unwrap() {
+                break;
+            }
+            rung += 1;
         }
-        assert_eq!(control.camera().zoom().to_string(), "4x");
-        let before = control.camera().eye();
-        assert!(!control.pan(1, 0), "a quarter pixel is not a pixel");
-        assert!(!control.pan(1, 0));
-        assert!(!control.pan(1, 0));
-        assert!(control.pan(1, 0), "four quarters are");
-        assert_eq!(control.camera().eye().x, before.x - 1);
+        assert_eq!(rung, 6, "every rung of the ladder was walked");
     }
 
     /// And the direction of the rounding: a drag out and back ends where it
-    /// started rather than a pixel to one side, which is what "towards zero"
-    /// with a signed remainder is for.
+    /// started rather than a pixel to one side.
+    ///
+    /// It survives D11 unchanged and is worth keeping for it — under the old
+    /// arithmetic it was a statement about a signed remainder truncating towards
+    /// zero, and under this one it holds because there is no remainder at all.
     #[test]
     fn a_drag_out_and_back_ends_where_it_started() {
         let mut control = control();
         assert!(control.zoom(true).unwrap());
-        let before = control.camera().eye();
+        let before = control.camera().eye_at();
         for _ in 0..7 {
             control.pan(1, 1);
         }
         for _ in 0..7 {
             control.pan(-1, -1);
         }
-        assert_eq!(control.camera().eye(), before);
+        assert_eq!(control.camera().eye_at(), before);
     }
 
-    /// Three quarters of a world pixel owed at 4x, and the zoom that leaves.
+    /// A drag finer than the display cannot exist, so a zoom has nothing to
+    /// forget — but the eye it leaves behind has to land on the *new* rung's
+    /// lattice, or it sits between two real pixels until somebody moves it.
     ///
-    /// The remainder belongs to the zoom that produced it: three quarters is not
-    /// three thirds, and a remainder carried across would pay for a pixel the
-    /// drag never asked for — the next single-pixel drag at 3x would move the eye
-    /// instead of saving up like the two after it.
+    /// Half a virtual pixel is a position at `2x` and is not one at `3x`, which
+    /// is the case this walks. The old test in this slot asserted that a zoom
+    /// dropped the fraction a drag was saving up; there is no such fraction now,
+    /// and the question it was really about — what happens to a sub-pixel offset
+    /// when the rung changes — is this.
     #[test]
-    fn a_zoom_forgets_what_a_drag_was_saving_up() {
+    fn a_zoom_leaves_the_eye_on_the_new_rungs_lattice() {
         let mut control = control();
-        for _ in 0..5 {
-            assert!(control.zoom(true).unwrap());
-        }
-        for _ in 0..3 {
-            assert!(!control.pan(1, 0), "three quarters owed");
-        }
-        assert!(control.zoom(false).unwrap());
-        assert_eq!(control.camera().zoom().to_string(), "3x");
-        assert!(!control.pan(1, 0), "a third, not a third plus three quarters");
-        assert!(!control.pan(1, 0));
-        let before = control.camera().eye();
-        assert!(control.pan(1, 0), "three thirds");
-        assert_eq!(control.camera().eye().x, before.x - 1);
-    }
+        assert!(control.zoom(true).unwrap());
+        assert_eq!(control.camera().zoom().to_string(), "2x");
+        assert!(control.pan(1, 0), "half a virtual pixel, which 2x can express");
+        let half = control.camera().eye_at();
+        assert_eq!(half.x.fract().abs(), 0.5);
 
-    /// A press or a release does the same, for the same reason: the fraction one
-    /// drag left over is not owed to the next one.
-    #[test]
-    fn a_new_drag_does_not_inherit_a_remainder() {
-        let mut control = control();
-        for _ in 0..5 {
-            assert!(control.zoom(true).unwrap());
-        }
-        for _ in 0..3 {
-            assert!(!control.pan(1, 0));
-        }
-        control.set_panning(true);
-        for _ in 0..3 {
-            assert!(
-                !control.pan(1, 0),
-                "the owed three quarters went with the old drag"
-            );
-        }
-        let before = control.camera().eye();
-        assert!(control.pan(1, 0));
-        assert_eq!(control.camera().eye().x, before.x - 1);
+        assert!(control.zoom(true).unwrap());
+        assert_eq!(control.camera().zoom().to_string(), "3x");
+        let thirds = control.camera().eye_at();
+        assert_eq!(
+            thirds,
+            control.camera().snap(thirds),
+            "an eye off the lattice is a frame resampled by a fraction of a texel",
+        );
     }
 
     /// `cursor_moved` pans only while the button is down, and it pans by the
@@ -436,7 +495,7 @@ mod tests {
     fn the_body_moves_the_eye_only_while_locked() {
         let mut control = control();
         assert_eq!(control.follow(), Follow::Body);
-        control.follow_body(crate::camera::project(Point::new(200, 200, 0)));
+        control.follow_body(Gaze::on(Point::new(200, 200, 0)), FRAME);
         assert_eq!(
             control.camera().eye(),
             crate::camera::project(Point::new(200, 200, 0))
@@ -445,10 +504,10 @@ mod tests {
         control.pan(30, 30);
         assert_eq!(control.follow(), Follow::Free, "a hand on the camera unlocks it");
         let free = control.camera().eye();
-        control.follow_body(crate::camera::project(Point::new(300, 300, 0)));
+        control.follow_body(Gaze::on(Point::new(300, 300, 0)), FRAME);
         assert_eq!(control.camera().eye(), free, "the body no longer drags the eye");
 
-        control.relock(Point::new(300, 300, 0));
+        control.relock(Gaze::on(Point::new(300, 300, 0)));
         assert_eq!(control.follow(), Follow::Body);
         assert_eq!(
             control.camera().eye(),
@@ -484,7 +543,7 @@ mod tests {
     #[test]
     fn a_device_that_cannot_hold_the_image_refuses_the_zoom() {
         // 800 wide at 3/4 wants 1068, which this device will not hold.
-        let mut control = Control::new(Camera::new(Point::new(100, 100, 0), 800, 600), 1024);
+        let mut control = Control::new(Camera::new(Point::new(100, 100, 0), 800, 600), 1024, Rig::HARD);
         let before = *control.camera();
         let refusal = control.zoom(false).unwrap_err();
         assert_eq!(*control.camera(), before, "a refusal moves nothing");
@@ -499,7 +558,7 @@ mod tests {
     /// used. Without this the next frame is a validation error.
     #[test]
     fn growing_the_viewport_steps_the_zoom_back_in() {
-        let mut control = Control::new(Camera::new(Point::new(100, 100, 0), 400, 300), 1024);
+        let mut control = Control::new(Camera::new(Point::new(100, 100, 0), 400, 300), 1024, Rig::HARD);
         assert!(control.zoom(false).unwrap(), "536 fits in 1024");
         assert_eq!(control.camera().zoom().to_string(), "3/4x");
         assert_eq!(control.fit_to_device(), None);
@@ -517,7 +576,7 @@ mod tests {
     /// prints it, and a caller that printed one per rung would be shouting.
     #[test]
     fn a_fit_that_climbs_several_rungs_reports_once() {
-        let mut control = Control::new(Camera::new(Point::new(100, 100, 0), 400, 300), 4096);
+        let mut control = Control::new(Camera::new(Point::new(100, 100, 0), 400, 300), 4096, Rig::HARD);
         assert!(control.zoom(false).unwrap());
         control.set_max_texture(512);
         control.resize(1200, 900);
@@ -531,7 +590,7 @@ mod tests {
     /// loop that steps in has to stop rather than spin at the top of the ladder.
     #[test]
     fn a_viewport_past_the_limit_stops_at_the_top_of_the_ladder() {
-        let mut control = Control::new(Camera::new(Point::new(100, 100, 0), 8192, 8192), 1024);
+        let mut control = Control::new(Camera::new(Point::new(100, 100, 0), 8192, 8192), 1024, Rig::HARD);
         let refusal = control.fit_to_device().expect("nothing here fits");
         assert_eq!(refusal.settled.to_string(), "4x", "climbed as far as it could");
         assert_eq!(control.camera().zoom().to_string(), "4x");

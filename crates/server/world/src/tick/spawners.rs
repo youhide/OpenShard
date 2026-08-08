@@ -72,7 +72,7 @@ impl World {
                 .facet_state(Facet(facet))
                 .terrain
                 .as_ref()
-                .and_then(|terrain| terrain.ground_z(x, y))
+                .and_then(|terrain| terrain.ground_z(Tile::new(x, y)))
                 .unwrap_or(0);
 
             if let Some(entity) = npc::spawn(

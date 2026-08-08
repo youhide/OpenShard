@@ -1,4 +1,4 @@
-//! Which way the keyboard is asking to walk, and how often it may ask.
+//! Which way the keyboard is asking to walk.
 //!
 //! # Why a key is held rather than pressed
 //!
@@ -11,35 +11,15 @@
 //! too much.
 //!
 //! So the key is *state* and the clock is ours: a direction is held or it is
-//! not, and while one is held a step is due every [`crowd::WALK_HOLD`] — or
-//! every [`crowd::RUN_HOLD`] with shift down, which is what running is.
-//!
-//! # The rate is the step's own length, not the anti-speedhack floor
-//!
-//! `common/movement`'s intervals are floors, deliberately half the real rate so
-//! that jitter never trips the check (see `pace.rs`). Walking *at* the floor
-//! would be moving twice as fast as a body moves, and the crowd — which glides a
-//! step over its own length — would have a walker arrive half a tile before the
-//! next step and stand there. The hold in `crowd` is already that real length,
-//! for exactly this reason, so it is what is read here rather than a second
-//! number that could disagree with it.
-//!
-//! # The first press steps at once
-//!
-//! Waiting a whole step before the first one would put 400ms between the key and
-//! the character. So a press that changes the direction is due immediately and
-//! the timer is armed from there; a press of a key already down is the OS
-//! repeating itself and is ignored.
-
-use std::time::{Duration, Instant};
+//! not, and [`crate::steer::Steering`] is what decides when the next step
+//! leaves. This file answers one question — which way is the keyboard pointing
+//! right now — and owns no timer, because the mouse asks for steps at the same
+//! rate and two clocks would take two steps per beat.
 
 use openshard_protocol::direction::{Direction, Facing};
 use winit::keyboard::KeyCode;
 
-use crate::crowd::{RUN_HOLD, WALK_HOLD};
-
-/// The arrow keys currently down, whether shift is, and when the next step is
-/// due.
+/// The arrow keys currently down, and whether shift is.
 #[derive(Clone, Debug, Default)]
 pub struct Held {
     /// Every arrow currently down, in the order they went down.
@@ -51,11 +31,6 @@ pub struct Held {
     down: Vec<Direction>,
     /// Whether either shift is down. The whole of "run" on this keyboard.
     running: bool,
-    /// When the next step may be sent, or `None` when nothing is held.
-    ///
-    /// Absent means absent: no key is down, so there is no next step — not "not
-    /// known yet".
-    due: Option<Instant>,
 }
 
 impl Held {
@@ -74,16 +49,17 @@ impl Held {
         }
     }
 
-    /// An arrow went down. Answers the step to send now, if any.
-    pub fn press(&mut self, direction: Direction, now: Instant) -> Option<Facing> {
+    /// An arrow went down. Answers whether the direction being obeyed changed.
+    ///
+    /// `false` is the operating system repeating a key that is already the one
+    /// obeyed, and its repeat rate is not a walking speed — see the module docs.
+    pub fn press(&mut self, direction: Direction) -> bool {
         if self.down.last() == Some(&direction) {
-            // The key was already the one being obeyed: this is the OS
-            // repeating it, and the repeat rate is not a walking speed.
-            return None;
+            return false;
         }
         self.down.retain(|held| *held != direction);
         self.down.push(direction);
-        Some(self.send(now))
+        true
     }
 
     /// An arrow came up.
@@ -92,18 +68,17 @@ impl Held {
     /// focus mid-step gets the release and never got the press.
     pub fn release(&mut self, direction: Direction) {
         self.down.retain(|held| *held != direction);
-        if self.down.is_empty() {
-            self.due = None;
-        }
     }
 
     /// Shift went down or came up.
-    ///
-    /// Deliberately not re-timed: a walker that starts running mid-step keeps
-    /// the deadline it already had, and the next one is a run's. Re-arming here
-    /// would let a player tapping shift send a step per tap.
     pub fn set_running(&mut self, running: bool) {
         self.running = running;
+    }
+
+    /// Whether shift is down, which is what the mouse's own steps read to decide
+    /// their pace as well.
+    pub const fn running(&self) -> bool {
+        self.running
     }
 
     /// Everything is up.
@@ -113,45 +88,15 @@ impl Held {
     /// to.
     pub fn clear(&mut self) {
         self.down.clear();
-        self.due = None;
     }
 
-    /// The step due by now, if one is.
-    ///
-    /// Called from the wait loop, so it charges one step per call rather than
-    /// catching up on a stall: a window that was minimised for a minute has not
-    /// banked a hundred and fifty steps, and sending them would be the flood
-    /// this module exists to prevent.
-    pub fn due(&mut self, now: Instant) -> Option<Facing> {
-        match self.due {
-            Some(due) if now >= due => Some(self.send(now)),
-            _ => None,
-        }
-    }
-
-    /// When the next step is due, for the event loop's deadline.
-    pub fn deadline(&self) -> Option<Instant> {
-        self.due
-    }
-
-    /// How long a step takes at the pace being asked for.
-    fn interval(&self) -> Duration {
-        if self.running { RUN_HOLD } else { WALK_HOLD }
-    }
-
-    /// Take the step that is due: arm the next one and say what to send.
-    ///
-    /// Only called with something held, which is what makes the `unwrap`
-    /// honest — `press` has just pushed, and `due` is `None` whenever the stack
-    /// is empty.
-    fn send(&mut self, now: Instant) -> Facing {
-        let direction = *self.down.last().unwrap();
-        self.due = Some(now + self.interval());
-        if self.running {
-            Facing::running(direction)
-        } else {
-            Facing::walking(direction)
-        }
+    /// Which way the keyboard is asking to walk, if it is asking at all.
+    pub fn asking(&self) -> Option<Facing> {
+        let direction = *self.down.last()?;
+        Some(match self.running {
+            true => Facing::running(direction),
+            false => Facing::walking(direction),
+        })
     }
 }
 
@@ -159,113 +104,51 @@ impl Held {
 mod tests {
     use super::*;
 
-    /// The clock is a parameter here as it is in `WalkPace`, so a rate can be
-    /// tested without sleeping through one.
-    fn at(start: Instant, millis: u64) -> Instant {
-        start + Duration::from_millis(millis)
-    }
-
-    #[test]
-    fn a_press_steps_at_once_and_then_at_the_walking_rate() {
-        let start = Instant::now();
-        let mut held = Held::default();
-
-        assert_eq!(
-            held.press(Direction::NorthWest, start),
-            Some(Facing::walking(Direction::NorthWest))
-        );
-        // Nothing is due until a whole step has passed.
-        assert_eq!(held.due(at(start, 399)), None);
-        assert_eq!(
-            held.due(at(start, 400)),
-            Some(Facing::walking(Direction::NorthWest))
-        );
-        assert_eq!(held.due(at(start, 401)), None);
-    }
-
     /// The defect this module was written for: the OS repeats a held key at its
-    /// own rate, and that rate is not a walking speed.
+    /// own rate, and that rate is not a walking speed. The repeat changes
+    /// nothing, so nothing upstream re-arms a clock from it.
     #[test]
-    fn the_operating_systems_repeat_is_not_a_step() {
-        let start = Instant::now();
+    fn the_operating_systems_repeat_changes_nothing() {
         let mut held = Held::default();
-
-        held.press(Direction::NorthWest, start).unwrap();
-        for repeat in 1..30 {
-            assert_eq!(held.press(Direction::NorthWest, at(start, repeat * 30)), None);
+        assert!(held.press(Direction::NorthWest));
+        for _ in 1..30 {
+            assert!(!held.press(Direction::NorthWest));
         }
     }
 
     #[test]
-    fn shift_is_the_running_flag_and_halves_the_gap() {
-        let start = Instant::now();
-        let mut held = Held::default();
-        held.set_running(true);
-
-        assert_eq!(
-            held.press(Direction::SouthEast, start),
-            Some(Facing::running(Direction::SouthEast))
-        );
-        assert_eq!(held.due(at(start, 199)), None);
-        assert_eq!(
-            held.due(at(start, 200)),
-            Some(Facing::running(Direction::SouthEast))
-        );
-    }
-
-    /// Shift pressed mid-walk does not itself send anything: the deadline in
-    /// flight is kept and the pace changes from the next step on.
-    #[test]
-    fn shift_mid_step_does_not_send_a_step_of_its_own() {
-        let start = Instant::now();
-        let mut held = Held::default();
-
-        held.press(Direction::North, start).unwrap();
-        held.set_running(true);
-        assert_eq!(held.due(at(start, 200)), None, "the walk's deadline stands");
-        assert_eq!(held.due(at(start, 400)), Some(Facing::running(Direction::North)));
-        // And from there it is a runner's.
-        assert_eq!(held.due(at(start, 600)), Some(Facing::running(Direction::North)));
-    }
-
-    #[test]
     fn the_last_key_pressed_is_the_one_obeyed_and_releasing_it_falls_back() {
-        let start = Instant::now();
         let mut held = Held::default();
-
-        held.press(Direction::NorthWest, start).unwrap();
-        assert_eq!(
-            held.press(Direction::NorthEast, at(start, 50)),
-            Some(Facing::walking(Direction::NorthEast))
-        );
+        held.press(Direction::NorthWest);
+        assert!(held.press(Direction::NorthEast));
+        assert_eq!(held.asking(), Some(Facing::walking(Direction::NorthEast)));
         held.release(Direction::NorthEast);
         assert_eq!(
-            held.due(at(start, 450)),
+            held.asking(),
             Some(Facing::walking(Direction::NorthWest)),
             "the key still down keeps walking"
         );
     }
 
     #[test]
-    fn nothing_held_is_nothing_due() {
-        let start = Instant::now();
+    fn shift_is_the_running_flag() {
         let mut held = Held::default();
-
-        held.press(Direction::West, start).unwrap();
-        held.release(Direction::West);
-        assert_eq!(held.deadline(), None);
-        assert_eq!(held.due(at(start, 10_000)), None);
-        // A release nobody pressed is not an error.
-        held.release(Direction::West);
+        held.press(Direction::SouthEast);
+        held.set_running(true);
+        assert_eq!(held.asking(), Some(Facing::running(Direction::SouthEast)));
     }
 
     #[test]
-    fn losing_focus_lets_go_of_everything() {
-        let start = Instant::now();
+    fn nothing_held_asks_for_nothing() {
         let mut held = Held::default();
+        held.press(Direction::West);
+        held.release(Direction::West);
+        assert_eq!(held.asking(), None);
+        // A release nobody pressed is not an error.
+        held.release(Direction::West);
 
-        held.press(Direction::South, start).unwrap();
+        held.press(Direction::South);
         held.clear();
-        assert_eq!(held.due(at(start, 10_000)), None);
+        assert_eq!(held.asking(), None);
     }
 }

@@ -20,6 +20,7 @@ name = "openshard"
 path = "src/main.rs"
 
 [dependencies]
+clap.workspace = true
 openshard-config.workspace = true
 openshard-events.workspace = true
 openshard-gateway.workspace = true

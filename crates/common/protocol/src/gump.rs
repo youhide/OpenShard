@@ -11,6 +11,8 @@
 //! `0xDD`, and ClassicUO and the modern 2D client both still render `0xB0`, so the
 //! compression is a later optimisation, not a requirement.
 
+pub mod layout;
+
 use std::fmt;
 
 use crate::codec::{PacketReader, PacketWriter};
@@ -752,6 +754,53 @@ impl EncodePacket for GumpDisplay {
     }
 }
 
+impl DecodePacket for GumpDisplay {
+    const ID: u8 = 0xB0;
+
+    /// The other end of [`EncodePacket::encode_body`] above, for a client
+    /// reading a window it has been sent.
+    ///
+    /// Nothing here refuses a layout: the string is handed on as it arrived and
+    /// [`layout::parse`] is what makes sense of it, element by element, keeping
+    /// the ones it does not know rather than dropping the window. A malformed
+    /// element is a picture that does not draw; a malformed *length* is a
+    /// desynchronised stream, and that is what the reader's bounds catch.
+    fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
+        let serial = GumpKey(reader.u32()?);
+        let gump_id = GumpId(reader.u32()?);
+        // Written as unsigned by the encoder above, and signed in the layout's
+        // own space — see `GumpPoint`. The cast is the same one, backwards.
+        let x = reader.u32()? as i32;
+        let y = reader.u32()? as i32;
+
+        let layout_len = reader.u16()? as usize;
+        let layout = String::from_utf8_lossy(reader.bytes(layout_len)?).into_owned();
+
+        let count = reader.u16()? as usize;
+        // Capped only in the *reservation*: the count is the sender's claim and
+        // the reader is what proves each line is really there, so a huge count
+        // over a short packet fails on the next read rather than on an
+        // allocation.
+        let mut lines = Vec::with_capacity(count.min(64));
+        for _ in 0..count {
+            let units_len = reader.u16()? as usize;
+            let mut units = Vec::with_capacity(units_len.min(256));
+            for _ in 0..units_len {
+                units.push(reader.u16()?);
+            }
+            lines.push(String::from_utf16_lossy(&units));
+        }
+
+        Ok(Self {
+            serial,
+            gump_id,
+            at: GumpPoint::new(x, y),
+            layout,
+            lines,
+        })
+    }
+}
+
 /// `0xB1` — the client's answer to a gump: which button was pressed, plus the
 /// state of any switches (checkboxes, radios) and text fields.
 ///
@@ -814,6 +863,43 @@ impl DecodePacket for GumpResponse {
             switches,
             text_entries,
         })
+    }
+}
+
+impl GumpResponse {
+    /// Encode a whole `0xB1`. What `crates/client/net` sends when a button is
+    /// pressed; this server only ever decodes one.
+    ///
+    /// Every field is a `Raw*` and that is the point: a reply *is* an echo. The
+    /// client repeats the key and the dialog id it was sent, and the server's
+    /// check is against the window it remembers drawing — so nothing is
+    /// promoted on the way out, because nothing here is this end's to name.
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        crate::packet::frame_body(
+            <Self as DecodePacket>::ID,
+            PacketLength::Variable,
+            |out: &mut PacketWriter| {
+                out.u32(self.serial.0);
+                out.u32(self.gump_id.0);
+                out.u32(self.button.0);
+
+                out.u32(self.switches.len() as u32);
+                for switch in &self.switches {
+                    out.u32(switch.0);
+                }
+
+                out.u32(self.text_entries.len() as u32);
+                for (id, text) in &self.text_entries {
+                    out.u16(*id);
+                    let units: Vec<u16> = text.encode_utf16().collect();
+                    out.u16(u16::try_from(units.len()).unwrap_or(u16::MAX));
+                    for unit in units {
+                        out.u16(unit);
+                    }
+                }
+            },
+        )
     }
 }
 
@@ -1021,6 +1107,57 @@ mod tests {
         assert_eq!(u16::from_be_bytes([tail[2], tail[3]]), 2, "two chars");
         assert_eq!(u16::from_be_bytes([tail[4], tail[5]]), b'O' as u16);
         assert_eq!(u16::from_be_bytes([tail[6], tail[7]]), b'k' as u16);
+    }
+
+    /// The two halves this engine had never needed until it grew a client of its
+    /// own: the window out and the answer back, each read by the end that did
+    /// not write it. A field written in the wrong width desynchronises the rest
+    /// of the packet rather than failing, so the assertion is on the whole
+    /// value, not on a byte.
+    #[test]
+    fn a_window_the_server_drew_is_the_window_the_client_reads() {
+        let sent = GumpDisplay {
+            serial: GumpKey(0x1234),
+            gump_id: GumpId(0x00AD_0001),
+            at: GumpPoint::new(100, 100),
+            // A negative coordinate on purpose: it rides as unsigned and has to
+            // come back signed — see `GumpPoint`.
+            layout: "{ resizepic -16 0 5054 300 270 }{ text 105 14 2100 0 }".to_owned(),
+            lines: vec!["Admin".to_owned(), "Populate Felucca".to_owned()],
+        };
+        let bytes = encode_packet(&sent, version());
+        let read: GumpDisplay = decode_server_packet(&bytes, version());
+        assert_eq!(read, sent);
+    }
+
+    #[test]
+    fn the_answer_a_client_encodes_is_the_answer_the_server_decodes() {
+        let sent = GumpResponse {
+            serial: RawGumpKey(0x1234),
+            gump_id: RawGumpId(0x00AD_0001),
+            button: RawButtonId(13),
+            switches: vec![RawSwitchId(7), RawSwitchId(9)],
+            text_entries: vec![(2, "Hi".to_owned())],
+        };
+        let bytes = sent.encode();
+        assert_eq!(bytes[0], 0xB1);
+        assert_eq!(
+            u16::from_be_bytes([bytes[1], bytes[2]]) as usize,
+            bytes.len(),
+            "the length field counts the whole packet"
+        );
+        let read: GumpResponse = decode_packet(&bytes, version()).unwrap();
+        assert_eq!(read, sent);
+    }
+
+    /// Decode a packet the *server* sent, the way a client does: the length
+    /// table is the other one, so `decode_packet` — which asks the client table
+    /// — would not know to skip `0xB0`'s length field.
+    fn decode_server_packet(bytes: &[u8], version: ClientVersion) -> GumpDisplay {
+        match crate::server_packet::ServerPacket::decode(bytes, version) {
+            Ok(Some(crate::server_packet::ServerPacket::GumpDisplay(gump))) => gump,
+            other => panic!("0xB0 did not decode as one: {other:?}"),
+        }
     }
 
     #[test]

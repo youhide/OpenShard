@@ -335,6 +335,23 @@ impl EncodePacket for OpenPaperdoll {
     }
 }
 
+impl DecodePacket for OpenPaperdoll {
+    const ID: u8 = 0x88;
+
+    fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
+        let raw = reader.u32()?;
+        let serial = Serial::new(raw).ok_or(DecodeError::UnknownValue {
+            field: "0x88 paperdoll serial",
+            value: raw,
+        })?;
+        Ok(Self {
+            serial,
+            text: reader.fixed_string(60)?,
+            flags: PaperdollFlags(reader.u8()?),
+        })
+    }
+}
+
 /// One of the three bars a client draws: what there is now, and the most there
 /// could be.
 ///
@@ -1236,6 +1253,22 @@ mod tests {
         assert_eq!(bytes[65], PaperdollFlags::CAN_LIFT.0);
         // The title is where the client draws the name across the top.
         assert!(bytes[5..].starts_with(b"Lord British"));
+    }
+
+    /// The client's half of `0x88`. Worth a test of its own rather than trusting
+    /// the encoder above: the title is a fixed 60-byte field, so a decoder that
+    /// reads it as null-terminated and a decoder that reads it as a block land on
+    /// different flag bytes, and the flags are the last byte of the packet.
+    #[test]
+    fn a_paperdoll_reads_back_the_title_and_the_flags() {
+        let sent = OpenPaperdoll {
+            serial: Serial::new(0x0001_2345).unwrap(),
+            text: "Lord British".to_owned(),
+            flags: PaperdollFlags::WARMODE.with(PaperdollFlags::CAN_LIFT),
+        };
+        let bytes = encode_packet(&sent, version());
+        let read: OpenPaperdoll = crate::packet::decode_packet(&bytes, version()).unwrap();
+        assert_eq!(read, sent, "the padding past the title is not part of it");
     }
 
     #[test]

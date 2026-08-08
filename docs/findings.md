@@ -9,9 +9,10 @@ None of it is architecture. For that, [`architecture.md`](architecture.md).
 
 ## Reference sources
 
-Two other emulators. Neither is vendored, neither is a dependency, and neither is
-copied — they are read. Where your checkouts of them are is your own business:
-put the paths in `CLAUDE.local.md`, which is gitignored beside this file.
+Other people's emulators, and one other client. None is vendored, none is a
+dependency, and — with the single exception called out below — none is copied:
+they are read. Where your checkouts of them are is your own business: put the
+paths in `CLAUDE.local.md`, which is gitignored beside this file.
 
 **SphereServer**, if a checkout is available: `Source-X/` (the C++ engine) and
 `Scripts-X/` (the .scp scriptpack). Read it for **observed protocol behaviour**,
@@ -22,7 +23,33 @@ it.
 **ServUO** (C#, on GitHub), for a second opinion on the same problems. Where the
 two agree about the client, that is as close to a specification as this genre has.
 
-Do **not** read either for architecture. Copying their structure is the one thing
+**Iris2** (C++/Ogre3D, on GitHub, archived), the one open reference that ever put
+Ultima Online on screen in *actual* 3D rather than as sprites. Read it for the
+`.grn` model format and for the tables that map a body to a model and an
+animation — see "3D character models" below. It is **GPL**, and this project is
+MIT/Apache-2.0: not a line of its code and not one of its assets may land here.
+Its observations may, rewritten.
+
+**anima-client** (Rust, on GitHub), a UO client written from scratch: a headless
+sans-IO core (`anima-core` — protocol, world model, Z-aware A\*, asset parsers)
+with the renderers on top, validated against a live ServUO. It is the only
+reference here that implements *our counterpart* rather than another server, so
+where it and this tree disagree about a packet, one of the two is wrong about
+the wire and it is worth finding out which. It is **MIT OR Apache-2.0** —
+declared in every crate from its first commit, licence files added 2026-08-07 —
+which is this project's own pair, so unlike everything else on this list its code
+may be borrowed outright, with the copyright and licence kept. Its author read
+this file against that tree and sent back the stun/disarm finding below.
+
+**Three engines that lit a two-dimensional world**, read for the lighting plan
+and none of them a UO reference: **OpenNox** (GPL-3, Go, a reimplementation of
+Westwood's Nox — `src/client/sight.go`), **DevilutionX** (Diablo 1's
+reconstructed source — `lighting.cpp`), and **Godot** (MIT — `Light2D`,
+`LightOccluder2D`). What they are worth is in "How three other engines lit a flat
+world" below. Licences differ and none of them is compatible with this tree; they
+are read, and what lands here is an observation in English.
+
+Do **not** read any of them for architecture. Copying their structure is the one thing
 this project exists to avoid — and where they agree about *engine* design, that
 is often the strongest available argument for doing it differently. Both stop the
 world to save it; `crates/server/persistence/src/journal.rs` explains at length
@@ -54,6 +81,60 @@ trap: a server-side movement hole is invisible from the only end normally tested
 and surfaces as NPCs strolling through walls. (`NO_SHOOT` was mis-valued at `0x20`
 in the same file, which is `UFLAG1_DAMAGE`; there is no `UFLAG1_NOSHOOT` at all.
 Pin a flag's value in a test next to the constant.)
+
+## How three other engines lit a flat world
+
+Read while planning the lighting rewrite ([`lighting.md`](lighting.md)), because
+a day somebody else already spent is the cheapest day there is. Two findings came
+out of it and the first is the one that changes what we build.
+
+**An occluder is a shape declared per object type, not a shape derived from the
+picture.** All three do this and none of them measures anything:
+
+- **Nox** has exactly four constructors — `newFromWall(gx, gy, typ)` for a wall
+  on the grid, and `newFromDrawableBox`, `newFromDrawableCircle`,
+  `newFromDrawableDoor` for everything else. A box or a circle, per object.
+- **Godot** authors an `OccluderPolygon2D` per sprite. Its editor can generate one
+  from the sprite's alpha, which is the same silhouette pass
+  `facing::facing_of` is — and it produces a polygon that a person then edits.
+- **Diablo** does not have occluder shapes at all: light is a level per tile,
+  flooded over the grid with radius tables.
+
+So the hand-authored table of [`lighting.md`](lighting.md)'s decision 31.2 is not
+a workaround for missing tooling. It is what everyone who has done this converged
+on, and the part that is genuinely unusual here is the opposite one: **we derive
+a solid from art we did not draw**, because the art is the client's and there is
+no model behind it. Where Baldur's Gate shipped a light map and a height map
+beside its background, those were *exports* from the 3D scene its artists built.
+
+**And nobody marches a ray per fragment per light.** Two different answers, both
+"compute the shadow once, look it up after":
+
+- **Nox** builds shadow geometry on the CPU: each occluder becomes an angular
+  interval (`SightObject.Ang40`/`Ang44` in a fixed-point circle of
+  `sightAngSz = 75000`), a sorted active list sweeps them by angle with `DistSq32`
+  deciding who is in front, and the result is extruded away from the eye, clipped
+  to the view lines, and **filled black** — the entry point is called
+  `Nox_xxx_drawBlack_496150`. Soft edges are ten passes of the same line offset a
+  pixel with alpha falling 208, 188, 168…
+- **Godot** renders a per-light shadow map — distance to the nearest occluder by
+  angle — so a fragment costs one lookup plus a PCF tap or thirteen.
+
+Neither is a plan for this engine and one of them is not even the same problem:
+**Nox's is visibility from a single eye, not light from a lamp.** There are no
+sources in it, no height (`image.Point` and `Rectf` throughout — `z` does not
+appear in the file), and its cost is linear in occluders because it never touches
+a pixel per light. Godot's `Light2D` has a `height`, but it feeds the normal map
+only: the occluder is a polygon in the canvas plane and cannot say that light
+passed *over* a low wall. `range_z_min`/`range_z_max` are `z_index` draw layers,
+which is the manual-storeys trick — and the reason it is not enough here is that
+UO puts a real `z` in every packet.
+
+What both point at is written down and not acted on: this engine walks the grid
+**per fragment per light**, which `lighting.md`'s step 6 measured as nearly all of
+the pass's GPU time, and two independent predecessors say the standard cure is to
+compute a light's shadow once. It is not a plan until something is measured that
+says it must be.
 
 ## The client, as observed
 
@@ -104,7 +185,88 @@ machinery as `0x78`, encoder in `crates/common/protocol`, default in core and
 overridable in the pack off the domain event — the split combat and magic already
 use. This was a systemic miss for most of the project's life; do not add to it.
 
+**`0x22` is two different packets, one per direction, and both are three
+bytes.** Server to client it is the walk ack: sequence, notoriety. Client to
+server it is `Resynchronize`: the id and two bytes of nothing. Same id, same
+length, opposite meanings, and no field distinguishes them — only which way the
+bytes are going. ServUO registers `0x22, 3, true, Resynchronize` beside a `0x22`
+it also emits, ClassicUO has `Handler.Add(0x22, ConfirmWalk)` and
+`Send_Resync()` writing id `0x22`, and both are right. A packet table that
+resolves an id to one meaning is wrong for this one; ours is already two tables
+(`ClientPacket` and `ServerPacket`), which is what makes it a non-event here
+rather than a day.
+
+**The walk handshake has a repair leg, and it is a request/response.** Reading
+`WalkerManager.ConfirmWalk`, `DenyWalk` and `PacketHandlers.UpdatePlayer`
+together, the whole cycle is: an ack the client cannot place is a *bad step* →
+it sends one `0x22` resync (guarded by `ResendPacketResync`, so a burst of bad
+acks asks once) and sets `WalkingFailed`, which is the first condition in
+`PlayerMobile.Walk` and stops every further request → the server answers a
+resync with the player's real position (`0x20`), everything in view again, and
+its own sequence back to zero (ServUO's `Resynchronize`: `MobileUpdate`,
+`MobileIncoming`, `SendEverything`, `state.Sequence = 0`,
+`ClearFastwalkStack`) → the `0x20` handler clears `WalkingFailed` and
+`ResendPacketResync` and forces the tile. Freezing the walk is only safe because
+something is guaranteed to unfreeze it; a client that stopped walking on a
+desync *without* sending the resync would stop walking for good.
+
+**ClassicUO's ack is a search, not a queue pop, and that is a consequence of
+where its steps live.** `ConfirmWalk` scans the ≤5 remembered `StepInfo`s for
+the sequence and only marks the match `Accepted`; the step is *consumed* by the
+animation (`Mobile.ProcessSteps`, which pops when the step's time has run out
+and its `StepInfo` was accepted). Ours is a FIFO and the ack must match its
+front. Neither is a port of the other and ours is not the poorer: the wire
+answers each `0x02` exactly once and in order, so a queue is provably right,
+while a search cannot tell a *stale* answer — one to a step a rollback already
+voided — from a real desync at all. ClassicUO calls both a bad step, so every
+wall hit on a slow link costs it a needless resync. Counting what is still owed
+(`Walk::draining`) distinguishes them; see `docs/client.md`.
+
+**ClassicUO has the pre-AOS stun and disarm subcommands swapped.** `0xBF`
+subcommand `0x09` is *disarm* and `0x0A` is *stun*; the client says the opposite.
+`OutgoingPackets.cs`'s `Send_StunRequest` writes `0x09` and `Send_DisarmRequest`
+writes `0x0A`, while ServUO registers `RegisterExtended(0x09, true,
+DisarmRequest)` and `RegisterExtended(0x0A, true, StunRequest)`
+(`Server/Network/PacketHandlers.cs`), and Razor (`Razor/Network/Packets.cs`)
+writes ServUO's pairing. Two independent receivers agreeing is suggestive, not
+proof — what settles it is that the two handlers gate on *different skills*, so
+the shard's own reply names which one you sent.
+`Scripts/Items/Equipment/Weapons/Fists.cs` wants ArmsLore and Wrestling ≥ 80 to
+ready a disarm, Anatomy and Wrestling ≥ 80 to ready a stun. With hands free,
+ArmsLore and Wrestling at 100 and Anatomy at 0, `0x09` answers cliloc 1019013
+*"You get yourself ready to disarm your opponent"* and `0x0A` answers 1004008
+*"You are not skilled enough to stun your opponent"*, and inverting the skills
+inverts both replies. The server registration is right and the client is the
+outlier. Nothing about getting it backwards is loud: sending the client's pairing
+arms the *other* special with no error at all, and a server that takes the
+pairing from the client hands every player the wrong move. Both handlers return
+immediately when `Core.AOS`, and an AOS-era client sends `Send_UseCombatAbility`
+instead (`GameActions.cs`), so this is a pre-AOS-only trap — which is exactly the
+era a from-scratch shard implements first. The live measurement is
+anima-client's, on a running ServUO (its issue #1); everything else above is
+checkable in the two checkouts.
+
 ## The client's data files
+
+**A tiledata flag means what the engine reads it for, and a barrel is not
+necessarily a barrel.** `water barrel` (`0x154D`) looks exactly like a barrel on
+Britain's docks and is walked straight through. Its tiledata carries one flag,
+`0x4000` — `ArticleA`, meaning the item's name takes "a" — and neither
+`Impassable` nor `Surface`; its height is zero. The barrel a tile away
+(`barrel`, `0x0E77`) is `Impassable`, height 5, and stops everybody. ServUO
+decides with the same predicate (`ImpassableSurface = Impassable | Surface`,
+`Scripts/Services/Pathing/Movement.cs`), so the reference walks through it too:
+this is the client's data, not a defect in ours, and making it solid is a
+gameplay decision rather than a fix. Pinned in
+`client/app/src/clutter.rs`. What it cost was a day of looking for the bug in
+three layers that were all behaving.
+
+**Read a tiledata answer straight out of the file before believing a layer is
+wrong.** The file is 3,188,736 bytes, which is the High Seas layout exactly —
+41 bytes a static entry, 8-byte flags — and that arithmetic is what says the
+reader is aligned at all. Two entries read by hand from those offsets agreed
+with `TileData` to the bit, which is what turned "our reader is broken" into
+"the client says so" in one step.
 
 **The map is in the `.uop`, not the `.mul`.** Modern clients ship both and the
 `.mul` may be a stub full of zeroes. `Map::load_facet` prefers the UOP. See
@@ -162,6 +324,101 @@ terrain along two edges of every stretched tile. ClassicUO insets by half a texe
 in `CalculateHalfPixelUVs`, which makes the four corners sample the texture's own
 first and last texel centres. This does not arise for a tile drawn 1:1 from its
 own sprite, which is why it appears exactly when stretching starts.
+
+**Doors are not in the map, and neither are shop signs.** A `.mul` static cannot
+move, and a door has to open, so the client's files contain almost none: across
+400x400 tiles covering the whole of Britain — 87,191 statics — there is exactly
+**one** tile whose tiledata name is `door`. Signs split in two: the *post* is a
+static (49 of them in the same rectangle, `metal signpost` / `wooden signpost`),
+while the hanging board naming the shop is not there at all. Both are server-side
+decoration, placed as items with `Drawn` + `Position` and drawn by `0x1A` — see
+`world/tick/decor.rs`, which already carries doors and containers.
+
+Worth knowing because of how it fails: a client rendering the map alone shows
+cannons (49 tiles), fountains (31) and every wall and roof, so the scene looks
+complete, and what is missing is exactly the furniture a player reads as part of
+the building. The conclusion "our static renderer drops small sprites" is the
+natural one and it is wrong. The population comes from the Community Pack's
+`felucca/_generated/deco.js` — 18,832 statics, 638 doors, 5,598 containers,
+converted once out of ServUO's `Data/Decoration/**.cfg` and `Data/signs.cfg` —
+and it lands through the `.admin` "Decorate Felucca" button.
+
+**A worn item's default picture is its own tiledata `AnimID`, and `Equipconv.def`
+is an override table, not a lookup a worn item requires an entry in.** The
+`AnimID` field of a static's tiledata entry (offset 14 of 21 in the High Seas
+layout, `StaticTile::anim_id`) names the body-animation-space graphic an item
+draws with — read through the same `anim.mul` machinery a mobile's body
+itself uses — and *that* is what an ordinary shirt or pair of boots draws
+from: it has no entry in `Equipconv.def` at all. The table only maps
+`(body, AnimID)` to a *different* `AnimID`, for the pairs where this body
+needs a different picture (chiefly a race or gender variant of the same
+garment); confirmed by reading `AnimationsLoader.ProcessEquipConvDef` and
+`MobileView.AddItem` in ClassicUO, a BSD-2 reference client kept outside this
+repository — `graphic = item.ItemData.AnimID`, replaced only if
+`EquipConversions[body][AnimID]` exists. Treating a missing entry as "draw
+nothing" instead of "the `AnimID` already draws right" was the first
+implementation of equipment rendering here, and it dropped every piece of
+plain clothing on every NPC silently: no test caught it, because every test
+built its own atlas and equipment table together and never had an item
+*without* a conversion entry in the mix — the gap only showed on a live
+client with a real `Equipconv.def`, which does not have entries for the
+common case. Also not read: `mobtypes.txt`, which tells a human body from a
+gargoyle one and shifts the resolved graphic accordingly — without it, a
+gargoyle's equipment resolves through the same table a human's does.
+
+`AnimID` had already been named in this reader's own layout comment for
+`parse_static` since the day it was written — `crates/common/uofiles/src/tiledata.rs`
+documents the byte offset in a doc comment on the function — and was simply
+never wired into the `StaticTile` struct or read. It sat between two fields
+that already were read (`layer` before it, `height` after): a field can be
+*in the comment* and still not be in the code, and nothing short of a
+consumer asking for it says so.
+
+**3D character models exist in the client's files, and nobody ever built them.**
+Origin shipped a 3D client — Third Dawn, later UO:3D — and its installer laid a
+`Models/` directory beside the `.mul` files: skinned character meshes with
+skeletal animation, in **Granny** (`.grn`, RAD Game Tools). Iris2, the archived
+C++/Ogre3D client above, renders UO in 3D by reading exactly that directory out
+of the player's own install, the same way anything here reads `art.mul`. It
+authors no geometry of its own: its `data/grannys/` holds one material and the
+skinning shaders, and nothing else. So "3D characters" is not a modelling
+project — it is a file-format project, and the art is already on disk.
+
+What that costs, in the order it has to be solved:
+
+- **The format is proprietary and was reverse-engineered by hand.** Granny's
+  official `granny2.dll` is a paid SDK and unusable in a GPL project, so Iris2
+  wrote its own chunk walker: a magic of `0xCA5E____`, a visitor over a tree of
+  chunks — points, normals, texcoords, polygons, weights, bones, bone ties,
+  animation. It is **not fully decoded**. The structs are honest about it:
+  fields named `iUnknown[7]`, comments reading "order unknown", "might be
+  scale", "doesn't look like floats". Anyone porting this inherits the gaps, not
+  a specification.
+- **Three tables in the client answer "which file".** `Models.txt` maps a body
+  id to a type (`0` monster, `1` sea, `2` animal, `3` human), a model name, a
+  default hue and three scale factors; `Human.lst` / `Animal.lst` / `Monster.lst`
+  / `Sea.lst` map an animation id to an animation name; together they produce a
+  path like `Models/Animals/Deer_Stag_Walk.grn`, with textures in `Models/Maps/`.
+  This is the 3D counterpart of `Bodyconv.def` and `anim*.mul`, and it is a
+  separate id space again.
+- **A humanoid is stitched from parts, not loaded as one mesh.** Head, torso,
+  legs, hair and every worn item are separate meshes sharing one skeleton
+  (`stitchin.def`). The invariant Iris2 states in a comment beside the code and
+  is worth stealing: **the skeleton is chosen by the body id, never by what the
+  body is wearing** — equipment supplies meshes, not bones.
+- **Conventions differ from any engine you will bind it to.** Granny orders a
+  quaternion `x,y,z,w` where Ogre wants `w,x,y,z`; bones carry a parent index
+  plus a local translate and rotation, so a derived transform is a walk up the
+  hierarchy; skin weights are two bones per vertex, which is what makes GPU
+  skinning straightforward.
+
+The reason this is a finding and not a plan: `Models/` is present only where a
+Third Dawn / UO:3D install once existed, and later clients do not ship it at all.
+Iris2 knows this and pops a dialog — "No 3D Character Models found in UO-dir" —
+because for most players it simply is not there. Measured against the population
+in [`client_versions.md`](client_versions.md), a renderer that requires those
+files serves a small and shrinking slice, so the value here is the format and the
+body→model→animation mapping, not a route to a 3D client.
 
 **No client files are in this repository and none ever will be.** They are
 copyrighted and they are not ours to redistribute. `world.client_files` points

@@ -34,12 +34,40 @@ debug = false
 [profile.test.package."*"]
 debug = false
 
+# The client's per-frame CPU work does not survive being unoptimized.
+#
+# A frame walks the visible tile rectangle four times — twice to ask what art it
+# needs, twice to build the quads — and that rectangle is ~9,800 cells at 1080p.
+# Measured on that size: `ground::collect` alone is 9.7ms at `opt-level = 0` and
+# 1.2ms at `opt-level = 1`, and `visible_graphics` 1.2ms against 0.11ms. Ground
+# is the cheaper half; the statics walk the same rectangle and there are more
+# statics than tiles in a city. Two digits of milliseconds per frame is what
+# "scrolling the map is slow in a debug build" was.
+#
+# `opt-level = 1` and not 2: it is where the whole win is here (1.18ms against
+# release's 1.32ms — the rest is `sort_by_key`, already optimized in libstd), and
+# it keeps line tables and locals intact, so a breakpoint in this code still
+# means something. Named crate by crate rather than set on the whole profile,
+# because the server is stepped through and this is not a debuggability tax it
+# should pay: what is listed is the render path and the client-file decoders
+# under it.
+[profile.dev.package.openshard-client-render]
+opt-level = 1
+[profile.dev.package.openshard-client-app]
+opt-level = 1
+[profile.dev.package.openshard-uofiles]
+opt-level = 1
+[profile.dev.package.openshard-protocol]
+opt-level = 1
+
 [workspace.dependencies]
 # Internal crates
 openshard-ai = { path = "crates/server/ai", version = "0.0.1" }
 openshard-chat = { path = "crates/server/chat", version = "0.0.1" }
 openshard-client-app = { path = "crates/client/app", version = "0.0.1" }
+openshard-client-artscan = { path = "crates/client/artscan", version = "0.0.1" }
 openshard-client-net = { path = "crates/client/net", version = "0.0.1" }
+openshard-client-pathtrace = { path = "crates/client/pathtrace", version = "0.0.1" }
 openshard-client-render = { path = "crates/client/render", version = "0.0.1" }
 openshard-combat = { path = "crates/server/combat", version = "0.0.1" }
 openshard-config = { path = "crates/common/config", version = "0.0.1" }
@@ -77,14 +105,30 @@ bytes = "1"
 # before, so a shell that exports it and a shell that types it get the same run,
 # and `--help` is the one place both are written down.
 clap = { version = "4", features = ["derive", "env"] }
+# Rasterizes an operator-supplied TrueType/OpenType face
+# (`openshard_uofiles::ttf_font`) for the code points `fonts.mul` never
+# shipped — Cyrillic today. Pure Rust, no system font stack: the same
+# rasterizer runs identically on every platform this workspace targets,
+# including the wasm32 client build.
+fontdue = "0.9"
 # `.env` beside the workspace root, read before the command line is parsed. What
 # it holds is one operator's client install — a path that must never be
 # committed, which is why the file is in `.gitignore` and `.env.example` is the
 # version under review.
 dotenvy = "0.15"
+# `gumpartLegacyMUL.uop` marks every one of its 5,556 entries compression flag
+# 3, which is zlib, and only zlib — the flag also covers a second,
+# container-specific pass that this client never turns on. Pulled in directly
+# rather than through `flate2`'s `rust_backend`: that feature is this crate and
+# nothing else, so the extra layer buys nothing, and `unsafe_code = "deny"`
+# workspace-wide rules out `flate2`'s C backend anyway.
+miniz_oxide = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# Property-based fuzzing over a hand-written oracle — random scenes, shrunk to
+# a minimal failing case rather than one fixed fixture per bug. Dev-only.
+proptest = "1"
 tokio = { version = "1", features = ["full"] }
 toml = "0.8"
 tracing = "0.1"

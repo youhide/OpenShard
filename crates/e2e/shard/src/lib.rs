@@ -29,10 +29,11 @@
 pub mod in_process;
 
 use std::net::{SocketAddr, SocketAddrV4};
+use std::path::Path;
 use std::thread::JoinHandle;
 
 use openshard_client_net::session::{Pick, Plan};
-use openshard_config::{Config, DEFAULT_TOML};
+use openshard_config::{Config, ConfigError, DEFAULT_TOML};
 use openshard_gateway::{ClientGatewayServer, Shutdown};
 use openshard_protocol::identity::{RawAccountName, RawPlaintextPassword};
 use openshard_protocol::version::ClientVersion;
@@ -115,6 +116,31 @@ pub fn stock_config(address: SocketAddr) -> Config {
          [[accounts]] table changed"
     );
     config
+}
+
+/// The operator's own `openshard.toml`, if there is one to read.
+///
+/// `Ok(None)` means there is no such file, which is not a failure: a fresh
+/// checkout has none, and the caller falls back to [`stock_config`].
+///
+/// # Only the playground may call this
+///
+/// A test that read the machine's config would pass or fail on what somebody
+/// happened to have configured — a pack loaded, a database pointed at a real
+/// file, a gameplay knob turned — and that is the opposite of what these tests
+/// are for. They take [`stock_config`], which is the shipped default and the
+/// same on every machine. The playground is the exception because it is not a
+/// test: it exists to *look* at a world, and the world worth looking at is the
+/// one the operator has already laid.
+///
+/// Nothing here overrides the addresses. The caller does that, because only it
+/// knows the address the in-process shard was given.
+pub fn operator_config(path: impl AsRef<Path>) -> Result<Option<Config>, ConfigError> {
+    let path = path.as_ref();
+    if !path.exists() {
+        return Ok(None);
+    }
+    Config::load(path).map(Some)
 }
 
 /// A shard running on a thread of its own, and the way to end it.
@@ -249,7 +275,7 @@ pub fn spawn(config: impl FnOnce(SocketAddr) -> Config + Send + 'static) -> (Soc
             // `new`, because the stop it is held by already exists — the caller
             // is holding a clone of it in the `Running` below.
             let reins = openshard_server::shard::Reins::over(served);
-            openshard_server::shard::run_shard(events, config, world, store, reins).await;
+            openshard_server::shard::run_shard(events, config, world, store, reins, &[]).await;
         });
     });
 

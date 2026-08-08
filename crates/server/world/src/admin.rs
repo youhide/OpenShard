@@ -140,6 +140,26 @@ pub fn open_menu(state: &mut WorldState, actor: EntityId) {
     state.send_packet(connection, &packet);
 }
 
+/// Send a verb the way a button would, with nobody having pressed it.
+///
+/// This is what `--seed` is: an operator naming on the command line the same
+/// verbs a game master would click, so a shard can lay its world down without a
+/// client attached at all. Deliberately *not* gated on the world being empty —
+/// the flag is the whole of the intent, and a seeded shard that then decides for
+/// itself whether to obey would be worse than one that does what it was told.
+/// Laying the same verb twice duplicates what it lays; that is the operator's to
+/// know, and [`ROWS`]' clear verbs are how it is undone.
+///
+/// The verb is not validated here. The engine holds no spawn data, so it cannot
+/// know which verbs a pack answers to — an unknown one reaches `onEvent` and
+/// falls through it, exactly as a pack that dropped a set would.
+pub fn seed(state: &mut WorldState, action: &str) {
+    state.bus.send(crate::events::AdminMenuAction {
+        serial: None,
+        action: action.to_owned(),
+    });
+}
+
 /// Interpret a `0xB1` for the admin gump: the acting mobile and the *verb* its
 /// button asked for, or `None` if it is not our gump, the close box, or a forgery.
 /// The verb is a plain string the script pack switches on — the engine holds no

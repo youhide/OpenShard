@@ -1,0 +1,23 @@
+[package]
+name = "openshard-client-pathtrace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "A reference Monte Carlo path tracer: a third opinion about a scene the renderer already drew."
+
+# **No dependencies, and that is the whole design.** This crate is what the
+# renderer's own shadow walk is checked against, so it must not be able to reach
+# the thing it checks even by accident: no `openshard-client-render`, no shared
+# geometry helper, no shared constant. Everything it needs about the scene and
+# about the camera arrives through its own types, from a caller that does the
+# translating in one visible place.
+[dependencies]
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

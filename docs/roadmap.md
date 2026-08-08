@@ -391,6 +391,65 @@ surfaced on stacked geometry (stairs, house floors). The whole of it is
 `MapTerrain::check` / `start_surface`, ported with the arithmetic audited as
 everywhere else.
 
+### Backlog: a pier or bridge over low ground can drop a walker under it
+
+`MapTerrain::check`'s `landCheck` guard (`movement/src/terrain.rs:207-217`) is
+ServUO's own `Movement.cs` `landCheck`, ported variable-for-variable and
+direction-for-direction — audited against the reference, not a porting bug. It
+exists to discard a low decorative static the terrain visibly pokes through (a
+rock embedded in a hillside): when the land under a platform static is walkable
+and its average height (`land_center`) is close to or above the static's own
+stand height (`our_z`), the static is dropped from the candidate list and the
+walker falls through to the land instead.
+
+ServUO's own `landCheck` does not exempt `Bridge`/climbable statics from this
+either — the flag only changes `itemTop` (how high a step must reach to clear
+the static), never the guard itself. That is fine as long as a bridge or pier
+sits over water, where `land_is_ground` is false and the guard never fires. It
+is not fine at the shore end of a pier or the bank end of a bridge over a
+ravine, where the ground underneath is ordinary walkable land whose average
+height can read close to the deck: the guard fires, the deck static is
+discarded, and the walker lands on `land_center` — which for a structure
+spanning a drop is often well below the deck. That reads as "fell under the
+bridge," and matches a player report (2026-08-02) of falling underground
+specifically on piers and bridges.
+
+Not fixed yet because it is a real divergence from the cited reference, not an
+arithmetic slip, and needs a decision rather than a silent patch: exempting
+`is_climbable()` statics from this guard would be a deliberate deviation from
+`Movement.cs`, and wants a repro against real client files (a pier whose shore
+tiles are dry land, not water) confirming the fall before touching it.
+
+### Backlog: a mobile is not an obstacle
+
+The step check asks two things — `MapTerrain::check` for the client's files, and
+`Obstructions` for what the world has put on top (`state/src/obstruct.rs`,
+composed in `LiveTerrain::can_step`). Nothing registers a *mobile* in the second.
+Every `Obstructions::block` call is a door (`tick/decor.rs`), a placed impassable
+decoration, a restored item (`tick/persist.rs`) or a field spell
+(`tick/fields.rs`); no mobile is ever entered or removed. So a player walks
+through a standing NPC, a guard does not hold a doorway, and `find_path` plans
+straight through a crowd. ServUO blocks here (`Movement.CheckMovement` with
+`checkMobiles`), and so does the 2D client's expectation — bodies do not overlap.
+
+Two ways to close it, and the choice is the point:
+
+- **Register mobiles in `Obstructions`.** Cheap to read — the index is already on
+  the hot path — but it is a second copy of `Position`, updated on every step,
+  every spawn, every despawn and every teleport. That bargain is fine for a door
+  that flips twice an hour and much worse for a body that moves three times a
+  second; one missed `unblock` is a permanent invisible wall.
+- **Ask the sector grid.** `FacetState::sectors` is already the authoritative
+  index from tile to entity and is already kept honest by the step itself
+  (`tick/motion.rs` writes it beside `Position`). No second copy, and the cost is
+  one lookup per step. This is the one to take.
+
+Either way three rules come with it and none are in the code yet: the dead do not
+block (a corpse is an item, a ghost walks through), a mobile may always step *off*
+the tile it is standing on, and staff walking through bodies is the same
+permission as walking through walls — see `gm.rs`, which has no such bypass
+either.
+
 ### The tick
 
 `World::tick` is the deterministic half of the boundary the gateway's channel

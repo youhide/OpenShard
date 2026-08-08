@@ -16,6 +16,7 @@
 //! and the z band below already throws out the forge on the floor above.
 
 use openshard_entities::EntityId;
+use openshard_movement::Tile;
 use openshard_state::WorldState;
 use openshard_state::components::{Drawn, Position};
 
@@ -117,7 +118,7 @@ pub fn around(state: &WorldState, crafter: EntityId) -> Facilities {
                 continue;
             };
             statics.clear();
-            terrain.statics_at(x, y, &mut statics);
+            terrain.statics_at(Tile::new(x, y), &mut statics);
             for (id, z) in &statics {
                 if in_z_band(i32::from(at.z), i32::from(*z)) {
                     found.add(Graphic(*id));

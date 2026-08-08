@@ -31,6 +31,23 @@ that file. See [`style.md`](style.md).
 
 Running the shard: `cargo run -p openshard-server`.
 
+A shard with an empty world draws its map and nothing else — the engine ships no
+spawn or decoration data, so the townsfolk, the doors and the shop signs all come
+from the script pack under the verbs the `.admin` menu's buttons send. `--seed`
+sends those verbs at boot instead, so a world can be laid without a client
+attached:
+
+```sh
+cargo run -p openshard-server -- --seed regions:felucca,decorate:felucca,populate:felucca
+```
+
+The verbs are the pack's, not a list the binary checks, and they are sent in the
+order given — regions before what stands in them. They are sent *every* run the
+flag is passed: with `persistence.database` empty the world starts bare each
+time, which is what makes this convenient, but against a real database a second
+seeded start lays everything a second time. The `.admin` menu's clear verbs are
+how that is undone.
+
 Running both ends at once — a shard and our own client logged in to it, in one
 process, with no port bound and no socket opened:
 
@@ -105,3 +122,17 @@ wanted Rust 1.85, above the old 1.82 MSRV. The scripting spike raised the MSRV t
 1.88, which dissolved the reason for the pin, so it was dropped: the crate floats
 on its declared `"0.7"` again (currently 0.7.18, `postgres-protocol` 0.6.12). The
 mechanism above is what to reach for if a future update pulls something past 1.88.
+
+**A live instance of exactly this, found 2026-08-07 and not yet pinned.**
+`crates/client/render`'s build-dependency `wesl = "0.4"` (the WESL-to-WGSL
+shader compiler, see [`lighting_raymarch.md`](lighting_raymarch.md)) resolves
+today to `wesl` 0.4.2 in `Cargo.lock`, and 0.4.2's own `Cargo.toml` states
+`rust-version = "1.96.0"` — above this workspace's `1.88`, confirmed by
+reading the crate's manifest directly
+(`~/.cargo/registry/src/*/wesl-0.4.2/Cargo.toml`). `wesl` 0.4.0, the version
+current when it was first vendored, declared `1.87.0`. Not caught by CI
+because the toolchain actually in use here is newer than both numbers — the
+drift is latent, not a build failure yet. Not fixed here (found while
+rewriting the lighting docs, out of scope for that pass): if a future
+`cargo update` or a clean environment on an older toolchain hits this, pin
+`wesl` the way `tokio-postgres` was pinned above.

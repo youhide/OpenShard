@@ -489,7 +489,7 @@ mod tests {
             .unwrap();
         engine
             .deliver(&Event::AdminAction {
-                serial: 1,
+                serial: Some(1),
                 action: "populate:cemetery".to_owned(),
             })
             .unwrap();
@@ -541,7 +541,7 @@ mod tests {
             .unwrap();
         engine
             .deliver(&Event::AdminAction {
-                serial: 1,
+                serial: Some(1),
                 action: "clear".to_owned(),
             })
             .unwrap();
@@ -565,7 +565,7 @@ mod tests {
             .unwrap();
         engine
             .deliver(&Event::AdminAction {
-                serial: 1,
+                serial: Some(1),
                 action: "decorate:britain".to_owned(),
             })
             .unwrap();
@@ -613,7 +613,7 @@ mod tests {
             .unwrap();
         engine
             .deliver(&Event::AdminAction {
-                serial: 1,
+                serial: Some(1),
                 action: "decorate:britain".to_owned(),
             })
             .unwrap();
@@ -877,7 +877,7 @@ mod tests {
         engine.load_file(&dir).unwrap().unwrap();
         engine
             .deliver(&Event::AdminAction {
-                serial: 1,
+                serial: Some(1),
                 action: "go".to_owned(),
             })
             .unwrap();

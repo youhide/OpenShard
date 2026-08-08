@@ -421,6 +421,7 @@ pub async fn run_shard(
     world: World,
     store: Arc<dyn Store>,
     reins: Reins,
+    seed: &[String],
 ) {
     let shutdown = reins.shutdown();
     // `Config::validate` (run by `Config::load`, which every `Config` reaching
@@ -461,6 +462,20 @@ pub async fn run_shard(
         saves,
         advertised,
     };
+
+    // The verbs this run was told to send itself, after `Scripts::load` above has
+    // taken its cursors and before the first tick retires anything — the one
+    // window where an event sent from outside a tick is read exactly once. Sent
+    // even with no script loaded: the bus does not care, and a shard configured
+    // without a pack and asked to seed has an operator to tell, not a silent
+    // no-op to perform.
+    for action in seed {
+        info!(action, "seeding from the command line");
+        shard.world.seed(action);
+    }
+    if !seed.is_empty() && config.scripting.main.is_empty() {
+        warn!("--seed was given but scripting.main is empty; no pack will answer these verbs");
+    }
 
     let mut ticker = tokio::time::interval(TICK_INTERVAL);
     // A tick that ran late must not try to catch up by running several in a row:

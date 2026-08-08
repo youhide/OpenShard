@@ -14,12 +14,15 @@
 //!
 //! # Browser-shaped from the start
 //!
-//! The web is a target, so the ceiling is WebGL2 rather than native Vulkan: no
-//! compute shaders, no storage buffers, instancing through vertex buffers, and
-//! every device request `async` because a browser cannot be blocked on. None of
-//! that constrains what UO needs to draw — the original client was a software
-//! blitter — but all of it is painful to retrofit, so it is honoured here from
-//! the first triangle rather than discovered later.
+//! The web is a target, so every device request is `async` because a browser
+//! cannot be blocked on — that is honoured here from the first triangle rather
+//! than discovered later. The ceiling itself is **WebGPU, not WebGL2**
+//! (`docs/lighting.md` decision 30.5): real compute shaders and storage
+//! buffers, because WebGPU is broadly shipped now and was only a flag behind
+//! Chromium when the older, stricter ceiling was written. What that older
+//! ceiling produced is not deleted — `Occlusion`'s texture-folded lookup
+//! (decision 38.4) still runs and still works — it is simply no longer what
+//! new code here has to route around.
 //!
 //! # Colour is not converted
 //!
@@ -29,16 +32,43 @@
 //! that comes out of the frame — which would make an exact assertion in a test
 //! impossible and replace it with a tolerance nobody can justify.
 
+pub mod animate;
 pub mod animation;
+pub mod arttable;
 pub mod atlas;
+pub mod bench;
 pub mod blit;
 pub mod camera;
+pub mod chart;
+pub mod container;
 pub mod control;
+pub mod cutaway;
+pub mod debug;
 pub mod depth;
+pub mod doors;
+pub mod facing;
+pub mod follow;
+pub mod geometry;
 pub mod ground;
+pub mod gump;
 pub mod hue;
 pub mod items;
+pub mod light;
+pub mod mesh;
+pub mod mesh_face;
 pub mod mobiles;
+pub mod occlusion;
+pub mod outline;
+pub mod paperdoll;
+pub mod place;
+pub mod plan;
+pub mod png;
 pub mod renderer;
+pub mod scene;
+pub mod select;
+pub mod solid;
+pub mod solids;
 pub mod sprite;
 pub mod statics;
+pub mod text;
+pub mod tonemap;

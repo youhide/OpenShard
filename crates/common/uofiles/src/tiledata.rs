@@ -119,6 +119,48 @@ impl TileFlags {
     pub const WINDOW: u64 = 0x0000_1000;
     /// UFLAG4_DOOR.
     pub const DOOR: u64 = 0x2000_0000;
+    /// ClassicUO's `TileFlag.Transparent`. Only the renderer reads it, and only
+    /// as one half of the pair that keeps a tile from cutting the roof away
+    /// above the player — see `openshard-render`'s `cutaway`.
+    pub const TRANSPARENT: u64 = 0x0000_0004;
+    /// Drawn at partial alpha whatever else is decided about it: a window pane,
+    /// a force field. ClassicUO's `TileFlag.Translucent`.
+    pub const TRANSLUCENT: u64 = 0x0000_0008;
+    /// Never drawn and never walked on: the client's own marker for a graphic
+    /// that exists in the tables and nowhere in the world. ClassicUO drops these
+    /// in `AddTileToRenderList` before anything else is asked about them.
+    pub const INTERNAL: u64 = 0x0001_0000;
+    /// A tree's leaves, a boat's mast — the things that fade when a body walks
+    /// behind them. ClassicUO's `TileFlag.Foliage`.
+    pub const FOLIAGE: u64 = 0x0002_0000;
+    /// A roof tile. This is what makes a building's inside visible at all: the
+    /// client stops drawing these once the player is under one.
+    ///
+    /// `0x1000_0000` — ClassicUO's `TileFlag.Roof`. Sphere's header has no name
+    /// for this bit, so ClassicUO is the only reference for it and the value is
+    /// pinned in a test beside the constant.
+    pub const ROOF: u64 = 0x1000_0000;
+    /// The static gives off light: a torch, a candle, a brazier, a lantern.
+    ///
+    /// `0x0080_0000` — ClassicUO's `TileFlag.LightSource`, read in
+    /// `TileDataLoader`'s `IsLight`, and ServUO's `TileFlag.LightSource` at the
+    /// same value. It says *that* a graphic burns and nothing about how big or
+    /// what colour: the client takes those from `light.mul`, keyed by an id this
+    /// reader does not carry yet. See `openshard-client-render`'s `light`, which
+    /// picks a flame by graphic until that file is read.
+    ///
+    /// Pinned in a test beside the constant, because a flag means what the
+    /// engine *reads* it for.
+    pub const LIGHT_SOURCE: u64 = 0x0080_0000;
+    /// The static cycles through graphics on its own: a fire, a torch, a water
+    /// wheel. What it cycles through is `animdata.mul` — see
+    /// [`crate::animdata`] — and this bit is the only thing that says a graphic
+    /// animates at all, since that file has a zeroed entry for everything else.
+    ///
+    /// `0x0100_0000` in both references that name it: ClassicUO's
+    /// `TileFlag.Animation` and ServUO's. Pinned in a test beside the constant,
+    /// because a flag means what the engine *reads* it for.
+    pub const ANIMATION: u64 = 0x0100_0000;
 
     /// Wrap a raw flag word.
     pub const fn new(bits: u64) -> Self {
@@ -130,7 +172,11 @@ impl TileFlags {
         self.0
     }
 
-    /// Whether every bit in `mask` is set.
+    /// Whether *any* bit in `mask` is set.
+    ///
+    /// Any and not all, which is what a caller passing a pair of alternatives
+    /// wants — `has(WINDOW | NO_SHOOT)` is "does this stop an arrow", the pair
+    /// ServUO's `Map.LineOfSight` tests together, and no tile carries both.
     pub const fn has(self, mask: u64) -> bool {
         self.0 & mask != 0
     }
@@ -154,6 +200,40 @@ impl TileFlags {
     pub const fn is_climbable(self) -> bool {
         self.has(Self::CLIMBABLE)
     }
+
+    /// Whether this static plays a cycle of its own. See [`Self::ANIMATION`].
+    pub const fn is_animated(self) -> bool {
+        self.has(Self::ANIMATION)
+    }
+
+    /// Whether this burns, glows or otherwise lights its surroundings. See
+    /// [`Self::LIGHT_SOURCE`].
+    pub const fn is_light_source(self) -> bool {
+        self.has(Self::LIGHT_SOURCE)
+    }
+
+    /// Whether this is a roof. See [`Self::ROOF`].
+    pub const fn is_roof(self) -> bool {
+        self.has(Self::ROOF)
+    }
+
+    /// Whether the client never draws this. See [`Self::INTERNAL`].
+    pub const fn is_internal(self) -> bool {
+        self.has(Self::INTERNAL)
+    }
+
+    /// Whether this fades when a body walks behind it. See [`Self::FOLIAGE`].
+    pub const fn is_foliage(self) -> bool {
+        self.has(Self::FOLIAGE)
+    }
+
+    /// Whether this lies flat under whatever stands on it — a floor, a rug.
+    ///
+    /// ClassicUO calls the bit `Background`; this workspace named it after
+    /// Sphere's `UFLAG1_FLOOR`. One bit, two names.
+    pub const fn is_background(self) -> bool {
+        self.has(Self::FLOOR)
+    }
 }
 
 impl fmt::Debug for TileFlags {
@@ -169,6 +249,13 @@ impl fmt::Debug for TileFlags {
             (Self::CLIMBABLE, "CLIMBABLE"),
             (Self::WINDOW, "WINDOW"),
             (Self::DOOR, "DOOR"),
+            (Self::ANIMATION, "ANIMATION"),
+            (Self::LIGHT_SOURCE, "LIGHT_SOURCE"),
+            (Self::TRANSPARENT, "TRANSPARENT"),
+            (Self::TRANSLUCENT, "TRANSLUCENT"),
+            (Self::INTERNAL, "INTERNAL"),
+            (Self::FOLIAGE, "FOLIAGE"),
+            (Self::ROOF, "ROOF"),
         ] {
             if self.has(mask) {
                 names.push(name);
@@ -218,6 +305,16 @@ pub struct StaticTile {
     /// knows to take both hands. It was read past for most of this reader's life
     /// because nothing asked; Arms Lore does.
     pub layer: u8,
+    /// What a worn copy of it draws as, in the body-animation index space —
+    /// a different space from this tile's own art graphic, and read from
+    /// `anim.mul`/`AnimAtlas` rather than `art.mul`.
+    ///
+    /// This is the *default* a worn item draws with — `EquipConv` only
+    /// overrides it for the pairs where a body needs a different picture
+    /// (a race or gender variant); an ordinary shirt has no such entry and
+    /// draws from this field directly. Read past for most of this reader's
+    /// life, the same way `layer` was, because nothing asked for it either.
+    pub anim_id: u16,
     /// Its name.
     pub name: String,
 }
@@ -282,6 +379,12 @@ impl fmt::Debug for TileData {
             .field("land", &self.land.len())
             .field("statics", &self.statics.len())
             .finish()
+    }
+}
+
+impl AsRef<TileData> for TileData {
+    fn as_ref(&self) -> &TileData {
+        self
     }
 }
 
@@ -369,6 +472,22 @@ impl TileData {
         &self.statics[id as usize]
     }
 
+    /// Put one entry into the table, replacing whatever was there.
+    ///
+    /// For tests that need a tiledata saying one specific thing — a graphic that
+    /// is a light source, a roof, a wall — the way [`TileData::empty`] is for
+    /// tests that need it to say nothing. It is `pub` and not `#[cfg(test)]`
+    /// because the tests that want it are in other crates: a renderer's test
+    /// about what a flag makes it draw cannot read a real install, since this
+    /// repository ships no client files.
+    ///
+    /// Nothing in the engine calls it, and nothing should: what a graphic can do
+    /// is the client's file talking, and an entry written over at runtime is a
+    /// disagreement between the two ends of the wire about the same graphic.
+    pub fn set_static_tile(&mut self, id: u16, tile: StaticTile) {
+        self.statics[id as usize] = tile;
+    }
+
     fn parse_land(bytes: &[u8], format: TileDataFormat, index: usize) -> Option<LandTile> {
         let entry = format.land_entry();
         let offset = (index / GROUP_SIZE) * (GROUP_HEADER + GROUP_SIZE * entry)
@@ -420,6 +539,7 @@ impl TileData {
             flags,
             weight: raw[fixed],
             layer: raw[fixed + 1],
+            anim_id: u16::from_le_bytes([raw[fixed + 6], raw[fixed + 7]]),
             height: raw[fixed + 12],
             name: read_name(&raw[fixed + 13..]),
         })
@@ -480,6 +600,36 @@ pub fn pluralize_name(name: &str, plural: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bits the renderer reads, pinned against ClassicUO's `TileFlag`.
+    ///
+    /// None of these appear in Sphere's `uofiles_macros.h` under a name that
+    /// says what the client does with them, so ClassicUO is the only reference
+    /// and a wrong bit here is silent: the roof simply never lifts, or every
+    /// wall is treated as one. The values are `TileDataLoader.cs`'s enum.
+    #[test]
+    fn the_drawing_flags_are_classicuos_bits() {
+        assert_eq!(TileFlags::TRANSPARENT, 0x0000_0004);
+        assert_eq!(TileFlags::TRANSLUCENT, 0x0000_0008);
+        assert_eq!(TileFlags::INTERNAL, 0x0001_0000);
+        assert_eq!(TileFlags::FOLIAGE, 0x0002_0000);
+        assert_eq!(TileFlags::ROOF, 0x1000_0000);
+        // ClassicUO's `Surface` and `Bridge` are bits this workspace already
+        // named after Sphere. Asserted here rather than trusted, because the
+        // renderer is about to read them under the client's names: a surface is
+        // what a roof may still be drawn as, and a bridge is what
+        // `CalculateObjectHeight` halves.
+        assert_eq!(TileFlags::PLATFORM, 0x0000_0200, "ClassicUO's Surface");
+        assert_eq!(TileFlags::CLIMBABLE, 0x0000_0400, "ClassicUO's Bridge");
+        // `TileFlag.LightSource`, which `TileDataLoader.IsLight` reads and
+        // ServUO's `TileData` gives the same value. One bit off is a torch that
+        // lights nothing and a bookshelf that burns: `0x0040_0000` next door is
+        // `Wearable` and `0x0100_0000` above it is `Animation`, and both are
+        // set on plenty of graphics that are not on fire.
+        assert_eq!(TileFlags::LIGHT_SOURCE, 0x0080_0000);
+        assert!(TileFlags::new(TileFlags::LIGHT_SOURCE).is_light_source());
+        assert!(!TileFlags::new(TileFlags::ANIMATION).is_light_source());
+    }
 
     #[test]
     fn pluralize_resolves_the_tiledata_markers() {
@@ -542,6 +692,7 @@ mod tests {
         bytes[entry..entry + 8].copy_from_slice(&(TileFlags::WALL | TileFlags::BLOCK).to_le_bytes());
         bytes[entry + 8] = 255; // weight
         bytes[entry + 9] = 2; // quality, which for equipment is the layer
+        bytes[entry + 14..entry + 16].copy_from_slice(&0xABCDu16.to_le_bytes()); // anim_id
         bytes[entry + 20] = 20; // height
         bytes[entry + 21..entry + 32].copy_from_slice(b"wooden wall");
         bytes
@@ -575,6 +726,10 @@ mod tests {
         // fields that are already read, and an off-by-one would report a plausible
         // layer for every item in the game.
         assert_eq!(wall.layer, 2, "quality/layer at 9, right after the weight");
+        // Between the unknown u32 and the hue, on Sphere's own layout — a
+        // worn item's *default* drawn graphic, and a different index space
+        // from this tile's own art.
+        assert_eq!(wall.anim_id, 0xABCD, "anim id at 14, after the unknown u32");
         assert!(wall.flags.is_blocking());
     }
 

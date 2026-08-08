@@ -172,7 +172,7 @@ impl World {
             // Is there a frame of the given side at (tx, ty) sharing height z?
             let frame_at = |tx: u16, ty: u16, tz: i8, pred: fn(u16) -> bool| -> bool {
                 let mut here = Vec::new();
-                terrain.statics_at(tx, ty, &mut here);
+                terrain.statics_at(Tile::new(tx, ty), &mut here);
                 here.iter().any(|&(id, z)| z == tz && pred(id))
             };
             // Place a door in the gap, but only if a door actually fits there — an
@@ -181,7 +181,8 @@ impl World {
             // the `occupied` set is our own de-dup.
             let mut try_place = |gap: Point, door: (Graphic, Graphic, i16, i16)| {
                 let key = (gap.x, gap.y);
-                if occupied.contains(&key) || !terrain.can_fit(gap.x, gap.y, i32::from(gap.z), 16) {
+                if occupied.contains(&key) || !terrain.can_fit(Tile::new(gap.x, gap.y), i32::from(gap.z), 16)
+                {
                     return;
                 }
                 occupied.insert(key);
@@ -196,7 +197,7 @@ impl World {
                         continue;
                     };
                     here.clear();
-                    terrain.statics_at(vx, vy, &mut here);
+                    terrain.statics_at(Tile::new(vx, vy), &mut here);
                     for &(id, z) in &here {
                         if doorgen::is_west_frame(id) {
                             // A single door: one gap tile to an east frame two away.

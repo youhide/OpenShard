@@ -202,6 +202,63 @@ impl Uop {
                 detail: format!("the entry for {name} runs past the end of the file"),
             })
     }
+
+    /// The entry `name` resolves to, without [`entry`]'s refusal to hand back
+    /// something compressed.
+    ///
+    /// `entry` exists because the map and art containers this crate reads are
+    /// never compressed, so a caller silently getting "no entry" for one would
+    /// be drawing a hole where a wall is. Gump art breaks that assumption —
+    /// every entry in `gumpartLegacyMUL.uop` carries a nonzero compression
+    /// flag — and it is [`gumpart`] that knows what that flag means and how to
+    /// invert it, not `Uop`. This is the seam between the two: `Uop` hands back
+    /// exactly what its own header says about the entry, and stays ignorant of
+    /// what any particular compression scheme does with the bytes.
+    ///
+    /// [`entry`]: Uop::entry
+    /// [`gumpart`]: crate::gumpart
+    pub fn raw_entry(&self, name: &str) -> Result<Option<RawEntry<'_>>, UopError> {
+        let Some(entry) = self.entries.get(&hash_file_name(name.as_bytes())) else {
+            return Ok(None);
+        };
+        let start = entry.data_offset + entry.header_length;
+        let bytes = self
+            .bytes
+            .get(start..start + entry.compressed_length)
+            .ok_or_else(|| UopError::Malformed {
+                path: self.path.clone(),
+                detail: format!("the entry for {name} runs past the end of the file"),
+            })?;
+        Ok(Some(RawEntry {
+            compression: entry.compression,
+            decompressed_length: entry.decompressed_length,
+            bytes,
+        }))
+    }
+}
+
+/// What the container's own header says about one entry, before `Uop` decides
+/// whether it can produce a picture, a map chunk, or anything else from it.
+///
+/// Returned by [`Uop::raw_entry`] rather than [`Uop::entry`]'s plain `&[u8]`:
+/// a caller that has to invert its own container-specific compression needs
+/// the flag that says which scheme was used and the length the first stage
+/// (always zlib, on every entry this reader has seen) should produce, not
+/// just the bytes.
+#[derive(Debug)]
+pub struct RawEntry<'a> {
+    /// The compression flag the container recorded for this entry: `0` for
+    /// stored, `3` for every entry `gumpartLegacyMUL.uop` ships. This reader
+    /// has never seen another value, so it is not an enum — a caller seeing
+    /// something else here is looking at a format this crate has no reader
+    /// for yet, and that is its own error to raise.
+    pub compression: u16,
+    /// What zlib alone should produce from `bytes`. For a flag-3 entry this is
+    /// an intermediate length, not the final picture data: see
+    /// `gumpart`'s module documentation for the second pass that sits on top.
+    pub decompressed_length: usize,
+    /// The entry's stored bytes, exactly as the container holds them.
+    pub bytes: &'a [u8],
 }
 
 /// Read a UOP container and concatenate its entries in index order.
@@ -250,6 +307,11 @@ struct Entry {
     data_offset: usize,
     header_length: usize,
     compressed_length: usize,
+    /// What zlib alone produces from `compressed_length` bytes at
+    /// `data_offset + header_length`. Unread until `raw_entry` needed it —
+    /// `entry` never looks past `compressed_length`, since a stored entry's
+    /// compressed and decompressed lengths are the same number.
+    decompressed_length: usize,
     compression: u16,
 }
 
@@ -299,6 +361,9 @@ impl Header {
                     header_length: read_u32(bytes, at + 8).ok_or_else(|| malformed("truncated entry"))?
                         as usize,
                     compressed_length: read_u32(bytes, at + 12).ok_or_else(|| malformed("truncated entry"))?
+                        as usize,
+                    decompressed_length: read_u32(bytes, at + 16)
+                        .ok_or_else(|| malformed("truncated entry"))?
                         as usize,
                     compression: read_u16(bytes, at + 32).ok_or_else(|| malformed("truncated entry"))?,
                 };

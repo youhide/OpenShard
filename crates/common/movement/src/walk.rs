@@ -47,16 +47,16 @@ pub trait Terrain {
     /// map should correct it and return the real height.
     fn can_step(&self, from: Point, to: Point) -> Option<Point>;
 
-    /// The ground height at `(x, y)`, if this terrain knows one.
+    /// The ground height at `tile`, if this terrain knows one.
     ///
     /// Where a character spawns: the map holds the floor, not the config. An
     /// implementation with no map — [`OpenWorld`] — returns `None`, and the
     /// caller falls back to a flat default.
-    fn ground_z(&self, _x: u16, _y: u16) -> Option<i8> {
+    fn ground_z(&self, _tile: Tile) -> Option<i8> {
         None
     }
 
-    /// The *land* tile id at `(x, y)` — the index into `tiledata.mul`'s land
+    /// The *land* tile id at `tile` — the index into `tiledata.mul`'s land
     /// table, not a static's graphic.
     ///
     /// Read for what the ground *is* rather than how high it stands: a mountain
@@ -66,31 +66,31 @@ pub trait Terrain {
     /// when a *static* was clicked, and a click on bare land arrives with a
     /// graphic of zero (ServUO `PacketHandlers.cs`, the `LandTarget` branch), so
     /// the server has to look the tile up itself.
-    fn land_tile(&self, _x: u16, _y: u16) -> Option<u16> {
+    fn land_tile(&self, _tile: Tile) -> Option<u16> {
         None
     }
 
-    /// The static tiles standing at `(x, y)`, appended to `out` as
+    /// The static tiles standing at `tile`, appended to `out` as
     /// `(graphic, z)` pairs.
     ///
     /// Only what the map holds; a terrain with no statics (an open world) adds
     /// nothing. The primitive tuple keeps this trait — which lives below `world` —
     /// free of the map's own types. Used to find door frames when generating the
     /// functional doors a building's static art only implies.
-    fn statics_at(&self, _x: u16, _y: u16, _out: &mut Vec<(u16, i8)>) {}
+    fn statics_at(&self, _tile: Tile, _out: &mut Vec<(u16, i8)>) {}
 
-    /// The z a mobile stands at on `(x, y)`, reached from near `near_z` — the top
+    /// The z a mobile stands at on `tile`, reached from near `near_z` — the top
     /// of the walkable surface there, a building's raised floor and all.
     ///
     /// Where a spawn drops onto the ground: the pack gives a tile and a rough
     /// height, and the map says which floor that lands on (asking from `near_z`
     /// rather than the sky, so it finds the floor and not the roof above it).
     /// `None` when the tile has no reachable surface, or the terrain has no map.
-    fn stand_z(&self, _x: u16, _y: u16, _near_z: i32) -> Option<i32> {
+    fn stand_z(&self, _tile: Tile, _near_z: i32) -> Option<i32> {
         None
     }
 
-    /// Where to *place* a mobile on `(x, y)`, near `near_z` — like
+    /// Where to *place* a mobile on `tile`, near `near_z` — like
     /// [`stand_z`](Self::stand_z), but not bound by one step's reach.
     ///
     /// A spawn is not a step: a shopkeeper placed at ground level belongs on the
@@ -99,18 +99,18 @@ pub trait Terrain {
     /// fits on regardless of how far it is from `near_z`, so an NPC stops sinking
     /// through the shop floor. Defaults to [`stand_z`](Self::stand_z) for a terrain
     /// with no map.
-    fn spawn_z(&self, x: u16, y: u16, near_z: i32) -> Option<i32> {
-        self.stand_z(x, y, near_z)
+    fn spawn_z(&self, tile: Tile, near_z: i32) -> Option<i32> {
+        self.stand_z(tile, near_z)
     }
 
-    /// Whether an object `height` tall can sit at `(x, y, z)` — nothing solid in
+    /// Whether an object `height` tall can sit at `tile, z` — nothing solid in
     /// its body, and a surface under it to rest on.
     ///
     /// This is what keeps a generated door in a real doorway: a door belongs in an
     /// open gap with a floor, so a spot that is a solid wall (something in the way)
     /// or thin air (no surface) reports that nothing fits. An open world fits
     /// everything — it has no walls and, having no map, generates no doors anyway.
-    fn can_fit(&self, _x: u16, _y: u16, _z: i32, _height: i32) -> bool {
+    fn can_fit(&self, _tile: Tile, _z: i32, _height: i32) -> bool {
         true
     }
 
@@ -171,13 +171,30 @@ pub trait Terrain {
     }
 }
 
+/// A tile's column and row, with no height — a [`Point`] flattened to the plane
+/// a sight line or a path search reasons on.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Tile {
+    /// East-west tile.
+    pub x: u16,
+    /// North-south tile.
+    pub y: u16,
+}
+
+impl Tile {
+    /// A tile at `(x, y)`.
+    pub const fn new(x: u16, y: u16) -> Self {
+        Self { x, y }
+    }
+}
+
 /// The tiles a straight line from `from` to `to` crosses, endpoints excluded —
 /// where a sight line looks for walls. Plain integer Bresenham; the endpoints
 /// are the looker and the looked-at, and neither occludes itself.
 #[must_use]
-pub fn line_tiles(from: (u16, u16), to: (u16, u16)) -> Vec<(u16, u16)> {
-    let (mut x, mut y) = (i32::from(from.0), i32::from(from.1));
-    let (tx, ty) = (i32::from(to.0), i32::from(to.1));
+pub fn line_tiles(from: Tile, to: Tile) -> Vec<Tile> {
+    let (mut x, mut y) = (i32::from(from.x), i32::from(from.y));
+    let (tx, ty) = (i32::from(to.x), i32::from(to.y));
     let dx = (tx - x).abs();
     let dy = -(ty - y).abs();
     let sx = if x < tx { 1 } else { -1 };
@@ -200,7 +217,7 @@ pub fn line_tiles(from: (u16, u16), to: (u16, u16)) -> Vec<(u16, u16)> {
         if x == tx && y == ty {
             break;
         }
-        tiles.push((x as u16, y as u16));
+        tiles.push(Tile::new(x as u16, y as u16));
     }
     tiles
 }
@@ -361,6 +378,14 @@ impl Walker {
 /// The eight-way direction from one tile toward another, or `None` when they are
 /// the same tile. Shared by the creature brain and the townsfolk who turn to face
 /// whoever they greet.
+///
+/// This only ever looks at *sign* — which quadrant `to` sits in — never at how
+/// far off either axis it is, and that is correct for what calls it: a single
+/// step, or a facing toward an adjacent tile, has nothing else to weigh. Fed a
+/// distant target instead it degenerates: 99 tiles east and 1 south is exactly
+/// as diagonal to this as 1 tile east and 1 south, because every quadrant off
+/// both axes answers `NorthEast`/`SouthEast`/`SouthWest`/`NorthWest` regardless
+/// of the ratio. [`heading_toward`] is the sibling for that case.
 pub fn direction_toward(from: Point, to: Point) -> Option<Direction> {
     let dx = (i32::from(to.x) - i32::from(from.x)).signum();
     let dy = (i32::from(to.y) - i32::from(from.y)).signum();
@@ -377,6 +402,123 @@ pub fn direction_toward(from: Point, to: Point) -> Option<Direction> {
     }
 }
 
+/// The eight-way *heading* from one point toward another — a compass sector,
+/// each spanning 45° and centred on its direction, rather than [`direction_toward`]'s
+/// quadrant-by-sign. `None` when the two points coincide.
+///
+/// This is what a continuous target wants: the mouse-steer heading in
+/// `client/app`'s `Steering::steer`, and the straight-line fallback a stalled
+/// destination in `Steering::take` degrades to. Both name a point that can be
+/// almost anywhere relative to the body, and [`direction_toward`] would call
+/// nearly all of that diagonal — a cursor one tile south and twenty tiles east
+/// of the body is due east, not south-east, and a fair sector split is what
+/// says so.
+pub fn heading_toward(from: Point, to: Point) -> Option<Direction> {
+    let (dx, dy) = (
+        i32::from(to.x) - i32::from(from.x),
+        i32::from(to.y) - i32::from(from.y),
+    );
+    if dx == 0 && dy == 0 {
+        return None;
+    }
+    // atan2(dy, dx): 0° at due east, 90° at due south — tile `y` grows south,
+    // the same sense as screen `y`, so no sign flip is needed to match it.
+    // Rounding to the nearest 45° is the sector split: each direction owns the
+    // 45° centred on its own bearing, not the read of just `dx`'s and `dy`'s
+    // signs that flattens everything off-axis to a diagonal.
+    let octant = (f64::from(dy).atan2(f64::from(dx)).to_degrees() / 45.0).round() as i64;
+    Some(match octant.rem_euclid(8) {
+        0 => Direction::East,
+        1 => Direction::SouthEast,
+        2 => Direction::South,
+        3 => Direction::SouthWest,
+        4 => Direction::West,
+        5 => Direction::NorthWest,
+        6 => Direction::North,
+        _ => Direction::NorthEast,
+    })
+}
+
+/// A heading, with the part of it the eight sectors throw away.
+///
+/// A sector is 45° wide and a body can only be sent along its centre, so
+/// rounding to one is lossy by construction — and what it loses is the very
+/// thing a player is saying when they hold the cursor a little to one side of
+/// a corner. See [`Lean`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Heading {
+    /// The sector: which of the eight ways this heading is nearest to.
+    pub direction: Direction,
+    /// Where inside that sector it actually points.
+    pub lean: Lean,
+}
+
+impl Heading {
+    /// A heading with nothing to say beyond its sector — what a held arrow key
+    /// is, and what a direction reconstructed from anything but a real bearing
+    /// has to be.
+    #[must_use]
+    pub const fn centred(direction: Direction) -> Self {
+        Self {
+            direction,
+            lean: Lean::Centred,
+        }
+    }
+}
+
+/// Which side of its own sector a heading falls on: the sub-sector detail that
+/// rounding to one of eight directions discards.
+///
+/// It is what a player leaning the cursor past a corner is saying, and there is
+/// no other way to say it — the body can only be sent along a sector's centre,
+/// so the *ask* is quantised even though the pointing was not. Where it matters
+/// is a tie: two ways past an obstacle, both legal, and no reason in the
+/// terrain to prefer either. The cursor has the reason.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Lean {
+    /// Dead on the sector's own bearing — and exactly so, by integer
+    /// arithmetic rather than by a tolerance (see [`Lean::of`]). A held arrow
+    /// key is this, and so is a cursor squarely on the diagonal.
+    #[default]
+    Centred,
+    /// Past the centre, the way the compass turns: north-east of north,
+    /// south-east of east. The clockwise flank is the one being pointed at.
+    Clockwise,
+    /// Past the centre the other way.
+    Counter,
+}
+
+impl Lean {
+    /// Which side of the bearing `(ux, uy)` the vector `(dx, dy)` falls on.
+    ///
+    /// The sign of their 2D cross product — positive is clockwise where `y`
+    /// grows downward, which is true of both spaces this is used in: the tile
+    /// grid, whose `y` grows south, and the screen it is drawn on. It is the
+    /// same answer in both, because the projection between them turns the
+    /// plane without flipping it — so a caller measuring on the screen and a
+    /// caller measuring on the grid mean the same thing by `Clockwise`, and
+    /// [`crate::Detour`] can take either without being told which.
+    ///
+    /// The bearing is a vector and not a [`Direction`] because the screen
+    /// bearing of a direction is not its grid step, and asking a pointing
+    /// device is the whole point.
+    ///
+    /// Integer arithmetic on purpose: a tolerance would have to name a number
+    /// of degrees, and the case that has to be exact is a cursor pointing
+    /// *squarely* along a bearing — which is a cross product of zero, and
+    /// nothing about trigonometry. Through `atan2` that same case comes out as
+    /// 45.000000000000007 against 45, and a player pointing straight at a
+    /// corner would lean one way for no reason anyone could see.
+    #[must_use]
+    pub const fn of(ux: i32, uy: i32, dx: i32, dy: i32) -> Self {
+        match ux * dy - uy * dx {
+            0 => Self::Centred,
+            cross if cross > 0 => Self::Clockwise,
+            _ => Self::Counter,
+        }
+    }
+}
+
 /// Where one step from `position` lands, or `None` at the world's edge.
 ///
 /// The map is addressed with `u16`s, so a step west from x=0 has no
@@ -389,21 +531,134 @@ pub fn step_from(position: Point, direction: Direction) -> Option<Point> {
     Some(Point { x, y, z: position.z })
 }
 
+/// Where one *legal* step from `from` lands, or `None` when that step is not a
+/// step this world allows at all.
+///
+/// [`Terrain::can_step`] answers for the destination tile alone — is there
+/// ground, does the body fit, is the climb within [`MAX_STEP_UP`]. That is the
+/// whole answer for a cardinal and only half of it for a diagonal, which also
+/// may not clip the corner where two blockers meet: both cardinal tiles
+/// flanking it must themselves be steppable, the same rule the client enforces
+/// and the rule `openshard_state::obstruct`'s `LiveTerrain` applies to every
+/// step that reaches the wire.
+///
+/// It lives here, above every caller, because the three that need it are not
+/// one layer: [`find_path`](crate::find_path) planning a route, the shard
+/// validating a creature's step, and the client's own held-direction detour
+/// deciding whether the way ahead is open. A [`Terrain`] implementation is free
+/// to *also* refuse a corner — `LiveTerrain` does, because it is the last word
+/// before a `0x21` — but nothing may rely on one that does not, and
+/// [`MapTerrain`](crate::MapTerrain), the static map both ends share, is
+/// exactly such a one. A client asking `can_step` directly therefore believes a
+/// corner-cutting diagonal is walkable, sends it, and is rubber-banded — which
+/// is a body stuck against a building corner for as long as the player holds
+/// that direction.
+#[must_use]
+pub fn step_allowed(terrain: &dyn Terrain, from: Point, direction: Direction) -> Option<Point> {
+    let to = step_from(from, direction)?;
+    if direction.is_diagonal() && !corner_open(terrain, from, direction) {
+        return None;
+    }
+    terrain.can_step(from, to)
+}
+
+/// Whether both cardinal tiles flanking a diagonal are steppable, so the
+/// diagonal does not cut through a wall's corner. The flanks of a diagonal are
+/// the two wire directions either side of it (NE lies between N and E).
+fn corner_open(terrain: &dyn Terrain, from: Point, diagonal: Direction) -> bool {
+    let d = diagonal.to_bits();
+    let flanks = [
+        Direction::from_bits((d + 7) % 8),
+        Direction::from_bits((d + 1) % 8),
+    ];
+    flanks.iter().all(|&card| {
+        step_from(from, card)
+            .and_then(|tile| terrain.can_step(from, tile))
+            .is_some()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use openshard_protocol::world::{RawFastwalkKey, RawStepSequence};
 
     use super::*;
 
+    /// Where [`direction_toward`] flattens: far more east than south still
+    /// reads as a diagonal, because only the signs of `dx`/`dy` are looked at.
+    #[test]
+    fn direction_toward_is_diagonal_off_both_axes_however_lopsided() {
+        let from = Point::new(100, 100, 0);
+        assert_eq!(
+            direction_toward(from, Point::new(199, 101, 0)),
+            Some(Direction::SouthEast),
+            "99 tiles east and 1 south is still called diagonal by the sign-only version"
+        );
+    }
+
+    /// [`heading_toward`] is the fair-sector sibling: the same lopsided target
+    /// reads as the axis it is overwhelmingly closer to.
+    #[test]
+    fn heading_toward_favors_the_dominant_axis() {
+        let from = Point::new(100, 100, 0);
+        assert_eq!(
+            heading_toward(from, Point::new(199, 101, 0)),
+            Some(Direction::East),
+            "99 tiles east and 1 south is due east, not south-east"
+        );
+        assert_eq!(
+            heading_toward(from, Point::new(101, 199, 0)),
+            Some(Direction::South),
+            "and the same holds on the other axis"
+        );
+    }
+
+    /// Each of the eight sectors spans 45°, centred on its own direction —
+    /// exercised on the diagonals, where a sign-only read and a sector read
+    /// happen to agree, and on points just either side of a sector boundary,
+    /// where they do not.
+    #[test]
+    fn heading_toward_splits_the_compass_into_eight_even_sectors() {
+        let from = Point::new(100, 100, 0);
+        let cases = [
+            ((110, 100), Direction::East),
+            ((110, 110), Direction::SouthEast),
+            ((100, 110), Direction::South),
+            ((90, 110), Direction::SouthWest),
+            ((90, 100), Direction::West),
+            ((90, 90), Direction::NorthWest),
+            ((100, 90), Direction::North),
+            ((110, 90), Direction::NorthEast),
+            // Just inside East's sector (< 22.5° off the axis): 10 tiles east,
+            // 4 south is ~21.8°.
+            ((110, 104), Direction::East),
+            // Just past it (> 22.5°): 10 tiles east, 5 south is ~26.6°.
+            ((110, 105), Direction::SouthEast),
+        ];
+        for ((x, y), expected) in cases {
+            assert_eq!(
+                heading_toward(from, Point::new(x, y, 0)),
+                Some(expected),
+                "({x}, {y})"
+            );
+        }
+    }
+
+    #[test]
+    fn heading_toward_the_same_tile_is_none() {
+        let here = Point::new(100, 100, 0);
+        assert_eq!(heading_toward(here, here), None);
+    }
+
     #[test]
     fn a_sight_line_crosses_the_tiles_between_and_not_the_ends() {
-        let tiles = line_tiles((10, 10), (10, 13));
-        assert_eq!(tiles, vec![(10, 11), (10, 12)]);
-        let diagonal = line_tiles((0, 0), (3, 3));
-        assert_eq!(diagonal, vec![(1, 1), (2, 2)]);
-        assert!(line_tiles((5, 5), (5, 5)).is_empty());
+        let tiles = line_tiles(Tile::new(10, 10), Tile::new(10, 13));
+        assert_eq!(tiles, vec![Tile::new(10, 11), Tile::new(10, 12)]);
+        let diagonal = line_tiles(Tile::new(0, 0), Tile::new(3, 3));
+        assert_eq!(diagonal, vec![Tile::new(1, 1), Tile::new(2, 2)]);
+        assert!(line_tiles(Tile::new(5, 5), Tile::new(5, 5)).is_empty());
         assert!(
-            line_tiles((5, 5), (6, 5)).is_empty(),
+            line_tiles(Tile::new(5, 5), Tile::new(6, 5)).is_empty(),
             "adjacent tiles see each other"
         );
     }

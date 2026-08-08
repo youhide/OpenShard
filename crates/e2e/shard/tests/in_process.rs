@@ -53,7 +53,9 @@ async fn a_client_enters_the_world_with_no_socket_anywhere() {
     let start = view.player.position;
     let mut walk = Walk::new(start, view.player.facing);
     let heading = Facing::walking(view.player.facing.direction);
-    let request = walk.step(heading, |_, _| None).expect("room on the map to walk");
+    let request = walk
+        .step(heading, |_, _, _| None)
+        .expect("room on the map to walk");
     socket.send(&request).await.expect("the shard is listening");
 
     let stepped = tokio::time::timeout(WAIT, async {

@@ -11,7 +11,7 @@
 
 use crate::codec::{PacketReader, PacketWriter};
 use crate::error::DecodeError;
-use crate::packet::{DecodePacket, EncodePacket, PacketLength};
+use crate::packet::{DecodePacket, EncodePacket, PacketLength, frame_body};
 use crate::serial::Serial;
 use crate::version::ClientVersion;
 use crate::wire::{ClilocId, Graphic, Hue, RawHue};
@@ -224,6 +224,44 @@ impl DecodePacket for UnicodeTalkRequest {
     }
 }
 
+impl UnicodeTalkRequest {
+    /// The language tag in the header. Four bytes, null-padded, and never read by
+    /// this engine — the field exists because the client fills it in and the
+    /// offsets after it depend on its width, not because anything acts on it.
+    const LANGUAGE: [u8; 4] = *b"ENU\0";
+
+    /// Encode a whole `0xAD`. What `crates/client/net` sends when the player
+    /// types; this *server* never sends one, only ever decodes it — the same
+    /// split as [`WalkRequest::encode`](crate::world::WalkRequest::encode).
+    ///
+    /// Always the plain form: big-endian UTF-16, null-terminated. The keyword
+    /// block is the client recognising its own trigger words ("bank", "guards")
+    /// against a list that lives in the client's files, and this end has no such
+    /// list — so [`mode`](Self::mode) must arrive without the keyword bits, or
+    /// the header would promise a block that is not there and the server would
+    /// read the text as its length. Asserted in debug rather than masked: a mode
+    /// silently rewritten here is a caller that thinks it sent something else.
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        debug_assert!(
+            !self.mode.has_keywords(),
+            "0xAD encodes the plain form; mode 0x{:02X} claims a keyword block",
+            self.mode.0
+        );
+        frame_body(
+            <Self as DecodePacket>::ID,
+            PacketLength::Variable,
+            |out: &mut PacketWriter| {
+                out.u8(self.mode.0);
+                out.u16(self.hue.0);
+                out.u16(self.font.0);
+                out.bytes(&Self::LANGUAGE);
+                out.null_terminated_string_utf16(&self.text);
+            },
+        )
+    }
+}
+
 /// Decode big-endian UTF-16 up to a null terminator (or the end).
 fn utf16_be_to_string(bytes: &[u8]) -> String {
     let mut units = Vec::with_capacity(bytes.len() / 2);
@@ -419,6 +457,48 @@ impl EncodePacket for UnicodeMessage {
     }
 }
 
+impl DecodePacket for UnicodeMessage {
+    const ID: u8 = 0xAE;
+
+    /// The client's direction of `0xAE`, written for the same reason
+    /// [`SpokenMessage::decode_body`] was: our own client has to read what the
+    /// shard draws over a head, and a client that spoke `0xAD` gets exactly this
+    /// packet back — see the module doc. The layout matches `0x1C` up to the
+    /// name, then the language tag, then big-endian UTF-16 rather than ASCII.
+    ///
+    /// The two sentinels fold to `None` here exactly as they do in
+    /// [`SpokenMessage::decode_body`] — see that function's docs for why.
+    fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
+        let serial = match reader.u32()? {
+            SYSTEM_SERIAL => None,
+            raw => Some(Serial::new(raw).ok_or(DecodeError::UnknownValue {
+                field: "0xAE speaker serial",
+                value: raw,
+            })?),
+        };
+        let graphic = match reader.u16()? {
+            NO_GRAPHIC => None,
+            raw => Some(Graphic(raw)),
+        };
+        let mode = RawTalkMode(reader.u8()?).interpret();
+        let hue = Hue(reader.u16()?);
+        let font = Font(reader.u16()?);
+        let language = reader.fixed_string(LANGUAGE_LENGTH)?;
+        let name = reader.fixed_string(NAME_LENGTH)?;
+        let text = utf16_be_to_string(reader.rest());
+        Ok(Self {
+            serial,
+            graphic,
+            mode,
+            hue,
+            font,
+            language,
+            name,
+            text,
+        })
+    }
+}
+
 /// The default four-byte language tag (`"ENU\0"`) for a Unicode message whose
 /// source named none. Exposed so the world need not restate the fallback.
 pub const DEFAULT_LANGUAGE_TAG: &str = DEFAULT_LANGUAGE;
@@ -597,6 +677,29 @@ mod tests {
     }
 
     #[test]
+    fn what_the_client_types_comes_back_out_of_the_decoder() {
+        // The one thing worth asserting about the encoder: it is the server's own
+        // decoder that has to read it, and a header field written in the wrong
+        // width desynchronises the text rather than failing. Non-ASCII on purpose
+        // — UTF-16 is the whole reason a modern client sends 0xAD at all.
+        let said = UnicodeTalkRequest {
+            mode: RawTalkMode(TalkMode::Regular.to_wire()),
+            hue: RawHue(0x0384),
+            font: RawFont(3),
+            text: "привет .admin".to_owned(),
+        };
+        let bytes = said.encode();
+        assert_eq!(bytes[0], 0xAD);
+        assert_eq!(
+            u16::from_be_bytes([bytes[1], bytes[2]]) as usize,
+            bytes.len(),
+            "the length field counts the whole packet, itself and the id included"
+        );
+        let heard: UnicodeTalkRequest = decode_packet(&bytes, version()).unwrap();
+        assert_eq!(heard, said);
+    }
+
+    #[test]
     fn a_unicode_talk_request_skips_the_keyword_block() {
         // mode with the keyword bit set: a count word, packed ids, then ASCII.
         let mut bytes = vec![0xAD];
@@ -690,6 +793,70 @@ mod tests {
         let mut expected: Vec<u16> = "olá".encode_utf16().collect();
         expected.push(0);
         assert_eq!(text_units, expected, "big-endian UTF-16, null-terminated");
+    }
+
+    /// The client's side of `0xAE`, round-tripped against our own encoder, with
+    /// non-ASCII text — the whole reason `0xAE` exists rather than `0x1C`
+    /// carrying everything.
+    ///
+    /// This is the packet a client that spoke `0xAD` gets back for its *own*
+    /// words (see the module doc), so a client that could not decode it would
+    /// never see what it just typed — the bug this test exists to close.
+    #[test]
+    fn a_unicode_message_decodes_back_to_what_was_said() {
+        let said = UnicodeMessage {
+            serial: Serial::new(0x0000_0123),
+            graphic: Some(Graphic(0x0190)),
+            mode: TalkMode::Regular,
+            hue: Hue(0x0022),
+            font: Font(3),
+            language: "RUS".to_owned(),
+            name: "Иванов".to_owned(),
+            text: "привет .admin".to_owned(),
+        };
+        let packet = encode_packet(&said, version());
+        assert_eq!(packet[0], 0xAE);
+
+        let Some(ServerPacket::UnicodeMessage(read)) = ServerPacket::decode(&packet, version()).unwrap()
+        else {
+            panic!("0xAE decoded as something else");
+        };
+        assert_eq!(read.serial, said.serial);
+        assert_eq!(read.graphic, said.graphic);
+        assert_eq!(read.mode, said.mode);
+        assert_eq!(read.hue, said.hue);
+        assert_eq!(read.font, said.font);
+        assert_eq!(read.language, "RUS", "the language tag round-trips");
+        // The name field narrows to Latin-1 on the wire (fixed_string), so a
+        // Cyrillic name does not survive it — only the text, sent as UTF-16,
+        // does. That is the whole point of comparing text and not name here.
+        assert_eq!(read.text, said.text, "UTF-16 text survives what Latin-1 cannot");
+    }
+
+    /// The system talking through `0xAE` folds the same sentinels `0x1C` does —
+    /// see [`SpokenMessage::decode_body`]'s docs for why that fold matters.
+    #[test]
+    fn a_system_unicode_message_has_no_mobile_behind_it() {
+        let packet = encode_packet(
+            &UnicodeMessage {
+                serial: None,
+                graphic: None,
+                mode: TalkMode::Regular,
+                hue: Hue::NONE,
+                font: Font::DEFAULT,
+                language: DEFAULT_LANGUAGE_TAG.to_owned(),
+                name: "System".to_owned(),
+                text: "welcome".to_owned(),
+            },
+            version(),
+        );
+        let Some(ServerPacket::UnicodeMessage(read)) = ServerPacket::decode(&packet, version()).unwrap()
+        else {
+            panic!("0xAE decoded as something else");
+        };
+        assert_eq!(read.serial, None, "the system talking is not mobile 0xFFFFFFFF");
+        assert_eq!(read.graphic, None, "and no body stands behind it");
+        assert_eq!(read.text, "welcome");
     }
 
     #[test]

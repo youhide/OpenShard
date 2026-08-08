@@ -103,7 +103,9 @@ async fn a_stop_leaves_the_world_on_disk_before_it_returns() {
     let start = view.player.position;
     let mut walk = Walk::new(start, view.player.facing);
     let heading = Facing::walking(view.player.facing.direction);
-    let request = walk.step(heading, |_, _| None).expect("room on the map to walk");
+    let request = walk
+        .step(heading, |_, _, _| None)
+        .expect("room on the map to walk");
     socket.send(&request).await.expect("the shard is listening");
 
     let stepped = tokio::time::timeout(WAIT, async {

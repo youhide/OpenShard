@@ -1,0 +1,24 @@
+[package]
+name = "openshard-client-artscan"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Measures a client's art once, off the clock, and writes the table the client reads."
+
+# The crate that opens the files `openshard-client-render` promises never to
+# open. It is a build tool in the shape `docs/roadmap.md` already settled for the
+# Sphere scriptpack — it runs against an install and writes a table — plus the
+# reader the client loads that table with, which is here rather than in the app
+# so that the tool and the client cannot disagree about where the file lives or
+# what makes it stale.
+[dependencies]
+openshard-client-render.workspace = true
+openshard-uofiles.workspace = true
+openshard-protocol.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true

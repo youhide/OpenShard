@@ -22,6 +22,10 @@ dist/
 # on first run; `openshard_config::DEFAULT_TOML` is the version under review.
 /openshard.toml
 
+# Where the client's HUD was left: tabs, window geometry, scale. One person's
+# screen arrangement, written on exit — see `crates/client/app/src/desk.rs`.
+/client_ui.toml
+
 # Editors / OS
 .DS_Store
 .idea/

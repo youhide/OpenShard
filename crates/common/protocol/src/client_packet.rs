@@ -23,7 +23,7 @@ use crate::target::TargetResponse;
 use crate::trade::SecureTradeAction;
 use crate::vendor::{BuyReply, SellReply};
 use crate::version::ClientVersion;
-use crate::world::WalkRequest;
+use crate::world::{ResyncRequest, WalkRequest};
 
 /// `0xD1` from the client is a bare notification — "log me out" — with no
 /// body to decode. Kept private: nothing outside [`ClientPacket::decode`]
@@ -38,6 +38,15 @@ pub enum ClientPacket {
     Walk(WalkRequest),
     /// `0xD1` — "Log Out" on the paperdoll.
     LogoutRequest,
+    /// `0x22` from the client — "tell me where I am".
+    ///
+    /// Sent when the walk handshake has fallen out of step: an ack the client
+    /// cannot place, which it answers by asking rather than by guessing. It
+    /// carries no body — the question is the whole packet — and the answer is a
+    /// `0x20` with the real position, everything in view again, and both
+    /// sequences back to zero. See [`RESYNC_REQUEST_ID`] for why this shares an
+    /// id with the walk ack.
+    ResyncRequest,
     /// `0x34` — a status-bar or skill-list query.
     StatusQuery(StatusQuery),
     /// `0xD7` — the AoS encoded command (the paperdoll's Quest and Guild
@@ -112,6 +121,7 @@ impl ClientPacket {
                 .map(Self::Walk)
                 .map_err(ClientDecodeError::Walk),
             LOGOUT_REQUEST_ID => Ok(Self::LogoutRequest),
+            ResyncRequest::ID => Ok(Self::ResyncRequest),
             StatusQuery::ID => decode_packet(packet, version)
                 .map(Self::StatusQuery)
                 .map_err(ClientDecodeError::StatusQuery),
@@ -273,15 +283,25 @@ mod tests {
 
     #[test]
     fn an_unknown_id_is_not_an_error() {
-        let bytes = [0x22, 0x00, 0x00];
+        let bytes = [0xF3, 0x00, 0x00];
         let packet = ClientPacket::decode(&bytes, version()).unwrap();
         assert_eq!(
             packet,
             ClientPacket::Unknown {
-                id: 0x22,
+                id: 0xF3,
                 body: bytes.to_vec()
             }
         );
+    }
+
+    /// The one id that means two unrelated things depending on which way it is
+    /// travelling. Three bytes each way, and nothing in the body to tell them
+    /// apart — this test is here so that a reader who finds `0x22` in the server
+    /// packets is told, by a failing name, that they are not the same packet.
+    #[test]
+    fn twenty_two_from_the_client_is_a_resync_and_not_a_walk_ack() {
+        let packet = ClientPacket::decode(&[0x22, 0x00, 0x00], version()).unwrap();
+        assert_eq!(packet, ClientPacket::ResyncRequest);
     }
 
     #[test]

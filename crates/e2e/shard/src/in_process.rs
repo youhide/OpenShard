@@ -111,7 +111,7 @@ pub fn spawn(config: impl FnOnce(SocketAddr) -> Config + Send + 'static) -> (InP
             // The tally inside the reins goes unread, as in `crate::spawn` —
             // see there.
             let reins = openshard_server::shard::Reins::over(served);
-            openshard_server::shard::run_shard(events, config, world, store, reins).await;
+            openshard_server::shard::run_shard(events, config, world, store, reins, &[]).await;
         });
     });
 

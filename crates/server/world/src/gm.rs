@@ -13,6 +13,7 @@
 //! themselves, the same "emit, don't reimplement" the rest of the world follows.
 
 use openshard_entities::EntityId;
+use openshard_movement::Tile;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::speech::{Font, SpokenMessage, TalkMode};
 use openshard_protocol::target::{TargetCursor, TargetKind};
@@ -426,7 +427,7 @@ fn ground_z(state: &WorldState, facet: u8, x: u16, y: u16) -> Option<i8> {
         .facet_state(Facet(facet))
         .terrain
         .as_ref()
-        .and_then(|terrain| terrain.ground_z(x, y))
+        .and_then(|terrain| terrain.ground_z(Tile::new(x, y)))
 }
 
 /// Parse a `u16` written in hex (`0x1bf2`) or decimal — item ids are quoted both.

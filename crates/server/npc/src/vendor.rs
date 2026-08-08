@@ -314,7 +314,7 @@ pub fn open_shop(state: &mut WorldState, connection: ConnectionId, serial: Seria
     state.send_packet(
         connection,
         &ServerPacket::ContainerContents(ContainerContents {
-            container: stock_serial,
+            container: Some(stock_serial),
             items: contents.clone(),
         }),
     );

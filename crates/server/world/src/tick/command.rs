@@ -388,6 +388,18 @@ pub enum Command {
         /// Which connection asked.
         connection: ConnectionId,
     },
+    /// A client lost track of the walk and asked where it is — a `0x22` *from the
+    /// client*, which is a different packet from the `0x22` this server sends to
+    /// acknowledge a step.
+    ///
+    /// The repair leg of the walk handshake, and the client is waiting on it: it
+    /// stops sending steps when it asks, because a `0x22` ack carries no position
+    /// and there is nothing local it could work the answer out from. A shard that
+    /// drops this leaves that client unable to walk for the rest of the session.
+    Resync {
+        /// Which connection asked.
+        connection: ConnectionId,
+    },
     /// A client asked for its skill list — a `0x34` type `0x05`, sent when the
     /// skill window opens. Without this the window opens empty: the login list is
     /// long gone by the time a player clicks the skill button.

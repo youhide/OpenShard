@@ -224,7 +224,7 @@ impl World {
         let live = state.live_terrain();
         // Reached from its own height, which is what asking "is this tile
         // standable" means when nobody is walking onto it from anywhere.
-        openshard_movement::Terrain::stand_z(&live, at.x, at.y, i32::from(at.z)).is_some()
+        openshard_movement::Terrain::stand_z(&live, Tile::new(at.x, at.y), i32::from(at.z)).is_some()
     }
 
     /// Whether `item` is inside the mobile's own backpack, at any depth.

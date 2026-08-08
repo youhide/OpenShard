@@ -27,9 +27,20 @@
 //! And [`WalkPace`], which decides how often a step is allowed.
 //!
 //! [`Terrain`] — whether a tile can be stood on — is a trait, because the answer
-//! needs the client's map files, the statics, the multis and every other mobile,
-//! and none of that belongs here. `openshard-world` implements it;
-//! [`OpenWorld`] is what a shard with no client files runs.
+//! needs the client's map files, the statics, the multis and every other mobile.
+//! [`MapTerrain`] is the static half — the map and `tiledata.mul`, nothing else —
+//! shared between the server tick and the client's own click-to-walk planner;
+//! [`OpenWorld`] is what a shard with no client files runs. The dynamic half —
+//! doors, placed items, other mobiles — is `openshard-state::obstruct`, which
+//! stays server-side because it needs the entity registry.
+//!
+//! And two ways of getting somewhere, which answer different questions.
+//! [`find_path`] needs a destination and searches for a route to it.
+//! [`Detour`] needs neither: it takes a direction a body is already walking and
+//! the four tiles around it that decide the next step, and answers with where
+//! that body actually goes — the way past what is directly in the way, or
+//! nothing when there is no way past. A heading has no destination to plan to,
+//! which is why the second exists.
 //!
 //! # Fastwalk
 //!
@@ -37,12 +48,20 @@
 //! hacks, was broken almost immediately, and Sphere stopped reading it. The
 //! defence that works is server-side: see [`WalkPace`].
 
+mod detour;
 mod pace;
 mod path;
+pub mod scene;
 mod sequence;
+mod terrain;
 mod walk;
 
-pub use pace::{Pace, RUN_INTERVAL, WALK_BUFFER, WALK_INTERVAL, WalkPace};
+pub use detour::{Around, Detour, Leeway, Step};
+pub use pace::{Pace, RUN_HOLD, RUN_INTERVAL, WALK_BUFFER, WALK_HOLD, WALK_INTERVAL, WalkPace};
 pub use path::find_path;
 pub use sequence::{OutOfSequence, StepCounter, WalkSequence};
-pub use walk::{Intent, OpenWorld, Terrain, Walk, Walker, direction_toward, intend, line_tiles, step_from};
+pub use terrain::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
+pub use walk::{
+    Heading, Intent, Lean, OpenWorld, Terrain, Tile, Walk, Walker, direction_toward, heading_toward, intend,
+    line_tiles, step_allowed, step_from,
+};

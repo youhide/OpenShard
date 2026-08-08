@@ -181,7 +181,7 @@ impl World {
         // means, registering regions through `op_register_spawner` or clearing them.
         if let Some(serial) = self.state.registry.serial_of(actor) {
             self.state.bus.send(AdminMenuAction {
-                serial,
+                serial: Some(serial),
                 action: verb.to_owned(),
             });
         }

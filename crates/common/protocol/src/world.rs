@@ -726,9 +726,51 @@ impl WalkRequest {
     }
 }
 
+/// `0x22` *from the client* — "tell me where I am". 3 bytes: the id and two of
+/// nothing.
+///
+/// # One id, two packets
+///
+/// The same id going the other way is [`WalkAck`], which is also three bytes and
+/// means nothing like this. No field distinguishes them — only the direction of
+/// travel — and both references agree that this is how it is: ServUO registers
+/// `0x22, 3, true, Resynchronize` beside the `0x22` it sends, and ClassicUO has
+/// `Handler.Add(0x22, ConfirmWalk)` beside an `OutgoingPackets.Send_Resync`
+/// writing the same id. They sit next to each other in this file so that nobody
+/// finds one and assumes it is the other.
+///
+/// # What it is for
+///
+/// The repair leg of the walk handshake. A client that receives an ack it cannot
+/// place has no way to work out where it really is — a `0x22` ack carries no
+/// position — so it asks, and stops walking until it is told. The answer is a
+/// `0x20`, everything in view again, and both sequences back to zero; ServUO's
+/// `Resynchronize` is that list exactly. A server that ignores this leaves such a
+/// client frozen for good, which is why `Walk` on our own client did not use it
+/// until the shard could answer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ResyncRequest;
+
+impl ResyncRequest {
+    /// The id, shared with [`WalkAck`] in the other direction.
+    pub const ID: u8 = 0x22;
+
+    /// Encode the whole packet. What `crates/client/net`'s walk sends when it
+    /// loses track of the server; this server only ever decodes it.
+    pub fn encode(self) -> Vec<u8> {
+        let mut writer = PacketWriter::with_capacity(3);
+        writer.u8(Self::ID);
+        // Two bytes the client fills with nothing. ServUO reads a fixed length
+        // of three and looks at neither.
+        writer.zeros(2);
+        writer.into_bytes()
+    }
+}
+
 /// `0x22` — the step is allowed. 3 bytes.
 ///
-/// `notoriety` colours the player's own health bar.
+/// `notoriety` colours the player's own health bar. See [`ResyncRequest`] for
+/// the unrelated packet that shares this id in the other direction.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WalkAck {
     /// The sequence number being acknowledged.

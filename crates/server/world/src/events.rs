@@ -275,7 +275,8 @@ pub struct RegionChanged {
     pub name: String,
 }
 
-/// A game master pressed a button in the `.admin` menu.
+/// A game master pressed a button in the `.admin` menu — or the shard was asked
+/// to seed itself on the command line.
 ///
 /// The engine carries the verb across; the script pack decides what it does —
 /// which spawn set to register, what to clear. Emitted on the bus so a script
@@ -283,8 +284,11 @@ pub struct RegionChanged {
 /// pack. Carries an owned `String`, so it is `Clone`, not `Copy`.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct AdminMenuAction {
-    /// The game master's wire identity.
-    pub serial: Serial,
+    /// The game master's wire identity, or `None` when nobody pressed anything:
+    /// a `--seed` verb is sent before the first tick, when there is no acting
+    /// mobile and no connection to answer. Absent, not unknown — a placeholder
+    /// serial here would name whatever entity happens to hold it.
+    pub serial: Option<Serial>,
     /// The action the button asked for, e.g. `"populate:britain"`.
     pub action: String,
 }

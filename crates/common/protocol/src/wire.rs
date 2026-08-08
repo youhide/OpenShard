@@ -123,6 +123,80 @@ pub struct ClilocId(pub u32);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct Layer(pub u8);
 
+impl Layer {
+    /// The weapon hand.
+    ///
+    /// This and the twenty-two that follow are the reference client's `Layer`
+    /// enum, verbatim and in its own order. They are named — rather than
+    /// written as `Layer(0x14)` where they are needed — because a *table* needs
+    /// them: the paperdoll's draw order is twenty-five layer names per row,
+    /// three rows of them, and a table of hex bytes cannot be checked against
+    /// the reference it was ported from. Naming them here rather than in the
+    /// renderer that reads them is [`HAIR`](Self::HAIR)'s reason: one list, and
+    /// both ends of the wire read it.
+    ///
+    /// Still constants and not an enum, for the reason above the type: the
+    /// numbers past these are a shard's business — a bank box, a trade window —
+    /// and modelling the whole byte would be a claim about slots this engine
+    /// has never sent.
+    pub const ONE_HANDED: Self = Self(0x01);
+    /// The off hand: a shield, or the second half of a two-handed weapon.
+    pub const TWO_HANDED: Self = Self(0x02);
+    /// Shoes.
+    pub const SHOES: Self = Self(0x03);
+    /// Pants.
+    pub const PANTS: Self = Self(0x04);
+    /// A shirt.
+    pub const SHIRT: Self = Self(0x05);
+    /// A helmet or a hat.
+    pub const HELMET: Self = Self(0x06);
+    /// Gloves.
+    pub const GLOVES: Self = Self(0x07);
+    /// A ring.
+    pub const RING: Self = Self(0x08);
+    /// A talisman.
+    pub const TALISMAN: Self = Self(0x09);
+    /// A necklace or a gorget.
+    pub const NECKLACE: Self = Self(0x0A);
+    /// `Layer.Hair`. Hair is an ordinary worn item on this wire, and the two
+    /// ends disagree about what to do with it: the shard dresses a corpse and a
+    /// ghost in it, and the client refuses to draw it on either
+    /// (`IsDead && (layer == Layer.Hair || layer == Layer.Beard)`).
+    pub const HAIR: Self = Self(0x0B);
+    /// A belt or a sash.
+    pub const WAIST: Self = Self(0x0C);
+    /// The chest piece worn under the tunic.
+    pub const TORSO: Self = Self(0x0D);
+    /// A bracelet.
+    pub const BRACELET: Self = Self(0x0E);
+    /// A mask, and whatever else sits on the face.
+    pub const FACE: Self = Self(0x0F);
+    /// `Layer.FacialHair` — a beard. [`HAIR`](Self::HAIR)'s twin everywhere it
+    /// is asked about, which is why the pair is named here rather than at the
+    /// two call sites that had one each.
+    pub const BEARD: Self = Self(0x10);
+    /// The outer chest piece — `Layer.Tunic`, the surcoat over the armour.
+    pub const TUNIC: Self = Self(0x11);
+    /// Earrings.
+    pub const EARRINGS: Self = Self(0x12);
+    /// Arms.
+    pub const ARMS: Self = Self(0x13);
+    /// A cloak — and, on the wire, a quiver.
+    pub const CLOAK: Self = Self(0x14);
+    /// The backpack. Drawn last on a paperdoll and outside its ordering,
+    /// which is what `openshard_client_render::paperdoll` keeps it apart for.
+    pub const BACKPACK: Self = Self(0x15);
+    /// A robe or a dress.
+    pub const ROBE: Self = Self(0x16);
+    /// A skirt or a kilt.
+    pub const SKIRT: Self = Self(0x17);
+    /// Leg armour.
+    pub const LEGS: Self = Self(0x18);
+    /// What is being ridden. Never drawn on a paperdoll — the mount is a body
+    /// of its own on the ground, not a picture on a doll.
+    pub const MOUNT: Self = Self(0x19);
+}
+
 /// A layer exactly as a client packet proposed it.
 ///
 /// Only `0x13` carries one inbound — the client works the slot out from the

@@ -27,13 +27,28 @@
 //! timing that a real network decides. The socket tests in `crates/e2e/shard`
 //! cover that and stay where they are.
 //!
+//! # Whose world it is
+//!
+//! The shard reads `openshard.toml` if there is one — `--config` names another —
+//! and falls back to the shipped default when there is not. That is the
+//! difference between a window onto a world and a window onto bare ground: the
+//! engine ships no spawn or decoration data at all, so with the default's empty
+//! `scripting.main` and no saved world, what draws is the map's own statics and
+//! nothing else. No townsfolk, no doors, no shop signs — those are the pack's,
+//! and they arrive over the wire like any other item.
+//!
+//! It follows that this *can* now open the world an operator has saved, and
+//! write to it: a config naming a database is that database. Not a second copy.
+//! Point it at one a `cargo run -p openshard-server` is already serving and two
+//! processes have it open at once.
+//!
 //! # What this is not
 //!
-//! Not a way to run a shard: it keeps nothing. The world is in memory and goes
-//! away with the process, which is what makes it a playground — see
-//! `cargo run -p openshard-server` for a shard that saves, and the `e2e` tests
-//! beside this crate for the same arrangement with assertions instead of a
-//! window.
+//! Not a shard to serve from: no port is bound, so nothing outside this process
+//! can reach it. The `e2e` tests beside this crate are the same arrangement with
+//! assertions instead of a window, and they take the shipped default on purpose
+//! — a test that read the machine's config would pass on what somebody happened
+//! to have configured.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -63,9 +78,29 @@ struct Cli {
     #[arg(long, env = "OPENSHARD_CHARACTER", default_value = openshard_e2e_shard::CHARACTER)]
     character: String,
 
+    /// The shard config to run, when there is one at that path.
+    ///
+    /// The point of reading it is the pack and the database: a shard with
+    /// `scripting.main` empty and no world saved anywhere draws the map and
+    /// nothing else — no townsfolk, no doors, no shop signs, because the engine
+    /// ships none of that. Missing, this falls back to the shipped default,
+    /// which is what a fresh checkout has.
+    #[arg(
+        long,
+        env = "OPENSHARD_CONFIG",
+        default_value = "openshard.toml",
+        value_name = "FILE"
+    )]
+    config: PathBuf,
+
     /// The `tracing` filter, in `RUST_LOG` syntax.
     #[arg(long, env = "RUST_LOG", default_value = "info", value_name = "FILTER")]
     log: String,
+
+    /// Draw overhead speech through this TrueType or OpenType face instead of
+    /// `fonts.mul`. See `openshard_client_app`'s own flag of the same name.
+    #[arg(long, env = "OPENSHARD_TTF_FONT", value_name = "FILE")]
+    ttf_font: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -81,6 +116,23 @@ fn main() -> ExitCode {
 
     let dir = cli.client;
 
+    // Read before the window opens and before the shard thread starts, so a
+    // config with a typo in it is a sentence on the terminal rather than a panic
+    // inside a thread nobody is watching.
+    let operator = match openshard_e2e_shard::operator_config(&cli.config) {
+        Ok(operator) => operator,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if operator.is_none() {
+        eprintln!(
+            "no {} beside this directory; running the shipped default, whose world is empty",
+            cli.config.display()
+        );
+    }
+
     // The shard reads the same install the window does, and that is not a
     // convenience: `world.client_files` is what gives the server a map, and
     // without one every step is allowed at whatever height the client guessed.
@@ -89,9 +141,18 @@ fn main() -> ExitCode {
     // into a stream of `0x21` rollbacks — which looks like a bug in the client.
     // It costs a second copy of the facet in this process; a playground can
     // afford one, and `docs/client_versions.md` is the standing rule it obeys.
+    // Overridden whichever config this is, because the window is the one naming
+    // the install and an operator's config may name none.
     let files = dir.to_string_lossy().into_owned();
     let (dial, shard) = openshard_e2e_shard::in_process::spawn(move |stated| {
-        let mut config = openshard_e2e_shard::stock_config(stated);
+        let mut config = operator.unwrap_or_else(|| openshard_e2e_shard::stock_config(stated));
+        // Both addresses, whichever config this is: nothing binds a port here,
+        // but the `0x8C` relay still tells the client where to dial and the
+        // client still obeys it. An operator's `advertise` — a LAN address, a
+        // public one — would send this window somewhere that is not this
+        // process, and the login would end politely and silently.
+        config.server.listen = stated;
+        config.server.advertise = stated;
         config.world.client_files = files;
         config
     });
@@ -103,12 +164,22 @@ fn main() -> ExitCode {
     // On this thread, because `winit` requires the event loop to own the one it
     // was built on. The shard is the one that moved.
     let plan = openshard_e2e_shard::plan_for(&cli.account, &cli.character);
-    let code = openshard_client_app::run(&dir, Some((dial, plan)));
+    // Nothing to open on: the shard says where the character stands, and a
+    // playground that looked somewhere else would be looking away from the
+    // thing it just logged in to play. `--at` is the offline viewer's.
+    let code = openshard_client_app::run(
+        &dir,
+        Some((dial, plan)),
+        cli.ttf_font,
+        openshard_client_app::Opening::default(),
+    );
 
-    // The window is gone, so the shard is asked to stop and waited for. It keeps
-    // nothing — the world is in memory and goes away with it — but the wait is
-    // still worth having: it is the same path an operator's Ctrl-C takes, so a
-    // stop that hangs or panics shows up here rather than only in production.
+    // The window is gone, so the shard is asked to stop and waited for. The wait
+    // is not a formality any more: with a config naming a database, the last
+    // save happens on the way out, and returning before it would lose whatever
+    // was played in this window. It is also the same path an operator's Ctrl-C
+    // takes, so a stop that hangs or panics shows up here rather than only in
+    // production.
     shard.stop();
     code
 }

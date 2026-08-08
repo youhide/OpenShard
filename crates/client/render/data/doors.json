@@ -1,0 +1,29 @@
+{
+  "_source": "ServUO. Every BaseDoor subclass is base(closed + 2 * facing, closed + 1 + 2 * facing, ...), so a family is `count` consecutive graphics with the shut leaves on the even offsets and the open ones on the odd. Scripts/Items/Functional/Doors.cs holds the thirteen plain ones, SecretDoors.cs six more, and SlidingDoors.cs three that use only four of the eight facings and are therefore eight graphics wide rather than sixteen.",
+  "_why": "Nothing in the client's own files says which of a door's graphics is the open one. tiledata.mul gives an open leaf the stopping flags of its shut twin - measured, identical in 103 of the 104 plain pairs; the DOOR flag comes in runs of 1 to 98 graphics so there is no parity to read off the layout; and 'an open leaf's picture is wider than a tile' holds for 46 of those pairs because a door swung to four of the eight facings is still 44 across. See docs/lighting.md, decision 11.",
+  "_not_here": "Portcullis.cs is deliberately absent: PortcullisNS and PortcullisEW are base(0x6F5, 0x6F5) and base(0x6F6, 0x6F6) - one graphic for both states, because a portcullis is raised in z rather than swung. There is nothing to tell apart, and a table cannot invent it.",
+  "families": [
+    { "base": "0x00E8", "count": 16, "name": "SecretStoneDoor1" },
+    { "base": "0x0314", "count": 16, "name": "SecretDungeonDoor" },
+    { "base": "0x0324", "count": 16, "name": "SecretStoneDoor2" },
+    { "base": "0x0334", "count": 16, "name": "SecretWoodenDoor" },
+    { "base": "0x0344", "count": 16, "name": "SecretLightWoodDoor" },
+    { "base": "0x0354", "count": 16, "name": "SecretStoneDoor3" },
+    { "base": "0x0675", "count": 16, "name": "MetalDoor" },
+    { "base": "0x0685", "count": 16, "name": "BarredMetalDoor" },
+    { "base": "0x0695", "count": 16, "name": "RattanDoor" },
+    { "base": "0x06A5", "count": 16, "name": "DarkWoodDoor" },
+    { "base": "0x06B5", "count": 16, "name": "MediumWoodDoor" },
+    { "base": "0x06C5", "count": 16, "name": "MetalDoor2" },
+    { "base": "0x06D5", "count": 16, "name": "LightWoodDoor" },
+    { "base": "0x06E5", "count": 16, "name": "StrongWoodDoor" },
+    { "base": "0x0824", "count": 16, "name": "IronGate" },
+    { "base": "0x0839", "count": 16, "name": "LightWoodGate" },
+    { "base": "0x084C", "count": 16, "name": "IronGateShort" },
+    { "base": "0x0866", "count": 16, "name": "DarkWoodGate" },
+    { "base": "0x1FED", "count": 16, "name": "BarredMetalDoor2" },
+    { "base": "0x2A05", "count": 8, "name": "PaperSlidingDoor" },
+    { "base": "0x2A0D", "count": 8, "name": "ClothSlidingDoor" },
+    { "base": "0x2A15", "count": 8, "name": "WoodenSlidingDoor" }
+  ]
+}

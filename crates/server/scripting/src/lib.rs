@@ -230,12 +230,14 @@ pub enum Event {
         /// How many were taken — the amount asked, or `0`.
         taken: u16,
     },
-    /// A game master pressed a button in the `.admin` menu. The engine only
-    /// carries the verb across; the pack decides what it does — which spawn set to
-    /// register, what to clear. This is how staff tools reach the script pack.
+    /// A game master pressed a button in the `.admin` menu, or the shard was
+    /// asked to seed itself on the command line. The engine only carries the verb
+    /// across; the pack decides what it does — which spawn set to register, what
+    /// to clear. This is how staff tools reach the script pack.
     AdminAction {
-        /// The game master's wire identity.
-        serial: Serial,
+        /// The game master's wire identity, or `null` for a `--seed` verb: that
+        /// one is sent before the first tick and nobody pressed it.
+        serial: Option<Serial>,
         /// The action the button asked for, e.g. `"populate:britain"`.
         action: String,
     },

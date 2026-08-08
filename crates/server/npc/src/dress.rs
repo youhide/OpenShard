@@ -34,10 +34,14 @@ pub const LAYER_SHOES: Layer = Layer(0x03);
 pub const LAYER_PANTS: Layer = Layer(0x04);
 /// Layer `0x05`, UO `Layer.Shirt`.
 pub const LAYER_SHIRT: Layer = Layer(0x05);
-/// Layer `0x0B`, UO `Layer.Hair`.
-pub const LAYER_HAIR: Layer = Layer(0x0B);
-/// Layer `0x10`, UO `Layer.FacialHair` — a beard.
-pub const LAYER_FACIAL_HAIR: Layer = Layer(0x10);
+/// Layer `0x0B`, UO `Layer.Hair`. The value lives in `protocol` rather than
+/// here, unlike the rest of this family: the *client* has to ask about this one
+/// too — it refuses to draw hair on the dead — and a number two crates decide
+/// behaviour from is a number with one definition.
+pub const LAYER_HAIR: Layer = Layer::HAIR;
+/// Layer `0x10`, UO `Layer.FacialHair` — a beard. [`LAYER_HAIR`]'s twin, and
+/// named in `protocol` for its reason.
+pub const LAYER_FACIAL_HAIR: Layer = Layer::BEARD;
 /// Layer `0x11`, UO `Layer.MiddleTorso` — a doublet, a tunic, an apron.
 pub const LAYER_MIDDLE_TORSO: Layer = Layer(0x11);
 /// Layer `0x17`, UO `Layer.OuterLegs` — a kilt or a skirt.

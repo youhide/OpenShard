@@ -11,7 +11,8 @@ use openshard_protocol::world::Point;
 use openshard_uofiles::map::Map;
 
 use crate::atlas::{LandAtlas, Region, TexmapAtlas};
-use crate::camera::Camera;
+use crate::camera::{Camera, TileBounds};
+use crate::cutaway::Cutaway;
 use crate::depth;
 
 /// One ground quad: where it goes, how its corners stand, and what to sample.
@@ -52,17 +53,25 @@ pub struct GroundQuad {
     /// standing behind it, and the pass order alone would put every static in
     /// front of every tile.
     pub depth: f32,
+    /// Which tile this is, for the lighting pass.
+    ///
+    /// [`Place::land`](crate::place::Place::land), and the height in it is not
+    /// read: the shader lifts each corner by its own, so the height a pixel of a
+    /// hillside carries is the interpolated one rather than the tile's base. See
+    /// [`crate::place`].
+    pub place: crate::place::Place,
 }
 
 impl GroundQuad {
     /// Bytes one quad occupies in the instance buffer.
     ///
-    /// Fifteen floats: position, the four corner heights, the land region, the
-    /// texture region and the depth. Written by hand rather than cast from a
-    /// struct — `bytemuck`'s derive emits `unsafe impl`, and this workspace
-    /// denies `unsafe_code` outright. Fifteen `to_le_bytes` is a cheaper price
-    /// than an exception to that rule.
-    pub const STRIDE: u64 = 15 * 4;
+    /// Fifteen floats and the two words of [`crate::place::Place`]: position,
+    /// the four corner heights, the land region, the texture region, the depth
+    /// and the tile. Written by hand rather than cast from a struct —
+    /// `bytemuck`'s derive emits `unsafe impl`, and this workspace denies
+    /// `unsafe_code` outright. Seventeen `to_le_bytes` is a cheaper price than
+    /// an exception to that rule.
+    pub const STRIDE: u64 = 17 * 4;
 
     /// Append this quad to an instance buffer.
     pub fn write(&self, out: &mut Vec<u8>) {
@@ -95,6 +104,9 @@ impl GroundQuad {
         ] {
             out.extend_from_slice(&value.to_le_bytes());
         }
+        for word in self.place.packed() {
+            out.extend_from_slice(&word.to_le_bytes());
+        }
     }
 }
 
@@ -104,10 +116,26 @@ impl GroundQuad {
 /// [`collect`]: the atlas has to exist before a quad can be given a region.
 pub fn visible_graphics(map: &Map, camera: &Camera) -> BTreeSet<Graphic> {
     let mut seen = BTreeSet::new();
-    for_each_visible_cell(map, camera, |_, _, cell| {
-        seen.insert(Graphic(cell.tile));
-    });
+    graphics_in(map, camera.visible_tiles(), &mut seen);
     seen
+}
+
+/// Every distinct land graphic on the cells of one rectangle, added to `out`.
+///
+/// The same walk [`visible_graphics`] does, over a rectangle somebody else
+/// chose. That somebody is the caller growing an atlas: what a frame needs that
+/// the atlas does not already hold is a question about the *edge* the camera
+/// crossed, and [`TileBounds::difference`] is what turns the viewport into the
+/// two or three thin bands that crossed it. Walking the whole rectangle instead
+/// is nine thousand cells at 1080p, on every frame, to discover that a camera
+/// which moved one tile introduced one row.
+///
+/// Accumulating into `out` rather than returning a set, because the caller has
+/// several bands and one atlas.
+pub fn graphics_in(map: &Map, bounds: TileBounds, out: &mut BTreeSet<Graphic>) {
+    for_each_cell_in(map, bounds, |_, _, cell| {
+        out.insert(Graphic(cell.tile));
+    });
 }
 
 /// The quads for everything visible, in the order they must be drawn.
@@ -115,12 +143,27 @@ pub fn visible_graphics(map: &Map, camera: &Camera) -> BTreeSet<Graphic> {
 /// A tile whose graphic is not in the atlas is dropped: either the client ships
 /// no art for it, or the atlas was built for a different camera. Both are
 /// "nothing to draw here", and neither is worth failing a frame over.
-pub fn collect(map: &Map, camera: &Camera, atlas: &LandAtlas, texmaps: &TexmapAtlas) -> Vec<GroundQuad> {
+///
+/// `cutaway` hides the ground above the player's head, which is the one case
+/// the client cuts land for at all: standing in a cave under a hill, the hill's
+/// own tiles would otherwise be drawn over the cave. A roof does *not* take the
+/// floor with it — see [`crate::cutaway`], where that is the client's odd last
+/// line and not an omission here.
+pub fn collect(
+    map: &Map,
+    camera: &Camera,
+    atlas: &LandAtlas,
+    texmaps: &TexmapAtlas,
+    cutaway: &Cutaway,
+) -> Vec<GroundQuad> {
     let (eye_x, eye_y) = camera.eye_tile();
     let base = depth::base_for(eye_x, eye_y);
     let mut quads: Vec<(depth::Order, GroundQuad)> = Vec::new();
 
-    for_each_visible_cell(map, camera, |x, y, cell| {
+    for_each_cell_in(map, camera.visible_tiles(), |x, y, cell| {
+        if !cutaway.shows_land(cell.z) {
+            return;
+        }
         let Some(region) = atlas.region(Graphic(cell.tile)) else {
             return;
         };
@@ -149,6 +192,7 @@ pub fn collect(map: &Map, camera: &Camera, atlas: &LandAtlas, texmaps: &TexmapAt
                 region,
                 texmap,
                 depth: order.to_depth(base),
+                place: crate::place::Place::land(x, y),
             },
         ));
     });
@@ -162,43 +206,35 @@ pub fn collect(map: &Map, camera: &Camera, atlas: &LandAtlas, texmaps: &TexmapAt
 
 /// The heights of a tile's four corners, in [`GroundQuad::corners`] order.
 ///
-/// A land cell stores one height, and it is the height of the corner the tile
-/// shares with the tiles north of it — the diamond's top. The other three belong
-/// to the neighbours, which is exactly why the ground has no seams in the
-/// client: adjacent tiles do not merely abut, they are stretched over *the same*
-/// vertices, so a gap between them is not expressible.
+/// [`Map::land_corners`] as floats, and the walk itself lives there because the
+/// *server* reads the same four numbers: what a tile's corners are is a fact
+/// about the map, and the height a body stands at on it — the average — has to
+/// be one formula on both sides of the wire or every step up a slope
+/// rubber-bands.
 ///
-/// Off the edge of the map there is no neighbour and the tile's own height
-/// stands in, which flattens the border tiles rather than dropping them off a
-/// cliff into nothing.
-fn corner_heights(map: &Map, x: u16, y: u16, own: i8) -> [f32; 4] {
-    let at = |x: Option<u16>, y: Option<u16>| -> f32 {
-        let height = match (x, y) {
-            (Some(x), Some(y)) => map.land(x, y).map_or(own, |cell| cell.z),
-            _ => own,
-        };
-        f32::from(height)
-    };
-    let (east, south) = (x.checked_add(1), y.checked_add(1));
-    [
-        f32::from(own),
-        at(east, Some(y)),
-        at(Some(x), south),
-        at(east, south),
-    ]
+/// `own` stands in for a tile the map has no cell for at all, which is off its
+/// edge: there is nothing to average and nothing to draw, and the caller here
+/// has a cell in hand by construction.
+///
+/// Public because it is not only the ground pass's: a tile's four corners are
+/// what say how high the tile *is*, and [`crate::cutaway`] has to ask that of
+/// the tile the player is standing on before it can decide what to stop
+/// drawing.
+pub fn corner_heights(map: &Map, x: u16, y: u16, own: i8) -> [f32; 4] {
+    map.land_corners(x, y).unwrap_or([own; 4]).map(f32::from)
 }
 
-/// Walk the visible rectangle, clamped to the map, calling back for each cell.
+/// Walk a rectangle, clamped to the map, calling back for each cell.
 ///
-/// The clamp is why the camera may hand back negative bounds: the edge of the
-/// world is the map's fact, not the camera's, and a camera that knew the map's
-/// size would have to be rebuilt whenever the facet changed.
-fn for_each_visible_cell(
+/// The clamp is why the bounds may be negative: the edge of the world is the
+/// map's fact, not the camera's, and a camera that knew the map's size would
+/// have to be rebuilt whenever the facet changed.
+fn for_each_cell_in(
     map: &Map,
-    camera: &Camera,
+    bounds: TileBounds,
     mut each: impl FnMut(u16, u16, openshard_uofiles::map::LandCell),
 ) {
-    let Some((xs, ys)) = camera.visible_tiles().clamp_to(map.width(), map.height()) else {
+    let Some((xs, ys)) = bounds.clamp_to(map.width(), map.height()) else {
         return;
     };
 
@@ -275,7 +311,13 @@ mod tests {
     fn every_visible_cell_with_art_becomes_exactly_one_quad() {
         let map = hillside();
         let camera = camera();
-        let quads = collect(&map, &camera, &grass_atlas(), &TexmapAtlas::pack([]).unwrap());
+        let quads = collect(
+            &map,
+            &camera,
+            &grass_atlas(),
+            &TexmapAtlas::pack([]).unwrap(),
+            &Cutaway::OPEN,
+        );
 
         let (xs, ys) = camera
             .visible_tiles()
@@ -318,7 +360,13 @@ mod tests {
     fn a_tile_is_drawn_where_the_camera_puts_it() {
         let map = hillside();
         let camera = camera();
-        let quads = collect(&map, &camera, &grass_atlas(), &TexmapAtlas::pack([]).unwrap());
+        let quads = collect(
+            &map,
+            &camera,
+            &grass_atlas(),
+            &TexmapAtlas::pack([]).unwrap(),
+            &Cutaway::OPEN,
+        );
         let at = |point: Point| {
             let screen = camera.to_screen(point);
             quads
@@ -362,7 +410,7 @@ mod tests {
             z: 0,
         });
         let corners_by_position = |map: &Map| -> std::collections::BTreeMap<(i32, i32), [i32; 4]> {
-            collect(map, &camera, &atlas, &texmaps)
+            collect(map, &camera, &atlas, &texmaps, &Cutaway::OPEN)
                 .iter()
                 .map(|quad| ((quad.x as i32, quad.y as i32), quad.corners.map(|z| z as i32)))
                 .collect()
@@ -398,6 +446,7 @@ mod tests {
             &camera(),
             &grass_atlas(),
             &TexmapAtlas::pack([]).unwrap(),
+            &Cutaway::OPEN,
         );
         assert!(quads.len() > 1000);
 
@@ -421,7 +470,13 @@ mod tests {
         // The facet is 64 tiles square; this looks at a corner of the world far
         // beyond it, which `clamp_to` answers with `None`.
         let camera = Camera::new(Point::new(4000, 4000, 0), 200, 160);
-        let quads = collect(&map, &camera, &grass_atlas(), &TexmapAtlas::pack([]).unwrap());
+        let quads = collect(
+            &map,
+            &camera,
+            &grass_atlas(),
+            &TexmapAtlas::pack([]).unwrap(),
+            &Cutaway::OPEN,
+        );
         assert!(quads.is_empty(), "{} quads off the map", quads.len());
         assert!(visible_graphics(&map, &camera).is_empty());
     }
@@ -462,6 +517,7 @@ mod tests {
                 du: 0.03125,
                 dv: 0.03125,
             }),
+            place: crate::place::Place::land(7, 9),
         };
         let mut out = Vec::new();
         quad.write(&mut out);
@@ -475,6 +531,8 @@ mod tests {
         // And the texture region is the last four, at offset 40.
         assert_eq!(&out[40..44], &0.75f32.to_le_bytes());
         assert_eq!(&out[52..56], &0.03125f32.to_le_bytes());
+        // The tile follows the depth, as two words rather than floats.
+        assert_eq!(&out[60..64], &(7u32 | 9 << 16).to_le_bytes(), "the tile");
     }
 
     /// A tile with no texture still writes a full instance — the buffer is a
@@ -494,6 +552,7 @@ mod tests {
             },
             texmap: None,
             depth: 0.25,
+            place: crate::place::Place::land(0, 0),
         };
         let mut out = Vec::new();
         quad.write(&mut out);

@@ -25,12 +25,12 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 
-use crate::walk::{Terrain, step_from};
+use crate::walk::{Terrain, Tile, step_allowed};
 
-/// A tile in the search, keyed by its column and row. Height is carried on the
-/// resolved [`Point`], not in the key: two routes reaching one tile at different
-/// heights are still the same tile to walk to.
-type Tile = (u16, u16);
+/// One entry on the open list: `(f, h, manhattan, tile)`, ordered so
+/// [`BinaryHeap`] with [`Reverse`] pops the cheapest-and-straightest first. See
+/// the note where this is pushed for why `manhattan` is there at all.
+type OpenEntry = (u32, u32, u32, u16, u16);
 
 /// Plan a walk from `from` to the tile of `to`, at most `budget` tiles explored.
 ///
@@ -44,8 +44,8 @@ type Tile = (u16, u16);
 /// about a town; open-world roaming would want caching, not a bigger cap.
 #[must_use]
 pub fn find_path(terrain: &dyn Terrain, from: Point, to: Point, budget: usize) -> Option<Vec<Direction>> {
-    let goal: Tile = (to.x, to.y);
-    let start: Tile = (from.x, from.y);
+    let goal = Tile::new(to.x, to.y);
+    let start = Tile::new(from.x, from.y);
     if start == goal {
         return Some(Vec::new());
     }
@@ -59,15 +59,24 @@ pub fn find_path(terrain: &dyn Terrain, from: Point, to: Point, budget: usize) -
     let mut cost: HashMap<Tile, u32> = HashMap::new();
     let mut came_from: HashMap<Tile, (Tile, Direction)> = HashMap::new();
     let mut closed: HashSet<Tile> = HashSet::new();
-    let mut open: BinaryHeap<Reverse<(u32, u32, u16, u16)>> = BinaryHeap::new();
+    // The tuple's third field is a tie-breaker, not a second admissible heuristic:
+    // Chebyshev alone cannot tell a straight cardinal line from a route that
+    // drifts off it and back — both cost the same eight-way step count. Manhattan
+    // distance can: it only grows on a diagonal that moves you off an axis you
+    // will have to close later, so among equal-`f` candidates it is smaller for
+    // the one that stayed straight. Breaking ties by it does not change *whether*
+    // a shortest path is found (see the cost check below), only which one among
+    // several equally short routes A* settles on — the one the client's own map
+    // asked for a straight walk on stays a straight walk.
+    let mut open: BinaryHeap<Reverse<OpenEntry>> = BinaryHeap::new();
 
     point_at.insert(start, from);
     cost.insert(start, 0);
     let h0 = heuristic(from, to);
-    open.push(Reverse((h0, h0, start.0, start.1)));
+    open.push(Reverse((h0, h0, manhattan(from, to), start.x, start.y)));
 
-    while let Some(Reverse((_f, _h, cx, cy))) = open.pop() {
-        let tile = (cx, cy);
+    while let Some(Reverse((_f, _h, _m, cx, cy))) = open.pop() {
+        let tile = Tile::new(cx, cy);
         // Skip a tile already finalised by a cheaper pop.
         if !closed.insert(tile) {
             continue;
@@ -82,18 +91,14 @@ pub fn find_path(terrain: &dyn Terrain, from: Point, to: Point, budget: usize) -
         let current = point_at[&tile];
         let here_cost = cost[&tile];
         for dir in Direction::ALL {
-            let Some(guess) = step_from(current, dir) else {
+            // `step_allowed`, not `can_step`: a diagonal may not clip a wall
+            // corner, and that half of the rule is not the terrain's to answer
+            // — see its doc for why it is shared with the shard and the client
+            // rather than restated here.
+            let Some(landing) = step_allowed(terrain, current, dir) else {
                 continue;
             };
-            // A diagonal may not clip a wall corner: both tiles beside it must be
-            // steppable too, the same rule the client enforces.
-            if is_diagonal(dir) && !corner_open(terrain, current, dir) {
-                continue;
-            }
-            let Some(landing) = terrain.can_step(current, guess) else {
-                continue;
-            };
-            let next: Tile = (landing.x, landing.y);
+            let next = Tile::new(landing.x, landing.y);
             if closed.contains(&next) {
                 continue;
             }
@@ -105,7 +110,13 @@ pub fn find_path(terrain: &dyn Terrain, from: Point, to: Point, budget: usize) -
             point_at.insert(next, landing);
             came_from.insert(next, (tile, dir));
             let h = heuristic(landing, to);
-            open.push(Reverse((next_cost + h, h, next.0, next.1)));
+            open.push(Reverse((
+                next_cost + h,
+                h,
+                manhattan(landing, to),
+                next.x,
+                next.y,
+            )));
         }
     }
     None
@@ -133,26 +144,12 @@ fn heuristic(from: Point, to: Point) -> u32 {
     dx.max(dy)
 }
 
-/// Whether a direction moves on both axes — a diagonal.
-fn is_diagonal(dir: Direction) -> bool {
-    let (dx, dy) = dir.step();
-    dx != 0 && dy != 0
-}
-
-/// Whether both cardinal tiles flanking a diagonal are steppable, so the diagonal
-/// does not cut through a wall's corner. The flanks of a diagonal are the two
-/// wire directions either side of it (NE lies between N and E).
-fn corner_open(terrain: &dyn Terrain, from: Point, diagonal: Direction) -> bool {
-    let d = diagonal.to_bits();
-    let flanks = [
-        Direction::from_bits((d + 7) % 8),
-        Direction::from_bits((d + 1) % 8),
-    ];
-    flanks.iter().all(|&card| {
-        step_from(from, card)
-            .and_then(|tile| terrain.can_step(from, tile))
-            .is_some()
-    })
+/// The open list's tie-breaker: Manhattan distance, which — unlike Chebyshev —
+/// is not blind to a detour off an axis the goal is on. See the note on `open`.
+fn manhattan(from: Point, to: Point) -> u32 {
+    let dx = i32::from(from.x).abs_diff(i32::from(to.x));
+    let dy = i32::from(from.y).abs_diff(i32::from(to.y));
+    dx + dy
 }
 
 #[cfg(test)]

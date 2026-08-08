@@ -33,15 +33,25 @@
 // draws it flat, which leaves gaps against its stretched neighbours; ours stays
 // watertight and is textured approximately. See docs/client.md.
 
+import package::place_format::{KIND_LAND, STANCE_FLAT, pack_place};
+
 struct Viewport {
-    // Pixels across, and down.
+    // The target's size in *real* pixels — the display's, which at a
+    // magnification above 1 is not the world's own. Only the last two lines of
+    // the vertex shader use it.
     size: vec2<f32>,
-    // The size of one land sprite in pixels: 44x44, from the file format.
+    // The size of one land sprite in virtual pixels: 44x44, from the file
+    // format.
     tile: vec2<f32>,
-    // Pixels one unit of height lifts a corner up the screen.
+    // Virtual pixels one unit of height lifts a corner up the screen.
     z_step: f32,
-    // Uniform blocks are sized in multiples of 16 bytes.
-    _padding: f32,
+    // Real pixels per virtual pixel. One when the world is being drawn into the
+    // offscreen image, which is the minifying path — see `camera::Projection`.
+    scale: f32,
+    // The point of the world's own grid that lands in the middle of the target,
+    // in virtual pixels. Fractional: the eye is quantised to a real pixel, so at
+    // 3x it carries thirds of a virtual one.
+    origin: vec2<f32>,
 };
 
 @group(0) @binding(0) var<uniform> viewport: Viewport;
@@ -58,6 +68,28 @@ struct VertexOut {
     // Where to sample the texture atlas, and whether there is anything there.
     @location(2) texmap_uv: vec2<f32>,
     @location(3) has_texmap: f32,
+    // This instance's own index — what the attachment now carries in place of
+    // the tile, and what `blit.wgsl`/`select.wgsl` look up in this pass's own
+    // instance buffer, bound a second time as storage. See `docs/gbuffer.md`
+    // decision 2 and step 7.
+    @location(4) @interpolate(flat) id: u32,
+    // Where in that tile, as the diamond's own two axes in `0..1`. Interpolated,
+    // and it is what makes a pool of light a gradient rather than a set of flat
+    // tiles with steps between them: a tile is 44 pixels across and a fragment
+    // lit by its tile's *centre* is lit in blocks the size of the ground.
+    @location(6) local: vec2<f32>,
+    // And the height, which is *not* flat: a hillside's pixels each carry the
+    // one their corner interpolation gave them, which is the height the light
+    // has to reach. Taking the tile's base instead would light a hilltop as if
+    // it were the valley floor.
+    @location(5) place_z: f32,
+};
+
+// What one fragment of a world pass writes: the picture, and where in the world
+// it came from.
+struct FragmentOut {
+    @location(0) color: vec4<f32>,
+    @location(1) place: vec4<u32>,
 };
 
 @vertex
@@ -78,6 +110,7 @@ fn vs_main(
     // statics included. Computed on the CPU — see `crate::depth` — because it
     // is one ordering shared by two passes and neither may derive its own.
     @location(5) depth: f32,
+    @builtin(instance_index) instance_index: u32,
 ) -> VertexOut {
     let half = viewport.tile * 0.5;
     let is_flat = f32(all(heights == vec4<f32>(heights.x)));
@@ -110,11 +143,16 @@ fn vs_main(
     let local_uv = mix(slope_uv, flat_uv, is_flat);
     let pixel = origin + offset - vec2<f32>(0.0, height * viewport.z_step);
 
+    // Virtual pixels to real ones, and the only line in this pass that knows a
+    // magnification exists. Everything above is the art's own grid, which is
+    // what makes it comparable against the files texel for texel.
+    let real = (pixel - viewport.origin) * viewport.scale + viewport.size * 0.5;
+
     // Pixels to clip space. `y` flips: the viewport counts down from the top and
     // clip space counts up from the middle.
     let ndc = vec2<f32>(
-        pixel.x / viewport.size.x * 2.0 - 1.0,
-        1.0 - pixel.y / viewport.size.y * 2.0,
+        real.x / viewport.size.x * 2.0 - 1.0,
+        1.0 - real.y / viewport.size.y * 2.0,
     );
 
     var out: VertexOut;
@@ -127,16 +165,46 @@ fn vs_main(
     // Corner to corner: the unit quad's own coordinates *are* the texture's.
     out.texmap_uv = texmap.xy + corner * texmap.zw;
     out.has_texmap = f32(texmap.z > 0.0);
+    out.id = instance_index;
+    out.place_z = height;
+    // The diamond's own axes, inverted from the screen offset this vertex is at:
+    // `slope_offset` above is `((a - b) * 22, (a + b - 1) * 22)` for a tile-local
+    // `(a, b)`, and this is that solved for the pair. Written from the offset
+    // rather than passed as `corner` because a *flat* tile's quad is the
+    // sprite's bounding square and not the diamond — its corners are half a tile
+    // outside the tile, and only the offset says by how much.
+    out.local = vec2<f32>(
+        (offset.x + offset.y) / f32(viewport.tile.x) + 0.5,
+        (offset.y - offset.x) / f32(viewport.tile.x) + 0.5,
+    );
     return out;
 }
 
+// Where in the world this fragment's pixel is: the instance's id, the
+// interpolated corner height, and "this is ground".
+//
+// **The tile itself no longer rides here** — `docs/gbuffer.md` step 7 moved it
+// to this pass's own instance buffer, read back by `blit.wgsl`/`select.wgsl`
+// as `ground_instances[id]`, the same move step 3 made for a static's tile.
+// The height and the sub-tile fraction stay exactly where they were: both are
+// this fragment's own, from the bilinear interpolation above, not a fact the
+// whole instance shares — carrying either from the row would flatten exactly
+// what they exist to vary.
+fn place_of(in: VertexOut) -> vec4<u32> {
+    return pack_place(in.id, in.place_z, STANCE_FLAT, KIND_LAND, in.local);
+}
+
 @fragment
-fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+fn fs_main(in: VertexOut) -> FragmentOut {
+    var out: FragmentOut;
+    out.place = place_of(in);
+
     // A slope with a texture of its own takes it, and nothing else about the
     // tile changes: the shape is still the diamond its four corners make.
     if in.is_flat < 0.5 && in.has_texmap > 0.5 {
         let textured = textureSample(texmap_texture, atlas_sampler, in.texmap_uv);
-        return vec4<f32>(textured.rgb, 1.0);
+        out.color = vec4<f32>(textured.rgb, 1.0);
+        return out;
     }
 
     let color = textureSample(atlas_texture, atlas_sampler, in.uv);
@@ -154,5 +222,6 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if in.is_flat > 0.5 && color.a < 0.5 {
         discard;
     }
-    return vec4<f32>(color.rgb, 1.0);
+    out.color = vec4<f32>(color.rgb, 1.0);
+    return out;
 }
