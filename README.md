@@ -279,6 +279,8 @@ Work lands through a pull request against a protected `main`. See
 index, with [`docs/style.md`](docs/style.md) for how the code reads and
 [`docs/findings.md`](docs/findings.md) for the traps already paid for.
 
+Questions and project discussion are welcome on [Discord](https://discord.gg/GKa46DdAG9).
+
 **No Ultima Online client files are in this repository and none ever will be.**
 They are copyrighted. Point the engine at whatever install you already have.
 
