@@ -172,17 +172,32 @@ impl SkillsPane {
                 Response::changed()
             }
             skills::Hit::Up => {
+                let before = self.tree.offset();
                 self.tree.scroll_by(-skills::STEP, content);
-                Response::changed()
+                if self.tree.offset() == before {
+                    Response::consumed()
+                } else {
+                    Response::changed()
+                }
             }
             skills::Hit::Down => {
+                let before = self.tree.offset();
                 self.tree.scroll_by(skills::STEP, content);
-                Response::changed()
+                if self.tree.offset() == before {
+                    Response::consumed()
+                } else {
+                    Response::changed()
+                }
             }
             skills::Hit::Track => {
+                let before = self.tree.offset();
                 self.tree
                     .scroll_to(sheet.offset_at(ctx.frame.cursor, content), content);
-                Response::changed()
+                if self.tree.offset() == before {
+                    Response::consumed()
+                } else {
+                    Response::changed()
+                }
             }
             // Already done, on every move since the press.
             skills::Hit::Thumb => Response::changed(),

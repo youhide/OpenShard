@@ -814,13 +814,19 @@ never a half-routed frame.
   it is a list computed from the same three inputs three times. Whether a pane
   wants a once-a-frame scratch is a question for every kind and not just this
   one, so it is not a container fix.
-- **A scroll that could not move still asks for a frame.** `SkillsPane::wheel`
+- ~~**A scroll that could not move still asks for a frame.** `SkillsPane::wheel`
   answers `consumed` at either end, and the arrows and the track beside it
   answer `changed` unconditionally: pressing Up at the top of the list is a
   redraw of a picture that has not changed. The wheel is the one that mattered
   — it is the one whose answer decides whether the camera hears the event — and
   the buttons are the same conflation with nothing riding on it. One line each,
-  and the shape is already there to copy.
+  and the shape is already there to copy.~~ **Closed by copying the wheel's own
+  shape.** `SkillsPane::clicked`'s `Hit::Up`, `Hit::Down` and `Hit::Track` arms
+  now read the offset before and after `scroll_by`/`scroll_to` and answer
+  `Response::consumed()` when it did not move, `Response::changed()` when it
+  did — the same `before`/`after` comparison `wheel` already made. Nothing
+  rode on it: these presses never reached the camera, so the only effect was
+  the extra frame.
 - ~~**`Drawn` is produced by a pane but consumed by passes that know all six
   kinds — and there are two of them.**~~ **Closed by S4, and the entry was
   wrong about how.** It said the two walks "already disagree", reading the
