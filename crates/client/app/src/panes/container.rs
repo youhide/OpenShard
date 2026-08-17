@@ -640,7 +640,10 @@ impl ContainerPane {
             // what every following move answers, because `has_prompt` above is
             // true from here until the number arrives.
             Dragged::Ask(most) => {
-                answer.absorb(Response::stale().with(Effect::Prompt(SplitPrompt { most })));
+                answer.absorb(Response::stale().with(Effect::Prompt(SplitPrompt {
+                    item: press.item.serial,
+                    most,
+                })));
                 answer
             }
             Dragged::Lift(drag) => {

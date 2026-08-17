@@ -3625,6 +3625,48 @@ pass in `App::draw`, a `gpu` row and curve beside `ui`/`world`/`waited`, and a
   `REPEATS` times back to back, which is a different cache state from one pass
   among a dozen others.
 
+### The party left egui: a yes/no plate and a manifest — backlog
+
+The two party windows were the last of this client's own interface drawn as
+`egui::Window`s over the gump layer, and both are gump windows now: the
+invitation is `crates/client/render/src/confirm.rs` on the reference's own
+`0x0816` question plate (`panes::confirm`), and the roster is
+`crates/client/render/src/party.rs` on the `0x0A28` manifest (`panes::party`).
+Both are reconciled from the view — `party.invited_by` and `party.members` — the
+way a `0xB0` dialog is, so neither has an openness kept anywhere but in
+`Windows::own_windows`. `Link::accept_party`, `decline_party`, `add_to_party`
+and `remove_from_party` are gone with them: a pane names `Effect::Net` and never
+holds a `Link`. What is left:
+
+- **Three window kinds now carry the same `hit()`.** `gump::Window::hit`,
+  `confirm::Window::hit` and `party::Window::hit` are one rectangle test against
+  a picture's sprite size, copied three times, because each keeps its own
+  `Hit` type. The shared part is "which of these indexed pictures covers the
+  cursor" and it wants to be one function over an index-to-meaning table.
+- **A party member is named by serial, in both windows.** No packet in this
+  path carries a name — a `0x78` invitation does not, and the `0xBF 0x06`
+  roster does not — so both draw `0x0000002A`. The names this client *does*
+  have arrive by single click and by tooltip (`view.paperdolls`, the `0xD6`
+  cache), and neither is consulted: a lookup that answered "not yet" for most
+  rows would be worse than a number that is always right. Worth revisiting
+  when the tooltip cache is keyed for this.
+- **Two controls on the reference's manifest have no packet here.** The
+  per-member *Tell* buttons address one member and `Outgoing::PartySay` only
+  addresses the whole party; the loot-type toggle needs a party-loot request
+  `Outgoing` has no arm for. Both are left off the plate rather than drawn dead
+  — see the module docs.
+- **A question is not modal, and the reference's is.** `QuestionGump` is
+  `IsModal = true`; this one is an ordinary window because z-order is the
+  manager's (decision 2 in `window_components.md`) and "nothing under me may be
+  clicked" would be a second z-order policy living in a pane. If a question ever
+  needs to be answered before anything else, that is a manager-level rule and a
+  field on `Windows`, not a pane's.
+- **Both windows cascade like a bag.** The reference centres its question plate
+  on the screen; `reconcile_own_windows` has never been told the surface size
+  and deliberately is not. This is the backlog entry every window kind already
+  shares — nothing remembers where it was left — and the question plate is the
+  one kind where the reference's own answer is *not* "wherever you last put it".
+
 ## Later
 
 LLM NPCs, quest generation, GM assistant, Discord integration. All optional, all

@@ -212,6 +212,12 @@ pub(crate) fn draw_gump_windows(
                     // `0x11` in one press, so a frame or two can pass in which
                     // this client has none of the numbers to write on it.
                     WindowSubject::Status => {}
+                    // Laid out by `panes::split::SplitPane` above, and
+                    // **unreachable**: it is the one kind that draws nothing out
+                    // of the view at all — the frame, the bar and the number are
+                    // all its own — so there is nothing that can go away
+                    // underneath it.
+                    WindowSubject::Split { .. } => {}
                     // Laid out by `panes::paperdoll::PaperdollPane` above, and
                     // reaching here is the sheet's case rather than the shop's:
                     // the pane answers `None` only for a client with no gump
@@ -230,6 +236,16 @@ pub(crate) fn draw_gump_windows(
                     // the pictures so that a click and the picture cannot
                     // disagree about which icon is which.
                     WindowSubject::Container(_) => {}
+                    // Laid out by `panes::confirm::ConfirmPane` above, and
+                    // reaching here is the shop's case once more: the shard can
+                    // settle the question — a roster for an accepted invitation
+                    // — between the frame that drew the plate and the reconcile
+                    // that takes the window with it.
+                    WindowSubject::Confirm(_) => {}
+                    // Laid out by `panes::party::PartyPane` above, and reaching
+                    // here is the last member leaving between the frame that
+                    // drew the roster and the reconcile that takes the window.
+                    WindowSubject::Party => {}
                 }
             }
         }
@@ -353,6 +369,12 @@ pub(crate) fn draw_gump_windows(
                 (WindowSubject::Status, Drawn::Status(status)) => {
                     labels.extend(status.lines.iter().map(|line| line.label().offset(at)));
                 }
+                // One line, the number being chosen — the reference's own text
+                // box, which is a control rather than a readout: it is where an
+                // exact figure is typed into a pile the bar has no pixels for.
+                (WindowSubject::Split { .. }, Drawn::Split(split)) => {
+                    labels.extend(split.lines.iter().map(|line| line.label().offset(at)));
+                }
                 (WindowSubject::Vendor(_), Drawn::Vendor(vendor)) => {
                     labels.extend(vendor.lines.iter().map(|line| line.label().offset(at)));
                 }
@@ -364,6 +386,15 @@ pub(crate) fn draw_gump_windows(
                 // under the pointer, looked up in the view a second time. Both
                 // are decided where they are drawn now.
                 (WindowSubject::Container(_), Drawn::Container(window)) => {
+                    labels.extend(window.lines.iter().map(|line| line.label().offset(at)));
+                }
+                // The question itself, wrapped by the layout that placed the
+                // plate — the same shape as every arm above: this pass reads
+                // what the layout produced and looks nothing up.
+                (WindowSubject::Confirm(_), Drawn::Confirm(window)) => {
+                    labels.extend(window.lines.iter().map(|line| line.label().offset(at)));
+                }
+                (WindowSubject::Party, Drawn::Party(window)) => {
                     labels.extend(window.lines.iter().map(|line| line.label().offset(at)));
                 }
                 _ => {}

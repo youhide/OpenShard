@@ -254,12 +254,13 @@ impl App {
         match press.dragged(self.input.pointer_gump, self.input.shift_held) {
             hand::Dragged::Still => false,
             hand::Dragged::Ask(most) => {
-                let Some(shell) = self.shell.as_mut() else {
-                    return false;
-                };
-                shell.open_split(most);
-                self.windows.prompt = Some(windows::Asking::World);
-                self.windows.dragging = None;
+                self.open_split_prompt(
+                    windows::Asking::World,
+                    crate::panes::SplitPrompt {
+                        item: press.item.serial,
+                        most,
+                    },
+                );
                 true
             }
             hand::Dragged::Lift(drag) => {
@@ -286,6 +287,56 @@ impl App {
         link.pick_up_item(drag.item.serial, drag.item.amount);
         self.windows.hand = Some(hand::Hand::Held(drag));
         self.reproject_item_drag();
+    }
+
+    /// Put the amount picker up over a press, and remember whose press it is.
+    ///
+    /// The one door, for both pressers: a bag's pane asks for it as
+    /// [`Effect::Prompt`](crate::panes::Effect::Prompt) and the manager asks for
+    /// it directly for an item lying on the ground, and everything about *the
+    /// window* is the same either way. What differs is one value — `asker`, the
+    /// record the answer is later routed by — which is exactly the thing
+    /// [`windows::Asking`] exists to name.
+    ///
+    /// It needs no shell. The picker used to be an `egui::Window`, so a client
+    /// running without a HUD could not divide a stack at all — the effect was
+    /// dropped on the floor when `App::shell` was `None`. It is a gump window
+    /// now, drawn by the same pass as every other, and the gesture works in any
+    /// build that can draw a container.
+    pub(crate) fn open_split_prompt(&mut self, asker: windows::Asking, prompt: crate::panes::SplitPrompt) {
+        windows::open_split_window(&mut self.windows.own_windows, prompt, self.input.pointer_gump);
+        self.windows.prompt = Some(asker);
+        // The keys go to the picker from the moment it opens — the reference's
+        // own `SetKeyboardFocus`, and what lets an exact figure be typed into a
+        // pile the bar has no pixels for. The window it takes them *from* is
+        // whatever had them, which is the manager's to say (decision 2).
+        self.windows.keyboard = Some(WindowSubject::Split {
+            item: prompt.item,
+            most: prompt.most,
+        });
+        // A window cannot be being dragged while a question about a press is
+        // standing over it.
+        self.windows.dragging = None;
+    }
+
+    /// The picker has been answered: take it down and hand the answer to
+    /// whichever press it went up over.
+    ///
+    /// **Closing first, delivering second.** The presser may answer by lifting,
+    /// dropping and asking for the container again ([`ContainerPane`]'s three
+    /// effects), and none of that should be happening underneath a window that
+    /// is still on the screen. The record of who was asked
+    /// ([`windows::Windows::prompt`]) is cleared *after* the walk, because the
+    /// walk is what reads it to find the addressee.
+    pub(crate) fn answer_prompt(&mut self, answer: crate::panes::Answer) {
+        self.windows
+            .own_windows
+            .retain(|window| !matches!(window.subject, WindowSubject::Split { .. }));
+        if matches!(self.windows.keyboard, Some(WindowSubject::Split { .. })) {
+            self.windows.keyboard = None;
+        }
+        let _answered = self.deliver(crate::panes::Input::Answered(answer));
+        self.windows.prompt = None;
     }
 
     /// The amount prompt has been answered, and the press it suspended is the
@@ -604,6 +655,17 @@ impl App {
             self.windows.dragging = None;
             return true;
         }
+        // Closing the picker *is* dismissing the prompt, which is the same
+        // shape a dialog's close has one arm up: the window is a question, so
+        // taking it down has to answer it. Ahead of the view check below and
+        // not below it, because the press it is standing over is this client's
+        // own state — a prompt left up over a world that has gone away is a
+        // window nothing can take down.
+        if let WindowSubject::Split { .. } = subject {
+            self.answer_prompt(crate::panes::Answer::Cancelled);
+            self.windows.dragging = None;
+            return true;
+        }
         if self.world.authoritative.view.is_none() {
             return false;
         }
@@ -645,6 +707,20 @@ impl App {
             // the same close said twice: once here and once in a field. Step 3
             // deleted the field.
             WindowSubject::Skills | WindowSubject::Status => {}
+            // Both are answered above, each by the one act that is its close:
+            // a dialog sends button zero, and the picker dismisses the press it
+            // was standing over.
+            WindowSubject::Split { .. } => unreachable!("dismissed above"),
+            // A question is the view's, so closing one *is* overlaid — the
+            // container's shape rather than the skill sheet's. Nothing goes out
+            // on the wire: dismissing a plate is not an answer, and the shard
+            // hears from this client only when a button was pressed. The overlay
+            // is dropped by `reconcile_own_windows` on the frame the view agrees
+            // the question is settled, which is what stops the plate from coming
+            // straight back up.
+            WindowSubject::Confirm(_) | WindowSubject::Party => {
+                self.windows.locally_closed.insert(subject);
+            }
             WindowSubject::Dialog(_) => unreachable!("answered above"),
         }
         self.windows

@@ -172,8 +172,17 @@ impl ApplicationHandler<()> for App {
                         // hands over two at once appends both.
                         let mut answer = panes::Response::ignored();
                         match code {
-                            KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter => {
+                            KeyCode::Enter | KeyCode::NumpadEnter => {
                                 answer.absorb(self.deliver(panes::Input::Key(panes::Key::Done)));
+                            }
+                            // **Not the same key as Enter**, though a
+                            // `{ textentry }` answers both by putting itself
+                            // down: a modal is where "done" and "never mind"
+                            // are opposite answers, and the amount picker sends
+                            // its number on one and dismisses the press on the
+                            // other. See `panes::Key::Cancel`.
+                            KeyCode::Escape => {
+                                answer.absorb(self.deliver(panes::Input::Key(panes::Key::Cancel)));
                             }
                             KeyCode::Backspace => {
                                 answer.absorb(self.deliver(panes::Input::Key(panes::Key::Backspace)));

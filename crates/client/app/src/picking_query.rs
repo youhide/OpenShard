@@ -616,56 +616,25 @@ impl App {
     /// *asked* for — it is what the layout left over, which `Shell` holds between
     /// frames — and it is applied beside this call rather than through it.
     pub(crate) fn apply(&mut self, request: shell::Request) {
-        if let Some(decision) = request.split {
-            // Through the router, because the press this answers belongs to
-            // whoever is holding it — a bag's pane, or the manager for an item
-            // lying in the world — and `Windows::prompt` is the record of
-            // which. The shell's own vocabulary stops here: `Answer` is what a
-            // window is offered, so no pane has heard of a `SplitDecision`.
-            let answer = match decision {
-                crate::shell::SplitDecision::Confirm(amount) => crate::panes::Answer::Split(amount),
-                crate::shell::SplitDecision::Cancel => crate::panes::Answer::Cancelled,
-            };
-            // The frame this arrives on is already being drawn — `apply` is the
-            // first thing a frame does — so the answer's `redraw` has nothing
-            // left to ask for.
-            let _answered = self.deliver(crate::panes::Input::Answered(answer));
-            // After the walk and not before it: the walk is what reads the
-            // record to find the addressee.
-            self.windows.prompt = None;
-        }
-        if request.party_add {
-            if let Some(link) = self.world.shard.link() {
-                link.add_to_party();
-            }
-        }
-        if request.party_leave {
-            // Leaving is `0x02` naming *yourself* — the same packet a leader
-            // kicks with, which is the wire's own shape rather than this
-            // client's shortcut. See `openshard_party::remove`.
-            let me = self
-                .world
-                .authoritative
-                .view
-                .as_ref()
-                .map(|view| view.player.serial);
-            if let (Some(link), Some(me)) = (self.world.shard.link(), me) {
-                link.remove_from_party(me);
-            }
-        }
-        if let Some(answer) = request.party_invite {
-            // Nothing local is cleared: the prompt is drawn from the view's own
-            // `invited_by`, so it goes away when the shard answers rather than
-            // when this end decides it has. A second press before that packet
-            // lands sends a second accept, which the shard reads as one it has
-            // no invitation for and refuses — the harmless direction.
-            if let Some(link) = self.world.shard.link() {
-                match answer {
-                    shell::PartyAnswer::Accept => link.accept_party(),
-                    shell::PartyAnswer::Decline => link.decline_party(),
-                }
-            }
-        }
+        // **No amount answer here any more.** The picker was an `egui::Window`,
+        // so what it decided arrived a frame late through this struct and had
+        // to be translated out of the shell's vocabulary on the way. It is a
+        // gump window now (`panes::split`) and its answer is an ordinary
+        // `Effect` on the frame the button was pressed — see
+        // `App::answer_prompt`, which is where the two lines that used to be
+        // here went.
+        // **No Add and no Leave here either.** Both were buttons on the shell's
+        // roster window and are controls on the manifest now (`panes::party`),
+        // where each is an ordinary `Effect::Net` from the window that was
+        // pressed. Leaving is still `0x02` naming yourself — that is the wire's
+        // shape and did not change — but the pane names it, not this.
+        //
+        // **No party invitation arm here any more.** The answer is a press on
+        // this client's own `0x0816` plate now — see `panes::confirm` — which
+        // reaches the shard as an ordinary `Effect::Net` from the window that
+        // was pressed, the same as every other window's packet. Nothing about
+        // the invitation is edge-triggered through the shell any more, because
+        // the shell no longer draws it.
         if request.frame_dump {
             self.request_frame_dump();
         }

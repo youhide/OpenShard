@@ -405,25 +405,14 @@ impl Link {
         self.send(Command::Outgoing(Outgoing::PartySay(text)));
     }
 
-    /// Ask the shard to raise a cursor for adding somebody to the party.
-    pub fn add_to_party(&self) {
-        self.send(Command::Outgoing(Outgoing::PartyAdd));
-    }
-
-    /// Accept the party invitation this client is holding.
-    pub fn accept_party(&self) {
-        self.send(Command::Outgoing(Outgoing::PartyAccept));
-    }
-
-    /// Decline it.
-    pub fn decline_party(&self) {
-        self.send(Command::Outgoing(Outgoing::PartyDecline));
-    }
-
-    /// Leave the party, or turn out the member named.
-    pub fn remove_from_party(&self, member: Serial) {
-        self.send(Command::Outgoing(Outgoing::PartyRemove(member)));
-    }
+    // No party wrappers at all any more — no `accept_party`, `decline_party`,
+    // `add_to_party` or `remove_from_party`. Every one of them
+    // had exactly one caller, in the shell's edge-triggered request, and the
+    // party is two of this client's own gump windows now: the invitation is
+    // `panes::confirm` and the roster is `panes::party`. A pane names what it
+    // wants as `Effect::Net(Outgoing::PartyAccept)` and never reaches a `Link`
+    // it is not allowed to hold (decision 5). The packets themselves are
+    // untouched — see `openshard_client_net::party`.
 
     /// Answer an open dialog.
     pub fn answer_gump(&self, reply: GumpReply) {

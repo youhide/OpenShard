@@ -340,13 +340,14 @@ impl App {
             }
             // Up it goes, and the manager remembers whose press it is standing
             // over — which is what the answer is later routed by.
-            Effect::Prompt(prompt) => {
-                if let Some(shell) = self.shell.as_mut() {
-                    shell.open_split(prompt.most);
-                    self.windows.prompt = Some(Asking::Window(subject));
-                    self.windows.dragging = None;
-                }
-            }
+            Effect::Prompt(prompt) => self.open_split_prompt(Asking::Window(subject), prompt),
+            // The other end of it, asked for by the *picker's* window rather
+            // than by the presser: the number goes to whoever `Windows::prompt`
+            // says is waiting, and the picker goes off the list. See
+            // `App::answer_prompt`, which is the one door — the right button
+            // over the picker and Escape on it arrive there through
+            // `App::close_window` instead.
+            Effect::Answered(answer) => self.answer_prompt(answer),
             Effect::StackAll => {
                 if let WindowSubject::Container(container) = subject {
                     self.start_stack_pass(container);

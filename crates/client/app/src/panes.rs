@@ -46,13 +46,16 @@ use crate::hand::{Hand, ItemDrag, PendingDrop};
 use crate::resources::Resources;
 use crate::windows::{Drawn, WindowSubject};
 
+pub(crate) mod confirm;
 pub(crate) mod container;
 pub(crate) mod dialog;
 #[cfg(test)]
 pub(crate) mod fixture;
 pub(crate) mod paperdoll;
+pub(crate) mod party;
 mod route;
 mod skills;
+pub(crate) mod split;
 mod status;
 mod vendor;
 
@@ -136,10 +139,11 @@ pub enum Answer {
 
 /// One keystroke, as a window sees it.
 ///
-/// Three arms and not a key code, because only three things can happen to a
-/// text box: a character goes in, the last one comes out, or the player is done
-/// with it. Which physical key means which is the event loop's business — see
-/// `event_loop.rs`, where Escape and Enter both become [`Key::Done`].
+/// Four arms and not a key code, because only four things can happen to a text
+/// box: a character goes in, the last one comes out, the player is done with
+/// it, or the player never mind. Which physical key means which is the event
+/// loop's business — see `event_loop.rs`, where Enter becomes [`Key::Done`] and
+/// Escape [`Key::Cancel`].
 ///
 /// A character rather than the `&str` the keyboard produced: a `&str` would put
 /// a lifetime on [`Input`], and an input method that produces two characters at
@@ -154,6 +158,16 @@ pub enum Key {
     Backspace,
     /// The player is finished with the box: give the keyboard back to the world.
     Done,
+    /// The player never mind: whatever the box was being filled in for does not
+    /// happen.
+    ///
+    /// The two are one key to a `{ textentry }` — a dialog's field puts itself
+    /// down either way, which is what Escape means there — and **opposite
+    /// answers to a modal**, which is the window kind that made the arm
+    /// necessary: Enter on the amount picker takes the number, and Escape takes
+    /// the press down with the prompt. One enum with two arms rather than a
+    /// window kind reaching for the key code the event loop already threw away.
+    Cancel,
 }
 
 /// The modifier keys, as a pane sees them.
@@ -537,6 +551,21 @@ pub enum Effect {
     ReleaseKeyboard,
     /// Make one of the two windows the shard does not know about exist.
     Open(LocalWindow),
+    /// The client's own modal has been answered, and this is the answer.
+    ///
+    /// [`Effect::Prompt`]'s other end, and asked for by the *prompt's* window
+    /// rather than by the presser: the picker owns the number and knows nothing
+    /// about the press it is standing over, so what it says is only what was
+    /// chosen. The manager takes the window down and hands the answer to
+    /// whichever presser [`Windows::prompt`](crate::windows::Windows::prompt)
+    /// names — see `App::answer_prompt`.
+    ///
+    /// One effect and not a `Net` beside a `Close`, for [`Effect::Answer`]'s
+    /// reason one window kind over: answering *is* closing here, and a picker
+    /// that could do one without the other would either stand over a press that
+    /// has already been divided or leave a press waiting for a number that has
+    /// already been sent.
+    Answered(Answer),
 }
 
 /// The client's own amount picker, as a pane asks for it.
@@ -548,6 +577,14 @@ pub enum Effect {
 /// who a modal's answer is addressed to once.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SplitPrompt {
+    /// Which pile is being divided.
+    ///
+    /// Not read to look anything up — the presser is holding the item, and the
+    /// answer is measured against *its* copy when it arrives. It is the
+    /// prompt's identity: the window is filed under the item the way the
+    /// reference client files its `SplitMenuGump`, so a second prompt cannot
+    /// open over the same pile.
+    pub item: openshard_protocol::serial::Serial,
     /// The most that may be taken: the pile less the one that stays behind.
     /// A split that took the whole stack would be a lift with extra steps.
     pub most: u16,
@@ -679,6 +716,14 @@ pub enum AnyPane {
     Dialog(dialog::DialogPane),
     Skills(skills::SkillsPane),
     Status(status::StatusPane),
+    /// The client's own amount picker — the window a Shift-drag asks a question
+    /// through. See [`split::SplitPane`].
+    Split(split::SplitPane),
+    /// The client's own yes/no window — the first kind that is a *question*
+    /// rather than a view of something. See [`confirm::ConfirmPane`].
+    Confirm(confirm::ConfirmPane),
+    /// The party manifest. See [`party::PartyPane`].
+    Party(party::PartyPane),
 }
 
 impl AnyPane {
@@ -697,13 +742,22 @@ impl AnyPane {
             WindowSubject::Dialog(gump_id) => Self::Dialog(dialog::DialogPane::new(gump_id)),
             WindowSubject::Skills => Self::Skills(skills::SkillsPane::default()),
             WindowSubject::Status => Self::Status(status::StatusPane),
+            WindowSubject::Confirm(question) => Self::Confirm(confirm::ConfirmPane::new(question)),
+            WindowSubject::Party => Self::Party(party::PartyPane::default()),
+            // The one subject that carries what its pane is built with rather
+            // than what the pane looks up. Everything else here names something
+            // in the view — a bag, a body, a gump — and the pane reads it every
+            // frame; the bound on a split is measured from a pile *at the
+            // moment of the press* and must not be re-read afterwards, so it
+            // travels with the identity. See `SplitPane::most`.
+            WindowSubject::Split { most, .. } => Self::Split(split::SplitPane::new(most)),
         }
     }
 }
 
 impl Pane for AnyPane {
-    /// The delegating `match` decision 1 pays for the enum with: six lines per
-    /// trait method, once.
+    /// The delegating `match` decision 1 pays for the enum with: one line per
+    /// kind per trait method, once.
     fn art(&self, frame: &PaneFrame<'_>) -> Vec<GumpArt> {
         match self {
             Self::Container(pane) => pane.art(frame),
@@ -712,6 +766,9 @@ impl Pane for AnyPane {
             Self::Dialog(pane) => pane.art(frame),
             Self::Skills(pane) => pane.art(frame),
             Self::Status(pane) => pane.art(frame),
+            Self::Split(pane) => pane.art(frame),
+            Self::Confirm(pane) => pane.art(frame),
+            Self::Party(pane) => pane.art(frame),
         }
     }
 
@@ -723,6 +780,9 @@ impl Pane for AnyPane {
             Self::Dialog(pane) => pane.layout(frame),
             Self::Skills(pane) => pane.layout(frame),
             Self::Status(pane) => pane.layout(frame),
+            Self::Split(pane) => pane.layout(frame),
+            Self::Confirm(pane) => pane.layout(frame),
+            Self::Party(pane) => pane.layout(frame),
         }
     }
 
@@ -734,6 +794,9 @@ impl Pane for AnyPane {
             Self::Dialog(pane) => pane.handle(input, ctx),
             Self::Skills(pane) => pane.handle(input, ctx),
             Self::Status(pane) => pane.handle(input, ctx),
+            Self::Split(pane) => pane.handle(input, ctx),
+            Self::Confirm(pane) => pane.handle(input, ctx),
+            Self::Party(pane) => pane.handle(input, ctx),
         }
     }
 }

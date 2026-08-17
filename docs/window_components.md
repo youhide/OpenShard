@@ -993,6 +993,33 @@ never a half-routed frame.
   each pane arranges for itself is undecided, and the container is the only kind
   that has needed it so far.
 
+### Found while making the amount picker a gump (2026-08-17)
+
+The picker is the seventh kind — `panes::split`, `render/src/split.rs`, see
+`docs/client.md`'s section of that name. Four things it surfaced and did not
+settle:
+
+- **A subject carries a value now.** `WindowSubject::Split { item, most }` is the
+  first identity with something in it that is not a key: `most` is measured from
+  the pile at the moment of the press and is deliberately never re-read, so it
+  travels with the subject to reach `AnyPane::of`. Every other kind's pane looks
+  its subject up in the view instead. If a second window ever wants that shape,
+  the honest fix is probably for `AnyPane::of` to take the subject *and* what the
+  window was opened with, rather than for identities to keep growing fields.
+- **The picker is placed and every other window is cascaded.** It opens at
+  `pointer - (80, 40)` and is clamped only against negative corners: nothing at
+  that layer knows how wide the surface is, so a prompt raised near the right or
+  bottom edge hangs off it. The surface size would have to reach the manager for
+  that to be fixable, and the same fact would fix the cascade running windows off
+  the screen — one backlog entry, two symptoms.
+- **The wheel entry above is now half answered.** "Which windows claim a wheel
+  they have no use for" was written when none had a use; the picker does — a
+  notch steps the number, as `HSliderBar` does — so the question is only about
+  the kinds that claim one and ignore it.
+- **`shell::Request` is shrinking.** The split field is gone from it, and what is
+  left is party and diagnostics. When the last window-shaped member goes, `apply`
+  is a frame-late door with nothing window-shaped left to carry.
+
 ## Status
 
 **S0 through S8 built** (2026-08-17) — **the plan is complete.**

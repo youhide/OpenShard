@@ -280,6 +280,14 @@ fn a_window_is_local_exactly_when_nothing_in_the_view_holds_it_open() {
     let serial = Serial::new(0x0000_002A).expect("a serial");
     assert!(WindowSubject::Skills.is_local());
     assert!(WindowSubject::Status.is_local());
+    assert!(
+        WindowSubject::Split {
+            item: serial,
+            most: 5
+        }
+        .is_local(),
+        "the amount picker is this client's own too — nothing in the view holds it up"
+    );
     assert!(!WindowSubject::Container(serial).is_local());
     assert!(!WindowSubject::Vendor(serial).is_local());
     assert!(!WindowSubject::Paperdoll(serial).is_local());

@@ -59,15 +59,6 @@ use crate::diagnostics::{HealthBar, Height, Hud, PickedTile, PriorityZ, Route, S
 use crate::graphics::{HighlightStyle, HighlightTarget};
 use crate::world::{Shard, WorldState};
 
-/// What a player pressed on the party invitation prompt.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum PartyAnswer {
-    /// Join the party.
-    Accept,
-    /// Say no.
-    Decline,
-}
-
 /// What the panels asked for this frame.
 ///
 /// No longer `Copy`: one of these carries what the player typed. A request is
@@ -78,19 +69,6 @@ pub struct Request {
     /// Save the next fully rendered world frame and its GPU planes. This is an
     /// edge-triggered diagnostic action, not a persistent display setting.
     pub frame_dump: bool,
-    /// Result of the modal stack-split prompt, when it closed this frame.
-    pub split: Option<SplitDecision>,
-    /// The answer to a party invitation, on the frame a button was pressed.
-    ///
-    /// Edge-triggered, like [`split`](Self::split): the prompt is drawn from
-    /// the view's own `invited_by`, so it goes away when the *shard* says the
-    /// question is settled rather than when this client thinks it answered.
-    pub party_invite: Option<PartyAnswer>,
-    /// Raise a cursor to ask somebody into the party, on the frame the button
-    /// was pressed.
-    pub party_add: bool,
-    /// Leave the party, on the frame the button was pressed.
-    pub party_leave: bool,
     /// Put the eye back on the body and lock it there.
     pub relock: bool,
     /// Let go of the body.
@@ -163,18 +141,6 @@ pub struct Request {
     pub audio: Option<crate::desk::Audio>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SplitDecision {
-    Confirm(u16),
-    Cancel,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct SplitPrompt {
-    amount: u16,
-    max: u16,
-}
-
 /// What the script picker asked for.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ScriptRequest {
@@ -236,7 +202,6 @@ pub struct Shell {
     /// the app has a file to write. The `window` field is the one part of it this
     /// never touches: the operating system's window is the app's, not the HUD's.
     desk: Desk,
-    split_prompt: Option<SplitPrompt>,
 }
 
 impl Shell {
@@ -300,15 +265,6 @@ impl Shell {
             // animation clock is what wakes the loop.
             repaint_after: std::time::Duration::MAX,
             desk,
-            split_prompt: None,
-        }
-    }
-
-    /// Open the modal amount picker for a Shift-dragged stack.
-    pub fn open_split(&mut self, max: u16) {
-        if max > 0 {
-            self.split_prompt = Some(SplitPrompt { amount: 1, max });
-            self.context.request_repaint();
         }
     }
 
@@ -434,100 +390,33 @@ impl Shell {
         // a docked panel shrinks the world and a floating window sits over it.
         let mut free = egui::Rect::from_min_size(egui::Pos2::ZERO, self.context.content_rect().size());
         let desk = &mut self.desk;
-        let split_prompt = &mut self.split_prompt;
         let output = self.context.run_ui(input, |ui| {
             request = layout(ui, hud, camera, world, desk);
-            // The party invitation, drawn straight off the view rather than
-            // out of local state: the question exists because the shard said
-            // so, and it stops existing when the shard sends the roster or a
-            // removal. There is nothing here to keep in step, which is what
-            // makes it different from the split prompt below.
-            if let Some(leader) = world.authoritative.view.as_ref().and_then(|v| v.party.invited_by) {
-                // By serial, because that is all there is. A `0x78` carries no
-                // name — a mobile is named by a single click or by a tooltip,
-                // and this client may have done neither to the person inviting
-                // it. Better a number than a guess at whose it is.
-                let who = format!("{:#010X}", leader.raw());
-                egui::Window::new("Party invitation")
-                    .collapsible(false)
-                    .resizable(false)
-                    .anchor(egui::Align2::CENTER_TOP, egui::Vec2::new(0.0, 48.0))
-                    .show(ui.ctx(), |ui| {
-                        ui.label(format!("{who} has invited you to a party."));
-                        ui.horizontal(|ui| {
-                            if ui.button("Join").clicked() {
-                                request.party_invite = Some(PartyAnswer::Accept);
-                            }
-                            if ui.button("Decline").clicked() {
-                                request.party_invite = Some(PartyAnswer::Decline);
-                            }
-                        });
-                    });
-            }
-            // And the party itself, while there is one. Drawn off the view for
-            // the invitation's reason: the roster is the shard's, arrives whole
-            // on every change, and this window is a view of it rather than a
-            // copy that could go stale.
-            let roster: Vec<_> = world
-                .authoritative
-                .view
-                .as_ref()
-                .map(|view| view.party.members.clone())
-                .unwrap_or_default();
-            if !roster.is_empty() {
-                egui::Window::new("Party")
-                    .collapsible(true)
-                    .resizable(false)
-                    .anchor(egui::Align2::RIGHT_TOP, egui::Vec2::new(-8.0, 48.0))
-                    .show(ui.ctx(), |ui| {
-                        for (row, member) in roster.iter().enumerate() {
-                            // The leader is the first row and the wire never
-                            // says so outright — see `view::Party`.
-                            let mark = if row == 0 { " (leader)" } else { "" };
-                            ui.label(format!("{:#010X}{mark}", member.raw()));
-                        }
-                        ui.separator();
-                        ui.horizontal(|ui| {
-                            if ui.button("Add").clicked() {
-                                request.party_add = true;
-                            }
-                            if ui.button("Leave").clicked() {
-                                request.party_leave = true;
-                            }
-                        });
-                    });
-            }
-            if let Some(prompt) = split_prompt.as_mut() {
-                let mut decision = None;
-                egui::Window::new("Split stack")
-                    .collapsible(false)
-                    .resizable(false)
-                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                    .show(ui.ctx(), |ui| {
-                        ui.label(format!("Amount (1–{}):", prompt.max));
-                        ui.add(
-                            egui::DragValue::new(&mut prompt.amount)
-                                .range(1..=prompt.max)
-                                .speed(1),
-                        );
-                        ui.horizontal(|ui| {
-                            if ui.button("Split").clicked()
-                                || ui.input(|input| input.key_pressed(egui::Key::Enter))
-                            {
-                                decision = Some(SplitDecision::Confirm(prompt.amount));
-                            }
-                            if ui.button("Cancel").clicked()
-                                || ui.input(|input| input.key_pressed(egui::Key::Escape))
-                            {
-                                decision = Some(SplitDecision::Cancel);
-                            }
-                        });
-                    });
-                if let Some(decision) = decision {
-                    request.split = Some(decision);
-                    *split_prompt = None;
-                }
-            }
+            // **No party invitation here any more.** It was an `egui::Window`
+            // with a Join and a Decline on it, drawn over the gump layer with
+            // its own font and its own frame — and, because egui is painted on
+            // top and claims a click before any of this client's own windows are
+            // offered it, with its own idea of what "the window under the
+            // pointer" means. It is `panes::confirm` now: the reference client's
+            // own `0x0816` plate, opened and taken away by
+            // `reconcile_own_windows` off the same `party.invited_by` this used
+            // to read, and clicked by the one walk every other window is clicked
+            // by. See `crates/client/render/src/confirm.rs`.
+            //
+            // **And no party roster either.** It listed the members and carried
+            // an Add and a Leave, drawn from `!members.is_empty()`; it is
+            // `panes::party` now — the reference's own `0x0A28` manifest, opened
+            // and taken away by `reconcile_own_windows` off the same roster.
+            // See `crates/client/render/src/party.rs`.
+            // **No amount picker here any more.** It was an `egui::Window` with
+            // a `DragValue` on it, anchored to the middle of the screen while
+            // the pointer was wherever the drag had got to — and, for the
+            // invitation's reason, answered through a window system that is not
+            // the one every other window of this client is clicked by. It is
+            // `panes::split` now: the reference client's own `SplitMenuGump`,
+            // put up under the pointer by `App::open_split_prompt` and routed
+            // back by the same `Windows::prompt` record as before. See
+            // `crates/client/render/src/split.rs`.
             free = ui.available_rect_before_wrap();
         });
         // The scale lives in egui — Ctrl+`+` is egui's own shortcut and writes it

@@ -136,21 +136,67 @@ pub enum WindowSubject {
     /// `bool`, written by five places and read by a sixth; being in the list is
     /// the whole of the fact now, the same as every other kind's.
     Status,
+    /// The client's own amount picker, standing over a Shift-drag.
+    ///
+    /// The third kind whose existence is local, and the first one that is open
+    /// because *this client* asked rather than because the player or the shard
+    /// did: a press turned into a question, and this is the question on the
+    /// screen. It used to be an `egui::Window` in the shell with a
+    /// `DragValue` on it — a second window system drawn over the gump layer,
+    /// with its own idea of where a window is and no way to be clicked by the
+    /// same walk everything else is.
+    ///
+    /// **The only subject that carries something its pane cannot look up.** A
+    /// bag, a body and a gump are all in the view, so their panes re-read them
+    /// every frame and can never hold a stale copy; `most` is measured from the
+    /// pile at the moment of the press and is deliberately *not* re-read, so
+    /// that the bar cannot slide under the player's finger when the pile
+    /// changes. `item` is the identity — one prompt per pile, the way the
+    /// reference client files its `SplitMenuGump` — and nothing looks it up
+    /// either: the press the answer belongs to is holding its own copy, and
+    /// [`ItemPress::split`](crate::hand::ItemPress::split) is what measures the
+    /// answer against the pile as it stands when it arrives.
+    Split { item: Serial, most: u16 },
+    /// A question this client is asking on its own behalf — see
+    /// [`Question`](crate::panes::confirm::Question), which is both the key and
+    /// the whole of what the window means.
+    ///
+    /// Keyed by the question rather than by nothing, so that two questions are
+    /// two windows: one plate showing whichever was asked last would answer the
+    /// wrong packet for the other. Its *existence* is the view's, not this
+    /// client's — a party invitation stands because a `0x78` said so — which is
+    /// why it is reconciled like a dialog rather than opened like a skill sheet,
+    /// and why it is not [`WindowSubject::is_local`].
+    Confirm(crate::panes::confirm::Question),
+    /// The party manifest. No key, for the skill sheet's reason: a client is in
+    /// one party at a time, and the roster is about the body at this end of the
+    /// connection.
+    ///
+    /// Its existence is the view's, like a question's and unlike a sheet's: the
+    /// window appears when a roster arrives and goes when the last member
+    /// leaves, so it is reconciled rather than opened by a button. That is also
+    /// the whole of what it inherits from the `egui::Window` it replaced, which
+    /// was drawn from `!members.is_empty()` in exactly the same way.
+    Party,
 }
 
 impl WindowSubject {
     /// Whether this window exists because the player asked for it rather than
     /// because the shard opened it.
     ///
-    /// The two kinds [`open_local_window`] puts in the list and
-    /// [`reconcile_own_windows`] cannot answer for: there is no container, no
-    /// mobile and no gump in the view to hold either of them open, so the view
-    /// going away does not take them with it. Everything that has to drop
+    /// The three kinds [`reconcile_own_windows`] cannot answer for — the two
+    /// [`open_local_window`] puts in the list, and the amount picker
+    /// [`open_split_window`] does: there is no container, no mobile and no gump
+    /// in the view to hold any of them open, so the view going away does not
+    /// take them with it. (The picker is not the *player's* window the way the
+    /// other two are — this client put it up to ask a question — but the fact
+    /// this predicate states is about the view and not about who asked.)
+    /// Everything that has to drop
     /// *every* window when the world ends — the disconnect — asks this instead
     /// of naming the kinds, which is a list that would otherwise have to be
     /// kept in step by hand.
     pub const fn is_local(self) -> bool {
-        matches!(self, Self::Skills | Self::Status)
+        matches!(self, Self::Skills | Self::Status | Self::Split { .. })
     }
 }
 
@@ -182,6 +228,13 @@ pub enum Drawn {
     Skills(skills::Sheet),
     /// The status frame and the numbers written over it.
     Status(openshard_client_render::status::Window),
+    /// The amount picker: its frame, its knob, its button, and the number.
+    Split(openshard_client_render::split::Window),
+    /// A yes/no question: the plate, its two buttons, and the wording.
+    Confirm(openshard_client_render::confirm::Window),
+    /// The party manifest: the stretched plate, its ten name rows, and its
+    /// controls.
+    Party(openshard_client_render::party::Window),
 }
 
 /// Whose press the client's own modal is standing over.
@@ -222,6 +275,9 @@ impl Drawn {
             Self::Paperdoll(window) => &window.doll.pictures,
             Self::Skills(sheet) => &sheet.pictures,
             Self::Status(status) => &status.pictures,
+            Self::Split(split) => &split.pictures,
+            Self::Confirm(question) => &question.pictures,
+            Self::Party(manifest) => &manifest.pictures,
         }
     }
 }
@@ -373,6 +429,50 @@ pub fn open_local_window(own_windows: &mut Vec<OwnWindow>, subject: WindowSubjec
     });
 }
 
+/// How far up and to the left of the pointer the amount picker opens.
+///
+/// The reference client's own `Mouse.Position - (80, 40)`, which is very nearly
+/// the middle of the 164×74 frame: the window arrives under the hand that asked
+/// for it, so the bar and the button are both a small movement away rather than
+/// wherever the last window happened to cascade to.
+const SPLIT_OFFSET: GumpPixel = GumpPixel::new(80, 40);
+
+/// Put the amount picker up over a Shift-drag, unless one is already up over
+/// this pile.
+///
+/// The third door into [`Windows::own_windows`], beside
+/// [`reconcile_own_windows`] for the windows the view asks for and
+/// [`open_local_window`] for the two the player does. It is its own door
+/// because this kind is placed rather than cascaded — a modal that opened in the
+/// corner of the screen while the pointer was in the middle of it would be a
+/// question asked somewhere else — and because the subject carries the bound its
+/// pane is built with.
+///
+/// `at` is the pointer, in absolute gump pixels. The window is nudged back onto
+/// the screen only in so far as it is never placed at a negative corner: a
+/// prompt hanging off the right-hand edge is the reference's behaviour too, and
+/// this client has no idea how wide the surface is down here.
+pub fn open_split_window(own_windows: &mut Vec<OwnWindow>, prompt: crate::panes::SplitPrompt, at: GumpPixel) {
+    let subject = WindowSubject::Split {
+        item: prompt.item,
+        most: prompt.most,
+    };
+    // Filed under the pile, so a second question about the same one cannot be
+    // asked — the reference's `GetGump<SplitMenuGump>(item)` guard, which is
+    // what that keying is for.
+    if own_windows.iter().any(|window| match window.subject {
+        WindowSubject::Split { item, .. } => item == prompt.item,
+        _ => false,
+    }) {
+        return;
+    }
+    own_windows.push(OwnWindow {
+        subject,
+        at: GumpPixel::new((at.x - SPLIT_OFFSET.x).max(0), (at.y - SPLIT_OFFSET.y).max(0)),
+        pane: crate::panes::AnyPane::of(subject),
+    });
+}
+
 /// [`crate::App::sync_own_windows`]'s membership logic, pulled out to a free
 /// function so it can be exercised without an `App` — which needs real
 /// client asset files to construct at all, the same reason `dst.rs` mirrors
@@ -409,6 +509,18 @@ pub fn reconcile_own_windows(
         WindowSubject::Dialog(gump_id) => view.gumps.iter().any(|gump| gump.gump_id == gump_id),
         WindowSubject::Skills => false,
         WindowSubject::Status => false,
+        // Nothing in the view holds the picker open, so there is nothing for an
+        // overlay entry to be ahead *of* — the same as the two kinds above.
+        WindowSubject::Split { .. } => false,
+        // A question dismissed without an answer stays dismissed for exactly as
+        // long as the fact behind it stands — a dialog's rule, one kind over.
+        // Nothing tells the shard a plate was closed, so only the view settling
+        // the question can clear the overlay and let the window open again.
+        WindowSubject::Confirm(question) => question.stands(view),
+        // And the manifest, for the question's reason: the roster is what holds
+        // it open, so a window closed by hand stays closed only until the party
+        // itself is gone.
+        WindowSubject::Party => crate::panes::party::in_a_party(view),
     });
     own_windows.retain(|window| {
         if locally_closed.contains(&window.subject) {
@@ -428,7 +540,14 @@ pub fn reconcile_own_windows(
             // takes it away, and anything here would be a second opinion about
             // that — the two fields this replaced could each say the window was
             // shut while the window was still in this list.
-            WindowSubject::Skills | WindowSubject::Status => true,
+            WindowSubject::Skills | WindowSubject::Status | WindowSubject::Split { .. } => true,
+            // And a question stands for as long as what it is about does. This
+            // is the arm that takes an invitation off the screen when the shard
+            // withdraws it, without anybody having pressed either button.
+            WindowSubject::Confirm(question) => question.stands(view),
+            // The last member leaving takes the window with it, without anybody
+            // having pressed anything.
+            WindowSubject::Party => crate::panes::party::in_a_party(view),
         }
     });
     // Containers first and paperdolls after, and both in the view's own
@@ -502,6 +621,58 @@ pub fn reconcile_own_windows(
         own_windows.push(OwnWindow {
             subject,
             at,
+            pane: crate::panes::AnyPane::of(subject),
+        });
+    }
+    // And this client's own questions, which are reconciled like a dialog and
+    // not opened like a skill sheet: a party invitation is on the screen because
+    // a `0x78` said so, so the same walk that opens a window for it is the walk
+    // that takes it away when the shard settles it.
+    //
+    // Over the *questions* rather than over anything in the view, because that
+    // is where the set lives — see [`Question::ALL`](crate::panes::confirm::Question).
+    // Cascaded like a bag for want of anywhere better: the reference centres its
+    // `QuestionGump` on the window, which is a size this function has never been
+    // told and deliberately is not — where a window goes is the manager's, and
+    // the manager's own placement rule is the cascade.
+    for question in crate::panes::confirm::Question::ALL {
+        let subject = WindowSubject::Confirm(question);
+        if !question.stands(view) {
+            continue;
+        }
+        if own_windows.iter().any(|window| window.subject == subject) {
+            continue;
+        }
+        // Dismissed by the player, and the question still standing: the overlay
+        // above is what keeps it dismissed, and this is where it would otherwise
+        // be re-opened on the very next frame.
+        if locally_closed.contains(&subject) {
+            continue;
+        }
+        let step = own_windows.len() as i32 % CONTAINER_CASCADE_LENGTH;
+        own_windows.push(OwnWindow {
+            subject,
+            at: GumpPixel::new(
+                CONTAINER_ORIGIN.x + CONTAINER_CASCADE.x * step,
+                CONTAINER_ORIGIN.y + CONTAINER_CASCADE.y * step,
+            ),
+            pane: crate::panes::AnyPane::of(subject),
+        });
+    }
+    // And the manifest, which is the same three questions in a row: is there a
+    // party, is the window already up, and has the player put it away since.
+    let subject = WindowSubject::Party;
+    if crate::panes::party::in_a_party(view)
+        && !own_windows.iter().any(|window| window.subject == subject)
+        && !locally_closed.contains(&subject)
+    {
+        let step = own_windows.len() as i32 % CONTAINER_CASCADE_LENGTH;
+        own_windows.push(OwnWindow {
+            subject,
+            at: GumpPixel::new(
+                CONTAINER_ORIGIN.x + CONTAINER_CASCADE.x * step,
+                CONTAINER_ORIGIN.y + CONTAINER_CASCADE.y * step,
+            ),
             pane: crate::panes::AnyPane::of(subject),
         });
     }

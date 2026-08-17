@@ -458,7 +458,7 @@ impl DialogPane {
             // it *instead* of closing the window — which is the one place this
             // client's Escape does something other than take the topmost window
             // down.
-            Key::Done => {
+            Key::Done | Key::Cancel => {
                 self.focus = None;
                 Response::changed().with(Effect::ReleaseKeyboard)
             }
