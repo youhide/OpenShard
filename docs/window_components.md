@@ -855,13 +855,34 @@ never a half-routed frame.
   would have been the bigger, unrequested change this entry never asked for —
   only the *type* `world_press` holds was window-shaped by accident, and that
   is what moved.
-- **A bag rebuilds its icon list two or three times a frame.** `contents()`
+- ~~**A bag rebuilds its icon list two or three times a frame.** `contents()`
   filters the view's list and projects a pending drop into it, and it is asked
   by `art`, by `layout` and by a press on the sweep plate. Each is a `Vec` of
   what is in the bag — small, and the same allocation the old layout made — but
   it is a list computed from the same three inputs three times. Whether a pane
   wants a once-a-frame scratch is a question for every kind and not just this
-  one, so it is not a container fix.
+  one, so it is not a container fix.~~ **Closed for `art`/`layout`, locally, by
+  `ContainerPane::scratch`.** The two calls that are provably paired — every
+  redraw asks a pane's `art` and then its `layout`, back to back in
+  `render_passes.rs`, off the same `view` and the same `hand`, with no packet
+  fold or input event between them — now share one computation: `art` leaves
+  what it computed in a `RefCell` and `layout` takes it with
+  `ContainerPane::recall_contents`, unconditionally emptying the cell so a
+  `layout` that ever runs without a matching `art` first recomputes rather
+  than reading a stranger's leftovers. `contents()` itself moved to take
+  `(view, hand)` instead of a whole `PaneFrame`, which is what let the cache be
+  pinned by a test without the `&Resources` that blocks S8.
+
+  The sweep plate's own call is **deliberately not folded in**: a press runs
+  off the input event pump, not the redraw clock, so there is no gap between a
+  redraw and the press that follows it for a cache to sit in safely — reading
+  one there would be trusting a value that may already be older than the last
+  packet. It still asks `contents()` fresh, as it always has.
+
+  The broader question this entry's last sentence raised — whether a pane
+  wants a once-a-frame scratch as a thing `trait Pane` itself offers, for
+  every kind and not just this one — **stays open**. This closes only the
+  container's own case, by a mechanism private to `ContainerPane`.
 - ~~**A scroll that could not move still asks for a frame.** `SkillsPane::wheel`
   answers `consumed` at either end, and the arrows and the track beside it
   answer `changed` unconditionally: pressing Up at the top of the list is a

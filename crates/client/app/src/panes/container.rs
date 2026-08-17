@@ -26,6 +26,7 @@
 //! picture: the double click that uses an icon, the drag that lifts one, the
 //! two plates below the frame, and the tint under the pointer.
 
+use std::cell::RefCell;
 use std::time::Instant;
 
 use openshard_client_net::action::Outgoing;
@@ -121,6 +122,30 @@ pub struct ContainerPane {
     /// memory of the last move, compared against the layout's own predicate
     /// and asked to agree with what is drawn.
     plate_hovered: bool,
+    /// A one-redraw memo of [`Self::contents`], left by [`art`](Pane::art)
+    /// for [`layout`](Pane::layout) to pick up rather than compute again.
+    ///
+    /// Interior mutability because both methods take `&self` — [`Pane`]'s own
+    /// shape — but this is not "whatever the bag last held": it is "whatever
+    /// `art` computed a moment ago, for the `layout` call that always follows
+    /// it before anything else runs." `render_passes.rs` asks every open
+    /// pane's `art`, packs it, and only *then* asks every open pane's
+    /// `layout` — two loops, back to back, off the same `view` and the same
+    /// `hand`, with no packet fold and no input event between them (D6). That
+    /// gap is this field's entire lifetime: [`Self::recall_contents`] empties
+    /// it unconditionally, so a `layout` reached without a matching `art`
+    /// first — the shop-crate branch, or a test calling one and not the
+    /// other — finds nothing and recomputes, and can never read a value some
+    /// earlier, unrelated `art` left behind.
+    ///
+    /// **Deliberately not offered to [`Self::press_plate`].** A press runs
+    /// off the input event pump, not the redraw that fills this — there is no
+    /// guaranteed gap between a redraw and the press that follows it, so the
+    /// plate's own call to [`Self::contents`] stays a fresh read every time.
+    /// See `docs/window_components.md`'s backlog entry this closes: the
+    /// broader question of a once-a-frame scratch for every pane kind stays
+    /// open, and this is deliberately narrower than that.
+    scratch: RefCell<Option<Vec<ContainedItem>>>,
 }
 
 /// A container, laid out for one frame: the pictures, what they *are*, and
@@ -325,6 +350,7 @@ impl ContainerPane {
             hovered: None,
             last_click: None,
             plate_hovered: false,
+            scratch: RefCell::new(None),
         }
     }
 
@@ -379,10 +405,16 @@ impl ContainerPane {
     /// held item is subtracted here for as long as the hand holds it. And a
     /// drop this window is waiting on is added at the place it was dropped, so
     /// there is no gap between letting go and the shard's answer.
-    fn contents(&self, frame: &PaneFrame<'_>) -> Vec<ContainedItem> {
-        let held = frame.hand.map(|hand| hand.drag().item.serial);
-        let mut contents: Vec<ContainedItem> = frame
-            .view
+    ///
+    /// Takes `view` and `hand` rather than a whole [`PaneFrame`] on purpose:
+    /// neither this nor [`Self::recall_contents`] touches `frame.resources`,
+    /// and a test that wants to pin the caching in [`Self::scratch`] would
+    /// otherwise need a full [`Resources`](crate::resources::Resources) — the
+    /// same wall step 8 of `docs/window_components.md` is still standing
+    /// behind.
+    fn contents(&self, view: &WorldView, hand: Option<Hand>) -> Vec<ContainedItem> {
+        let held = hand.map(|hand| hand.drag().item.serial);
+        let mut contents: Vec<ContainedItem> = view
             .contents
             .get(&self.container)
             .into_iter()
@@ -393,13 +425,28 @@ impl ContainerPane {
         if let Some(Hand::Dropped {
             drag,
             destination: PendingDrop::Container { container, at },
-        }) = frame.hand
+        }) = hand
         {
             if container == self.container {
                 contents.push(ContainedItem { at, ..drag.item });
             }
         }
         contents
+    }
+
+    /// What [`layout`](Pane::layout) reads: whatever [`art`](Pane::art) left
+    /// in [`Self::scratch`] a moment ago, or a fresh [`Self::contents`] if
+    /// there is nothing there.
+    ///
+    /// The `take()` is unconditional — it empties the cell whether or not it
+    /// found anything — so a value can be read here at most once, and a call
+    /// with no matching `art` immediately before it recomputes rather than
+    /// answering with somebody else's frame.
+    fn recall_contents(&self, view: &WorldView, hand: Option<Hand>) -> Vec<ContainedItem> {
+        self.scratch
+            .borrow_mut()
+            .take()
+            .unwrap_or_else(|| self.contents(view, hand))
     }
 
     /// The two things written over this window: the plate's caption, and the
@@ -520,7 +567,7 @@ impl ContainerPane {
         match plate {
             Plate::StackAll => raised.with(Effect::StackAll),
             Plate::TakeAll => match backpack_of(ctx.frame.view) {
-                Some(backpack) => take_all(&self.contents(&ctx.frame), backpack)
+                Some(backpack) => take_all(&self.contents(ctx.frame.view, ctx.frame.hand), backpack)
                     .into_iter()
                     .fold(raised, Response::with),
                 // Nothing to sweep into. The plate is drawn — a body can lose
@@ -683,33 +730,44 @@ impl Pane for ContainerPane {
     /// The background, every icon in it, and the plate's own art when this
     /// window has one.
     ///
-    /// Asked of the view every frame rather than remembered, because what is
-    /// in a bag changes without the window hearing about it — and the atlas
-    /// answers a repeat with nothing, so asking for the same list twice costs
-    /// a comparison. The plate's graphic is the same one graphic for every
-    /// window that has one, so this never grows the atlas past its first ask
-    /// — it is here at all only because [`Self::plate`] is a question about
-    /// the view (a shop's crate has no plate) that this method must not
-    /// answer a second, disagreeing way.
+    /// Asked of the view every frame rather than remembered *across* frames,
+    /// because what is in a bag changes without the window hearing about it —
+    /// and the atlas answers a repeat with nothing, so asking for the same
+    /// list twice costs a comparison. The plate's graphic is the same one
+    /// graphic for every window that has one, so this never grows the atlas
+    /// past its first ask — it is here at all only because [`Self::plate`] is
+    /// a question about the view (a shop's crate has no plate) that this
+    /// method must not answer a second, disagreeing way.
+    ///
+    /// What this call to [`Self::contents`] computes *is* remembered for the
+    /// rest of this one redraw — see [`Self::scratch`] — so [`layout`],
+    /// called next for this same window, does not ask a third time.
     fn art(&self, frame: &PaneFrame<'_>) -> Vec<GumpArt> {
         match frame.view.containers.get(&self.container) {
             Some(gump) => {
-                let mut wanted = container::art_of(*gump, &self.contents(frame));
+                let contents = self.contents(frame.view, frame.hand);
+                let mut wanted = container::art_of(*gump, &contents);
                 if self.plate(frame).is_some() {
                     wanted.push(GumpArt::Gump(container::PLATE_BACKGROUND));
                 }
+                // Left for `layout` — called next, for this same window,
+                // before anything else runs (see `Self::scratch`) — to pick
+                // up instead of asking `contents` a second time.
+                *self.scratch.borrow_mut() = Some(contents);
                 wanted
             }
             // The window is open and the view has no `0x24` for it — one frame
             // between the packet that took the bag away and the reconcile that
-            // will take the window with it.
+            // will take the window with it. Nothing computed, so nothing to
+            // leave in `Self::scratch` either — `layout` takes the same path
+            // and finds it empty (or a stranger's leftover, which it discards).
             None => Vec::new(),
         }
     }
 
     fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         let gump = *frame.view.containers.get(&self.container)?;
-        let contents = self.contents(frame);
+        let contents = self.recall_contents(frame.view, frame.hand);
         let plate = self.plate_button(frame).map(|(_, button)| {
             let hue = if self.plate_hovered {
                 HIGHLIGHT_HUE
@@ -792,6 +850,22 @@ mod tests {
             grid: GridSlot(0),
             hue: Hue::NONE,
         }
+    }
+
+    /// A bare view with our own body entered and nothing else — enough to
+    /// carry one bag's contents for the caching tests below. `WorldView` has
+    /// no `Default` on purpose (see its own doc comment); `entered` is its
+    /// cheapest real constructor and touches no client file.
+    fn bare_view() -> WorldView {
+        use openshard_protocol::direction::{Direction, Facing};
+        use openshard_protocol::world::{MapSize, PlayerStart, Point};
+        WorldView::entered(PlayerStart {
+            serial: serial(0x0000_002A),
+            body: Graphic(0x0190),
+            position: Point::new(1475, 1770, 20),
+            facing: Facing::walking(Direction::South),
+            map: MapSize::BRITANNIA,
+        })
     }
 
     /// The pairing rule, minus the half the shape now answers: two clicks in
@@ -1067,6 +1141,115 @@ mod tests {
             window.item_at(GumpPixel::new(10, 10), &atlas),
             None,
             "and nothing at all outside the window"
+        );
+    }
+
+    /// `recall_contents` reuses exactly what was left for it — the case
+    /// `art` and `layout` hit every ordinary redraw — rather than answering
+    /// with a fresh (and here, deliberately *different*) computation. Proves
+    /// reuse rather than coincidence: the stashed value and the view/hand
+    /// passed alongside it disagree, so a pass-through to `contents` would
+    /// be caught.
+    #[test]
+    fn recall_contents_reuses_what_art_left_behind() {
+        let pane = ContainerPane::new(serial(0x4000_0000));
+        let stashed = vec![item(0x4000_0009, Graphic(0x0EED), 1)];
+        *pane.scratch.borrow_mut() = Some(stashed.clone());
+
+        // A view that would compute something else entirely, so a bug that
+        // silently ignored the cache and recomputed would be visible.
+        let mut view = bare_view();
+        view.contents
+            .insert(pane.container, vec![item(0x4000_0001, Graphic(0x0A28), 1)]);
+
+        assert_eq!(
+            pane.recall_contents(&view, None),
+            stashed,
+            "the cached list wins over a fresh computation"
+        );
+    }
+
+    /// The other half of the same contract: nothing was stashed — either
+    /// because `art` never ran (a test calling `recall_contents` on its
+    /// own) or because it hit the no-gump branch and left the cell empty —
+    /// so the answer is an ordinary, fresh `contents()`.
+    #[test]
+    fn recall_contents_falls_back_to_a_fresh_read_when_nothing_was_cached() {
+        let pane = ContainerPane::new(serial(0x4000_0000));
+        let mut view = bare_view();
+        let candle = item(0x4000_0001, Graphic(0x0A28), 1);
+        view.contents.insert(pane.container, vec![candle]);
+
+        assert_eq!(
+            pane.recall_contents(&view, None),
+            vec![candle],
+            "no cache to reuse, so this is `contents()` itself"
+        );
+    }
+
+    /// The staleness this cache exists to rule out: a value left over from
+    /// an earlier bag state must never survive to answer a *later* one.
+    /// `take()` is what guarantees it — reading the cache once empties it —
+    /// so a second read in a row, standing in for "the next redraw", cannot
+    /// see the first redraw's answer even though nothing here calls `art`
+    /// again to overwrite it.
+    #[test]
+    fn a_read_cache_does_not_survive_to_answer_the_next_read() {
+        let pane = ContainerPane::new(serial(0x4000_0000));
+        let mut view = bare_view();
+        let first_item = item(0x4000_0001, Graphic(0x0A28), 1);
+        view.contents.insert(pane.container, vec![first_item]);
+
+        // Simulates one redraw: `art` stashes what it computed for the bag
+        // as it stood then, `layout` reads it back through the same call
+        // this test makes directly.
+        *pane.scratch.borrow_mut() = Some(pane.contents(&view, None));
+        let first_read = pane.recall_contents(&view, None);
+        assert_eq!(first_read, vec![first_item]);
+
+        // The bag changes — a packet lands, standing in for the gap between
+        // one redraw and the next — and nothing refills the cache before
+        // this second read, exactly as would happen if `layout` somehow ran
+        // twice without an intervening `art`.
+        let second_item = item(0x4000_0002, Graphic(0x0EED), 1);
+        view.contents.insert(pane.container, vec![second_item]);
+        let second_read = pane.recall_contents(&view, None);
+
+        assert_eq!(
+            second_read,
+            vec![second_item],
+            "the second read reflects the bag's current contents, not the first read's stale list"
+        );
+    }
+
+    /// The end-to-end shape `art`/`layout` actually run: two frames, two
+    /// different bags of items, and each frame's `layout` seeing exactly
+    /// that frame's own state — never a lingering answer from the frame
+    /// before it. This is the regression the backlog entry
+    /// (`docs/window_components.md`) was closed against: three redundant
+    /// recomputations became one memo per redraw, and it had to be provably
+    /// impossible for that memo to leak across a change in what the bag
+    /// holds.
+    #[test]
+    fn the_cache_tracks_a_bag_that_changes_from_one_frame_to_the_next() {
+        let pane = ContainerPane::new(serial(0x4000_0000));
+        let mut view = bare_view();
+
+        // Frame one: a single candle in the bag, nothing on the cursor.
+        let candle = item(0x4000_0001, Graphic(0x0A28), 1);
+        view.contents.insert(pane.container, vec![candle]);
+        *pane.scratch.borrow_mut() = Some(pane.contents(&view, None)); // art
+        assert_eq!(pane.recall_contents(&view, None), vec![candle]); // layout
+
+        // Frame two: the candle is gone (swept, used, whatever) and a bottle
+        // has taken its place. A stale cache would still say "candle".
+        let bottle = item(0x4000_0002, Graphic(0x0F0E), 1);
+        view.contents.insert(pane.container, vec![bottle]);
+        *pane.scratch.borrow_mut() = Some(pane.contents(&view, None)); // art
+        assert_eq!(
+            pane.recall_contents(&view, None), // layout
+            vec![bottle],
+            "the second frame's layout sees the second frame's bag"
         );
     }
 }
