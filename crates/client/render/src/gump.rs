@@ -1003,16 +1003,41 @@ impl Window {
     /// buttons dead zones, while the reference's `Button` owns its full bounds.
     #[must_use]
     pub fn hit(&self, cursor: GumpPixel, atlas: &GumpAtlas) -> Option<Hit> {
-        self.hits.iter().rev().find_map(|(index, hit)| {
-            let picture = self.pictures.get(index.position())?;
-            let sprite = atlas.sprite(picture.graphic)?;
-            (cursor.x >= picture.at.x
-                && cursor.y >= picture.at.y
-                && cursor.x < picture.at.x + i32::from(sprite.width)
-                && cursor.y < picture.at.y + i32::from(sprite.height))
-            .then_some(*hit)
-        })
+        pick_hit(
+            &self.pictures,
+            atlas,
+            cursor,
+            self.hits.iter().map(|(index, hit)| (*index, *hit)),
+        )
     }
+}
+
+/// Which of `pictures` — named by `hits` — owns `cursor`, testing the last one
+/// first.
+///
+/// The one hit test [`Window::hit`], [`crate::confirm::Window::hit`] and
+/// [`crate::party::Window::hit`] all did by hand, copied three times: which of
+/// these indexed pictures covers the cursor, against the picture's whole
+/// rectangle rather than its opaque texels — the reference's `Button` owns its
+/// bounds, and testing the ink turns a bevelled margin into a dead zone. Later
+/// wins on overlap, the same rule [`pick`] answers by, because a window's own
+/// `hits` are declared in painter's order.
+#[must_use]
+pub fn pick_hit<H: Copy>(
+    pictures: &[Picture],
+    atlas: &GumpAtlas,
+    cursor: GumpPixel,
+    hits: impl DoubleEndedIterator<Item = (PictureIndex, H)>,
+) -> Option<H> {
+    hits.rev().find_map(|(index, hit)| {
+        let picture = pictures.get(index.position())?;
+        let sprite = atlas.sprite(picture.graphic)?;
+        (cursor.x >= picture.at.x
+            && cursor.y >= picture.at.y
+            && cursor.x < picture.at.x + i32::from(sprite.width)
+            && cursor.y < picture.at.y + i32::from(sprite.height))
+        .then_some(hit)
+    })
 }
 
 /// Lay a parsed layout out at `at`, showing `page`.

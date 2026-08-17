@@ -3638,11 +3638,11 @@ way a `0xB0` dialog is, so neither has an openness kept anywhere but in
 and `remove_from_party` are gone with them: a pane names `Effect::Net` and never
 holds a `Link`. What is left:
 
-- **Three window kinds now carry the same `hit()`.** `gump::Window::hit`,
-  `confirm::Window::hit` and `party::Window::hit` are one rectangle test against
-  a picture's sprite size, copied three times, because each keeps its own
-  `Hit` type. The shared part is "which of these indexed pictures covers the
-  cursor" and it wants to be one function over an index-to-meaning table.
+- ~~**Three window kinds now carry the same `hit()`.**~~ **Closed.**
+  `gump::pick_hit` is that one function, generic over the `Hit` type and over
+  whether the caller's index-to-meaning table is a `BTreeMap` or a `Vec` —
+  `gump::Window::hit`, `confirm::Window::hit` and `party::Window::hit` are all
+  now one line each, calling it.
 - **A party member is named by serial, in both windows.** No packet in this
   path carries a name — a `0x78` invitation does not, and the `0xBF 0x06`
   roster does not — so both draw `0x0000002A`. The names this client *does*

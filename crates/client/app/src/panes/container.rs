@@ -843,6 +843,8 @@ mod tests {
     use openshard_protocol::containers::GridSlot;
     use openshard_protocol::items::ItemAmount;
 
+    use crate::panes::fixture;
+
     use super::*;
 
     fn serial(raw: u32) -> Serial {
@@ -1227,6 +1229,64 @@ mod tests {
             second_read,
             vec![second_item],
             "the second read reflects the bag's current contents, not the first read's stale list"
+        );
+    }
+
+    /// **Step 8, through the front door.** `ItemPress::dragged` already pins
+    /// the slop-then-lift rule (`hand.rs`'s own tests); this goes in through
+    /// [`Pane::handle`] instead — the located gate, the `drawn` lookup and
+    /// `Window::item_at` ahead of it — which is what `docs/window_components.md`'s
+    /// backlog entry asked for: a press on an icon becomes a lift without a
+    /// client install on disk, now that [`fixture::Install`] answers every
+    /// borrow a bag's own `handle` reads.
+    #[test]
+    fn a_press_on_an_icon_becomes_a_lift_through_handle() {
+        const BAG: Graphic = Graphic(0x003C);
+        const CANDLE: Graphic = Graphic(0x0A28);
+        let files = fixture::Install::shipping([
+            (GumpArt::Gump(BAG), (140, 100)),
+            (GumpArt::Item(CANDLE), (10, 20)),
+        ]);
+        let bag = serial(0x4000_0100);
+        let mut view = bare_view();
+        view.containers.insert(bag, BAG);
+        view.contents.insert(
+            bag,
+            vec![ContainedItem {
+                at: GumpPoint::new(20, 20),
+                ..item(0x4000_0001, CANDLE, 1)
+            }],
+        );
+
+        let mut pane = ContainerPane::new(bag);
+        // Inside the candle's own icon, at (20, 20) sized 10×20.
+        let icon = GumpPixel::new(25, 30);
+        let laid_out = pane
+            .layout(&files.ctx(&view, None, icon, true).frame)
+            .expect("a bag with a gump in the view lays itself out");
+        let ctx = files.ctx(&view, Some(&laid_out), icon, true);
+        let press = pane.handle(Input::Press(Button::Left), &ctx);
+        assert!(press.taken, "a press on our own window is always ours");
+        assert!(
+            matches!(press.out.as_slice(), [Effect::Raise]),
+            "nothing has been sent yet — the press is only a press, held by the pane"
+        );
+        assert!(pane.pressed.is_some());
+
+        // Past the slop, so the held press has become a drag.
+        let dragged = icon.offset(GumpPixel::new(10, 0));
+        let laid_out = pane
+            .layout(&files.ctx(&view, None, dragged, true).frame)
+            .expect("the bag still lays out the same way");
+        let ctx = files.ctx(&view, Some(&laid_out), dragged, true);
+        let answer = pane.handle(Input::Move, &ctx);
+        assert!(
+            matches!(answer.out.as_slice(), [Effect::Lift(_)]),
+            "the move past the slop is what turns a press into a lift"
+        );
+        assert!(
+            pane.pressed.is_none(),
+            "the press is spent once it becomes a lift"
         );
     }
 

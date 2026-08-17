@@ -723,4 +723,83 @@ mod tests {
         let answer = button_effects(paperdoll::DollButton::Backpack, me, true, false, None, true);
         assert!(answer.out.is_empty(), "no worn backpack, nothing to use");
     }
+
+    /// **Step 8's paperdoll quarter, through [`Pane::handle`].**
+    ///
+    /// S5 declined this press so the legacy chain could answer it; S6 is what
+    /// moved the transfer machinery in, and the module docs above say what
+    /// changed: "a worn item is pressed, dragged off the doll and lifted like
+    /// an icon in a bag." So the press this pane owns today is not `ignored`
+    /// at all — it is [`ContainerPane::press`](crate::panes::container)'s
+    /// shape, one holder over: taken, held as [`PaperdollPane::pressed`], and
+    /// turned into [`Effect::Lift`] by the move that follows, past the same
+    /// slop [`ItemPress::dragged`] pins for every holder.
+    ///
+    /// The doll is built by hand rather than through [`Pane::layout`] — a real
+    /// doll picture needs `gumpartLegacyMUL.uop`, which
+    /// [`fixture::Install`] deliberately does not ship (see its own doc) —
+    /// but `press` never asks how a picture got into `ctx.drawn`, only what is
+    /// in it, so a hand-built `Doll` naming one worn layer exercises the same
+    /// code a real frame would.
+    #[test]
+    fn a_press_on_our_own_worn_item_becomes_a_lift_through_handle() {
+        use std::collections::BTreeMap;
+
+        use openshard_client_render::gump::{GumpArt, PictureIndex};
+        use openshard_protocol::wire::Graphic;
+
+        use crate::panes::fixture;
+
+        const SHIRT: Graphic = Graphic(0x1F03);
+        const WORN_LAYER: Layer = Layer(5);
+
+        let me = serial(0x0000_002A);
+        let files = fixture::Install::shipping([(GumpArt::Item(SHIRT), (20, 20))]);
+        let mut view = fixture::world(me);
+        view.player.equipment.push(Equipment {
+            serial: serial(0x4000_0001),
+            graphic: SHIRT,
+            layer: WORN_LAYER,
+            hue: Hue::NONE,
+        });
+
+        let mut pane = PaperdollPane::new(me);
+        let at = GumpPixel::new(50, 50);
+        let doll = paperdoll::Doll {
+            pictures: vec![openshard_client_render::gump::Picture::plain(
+                GumpArt::Item(SHIRT),
+                at,
+            )],
+            hits: BTreeMap::new(),
+            equipment_hits: BTreeMap::from([(PictureIndex::new(0), WORN_LAYER)]),
+        };
+        let drawn = Drawn::Paperdoll(Window {
+            doll,
+            lines: Vec::new(),
+        });
+
+        // Inside the shirt's own picture, 20×20 at (50, 50).
+        let cursor = at.offset(GumpPixel::new(5, 5));
+        let ctx = files.ctx(&view, Some(&drawn), cursor, true);
+        let press = pane.handle(Input::Press(Button::Left), &ctx);
+        assert!(press.taken, "a press on our own window is always ours");
+        assert!(
+            matches!(press.out.as_slice(), [Effect::Raise]),
+            "nothing has been sent yet — the transfer starts as a press, not a packet"
+        );
+        assert!(pane.pressed.is_some());
+
+        // Past the slop, so the held press has become a drag.
+        let dragged = cursor.offset(GumpPixel::new(10, 0));
+        let ctx = files.ctx(&view, Some(&drawn), dragged, true);
+        let answer = pane.handle(Input::Move, &ctx);
+        assert!(
+            matches!(answer.out.as_slice(), [Effect::Lift(_)]),
+            "the move past the slop is what turns the held press into a lift"
+        );
+        assert!(
+            pane.pressed.is_none(),
+            "the press is spent once it becomes a lift"
+        );
+    }
 }

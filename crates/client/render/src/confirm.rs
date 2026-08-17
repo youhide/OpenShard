@@ -112,20 +112,17 @@ pub struct Window {
 impl Window {
     /// Which button owns `cursor`, if either does.
     ///
-    /// Against the button's whole rectangle rather than its opaque texels, for
-    /// [`crate::gump::Window::hit`]'s reason: the reference's `Button` owns its
-    /// bounds, and testing the ink turns a bevelled margin into a dead zone.
+    /// [`crate::gump::pick_hit`]'s test: against the button's whole rectangle
+    /// rather than its opaque texels, because the reference's `Button` owns its
+    /// bounds and testing the ink turns a bevelled margin into a dead zone.
     #[must_use]
     pub fn hit(&self, cursor: GumpPixel, atlas: &GumpAtlas) -> Option<Hit> {
-        self.hits.iter().rev().find_map(|(index, hit)| {
-            let picture = self.pictures.get(index.position())?;
-            let sprite = atlas.sprite(picture.graphic)?;
-            (cursor.x >= picture.at.x
-                && cursor.y >= picture.at.y
-                && cursor.x < picture.at.x + i32::from(sprite.width)
-                && cursor.y < picture.at.y + i32::from(sprite.height))
-            .then_some(*hit)
-        })
+        crate::gump::pick_hit(
+            &self.pictures,
+            atlas,
+            cursor,
+            self.hits.iter().map(|(index, hit)| (*index, *hit)),
+        )
     }
 }
 

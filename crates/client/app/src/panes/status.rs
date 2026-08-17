@@ -80,3 +80,51 @@ impl Pane for StatusPane {
         Response::ignored()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use openshard_protocol::serial::Serial;
+
+    use crate::panes::{Button, fixture};
+
+    use super::*;
+
+    /// **S3's `None` gap, closed through `Pane::layout`.** A `0x1B` opens no
+    /// window (see the module docs), so the Status button's own path opens one
+    /// and asks for a fresh `0x11` in the same press — and the frame or two
+    /// before that reply lands is a window with nothing to draw. Drawing the
+    /// empty frame would draw a status window belonging to nobody; `None` is
+    /// the honest answer, and `fixture::world` is exactly that gap — a `0x1B`
+    /// and nothing after it, so `player.status` and `player.hits` are both
+    /// `None` the way they are on the frame the window opens.
+    #[test]
+    fn a_frame_with_no_status_reply_yet_lays_out_nothing() {
+        let files = fixture::Install::shipping([]);
+        let view = fixture::world(Serial::new(0x0000_002A).unwrap());
+        let pane = StatusPane;
+        let laid_out = pane.layout(&files.ctx(&view, None, GumpPixel::new(0, 0), true).frame);
+        assert!(
+            laid_out.is_none(),
+            "no `0x11` has arrived, so there is nothing to draw yet"
+        );
+    }
+
+    /// **The other half of decision 2.** There is no control on this frame at
+    /// all — no arrow, no button, no list — so every input this pane is ever
+    /// offered is somebody else's: the manager's raise-and-grab, or the right
+    /// button that closes it. `handle` says so unconditionally, and it says so
+    /// even with `ctx.drawn` still `None` — a window drawn nothing on the last
+    /// frame is not a window a bug can crash a hit test against, because this
+    /// pane never reaches for `ctx.drawn` at all.
+    #[test]
+    fn a_press_with_no_layout_behind_it_is_still_ignored() {
+        let files = fixture::Install::shipping([]);
+        let view = fixture::world(Serial::new(0x0000_002A).unwrap());
+        let mut pane = StatusPane;
+        let ctx = files.ctx(&view, None, GumpPixel::new(0, 0), true);
+        let answer = pane.handle(Input::Press(Button::Left), &ctx);
+        assert!(!answer.taken);
+        assert!(!answer.redraw);
+        assert!(answer.out.is_empty());
+    }
+}

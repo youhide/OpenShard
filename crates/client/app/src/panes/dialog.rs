@@ -876,4 +876,67 @@ mod tests {
             Some(RawButtonId(0))
         );
     }
+
+    /// **D9/S4's split, on the one field that reads it.**
+    ///
+    /// *Which* window the keys reach at all is never this pane's question — see
+    /// [`Input::Key`]'s own doc: the manager offers a keystroke only to the
+    /// window [`Windows::keyboard`](crate::windows::Windows::keyboard) names,
+    /// by identity and ahead of ever building a [`PaneCtx`], so
+    /// `DialogPane::handle`'s own `Input::Key` arm is reached at all only when
+    /// that has already been decided. What is left for `PaneFrame::has_keyboard`
+    /// to answer is the second question the module docs draw the line at: which
+    /// of *this* window's boxes the keys are landing in should still draw a
+    /// caret, and which should not — a field left focused in a window the
+    /// player has clicked away from must go dark rather than keep blinking.
+    /// That is read in exactly one place, [`DialogPane::lines`], which is what
+    /// this proves it through — [`Pane::layout`], not `handle`.
+    #[test]
+    fn the_caret_is_drawn_only_while_this_window_holds_the_keyboard() {
+        use openshard_protocol::serial::Serial;
+
+        use crate::panes::fixture;
+
+        let gump = admin_menu();
+        let mut pane = pane(&gump);
+        // A field the player has already clicked into, same as
+        // `a_keystroke_needs_a_field_to_go_into` arms it — the caret is drawn
+        // over *this* box and no other.
+        pane.focus = Some(TextEntryId::new(7));
+
+        let mut view = fixture::world(Serial::new(0x0000_0001).unwrap());
+        view.gumps.push(gump.clone());
+        // No art is needed to pin this: `Field`s and `Caption`s come straight
+        // out of the layout's own coordinates, never out of the atlas — see
+        // `gump_art::window`'s `Element::TextEntry` arm.
+        let files = fixture::Install::shipping([]);
+
+        let with_keyboard = PaneFrame {
+            view: &view,
+            files: files.files(),
+            cursor: GumpPixel::new(0, 0),
+            hand: None,
+            has_keyboard: true,
+            has_prompt: false,
+        };
+        let Some(Drawn::Dialog(drawn)) = pane.layout(&with_keyboard) else {
+            panic!("a dialog whose gump is still in the view lays itself out");
+        };
+        assert!(
+            drawn.lines.iter().any(|line| line.text == CARET),
+            "this window holds the keyboard, so the field it is focused on draws a caret"
+        );
+
+        let without_keyboard = PaneFrame {
+            has_keyboard: false,
+            ..with_keyboard
+        };
+        let Some(Drawn::Dialog(drawn)) = pane.layout(&without_keyboard) else {
+            panic!("the same dialog, laid out again");
+        };
+        assert!(
+            !drawn.lines.iter().any(|line| line.text == CARET),
+            "the manager says the keys are elsewhere now, and the caret goes with them"
+        );
+    }
 }

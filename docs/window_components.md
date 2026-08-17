@@ -975,16 +975,24 @@ never a half-routed frame.
   defect wearing a disguise** — it reads as a second assembler, it type-checks
   like one, and the next author keeps it in step for nothing.
 
-- **Four kinds have a context and no test through it.** S8 made every pane's
-  `handle` reachable without an install, and spent that on the two kinds the
-  wheel defect was about. A container's press-becomes-a-lift, a paperdoll's
-  declined press, a dialog's keyboard routing and the status frame's `None`
-  layout are all now writable as tests against `panes::fixture::Install`, and
-  none of them is written. Each needs the same three lines the vendor's does —
-  build the install, lay the pane out, hand the layout back as `ctx.drawn` —
-  plus whatever that kind's `handle` reads: the container wants `tiledata`
-  (there, empty) and the paperdoll wants `art` (there, empty), which is exactly
-  the pair `Art::empty`/`TileData::empty` answer for.
+- ~~**Four kinds have a context and no test through it.**~~ **Closed.** Four
+  tests now go through `Pane::handle`/`Pane::layout` against
+  `panes::fixture::Install`, the vendor's own shape: a container's icon becomes
+  a lift on the move past the drag slop
+  (`a_press_on_an_icon_becomes_a_lift_through_handle`, `container.rs`); a
+  paperdoll's own worn item does the same
+  (`a_press_on_our_own_worn_item_becomes_a_lift_through_handle`, `paperdoll.rs`
+  — S5's "declined press" is superseded reading: S6 folded that machinery in,
+  so a press on your own worn item is taken and lifts directly, exactly like a
+  bag); a dialog's caret is drawn only while `PaneFrame::has_keyboard` is true
+  (`the_caret_is_drawn_only_while_this_window_holds_the_keyboard`, `dialog.rs`
+  — `Input::Key` itself is routed a level up, in `route.rs`'s
+  `offer_to_panes`, addressed by `Windows::keyboard` before a pane is ever
+  asked; the one place `DialogPane` reads `has_keyboard` at all is deciding
+  whether the focused field draws a caret); and the status frame's `None`
+  layout, plus a press with no layout behind it staying `ignored`
+  (`a_frame_with_no_status_reply_yet_lays_out_nothing`,
+  `a_press_with_no_layout_behind_it_is_still_ignored`, `status.rs`).
 - **Whether `trait Pane` should offer a once-a-frame scratch.** Carried over
   from the container's `contents()` entry, whose last sentence raised it and
   which closed only the container's own case with a private `RefCell`. Every
