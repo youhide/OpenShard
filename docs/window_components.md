@@ -756,15 +756,18 @@ never a half-routed frame.
   `close_window_under_pointer`, both of which now take `owner` as a parameter
   instead of calling the walk. One texel pick against the window list per
   event, not up to three.
-- **`close_window`'s dialog arm answers the same `None` to two questions.** It
-  asks the window's pane for a dismissal, and `None` means `{ noclose }` — the
-  window stays up and the press was still the window's. But the lookup that
-  finds the pane can also come back empty (no such window, or a `Dialog` subject
-  holding some other pane, which `AnyPane::of` makes impossible), and that folds
-  into the same arm. Both currently do the harmless thing; a third reason to
-  answer `None` would not. Worth splitting when this door is next rewritten —
-  S7 gave the fallback rung a name but did not touch this one, which is still
-  the last thing in `App` that knows what a dialog is.
+- ~~**`close_window`'s dialog arm answers the same `None` to two questions.**~~
+  **Closed by splitting the `and_then` chain into two steps.** The `find` and
+  the `dismiss` call are no longer one expression: a missing window now returns
+  `false` of its own accord, with a comment saying why — there is nothing here
+  for the press to have taken, so it did not — and only a *found* dialog whose
+  pane answers `None` still returns `true`, unchanged, because that is `{
+  noclose }` and the press really was the window's. The no-such-window arm is
+  unreachable today (both callers pass a subject that came from a real window),
+  and the split does not change that; it changes the function to say so on its
+  own instead of depending on it. `AnyPane::of` still makes a `Dialog` subject
+  holding some other pane impossible, so that sub-case stays dead code inside
+  the `match`, documented in place rather than folded away.
 - ~~**A vendor's ACCEPT and CLEAR tint on hover, and nothing asks for a frame
   when it changes.**~~ **Closed by S5, in the pairing the entry itself asked
   for.** `VendorPane::tint` remembers which plate the pointer was on and

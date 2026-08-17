@@ -563,22 +563,31 @@ impl App {
             // Escape closes the topmost window without ever pointing at it — so
             // this is the one door and the pane is the one that can fill in the
             // packet.
-            let dismissal = self
+            let Some(window) = self
                 .windows
                 .own_windows
                 .iter()
                 .find(|window| window.subject == subject)
-                .and_then(|window| match &window.pane {
-                    crate::panes::AnyPane::Dialog(pane) => pane.dismiss(&gump),
-                    // A dialog window always holds a dialog pane — `AnyPane::of`
-                    // is a `match` on the subject — so this is not a case, it is
-                    // the compiler being told the same thing twice.
-                    _ => None,
-                });
+            else {
+                // No window with this subject is open at all — there is nothing
+                // here for this press to have taken, so it did not. Unreachable
+                // today: both callers (`close_window_under_pointer`,
+                // `close_top_window`) only ever pass a subject that came from a
+                // real window. Written down anyway, so the function's contract
+                // does not depend on its callers never trying otherwise.
+                return false;
+            };
+            let dismissal = match &window.pane {
+                crate::panes::AnyPane::Dialog(pane) => pane.dismiss(&gump),
+                // A dialog window always holds a dialog pane — `AnyPane::of`
+                // is a `match` on the subject — so this is not a case, it is
+                // the compiler being told the same thing twice.
+                _ => None,
+            };
             let Some(reply) = dismissal else {
-                // Answered by its own buttons or not at all. The press is still
-                // the window's — it must not steer the body — so this says the
-                // window took it.
+                // The dialog is open, but nothing dismiss-worthy has been
+                // answered on it yet. The press is still the window's — it
+                // must not steer the body — so this says the window took it.
                 return true;
             };
             self.answer_gump(reply);
