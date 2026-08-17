@@ -292,11 +292,10 @@ impl PaperdollPane {
             }
         }
         // The frame, the body, a stranger's shirt: nothing that answers, so
-        // the press moves the window.
-        raised.with(Effect::Grab(GumpPixel::new(
-            ctx.frame.cursor.x - ctx.frame.at.x,
-            ctx.frame.cursor.y - ctx.frame.at.y,
-        )))
+        // the press moves the window. `ctx.frame.cursor` is already local to
+        // it, so it is the grab offset outright — see `PaneFrame::cursor`'s
+        // doc.
+        raised.with(Effect::Grab(ctx.frame.cursor))
     }
 
     /// The release that finishes whatever this window was in the middle of: a
@@ -430,7 +429,8 @@ impl PaperdollPane {
     fn lines(&self, frame: &PaneFrame<'_>) -> Vec<Line> {
         let mut lines = Vec::new();
         if let Some(doll) = frame.view.paperdolls.get(&self.mobile) {
-            let name = paperdoll::name(&doll.name, frame.at);
+            // Window-local — see `PaneFrame::cursor`'s doc.
+            let name = paperdoll::name(&doll.name, GumpPixel::new(0, 0));
             lines.push(Line {
                 at: name.at,
                 font: name.font,
@@ -540,7 +540,8 @@ impl Pane for PaperdollPane {
             preview,
             &frame.resources.equip_conv,
             files,
-            frame.at,
+            // Window-local — see `PaneFrame::cursor`'s doc.
+            GumpPixel::new(0, 0),
         );
         let lines = self.lines(frame);
         Some(Drawn::Paperdoll(Window { doll, lines }))

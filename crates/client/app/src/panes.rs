@@ -187,15 +187,24 @@ pub struct PaneFrame<'a> {
     pub view: &'a WorldView,
     /// The client's own files: art, tiledata, the gump atlas, skill names.
     pub resources: &'a Resources,
-    /// Where the manager has put this window, in absolute gump pixels.
+    /// The pointer, in this window's own gump pixels — the origin is the
+    /// window's own top-left corner, not the screen's.
     ///
-    /// A pane **reads this and never writes it** — the cascade, the raise, the
-    /// drag that moves a window and the close gesture are all the manager's,
-    /// and a pane that wants to be moved declines the press instead. It is
-    /// absolute rather than window-local for now (decision 2), so a pane
-    /// hit-tests by subtracting this from [`PaneFrame::cursor`].
-    pub at: GumpPixel,
-    /// The pointer, in the same gump pixels [`PaneFrame::at`] is in.
+    /// **Window-local, not absolute.** `docs/window_components.md`'s Backlog
+    /// entry of that name is what this field closes: every window kind lays
+    /// its own pictures out as if it sat at `(0, 0)` (see each pane's
+    /// `layout`, which always passes [`GumpPixel::new(0, 0)`] to the render
+    /// crate's layout functions), so a pane's own hit test needs no
+    /// subtraction to match what it drew — it reads `cursor` and compares it
+    /// straight against its own pictures. The one place [`GumpPixel::new(0,
+    /// 0)`] is not enough is where a picture or a pointer position has to
+    /// leave the window's own frame of reference: `render_passes.rs`'s draw
+    /// pass and `own_windows.rs`'s [`App::window_under_pointer`] are the two
+    /// places that add the window's own absolute placement
+    /// ([`OwnWindow::at`](crate::windows::OwnWindow::at), the manager's) back
+    /// in — once each, which is decision 2's "one place that measures a
+    /// cursor" made real. A pane itself never sees that placement: it has no
+    /// `at` field to read or forget to subtract.
     pub cursor: GumpPixel,
     /// What is on the cursor, if anything, and where it is on its way to.
     ///

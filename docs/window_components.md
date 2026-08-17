@@ -109,12 +109,13 @@ class this plan is closing. State that lives in the record is dropped by the
 commissioned with — *"позиция менеджится внешне"* — and it is also why a pane
 does not need to know it is a window at all.
 
-Coordinates stay **absolute gump pixels** for now, the way `Picture`, `Drawn`
-and `gump_art::pick` already are, with the pane subtracting `ctx.at` where it
-hit-tests — which is what `vendor::Window::contains` does today. Converting the
-whole layer to window-local coordinates is a real improvement and a different
-plan; it is in the Backlog, not here, because it touches the render crate and
-this plan deliberately does not.
+Coordinates stayed **absolute gump pixels** through S0–S7, the way `Picture`,
+`Drawn` and `gump_art::pick` were then, with the pane subtracting `ctx.at`
+where it hit-tested — which is what `vendor::Window::contains` did. Converting
+the whole layer to window-local coordinates was a real improvement and a
+different plan, filed in the Backlog rather than folded in here because it
+touches the render crate and this plan deliberately did not — **closed**,
+after S7, by the Backlog entry of that name.
 
 **D3. The context is readonly, and it carries the clock.**
 
@@ -704,12 +705,45 @@ never a half-routed frame.
 
 ## Backlog
 
-- **Window-local coordinates.** D2 keeps absolute gump pixels so this plan does
+- ~~**Window-local coordinates.** D2 keeps absolute gump pixels so this plan does
   not reach into the render crate. Every pane hit-test then begins by
   subtracting `ctx.at`, which is a line that can be forgotten — and a pane that
   forgets it hit-tests against the top-left of the screen, which looks like
   "the window is dead" from the outside. Worth doing after S7, when there are
-  six panes to convert at once and one place that measures a cursor.
+  six panes to convert at once and one place that measures a cursor.~~
+  **Closed, all six kinds at once, as this entry asked.** The render crate's
+  window-layout functions (`vendor::buy`/`sell`, `container::window*`,
+  `skills::window`, `status::window`, `paperdoll::window`/`name`, and the
+  dialog layout, `gump_art::window`) **keep their `at: GumpPixel` parameter**
+  rather than losing it — the smaller of the two mechanical shapes this entry
+  left open, chosen because dropping the parameter everywhere would have
+  meant rewriting every internal `.offset(at)` call in six files *and* the
+  expected values in every one of their existing unit tests, for a shape those
+  tests already exercise correctly at a nonzero `at`. Every pane now calls
+  them with `GumpPixel::new(0, 0)` always (`PaneCtx`/`PaneFrame` in
+  `panes.rs`), so every `Picture`, `Line` and `Scissor` a pane's `layout`
+  produces is window-local by construction, and `PaneFrame::at` — which had
+  no reader left once every call site was zeroed — is gone rather than kept
+  as a field nothing reads.
+
+  **The "one place that measures a cursor" is two, one per direction**, and
+  each is named where it lives: `render_passes.rs`'s `draw_gump_windows`
+  moves the *art* into screen space, once per window per frame, with the new
+  `Picture::offset`/`Scissor::offset`/`GumpLabel::offset` (`gump.rs`,
+  `text.rs`) — the picture and its scissor move together, because a scissor
+  is only meaningful next to the picture it crops. `own_windows.rs`'s
+  `App::window_under_pointer` moves the *cursor* into each candidate
+  window's own space instead, before testing it against that window's
+  (already window-local) last-drawn pictures. `panes/route.rs`'s
+  `offer_to_panes` and `render_passes.rs`'s two `PaneFrame` builders do the
+  same subtraction before a pane ever sees `ctx.frame.cursor` — that is what
+  makes a pane's own hit test (`window.hit(ctx.frame.cursor, ...)`, `Effect::
+  Grab(ctx.frame.cursor)`, and so on) need no arithmetic of its own at all,
+  which was the whole complaint this entry opened with. A test in `gump.rs`
+  (`offsetting_pictures_and_offsetting_the_cursor_pick_the_same_answer`)
+  pins the identity both directions rely on: picking a window-local list
+  against a local cursor and picking the same list moved into screen space
+  against the absolute cursor must always agree.
 - ~~**The vendor window and the skill window disagree about what a wheel over a
   window means.** Skills claims its whole frame; the vendor claims only its
   catalogue viewport (`catalogue_contains`), so a notch over the shop's buttons

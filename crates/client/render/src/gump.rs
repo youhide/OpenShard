@@ -156,6 +156,21 @@ pub struct Scissor {
 }
 
 impl Scissor {
+    /// The same box, moved by `by`.
+    ///
+    /// What turns a window-local scissor into the screen-space one a pass
+    /// draws against: a window's own layout carries its boxes at the origin
+    /// (`docs/window_components.md`'s window-local coordinates), and this is
+    /// the one step that adds the window's placement back, right beside
+    /// [`Picture::offset`] which does the same for the picture the box crops.
+    #[must_use]
+    pub const fn offset(self, by: GumpPixel) -> Self {
+        Self {
+            at: self.at.offset(by),
+            ..self
+        }
+    }
+
     /// Whether a point is inside — the hit test's half of the same box.
     ///
     /// Right and bottom edges are outside, which is the same half-open box
@@ -574,6 +589,27 @@ impl Picture {
     pub const fn tiled(self, width: i32, height: i32) -> Self {
         Self {
             tiled: Some((width, height)),
+            ..self
+        }
+    }
+
+    /// The same picture, moved by `by`: its own corner and, if it has one,
+    /// its scissor box move together — a scissor is only meaningful next to
+    /// the picture it crops.
+    ///
+    /// The one place a window-local picture (`docs/window_components.md`'s
+    /// window-local coordinates) becomes a screen-space one: every window
+    /// kind lays its pictures out at the origin now, and this is what the
+    /// draw pass and the pointer pick both use to add the window's own
+    /// placement back, once, rather than baking it into the layout.
+    #[must_use]
+    pub const fn offset(self, by: GumpPixel) -> Self {
+        Self {
+            at: self.at.offset(by),
+            scissor: match self.scissor {
+                Some(scissor) => Some(scissor.offset(by)),
+                None => None,
+            },
             ..self
         }
     }
@@ -1666,6 +1702,55 @@ mod tests {
         // the top, so the art pixel under a given screen pixel is unchanged.
         assert!((cut[0].region.dv - whole[0].region.dv / 2.0).abs() < 1e-6);
         assert!((cut[0].region.v - (whole[0].region.v + whole[0].region.dv / 2.0)).abs() < 1e-6);
+    }
+
+    /// The identity `docs/window_components.md`'s window-local coordinates
+    /// depend on: picking a window-local picture list against a *local*
+    /// cursor — `client/app`'s `App::window_under_pointer` shape — answers
+    /// exactly what picking that same list, each picture moved by the
+    /// window's placement with [`Picture::offset`], answers against the
+    /// *absolute* cursor — `client/app`'s `draw_gump_windows` shape. The two
+    /// call sites add a window's position back in two different ways (one
+    /// moves the cursor down, one moves the art up), and this is the proof
+    /// neither can silently disagree with the other about which pixel a
+    /// click landed on.
+    #[test]
+    fn offsetting_pictures_and_offsetting_the_cursor_pick_the_same_answer() {
+        let atlas = atlas_of([(Graphic(1), block(40, 40)), (Graphic(2), block(10, 10))]);
+        // A window's own art, laid out exactly as a pane's `layout` produces
+        // it now: at the origin, as if the manager had put the window at
+        // `(0, 0)`.
+        let local = [
+            Picture::plain(GumpArt::Gump(Graphic(1)), GumpPixel::new(0, 0)),
+            Picture::plain(GumpArt::Gump(Graphic(2)), GumpPixel::new(15, 15)).inside(Scissor {
+                at: GumpPixel::new(15, 15),
+                width: 10,
+                height: 10,
+            }),
+        ];
+        // Where the manager has actually put the window this frame.
+        let placed = GumpPixel::new(300, 200);
+        let cursor = GumpPixel::new(318, 218);
+
+        // `own_windows.rs`'s way: leave the pictures alone, move the cursor
+        // into the window's own space.
+        let local_cursor = GumpPixel::new(cursor.x - placed.x, cursor.y - placed.y);
+        let picked_by_local_cursor = pick(&local, local_cursor, &atlas);
+
+        // `render_passes.rs`'s way: leave the cursor alone, move every
+        // picture (and its scissor) into screen space.
+        let screen_space: Vec<Picture> = local.iter().map(|picture| picture.offset(placed)).collect();
+        let picked_by_offset_pictures = pick(&screen_space, cursor, &atlas);
+
+        assert_eq!(
+            picked_by_local_cursor, picked_by_offset_pictures,
+            "the pointer pick and the draw pass must agree on which picture a click landed on"
+        );
+        assert_eq!(
+            picked_by_local_cursor,
+            Some(PictureIndex::new(1)),
+            "the cursor is inside the smaller picture's scissor box"
+        );
     }
 
     /// A picture wholly outside its box is not drawn at all — the ordinary case

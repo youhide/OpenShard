@@ -27,6 +27,8 @@
 
 use std::time::Instant;
 
+use openshard_client_render::gump::GumpPixel;
+
 use crate::app::App;
 use crate::hand::Hand;
 use crate::panes::{Button, Effect, Input, Modifiers, Pane, PaneCtx, PaneFrame, Response};
@@ -221,6 +223,10 @@ impl App {
         };
         let resources = &self.resources;
         let drawn_windows = &self.windows.drawn_windows;
+        // The pointer, in absolute gump pixels — turned into each window's
+        // own local cursor inside the loop below, the same arithmetic
+        // `render_passes.rs` does when it builds a `PaneFrame` for `art` and
+        // `layout`. See `PaneFrame::cursor`'s doc.
         let cursor = self.input.pointer_gump;
         let modifiers = Modifiers {
             shift: self.input.shift_held,
@@ -238,12 +244,12 @@ impl App {
                 continue;
             }
             let under_pointer = owner == Some(open.subject);
+            let local_cursor = GumpPixel::new(cursor.x - open.at.x, cursor.y - open.at.y);
             let ctx = PaneCtx {
                 frame: PaneFrame {
                     view,
                     resources,
-                    at: open.at,
-                    cursor,
+                    cursor: local_cursor,
                     hand,
                     has_keyboard: keyboard == Some(open.subject),
                     has_prompt: prompt == Some(open.subject),

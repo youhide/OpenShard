@@ -130,6 +130,11 @@ pub(crate) fn draw_gump_windows(
             // answers and the atlas is a field of it — packing inside the walk
             // would be growing the very thing the walk is holding.
             let hand = windows.hand;
+            // The pointer, in each window's own gump pixels — see
+            // `PaneFrame::cursor`'s doc for why this is the one arithmetic a
+            // pane never has to do for itself.
+            let local_cursor =
+                |at: gump_art::GumpPixel| gump_art::GumpPixel::new(cursor.x - at.x, cursor.y - at.y);
             let wanted: Vec<(WindowSubject, Vec<gump_art::GumpArt>)> = windows
                 .own_windows
                 .iter()
@@ -137,8 +142,7 @@ pub(crate) fn draw_gump_windows(
                     let frame = panes::PaneFrame {
                         view,
                         resources,
-                        at: open.at,
-                        cursor,
+                        cursor: local_cursor(open.at),
                         hand,
                         has_keyboard: windows.keyboard == Some(open.subject),
                         has_prompt: windows.prompt == Some(crate::windows::Asking::Window(open.subject)),
@@ -169,8 +173,7 @@ pub(crate) fn draw_gump_windows(
                 let frame = panes::PaneFrame {
                     view,
                     resources,
-                    at: open.at,
-                    cursor,
+                    cursor: local_cursor(open.at),
                     hand,
                     has_keyboard: windows.keyboard == Some(open.subject),
                     has_prompt: windows.prompt == Some(crate::windows::Asking::Window(open.subject)),
@@ -287,7 +290,27 @@ pub(crate) fn draw_gump_windows(
         // belonging to that frame, before the next window is allowed to cover
         // it.  A global text pass cannot express this ordering.
         for (subject, drawn) in &windows.drawn_windows {
-            let art = gump_art::collect(drawn.pictures(), &resources.gump_atlas);
+            // Every pane laid this window out window-local — see
+            // `PaneFrame::cursor`'s doc — so this is the one place its
+            // pictures and its text become the screen-space geometry a pass
+            // draws: the window's own absolute placement, added back once.
+            // Looked up in `own_windows` rather than carried on
+            // `drawn_windows` itself, because it is the *current* position
+            // that has to agree with what is on screen this frame — the same
+            // one the layout above was just built with — and not a second
+            // copy that could go stale relative to it.
+            let at = windows
+                .own_windows
+                .iter()
+                .find(|open| open.subject == *subject)
+                .map(|open| open.at)
+                .unwrap_or_default();
+            let offset_pictures: Vec<gump_art::Picture> = drawn
+                .pictures()
+                .iter()
+                .map(|picture| picture.offset(at))
+                .collect();
+            let art = gump_art::collect(&offset_pictures, &resources.gump_atlas);
             pass.render_layer(&window.device, &window.queue, encoder, frame, &art);
             let mut labels = Vec::new();
             let mut cut = Vec::new();
@@ -299,31 +322,31 @@ pub(crate) fn draw_gump_windows(
                 // the typed contents of every field — the second half of the
                 // window, worked out in a different place from the first.
                 (WindowSubject::Dialog(_), Drawn::Dialog(laid_out)) => {
-                    labels.extend(laid_out.lines.iter().map(crate::panes::Line::label));
+                    labels.extend(laid_out.lines.iter().map(|line| line.label().offset(at)));
                 }
                 // A dialog's arm and a shop's: the pane resolved the name and
                 // the hover label when it laid the window out, and this pass
                 // reads what the layout produced and looks nothing up.
                 (WindowSubject::Paperdoll(_), Drawn::Paperdoll(window)) => {
-                    labels.extend(window.lines.iter().map(crate::panes::Line::label));
+                    labels.extend(window.lines.iter().map(|line| line.label().offset(at)));
                 }
                 (WindowSubject::Skills, Drawn::Skills(sheet)) => {
                     for line in &sheet.lines {
                         let mut quads = openshard_client_render::text::collect_gump(
-                            &[line.label()],
+                            &[line.label().offset(at)],
                             &resources.font_atlas,
                         );
                         if let Some(scissor) = line.scissor {
-                            scissor.cut(&mut quads);
+                            scissor.offset(at).cut(&mut quads);
                         }
                         cut.extend(quads);
                     }
                 }
                 (WindowSubject::Status, Drawn::Status(status)) => {
-                    labels.extend(status.lines.iter().map(|line| line.label()));
+                    labels.extend(status.lines.iter().map(|line| line.label().offset(at)));
                 }
                 (WindowSubject::Vendor(_), Drawn::Vendor(vendor)) => {
-                    labels.extend(vendor.lines.iter().map(|line| line.label()));
+                    labels.extend(vendor.lines.iter().map(|line| line.label().offset(at)));
                 }
                 // A bag's plate caption and its hover label, resolved by the
                 // pane that laid the window out — the same shape as a
@@ -333,7 +356,7 @@ pub(crate) fn draw_gump_windows(
                 // under the pointer, looked up in the view a second time. Both
                 // are decided where they are drawn now.
                 (WindowSubject::Container(_), Drawn::Container(window)) => {
-                    labels.extend(window.lines.iter().map(crate::panes::Line::label));
+                    labels.extend(window.lines.iter().map(|line| line.label().offset(at)));
                 }
                 _ => {}
             }

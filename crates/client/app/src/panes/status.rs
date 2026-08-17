@@ -24,7 +24,7 @@
 //! it from there so the bar over the player's head and the line on this frame
 //! cannot disagree.
 
-use openshard_client_render::gump::GumpArt;
+use openshard_client_render::gump::{GumpArt, GumpPixel};
 use openshard_client_render::status;
 
 use crate::panes::{Input, Pane, PaneCtx, PaneFrame, Response};
@@ -65,7 +65,8 @@ impl Pane for StatusPane {
         Some(Drawn::Status(status::window(
             player.status.as_ref()?,
             player.hits?,
-            frame.at,
+            // Window-local — see `PaneFrame::cursor`'s doc.
+            GumpPixel::new(0, 0),
         )))
     }
 

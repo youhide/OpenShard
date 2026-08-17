@@ -405,10 +405,9 @@ impl DialogPane {
                 if flags(gump).no_move {
                     raised
                 } else {
-                    raised.with(Effect::Grab(GumpPixel::new(
-                        ctx.frame.cursor.x - ctx.frame.at.x,
-                        ctx.frame.cursor.y - ctx.frame.at.y,
-                    )))
+                    // Already local to this window — see `PaneFrame::cursor`'s
+                    // doc — so it is the grab offset with nothing subtracted.
+                    raised.with(Effect::Grab(ctx.frame.cursor))
                 }
             }
         }
@@ -598,7 +597,8 @@ impl Pane for DialogPane {
             .collect();
         let art = gump_art::window(
             &gump.elements,
-            frame.at,
+            // Window-local — see `PaneFrame::cursor`'s doc.
+            GumpPixel::new(0, 0),
             self.page.raw(),
             &on,
             self.held,

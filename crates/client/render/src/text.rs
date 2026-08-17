@@ -242,6 +242,23 @@ pub struct GumpLabel<'a> {
     pub clip: Option<(i32, i32)>,
 }
 
+impl<'a> GumpLabel<'a> {
+    /// The same label, moved by `by`.
+    ///
+    /// [`crate::gump::Picture::offset`]'s counterpart for a line of text: a
+    /// window's own layout resolves every label at the origin
+    /// (`docs/window_components.md`'s window-local coordinates), and this is
+    /// what the draw pass uses to add the window's placement back once, at
+    /// the point it turns a laid-out line into screen-space glyphs.
+    #[must_use]
+    pub const fn offset(self, by: GumpPixel) -> Self {
+        Self {
+            at: self.at.offset(by),
+            ..self
+        }
+    }
+}
+
 /// How far down a lowercase letter hangs from the top of its line, per face —
 /// `FontsLoader._offsetCharTable`.
 const LOWERCASE_DROP: [i32; openshard_uofiles::font::FONT_COUNT] = [2, 0, 2, 2, 0, 0, 2, 2, 0, 0];

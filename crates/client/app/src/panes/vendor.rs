@@ -296,10 +296,10 @@ impl VendorPane {
                 };
                 answer.with(Effect::Close)
             }
-            None => raised.with(Effect::Grab(GumpPixel::new(
-                ctx.frame.cursor.x - ctx.frame.at.x,
-                ctx.frame.cursor.y - ctx.frame.at.y,
-            ))),
+            // `ctx.frame.cursor` is already this window's own local pixels, so
+            // the grab offset — how far into the window the press landed — is
+            // that value directly, with no subtraction to do.
+            None => raised.with(Effect::Grab(ctx.frame.cursor)),
         }
     }
 }
@@ -319,6 +319,10 @@ impl Pane for VendorPane {
 
     fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         let stall = Stall::of(frame.view, self.vendor)?;
+        // Window-local: `at` is the origin, exactly as if the manager had put
+        // this window at `(0, 0)` — see `PaneFrame::cursor`'s doc. The draw
+        // pass and the pointer pick are the two places that add this
+        // window's real, absolute position back.
         let window = match stall {
             Stall::Buy { lines, stock } => vendor::buy(
                 self.vendor,
@@ -326,7 +330,7 @@ impl Pane for VendorPane {
                 stock,
                 &self.amounts,
                 self.scroll,
-                frame.at,
+                GumpPixel::new(0, 0),
                 frame.cursor,
                 &frame.resources.gump_atlas,
             ),
@@ -335,7 +339,7 @@ impl Pane for VendorPane {
                 lines,
                 &self.amounts,
                 self.scroll,
-                frame.at,
+                GumpPixel::new(0, 0),
                 frame.cursor,
                 &frame.resources.gump_atlas,
             ),

@@ -372,8 +372,14 @@ impl App {
         let cursor = self.input.pointer_gump;
         self.windows.own_windows.iter().rev().find_map(|window| {
             let drawn = self.drawn(window.subject)?;
+            // Every pane laid this window out window-local (see
+            // `panes::PaneFrame::cursor`'s doc), so the pointer has to be
+            // converted into *this* window's own pixels before it is tested
+            // against what that window drew — the other half of the one
+            // arithmetic `render_passes.rs`'s draw pass does with `.offset`.
+            let local = gump_art::GumpPixel::new(cursor.x - window.at.x, cursor.y - window.at.y);
             if let Drawn::Vendor(vendor) = drawn {
-                return vendor.contains(cursor).then_some(window.subject);
+                return vendor.contains(local).then_some(window.subject);
             }
             // A dialog's fields are the one part of a window that is a box
             // rather than a picture — see `gump::Field` — and a click in one is
@@ -381,11 +387,11 @@ impl App {
             // a picture, so this only matters for a field the layout hung
             // outside its own frame; asking is cheaper than being wrong there.
             if let Drawn::Dialog(laid_out) = drawn {
-                if gump_art::field(&laid_out.art.fields, cursor).is_some() {
+                if gump_art::field(&laid_out.art.fields, local).is_some() {
                     return Some(window.subject);
                 }
             }
-            gump_art::pick(drawn.pictures(), cursor, &self.resources.gump_atlas).map(|_| window.subject)
+            gump_art::pick(drawn.pictures(), local, &self.resources.gump_atlas).map(|_| window.subject)
         })
     }
 

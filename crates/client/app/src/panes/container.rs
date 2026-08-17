@@ -393,7 +393,10 @@ impl ContainerPane {
     fn plate_button(&self, frame: &PaneFrame<'_>) -> Option<(Plate, container::ActionButton)> {
         let plate = self.plate(frame)?;
         let gump = *frame.view.containers.get(&self.container)?;
-        let button = plate.button(&frame.resources.gump_atlas, gump, frame.at)?;
+        // Window-local — see `PaneFrame::cursor`'s doc — so `button.at` comes
+        // out measured from this window's own top-left, exactly like every
+        // icon in it.
+        let button = plate.button(&frame.resources.gump_atlas, gump, GumpPixel::new(0, 0))?;
         Some((plate, button))
     }
 
@@ -503,12 +506,9 @@ impl ContainerPane {
     /// itself, which is the grip the window is moved by.
     fn press(&mut self, window: &Window, ctx: &PaneCtx<'_>) -> Response {
         let raised = Response::changed().with(Effect::Raise);
-        let grab = || {
-            Effect::Grab(GumpPixel::new(
-                ctx.frame.cursor.x - ctx.frame.at.x,
-                ctx.frame.cursor.y - ctx.frame.at.y,
-            ))
-        };
+        // `ctx.frame.cursor` is already local to this window — see
+        // `PaneFrame::cursor`'s doc — so it is the grab offset outright.
+        let grab = || Effect::Grab(ctx.frame.cursor);
         if !self.ordinary(&ctx.frame) {
             return raised.with(grab());
         }
@@ -533,8 +533,11 @@ impl ContainerPane {
         // Where inside the icon the player took hold of it, so that the item
         // keeps its place under the pointer once it is on the cursor — and so
         // that a drop lands where the icon looks like it is, rather than where
-        // the pointer happens to be inside it.
-        let icon = ctx.frame.at.offset(GumpPixel::new(item.at.x, item.at.y));
+        // the pointer happens to be inside it. `item.at` is already this
+        // window's own local coordinate (the wire's own, measured from the
+        // background's top-left) and so is `ctx.frame.cursor`, so no window
+        // placement has to be added in to compare the two.
+        let icon = GumpPixel::new(item.at.x, item.at.y);
         self.pressed = Some(ItemPress {
             item,
             origin: DragOrigin::Container(self.container),
@@ -592,10 +595,10 @@ impl ContainerPane {
             // Merging two stacks is a destination gesture of its own and is
             // not this one.
             let grab = hand.drag().grab;
-            let at = GumpPoint::new(
-                ctx.frame.cursor.x - ctx.frame.at.x - grab.x,
-                ctx.frame.cursor.y - ctx.frame.at.y - grab.y,
-            );
+            // `ctx.frame.cursor` is already this window's own local pixels —
+            // see `PaneFrame::cursor`'s doc — so only the grab offset inside
+            // the icon is left to subtract.
+            let at = GumpPoint::new(ctx.frame.cursor.x - grab.x, ctx.frame.cursor.y - grab.y);
             return Response::changed().with(Effect::Drop(PendingDrop::Container {
                 container: self.container,
                 at,
@@ -776,7 +779,9 @@ impl Pane for ContainerPane {
             };
             (button, hue)
         });
-        let pictures = container::window_with_plate(gump, &contents, frame.at, self.hovered, plate);
+        // Window-local — see `PaneFrame::cursor`'s doc.
+        let pictures =
+            container::window_with_plate(gump, &contents, GumpPixel::new(0, 0), self.hovered, plate);
         let lines = self.lines(frame, &contents);
         Some(Drawn::Container(Window {
             pictures,

@@ -132,10 +132,9 @@ impl SkillsPane {
                 self.held = Some(hit);
                 raised
             }
-            None => raised.with(Effect::Grab(GumpPixel::new(
-                ctx.frame.cursor.x - ctx.frame.at.x,
-                ctx.frame.cursor.y - ctx.frame.at.y,
-            ))),
+            // `ctx.frame.cursor` is already local to this window, so it is
+            // the grab offset outright — see `PaneFrame::cursor`'s doc.
+            None => raised.with(Effect::Grab(ctx.frame.cursor)),
         }
     }
 
@@ -275,7 +274,10 @@ impl Pane for SkillsPane {
                 })
             },
             |text, font| openshard_client_render::text::gump_width(text, font, &resources.font_atlas),
-            frame.at,
+            // Window-local: the origin, as if the manager had placed this
+            // window at `(0, 0)` — see `PaneFrame::cursor`'s doc for where
+            // the real position is added back in.
+            GumpPixel::new(0, 0),
         )))
     }
 
