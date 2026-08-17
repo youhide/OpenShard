@@ -217,6 +217,24 @@ impl VendorPane {
         }
     }
 
+    /// A notch anywhere over the window, once [`Pane::handle`] has already
+    /// established the pointer is on this window at all.
+    ///
+    /// **Closes the plan's Backlog entry that pitted this pane against
+    /// [`SkillsPane`](crate::panes::skills::SkillsPane): the whole frame is
+    /// this window's, matching ClassicUO, not only the catalogue's own
+    /// viewport.** `over_catalogue` decides whether there is a list here for
+    /// the notch to move — [`vendor::Window::catalogue_contains`] is what the
+    /// caller answers it with — but `taken` no longer waits on that answer: a
+    /// notch over a button or a plate is [`Response::consumed`] rather than
+    /// falling through to the camera behind the window.
+    fn wheel_over_window(&mut self, notches: f32, over_catalogue: bool, rows: usize) -> Response {
+        if !over_catalogue {
+            return Response::consumed();
+        }
+        self.wheel(notches, rows)
+    }
+
     /// One more of this row, or back to none once the whole of it is chosen.
     ///
     /// A click and not a spinner: the reference client's own catalogue counts up
@@ -325,7 +343,7 @@ impl Pane for VendorPane {
         Some(Drawn::Vendor(window))
     }
 
-    /// A notch over the catalogue, and a left press anywhere in the window.
+    /// A notch anywhere over the window, and a left press anywhere in it.
     ///
     /// Both are located, so both begin by asking whether this window is the one
     /// the pointer is on — see [`PaneCtx::under_pointer`], and note that a
@@ -337,6 +355,10 @@ impl Pane for VendorPane {
     /// and a release finishes a gesture this window does not have. A move is
     /// the tint's — offered to every window, ahead of the located gate,
     /// because the tint follows the raw cursor the way the layout reads it.
+    ///
+    /// **A notch anywhere over the frame is this window's**, matching
+    /// [`SkillsPane`](crate::panes::skills::SkillsPane) and ClassicUO — see
+    /// `wheel_over_window`.
     fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         if let Input::Move = input {
             return self.hover(ctx);
@@ -351,16 +373,12 @@ impl Pane for VendorPane {
             return Response::ignored();
         };
         match input {
-            // Only over the catalogue itself. A notch over the order panel is
-            // deliberately not this window's — see the plan's Backlog, where
-            // this and the skill sheet's whole-frame claim are the two answers
-            // nobody has yet chosen between.
+            // Anywhere over the window's frame, not only the catalogue's own
+            // viewport — matching the skill sheet's whole-frame claim and
+            // ClassicUO's own behaviour. See `wheel_over_window`.
             Input::Wheel(notches) => {
-                if !window.catalogue_contains(ctx.frame.cursor) {
-                    return Response::ignored();
-                }
                 let rows = Stall::of(ctx.frame.view, self.vendor).map_or(0, |stall| stall.rows());
-                self.wheel(notches, rows)
+                self.wheel_over_window(notches, window.catalogue_contains(ctx.frame.cursor), rows)
             }
             Input::Press(Button::Left) => self.press(window, ctx),
             // A keystroke among them for the skill sheet's reason: a shop has
@@ -418,6 +436,32 @@ mod tests {
         assert!(pane.wheel(-1.0, 9).redraw);
         assert!(pane.wheel(1.0, 9).redraw);
         assert_eq!(pane.scroll, 0);
+    }
+
+    /// **The Backlog's decision, as an assertion.** A notch over a button or a
+    /// plate — anywhere in the window that is not the catalogue's own
+    /// viewport — is still this window's, matching [`SkillsPane`]'s whole-frame
+    /// claim and ClassicUO. Before this, `catalogue_contains` gated `taken`
+    /// itself, and a notch over the CLEAR or ACCEPT plates reached the camera
+    /// behind the shop.
+    #[test]
+    fn a_notch_off_the_catalogue_is_still_the_windows_and_does_not_scroll() {
+        let mut pane = pane();
+        let answer = pane.wheel_over_window(-1.0, false, 9);
+        assert!(answer.taken, "the whole frame is the window's, not only the list");
+        assert!(!answer.redraw, "there is no list here for it to move");
+        assert_eq!(pane.scroll, 0, "the catalogue itself did not move");
+    }
+
+    /// The same notch over the catalogue's own viewport still scrolls, so the
+    /// widened claim above did not cost the list its own behaviour.
+    #[test]
+    fn a_notch_on_the_catalogue_still_scrolls_it() {
+        let mut pane = pane();
+        let answer = pane.wheel_over_window(-1.0, true, 9);
+        assert!(answer.taken);
+        assert!(answer.redraw);
+        assert_eq!(pane.scroll, 1);
     }
 
     /// A catalogue that fits in its viewport has no scrolling to do, and the

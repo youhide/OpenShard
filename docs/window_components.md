@@ -710,13 +710,19 @@ never a half-routed frame.
   forgets it hit-tests against the top-left of the screen, which looks like
   "the window is dead" from the outside. Worth doing after S7, when there are
   six panes to convert at once and one place that measures a cursor.
-- **The vendor window and the skill window disagree about what a wheel over a
+- ~~**The vendor window and the skill window disagree about what a wheel over a
   window means.** Skills claims its whole frame; the vendor claims only its
   catalogue viewport (`catalogue_contains`), so a notch over the shop's buttons
   still reaches the camera. Both are panes now (S1, S2), so this is a per-pane
   decision that is *visible* as a decision — two `handle` arms, four lines
   apart in shape — but that does not settle it: somebody has to say which is
-  right. ClassicUO claims the whole window.
+  right. ClassicUO claims the whole window.~~ **Closed: the whole frame is
+  every window's, matching ClassicUO.** `VendorPane::handle` (`vendor.rs`) no
+  longer gates `taken` on `catalogue_contains` — that predicate now only
+  decides whether the catalogue itself has a row to move
+  (`VendorPane::wheel_over_window`), the same split `SkillsPane` already made.
+  A notch over a button or a plate is `Response::consumed` and never falls
+  through to the camera.
 - ~~**`if let Some(window) = self.window.as_ref() { window.window.request_redraw() }`,
   twenty times.**~~ **Closed by `App::ask_redraw()`** (`window.rs`, beside
   `create_window`): `if let Some(window) = self.window.as_ref() {
