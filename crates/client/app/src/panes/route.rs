@@ -28,8 +28,9 @@
 use std::time::Instant;
 
 use crate::app::App;
+use crate::hand::Hand;
 use crate::panes::{Button, Effect, Input, Modifiers, Pane, PaneCtx, PaneFrame, Response};
-use crate::windows::{Asking, Hand, WindowSubject};
+use crate::windows::{Asking, WindowSubject};
 
 impl App {
     /// Offer one input to the window layer, and carry out whatever it asked

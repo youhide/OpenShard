@@ -39,8 +39,9 @@ use openshard_protocol::wire::{Hue, Layer};
 
 use crate::DOUBLE_CLICK;
 use crate::crowd;
+use crate::hand::{DragOrigin, Dragged, ItemPress, PendingDrop, centre_of};
 use crate::panes::{Button, Effect, Input, Line, LocalWindow, Pane, PaneCtx, PaneFrame, Response};
-use crate::windows::{DragOrigin, Dragged, Drawn, ItemPress, PendingDrop, centre_of};
+use crate::windows::Drawn;
 
 /// One open paperdoll window.
 #[derive(Debug)]

@@ -40,8 +40,9 @@ use openshard_protocol::speech::Font;
 use openshard_protocol::wire::{Graphic, Hue, Layer, RawLayer};
 
 use crate::DOUBLE_CLICK;
+use crate::hand::{DragOrigin, Dragged, Hand, ItemPress, PendingDrop};
 use crate::panes::{Answer, Button, Effect, Input, Line, Pane, PaneCtx, PaneFrame, Response, SplitPrompt};
-use crate::windows::{DragOrigin, Dragged, Drawn, Hand, ItemPress, PendingDrop};
+use crate::windows::Drawn;
 
 /// The face both of this window's labels are written in — `fonts.mul`'s face
 /// 1, the same one every other label in this client uses.

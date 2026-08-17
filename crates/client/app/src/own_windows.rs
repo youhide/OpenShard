@@ -37,6 +37,7 @@ use openshard_protocol::speech::TalkMode;
 use openshard_protocol::wire::Graphic;
 
 use crate::app::App;
+use crate::hand;
 use crate::windows::{self, Drawn, WindowSubject};
 use crate::{chat, link};
 
@@ -186,7 +187,7 @@ impl App {
         let openshard_protocol::items::WorldItemPayload::Stack(amount) = item.payload else {
             return false;
         };
-        self.windows.world_press = Some(windows::ItemPress {
+        self.windows.world_press = Some(hand::ItemPress {
             item: ContainedItem {
                 serial,
                 graphic: item.graphic,
@@ -197,11 +198,11 @@ impl App {
                 grid: Default::default(),
                 hue: item.hue,
             },
-            origin: windows::DragOrigin::Ground,
+            origin: hand::DragOrigin::Ground,
             at: self.input.pointer_gump,
             // A ground sprite has no gump-local grab point — see `centre_of`,
             // which a worn item's press asks the same question of.
-            grab: windows::centre_of(item.graphic, &self.resources.art),
+            grab: hand::centre_of(item.graphic, &self.resources.art),
         });
         true
     }
@@ -237,7 +238,7 @@ impl App {
     /// Turn a genuine pointer move into a lift, for the one press no window
     /// holds: an item lying in the world.
     ///
-    /// The rule itself is [`ItemPress::dragged`], which a bag's pane and a
+    /// The rule itself is [`ItemPress::dragged`](hand::ItemPress::dragged), which a bag's pane and a
     /// doll's pane ask of their own presses — one policy, three holders. What
     /// is different here is only what happens to the answer, because there is
     /// no pane to hand an effect to.
@@ -251,8 +252,8 @@ impl App {
             return false;
         }
         match press.dragged(self.input.pointer_gump, self.input.shift_held) {
-            windows::Dragged::Still => false,
-            windows::Dragged::Ask(most) => {
+            hand::Dragged::Still => false,
+            hand::Dragged::Ask(most) => {
                 let Some(shell) = self.shell.as_mut() else {
                     return false;
                 };
@@ -261,7 +262,7 @@ impl App {
                 self.windows.dragging = None;
                 true
             }
-            windows::Dragged::Lift(drag) => {
+            hand::Dragged::Lift(drag) => {
                 self.windows.world_press = None;
                 self.lift(drag);
                 self.windows.dragging = None;
@@ -278,12 +279,12 @@ impl App {
     /// Nothing happens without a shard to ask: the hand is a *mirror* of the
     /// other end's slot, and one filled with no packet behind it is an item
     /// this client has taken out of a bag nobody else knows about.
-    pub(crate) fn lift(&mut self, drag: windows::ItemDrag) {
+    pub(crate) fn lift(&mut self, drag: hand::ItemDrag) {
         let Some(link) = self.world.shard.link() else {
             return;
         };
         link.pick_up_item(drag.item.serial, drag.item.amount);
-        self.windows.hand = Some(windows::Hand::Held(drag));
+        self.windows.hand = Some(hand::Hand::Held(drag));
         self.reproject_item_drag();
     }
 
@@ -320,7 +321,7 @@ impl App {
         };
         // A drop already in flight: the release is still the hand's — it must
         // not walk the body — and there is nothing more to send.
-        let windows::Hand::Held(drag) = hand else {
+        let hand::Hand::Held(drag) = hand else {
             return true;
         };
         // Outside a gump the protocol's x/y/z are world coordinates, not gump
@@ -329,9 +330,9 @@ impl App {
         if let (Some(link), Some(tile)) = (self.world.shard.link(), self.pick_tile(*self.control.camera())) {
             let at = openshard_protocol::world::Point::new(tile.at.x, tile.at.y, tile.stand_z.0);
             link.drop_on_ground(drag.item.serial, at);
-            self.windows.hand = Some(windows::Hand::Dropped {
+            self.windows.hand = Some(hand::Hand::Dropped {
                 drag,
-                destination: windows::PendingDrop::Ground(at),
+                destination: hand::PendingDrop::Ground(at),
             });
             self.reproject_item_drag();
         }
@@ -749,5 +750,5 @@ mod stack_tests {
     }
 
     // The split's own bounds moved with the rule: `ItemPress::split` is what
-    // divides a pile now, and it is exercised beside it in `windows.rs`.
+    // divides a pile now, and it is exercised beside it in `hand.rs`.
 }

@@ -451,7 +451,7 @@ impl Link {
     }
 
     // No `drop_into` and no `equip`: where a held item is put down is named by
-    // a [`PendingDrop`](crate::windows::PendingDrop), and that type turns
+    // a [`PendingDrop`](crate::hand::PendingDrop), and that type turns
     // itself into the packet — one place, so a fourth destination is a compile
     // error rather than a `match` somebody forgot. `App::perform`'s
     // `Effect::Drop` arm sends it through [`Link::act`], the way step 1's

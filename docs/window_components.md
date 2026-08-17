@@ -837,14 +837,24 @@ never a half-routed frame.
   different pictures), lit by `HIGHLIGHT_HUE` — the same hue the icon hover
   already uses — through the same `Response::stale`-on-change shape
   `ContainerPane::hover` was already written in.
-- **`Windows::world_press` is in the window layer because the hand is, and it
+- ~~**`Windows::world_press` is in the window layer because the hand is, and it
   is not about a window.** An item lying on the ground is pressed exactly the
   way an icon in a bag is — same type, same rule for what the press becomes —
   and the manager holds it because the world has no pane. That is honest, and
   the field is still the one thing in `Windows` that is not about a window. It
   belongs beside the picking state, or in a `Hand`-shaped module of its own with
   the two effects and `ItemPress::dragged`; worth deciding when S7 gives the
-  world's gestures their rung, since the two questions are the same one.
+  world's gestures their rung, since the two questions are the same one.~~
+  **Closed by a `Hand`-shaped module of its own, `hand.rs`.** `ItemPress`,
+  `DRAG_SLOP`, `centre_of`, `Dragged`, `DragOrigin`, `PendingDrop`, `ItemDrag`
+  and `Hand` — the whole rule for what a press becomes, wherever it landed —
+  moved out of `windows.rs` into `crate::hand`, along with the tests that
+  pinned them. `Windows::world_press` **stays a field of `Windows`**, and that
+  is deliberate rather than left behind: it is one of three exclusive devices
+  the manager tracks (beside `hand` and `dragging`), and moving the *registry*
+  would have been the bigger, unrequested change this entry never asked for —
+  only the *type* `world_press` holds was window-shaped by accident, and that
+  is what moved.
 - **A bag rebuilds its icon list two or three times a frame.** `contents()`
   filters the view's list and projects a pending drop into it, and it is asked
   by `art`, by `layout` and by a press on the sweep plate. Each is a `Vec` of

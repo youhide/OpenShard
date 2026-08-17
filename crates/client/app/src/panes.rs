@@ -42,8 +42,9 @@ use openshard_client_render::text::GumpLabel;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 
+use crate::hand::{Hand, ItemDrag, PendingDrop};
 use crate::resources::Resources;
-use crate::windows::{Drawn, Hand, ItemDrag, PendingDrop, WindowSubject};
+use crate::windows::{Drawn, WindowSubject};
 
 pub(crate) mod container;
 pub(crate) mod dialog;

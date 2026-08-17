@@ -280,17 +280,17 @@ impl App {
                 ServerPacket::AddToContainer(added) => {
                     matches!(
                         hand.pending_drop(),
-                        Some(crate::windows::PendingDrop::Container { .. })
+                        Some(crate::hand::PendingDrop::Container { .. })
                     ) && added.item.serial == held
                 }
                 ServerPacket::WorldItem(item) => {
-                    matches!(hand.pending_drop(), Some(crate::windows::PendingDrop::Ground(_)))
+                    matches!(hand.pending_drop(), Some(crate::hand::PendingDrop::Ground(_)))
                         && item.serial == held
                 }
                 ServerPacket::EquipUpdate(update) => {
                     matches!(
                         hand.pending_drop(),
-                        Some(crate::windows::PendingDrop::Equipment { mobile, layer })
+                        Some(crate::hand::PendingDrop::Equipment { mobile, layer })
                             if update.mobile == mobile && update.layer == layer
                     ) && update.item == held
                 }
@@ -531,9 +531,9 @@ impl App {
         self.world.presentation.items.clear();
         self.world.presentation.item_serials.clear();
         self.world.presentation.corpses.clear();
-        let transaction_drag = self.windows.hand.map(crate::windows::Hand::drag);
+        let transaction_drag = self.windows.hand.map(crate::hand::Hand::drag);
         let lifted_ground = transaction_drag
-            .filter(|drag| drag.origin == crate::windows::DragOrigin::Ground)
+            .filter(|drag| drag.origin == crate::hand::DragOrigin::Ground)
             .map(|drag| drag.item.serial);
         for (serial, item) in items {
             if Some(*serial) == lifted_ground {
@@ -596,7 +596,7 @@ impl App {
         // its owner. While a ground drop is pending, replace that suppressed
         // source with its transactional destination so there is no old-place
         // flash or gap before `WorldItem` confirms it.
-        if let Some((drag, crate::windows::PendingDrop::Ground(at))) = self
+        if let Some((drag, crate::hand::PendingDrop::Ground(at))) = self
             .windows
             .hand
             .and_then(|hand| Some((hand.drag(), hand.pending_drop()?)))

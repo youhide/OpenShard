@@ -67,6 +67,7 @@ mod event_loop;
 mod frame_geometry;
 mod frames;
 mod graphics;
+mod hand;
 mod input;
 mod jank;
 mod keys;

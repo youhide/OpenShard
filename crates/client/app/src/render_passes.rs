@@ -244,7 +244,7 @@ pub(crate) fn draw_gump_windows(
         if let Some(drag) = windows
             .hand
             .filter(|hand| hand.pending_drop().is_none())
-            .map(crate::windows::Hand::drag)
+            .map(crate::hand::Hand::drag)
         {
             let art_files = gump_art::ArtFiles {
                 gumps: files,
