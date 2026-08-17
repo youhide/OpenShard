@@ -466,6 +466,31 @@ be the old layout. On the shipped file every one of the 326 divides by 16 and
 only 115 divide by 12 — decisive, and better than ServUO's `PostHSFormat`, a
 static somebody has to remember to set.
 
+**There is no shipped gump for "a blank rectangular plate behind arbitrary
+text."** Looked for one to back a client-owned control (`docs/window_components.md`'s
+container plate) the way `vendor.rs` backs its own window in real gump art,
+before drawing anything synthetic. `gumpartLegacyMUL.uop` has plenty of
+button-shaped graphics, but every one either has text baked into the art itself
+— `0x0481`/`0x0482`/`0x0483`, ClassicUO's generic message-box OK button
+(`MessageBoxGump.cs`), decode to 28×21 with "OK" burned into the pixels, so it
+cannot carry a different caption — or is sized for a different job:
+`0x0836` (this codebase's `TOTAL_PLATE`, `skills.rs`) is 210×19, a value-label
+plate three times too wide; `0x0837` (`USE_BUTTON`) is an 11×11 icon, not a
+rectangle with room for a word. ClassicUO's own equivalent controls — its
+tooltip box (`Tooltip.cs`), its right-click context menu (`ContextMenuControl.cs`),
+and `GridLootGump`, the closest thing the reference client has to a
+client-side container action — all draw their text's background as a
+**solid-colour quad built in code**, not as gump art at all; `ContextMenuControl.cs`'s
+only gump reference (`0x838`) is a checkmark icon beside a row, not the row's
+background. The nearest thing to reusable "flat panel" art is `0x0BB8`, a
+9-slice `ResizePic` ClassicUO puts behind *editable* textboxes at a fixed 25px
+height (`UserMarkerGump.cs`, `LocationGoGump.cs`, `MessageBoxGump.cs`,
+`MarkersManagerGump.cs`) — multi-piece, taller than the 18–20px target, and
+built for a different control. Conclusion this cost the research to reach: a
+generic blank text-plate is not a gump-art concept in this protocol at all: the
+reference client renders that particular shape of "a box behind some words" as
+paint, never as art, everywhere it needs one.
+
 ## Traps in tests and benchmarks
 
 **A benchmark where nothing moves measures nothing.** A player who does not walk is
