@@ -377,10 +377,7 @@ impl DialogPane {
         // keys only while the player is still in the box.
         self.focus = None;
         let raised = raised.with(Effect::ReleaseKeyboard);
-        match laid_out
-            .art
-            .hit(ctx.frame.cursor, &ctx.frame.resources.gump_atlas)
-        {
+        match laid_out.art.hit(ctx.frame.cursor, ctx.frame.files.gump_atlas) {
             Some(hit @ (Hit::Reply(_) | Hit::Page(_))) => {
                 self.held = Some(hit);
                 raised
@@ -426,11 +423,7 @@ impl DialogPane {
         let (Some(gump), Some(Drawn::Dialog(laid_out))) = (self.gump(ctx.frame.view), ctx.drawn) else {
             return Response::changed();
         };
-        if laid_out
-            .art
-            .hit(ctx.frame.cursor, &ctx.frame.resources.gump_atlas)
-            != Some(held)
-        {
+        if laid_out.art.hit(ctx.frame.cursor, ctx.frame.files.gump_atlas) != Some(held) {
             return Response::changed();
         }
         match held {
@@ -511,9 +504,8 @@ impl DialogPane {
                 let text = match caption.source {
                     CaptionSource::Line(line) => gump.line(line)?,
                     CaptionSource::Cliloc(number) => frame
-                        .resources
+                        .files
                         .cliloc
-                        .as_ref()
                         .and_then(|table| table.get(ClilocNumber::new(number)))
                         .or_else(|| localized::fallback(ClilocId(number)))?,
                 };
@@ -543,7 +535,7 @@ impl DialogPane {
                 // by, so the caret lands where the next character will.
                 lines.push(Line {
                     at: field.at.offset(GumpPixel::new(
-                        text::gump_width(typed, CAPTION_FONT, &frame.resources.font_atlas),
+                        text::gump_width(typed, CAPTION_FONT, frame.files.font_atlas),
                         0,
                     )),
                     font: CAPTION_FONT,
@@ -602,7 +594,7 @@ impl Pane for DialogPane {
             self.page.raw(),
             &on,
             self.held,
-            &frame.resources.gump_atlas,
+            frame.files.gump_atlas,
         );
         let lines = self.lines(gump, &art, frame);
         Some(Drawn::Dialog(Window { art, lines }))

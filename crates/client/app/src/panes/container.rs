@@ -396,7 +396,7 @@ impl ContainerPane {
         // Window-local — see `PaneFrame::cursor`'s doc — so `button.at` comes
         // out measured from this window's own top-left, exactly like every
         // icon in it.
-        let button = plate.button(&frame.resources.gump_atlas, gump, GumpPixel::new(0, 0))?;
+        let button = plate.button(frame.files.gump_atlas, gump, GumpPixel::new(0, 0))?;
         Some((plate, button))
     }
 
@@ -480,7 +480,7 @@ impl ContainerPane {
                 font: LABEL_FONT,
                 hue: Hue::LABEL,
                 clip: None,
-                text: hover_text(item, &frame.resources.tiledata.static_tile(item.graphic.0).name),
+                text: hover_text(item, &frame.files.tiledata.static_tile(item.graphic.0).name),
             });
         }
         lines
@@ -521,11 +521,11 @@ impl ContainerPane {
         if plate_answer.taken {
             return plate_answer;
         }
-        let Some(item) = window.item_at(ctx.frame.cursor, &ctx.frame.resources.gump_atlas) else {
+        let Some(item) = window.item_at(ctx.frame.cursor, ctx.frame.files.gump_atlas) else {
             return raised.with(grab());
         };
         if self.paired(item.serial, ctx.now) {
-            let worn = RawLayer(ctx.frame.resources.tiledata.static_tile(item.graphic.0).layer);
+            let worn = RawLayer(ctx.frame.files.tiledata.static_tile(item.graphic.0).layer);
             let mut answer = raised;
             answer.absorb(double_clicked(item, worn, ctx.frame.view.player.serial));
             return answer;
@@ -662,7 +662,7 @@ impl ContainerPane {
     fn hover(&mut self, ctx: &PaneCtx<'_>) -> Response {
         let hovered = match (ctx.under_pointer, ctx.drawn) {
             (true, Some(Drawn::Container(window))) => window
-                .item_at(ctx.frame.cursor, &ctx.frame.resources.gump_atlas)
+                .item_at(ctx.frame.cursor, ctx.frame.files.gump_atlas)
                 .map(|item| item.serial),
             _ => None,
         };

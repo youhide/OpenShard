@@ -28,8 +28,7 @@ use openshard_protocol::skill::SkillLock;
 use openshard_protocol::wire::RawSkillId;
 use openshard_uofiles::skills::SkillId;
 
-use crate::panes::{Button, Effect, Input, Pane, PaneCtx, PaneFrame, Response};
-use crate::resources::Resources;
+use crate::panes::{Button, Effect, Input, Pane, PaneCtx, PaneFiles, PaneFrame, Response};
 use crate::windows::Drawn;
 
 /// This character's skill sheet, open.
@@ -64,8 +63,8 @@ impl SkillsPane {
     /// has just named for the first time, or a different set of client files
     /// all change it, and a cached height would clamp a scroll against a list
     /// that is no longer there.
-    fn content(&self, resources: &Resources) -> i32 {
-        skills::content_height(&resources.skill_names, &resources.skill_groups, &self.tree)
+    fn content(&self, files: PaneFiles<'_>) -> i32 {
+        skills::content_height(files.skill_names, files.skill_groups, &self.tree)
     }
 
     /// One notch over the window: a row up or down, and what that was worth.
@@ -108,7 +107,7 @@ impl SkillsPane {
         let Some(Drawn::Skills(sheet)) = ctx.drawn else {
             return Response::ignored();
         };
-        let content = self.content(ctx.frame.resources);
+        let content = self.content(ctx.frame.files);
         let offset = sheet.offset_at(ctx.frame.cursor, content);
         let before = self.tree.offset();
         self.tree.scroll_to(offset, content);
@@ -127,7 +126,7 @@ impl SkillsPane {
     /// and a thumb that also picked the window up would move both at once.
     fn press(&mut self, sheet: &skills::Sheet, ctx: &PaneCtx<'_>) -> Response {
         let raised = Response::changed().with(Effect::Raise);
-        match sheet.hit(ctx.frame.cursor, &ctx.frame.resources.gump_atlas) {
+        match sheet.hit(ctx.frame.cursor, ctx.frame.files.gump_atlas) {
             Some(hit) => {
                 self.held = Some(hit);
                 raised
@@ -150,7 +149,7 @@ impl SkillsPane {
         let Some(Drawn::Skills(sheet)) = ctx.drawn else {
             return Response::changed();
         };
-        if sheet.hit(ctx.frame.cursor, &ctx.frame.resources.gump_atlas) != Some(held) {
+        if sheet.hit(ctx.frame.cursor, ctx.frame.files.gump_atlas) != Some(held) {
             return Response::changed();
         }
         self.clicked(held, sheet, ctx)
@@ -158,7 +157,7 @@ impl SkillsPane {
 
     /// What one completed click means.
     fn clicked(&mut self, hit: skills::Hit, sheet: &skills::Sheet, ctx: &PaneCtx<'_>) -> Response {
-        let content = self.content(ctx.frame.resources);
+        let content = self.content(ctx.frame.files);
         match hit {
             skills::Hit::Heading(group) => {
                 self.tree.toggle(group);
@@ -166,7 +165,7 @@ impl SkillsPane {
                 // last heading shortens the list under a scroll that was valid
                 // a line ago, and the clamp is what puts the viewport back on
                 // rows that exist.
-                let content = self.content(ctx.frame.resources);
+                let content = self.content(ctx.frame.files);
                 self.tree.scroll_to(self.tree.offset(), content);
                 Response::changed()
             }
@@ -260,10 +259,10 @@ impl Pane for SkillsPane {
     /// skill the files do not name has no row to put a number on, and is
     /// dropped inside the layout rather than here.
     fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
-        let resources = frame.resources;
+        let files = frame.files;
         Some(Drawn::Skills(skills::window(
-            &resources.skill_names,
-            &resources.skill_groups,
+            files.skill_names,
+            files.skill_groups,
             &self.tree,
             |id| {
                 frame.view.player.skills.get(&id.0).map(|line| skills::Standing {
@@ -273,7 +272,7 @@ impl Pane for SkillsPane {
                     lock: self.tree.lock_of(id, line.lock),
                 })
             },
-            |text, font| openshard_client_render::text::gump_width(text, font, &resources.font_atlas),
+            |text, font| openshard_client_render::text::gump_width(text, font, files.font_atlas),
             // Window-local: the origin, as if the manager had placed this
             // window at `(0, 0)` — see `PaneFrame::cursor`'s doc for where
             // the real position is added back in.
@@ -315,7 +314,7 @@ impl Pane for SkillsPane {
                 if !ctx.under_pointer {
                     return Response::ignored();
                 }
-                let content = self.content(ctx.frame.resources);
+                let content = self.content(ctx.frame.files);
                 self.wheel(notches, content)
             }
             // The right button is the manager's close, and a keystroke is a
@@ -332,7 +331,63 @@ impl Pane for SkillsPane {
 
 #[cfg(test)]
 mod tests {
+    use openshard_client_render::gump::GumpPixel;
+    use openshard_protocol::serial::Serial;
+
+    use crate::panes::fixture;
+
     use super::*;
+
+    /// **Step 8 on the second window kind: the notch through
+    /// [`Pane::handle`].**
+    ///
+    /// A sheet with no rows in it at all — this install names no skills — still
+    /// takes the notch, which is the half that decides whether the camera hears
+    /// it. That is the whole of the wheel defect: a list with nowhere to go
+    /// answering "nothing moved" is what turned a notch over a window into a
+    /// zoom of the map behind it, and the assertion is that `handle` says
+    /// `taken` where the old `bool` would have said `false`.
+    ///
+    /// The tests below ask [`SkillsPane::wheel`] directly and pin the *rule*
+    /// against a real content height; this one pins the gate and the plumbing
+    /// in front of it, which no call to `wheel` can see.
+    #[test]
+    fn a_notch_through_handle_is_the_sheets_even_with_no_list_to_move() {
+        // A sheet draws its own frame out of ordinary gump art the atlas is
+        // asked for after the layout, so it needs nothing packed — see
+        // `SkillsPane::art`, which answers with an empty list.
+        let files = fixture::Install::shipping([]);
+        let view = fixture::world(Serial::new(0x0000_0001).unwrap());
+        let mut pane = SkillsPane::default();
+        let cursor = GumpPixel::new(40, 80);
+
+        let laid_out = pane
+            .layout(&files.ctx(&view, None, cursor, true).frame)
+            .expect("a sheet always lays itself out — it draws its own frame");
+        let ctx = files.ctx(&view, Some(&laid_out), cursor, true);
+        let answer = pane.handle(Input::Wheel(-1.0), &ctx);
+        assert!(answer.taken, "the notch is the window's, list or no list");
+        assert!(!answer.redraw, "and there is nothing here to move");
+    }
+
+    /// The gate in front of it: a notch offered to a sheet the pointer is not
+    /// on is not the sheet's, and the manager's `under_pointer` is the only
+    /// thing that can say so — a pane cannot see what is drawn over it.
+    #[test]
+    fn a_notch_on_a_sheet_below_the_pointer_is_not_taken() {
+        let files = fixture::Install::shipping([]);
+        let view = fixture::world(Serial::new(0x0000_0001).unwrap());
+        let mut pane = SkillsPane::default();
+        let cursor = GumpPixel::new(40, 80);
+
+        let laid_out = pane
+            .layout(&files.ctx(&view, None, cursor, true).frame)
+            .expect("a sheet always lays itself out");
+        let ctx = files.ctx(&view, Some(&laid_out), cursor, false);
+        let answer = pane.handle(Input::Wheel(-1.0), &ctx);
+        assert!(!answer.taken, "a covered sheet does not answer a notch");
+        assert!(!answer.redraw);
+    }
 
     /// Six rows' worth of list in a viewport that holds fewer, so there is
     /// something to scroll. The number itself is arbitrary — what the

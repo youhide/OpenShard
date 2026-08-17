@@ -681,27 +681,54 @@ never a half-routed frame.
       parameter instead of calling the walk themselves; the texel pick against
       every window's last frame that a press used to pay for up to three times
       now runs once.
-- [ ] **S8. The test the wheel defect would have failed.** A pane exercised with
-      a `PaneCtx` and no `App`: scroll a catalogue to its end, offer one more
-      notch, assert `taken` and `!redraw`.
-      **Half of it exists as of S1, and twice over as of S2**: three tests in
-      `panes/vendor.rs` and three more in `panes/skills.rs`, each asking its
-      pane's `wheel` for a `Response` directly, and each asserting the defect —
-      `taken` at the end of the list, `!redraw` beside it. Injecting
-      `Response::ignored()` into either turns that pane's three red, which is
-      how both sets were checked.
-      What is still missing is the same assertion *through* `handle`, which is
-      what proves the pointer tests in front of it agree. That needs a
-      `PaneCtx`, which needs a `&Resources` — and `Resources` is built in one
-      place, out of real client asset files. It is the whole of what blocks
-      this step now; "`App` needs asset files" was the old, larger version of
-      the same sentence.
-      **S6 showed the way round half of it.** A hit test needs an atlas and not
-      the whole of `Resources`, and a `GumpAtlas` can be packed from two solid
-      blocks in a test — which is what `container::Window::item_at`'s does. The
-      remaining question is whether `PaneFrame` wants the two or three fields a
-      pane actually reads instead of the whole `Resources`, which would make
-      every pane's `handle` reachable from a test without an install.
+- [x] **S8. The test the wheel defect would have failed.** ✅ `PaneFrame` no
+      longer carries `&Resources`. It carries **`panes::PaneFiles`** — the nine
+      borrows a window actually reads (`gump_atlas`, `font_atlas`, `art`,
+      `tiledata`, `gumps`, `cliloc`, `equip_conv`, `skill_names`,
+      `skill_groups`) — and every one of them can be built from nothing, so a
+      `PaneCtx` no longer needs a client install. `panes/fixture.rs` is that
+      context on a stack: `Install::shipping` packs the atlas from solid blocks
+      the caller names, `FontAtlas::pack([])`, `TileData::empty`, the new
+      `Art::empty`, `Default` for the three tables, and `None` for the two an
+      install may legitimately not ship.
+      **The assertion the step is named for now runs through `handle`**, in
+      `panes/vendor.rs`: a nine-row catalogue scrolled to its end, one more
+      notch, `taken` and `!redraw` — with the layout the notch is answered
+      against produced by the pane's *own* `layout`, so the picture the test
+      hit-tests is the picture the player would be pointing at.
+      **Four things landed differently from the shape above:**
+      - **The blocker was one field, not the trait.** "`App` needs asset files"
+        narrowed to "`Resources` needs asset files" at S6 and to
+        "`PaneCtx::frame::resources` needs asset files" here. What made it a
+        field rather than a design is that a pane never wanted `Resources`: it
+        wanted nine things out of it, and the other twenty — the facet, the
+        navigation graph, the 195MB `anim.mul` — were in reach only because
+        nobody had said they were not. `PaneFiles` is that sentence as a type,
+        and it is now a decision to widen rather than a field already there.
+      - **`Art::empty` and `Uop::empty` are new, and they are `TileData::empty`'s
+        idiom rather than a stub.** A `Uop` with no entries answers `Ok(None)`
+        for every name, which is exactly what a real container answers for an
+        index it does not ship — so nothing here guesses at what a file says.
+        The doc on each says so, and points at the real-install test that is
+        where an assertion about real art belongs.
+      - **`PaneFiles::of` is called twice in `render_passes.rs`, once per
+        builder, and that is decision 6 showing through the borrow checker.**
+        It borrows `resources`, and the packing sweep between the `art` loop and
+        the `layout` loop grows the atlas — which is the *reason* the two loops
+        are separate. One `PaneFiles` spanning both would not compile, and the
+        thing it would not compile *for* is the invariant.
+      - **The second assertion is the one no call to `wheel` can make.** A notch
+        offered to a window the pointer is not on is not that window's: deleting
+        the `under_pointer` gate from `VendorPane::handle` reddens exactly that
+        one test and leaves the other twelve green. The rule's own tests could
+        not see it, which is what "through `handle`" buys. The conflation
+        mutation — `wheel`'s `consumed` back to `ignored` — reddens the
+        through-`handle` test beside the three rule tests, so the new test
+        covers the old defect as well as the plumbing.
+
+      The wheel is asserted through `handle` for **two** kinds, the two the
+      defect was about. The other four have a context they can be tested with
+      and no through-`handle` test yet — a Backlog entry, not a step.
 
 ## Backlog
 
@@ -948,7 +975,27 @@ never a half-routed frame.
   defect wearing a disguise** — it reads as a second assembler, it type-checks
   like one, and the next author keeps it in step for nothing.
 
+- **Four kinds have a context and no test through it.** S8 made every pane's
+  `handle` reachable without an install, and spent that on the two kinds the
+  wheel defect was about. A container's press-becomes-a-lift, a paperdoll's
+  declined press, a dialog's keyboard routing and the status frame's `None`
+  layout are all now writable as tests against `panes::fixture::Install`, and
+  none of them is written. Each needs the same three lines the vendor's does —
+  build the install, lay the pane out, hand the layout back as `ctx.drawn` —
+  plus whatever that kind's `handle` reads: the container wants `tiledata`
+  (there, empty) and the paperdoll wants `art` (there, empty), which is exactly
+  the pair `Art::empty`/`TileData::empty` answer for.
+- **Whether `trait Pane` should offer a once-a-frame scratch.** Carried over
+  from the container's `contents()` entry, whose last sentence raised it and
+  which closed only the container's own case with a private `RefCell`. Every
+  kind recomputes something between `art` and `layout`; whether that pairing is
+  a thing the trait states — the way decision 6 states the *order* — or a thing
+  each pane arranges for itself is undecided, and the container is the only kind
+  that has needed it so far.
+
 ## Status
+
+**S0 through S8 built** (2026-08-17) — **the plan is complete.**
 
 **S0 through S7 built** (2026-08-17). The router is real, every input the
 window layer sees goes through it, and **all six kinds have moved in**: a shop
@@ -1018,8 +1065,16 @@ ground.
 The `#[expect(dead_code)]` checklist is **empty**. `PaneCtx::modifiers` is read
 by the bag's Shift-split, which was the last entry on it.
 
-Next is S8, the last step, and it is still the test through `handle`, still
-blocked on the same thing: a `PaneCtx` needs a `&Resources`, which is built out
-of real client asset files. *S6 narrowed that*: `container::Window::item_at` is
-exercised against a real `GumpAtlas` built from two blocks, so the hit test at
-least is pinned without an install.
+**S8 closed the last of it, and what it deleted was a field.** A `PaneCtx` used
+to carry the whole of `Resources` — the facet, the navigation graph, the 195MB
+animation file — so a pane could only be asked a question on a machine with a
+client install on it. It carries `PaneFiles` now: nine borrows, every one of
+them buildable from nothing, which is what makes `panes/fixture.rs` a stack
+value and `Pane::handle` reachable from a test. The wheel defect is asserted
+through the front door for the two kinds it was about, and the gate in front of
+the rule — a notch on a window the pointer is not on — is asserted for the first
+time at all, because no call to `wheel` could ever have seen it.
+
+**The plan is done.** What is left is in the Backlog and is a list of tests that
+can now be written, plus one open question about whether the trait should say
+anything about a per-frame scratch.

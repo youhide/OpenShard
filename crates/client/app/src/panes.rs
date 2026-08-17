@@ -48,6 +48,8 @@ use crate::windows::{Drawn, WindowSubject};
 
 pub(crate) mod container;
 pub(crate) mod dialog;
+#[cfg(test)]
+pub(crate) mod fixture;
 pub(crate) mod paperdoll;
 mod route;
 mod skills;
@@ -166,6 +168,76 @@ pub struct Modifiers {
     pub ctrl: bool,
 }
 
+/// The client's own files, narrowed to what a window actually reads.
+///
+/// Nine borrows rather than the whole of [`Resources`], and the difference is
+/// not tidiness: `Resources` holds the facet, the navigation graph and the
+/// 195MB animation file, none of which can be built without an install on
+/// disk — so a `PaneFrame` carrying it made [`Pane::handle`] reachable from a
+/// test only on a machine with a client in it. That is the whole of step 8 in
+/// `docs/window_components.md`, and the answer the step's own last paragraph
+/// proposed: *the two or three fields a pane actually reads instead of the
+/// whole `Resources`*. It turned out to be nine, and every one of them can be
+/// built from nothing — `GumpAtlas::pack`, `FontAtlas::pack`,
+/// `TileData::empty`, `Art::empty`, `Default` for the three tables, and `None`
+/// for the two an install may legitimately not ship.
+///
+/// It is also a statement of what a window is allowed to know about the
+/// install: a pane that wanted the map or the animations would have to widen
+/// this struct, which is a decision somebody makes rather than a field that was
+/// already in reach.
+#[derive(Clone, Copy)]
+pub struct PaneFiles<'a> {
+    /// The gump pictures packed so far. Every kind reads it: it is what a hit
+    /// test picks against and what a layout measures a window's frame by.
+    pub gump_atlas: &'a openshard_client_render::gump::GumpAtlas,
+    /// The `fonts.mul` glyphs, for the two kinds that measure their own text —
+    /// a dialog's caret and a skill row's columns.
+    pub font_atlas: &'a openshard_client_render::atlas::FontAtlas,
+    /// The item art, read for one thing only: the centre of an icon that is
+    /// grabbed somewhere other than its own picture — see
+    /// [`centre_of`](crate::hand::centre_of).
+    pub art: &'a openshard_uofiles::art::Art,
+    /// What a graphic *is*: its name for a label, and its layer for a drop onto
+    /// a body.
+    pub tiledata: &'a openshard_uofiles::tiledata::TileData,
+    /// The client's gump art, or `None` for an install this build could not
+    /// open it from — the paperdoll is the one kind that reads the file itself,
+    /// because a doll's body is drawn from a gump rather than from the atlas.
+    pub gumps: Option<&'a openshard_uofiles::gumpart::Gumps>,
+    /// The client's own text table, or `None` when `Cliloc.enu` could not be
+    /// read. A dialog line that named a cliloc draws nothing without it, which
+    /// is the tolerance a missing gump or a missing glyph already gets.
+    pub cliloc: Option<&'a openshard_uofiles::cliloc::Cliloc>,
+    /// What a worn item's graphic resolves to for drawing, for the paperdoll.
+    pub equip_conv: &'a openshard_uofiles::equipconv::EquipConv,
+    /// What the client's files call each skill, for the sheet.
+    pub skill_names: &'a openshard_uofiles::skills::Skills,
+    /// Which heading each skill is filed under, for the sheet.
+    pub skill_groups: &'a openshard_uofiles::skillgrp::SkillGroups,
+}
+
+impl<'a> PaneFiles<'a> {
+    /// The window layer's view of an install.
+    ///
+    /// The one place [`Resources`] is narrowed, so that what a pane may read is
+    /// a list in one place rather than whatever the next author happens to
+    /// reach for through a `&Resources`.
+    pub fn of(resources: &'a Resources) -> Self {
+        Self {
+            gump_atlas: &resources.gump_atlas,
+            font_atlas: &resources.font_atlas,
+            art: &resources.art,
+            tiledata: &resources.tiledata,
+            gumps: resources.gumps.as_ref(),
+            cliloc: resources.cliloc.as_ref(),
+            equip_conv: &resources.equip_conv,
+            skill_names: &resources.skill_names,
+            skill_groups: &resources.skill_groups,
+        }
+    }
+}
+
 /// What a pane may read while it is being packed and laid out.
 ///
 /// Decision 3's context, minus the four things that only mean something while
@@ -185,8 +257,10 @@ pub struct PaneFrame<'a> {
     /// on the body; it looks both up here every time it is asked, which is why
     /// a window can never draw or click a stale item.
     pub view: &'a WorldView,
-    /// The client's own files: art, tiledata, the gump atlas, skill names.
-    pub resources: &'a Resources,
+    /// The client's own files, narrowed to the nine a window reads — see
+    /// [`PaneFiles`], and step 8 of `docs/window_components.md` for why that
+    /// narrowing is the step's whole content.
+    pub files: PaneFiles<'a>,
     /// The pointer, in this window's own gump pixels — the origin is the
     /// window's own top-left corner, not the screen's.
     ///

@@ -31,7 +31,7 @@ use openshard_client_render::gump::GumpPixel;
 
 use crate::app::App;
 use crate::hand::Hand;
-use crate::panes::{Button, Effect, Input, Modifiers, Pane, PaneCtx, PaneFrame, Response};
+use crate::panes::{Button, Effect, Input, Modifiers, Pane, PaneCtx, PaneFiles, PaneFrame, Response};
 use crate::windows::{Asking, WindowSubject};
 
 impl App {
@@ -221,7 +221,7 @@ impl App {
         let Some(view) = self.world.authoritative.view.as_ref() else {
             return Response::ignored();
         };
-        let resources = &self.resources;
+        let files = PaneFiles::of(&self.resources);
         let drawn_windows = &self.windows.drawn_windows;
         // The pointer, in absolute gump pixels — turned into each window's
         // own local cursor inside the loop below, the same arithmetic
@@ -248,7 +248,7 @@ impl App {
             let ctx = PaneCtx {
                 frame: PaneFrame {
                     view,
-                    resources,
+                    files,
                     cursor: local_cursor,
                     hand,
                     has_keyboard: keyboard == Some(open.subject),

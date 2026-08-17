@@ -126,9 +126,9 @@ pub(crate) fn draw_gump_windows(
             // **Decision 6's order, and it is now every kind's:** every pane
             // says what art it needs, all of it is packed, and only then is
             // anything laid out. Collected into a list
-            // first because a pane reads the whole of `Resources` while it
-            // answers and the atlas is a field of it — packing inside the walk
-            // would be growing the very thing the walk is holding.
+            // first because a pane holds the atlas borrowed while it answers
+            // (`panes::PaneFiles::gump_atlas`) — packing inside the walk would
+            // be growing the very thing the walk is holding.
             let hand = windows.hand;
             // The pointer, in each window's own gump pixels — see
             // `PaneFrame::cursor`'s doc for why this is the one arithmetic a
@@ -141,7 +141,11 @@ pub(crate) fn draw_gump_windows(
                 .map(|open| {
                     let frame = panes::PaneFrame {
                         view,
-                        resources,
+                        // The install, narrowed to what a window may read — see
+                        // `panes::PaneFiles`. Built per builder rather than once for
+                        // the pass: it borrows `resources`, and the packing sweep
+                        // between the two grows the atlas.
+                        files: panes::PaneFiles::of(resources),
                         cursor: local_cursor(open.at),
                         hand,
                         has_keyboard: windows.keyboard == Some(open.subject),
@@ -172,7 +176,11 @@ pub(crate) fn draw_gump_windows(
                 // one window out are two pictures waiting to disagree.
                 let frame = panes::PaneFrame {
                     view,
-                    resources,
+                    // The install, narrowed to what a window may read — see
+                    // `panes::PaneFiles`. Built per builder rather than once for
+                    // the pass: it borrows `resources`, and the packing sweep
+                    // between the two grows the atlas.
+                    files: panes::PaneFiles::of(resources),
                     cursor: local_cursor(open.at),
                     hand,
                     has_keyboard: windows.keyboard == Some(open.subject),

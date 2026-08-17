@@ -332,7 +332,7 @@ impl Pane for VendorPane {
                 self.scroll,
                 GumpPixel::new(0, 0),
                 frame.cursor,
-                &frame.resources.gump_atlas,
+                frame.files.gump_atlas,
             ),
             Stall::Sell { lines } => vendor::sell(
                 self.vendor,
@@ -341,7 +341,7 @@ impl Pane for VendorPane {
                 self.scroll,
                 GumpPixel::new(0, 0),
                 frame.cursor,
-                &frame.resources.gump_atlas,
+                frame.files.gump_atlas,
             ),
         };
         Some(Drawn::Vendor(window))
@@ -398,10 +398,138 @@ impl Pane for VendorPane {
 
 #[cfg(test)]
 mod tests {
+    use openshard_client_net::view::VendorSell;
+    use openshard_protocol::items::ItemAmount;
+    use openshard_protocol::wire::{Graphic, Hue};
+
+    use crate::panes::fixture;
+
     use super::*;
 
     fn pane() -> VendorPane {
         VendorPane::new(Serial::new(0x0000_002A).unwrap())
+    }
+
+    /// A catalogue of `rows` lines the shard is willing to buy, in a world with
+    /// nothing else in it.
+    fn shop(rows: usize) -> WorldView {
+        let vendor = Serial::new(0x0000_002A).unwrap();
+        let mut view = fixture::world(Serial::new(0x0000_0001).unwrap());
+        view.vendor_sells.insert(
+            vendor,
+            VendorSell {
+                lines: (0..rows)
+                    .map(|row| SellLine {
+                        // Serials from a range of their own, so a row's identity
+                        // cannot be confused with the vendor's or the player's.
+                        serial: Serial::new(0x4000_0001 + row as u32).unwrap(),
+                        graphic: Graphic(0x0EED),
+                        hue: Hue::NONE,
+                        amount: ItemAmount(9),
+                        price: 3,
+                        name: format!("row {row}"),
+                    })
+                    .collect(),
+            },
+        );
+        view
+    }
+
+    /// The two parchment panels a shop is drawn on, at whatever size — the
+    /// window's own arithmetic is in boxes, so what matters is that the atlas
+    /// has an entry for each and not how big it is.
+    fn install() -> fixture::Install {
+        fixture::Install::shipping(vendor::art_of().map(|art| (art, (256, 400))))
+    }
+
+    /// **Step 8, and the defect this plan grew out of, asserted through
+    /// [`Pane::handle`].**
+    ///
+    /// The three tests below it ask `VendorPane::wheel` directly, which pins the
+    /// *rule*; this one goes in the front door — the located gate, the `drawn`
+    /// lookup, the catalogue-or-frame split and the rule behind them — and so it
+    /// is the one that proves the pointer tests in front of the rule agree with
+    /// it. That was the last thing blocking this step, and what unblocked it is
+    /// [`PaneFiles`](crate::panes::PaneFiles): the context used to need a whole
+    /// `Resources`, which needs a client install on disk.
+    #[test]
+    fn a_notch_through_handle_is_taken_at_the_last_row_and_asks_for_no_frame() {
+        let files = install();
+        let view = shop(9);
+        let mut pane = pane();
+        // Inside the catalogue's viewport, which is what makes this a notch the
+        // list itself could move — asserted below rather than assumed, because
+        // a cursor that had missed the viewport would take the notch for the
+        // *frame* and pass this test for the wrong reason.
+        let cursor = GumpPixel::new(100, 70);
+
+        for step in 0..5 {
+            let laid_out = pane
+                .layout(&files.ctx(&view, None, cursor, true).frame)
+                .expect("a shop with a catalogue in the view lays itself out");
+            let Drawn::Vendor(window) = &laid_out else {
+                panic!("a shop lays itself out as a shop");
+            };
+            assert!(
+                window.catalogue_contains(cursor),
+                "the cursor is over the list, not the buttons"
+            );
+            let ctx = files.ctx(&view, Some(&laid_out), cursor, true);
+            let answer = pane.handle(Input::Wheel(-1.0), &ctx);
+            assert!(answer.taken, "notch {step} is the window's");
+            assert!(answer.redraw, "notch {step} moved the list");
+        }
+        assert_eq!(pane.scroll, 5);
+
+        let laid_out = pane
+            .layout(&files.ctx(&view, None, cursor, true).frame)
+            .expect("a shop with a catalogue in the view lays itself out");
+        let ctx = files.ctx(&view, Some(&laid_out), cursor, true);
+        let answer = pane.handle(Input::Wheel(-1.0), &ctx);
+        assert!(
+            answer.taken,
+            "the notch is still the window's at the last row — the camera never hears it"
+        );
+        assert!(!answer.redraw, "and there is nothing new to draw");
+        assert_eq!(pane.scroll, 5);
+    }
+
+    /// The gate in front of the rule, asserted the same way: a notch offered to
+    /// a window the pointer is *not* on is not that window's, however scrollable
+    /// its list is.
+    ///
+    /// This is the half a test of `wheel` alone cannot see, and the half that
+    /// decides whether a bag drawn over a shop can be scrolled through.
+    #[test]
+    fn a_notch_on_a_window_below_the_pointer_is_not_taken() {
+        let files = install();
+        let view = shop(9);
+        let mut pane = pane();
+        let cursor = GumpPixel::new(100, 70);
+
+        let laid_out = pane
+            .layout(&files.ctx(&view, None, cursor, true).frame)
+            .expect("a shop with a catalogue in the view lays itself out");
+        let ctx = files.ctx(&view, Some(&laid_out), cursor, false);
+        let answer = pane.handle(Input::Wheel(-1.0), &ctx);
+        assert!(!answer.taken, "a covered window does not answer a notch");
+        assert!(!answer.redraw);
+        assert_eq!(pane.scroll, 0, "and its list did not move");
+    }
+
+    /// A window that has never been drawn has no pixels the player can have
+    /// meant, so a press on it is nobody's — the arm that would otherwise
+    /// hit-test a layout worked out at press time, which is the second answer
+    /// [`PaneCtx::drawn`](crate::panes::PaneCtx::drawn) exists to prevent.
+    #[test]
+    fn a_press_on_a_window_that_was_never_drawn_is_ignored() {
+        let files = install();
+        let view = shop(9);
+        let mut pane = pane();
+        let ctx = files.ctx(&view, None, GumpPixel::new(100, 70), true);
+        let answer = pane.handle(Input::Press(Button::Left), &ctx);
+        assert!(!answer.taken);
+        assert!(!answer.redraw);
     }
 
     /// **The defect this plan grew out of, as an assertion.** A catalogue at

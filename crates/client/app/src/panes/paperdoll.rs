@@ -242,7 +242,7 @@ impl PaperdollPane {
         if let Some(index) = gump_art::pick(
             &window.doll.pictures,
             ctx.frame.cursor,
-            &ctx.frame.resources.gump_atlas,
+            ctx.frame.files.gump_atlas,
         ) {
             if let Some(button) = window.doll.hits.get(&index) {
                 self.held = Some(*button);
@@ -284,7 +284,7 @@ impl PaperdollPane {
                             // what goes on the cursor is the item's own icon.
                             // Anchor its centre to the pointer, and use the
                             // same offset if it is released into a bag.
-                            grab: centre_of(item.graphic, &ctx.frame.resources.art),
+                            grab: centre_of(item.graphic, ctx.frame.files.art),
                         });
                         return raised;
                     }
@@ -316,7 +316,7 @@ impl PaperdollPane {
         if let (Some(hand), true) = (ctx.frame.hand, ctx.under_pointer) {
             let layer = openshard_protocol::wire::Layer(
                 ctx.frame
-                    .resources
+                    .files
                     .tiledata
                     .static_tile(hand.drag().item.graphic.0)
                     .layer,
@@ -341,7 +341,7 @@ impl PaperdollPane {
         let on = gump_art::pick(
             &window.doll.pictures,
             ctx.frame.cursor,
-            &ctx.frame.resources.gump_atlas,
+            ctx.frame.files.gump_atlas,
         )
         .and_then(|index| window.doll.hits.get(&index).copied());
         if on != Some(held) {
@@ -406,7 +406,7 @@ impl PaperdollPane {
             (true, Some(Drawn::Paperdoll(window))) => gump_art::pick(
                 &window.doll.pictures,
                 ctx.frame.cursor,
-                &ctx.frame.resources.gump_atlas,
+                ctx.frame.files.gump_atlas,
             )
             .and_then(|index| window.doll.equipment_hits.get(&index).copied()),
             _ => None,
@@ -448,7 +448,7 @@ impl PaperdollPane {
                     font: Font(1),
                     hue: Hue::LABEL,
                     clip: None,
-                    text: frame.resources.tiledata.static_tile(item.graphic.0).name.clone(),
+                    text: frame.files.tiledata.static_tile(item.graphic.0).name.clone(),
                 });
             }
         }
@@ -475,7 +475,7 @@ impl Pane for PaperdollPane {
     /// is one the pointer cannot find and the player cannot close; the doll
     /// appears on the frame the `0x77` arrives.
     fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
-        let files = frame.resources.gumps.as_ref()?;
+        let files = frame.files.gumps.as_ref()?;
         let view = frame.view;
         let own = self.own(frame);
         let body = match own {
@@ -490,7 +490,7 @@ impl Pane for PaperdollPane {
         // tiledata for the sprite and the doll alike (`crowd::worn`). An item
         // the hand has lifted off this body is subtracted until the shard
         // answers, exactly as its bag subtracts a lifted icon.
-        let equipment: Vec<EquipmentLayer> = crowd::worn(self.equipment(frame), &frame.resources.tiledata)
+        let equipment: Vec<EquipmentLayer> = crowd::worn(self.equipment(frame), frame.files.tiledata)
             .into_iter()
             .filter(|item| {
                 frame.hand.is_none_or(|hand| {
@@ -521,7 +521,7 @@ impl Pane for PaperdollPane {
         let preview = match self.hand_over {
             true => frame.hand.and_then(|hand| {
                 let drag = hand.drag();
-                let tile = frame.resources.tiledata.static_tile(drag.item.graphic.0);
+                let tile = frame.files.tiledata.static_tile(drag.item.graphic.0);
                 let layer = Layer(tile.layer);
                 (own && layer.0 > 0 && layer.0 <= 25 && !equipment.iter().any(|worn| worn.layer == layer))
                     .then_some(EquipmentLayer {
@@ -538,7 +538,7 @@ impl Pane for PaperdollPane {
             self.held,
             self.hovered,
             preview,
-            &frame.resources.equip_conv,
+            frame.files.equip_conv,
             files,
             // Window-local — see `PaneFrame::cursor`'s doc.
             GumpPixel::new(0, 0),
