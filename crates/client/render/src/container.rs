@@ -22,7 +22,7 @@
 use crate::items::{HIGHLIGHT_HUE, displayed_graphic};
 use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::Graphic;
+use openshard_protocol::wire::{Graphic, Hue};
 
 use crate::gump::{GumpArt, GumpAtlas, GumpPixel, Picture};
 
@@ -35,6 +35,23 @@ use crate::gump::{GumpArt, GumpAtlas, GumpPixel, Picture};
 pub const TAKE_ALL_LABEL: &str = "[ Take all ]";
 /// Caption for compacting like piles through ordinary client drag packets.
 pub const STACK_ALL_LABEL: &str = "[ Stack all ]";
+
+/// The plate a bag's client-side caption is written over.
+///
+/// Reused rather than synthesised: `docs/findings.md` recorded that no
+/// *small, tightly-fitting* shipped gump matches the plate's old 72×18/80×18
+/// box, and the project's resolution was to stop asking for a tight fit and
+/// reuse a plate that is already shipped and already used this exact way —
+/// `crates/client/render/src/skills.rs`'s own `TOTAL_PLATE`, the plate its
+/// skill total is written beside. Same graphic, same role, confirmed here
+/// the same way it was confirmed there: `cargo run -p openshard-uofiles
+/// --example gump_probe -- 0x0836`, 210×19.
+///
+/// Generously sized on purpose (`docs/window_components.md`'s backlog entry
+/// this closes) — a caption a third that wide has room to spare, which is
+/// the point: fitting the art was never worth chasing, only covering the
+/// text with real pixels was.
+pub const PLATE_BACKGROUND: Graphic = Graphic(0x0836);
 
 /// A rectangular client-side container action.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -88,15 +105,26 @@ pub fn size(atlas: &GumpAtlas, gump: Graphic) -> Option<(i32, i32)> {
     Some((i32::from(sprite.width), i32::from(sprite.height)))
 }
 
+/// How big the plate is: [`PLATE_BACKGROUND`]'s own size, or `None` until it
+/// has been packed.
+///
+/// Both plates share one graphic, so both share this — asking the atlas
+/// rather than hardcoding 210×19 a second time, for [`size`]'s own reason: a
+/// number written down beside the art's real size is a second statement of
+/// the same shape, and the two are free to disagree the day the art changes.
+fn plate_size(atlas: &GumpAtlas) -> Option<(i32, i32)> {
+    size(atlas, PLATE_BACKGROUND)
+}
+
 /// The client-owned "Take all" plate immediately below a container.
 ///
-/// Its position depends on the actual gump art, so it is absent until that art
-/// has been packed just like the container window itself.
+/// Its position depends on the container's own art, and its size on the
+/// plate's — so it is absent until both have been packed.
 pub fn take_all_button(atlas: &GumpAtlas, gump: Graphic, at: GumpPixel) -> Option<ActionButton> {
     let (_, height) = size(atlas, gump)?;
     Some(ActionButton {
         at: at.offset(GumpPixel::new(0, height + 4)),
-        size: (72, 18),
+        size: plate_size(atlas)?,
     })
 }
 
@@ -105,7 +133,7 @@ pub fn stack_all_button(atlas: &GumpAtlas, gump: Graphic, at: GumpPixel) -> Opti
     let (_, height) = size(atlas, gump)?;
     Some(ActionButton {
         at: at.offset(GumpPixel::new(0, height + 4)),
-        size: (80, 18),
+        size: plate_size(atlas)?,
     })
 }
 
@@ -146,6 +174,35 @@ pub fn window_highlighted(
             item.hue
         });
         pictures.push(picture);
+    }
+    pictures
+}
+
+/// [`window_highlighted`], with the client-side plate drawn as a real
+/// picture rather than left as text with nothing behind it.
+///
+/// This is the fix for "a press on a bag over a window over another bag is
+/// offered a plate it cannot see" (`docs/window_components.md`'s backlog):
+/// once the plate is a picture in this list, it is exactly as pickable and
+/// exactly as occludable as the background and every icon beside it — the
+/// same [`crate::gump::pick`] walk that already resolves the rest of this
+/// window resolves the plate too, by construction, and there is no second
+/// rule left to write for it.
+///
+/// `plate` is `(where, what tint)` rather than recomputed here: the caller
+/// already worked out the button's position to draw the caption over it and
+/// to hit-test a press against it, and asking a second time is the exact
+/// "one rule, three readers" this window's plate has already cost once.
+pub fn window_with_plate(
+    gump: Graphic,
+    contents: &[ContainedItem],
+    at: GumpPixel,
+    highlighted: Option<Serial>,
+    plate: Option<(ActionButton, Hue)>,
+) -> Vec<Picture> {
+    let mut pictures = window_highlighted(gump, contents, at, highlighted);
+    if let Some((button, hue)) = plate {
+        pictures.push(Picture::plain(GumpArt::Gump(PLATE_BACKGROUND), button.at).hued(hue));
     }
     pictures
 }
@@ -208,8 +265,9 @@ mod tests {
             (GumpArt::Gump(BAG), block(140, 100)),
             (GumpArt::Item(CANDLE), block(10, 20)),
             (GumpArt::Item(COIN), block(8, 8)),
+            (GumpArt::Gump(PLATE_BACKGROUND), block(210, 19)),
         ])
-        .expect("three small blocks fit an atlas 2048 on a side")
+        .expect("four small blocks fit an atlas 2048 on a side")
     }
 
     fn item(serial: u32, graphic: Graphic, x: i32, y: i32) -> ContainedItem {
@@ -235,21 +293,76 @@ mod tests {
         );
     }
 
+    /// The plate's own size, not a magic number written down beside it a
+    /// second time — [`plate_size`] asks the atlas exactly as [`size`] does
+    /// for the window's own background.
     #[test]
-    fn take_all_button_sits_below_the_container_and_owns_its_plate() {
-        let button = take_all_button(&atlas(), BAG, GumpPixel::new(300, 200)).expect("the bag is packed");
-        assert_eq!(button.at, GumpPixel::new(300, 304));
-        assert!(button.contains(GumpPixel::new(371, 321)));
-        assert!(!button.contains(GumpPixel::new(372, 321)));
-        assert!(!button.contains(GumpPixel::new(371, 322)));
+    fn the_plate_is_exactly_as_big_as_its_own_art() {
+        assert_eq!(plate_size(&atlas()), Some((210, 19)));
+        assert_eq!(
+            take_all_button(
+                &GumpAtlas::pack([(GumpArt::Gump(BAG), block(140, 100))]).unwrap(),
+                BAG,
+                GumpPixel::new(0, 0)
+            ),
+            None,
+            "the container's own art is packed but the plate's is not, so there is nowhere to draw it"
+        );
     }
 
     #[test]
-    fn stack_all_button_uses_the_backpacks_action_slot() {
-        let button = stack_all_button(&atlas(), BAG, GumpPixel::new(300, 200)).expect("the bag is packed");
+    fn take_all_button_sits_below_the_container_and_owns_its_plate() {
+        let button = take_all_button(&atlas(), BAG, GumpPixel::new(300, 200))
+            .expect("the bag and the plate are packed");
         assert_eq!(button.at, GumpPixel::new(300, 304));
-        assert!(button.contains(GumpPixel::new(379, 321)));
-        assert!(!button.contains(GumpPixel::new(380, 321)));
+        assert_eq!(
+            button.size,
+            (210, 19),
+            "the plate's own size, generous over the caption"
+        );
+        assert!(
+            button.contains(GumpPixel::new(509, 322)),
+            "the far corner of the plate"
+        );
+        assert!(!button.contains(GumpPixel::new(510, 322)));
+        assert!(!button.contains(GumpPixel::new(509, 323)));
+    }
+
+    /// Both plates share one graphic now, so the backpack's own is exactly
+    /// the same size as every other bag's — only the caption on it differs.
+    #[test]
+    fn stack_all_button_uses_the_backpacks_action_slot() {
+        let button = stack_all_button(&atlas(), BAG, GumpPixel::new(300, 200))
+            .expect("the bag and the plate are packed");
+        assert_eq!(button.at, GumpPixel::new(300, 304));
+        assert_eq!(button.size, (210, 19));
+    }
+
+    /// A window whose plate is drawn as a real picture is exactly as
+    /// occludable as its background and its icons — the whole of the fix for
+    /// "a press on a bag over a window over another bag is offered a plate
+    /// it cannot see".
+    #[test]
+    fn a_plate_is_a_real_picture_at_the_buttons_own_position() {
+        let at = GumpPixel::new(300, 200);
+        let button = take_all_button(&atlas(), BAG, at).expect("the bag and the plate are packed");
+        let pictures = window_with_plate(BAG, &[], at, None, Some((button, HIGHLIGHT_HUE)));
+        let plate = pictures.last().expect("background, then the plate");
+        assert_eq!(plate.graphic, GumpArt::Gump(PLATE_BACKGROUND));
+        assert_eq!(
+            plate.at, button.at,
+            "the same position the caption is written over"
+        );
+        assert_eq!(plate.hue, HIGHLIGHT_HUE, "tinted while the pointer is on it");
+    }
+
+    /// A shop's crate has no client-side plate at all, and asking for one
+    /// draws nothing rather than an empty picture.
+    #[test]
+    fn no_plate_means_no_picture() {
+        let at = GumpPixel::new(300, 200);
+        let pictures = window_with_plate(BAG, &[], at, None, None);
+        assert_eq!(pictures.len(), 1, "the background, and nothing else");
     }
 
     /// Item coordinates are measured from the background's top left, so moving

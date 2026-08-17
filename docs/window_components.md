@@ -797,7 +797,7 @@ never a half-routed frame.
   tail reads the grab offset off `own_windows.last()` rather than off the
   window it is picking up, right only because `raise_window` has just moved
   that window to the end.
-- **A press on a bag over a window over another bag is offered a plate it
+- ~~**A press on a bag over a window over another bag is offered a plate it
   cannot see.** The plates hang below a window's own art, so a pane is offered
   their press with `under_pointer` false — and the walk only stops *after* the
   window the pointer is on, so a plate belonging to a window **above** that one
@@ -806,7 +806,37 @@ never a half-routed frame.
   the pointed-at window), so S6 preserved it deliberately; it is worth deciding
   whether it is right rather than inherited. The honest fix is for a plate to be
   part of the window's picture — pixels rather than a box — which is also what
-  would let it tint on hover like every other control this client draws.
+  would let it tint on hover like every other control this client draws.~~
+  **Closed by giving both plates pixels — the honest fix this entry itself
+  named.** `docs/findings.md` had already ruled out a synthetic quad tight to
+  the plate's old 72×18/80×18 box; the project's resolution was to stop
+  chasing a tight fit and reuse a plate that is already shipped and already
+  used exactly this way — `skills.rs`'s own `TOTAL_PLATE`
+  (`Graphic(0x0836)`, 210×19), sized generously rather than tightly. Both
+  plates now share it (`container::PLATE_BACKGROUND`), and `ActionButton`'s
+  size comes from the atlas the same way the window's own background size
+  does, rather than from the two hardcoded numbers this entry described.
+
+  The plate is drawn as a real `Picture` in `Window::pictures`
+  (`container::window_with_plate`), pushed by `ContainerPane::layout` at the
+  same position `press_plate`'s box test uses — one `plate_button` resolves
+  both, and the layout, the press and the hover tint all read it rather than
+  recomputing it three ways. Once the plate has pixels, it is exactly as
+  pickable and exactly as occludable as the background and every icon beside
+  it: `window_under_pointer`'s existing per-pixel walk resolves the covering
+  case by construction, and `ContainerPane::handle`'s press arm no longer
+  branches on `!under_pointer` to reach the plate — reaching the pane at all
+  now means this window owns the pixel, plate included, and `press` decides
+  which part of its own art the press landed on. `press_plate`'s own box test
+  stays, exactly as this entry allowed: it now only ever runs for a window
+  the pixel-pick has already confirmed owns that pixel.
+
+  The plate also tints on hover now, the same way an icon does:
+  `ContainerPane::plate_hovered`, a bit beside `hovered` rather than folded
+  into it (an icon and the plate can never be true at once, and are two
+  different pictures), lit by `HIGHLIGHT_HUE` — the same hue the icon hover
+  already uses — through the same `Response::stale`-on-change shape
+  `ContainerPane::hover` was already written in.
 - **`Windows::world_press` is in the window layer because the hand is, and it
   is not about a window.** An item lying on the ground is pressed exactly the
   way an icon in a bag is — same type, same rule for what the press becomes —
