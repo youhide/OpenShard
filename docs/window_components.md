@@ -717,13 +717,12 @@ never a half-routed frame.
   decision that is *visible* as a decision — two `handle` arms, four lines
   apart in shape — but that does not settle it: somebody has to say which is
   right. ClassicUO claims the whole window.
-- **`if let Some(window) = self.window.as_ref() { window.window.request_redraw() }`,
-  twenty times.** `event_loop.rs` asks for a frame that way in every arm, and S0
-  left the idiom alone rather than sweeping it while it was also changing what
-  decides the ask. Now that a `Response` says whether the frame is stale, the
-  honest shape is one `App::ask_redraw()` and arms that call it — or, better, an
-  arm that returns its `Response` to one place that acts on it. Mechanical, and
-  worth doing when S7 has finished moving what the arms *say*.
+- ~~**`if let Some(window) = self.window.as_ref() { window.window.request_redraw() }`,
+  twenty times.**~~ **Closed by `App::ask_redraw()`** (`window.rs`, beside
+  `create_window`): `if let Some(window) = self.window.as_ref() {
+  window.window.request_redraw(); }` and its one `as_mut()` cousin in the
+  `Resized` arm both collapse to `self.ask_redraw();`. Twenty call sites in
+  `event_loop.rs`, one method.
 - ~~**`stack_all_button_under_pointer` and `take_all_button_under_pointer` walk
   the window list and then ask `window_under_pointer()` inside the loop.**~~
   **Closed by S6.** What that predicate was reaching for is the router's own

@@ -1215,6 +1215,20 @@ impl App {
         })
     }
 
+    /// Ask the platform for another frame, if there is a window to ask.
+    ///
+    /// The one place that spells `self.window.as_ref()`: every event-loop arm
+    /// that decided a frame is stale used to open the `Option` itself, twenty
+    /// times over — mechanical, and mechanical is exactly what a repeated `if
+    /// let` should not stay. There is no window during the interval between
+    /// `resumed` handing one back and the first frame reaching this call, and
+    /// asking into that gap is simply a redraw nobody was there to want.
+    pub(crate) fn ask_redraw(&self) {
+        if let Some(window) = self.window.as_ref() {
+            window.window.request_redraw();
+        }
+    }
+
     /// Everything on screen right now, whatever the atlases already hold.
     ///
     /// The whole-viewport walk, which is what a rebuild needs and what an

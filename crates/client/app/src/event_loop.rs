@@ -51,9 +51,7 @@ impl ApplicationHandler<()> for App {
             }
         }
         if changed {
-            if let Some(window) = self.window.as_ref() {
-                window.window.request_redraw();
-            }
+            self.ask_redraw();
         }
     }
 
@@ -92,9 +90,7 @@ impl ApplicationHandler<()> for App {
                 self.input.aiming = false;
                 self.set_war_mode_held(false);
             }
-            if let Some(window) = self.window.as_ref() {
-                window.window.request_redraw();
-            }
+            self.ask_redraw();
             return;
         }
 
@@ -106,11 +102,11 @@ impl ApplicationHandler<()> for App {
                     window.config.height = size.height.max(1);
                     window.surface.configure(&window.device, &window.config);
                     self.control.resize(window.config.width, window.config.height);
-                    // The world texture and the depth buffer follow the
-                    // *camera's* size and not the window's, which are the same
-                    // thing only at zoom 1. `draw` resizes them together.
-                    window.window.request_redraw();
                 }
+                // The world texture and the depth buffer follow the
+                // *camera's* size and not the window's, which are the same
+                // thing only at zoom 1. `draw` resizes them together.
+                self.ask_redraw();
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else {
@@ -153,9 +149,7 @@ impl ApplicationHandler<()> for App {
                                 }
                             }
                         }
-                        if let Some(window) = self.window.as_ref() {
-                            window.window.request_redraw();
-                        }
+                        self.ask_redraw();
                     }
                     return;
                 }
@@ -196,9 +190,7 @@ impl ApplicationHandler<()> for App {
                         // wheel's lesson on the other input: a control character
                         // the field refused is not a picture that moved.
                         if answer.redraw {
-                            if let Some(window) = self.window.as_ref() {
-                                window.window.request_redraw();
-                            }
+                            self.ask_redraw();
                         }
                     }
                     return;
@@ -241,9 +233,7 @@ impl ApplicationHandler<()> for App {
                     };
                     if let Some(facing) = step {
                         if self.walk(facing) {
-                            if let Some(window) = self.window.as_ref() {
-                                window.window.request_redraw();
-                            }
+                            self.ask_redraw();
                         }
                     }
                     return;
@@ -261,9 +251,7 @@ impl ApplicationHandler<()> for App {
                 // manager's close box and every other application's answer.
                 if code == KeyCode::Escape {
                     if self.close_top_window() {
-                        if let Some(window) = self.window.as_ref() {
-                            window.window.request_redraw();
-                        }
+                        self.ask_redraw();
                     }
                     return;
                 }
@@ -452,9 +440,7 @@ impl ApplicationHandler<()> for App {
                     _ => false,
                 };
                 if changed {
-                    if let Some(window) = self.window.as_ref() {
-                        window.window.request_redraw();
-                    }
+                    self.ask_redraw();
                 }
             }
             // Shift is the whole of "run", and it arrives here rather than as a
@@ -483,9 +469,7 @@ impl ApplicationHandler<()> for App {
             WindowEvent::Focused(focused) => {
                 self.input.focused = focused;
                 if focused {
-                    if let Some(window) = self.window.as_ref() {
-                        window.window.request_redraw();
-                    }
+                    self.ask_redraw();
                 } else {
                     self.steer.clear();
                     self.input.aiming = false;
@@ -500,9 +484,7 @@ impl ApplicationHandler<()> for App {
             WindowEvent::Occluded(occluded) => {
                 self.input.occluded = occluded;
                 if !occluded {
-                    if let Some(window) = self.window.as_ref() {
-                        window.window.request_redraw();
-                    }
+                    self.ask_redraw();
                 }
             }
             // A cursor that has left says so once and then goes quiet, so the
@@ -514,9 +496,7 @@ impl ApplicationHandler<()> for App {
             }
             WindowEvent::CursorLeft { .. } => {
                 self.input.pointer_inside = false;
-                if let Some(window) = self.window.as_ref() {
-                    window.window.request_redraw();
-                }
+                self.ask_redraw();
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.input.pointer_inside = true;
@@ -549,9 +529,7 @@ impl ApplicationHandler<()> for App {
                     changed |= self.walk_toward_cursor();
                 }
                 if changed {
-                    if let Some(window) = self.window.as_ref() {
-                        window.window.request_redraw();
-                    }
+                    self.ask_redraw();
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -569,9 +547,7 @@ impl ApplicationHandler<()> for App {
                 if button == winit::event::MouseButton::Left && state == ElementState::Released {
                     let response = self.deliver(panes::Input::Release(panes::Button::Left));
                     if response.redraw {
-                        if let Some(window) = self.window.as_ref() {
-                            window.window.request_redraw();
-                        }
+                        self.ask_redraw();
                     }
                 }
                 // A container window takes the press before the world sees it,
@@ -582,9 +558,7 @@ impl ApplicationHandler<()> for App {
                     && state == ElementState::Pressed
                     && self.deliver(panes::Input::Press(panes::Button::Left)).taken
                 {
-                    if let Some(window) = self.window.as_ref() {
-                        window.window.request_redraw();
-                    }
+                    self.ask_redraw();
                 } else if button == winit::event::MouseButton::Left
                     && state == ElementState::Pressed
                     && !self.target_under_cursor(*self.control.camera())
@@ -655,9 +629,7 @@ impl ApplicationHandler<()> for App {
                         // the ordinary double-click use.
                         self.press_world_item();
                     }
-                    if let Some(window) = self.window.as_ref() {
-                        window.window.request_redraw();
-                    }
+                    self.ask_redraw();
                 }
                 // A right hold is a heading toward the cursor by default, or a
                 // Ctrl-held move order — either way it stays under way while
@@ -675,16 +647,12 @@ impl ApplicationHandler<()> for App {
                     && (self.cancel_target_cursor()
                         || self.deliver(panes::Input::Press(panes::Button::Right)).taken)
                 {
-                    if let Some(window) = self.window.as_ref() {
-                        window.window.request_redraw();
-                    }
+                    self.ask_redraw();
                 } else if button == winit::event::MouseButton::Right {
                     self.input.aiming = state == ElementState::Pressed;
                     if self.input.aiming {
                         if self.walk_toward_cursor() {
-                            if let Some(window) = self.window.as_ref() {
-                                window.window.request_redraw();
-                            }
+                            self.ask_redraw();
                         }
                     } else {
                         // A heading stops the instant the button does — unlike
@@ -719,9 +687,7 @@ impl ApplicationHandler<()> for App {
                     let response = self.deliver(panes::Input::Wheel(notches));
                     let zoomed = !response.taken && self.zoom(notches > 0.0);
                     if response.redraw || zoomed {
-                        if let Some(window) = self.window.as_ref() {
-                            window.window.request_redraw();
-                        }
+                        self.ask_redraw();
                     }
                 }
             }
@@ -776,9 +742,7 @@ impl ApplicationHandler<()> for App {
             moved |= self.walk(facing);
         }
         if moved {
-            if let Some(window) = self.window.as_ref() {
-                window.window.request_redraw();
-            }
+            self.ask_redraw();
         }
         // The animation clock. Watched, this is a safety net rather than the
         // pacer — `draw` asks for the next frame itself and the display answers
@@ -790,9 +754,7 @@ impl ApplicationHandler<()> for App {
         // already pacing costs a wake and no frame.
         if now >= self.next_tick {
             self.next_tick = now + self.redraw_interval();
-            if let Some(window) = self.window.as_ref() {
-                window.window.request_redraw();
-            }
+            self.ask_redraw();
         }
         // Three reasons to come back, so three terms: the animation clock,
         // whatever the UI is animating, and the next step a held key is owed.
