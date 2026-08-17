@@ -652,23 +652,34 @@ never a half-routed frame.
       that no window claimed. Releasing over a shop or a skill sheet still drops
       on the ground behind it, because neither pane answers a drop and neither
       is a place to put anything.
-- [ ] **S7. Delete the branches.** *Most of this step happened as its kinds
-      moved.* `hover_container_item` and every `WindowSubject` match inside the
-      old handlers are gone with S6, along with `scroll_vendor`/`scroll_skills`
-      (S1, S2), `release_on_own_window`/`hover_paperdoll_item` (S5) and
-      `release_container_item`'s match on the window kind (S6). `App` does not
-      know what any of the six is.
+- [x] **S7. Delete the branches.** ✅ *Most of this step had already happened as
+      its kinds moved.* `hover_container_item` and every `WindowSubject` match
+      inside the old handlers were gone with S6, along with
+      `scroll_vendor`/`scroll_skills` (S1, S2),
+      `release_on_own_window`/`hover_paperdoll_item` (S5) and
+      `release_container_item`'s match on the window kind (S6). `App` did not
+      know what any of the six was.
 
-      **What is actually left is a rung, not a branch.** Three things reach
-      `legacy_window_input` and none of them is a window kind: the press that
-      picks a window up when no pane wanted it (`press_on_own_window`, now the
-      raise-and-grab tail), and the world's own press and drop
-      (`press_world_item`/`drag_world_item`, `drop_hand_on_ground`), which no
-      pane can answer for because the ground is not a window. They have to run
-      *behind* the panes — a shop's Confirm and a sheet's thumb are asked first
-      — so `manager_gestures` cannot take them. The step is to give them a rung
-      named after what they are, and to delete `legacy_window_input` with the
-      word "legacy" in it.
+      **What was actually left was a rung, not a branch, and it has one now.**
+      `legacy_window_input` is `App::fallback_gestures` — the router's third
+      rung, named for what it is: the press that picks a window up when no pane
+      wanted it (`press_on_own_window`, the raise-and-grab tail), and the
+      world's own press and drop (`press_world_item`/`drag_world_item`,
+      `drop_hand_on_ground`), which no pane can answer for because the ground is
+      not a window. Neither moved *where* it runs — both still run **behind**
+      the panes, because a shop's Confirm and a sheet's thumb are asked first —
+      only what it is called changed, and the word "legacy" is gone from the
+      client.
+
+      **The other half of the step, folded in: `window_under_pointer` asked
+      once.** The Backlog entry "worked out once per move and twice per press"
+      is closed. `App::deliver` asks `window_under_pointer` a single time per
+      input and hands the answer down as `owner` to `manager_gestures`,
+      `offer_to_panes` and `fallback_gestures` — none of which asks again.
+      `press_on_own_window` and `close_window_under_pointer` take `owner` as a
+      parameter instead of calling the walk themselves; the texel pick against
+      every window's last frame that a press used to pay for up to three times
+      now runs once.
 - [ ] **S8. The test the wheel defect would have failed.** A pane exercised with
       a `PaneCtx` and no `App`: scroll a catalogue to its end, offer one more
       notch, assert `taken` and `!redraw`.
@@ -738,25 +749,22 @@ never a half-routed frame.
   from the shell rather than from the event loop, so `App::apply` delivers it —
   an input is an input, and this one is addressed — and the record is cleared
   **after** the walk, because the walk is what reads it to find the addressee.
-- **The window under the pointer is worked out once per move and twice per
-  press.** `offer_to_panes` asks `window_under_pointer` for every input, which
-  is the answer every pane is handed as `PaneCtx::under_pointer`. The second
-  asker on a press is `manager_gestures`' keyboard release (S4), which runs
-  ahead of the walk that is about to ask it anyway — and the third, on a press
-  that no pane wanted, is `press_on_own_window`'s own first line. *The per-move
-  askers are gone: `hover_paperdoll_item` went with S5 and
-  `hover_container_item` with S6, and the press S5's pane declined — which cost
-  two extra walks through the legacy chain — is answered by a pane as of S6.*
-  Each walk is the window list against the pointer through `gump_art::pick`,
-  which reads the atlas per texel. One answer per event, handed to whoever needs
-  it, when S7 writes the manager's fallback rung — which is the last asker.
+- ~~**The window under the pointer is worked out once per move and twice per
+  press.**~~ **Closed by S7.** `App::deliver` asks `window_under_pointer` once
+  per input and hands the answer down as `owner` — to `manager_gestures`'s
+  keyboard release (S4), to `offer_to_panes`'s walk (which used to ask again
+  itself), and to `fallback_gestures`'s `press_on_own_window` and
+  `close_window_under_pointer`, both of which now take `owner` as a parameter
+  instead of calling the walk. One texel pick against the window list per
+  event, not up to three.
 - **`close_window`'s dialog arm answers the same `None` to two questions.** It
   asks the window's pane for a dismissal, and `None` means `{ noclose }` — the
   window stays up and the press was still the window's. But the lookup that
   finds the pane can also come back empty (no such window, or a `Dialog` subject
   holding some other pane, which `AnyPane::of` makes impossible), and that folds
   into the same arm. Both currently do the harmless thing; a third reason to
-  answer `None` would not. Worth splitting when S7 rewrites this door, which is
+  answer `None` would not. Worth splitting when this door is next rewritten —
+  S7 gave the fallback rung a name but did not touch this one, which is still
   the last thing in `App` that knows what a dialog is.
 - ~~**A vendor's ACCEPT and CLEAR tint on hover, and nothing asks for a frame
   when it changes.**~~ **Closed by S5, in the pairing the entry itself asked
@@ -768,27 +776,19 @@ never a half-routed frame.
   (`vendor::Window::action_at` on the raw cursor, no z-gate), because a
   memory computed by a stricter rule than the picture's would ask for no
   frame while the picture changed.
-- **The press that picks a window up is the manager's, and it lives in the
-  legacy chain's tail.** A press that hit no furniture ends
-  `press_on_own_window` with `raise_window` and a `dragging`, and that is what
-  moves a status frame today — the pane declines every input, exactly as
-  decision 2 says it should. But `manager_gestures` runs *ahead* of the panes,
-  and this has to run *behind* them: a shop's Confirm button and a sheet's
-  thumb have to be asked first. So S7 cannot simply move it up there; the
-  router grows a fourth rung — the manager's gestures that are the *fallback*
-  rather than the precondition — or `deliver` learns to run one after the
-  chain has passed. Worth settling when S7 writes it, and worth knowing now
-  that "delete the branches" leaves one behind that is not a branch.
+- ~~**The press that picks a window up is the manager's, and it lives in the
+  legacy chain's tail.**~~ **Closed by S7.** `App::fallback_gestures` is the
+  router's fourth rung, exactly as this entry proposed: the manager's own
+  gestures that are a *fallback* rather than a precondition, reached only after
+  every pane has declined. `press_on_own_window` (the raise-and-grab tail) and
+  the world's own press and drop (`press_world_item`/`drag_world_item`,
+  `drop_hand_on_ground`/`release_world_press`) all live there now, unmoved from
+  where they ran — the fix was the name, not the order.
 
-  **S6 gave it two neighbours**, and they want the same rung: the world's own
-  item press (`press_world_item`, `drag_world_item`, `release_world_press`) and
-  the drop of a held item onto a tile (`drop_hand_on_ground`). Neither is a
-  window's — the ground has no pane — and both have to be asked *after* every
-  window has declined, which is the same rung and the same reason.
-
-  One wart to fix while writing it: that tail reads the grab offset off
-  `own_windows.last()` rather than off the window it is picking up, and it is
-  right only because `raise_window` has just moved that window to the end.
+  One wart the entry named is still there and was not this step's to fix: that
+  tail reads the grab offset off `own_windows.last()` rather than off the
+  window it is picking up, right only because `raise_window` has just moved
+  that window to the end.
 - **A press on a bag over a window over another bag is offered a plate it
   cannot see.** The plates hang below a window's own art, so a pane is offered
   their press with `under_pointer` false — and the walk only stops *after* the
@@ -841,7 +841,7 @@ never a half-routed frame.
 
 ## Status
 
-**S0 through S6 built** (2026-08-17). The router is real, every input the
+**S0 through S7 built** (2026-08-17). The router is real, every input the
 window layer sees goes through it, and **all six kinds have moved in**: a shop
 owns its scroll position, its chosen quantities and its tinted plate; the
 skill sheet owns its tree and the control the mouse is holding; the status
@@ -877,12 +877,17 @@ now, on the shop and on the doll alike.
 **A bag's plate raises its window** (S6): pressing "Take all" or "Stack all"
 puts that bag on top, which every other press on a window's furniture already
 did.
+**Nothing at all** (S7): a rename and a single `window_under_pointer` ask per
+event, where up to three used to run.
 
 The `||` chain the plan was written against is **gone**, and so is the last
-window kind behind it. `legacy_window_input` answers no window at all now: its
-wheel and key arms are empty, its press arm is the raise-and-grab tail, and its
-release and move arms are the world's — an item on the ground has no pane to
-keep its press in.
+window kind behind it. `App::fallback_gestures` — `legacy_window_input`,
+renamed — answers no window at all now: its wheel and key arms are empty, its
+press arm is the raise-and-grab tail, and its release and move arms are the
+world's — an item on the ground has no pane to keep its press in. The word
+"legacy" is gone from the client, and `App::window_under_pointer` is asked once
+per input in `App::deliver` and handed down as `owner`, rather than asked again
+by each of the three rungs that need it.
 
 **No window's openness is kept outside the list of open windows.**
 `Windows::skills` went with S2 and `Windows::status` with S3, and
@@ -904,13 +909,8 @@ ground.
 The `#[expect(dead_code)]` checklist is **empty**. `PaneCtx::modifiers` is read
 by the bag's Shift-split, which was the last entry on it.
 
-Next is S7, and it is smaller than its name: "delete the branches" mostly
-happened as each kind moved. What is left is one *rung* — the manager's own
-gestures that run behind the panes rather than ahead of them (the press that
-picks a window up, the world's item press, the drop onto the ground) — and the
-`window_under_pointer` walks that would be handed an answer instead of asking
-for one. S8 is still the test through `handle`, and still blocked on the same
-thing: a `PaneCtx` needs a `&Resources`, which is built out of real client
-asset files. *S6 narrowed that*: `container::Window::item_at` is exercised
-against a real `GumpAtlas` built from two blocks, so the hit test at least is
-pinned without an install.
+Next is S8, the last step, and it is still the test through `handle`, still
+blocked on the same thing: a `PaneCtx` needs a `&Resources`, which is built out
+of real client asset files. *S6 narrowed that*: `container::Window::item_at` is
+exercised against a real `GumpAtlas` built from two blocks, so the hit test at
+least is pinned without an install.

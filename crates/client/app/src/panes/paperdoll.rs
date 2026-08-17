@@ -12,7 +12,7 @@
 //! # The worn item, which arrived at step 6
 //!
 //! A press on a worn item of this client's own body starts an item transfer,
-//! and step 5 **declined** that one press so that the legacy chain could
+//! and step 5 **declined** that one press so that the fallback chain could
 //! answer it: the machinery it needs — a press that may become a lift, and the
 //! hand it fills — moved with the container at step 6. Both halves are here
 //! now. A worn item is pressed, dragged off the doll and lifted like an icon

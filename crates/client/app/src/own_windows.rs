@@ -439,19 +439,22 @@ impl App {
     /// which is a unit struct, or a window that has never been drawn and has no
     /// layout to hit-test.
     ///
-    /// It is in the router's third rung rather than in `manager_gestures`
-    /// because it has to run **behind** the panes: a shop's Confirm button and
-    /// a sheet's thumb are asked first, and only a press none of them wanted
-    /// picks the window up. The plan's step 7 gives that a rung of its own.
+    /// It is in the router's third rung (`App::fallback_gestures`) rather than
+    /// in `manager_gestures` because it has to run **behind** the panes: a
+    /// shop's Confirm button and a sheet's thumb are asked first, and only a
+    /// press none of them wanted picks the window up.
     ///
     /// The press while the hand is full is **not** asked about here: it is the
     /// manager's first question, ahead of every pane and of this — see
     /// `App::manager_gestures` and decision 7 in `docs/window_components.md`.
-    pub(crate) fn press_on_own_window(&mut self) -> bool {
+    ///
+    /// `owner` is `App::window_under_pointer`'s answer, asked once by
+    /// `App::deliver` and handed down rather than asked again here.
+    pub(crate) fn press_on_own_window(&mut self, owner: Option<WindowSubject>) -> bool {
         // A press that missed every window gives the keyboard back, and that is
         // the manager's own gesture now — see `App::manager_gestures`, which
         // runs it ahead of every pane and of this.
-        let Some(subject) = self.window_under_pointer() else {
+        let Some(subject) = owner else {
             return false;
         };
         self.raise_window(subject);
@@ -500,8 +503,11 @@ impl App {
     /// a window never reaches the world, the same way a press over a panel does
     /// not. Answers whether the press was the window's — see
     /// [`App::close_window`].
-    pub(crate) fn close_window_under_pointer(&mut self) -> bool {
-        let Some(subject) = self.window_under_pointer() else {
+    ///
+    /// `owner` is `App::window_under_pointer`'s answer, asked once by
+    /// `App::deliver` and handed down rather than asked again here.
+    pub(crate) fn close_window_under_pointer(&mut self, owner: Option<WindowSubject>) -> bool {
+        let Some(subject) = owner else {
             return false;
         };
         self.close_window(subject)

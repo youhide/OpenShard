@@ -13,17 +13,17 @@
 //! 2. **The panes, top down, first `taken` wins.** Painter's order is z-order,
 //!    so the last window in the list is the one drawn over the others and the
 //!    first one offered an event.
-//! 3. **The manager's own gestures that are a *fallback* rather than a
-//!    precondition.** The `App` methods in [`crate::own_windows`], reached only
-//!    when no pane answered — so they are never a second opinion about the same
-//!    click. No window kind is answered here any more (step 6 took the last):
-//!    what is left is the press that picks a window up, and the world's own
-//!    press and drop, which no window can answer for because the ground is not
-//!    a window.
+//! 3. **[`App::fallback_gestures`], the manager's own gestures that are a
+//!    *fallback* rather than a precondition.** Reached only when no pane
+//!    answered — so it is never a second opinion about the same click. No
+//!    window kind is answered here at all (step 6 took the last): what is left
+//!    is the press that picks a window up, and the world's own press and drop,
+//!    which no window can answer for because the ground is not a window.
 //!
-//! Step 3 is where the plan's step 7 finishes: those leftovers want a rung
-//! that is named after what they are, rather than the one the scaffolding left
-//! behind. Steps 1 and 2 are the shape that stays.
+//! [`App::window_under_pointer`] is asked once, here, and handed down as
+//! `owner` rather than asked again by steps 1 and 3 — the walk is a texel pick
+//! against every window's last frame, and three of those per press was step 7's
+//! own Backlog entry.
 
 use std::time::Instant;
 
@@ -45,12 +45,16 @@ impl App {
     /// with the event: no map zoom under a pointer that is over a shop, no tile
     /// selected behind a bag that was only being raised.
     pub(crate) fn deliver(&mut self, input: Input) -> Response {
-        let mut response = self.manager_gestures(input);
+        // Asked once for the whole of `deliver`: a texel pick against every
+        // window's last frame, wanted by all three rungs below and, before this,
+        // recomputed by each of them that needed it.
+        let owner = self.window_under_pointer();
+        let mut response = self.manager_gestures(input, owner);
         if !response.taken {
-            response.absorb(self.offer_to_panes(input));
+            response.absorb(self.offer_to_panes(input, owner));
         }
         if !response.taken {
-            response.absorb(self.legacy_window_input(input));
+            response.absorb(self.fallback_gestures(input, owner));
         }
         response
     }
@@ -63,7 +67,7 @@ impl App {
     /// (see [`Input::Move`]), and the release that let go of a frame is also the
     /// release that drops a held item into the bag under it — swallowing it here
     /// would strand the hand.
-    fn manager_gestures(&mut self, input: Input) -> Response {
+    fn manager_gestures(&mut self, input: Input, owner: Option<WindowSubject>) -> Response {
         match input {
             Input::Move => {
                 if self.drag_own_window() {
@@ -82,9 +86,7 @@ impl App {
             // no pane is offered a press that is not on it — a window cannot
             // notice the player clicking somewhere else. Not `taken`: the world
             // still gets the click that put the field down.
-            Input::Press(Button::Left)
-                if self.windows.keyboard.is_some() && self.window_under_pointer().is_none() =>
-            {
+            Input::Press(Button::Left) if self.windows.keyboard.is_some() && owner.is_none() => {
                 self.windows.keyboard = None;
                 Response::stale()
             }
@@ -156,12 +158,9 @@ impl App {
     ///
     /// The walk also stops *after* the window the pointer is over, for the two
     /// inputs that are somewhere: a press and a notch. Nothing below the window
-    /// under the pointer may answer either, which is the rule every one of the
-    /// legacy handlers opens with (`window_under_pointer`) and would otherwise
-    /// be a rule six panes each had to remember. It matters most while the
-    /// migration is half done: a kind that has not moved in yet declines
-    /// everything, so without this a moved-in pane two windows down would
-    /// happily take a click that landed on a bag drawn over it.
+    /// under the pointer may answer either — the rule `owner` states once here
+    /// rather than a rule six panes would each have had to ask
+    /// `window_under_pointer` to remember for themselves.
     ///
     /// A release and a move are not bounded. A release finishes a press
     /// wherever the pointer has got to since — a paperdoll's button has to come
@@ -176,12 +175,7 @@ impl App {
     /// a bag over it, and the letters must not follow the click. The walk below
     /// is still the walk — one place builds a context and one place performs
     /// what came back — with everything but the addressee skipped.
-    fn offer_to_panes(&mut self, input: Input) -> Response {
-        // Asked first, because it is a `&self` method and reads the whole of
-        // `App`: the z-order out of `own_windows` and last frame's pictures out
-        // of `drawn_windows`. It is the one question a pane cannot answer about
-        // itself — see [`PaneCtx::under_pointer`].
-        let owner = self.window_under_pointer();
+    fn offer_to_panes(&mut self, input: Input, owner: Option<WindowSubject>) -> Response {
         let located = matches!(input, Input::Press(_) | Input::Wheel(_));
         // Asked here for the same reason `owner` is: both are the manager's
         // answer about a window rather than a pane's about itself. `None` for a
@@ -354,15 +348,13 @@ impl App {
         }
     }
 
-    /// What is left of the chain that was in `event_loop.rs`, behind the one
-    /// type the router speaks.
+    /// The third rung: the manager's own gestures that are a *fallback* rather
+    /// than a precondition, reached only when no pane has taken the input.
     ///
-    /// Every chain here was that chain, in its order, with one difference: what
-    /// it answers is a [`Response`] and not a `bool`, so the caller can tell
-    /// "the window took it" from "the frame is stale". Step 6 took the last
-    /// *window kind* out of it; what remains is the manager's own leftovers,
-    /// and they are here rather than in `manager_gestures` because they have to
-    /// run **behind** the panes:
+    /// Nothing here is a window kind — step 6 took the last of those out — so
+    /// this is not a `match` over what was clicked, the way it used to be. What
+    /// is left is the manager's own leftovers, and they have to run **behind**
+    /// the panes rather than beside `manager_gestures`:
     ///
     /// - the press that picks a window up, which every pane that declines a
     ///   press falls through to (a status frame is dragged this way);
@@ -370,13 +362,12 @@ impl App {
     ///   ground — the one destination that is not a window, so no pane can
     ///   answer for it.
     ///
-    /// The plan's step 7 gives both a rung of their own; the Backlog entry
-    /// about "the press that picks a window up is the manager's" is what that
-    /// rung is for.
-    fn legacy_window_input(&mut self, input: Input) -> Response {
+    /// Both are named for what they are rather than for what they used to be
+    /// beside — the plan's step 7, finished.
+    fn fallback_gestures(&mut self, input: Input, owner: Option<WindowSubject>) -> Response {
         match input {
             Input::Press(Button::Left) => {
-                if self.press_on_own_window() {
+                if self.press_on_own_window(owner) {
                     Response::changed()
                 } else {
                     Response::ignored()
@@ -399,7 +390,7 @@ impl App {
             // event loop: a targeting cursor is put out before a window is taken
             // down under it.
             Input::Press(Button::Right) => {
-                if self.close_window_under_pointer() {
+                if self.close_window_under_pointer(owner) {
                     Response::changed()
                 } else {
                     Response::ignored()

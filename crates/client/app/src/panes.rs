@@ -17,20 +17,21 @@
 //! its layout and its input. `App` no longer knows what any of them is, and no
 //! window's input is answered anywhere but in its own pane.
 //!
-//! What [`crate::app::App::deliver`] still reaches *after* the panes is not a
-//! window kind. It is the press that picks a window up when no pane wanted it,
-//! and the two gestures over the world that look like a window's and are not:
-//! the press on an item lying on the ground, and the drop of a held item onto
-//! it. Step 7 of the plan gives those a rung of their own.
+//! What [`crate::app::App::deliver`] still reaches *after* the panes, in
+//! `App::fallback_gestures`, is not a window kind. It is the press that picks a
+//! window up when no pane wanted it, and the two gestures over the world that
+//! look like a window's and are not: the press on an item lying on the ground,
+//! and the drop of a held item onto it. Step 7 of the plan gave those that rung.
 //!
 //! # Two names that differ from the plan's
 //!
 //! The plan writes `trait Pane` and `enum Pane` in the same breath, which
 //! cannot both exist. The trait keeps the name — it is the concept — and the
 //! static-dispatch enum over its implementors is [`AnyPane`], the ordinary Rust
-//! spelling of that. The plan's `Panes::deliver` is [`crate::app::App::deliver`]
-//! for as long as the router still has to reach the legacy handlers, which need
-//! the whole `App`; the loop itself already takes nothing but the pane list.
+//! spelling of that. The plan's `Panes::deliver` is [`crate::app::App::deliver`],
+//! because the router still has to reach `App::fallback_gestures`, which needs
+//! the whole `App`; the loop over the panes itself already takes nothing but the
+//! pane list.
 
 use std::time::Instant;
 
@@ -350,7 +351,7 @@ impl Response {
     /// and the effects keep their order.
     ///
     /// For the two places one input has more than one answer — the manager's
-    /// own gestures beside a pane's, and the legacy handlers beside both.
+    /// own gestures beside a pane's, and the fallback rung beside both.
     pub fn absorb(&mut self, other: Self) {
         self.taken |= other.taken;
         self.redraw |= other.redraw;
