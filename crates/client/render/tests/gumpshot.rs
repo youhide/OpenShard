@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 
 use openshard_client_model::Skill as SkillLine;
 use openshard_client_render::atlas::FontAtlas;
-use openshard_client_render::gump::{self, ArtFiles, GumpAtlas, GumpPixel, Picture, Scissor};
+use openshard_client_render::gump::{self, ArtFiles, GumpArt, GumpAtlas, GumpPixel, Picture, Scissor};
 use openshard_client_render::mobiles::EquipmentLayer;
 use openshard_client_render::paperdoll::{self, Wearer, Whose};
 use openshard_client_render::skills::{self, Standing, Tree};
@@ -211,6 +211,42 @@ fn bag(client: &Client, out: &Path) {
     ];
     let pictures = container::window(BACKPACK, &contents, GumpPixel::new(0, 0));
     shoot(client, &pictures, &[], out, "container-backpack");
+
+    // The same bag with its client-side action under it, in both faces. The
+    // button hangs off the background's bottom edge and its caption off the
+    // button's right edge, so where those two land is arithmetic over two art
+    // sizes and neither is written down — which is the whole reason to look.
+    let mut atlas = GumpAtlas::build(
+        client.files(),
+        [
+            GumpArt::Gump(BACKPACK),
+            GumpArt::Gump(container::ACTION_UP),
+            GumpArt::Gump(container::ACTION_DOWN),
+        ],
+    )
+    .expect("the bag and both button faces");
+    let button =
+        container::stack_all_button(&atlas, BACKPACK, GumpPixel::new(0, 0)).expect("both are packed");
+    // `shoot` grows an atlas of its own from the pictures; this one only
+    // answered the two sizes the placement is made of.
+    atlas.take_dirty();
+    for (lit, name) in [(false, "container-action-up"), (true, "container-action-down")] {
+        let pictures = container::window_with_action(
+            BACKPACK,
+            &contents,
+            GumpPixel::new(0, 0),
+            None,
+            Some((button, container::action_face(lit))),
+        );
+        let caption = GumpLabel {
+            at: button.label_at(),
+            hue: Hue(0x0386),
+            clip: None,
+            text: container::STACK_ALL_LABEL,
+            font: openshard_protocol::speech::Font(1),
+        };
+        shoot(client, &pictures, &[(caption, None)], out, name);
+    }
 }
 
 /// A `0xB0` dialog, laid out through the same path the shard's own reach: a

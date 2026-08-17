@@ -259,8 +259,20 @@ const TITLE: Graphic = Graphic(0x0834);
 /// The rule the reference draws under the title and again above the total.
 const RULE: Graphic = Graphic(0x082B);
 
-/// The plate the total is written beside.
-const TOTAL_PLATE: Graphic = Graphic(0x0836);
+/// The instruction the reference prints across the bottom of the scroll, and
+/// which the total is written to the right of.
+///
+/// `new GumpPic(25, Height - 85, 0x0836, 0)` — `_bottomComment`. **Not a
+/// plate**, which is what this constant used to be called: the graphic is
+/// 210×19 pixels of the sentence "Left-click the button before a skill to use
+/// the skill. / Skills without buttons are accessed in the world." Nothing is
+/// written *on* it and nothing can be — it is already text.
+///
+/// The wrong name cost a real defect elsewhere. `container.rs` reused this
+/// graphic as a blank background for its own captions on the strength of that
+/// name and of its size, so every bag in the client drew that sentence under
+/// itself. Both readers now name the art for what the artist drew.
+const BOTTOM_COMMENT: Graphic = Graphic(0x0836);
 
 /// The arrow beside an open heading — `IsMinimized`'s `value ? 0x0827 : 0x826`.
 const HEADING_OPEN: Graphic = Graphic(0x0827);
@@ -312,8 +324,17 @@ const BOTTOM_WIDTH: i32 = 314;
 /// Where the rule above the total sits, which is also where the list stops.
 const RULE_BOTTOM_Y: i32 = HEIGHT - BOTTOM_HEIGHT - 40;
 
-/// Where the plate the total is written beside sits.
-const TOTAL_PLATE_AT: GumpPixel = GumpPixel::new(25, HEIGHT - BOTTOM_HEIGHT - 31);
+/// Where that instruction sits, and so where the total beside it starts.
+///
+/// The reference's own `x` of 25, and a `y` measured on this window's picture
+/// rather than taken from its `Height - 85`: that scroll is resizable and this
+/// one is not, and its bottom piece is not this one's — see [`HEIGHT`] and
+/// [`BOTTOM_HEIGHT`].
+const BOTTOM_COMMENT_AT: GumpPixel = GumpPixel::new(25, HEIGHT - BOTTOM_HEIGHT - 31);
+
+/// How wide it is, which is where the total is written from —
+/// `_skillsLabelSum.X = _bottomComment.X + _bottomComment.Width + 5`.
+const BOTTOM_COMMENT_WIDTH: i32 = 210;
 
 /// The viewport: where the rows are drawn, and the box they are cut to.
 ///
@@ -543,13 +564,17 @@ pub fn window(
         y += height_of(row);
     }
     scrollbar(&mut sheet, at, tree.offset(), content_height(names, groups, tree));
-    // The total, on its plate under the list. Every skill the shard has stated,
-    // including the ones whose heading is shut — it is the character's total and
-    // not the visible rows'.
+    // The total, past the right-hand end of the instruction under the list.
+    // Every skill the shard has stated, including the ones whose heading is
+    // shut — it is the character's total and not the visible rows'.
     sheet.lines.push(Line {
-        // Beside the plate rather than on it — `_bottomComment.X + Width + 5`,
-        // five pixels past its right-hand edge.
-        at: at.offset(GumpPixel::new(TOTAL_PLATE_AT.x + 210 + 5, TOTAL_PLATE_AT.y + 5)),
+        // Beside the instruction rather than on it — it is a picture of a
+        // sentence, so there is nowhere on it to write. `_bottomComment.X +
+        // Width + 5`, five pixels past its right-hand edge.
+        at: at.offset(GumpPixel::new(
+            BOTTOM_COMMENT_AT.x + BOTTOM_COMMENT_WIDTH + 5,
+            BOTTOM_COMMENT_AT.y + 5,
+        )),
         text: tenths(total.min(u32::from(u16::MAX)) as u16),
         font: TOTAL_FONT,
         hue: HEADING_HUE,
@@ -588,7 +613,7 @@ fn frame(sheet: &mut Sheet, at: GumpPixel) {
         Picture::plain(GumpArt::Gump(TITLE), at.offset(GumpPixel::new(140, 12))),
         Picture::plain(GumpArt::Gump(RULE), at.offset(GumpPixel::new(50, 42))),
         Picture::plain(GumpArt::Gump(RULE), at.offset(GumpPixel::new(50, RULE_BOTTOM_Y))),
-        Picture::plain(GumpArt::Gump(TOTAL_PLATE), at.offset(TOTAL_PLATE_AT)),
+        Picture::plain(GumpArt::Gump(BOTTOM_COMMENT), at.offset(BOTTOM_COMMENT_AT)),
     ] {
         sheet.pictures.push(picture);
     }
@@ -983,7 +1008,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("0x{:04X} is not in the window", graphic.0))
                 .scissor
         };
-        for parchment in [SCROLL_TOP, SCROLL_BOTTOM, TITLE, TOTAL_PLATE] {
+        for parchment in [SCROLL_TOP, SCROLL_BOTTOM, TITLE, BOTTOM_COMMENT] {
             assert_eq!(cut(parchment), None, "the frame is not cut to the list's box");
         }
         // No thumb in this list: four skills do not fill the window, which is

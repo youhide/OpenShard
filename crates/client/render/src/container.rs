@@ -22,7 +22,7 @@
 use crate::items::{HIGHLIGHT_HUE, displayed_graphic};
 use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::Graphic;
 
 use crate::gump::{GumpArt, GumpAtlas, GumpPixel, Picture};
 
@@ -32,33 +32,68 @@ use crate::gump::{GumpArt, GumpAtlas, GumpPixel, Picture};
 /// for client actions. Keeping this control just below that art makes it
 /// available for every chest and corpse without guessing at free pixels inside
 /// the many different container backgrounds.
-pub const TAKE_ALL_LABEL: &str = "[ Take all ]";
+///
+/// No brackets around the words any more: they were there to make a line of
+/// text read as something pressable, back when the text *was* the control.
+/// [`ACTION_UP`] is a button, so the caption is free to be a caption.
+pub const TAKE_ALL_LABEL: &str = "Take all";
 /// Caption for compacting like piles through ordinary client drag packets.
-pub const STACK_ALL_LABEL: &str = "[ Stack all ]";
+pub const STACK_ALL_LABEL: &str = "Stack all";
 
-/// The plate a bag's client-side caption is written over.
+/// The face a bag's client-side action is drawn in while nothing is on it,
+/// and the face it takes while the pointer is.
 ///
-/// Reused rather than synthesised: `docs/findings.md` recorded that no
-/// *small, tightly-fitting* shipped gump matches the plate's old 72×18/80×18
-/// box, and the project's resolution was to stop asking for a tight fit and
-/// reuse a plate that is already shipped and already used this exact way —
-/// `crates/client/render/src/skills.rs`'s own `TOTAL_PLATE`, the plate its
-/// skill total is written beside. Same graphic, same role, confirmed here
-/// the same way it was confirmed there: `cargo run -p openshard-uofiles
-/// --example gump_probe -- 0x0836`, 210×19.
+/// `0x0FA5`/`0x0FA7`, 30×22 — the pair a shard's own `0xB0` dialogs name as
+/// `4005`/`4007`, and the only *generic* button the client ships: every
+/// button on the paperdoll has its word baked into the art (`0x07D6` is
+/// "OPTIONS", `0x07DF` is "SKILLS", and so on through
+/// [`crate::paperdoll`]'s six), so none of them can carry a caption of ours.
 ///
-/// Generously sized on purpose (`docs/window_components.md`'s backlog entry
-/// this closes) — a caption a third that wide has room to spare, which is
-/// the point: fitting the art was never worth chasing, only covering the
-/// text with real pixels was.
-pub const PLATE_BACKGROUND: Graphic = Graphic(0x0836);
+/// This replaces `0x0836`, which was **not a plate at all**. That graphic is
+/// the reference skill window's `_bottomComment` — `new GumpPic(25, Height -
+/// 85, 0x0836, 0)` — and its 210×19 pixels are a picture of the sentence
+/// "Left-click the button before a skill to use the skill. / Skills without
+/// buttons are accessed in the world." Every bag in this client drew that
+/// sentence under itself, tinted purple when the pointer rested on it. The
+/// old note here, and `docs/findings.md`'s entry behind it, reasoned about
+/// its *size* and never looked at its pixels.
+///
+/// Two faces rather than one tint: a button that answers a press by changing
+/// picture is what every other button in this client and in the reference
+/// does, so the hue [`crate::items::HIGHLIGHT_HUE`] used to do the job with
+/// goes back to meaning what it means everywhere else — the icon under the
+/// cursor.
+pub const ACTION_UP: Graphic = Graphic(0x0FA5);
+/// The pressed face — see [`ACTION_UP`].
+pub const ACTION_DOWN: Graphic = Graphic(0x0FA7);
+
+/// How far the caption sits from the button's right edge.
+const LABEL_GAP: i32 = 4;
+
+/// How far down the caption's own top edge sits, so a line of
+/// [`crate::text`]'s face reads as centred against a 22 px button rather than
+/// hanging off its top.
+const LABEL_DROP: i32 = 4;
+
+/// Which face an action button wears: the pressed one while the pointer is on
+/// it.
+///
+/// One function rather than an `if` at each of the two call sites the old
+/// tint had — the layout that draws the picture and the test that pins it.
+#[must_use]
+pub const fn action_face(lit: bool) -> Graphic {
+    match lit {
+        true => ACTION_DOWN,
+        false => ACTION_UP,
+    }
+}
 
 /// A rectangular client-side container action.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ActionButton {
     /// Top-left corner in gump pixels.
     pub at: GumpPixel,
-    /// Width and height of the clickable plate.
+    /// Width and height of the clickable button — [`ACTION_UP`]'s own.
     pub size: (i32, i32),
 }
 
@@ -70,9 +105,22 @@ impl ActionButton {
         (0..self.size.0).contains(&x) && (0..self.size.1).contains(&y)
     }
 
-    /// Where its caption starts.
+    /// Where its caption starts: clear of the button's right edge, rather
+    /// than on top of it.
+    ///
+    /// The caption used to be written *over* the picture, because the picture
+    /// was 210 px of blank-looking art. A real button is 30 px wide and has a
+    /// drawing on it, so the text goes beside it — the shape every `0xB0`
+    /// dialog the shard sends already has, a `button` and a `text` on the same
+    /// row.
+    ///
+    /// Measured off [`Self::size`] rather than off [`ACTION_UP`]'s own 30×22,
+    /// for [`size`]'s reason: the button's width is already a fact this value
+    /// carries, and writing the art's size down a second time lets the two
+    /// disagree.
     pub const fn label_at(self) -> GumpPixel {
-        self.at.offset(GumpPixel::new(3, 2))
+        self.at
+            .offset(GumpPixel::new(self.size.0 + LABEL_GAP, LABEL_DROP))
     }
 }
 
@@ -105,35 +153,37 @@ pub fn size(atlas: &GumpAtlas, gump: Graphic) -> Option<(i32, i32)> {
     Some((i32::from(sprite.width), i32::from(sprite.height)))
 }
 
-/// How big the plate is: [`PLATE_BACKGROUND`]'s own size, or `None` until it
+/// How big an action button is: [`ACTION_UP`]'s own size, or `None` until it
 /// has been packed.
 ///
-/// Both plates share one graphic, so both share this — asking the atlas
-/// rather than hardcoding 210×19 a second time, for [`size`]'s own reason: a
-/// number written down beside the art's real size is a second statement of
-/// the same shape, and the two are free to disagree the day the art changes.
-fn plate_size(atlas: &GumpAtlas) -> Option<(i32, i32)> {
-    size(atlas, PLATE_BACKGROUND)
+/// Both actions share one pair of faces, so both share this — asking the
+/// atlas rather than hardcoding 30×22 a second time, for [`size`]'s own
+/// reason: a number written down beside the art's real size is a second
+/// statement of the same shape, and the two are free to disagree the day the
+/// art changes. The pressed face is the same size as the up one, so which of
+/// the two is asked does not matter.
+fn action_size(atlas: &GumpAtlas) -> Option<(i32, i32)> {
+    size(atlas, ACTION_UP)
 }
 
-/// The client-owned "Take all" plate immediately below a container.
+/// The client-owned "Take all" button immediately below a container.
 ///
 /// Its position depends on the container's own art, and its size on the
-/// plate's — so it is absent until both have been packed.
+/// button's — so it is absent until both have been packed.
 pub fn take_all_button(atlas: &GumpAtlas, gump: Graphic, at: GumpPixel) -> Option<ActionButton> {
     let (_, height) = size(atlas, gump)?;
     Some(ActionButton {
         at: at.offset(GumpPixel::new(0, height + 4)),
-        size: plate_size(atlas)?,
+        size: action_size(atlas)?,
     })
 }
 
-/// The compact-piles plate below the player's backpack.
+/// The compact-piles button below the player's backpack.
 pub fn stack_all_button(atlas: &GumpAtlas, gump: Graphic, at: GumpPixel) -> Option<ActionButton> {
     let (_, height) = size(atlas, gump)?;
     Some(ActionButton {
         at: at.offset(GumpPixel::new(0, height + 4)),
-        size: plate_size(atlas)?,
+        size: action_size(atlas)?,
     })
 }
 
@@ -178,31 +228,33 @@ pub fn window_highlighted(
     pictures
 }
 
-/// [`window_highlighted`], with the client-side plate drawn as a real
+/// [`window_highlighted`], with the client-side action button drawn as a real
 /// picture rather than left as text with nothing behind it.
 ///
 /// This is the fix for "a press on a bag over a window over another bag is
-/// offered a plate it cannot see" (`docs/window_components.md`'s backlog):
-/// once the plate is a picture in this list, it is exactly as pickable and
+/// offered a button it cannot see" (`docs/window_components.md`'s backlog):
+/// once the button is a picture in this list, it is exactly as pickable and
 /// exactly as occludable as the background and every icon beside it — the
 /// same [`crate::gump::pick`] walk that already resolves the rest of this
-/// window resolves the plate too, by construction, and there is no second
+/// window resolves the button too, by construction, and there is no second
 /// rule left to write for it.
 ///
-/// `plate` is `(where, what tint)` rather than recomputed here: the caller
-/// already worked out the button's position to draw the caption over it and
-/// to hit-test a press against it, and asking a second time is the exact
-/// "one rule, three readers" this window's plate has already cost once.
-pub fn window_with_plate(
+/// `action` is `(where, which face)` rather than recomputed here: the caller
+/// already worked out the button's position to place the caption beside it
+/// and to hit-test a press against it, and asking a second time is the exact
+/// "one rule, three readers" this window's button has already cost once. The
+/// face comes from [`action_face`], so what is drawn and what the pointer is
+/// told it is on cannot drift.
+pub fn window_with_action(
     gump: Graphic,
     contents: &[ContainedItem],
     at: GumpPixel,
     highlighted: Option<Serial>,
-    plate: Option<(ActionButton, Hue)>,
+    action: Option<(ActionButton, Graphic)>,
 ) -> Vec<Picture> {
     let mut pictures = window_highlighted(gump, contents, at, highlighted);
-    if let Some((button, hue)) = plate {
-        pictures.push(Picture::plain(GumpArt::Gump(PLATE_BACKGROUND), button.at).hued(hue));
+    if let Some((button, face)) = action {
+        pictures.push(Picture::plain(GumpArt::Gump(face), button.at));
     }
     pictures
 }
@@ -265,9 +317,10 @@ mod tests {
             (GumpArt::Gump(BAG), block(140, 100)),
             (GumpArt::Item(CANDLE), block(10, 20)),
             (GumpArt::Item(COIN), block(8, 8)),
-            (GumpArt::Gump(PLATE_BACKGROUND), block(210, 19)),
+            (GumpArt::Gump(ACTION_UP), block(30, 22)),
+            (GumpArt::Gump(ACTION_DOWN), block(30, 22)),
         ])
-        .expect("four small blocks fit an atlas 2048 on a side")
+        .expect("five small blocks fit an atlas 2048 on a side")
     }
 
     fn item(serial: u32, graphic: Graphic, x: i32, y: i32) -> ContainedItem {
@@ -293,12 +346,12 @@ mod tests {
         );
     }
 
-    /// The plate's own size, not a magic number written down beside it a
-    /// second time — [`plate_size`] asks the atlas exactly as [`size`] does
+    /// The button's own size, not a magic number written down beside it a
+    /// second time — [`action_size`] asks the atlas exactly as [`size`] does
     /// for the window's own background.
     #[test]
-    fn the_plate_is_exactly_as_big_as_its_own_art() {
-        assert_eq!(plate_size(&atlas()), Some((210, 19)));
+    fn the_action_button_is_exactly_as_big_as_its_own_art() {
+        assert_eq!(action_size(&atlas()), Some((30, 22)));
         assert_eq!(
             take_all_button(
                 &GumpAtlas::pack([(GumpArt::Gump(BAG), block(140, 100))]).unwrap(),
@@ -306,62 +359,84 @@ mod tests {
                 GumpPixel::new(0, 0)
             ),
             None,
-            "the container's own art is packed but the plate's is not, so there is nowhere to draw it"
+            "the container's own art is packed but the button's is not, so there is nowhere to draw it"
         );
     }
 
     #[test]
-    fn take_all_button_sits_below_the_container_and_owns_its_plate() {
+    fn take_all_button_sits_below_the_container_and_owns_its_art() {
         let button = take_all_button(&atlas(), BAG, GumpPixel::new(300, 200))
-            .expect("the bag and the plate are packed");
+            .expect("the bag and the button are packed");
         assert_eq!(button.at, GumpPixel::new(300, 304));
-        assert_eq!(
-            button.size,
-            (210, 19),
-            "the plate's own size, generous over the caption"
-        );
+        assert_eq!(button.size, (30, 22), "the button's own art, and nothing else");
         assert!(
-            button.contains(GumpPixel::new(509, 322)),
-            "the far corner of the plate"
+            button.contains(GumpPixel::new(329, 325)),
+            "the far corner of the button"
         );
-        assert!(!button.contains(GumpPixel::new(510, 322)));
-        assert!(!button.contains(GumpPixel::new(509, 323)));
+        assert!(!button.contains(GumpPixel::new(330, 325)));
+        assert!(!button.contains(GumpPixel::new(329, 326)));
     }
 
-    /// Both plates share one graphic now, so the backpack's own is exactly
-    /// the same size as every other bag's — only the caption on it differs.
+    /// Both actions share one pair of faces, so the backpack's own button is
+    /// exactly the same size as every other bag's — only the caption beside
+    /// it differs.
     #[test]
     fn stack_all_button_uses_the_backpacks_action_slot() {
         let button = stack_all_button(&atlas(), BAG, GumpPixel::new(300, 200))
-            .expect("the bag and the plate are packed");
+            .expect("the bag and the button are packed");
         assert_eq!(button.at, GumpPixel::new(300, 304));
-        assert_eq!(button.size, (210, 19));
+        assert_eq!(button.size, (30, 22));
     }
 
-    /// A window whose plate is drawn as a real picture is exactly as
+    /// The caption clears the button rather than being written over it — the
+    /// whole reason a 30 px button can carry a word at all.
+    #[test]
+    fn the_caption_starts_past_the_buttons_right_edge() {
+        let button = take_all_button(&atlas(), BAG, GumpPixel::new(300, 200))
+            .expect("the bag and the button are packed");
+        assert_eq!(button.label_at(), GumpPixel::new(300 + 30 + 4, 304 + 4));
+        assert!(
+            !button.contains(button.label_at()),
+            "a press on the caption is not a press on the button"
+        );
+    }
+
+    /// Which face is drawn is a function of one thing, in one place.
+    #[test]
+    fn the_pressed_face_is_the_lit_one() {
+        assert_eq!(action_face(false), ACTION_UP);
+        assert_eq!(action_face(true), ACTION_DOWN);
+        assert_ne!(ACTION_UP, ACTION_DOWN, "two faces, or there is no press to see");
+    }
+
+    /// A window whose button is drawn as a real picture is exactly as
     /// occludable as its background and its icons — the whole of the fix for
-    /// "a press on a bag over a window over another bag is offered a plate
+    /// "a press on a bag over a window over another bag is offered a button
     /// it cannot see".
     #[test]
-    fn a_plate_is_a_real_picture_at_the_buttons_own_position() {
+    fn an_action_is_a_real_picture_at_the_buttons_own_position() {
         let at = GumpPixel::new(300, 200);
-        let button = take_all_button(&atlas(), BAG, at).expect("the bag and the plate are packed");
-        let pictures = window_with_plate(BAG, &[], at, None, Some((button, HIGHLIGHT_HUE)));
-        let plate = pictures.last().expect("background, then the plate");
-        assert_eq!(plate.graphic, GumpArt::Gump(PLATE_BACKGROUND));
+        let button = take_all_button(&atlas(), BAG, at).expect("the bag and the button are packed");
+        let pictures = window_with_action(BAG, &[], at, None, Some((button, action_face(true))));
+        let drawn = pictures.last().expect("background, then the button");
+        assert_eq!(drawn.graphic, GumpArt::Gump(ACTION_DOWN));
         assert_eq!(
-            plate.at, button.at,
-            "the same position the caption is written over"
+            drawn.at, button.at,
+            "the same position the press is tested against"
         );
-        assert_eq!(plate.hue, HIGHLIGHT_HUE, "tinted while the pointer is on it");
+        assert_eq!(
+            drawn.hue,
+            Hue::NONE,
+            "a button says it is pressed by changing picture, not by taking a tint"
+        );
     }
 
-    /// A shop's crate has no client-side plate at all, and asking for one
+    /// A shop's crate has no client-side action at all, and asking for one
     /// draws nothing rather than an empty picture.
     #[test]
-    fn no_plate_means_no_picture() {
+    fn no_action_means_no_picture() {
         let at = GumpPixel::new(300, 200);
-        let pictures = window_with_plate(BAG, &[], at, None, None);
+        let pictures = window_with_action(BAG, &[], at, None, None);
         assert_eq!(pictures.len(), 1, "the background, and nothing else");
     }
 

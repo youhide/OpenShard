@@ -474,8 +474,17 @@ button-shaped graphics, but every one either has text baked into the art itself
 — `0x0481`/`0x0482`/`0x0483`, ClassicUO's generic message-box OK button
 (`MessageBoxGump.cs`), decode to 28×21 with "OK" burned into the pixels, so it
 cannot carry a different caption — or is sized for a different job:
-`0x0836` (this codebase's `TOTAL_PLATE`, `skills.rs`) is 210×19, a value-label
-plate three times too wide; `0x0837` (`USE_BUTTON`) is an 11×11 icon, not a
+`0x0836` (this codebase's `BOTTOM_COMMENT`, `skills.rs`) is 210×19 and is **not
+a plate at all** — its pixels are a picture of the sentence "Left-click the
+button before a skill to use the skill. / Skills without buttons are accessed
+in the world.", which is why ClassicUO adds it as `_bottomComment`
+(`StandardSkillsGump.cs:59`). Nothing can be written on it; it is already
+text. This entry originally described it by its *size* and called it "a
+value-label plate three times too wide", and `container.rs` reused it on the
+strength of that description — so for as long as that lasted, every bag in
+this client drew that sentence under itself, tinted purple under the pointer.
+**Measure a candidate gump by decoding its pixels and looking, never by its
+dimensions.** `0x0837` (`USE_BUTTON`) is an 11×11 icon, not a
 rectangle with room for a word. ClassicUO's own equivalent controls — its
 tooltip box (`Tooltip.cs`), its right-click context menu (`ContextMenuControl.cs`),
 and `GridLootGump`, the closest thing the reference client has to a
@@ -490,6 +499,20 @@ built for a different control. Conclusion this cost the research to reach: a
 generic blank text-plate is not a gump-art concept in this protocol at all: the
 reference client renders that particular shape of "a box behind some words" as
 paint, never as art, everywhere it needs one.
+
+**So stop looking for a plate and use a button.** The question "what backs my
+caption" was the wrong one; the right one is "what does the player press". The
+client ships exactly one *generic* button — `0x0FA5`/`0x0FA7`, 30×22, the pair
+every shard names as `4005`/`4007` in its own `0xB0` dialogs — and it carries
+no baked-in word, unlike the paperdoll's six (`0x07D6` "OPTIONS", `0x07D9`
+"LOG OUT", `0x07DF` "SKILLS", `0x07EB` "STATUS", `0x07EF` "HELP", `0x07E5`
+"PEACE"). Its neighbours in the same family are the same size and shape with
+a different picture on them: `0x0FB7` "OK", `0x0FB1` a cross, `0x0FBD` a
+stack. Put the button in the art and the caption *beside* it, which is the
+row every server dialog already draws, and the plate problem does not exist:
+there is no rectangle to back, the press has a real pressed face instead of a
+hue, and the caption is free to be any length. `container.rs`'s two actions
+are drawn this way.
 
 ## Traps in tests and benchmarks
 

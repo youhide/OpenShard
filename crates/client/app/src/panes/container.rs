@@ -24,7 +24,8 @@
 //! [`openshard_client_render::container`], which is the whole of the drawing.
 //! Everything else this window does is a client-side gesture over that
 //! picture: the double click that uses an icon, the drag that lifts one, the
-//! two plates below the frame, and the tint under the pointer.
+//! two action buttons below the frame, the face one of them takes under the
+//! pointer, and the tint an icon takes under it.
 
 use std::cell::RefCell;
 use std::time::Instant;
@@ -33,7 +34,6 @@ use openshard_client_net::action::Outgoing;
 use openshard_client_net::view::WorldView;
 use openshard_client_render::container;
 use openshard_client_render::gump::{self as gump_art, GumpArt, GumpAtlas, GumpPixel, Picture};
-use openshard_client_render::items::HIGHLIGHT_HUE;
 use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::Serial;
@@ -112,16 +112,18 @@ pub struct ContainerPane {
     /// a thing the rule refused either. Per-pane, the window half is gone by
     /// construction and what is left is the icon and the clock.
     last_click: Option<(Instant, Serial)>,
-    /// Whether the pointer is on this window's plate right now, tinted on the
-    /// next frame.
+    /// Whether the pointer is on this window's action button right now, which
+    /// is the button's pressed face on the next frame.
     ///
-    /// Separate from [`Self::hovered`] on purpose: that field is an *icon*,
-    /// and the plate is furniture below the frame — the two can never be true
+    /// Separate from [`Self::hovered`] on purpose: that field is an *icon* and
+    /// answers in a hue, this one is a button and answers in a
+    /// [`face`](openshard_client_render::container::action_face) —
+    /// the action button is furniture below the frame, so the two can never be true
     /// at once, and conflating them would mean one bit answering for two
     /// different pictures. The same shape [`Self::hovered`] already is: a
     /// memory of the last move, compared against the layout's own predicate
     /// and asked to agree with what is drawn.
-    plate_hovered: bool,
+    action_hovered: bool,
     /// A one-redraw memo of [`Self::contents`], left by [`art`](Pane::art)
     /// for [`layout`](Pane::layout) to pick up rather than compute again.
     ///
@@ -138,10 +140,10 @@ pub struct ContainerPane {
     /// other — finds nothing and recomputes, and can never read a value some
     /// earlier, unrelated `art` left behind.
     ///
-    /// **Deliberately not offered to [`Self::press_plate`].** A press runs
+    /// **Deliberately not offered to [`Self::press_action`].** A press runs
     /// off the input event pump, not the redraw that fills this — there is no
     /// guaranteed gap between a redraw and the press that follows it, so the
-    /// plate's own call to [`Self::contents`] stays a fresh read every time.
+    /// action button's own call to [`Self::contents`] stays a fresh read every time.
     /// See `docs/window_components.md`'s backlog entry this closes: the
     /// broader question of a once-a-frame scratch for every pane kind stays
     /// open, and this is deliberately narrower than that.
@@ -167,7 +169,7 @@ pub struct Window {
     /// The icons, in the order the pictures after the background were built
     /// from them.
     pub contents: Vec<ContainedItem>,
-    /// The plate's caption below the frame, and the name of whatever the
+    /// The action button's caption below the frame, and the name of whatever the
     /// pointer is resting on.
     pub lines: Vec<Line>,
 }
@@ -186,16 +188,16 @@ impl Window {
     }
 }
 
-/// The one client-side plate a bag may have drawn below it.
+/// The one client-side action button a bag may have drawn below it.
 ///
 /// Neither is in the shard's art: a `0x24` names one gump and it has no spare
 /// room for a control, so both are captions this client writes under the
 /// window and tests as boxes. Which of the two a window has is decided in one
-/// place — [`ContainerPane::plate`] — and read by both the layout that draws
+/// place — [`ContainerPane::action`] — and read by both the layout that draws
 /// the caption and the press that acts on it, where there used to be a
 /// predicate in `render_passes.rs` and a second one in `App` that had to agree.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Plate {
+enum Action {
     /// Sweep the lot into the backpack. Every bag but the backpack itself:
     /// there is nowhere to sweep your own pack to.
     TakeAll,
@@ -204,9 +206,9 @@ enum Plate {
     StackAll,
 }
 
-impl Plate {
+impl Action {
     /// Where it sits and how big it is, or `None` until the window's own art
-    /// has been packed — the plate hangs off the bottom edge, so its position
+    /// has been packed — the action button hangs off the bottom edge, so its position
     /// is the background's height.
     fn button(self, atlas: &GumpAtlas, gump: Graphic, at: GumpPixel) -> Option<container::ActionButton> {
         match self {
@@ -224,7 +226,7 @@ impl Plate {
     }
 }
 
-/// Which plate a window has, as a function of the three things that decide it.
+/// Which action button a window has, as a function of the three things that decide it.
 ///
 /// A free function of what it actually reads, so the rule can be pinned
 /// without a view — and one rule, where there used to be three that had to
@@ -232,27 +234,28 @@ impl Plate {
 /// pair of `if`s in the text pass that decided which caption to draw. A window
 /// that drew "Take all" and answered nothing would look broken and be silent
 /// about it.
-fn plate_of(container: Serial, backpack: Option<Serial>, shop: bool) -> Option<Plate> {
+fn action_of(container: Serial, backpack: Option<Serial>, shop: bool) -> Option<Action> {
     if shop {
         // A shop's crate is not loot to sweep and not a pile to compact: its
         // rows are bought with a `0x3B`.
         return None;
     }
     match backpack == Some(container) {
-        true => Some(Plate::StackAll),
-        false => Some(Plate::TakeAll),
+        true => Some(Action::StackAll),
+        false => Some(Action::TakeAll),
     }
 }
 
-/// Whether the plate lights up: on it, and given a button at all.
+/// Whether the action button wears its pressed face: the pointer is on it,
+/// and there is a button at all.
 ///
 /// A free function of the two things that decide it, for the reason
-/// [`plate_of`] is: `button` is already `None` unless the *caller* has
+/// [`action_of`] is: `button` is already `None` unless the *caller* has
 /// established this window owns the pixel under the cursor
-/// (`PaneCtx::under_pointer`), so a covering window's own plate cannot make
+/// (`PaneCtx::under_pointer`), so a covering window's own action button cannot make
 /// this one glow through it, and this predicate itself stays one comparison
 /// pinned without a [`PaneCtx`].
-fn plate_is_lit(button: Option<container::ActionButton>, cursor: GumpPixel) -> bool {
+fn action_is_lit(button: Option<container::ActionButton>, cursor: GumpPixel) -> bool {
     button.is_some_and(|button| button.contains(cursor))
 }
 
@@ -349,7 +352,7 @@ impl ContainerPane {
             pressed: None,
             hovered: None,
             last_click: None,
-            plate_hovered: false,
+            action_hovered: false,
             scratch: RefCell::new(None),
         }
     }
@@ -380,24 +383,24 @@ impl ContainerPane {
         !frame.view.vendor_buys.contains_key(&self.container)
     }
 
-    /// Which client-side plate this window has below it, if any.
-    fn plate(&self, frame: &PaneFrame<'_>) -> Option<Plate> {
-        plate_of(self.container, backpack_of(frame.view), !self.ordinary(frame))
+    /// Which client-side action button this window has below it, if any.
+    fn action(&self, frame: &PaneFrame<'_>) -> Option<Action> {
+        action_of(self.container, backpack_of(frame.view), !self.ordinary(frame))
     }
 
-    /// Which plate this window has, and where it sits — resolved once so the
+    /// Which action button this window has, and where it sits — resolved once so the
     /// layout that draws it, the caption written over it, the press that
     /// acts on it and the hover state that tints it all agree by
-    /// construction. `None` until the container's own art and the plate's
-    /// are both packed, the same as [`Plate::button`] on its own.
-    fn plate_button(&self, frame: &PaneFrame<'_>) -> Option<(Plate, container::ActionButton)> {
-        let plate = self.plate(frame)?;
+    /// construction. `None` until the container's own art and the action button's
+    /// are both packed, the same as [`Action::button`] on its own.
+    fn action_button(&self, frame: &PaneFrame<'_>) -> Option<(Action, container::ActionButton)> {
+        let action = self.action(frame)?;
         let gump = *frame.view.containers.get(&self.container)?;
         // Window-local — see `PaneFrame::cursor`'s doc — so `button.at` comes
         // out measured from this window's own top-left, exactly like every
         // icon in it.
-        let button = plate.button(frame.files.gump_atlas, gump, GumpPixel::new(0, 0))?;
-        Some((plate, button))
+        let button = action.button(frame.files.gump_atlas, gump, GumpPixel::new(0, 0))?;
+        Some((action, button))
     }
 
     /// The icons this window draws, which is the view's list with the hand's
@@ -452,23 +455,23 @@ impl ContainerPane {
             .unwrap_or_else(|| self.contents(view, hand))
     }
 
-    /// The two things written over this window: the plate's caption, and the
+    /// The two things written over this window: the action button's caption, and the
     /// name of the icon the pointer is resting on.
     ///
     /// Resolved here rather than in `client/render` because both need what
-    /// that crate has never heard of — the atlas the plate's position comes
+    /// that crate has never heard of — the atlas the action button's position comes
     /// out of, and the `tiledata` an item's name does. The pass draws what the
     /// layout produced, the way it draws a dialog's captions and a doll's name
-    /// plate.
+    /// action button.
     fn lines(&self, frame: &PaneFrame<'_>, contents: &[ContainedItem]) -> Vec<Line> {
         let mut lines = Vec::new();
-        if let Some((plate, button)) = self.plate_button(frame) {
+        if let Some((action, button)) = self.action_button(frame) {
             lines.push(Line {
                 at: button.label_at(),
                 font: LABEL_FONT,
                 hue: Hue::LABEL,
                 clip: None,
-                text: plate.label().to_owned(),
+                text: action.label().to_owned(),
             });
         }
         if let Some(item) = self
@@ -495,12 +498,12 @@ impl ContainerPane {
         paired
     }
 
-    /// A left press inside the window's own art, plate included.
+    /// A left press inside the window's own art, action button included.
     ///
     /// Four answers, and every one of them raises: a press on a window is
-    /// what puts it on top. The plate is tried first — it is furniture below
+    /// what puts it on top. The action button is tried first — it is furniture below
     /// the frame and not an icon, so [`Window::item_at`] below never sees it
-    /// and would otherwise read a plate press as a grab of the bag itself.
+    /// and would otherwise read a action button press as a grab of the bag itself.
     /// Short of that, an icon either completes a pair — a use, and nothing is
     /// held — or starts a press this pane keeps; anything else is the bag
     /// itself, which is the grip the window is moved by.
@@ -512,14 +515,14 @@ impl ContainerPane {
         if !self.ordinary(&ctx.frame) {
             return raised.with(grab());
         }
-        // `press_plate`'s own box test is safe to run unconditionally here:
+        // `press_action`'s own box test is safe to run unconditionally here:
         // `ctx.under_pointer`, already true or `press` would not have been
         // called, means this window owns the pixel the press landed on —
-        // plate included, now that it is drawn as a real picture — so the
+        // action button included, now that it is drawn as a real picture — so the
         // only question left is which part of the window's own art it was.
-        let plate_answer = self.press_plate(ctx);
-        if plate_answer.taken {
-            return plate_answer;
+        let action_answer = self.press_action(ctx);
+        if action_answer.taken {
+            return action_answer;
         }
         let Some(item) = window.item_at(ctx.frame.cursor, ctx.frame.files.gump_atlas) else {
             return raised.with(grab());
@@ -547,33 +550,33 @@ impl ContainerPane {
         raised
     }
 
-    /// A left press on the plate below the window.
+    /// A left press on the action button below the window.
     ///
     /// **Only called from [`Self::press`], and only once that has already
     /// established this window owns the pixel the press landed on.** The
-    /// plate used to be offered no pixels at all, so every window's
-    /// `press_plate` had to run its own box test against the raw cursor —
-    /// which is what let a plate belonging to a window the pointer could not
+    /// action button used to be offered no pixels at all, so every window's
+    /// `press_action` had to run its own box test against the raw cursor —
+    /// which is what let a action button belonging to a window the pointer could not
     /// see still answer a press (`docs/window_components.md`'s backlog entry
-    /// this closes). Now the plate is a picture in [`Window::pictures`], so
+    /// this closes). Now the action button is a picture in [`Window::pictures`], so
     /// [`PaneCtx::under_pointer`] already means "the pointer is on this
-    /// window's own art, plate included" before this is ever reached, and
+    /// window's own art, action button included" before this is ever reached, and
     /// this box test only decides *which part* of that art it landed on.
-    fn press_plate(&self, ctx: &PaneCtx<'_>) -> Response {
-        let Some((plate, button)) = self.plate_button(&ctx.frame) else {
+    fn press_action(&self, ctx: &PaneCtx<'_>) -> Response {
+        let Some((action, button)) = self.action_button(&ctx.frame) else {
             return Response::ignored();
         };
         if !button.contains(ctx.frame.cursor) {
             return Response::ignored();
         }
         let raised = Response::changed().with(Effect::Raise);
-        match plate {
-            Plate::StackAll => raised.with(Effect::StackAll),
-            Plate::TakeAll => match backpack_of(ctx.frame.view) {
+        match action {
+            Action::StackAll => raised.with(Effect::StackAll),
+            Action::TakeAll => match backpack_of(ctx.frame.view) {
                 Some(backpack) => take_all(&self.contents(ctx.frame.view, ctx.frame.hand), backpack)
                     .into_iter()
                     .fold(raised, Response::with),
-                // Nothing to sweep into. The plate is drawn — a body can lose
+                // Nothing to sweep into. The action button is drawn — a body can lose
                 // its pack — and pressing it asks for nothing.
                 None => raised,
             },
@@ -627,7 +630,7 @@ impl ContainerPane {
     /// is [`Response::stale`] exactly when something on the screen changed.
     fn moved(&mut self, ctx: &PaneCtx<'_>) -> Response {
         let mut answer = self.hover(ctx);
-        answer.absorb(self.hover_plate(ctx));
+        answer.absorb(self.hover_action(ctx));
         if ctx.frame.has_prompt {
             return answer;
         }
@@ -676,24 +679,27 @@ impl ContainerPane {
         Response::stale()
     }
 
-    /// Follow the pointer with whether it is on this window's plate.
+    /// Follow the pointer with whether it is on this window's action button.
     ///
-    /// [`Self::hover`]'s counterpart for the plate rather than an icon, and
+    /// [`Self::hover`]'s counterpart for the action button rather than an icon, and
     /// gated the same way and for the same reason: `under_pointer` already
-    /// means the plate's own pixels — not just the button's box — are what
-    /// the pointer is on, now that the plate is drawn rather than left as
-    /// text over nothing. A move that leaves it dark is the fix for the
-    /// backlog entry this step closes read the other way round: a tint that
-    /// used to be wearable through a window drawn on top cannot be any more,
-    /// because [`Self::plate_button`]'s box test is only ever asked while
+    /// means the action button's own pixels — not just the button's box — are what
+    /// the pointer is on, now that the action button is drawn rather than left as
+    /// text over nothing. A move that leaves it up is the fix for the
+    /// backlog entry this step closes read the other way round: a pressed face
+    /// that used to be wearable through a window drawn on top cannot be any more,
+    /// because [`Self::action_button`]'s box test is only ever asked while
     /// `under_pointer` says this window owns the pixel.
-    fn hover_plate(&mut self, ctx: &PaneCtx<'_>) -> Response {
-        let button = ctx.under_pointer.then(|| self.plate_button(&ctx.frame)).flatten();
-        let on = plate_is_lit(button.map(|(_, button)| button), ctx.frame.cursor);
-        if self.plate_hovered == on {
+    fn hover_action(&mut self, ctx: &PaneCtx<'_>) -> Response {
+        let button = ctx
+            .under_pointer
+            .then(|| self.action_button(&ctx.frame))
+            .flatten();
+        let on = action_is_lit(button.map(|(_, button)| button), ctx.frame.cursor);
+        if self.action_hovered == on {
             return Response::ignored();
         }
-        self.plate_hovered = on;
+        self.action_hovered = on;
         Response::stale()
     }
 
@@ -733,16 +739,16 @@ impl ContainerPane {
 }
 
 impl Pane for ContainerPane {
-    /// The background, every icon in it, and the plate's own art when this
+    /// The background, every icon in it, and the action button's own art when this
     /// window has one.
     ///
     /// Asked of the view every frame rather than remembered *across* frames,
     /// because what is in a bag changes without the window hearing about it —
     /// and the atlas answers a repeat with nothing, so asking for the same
-    /// list twice costs a comparison. The plate's graphic is the same one
+    /// list twice costs a comparison. The action button's graphic is the same one
     /// graphic for every window that has one, so this never grows the atlas
-    /// past its first ask — it is here at all only because [`Self::plate`] is
-    /// a question about the view (a shop's crate has no plate) that this
+    /// past its first ask — it is here at all only because [`Self::action`] is
+    /// a question about the view (a shop's crate has no action button) that this
     /// method must not answer a second, disagreeing way.
     ///
     /// What this call to [`Self::contents`] computes *is* remembered for the
@@ -753,8 +759,13 @@ impl Pane for ContainerPane {
             Some(gump) => {
                 let contents = self.contents(frame.view, frame.hand);
                 let mut wanted = container::art_of(*gump, &contents);
-                if self.plate(frame).is_some() {
-                    wanted.push(GumpArt::Gump(container::PLATE_BACKGROUND));
+                if self.action(frame).is_some() {
+                    // Both faces, not the one this frame happens to want: the
+                    // pointer arriving on the button must not be the moment
+                    // the atlas first hears of the pressed art, or the press
+                    // would draw nothing for the one frame the pack takes.
+                    wanted.push(GumpArt::Gump(container::ACTION_UP));
+                    wanted.push(GumpArt::Gump(container::ACTION_DOWN));
                 }
                 // Left for `layout` — called next, for this same window,
                 // before anything else runs (see `Self::scratch`) — to pick
@@ -774,17 +785,12 @@ impl Pane for ContainerPane {
     fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         let gump = *frame.view.containers.get(&self.container)?;
         let contents = self.recall_contents(frame.view, frame.hand);
-        let plate = self.plate_button(frame).map(|(_, button)| {
-            let hue = if self.plate_hovered {
-                HIGHLIGHT_HUE
-            } else {
-                Hue::NONE
-            };
-            (button, hue)
-        });
+        let action = self
+            .action_button(frame)
+            .map(|(_, button)| (button, container::action_face(self.action_hovered)));
         // Window-local — see `PaneFrame::cursor`'s doc.
         let pictures =
-            container::window_with_plate(gump, &contents, GumpPixel::new(0, 0), self.hovered, plate);
+            container::window_with_action(gump, &contents, GumpPixel::new(0, 0), self.hovered, action);
         let lines = self.lines(frame, &contents);
         Some(Drawn::Container(Window {
             pictures,
@@ -793,13 +799,13 @@ impl Pane for ContainerPane {
         }))
     }
 
-    /// A press on an icon, on the plate below, or on the bag itself, the
+    /// A press on an icon, on the action button below, or on the bag itself, the
     /// release that finishes whichever gesture that was, the move that
     /// lifts, and the prompt's answer.
     ///
     /// The press is *located*, and reaching this pane at all means
     /// [`PaneCtx::under_pointer`] is already true — the router only offers a
-    /// located input to the window whose own art, plate included, is the
+    /// located input to the window whose own art, action button included, is the
     /// topmost opaque pixel under the cursor. `press` decides which of the
     /// three that was. The release and the move are offered to every window
     /// — a press finishes wherever the pointer has got to, and a tint left
@@ -811,10 +817,10 @@ impl Pane for ContainerPane {
     fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         match input {
             Input::Press(Button::Left) => {
-                // Nothing of this window — background, icon or plate — is
+                // Nothing of this window — background, icon or action button — is
                 // the topmost pixel here, so there is nothing of ours for the
                 // press to have landed on. A window drawn over this one's
-                // plate now correctly wins that pixel instead of this pane
+                // action button now correctly wins that pixel instead of this pane
                 // being asked anyway (`docs/window_components.md`'s closed
                 // backlog entry).
                 if !ctx.under_pointer {
@@ -990,7 +996,7 @@ mod tests {
         assert_eq!(hover_text(&gold, "gold coins"), "gold coins (137)");
     }
 
-    /// Which plate a window has, in the one place that decides it: the
+    /// Which action button a window has, in the one place that decides it: the
     /// backpack compacts, every other bag is swept into it, and a shop's crate
     /// has neither.
     #[test]
@@ -998,51 +1004,51 @@ mod tests {
         let pack = serial(0x4000_0100);
         let chest = serial(0x4000_0200);
 
-        assert_eq!(plate_of(pack, Some(pack), false), Some(Plate::StackAll));
-        assert_eq!(plate_of(chest, Some(pack), false), Some(Plate::TakeAll));
+        assert_eq!(action_of(pack, Some(pack), false), Some(Action::StackAll));
+        assert_eq!(action_of(chest, Some(pack), false), Some(Action::TakeAll));
         assert_eq!(
-            plate_of(chest, None, false),
-            Some(Plate::TakeAll),
-            "a body with no pack is still offered the plate, and pressing it asks for nothing"
+            action_of(chest, None, false),
+            Some(Action::TakeAll),
+            "a body with no pack is still offered the action button, and pressing it asks for nothing"
         );
         assert_eq!(
-            plate_of(chest, Some(pack), true),
+            action_of(chest, Some(pack), true),
             None,
             "a shop's rows are bought, not swept"
         );
     }
 
     /// The predicate the hover tint narrows to, and the same shape
-    /// [`plate_of`]'s test uses: a free function pinned without a
+    /// [`action_of`]'s test uses: a free function pinned without a
     /// [`PaneCtx`]. `button` being `None` stands in for
-    /// [`hover_plate`](ContainerPane::hover_plate)'s own gate — a window that
+    /// [`hover_action`](ContainerPane::hover_action)'s own gate — a window that
     /// does not own the pixel under the cursor is never handed a button to
-    /// test at all — so a covering window cannot light this one's plate
+    /// test at all — so a covering window cannot light this one's action button
     /// through it.
     #[test]
-    fn the_plate_lights_up_only_on_its_own_box() {
+    fn the_action_lights_up_only_on_its_own_box() {
         let button = container::ActionButton {
             at: GumpPixel::new(100, 100),
             size: (210, 19),
         };
-        assert!(plate_is_lit(Some(button), GumpPixel::new(150, 110)));
+        assert!(action_is_lit(Some(button), GumpPixel::new(150, 110)));
         assert!(
-            !plate_is_lit(Some(button), GumpPixel::new(400, 400)),
-            "well outside the plate"
+            !action_is_lit(Some(button), GumpPixel::new(400, 400)),
+            "well outside the action button"
         );
         assert!(
-            !plate_is_lit(None, GumpPixel::new(150, 110)),
+            !action_is_lit(None, GumpPixel::new(150, 110)),
             "no button at all — this window does not own the pixel"
         );
     }
 
-    /// The plate's own picture sits exactly where the button says, and a
+    /// The action button's own picture sits exactly where the button says, and a
     /// click on it is not a click on any icon — `item_at`'s contract for the
-    /// background applies to the plate the same way, now that it too is
-    /// drawn. A shop's crate, which has no plate, draws no extra picture at
+    /// background applies to the action button the same way, now that it too is
+    /// drawn. A shop's crate, which has no action button, draws no extra picture at
     /// all.
     #[test]
-    fn a_plate_picture_sits_at_the_buttons_position_and_is_not_an_icon() {
+    fn an_action_picture_sits_at_the_buttons_position_and_is_not_an_icon() {
         use openshard_client_render::gump::{GumpArt, GumpAtlas};
         use openshard_uofiles::color::Color16;
         use openshard_uofiles::image::Image;
@@ -1057,14 +1063,21 @@ mod tests {
         };
         let atlas = GumpAtlas::pack([
             (GumpArt::Gump(BAG), block(140, 100)),
-            (GumpArt::Gump(container::PLATE_BACKGROUND), block(210, 19)),
+            (GumpArt::Gump(container::ACTION_UP), block(30, 22)),
+            (GumpArt::Gump(container::ACTION_DOWN), block(30, 22)),
         ])
-        .expect("two small blocks fit an atlas 2048 on a side");
+        .expect("three small blocks fit an atlas 2048 on a side");
 
         let at = GumpPixel::new(100, 50);
         let button = container::take_all_button(&atlas, BAG, at).expect("both are packed");
         let window = Window {
-            pictures: container::window_with_plate(BAG, &[], at, None, Some((button, HIGHLIGHT_HUE))),
+            pictures: container::window_with_action(
+                BAG,
+                &[],
+                at,
+                None,
+                Some((button, container::action_face(true))),
+            ),
             contents: Vec::new(),
             lines: Vec::new(),
         };
@@ -1073,24 +1086,24 @@ mod tests {
                 .pictures
                 .last()
                 .map(|picture| (picture.graphic, picture.at)),
-            Some((GumpArt::Gump(container::PLATE_BACKGROUND), button.at)),
-            "the plate is the last picture drawn, at the button's own position"
+            Some((GumpArt::Gump(container::ACTION_DOWN), button.at)),
+            "the action button is the last picture drawn, at the button's own position, wearing the face it was handed"
         );
         assert_eq!(
             window.item_at(button.at, &atlas),
             None,
-            "the plate is furniture below the frame, not an icon"
+            "the action button is furniture below the frame, not an icon"
         );
 
-        let no_plate = Window {
-            pictures: container::window_with_plate(BAG, &[], at, None, None),
+        let no_action = Window {
+            pictures: container::window_with_action(BAG, &[], at, None, None),
             contents: Vec::new(),
             lines: Vec::new(),
         };
         assert_eq!(
-            no_plate.pictures.len(),
+            no_action.pictures.len(),
             1,
-            "a shop's crate has no plate, so nothing beyond the background is drawn"
+            "a shop's crate has no action button, so nothing beyond the background is drawn"
         );
     }
 
