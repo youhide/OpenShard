@@ -3107,6 +3107,18 @@ own understanding had written.
   ClassicUO draws the art a second time five pixels up and left — so this is
   the client's own addition and the whole rule is stated at `stack_label`
   rather than cited to a reference that has none.
+- **A pile's count has no switch and no size of its own.** Two things the
+  counting above left open, both of them visible rather than wrong. One:
+  every counted pile on screen is written over, always — a bank floor with
+  fifty piles on it is fifty numbers, and there is no knob in the dev window's
+  Graphics tab to turn them off the way there is for the crowd or the statics.
+  Two: with `--ttf-font` on, the world's overhead text goes through `TtfAtlas`
+  instead of `fonts.mul`, and that path does not read `Label::font` at all —
+  one face at one pixel size, by construction (`text::collect_ttf`) — so the
+  count is drawn in the size a spoken line is rather than in
+  `items::STACK_COUNT_FONT`'s small face. A count wants to be smaller than
+  speech, which is a *second* TTF size and therefore a second atlas, not a
+  parameter.
 - **The facet is a startup constant and `0x1B` only carries a size.** The app
   loads Felucca and compares the shard's map size once, warning when they
   differ rather than following. Following means decoding `0xBF 0x08` and
