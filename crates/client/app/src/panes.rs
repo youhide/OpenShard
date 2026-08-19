@@ -51,6 +51,7 @@ pub(crate) mod container;
 pub(crate) mod dialog;
 #[cfg(test)]
 pub(crate) mod fixture;
+pub(crate) mod minimap;
 pub(crate) mod paperdoll;
 pub(crate) mod party;
 mod route;
@@ -602,6 +603,8 @@ pub struct SplitPrompt {
 pub enum LocalWindow {
     Skills,
     Status,
+    #[allow(dead_code)] // Opening affordance arrives with the minimap command/hotkey.
+    Minimap,
 }
 
 impl LocalWindow {
@@ -616,6 +619,7 @@ impl LocalWindow {
         match self {
             Self::Skills => WindowSubject::Skills,
             Self::Status => WindowSubject::Status,
+            Self::Minimap => WindowSubject::Minimap,
         }
     }
 }
@@ -724,6 +728,9 @@ pub enum AnyPane {
     Confirm(confirm::ConfirmPane),
     /// The party manifest. See [`party::PartyPane`].
     Party(party::PartyPane),
+    /// The generated-terrain minimap. Its pixels are recorded by the radar
+    /// content pass; the pane supplies lifecycle and hit bounds.
+    Minimap(minimap::MinimapPane),
 }
 
 impl AnyPane {
@@ -744,6 +751,7 @@ impl AnyPane {
             WindowSubject::Status => Self::Status(status::StatusPane),
             WindowSubject::Confirm(question) => Self::Confirm(confirm::ConfirmPane::new(question)),
             WindowSubject::Party => Self::Party(party::PartyPane::default()),
+            WindowSubject::Minimap => Self::Minimap(minimap::MinimapPane),
             // The one subject that carries what its pane is built with rather
             // than what the pane looks up. Everything else here names something
             // in the view — a bag, a body, a gump — and the pane reads it every
@@ -769,6 +777,7 @@ impl Pane for AnyPane {
             Self::Split(pane) => pane.art(frame),
             Self::Confirm(pane) => pane.art(frame),
             Self::Party(pane) => pane.art(frame),
+            Self::Minimap(pane) => pane.art(frame),
         }
     }
 
@@ -783,6 +792,7 @@ impl Pane for AnyPane {
             Self::Split(pane) => pane.layout(frame),
             Self::Confirm(pane) => pane.layout(frame),
             Self::Party(pane) => pane.layout(frame),
+            Self::Minimap(pane) => pane.layout(frame),
         }
     }
 
@@ -797,6 +807,7 @@ impl Pane for AnyPane {
             Self::Split(pane) => pane.handle(input, ctx),
             Self::Confirm(pane) => pane.handle(input, ctx),
             Self::Party(pane) => pane.handle(input, ctx),
+            Self::Minimap(pane) => pane.handle(input, ctx),
         }
     }
 }
@@ -871,5 +882,6 @@ mod tests {
         ));
         assert!(matches!(AnyPane::of(WindowSubject::Skills), AnyPane::Skills(_)));
         assert!(matches!(AnyPane::of(WindowSubject::Status), AnyPane::Status(_)));
+        assert!(matches!(AnyPane::of(WindowSubject::Minimap), AnyPane::Minimap(_)));
     }
 }

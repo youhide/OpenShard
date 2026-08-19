@@ -178,6 +178,9 @@ pub enum WindowSubject {
     /// the whole of what it inherits from the `egui::Window` it replaced, which
     /// was drawn from `!members.is_empty()` in exactly the same way.
     Party,
+    /// Generated terrain around the player. Its existence is local, like the
+    /// skill sheet; terrain products themselves remain in `App::radar_cache`.
+    Minimap,
 }
 
 impl WindowSubject {
@@ -196,7 +199,10 @@ impl WindowSubject {
     /// of naming the kinds, which is a list that would otherwise have to be
     /// kept in step by hand.
     pub const fn is_local(self) -> bool {
-        matches!(self, Self::Skills | Self::Status | Self::Split { .. })
+        matches!(
+            self,
+            Self::Skills | Self::Status | Self::Minimap | Self::Split { .. }
+        )
     }
 }
 
@@ -235,6 +241,8 @@ pub enum Drawn {
     /// The party manifest: the stretched plate, its ten name rows, and its
     /// controls.
     Party(openshard_client_render::party::Window),
+    /// The radar content bounds; it has no gump pictures to pick.
+    Minimap(crate::panes::minimap::Window),
 }
 
 /// Whose press the client's own modal is standing over.
@@ -278,6 +286,7 @@ impl Drawn {
             Self::Split(split) => &split.pictures,
             Self::Confirm(question) => &question.pictures,
             Self::Party(manifest) => &manifest.pictures,
+            Self::Minimap(_) => &[],
         }
     }
 }
@@ -509,6 +518,7 @@ pub fn reconcile_own_windows(
         WindowSubject::Dialog(gump_id) => view.gumps.iter().any(|gump| gump.gump_id == gump_id),
         WindowSubject::Skills => false,
         WindowSubject::Status => false,
+        WindowSubject::Minimap => false,
         // Nothing in the view holds the picker open, so there is nothing for an
         // overlay entry to be ahead *of* — the same as the two kinds above.
         WindowSubject::Split { .. } => false,
@@ -540,7 +550,10 @@ pub fn reconcile_own_windows(
             // takes it away, and anything here would be a second opinion about
             // that — the two fields this replaced could each say the window was
             // shut while the window was still in this list.
-            WindowSubject::Skills | WindowSubject::Status | WindowSubject::Split { .. } => true,
+            WindowSubject::Skills
+            | WindowSubject::Status
+            | WindowSubject::Minimap
+            | WindowSubject::Split { .. } => true,
             // And a question stands for as long as what it is about does. This
             // is the arm that takes an invitation off the screen when the shard
             // withdraws it, without anybody having pressed either button.

@@ -280,6 +280,7 @@ fn a_window_is_local_exactly_when_nothing_in_the_view_holds_it_open() {
     let serial = Serial::new(0x0000_002A).expect("a serial");
     assert!(WindowSubject::Skills.is_local());
     assert!(WindowSubject::Status.is_local());
+    assert!(WindowSubject::Minimap.is_local());
     assert!(
         WindowSubject::Split {
             item: serial,
@@ -292,6 +293,26 @@ fn a_window_is_local_exactly_when_nothing_in_the_view_holds_it_open() {
     assert!(!WindowSubject::Vendor(serial).is_local());
     assert!(!WindowSubject::Paperdoll(serial).is_local());
     assert!(!WindowSubject::Dialog(openshard_protocol::gump::GumpId(3)).is_local());
+}
+
+#[test]
+fn a_minimap_is_a_local_idempotent_window() {
+    let view = bare_view();
+    let mut own_windows = Vec::new();
+    let mut locally_closed = HashSet::new();
+
+    reconcile_own_windows(&view, &mut own_windows, &mut locally_closed);
+    assert!(own_windows.is_empty());
+    crate::windows::open_local_window(&mut own_windows, WindowSubject::Minimap);
+    crate::windows::open_local_window(&mut own_windows, WindowSubject::Minimap);
+    assert_eq!(own_windows.len(), 1);
+    assert!(matches!(own_windows[0].pane, crate::panes::AnyPane::Minimap(_)));
+
+    reconcile_own_windows(&view, &mut own_windows, &mut locally_closed);
+    assert_eq!(own_windows.len(), 1, "the view does not own minimap openness");
+    own_windows.retain(|window| window.subject != WindowSubject::Minimap);
+    reconcile_own_windows(&view, &mut own_windows, &mut locally_closed);
+    assert!(own_windows.is_empty(), "closing it is local too");
 }
 
 /// A vendor's buy window is an `OpenContainer` on the vendor serial, whereas

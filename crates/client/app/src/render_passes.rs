@@ -212,6 +212,9 @@ pub(crate) fn draw_gump_windows(
                     // `0x11` in one press, so a frame or two can pass in which
                     // this client has none of the numbers to write on it.
                     WindowSubject::Status => {}
+                    // The GPU radar content pass records its generated terrain
+                    // at this painter position in the next integration step.
+                    WindowSubject::Minimap => {}
                     // Laid out by `panes::split::SplitPane` above, and
                     // **unreachable**: it is the one kind that draws nothing out
                     // of the view at all — the frame, the bar and the number are
@@ -397,6 +400,7 @@ pub(crate) fn draw_gump_windows(
                 (WindowSubject::Party, Drawn::Party(window)) => {
                     labels.extend(window.lines.iter().map(|line| line.label().offset(at)));
                 }
+                (WindowSubject::Minimap, Drawn::Minimap(_)) => {}
                 _ => {}
             }
             let mut text = openshard_client_render::text::collect_gump(&labels, &resources.font_atlas);

@@ -5,8 +5,9 @@
 //! [`GumpArt`](crate::gump::GumpArt) is a closed enum whose two arms both **name
 //! a picture in a client file**, and [`GumpAtlas`](crate::gump::GumpAtlas) is a
 //! shelf packer for art that never changes once it is packed. A radar is a
-//! bitmap this client *generates*, and it is rewritten every time the player
-//! takes a step.
+//! bitmap this client *generates*.  The legacy [`RadarRenderer`] still exposes
+//! a single mutable bitmap for compatibility; [`RadarChunkRenderer`] instead
+//! keeps revisioned immutable products in bounded texture-array pages.
 //!
 //! The deciding property is mutability rather than identity. Shelf-packing
 //! something that is rewritten per step either fragments the atlas or forces the
@@ -33,8 +34,10 @@
 //! bitmap is opaque everywhere by construction.
 
 use openshard_uofiles::color::Color16;
+use std::collections::BTreeMap;
 
 use crate::gump::Frame;
+use crate::radar::{BASE_CHUNK_TILES, RadarChunk, RadarChunkKey, RadarRegion};
 use crate::renderer::{QUAD, upload};
 
 /// Bytes of the radar pass's uniform block: the target, the quad's place and
@@ -53,6 +56,82 @@ pub struct Placement {
     /// 128-pixel window is drawn at half a pixel a tile, and the sampler is
     /// `Nearest` so what that drops is dropped rather than smeared.
     pub extent: (f32, f32),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::radar::{RadarChunkCoord, RadarRevision};
+    use openshard_protocol::world::Facet;
+
+    fn chunk(x: u32, y: u32) -> RadarChunk {
+        RadarChunk::new(
+            RadarChunkKey::new(Facet(0), 0, RadarChunkCoord::new(x, y), RadarRevision(0)),
+            vec![Color16(0x03e0); usize::from(BASE_CHUNK_TILES).pow(2)],
+        )
+        .expect("a complete chunk")
+    }
+
+    #[test]
+    fn selecting_a_region_splits_at_chunk_edges_without_a_uv_gap() {
+        let west = chunk(0, 0);
+        let east = chunk(1, 0);
+        let region = RadarRegion {
+            facet: Facet(0),
+            lod: 0,
+            origin: (32, 0),
+            extent: (64, 16),
+        };
+        let draws = select_region_chunks(
+            region,
+            Placement {
+                origin: (10.0, 20.0),
+                extent: (128.0, 32.0),
+            },
+            [&west, &east],
+        );
+
+        assert_eq!(draws.len(), 2);
+        assert_eq!(draws[0].placement.extent.0, 64.0);
+        assert_eq!(
+            draws[0].placement.origin.0 + draws[0].placement.extent.0,
+            draws[1].placement.origin.0
+        );
+        assert_eq!(draws[0].uv.origin.0, 0.5);
+        assert_eq!(draws[0].uv.extent.0, 0.5);
+        assert_eq!(draws[1].uv.origin.0, 0.0);
+        assert_eq!(draws[1].uv.extent.0, 0.5);
+    }
+
+    #[test]
+    fn selecting_a_region_does_not_mix_facets_or_lods() {
+        let matching = chunk(0, 0);
+        let other_facet = RadarChunk::new(
+            RadarChunkKey::new(Facet(1), 0, RadarChunkCoord::new(0, 0), RadarRevision(0)),
+            vec![Color16(0x03e0); usize::from(BASE_CHUNK_TILES).pow(2)],
+        )
+        .unwrap();
+        let other_lod = RadarChunk::new(
+            RadarChunkKey::new(Facet(0), 1, RadarChunkCoord::new(0, 0), RadarRevision(0)),
+            vec![Color16(0x03e0); usize::from(BASE_CHUNK_TILES).pow(2)],
+        )
+        .unwrap();
+        let draws = select_region_chunks(
+            RadarRegion {
+                facet: Facet(0),
+                lod: 0,
+                origin: (0, 0),
+                extent: (16, 16),
+            },
+            Placement {
+                origin: (0.0, 0.0),
+                extent: (16.0, 16.0),
+            },
+            [&matching, &other_facet, &other_lod],
+        );
+        assert_eq!(draws.len(), 1);
+        assert_eq!(draws[0].chunk.key(), matching.key());
+    }
 }
 
 /// The radar's texture and the pass that puts it on the frame.
@@ -312,5 +391,430 @@ impl RadarRenderer {
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.quad.slice(..));
         pass.draw(0..4, 0..1);
+    }
+}
+
+/// A rectangle in a resident chunk texture, expressed as normalised UVs.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct ChunkUv {
+    pub origin: (f32, f32),
+    pub extent: (f32, f32),
+}
+
+/// One complete chunk's part of a [`RadarRegion`].  The placement is already
+/// clipped to the requested world rectangle, so adjacent chunks share their
+/// edge exactly instead of relying on filtered texels to hide a seam.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct RadarChunkDraw<'a> {
+    pub chunk: &'a RadarChunk,
+    pub placement: Placement,
+    pub uv: ChunkUv,
+}
+
+/// Select the chunks and exact source UVs covering a region.
+///
+/// `ready` may contain a larger cache working set.  Products at another facet
+/// or LOD are ignored: mixing LODs at an edge would turn categorical terrain
+/// into a visible seam.  Missing products are omitted so the cache owner can
+/// supply its coarser-ready fallback before this function is called.
+#[must_use]
+pub fn select_region_chunks<'a>(
+    region: RadarRegion,
+    at: Placement,
+    ready: impl IntoIterator<Item = &'a RadarChunk>,
+) -> Vec<RadarChunkDraw<'a>> {
+    if region.extent.0 == 0 || region.extent.1 == 0 || at.extent.0 <= 0.0 || at.extent.1 <= 0.0 {
+        return Vec::new();
+    }
+    let texel_world = 1_u64.checked_shl(u32::from(region.lod)).unwrap_or(u64::MAX);
+    let chunk_world = u64::from(BASE_CHUNK_TILES).saturating_mul(texel_world);
+    let left = u64::from(region.origin.0);
+    let top = u64::from(region.origin.1);
+    let right = left.saturating_add(u64::from(region.extent.0));
+    let bottom = top.saturating_add(u64::from(region.extent.1));
+    let mut selected: Vec<_> = ready
+        .into_iter()
+        .filter_map(|chunk| {
+            let key = chunk.key();
+            if key.facet() != region.facet || key.lod() != region.lod {
+                return None;
+            }
+            let chunk_left = u64::from(key.chunk().x).saturating_mul(chunk_world);
+            let chunk_top = u64::from(key.chunk().y).saturating_mul(chunk_world);
+            let chunk_right = chunk_left.saturating_add(chunk_world);
+            let chunk_bottom = chunk_top.saturating_add(chunk_world);
+            let x0 = left.max(chunk_left);
+            let y0 = top.max(chunk_top);
+            let x1 = right.min(chunk_right);
+            let y1 = bottom.min(chunk_bottom);
+            (x0 < x1 && y0 < y1).then(|| {
+                let scale_x = at.extent.0 / f32::from(region.extent.0);
+                let scale_y = at.extent.1 / f32::from(region.extent.1);
+                RadarChunkDraw {
+                    chunk,
+                    placement: Placement {
+                        origin: (
+                            at.origin.0 + (x0 - left) as f32 * scale_x,
+                            at.origin.1 + (y0 - top) as f32 * scale_y,
+                        ),
+                        extent: ((x1 - x0) as f32 * scale_x, (y1 - y0) as f32 * scale_y),
+                    },
+                    uv: ChunkUv {
+                        origin: (
+                            (x0 - chunk_left) as f32 / chunk_world as f32,
+                            (y0 - chunk_top) as f32 / chunk_world as f32,
+                        ),
+                        extent: (
+                            (x1 - x0) as f32 / chunk_world as f32,
+                            (y1 - y0) as f32 / chunk_world as f32,
+                        ),
+                    },
+                }
+            })
+        })
+        .collect();
+    selected.sort_by_key(|draw| (draw.chunk.key().chunk().y, draw.chunk.key().chunk().x));
+    selected
+}
+
+/// Fixed-size, recreatable GPU pages for immutable radar chunks.
+///
+/// A page is uploaded only when a new CPU key first becomes resident.  Normal
+/// walking only selects different pages and rewrites this pass's tiny uniforms.
+/// The array is deliberately bounded; eviction only discards a GPU copy, never
+/// the `RadarChunk` held by the content cache.
+#[derive(Debug)]
+pub struct RadarChunkRenderer {
+    pipeline: wgpu::RenderPipeline,
+    bind_group: wgpu::BindGroup,
+    uniforms: wgpu::Buffer,
+    quad: wgpu::Buffer,
+    texture: wgpu::Texture,
+    pages: BTreeMap<RadarChunkKey, ResidentPage>,
+    capacity: u32,
+    clock: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ResidentPage {
+    layer: u32,
+    last_used: u64,
+}
+
+const CHUNK_UNIFORM_BYTES: u64 = 48;
+const CHUNK_RGBA_BYTES: u64 = (BASE_CHUNK_TILES as u64) * (BASE_CHUNK_TILES as u64) * 4;
+
+impl RadarChunkRenderer {
+    /// Create a texture-array page cache with at most `byte_budget` bytes.
+    /// At least one page is retained even for a tiny non-zero budget.
+    #[must_use]
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, byte_budget: u64) -> Self {
+        let limit = u64::from(device.limits().max_texture_array_layers);
+        let capacity = (byte_budget / CHUNK_RGBA_BYTES)
+            .clamp(1, limit)
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("radar chunk pages"),
+            size: wgpu::Extent3d {
+                width: u32::from(BASE_CHUNK_TILES),
+                height: u32::from(BASE_CHUNK_TILES),
+                depth_or_array_layers: capacity,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("radar chunk nearest sampler"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
+        });
+        let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("radar chunk draw"),
+            size: CHUNK_UNIFORM_BYTES,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("radar chunk"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("radar chunk"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniforms.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("radar chunk"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("radar_chunk.wgsl").into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("radar chunk"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("radar chunk"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: 8,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x2,
+                        offset: 0,
+                        shader_location: 0,
+                    }],
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let quad = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("radar chunk quad"),
+            size: std::mem::size_of_val(&QUAD) as u64,
+            usage: wgpu::BufferUsages::VERTEX,
+            mapped_at_creation: true,
+        });
+        let bytes: Vec<u8> = QUAD.iter().flat_map(|value| value.to_le_bytes()).collect();
+        quad.get_mapped_range_mut(..)
+            .expect("fresh quad is mapped")
+            .copy_from_slice(&bytes);
+        quad.unmap();
+        Self {
+            pipeline,
+            bind_group,
+            uniforms,
+            quad,
+            texture,
+            pages: BTreeMap::new(),
+            capacity,
+            clock: 0,
+        }
+    }
+
+    #[must_use]
+    pub const fn byte_capacity(&self) -> u64 {
+        (self.capacity as u64) * CHUNK_RGBA_BYTES
+    }
+
+    #[must_use]
+    pub fn resident_len(&self) -> usize {
+        self.pages.len()
+    }
+
+    fn resident_layer(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        chunk: &RadarChunk,
+    ) -> u32 {
+        self.clock = self.clock.wrapping_add(1);
+        let key = chunk.key();
+        if let Some(page) = self.pages.get_mut(&key) {
+            page.last_used = self.clock;
+            return page.layer;
+        }
+        let layer = if self.pages.len() < self.capacity as usize {
+            self.pages.len() as u32
+        } else {
+            let (&evict, page) = self
+                .pages
+                .iter()
+                .min_by_key(|(_, page)| page.last_used)
+                .expect("non-empty when full");
+            let layer = page.layer;
+            self.pages.remove(&evict);
+            layer
+        };
+        let mut bytes = Vec::with_capacity(CHUNK_RGBA_BYTES as usize);
+        for colour in chunk.pixels() {
+            let rgb = colour.rgb8();
+            bytes.extend_from_slice(&[rgb.red, rgb.green, rgb.blue, 255]);
+        }
+        // Encode this copy before the draw that uses it.  A queue write would
+        // run before the whole command buffer, and a one-page cache could then
+        // overwrite the first chunk before its already-recorded draw executes.
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("radar chunk upload"),
+            size: CHUNK_RGBA_BYTES,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&staging, 0, &bytes);
+        encoder.copy_buffer_to_texture(
+            wgpu::TexelCopyBufferInfo {
+                buffer: &staging,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(u32::from(BASE_CHUNK_TILES) * 4),
+                    rows_per_image: Some(u32::from(BASE_CHUNK_TILES)),
+                },
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: 0, y: 0, z: layer },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width: u32::from(BASE_CHUNK_TILES),
+                height: u32::from(BASE_CHUNK_TILES),
+                depth_or_array_layers: 1,
+            },
+        );
+        self.pages.insert(
+            key,
+            ResidentPage {
+                layer,
+                last_used: self.clock,
+            },
+        );
+        layer
+    }
+
+    /// Draw complete ready chunks, clipped to the minimap window.  Call this
+    /// before recording player/waypoint geometry in the same window layer.
+    pub fn render_region<'a>(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: Frame<'_>,
+        region: RadarRegion,
+        at: Placement,
+        ready: impl IntoIterator<Item = &'a RadarChunk>,
+    ) {
+        let draws = select_region_chunks(region, at, ready);
+        if draws.is_empty() {
+            return;
+        }
+        let x = (at.origin.0 * frame.scale).max(0.0).floor() as u32;
+        let y = (at.origin.1 * frame.scale).max(0.0).floor() as u32;
+        let right = ((at.origin.0 + at.extent.0) * frame.scale)
+            .clamp(0.0, frame.width as f32)
+            .ceil() as u32;
+        let bottom = ((at.origin.1 + at.extent.1) * frame.scale)
+            .clamp(0.0, frame.height as f32)
+            .ceil() as u32;
+        if x >= right || y >= bottom {
+            return;
+        }
+        for draw in draws {
+            let layer = self.resident_layer(device, queue, encoder, draw.chunk);
+            let values = [
+                frame.width as f32,
+                frame.height as f32,
+                draw.placement.origin.0,
+                draw.placement.origin.1,
+                draw.placement.extent.0,
+                draw.placement.extent.1,
+                frame.scale,
+                0.0,
+                draw.uv.origin.0,
+                draw.uv.origin.1,
+                draw.uv.extent.0,
+                draw.uv.extent.1,
+            ];
+            let bytes: Vec<u8> = values.iter().flat_map(|value| value.to_le_bytes()).collect();
+            queue.write_buffer(&self.uniforms, 0, &bytes);
+            // Array indices are supplied as a float uniform and converted by
+            // the shader; all supported layer counts fit exactly in f32.
+            queue.write_buffer(&self.uniforms, 28, &(layer as f32).to_le_bytes());
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("radar chunk"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: frame.target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                multiview_mask: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_vertex_buffer(0, self.quad.slice(..));
+            pass.set_scissor_rect(x, y, right - x, bottom - y);
+            pass.draw(0..4, 0..1);
+        }
     }
 }

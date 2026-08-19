@@ -32,7 +32,8 @@
 //!   hole through the window it is drawn in rather than reading as unmapped
 //!   ground.
 
-use std::collections::BTreeMap;
+use std::cell::Cell;
+use std::collections::{BTreeMap, BTreeSet};
 
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Facet;
@@ -174,6 +175,56 @@ pub struct RadarChunk {
     pixels: Vec<Color16>,
 }
 
+/// How a draw request was satisfied by ready terrain.
+///
+/// The cache only ever returns a complete raster.  When the requested product
+/// is not ready, a current-source ancestor is preferred because it covers the
+/// same world area without exposing stale pixels.  If no such ancestor is
+/// ready, the newest retained product for the exact chunk remains a safe,
+/// complete (though stale) picture while production catches up.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RadarReadyKind {
+    /// The requested key is ready under the current source revision.
+    Exact,
+    /// A ready current-source parent at a coarser LOD covers the request.
+    CoarserAncestor,
+    /// The newest retained revision for the exact requested chunk is ready.
+    StaleExact,
+}
+
+/// A complete ready chunk selected for a terrain draw, with its fallback mode.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RadarReadyChunk<'a> {
+    chunk: &'a RadarChunk,
+    kind: RadarReadyKind,
+}
+
+impl<'a> RadarReadyChunk<'a> {
+    #[must_use]
+    pub const fn chunk(self) -> &'a RadarChunk {
+        self.chunk
+    }
+
+    #[must_use]
+    pub const fn kind(self) -> RadarReadyKind {
+        self.kind
+    }
+}
+
+/// Frame-diagnostic counters for retained CPU terrain products.
+///
+/// `requested` and `rebuilt` are lifetime event counters; `ready` and `stale`
+/// are snapshots. Queue-owned counters are exposed by `RadarWorkQueue`, since
+/// a cache does not dispatch or retain pending work.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct RadarCacheCounters {
+    pub requested: u64,
+    pub ready: usize,
+    pub stale: usize,
+    pub rebuilt: u64,
+    pub evicted: u64,
+}
+
 /// The sole owner of ready radar terrain products and their source revisions.
 ///
 /// This belongs with the map/content lifetime, not a minimap window. Closing a
@@ -185,6 +236,14 @@ pub struct RadarChunk {
 pub struct RadarCache {
     revisions: BTreeMap<Facet, RadarRevision>,
     ready: BTreeMap<RadarChunkKey, RadarChunk>,
+    requested: Cell<u64>,
+    rebuilt: u64,
+    evicted: u64,
+    /// Current-source products which a terrain/static mutation made unsafe to
+    /// reuse.  A producer consumes these keys in a later phase; keeping the
+    /// work here makes the content owner, rather than a minimap window, the
+    /// sole authority on what needs rebuilding.
+    dirty: BTreeSet<RadarChunkKey>,
 }
 
 impl RadarCache {
@@ -212,7 +271,54 @@ impl RadarCache {
             return false;
         }
         self.revisions.insert(facet, revision);
+        // Dirty keys name one exact source snapshot.  A separately announced
+        // newer snapshot supersedes any incomplete invalidation for this facet.
+        self.dirty.retain(|key| key.facet != facet);
         true
+    }
+
+    /// Record a terrain or static mutation at one world tile.
+    ///
+    /// The mutation creates a new source revision for `facet`, marks the
+    /// intersecting level-zero chunk, then marks its parent at every LOD up to
+    /// and including `max_lod`.  Thus a one-tile edit requests exactly one
+    /// base rebuild and one product at each derived level; sibling chunks are
+    /// not raster work merely because they share an ancestor.
+    ///
+    /// Returns `None` only if the facet revision has exhausted `u64`.  The map
+    /// itself must not be changed in that case, because the cache can no longer
+    /// name a newer immutable source product.
+    pub fn invalidate_tile(&mut self, facet: Facet, tile: (u32, u32), max_lod: u8) -> Option<RadarRevision> {
+        let revision = RadarRevision(self.revision(facet).0.checked_add(1)?);
+        self.revisions.insert(facet, revision);
+        self.dirty.retain(|key| key.facet != facet);
+
+        let (base_chunk, _) = world_tile_to_base_chunk(tile);
+        for lod in 0..=max_lod {
+            let shift = u32::from(lod);
+            let chunk = RadarChunkCoord::new(
+                base_chunk.x.checked_shr(shift).unwrap_or(0),
+                base_chunk.y.checked_shr(shift).unwrap_or(0),
+            );
+            self.dirty.insert(RadarChunkKey::new(facet, lod, chunk, revision));
+        }
+        Some(revision)
+    }
+
+    /// Whether this exact current-source product still needs a rebuild.
+    #[must_use]
+    pub fn is_dirty(&self, key: RadarChunkKey) -> bool {
+        key.revision == self.revision(key.facet) && self.dirty.contains(&key)
+    }
+
+    /// The current dirty products in deterministic production order.
+    ///
+    /// This is intentionally a snapshot rather than a consuming queue: Phase
+    /// 2.3's bounded producer owns dispatch and removes a key only once it has
+    /// published a complete CPU chunk.
+    #[must_use]
+    pub fn dirty_keys(&self) -> Vec<RadarChunkKey> {
+        self.dirty.iter().copied().collect()
     }
 
     /// Publish one complete CPU product if it still matches the source.
@@ -225,6 +331,8 @@ impl RadarCache {
             return false;
         }
         self.ready.insert(key, chunk);
+        self.dirty.remove(&key);
+        self.rebuilt = self.rebuilt.saturating_add(1);
         true
     }
 
@@ -236,11 +344,210 @@ impl RadarCache {
             .flatten()
     }
 
+    /// Select complete terrain for a draw request without exposing a hole.
+    ///
+    /// Selection is ordered as current exact product, nearest current coarser
+    /// ancestor, then the newest retained revision of the exact key. `None`
+    /// means the cache has never produced terrain covering this request; the
+    /// renderer must draw its explicit [`UNKNOWN`] placeholder rather than bind
+    /// an uninitialised or blank texture.
+    #[must_use]
+    pub fn select_ready(&self, key: RadarChunkKey) -> Option<RadarReadyChunk<'_>> {
+        self.requested.set(self.requested.get().saturating_add(1));
+        let current_revision = self.revision(key.facet);
+        if key.revision == current_revision {
+            if let Some(chunk) = self.ready.get(&key) {
+                return Some(RadarReadyChunk {
+                    chunk,
+                    kind: RadarReadyKind::Exact,
+                });
+            }
+
+            let ancestor = self
+                .ready
+                .iter()
+                .filter(|(candidate, _)| {
+                    candidate.facet == key.facet
+                        && candidate.revision == current_revision
+                        && candidate.lod > key.lod
+                        && key.chunk.x.checked_shr(u32::from(candidate.lod - key.lod))
+                            == Some(candidate.chunk.x)
+                        && key.chunk.y.checked_shr(u32::from(candidate.lod - key.lod))
+                            == Some(candidate.chunk.y)
+                })
+                .min_by_key(|(candidate, _)| candidate.lod)
+                .map(|(_, chunk)| chunk);
+            if let Some(chunk) = ancestor {
+                return Some(RadarReadyChunk {
+                    chunk,
+                    kind: RadarReadyKind::CoarserAncestor,
+                });
+            }
+        }
+
+        self.ready
+            .iter()
+            .filter(|(candidate, _)| {
+                candidate.facet == key.facet
+                    && candidate.lod == key.lod
+                    && candidate.chunk == key.chunk
+                    && candidate.revision <= current_revision
+            })
+            .max_by_key(|(candidate, _)| candidate.revision)
+            .map(|(_, chunk)| RadarReadyChunk {
+                chunk,
+                kind: RadarReadyKind::StaleExact,
+            })
+    }
+
+    /// Cache-owned diagnostic counters, sampled once per frame by callers.
+    #[must_use]
+    pub fn counters(&self) -> RadarCacheCounters {
+        let current = self
+            .ready
+            .keys()
+            .filter(|key| key.revision == self.revision(key.facet))
+            .count();
+        RadarCacheCounters {
+            requested: self.requested.get(),
+            ready: current,
+            stale: self.ready.len() - current,
+            rebuilt: self.rebuilt,
+            evicted: self.evicted,
+        }
+    }
+
     /// Number of retained complete products, including superseded products
     /// awaiting the cache budget/eviction policy from Phase 2.
     #[must_use]
     pub fn retained_len(&self) -> usize {
         self.ready.len()
+    }
+}
+
+/// A bounded hand-off from cache invalidation to a radar chunk producer.
+///
+/// This queue deliberately owns scheduling only: it never walks a [`Map`],
+/// allocates pixels, or uploads a texture.  A presentation frame may refresh
+/// its dirty view cheaply, while an idle worker takes at most
+/// `builds_per_turn` keys and returns a complete [`RadarChunk`] through
+/// [`Self::finish`].  Keeping those paths separate is what prevents a newly
+/// exposed minimap area from becoming a synchronous rasterisation burst.
+#[derive(Debug)]
+pub struct RadarWorkQueue {
+    max_queued: usize,
+    builds_per_turn: usize,
+    pending: BTreeSet<RadarChunkKey>,
+    in_flight: BTreeSet<RadarChunkKey>,
+}
+
+/// Queue-owned frame diagnostics, separate from retained cache products.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct RadarWorkCounters {
+    /// Work waiting to be handed to a producer.
+    pub queued: usize,
+    /// Work a producer has accepted but not yet returned.
+    pub in_flight: usize,
+}
+
+impl Default for RadarWorkQueue {
+    fn default() -> Self {
+        Self::new(128, 1).expect("the shipped radar queue limits are non-zero")
+    }
+}
+
+impl RadarWorkQueue {
+    /// Construct a queue with explicit total and producer-turn bounds.
+    ///
+    /// `max_queued` includes work already handed to a producer.  A stalled
+    /// producer therefore cannot make the amount of outstanding map work grow
+    /// without bound.
+    #[must_use]
+    pub fn new(max_queued: usize, builds_per_turn: usize) -> Option<Self> {
+        (max_queued != 0 && builds_per_turn != 0).then_some(Self {
+            max_queued,
+            builds_per_turn,
+            pending: BTreeSet::new(),
+            in_flight: BTreeSet::new(),
+        })
+    }
+
+    /// Number of requests waiting for a producer.
+    #[must_use]
+    pub fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Number of requests currently owned by a producer.
+    #[must_use]
+    pub fn in_flight_len(&self) -> usize {
+        self.in_flight.len()
+    }
+
+    /// Queue state suitable for a frame diagnostic report.
+    #[must_use]
+    pub fn counters(&self) -> RadarWorkCounters {
+        RadarWorkCounters {
+            queued: self.pending_len(),
+            in_flight: self.in_flight_len(),
+        }
+    }
+
+    /// Enqueue one immutable product, coalescing an identical request.
+    ///
+    /// Returns `false` only when this is a new key and the total outstanding
+    /// work is at its explicit bound.  Re-requesting pending or in-flight work
+    /// always succeeds without consuming another slot.
+    pub fn request(&mut self, key: RadarChunkKey) -> bool {
+        if self.pending.contains(&key) || self.in_flight.contains(&key) {
+            return true;
+        }
+        if self.pending.len() + self.in_flight.len() == self.max_queued {
+            return false;
+        }
+        self.pending.insert(key);
+        true
+    }
+
+    /// Reconcile pending work with the cache's current dirty snapshot.
+    ///
+    /// Superseded pending keys are discarded before admitting current work.
+    /// An already-running old revision is left to finish safely: publication
+    /// rejects it against the cache revision, rather than attempting to cancel
+    /// a producer that may already be reading its immutable source snapshot.
+    pub fn refresh_dirty(&mut self, cache: &RadarCache) {
+        self.pending.retain(|key| cache.is_dirty(*key));
+        for key in cache.dirty_keys() {
+            self.request(key);
+        }
+    }
+
+    /// Hand a bounded, deterministic batch to an idle/background producer.
+    ///
+    /// This only transfers ownership between queue sets.  It does not build
+    /// pixels and is consequently safe to call from presentation bookkeeping.
+    #[must_use]
+    pub fn take_for_producer(&mut self) -> Vec<RadarChunkKey> {
+        let keys: Vec<_> = self.pending.iter().copied().take(self.builds_per_turn).collect();
+        for key in &keys {
+            self.pending.remove(key);
+            self.in_flight.insert(*key);
+        }
+        keys
+    }
+
+    /// Release a dispatched job and publish its complete result if current.
+    ///
+    /// Results not dispatched by this queue are refused.  A result made stale
+    /// by a later mutation still releases its slot, but [`RadarCache::publish`]
+    /// rejects the pixels; a later [`Self::refresh_dirty`] queues the newer
+    /// source key.
+    pub fn finish(&mut self, cache: &mut RadarCache, chunk: RadarChunk) -> bool {
+        let key = chunk.key();
+        if !self.in_flight.remove(&key) {
+            return false;
+        }
+        cache.publish(chunk)
     }
 }
 
@@ -751,6 +1058,114 @@ mod tests {
     }
 
     #[test]
+    fn ready_selection_prefers_exact_then_nearest_current_ancestor() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::default();
+        let requested = cache.key(facet, 0, RadarChunkCoord::new(7, 5));
+        let ancestor = cache.key(facet, 2, RadarChunkCoord::new(1, 1));
+        let ancestor_chunk =
+            RadarChunk::new(ancestor, vec![WHITE; chunk_pixel_count()]).expect("a complete ancestor");
+        assert!(cache.publish(ancestor_chunk));
+
+        let fallback = cache
+            .select_ready(requested)
+            .expect("the ancestor covers the request");
+        assert_eq!(fallback.kind(), RadarReadyKind::CoarserAncestor);
+        assert_eq!(fallback.chunk().key(), ancestor);
+
+        let exact_chunk =
+            RadarChunk::new(requested, vec![GREEN; chunk_pixel_count()]).expect("a complete exact chunk");
+        assert!(cache.publish(exact_chunk));
+        let exact = cache.select_ready(requested).expect("the exact product is ready");
+        assert_eq!(exact.kind(), RadarReadyKind::Exact);
+        assert_eq!(exact.chunk().key(), requested);
+    }
+
+    #[test]
+    fn ready_selection_uses_the_newest_exact_stale_product_when_current_is_missing() {
+        let facet = Facet(0);
+        let coord = RadarChunkCoord::new(2, 3);
+        let mut cache = RadarCache::default();
+        let old = cache.key(facet, 1, coord);
+        assert!(
+            cache.publish(
+                RadarChunk::new(old, vec![RED; chunk_pixel_count()]).expect("a complete old product")
+            )
+        );
+        assert!(cache.set_revision(facet, RadarRevision(1)));
+        let current = cache.key(facet, 1, coord);
+
+        let fallback = cache
+            .select_ready(current)
+            .expect("the old complete raster remains safe");
+        assert_eq!(fallback.kind(), RadarReadyKind::StaleExact);
+        assert_eq!(fallback.chunk().key(), old);
+
+        let counters = cache.counters();
+        assert_eq!(counters.requested, 1);
+        assert_eq!(counters.ready, 0);
+        assert_eq!(counters.stale, 1);
+        assert_eq!(counters.rebuilt, 1);
+        assert_eq!(counters.evicted, 0, "eviction is not implemented yet");
+    }
+
+    #[test]
+    fn a_tile_mutation_marks_only_its_base_chunk_and_lod_ancestors_dirty() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::default();
+        let tile = (
+            u32::from(BASE_CHUNK_TILES) * 6 + 9,
+            u32::from(BASE_CHUNK_TILES) * 5 + 12,
+        );
+
+        let revision = cache
+            .invalidate_tile(facet, tile, 3)
+            .expect("the first revision is representable");
+        assert_eq!(revision, RadarRevision(1));
+        assert_eq!(
+            cache.dirty_keys(),
+            vec![
+                cache.key(facet, 0, RadarChunkCoord::new(6, 5)),
+                cache.key(facet, 1, RadarChunkCoord::new(3, 2)),
+                cache.key(facet, 2, RadarChunkCoord::new(1, 1)),
+                cache.key(facet, 3, RadarChunkCoord::new(0, 0)),
+            ],
+            "one tile has one base product and one ancestor at each LOD"
+        );
+
+        let base = cache.key(facet, 0, RadarChunkCoord::new(6, 5));
+        let other = cache.key(facet, 0, RadarChunkCoord::new(7, 5));
+        assert!(cache.is_dirty(base));
+        assert!(!cache.is_dirty(other), "an adjacent base chunk is unaffected");
+
+        let complete = RadarChunk::new(base, vec![GREEN; chunk_pixel_count()]).expect("a complete chunk");
+        assert!(cache.publish(complete));
+        assert!(!cache.is_dirty(base), "publication settles only that product");
+        assert!(cache.is_dirty(cache.key(facet, 1, RadarChunkCoord::new(3, 2))));
+    }
+
+    #[test]
+    fn a_new_mutation_supersedes_unfinished_dirty_work_for_its_facet() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::default();
+        let first = cache.invalidate_tile(facet, (0, 0), 1).expect("a first revision");
+        let second = cache
+            .invalidate_tile(facet, (u32::from(BASE_CHUNK_TILES), 0), 1)
+            .expect("a second revision");
+
+        assert_eq!(first, RadarRevision(1));
+        assert_eq!(second, RadarRevision(2));
+        assert_eq!(
+            cache.dirty_keys(),
+            vec![
+                cache.key(facet, 0, RadarChunkCoord::new(1, 0)),
+                cache.key(facet, 1, RadarChunkCoord::new(0, 0)),
+            ],
+            "a worker can never be asked to build an obsolete source revision"
+        );
+    }
+
+    #[test]
     fn a_bare_tile_is_its_land() {
         let map = Map::from_blocks(1, 1, |x, _| LandCell {
             tile: LandTile(if x < 4 { 1 } else { 2 }),
@@ -903,5 +1318,87 @@ mod tests {
         let mut pixels = vec![Color16::TRANSPARENT; 4];
         fill(&map, &colors(), (0, 0), 8, 8, &mut pixels);
         assert!(pixels.iter().all(|&color| color == GREEN));
+    }
+
+    #[test]
+    fn producer_queue_coalesces_keys_and_never_exceeds_its_bound() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::default();
+        let mut queue = RadarWorkQueue::new(2, 1).expect("non-zero limits");
+        cache.invalidate_tile(facet, (0, 0), 0).expect("a revision");
+
+        // Add three keys from the current source snapshot to exercise the
+        // queue's capacity independently of cache mutation scheduling.
+        let first = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        let second = cache.key(facet, 0, RadarChunkCoord::new(1, 0));
+        let third = cache.key(facet, 0, RadarChunkCoord::new(2, 0));
+        assert!(queue.request(first));
+        assert!(queue.request(first), "an equal request is coalesced");
+        assert!(queue.request(second));
+        assert!(!queue.request(third), "a distinct request observes the bound");
+        assert_eq!(
+            queue.counters(),
+            RadarWorkCounters {
+                queued: 2,
+                in_flight: 0
+            }
+        );
+
+        assert_eq!(queue.take_for_producer(), vec![first]);
+        assert_eq!(
+            queue.counters(),
+            RadarWorkCounters {
+                queued: 1,
+                in_flight: 1
+            }
+        );
+        assert!(queue.request(first), "an in-flight request is also coalesced");
+        assert!(!queue.request(third), "in-flight work counts toward the bound");
+    }
+
+    #[test]
+    fn producer_queue_publishes_only_dispatched_complete_current_products() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::default();
+        let mut queue = RadarWorkQueue::new(4, 1).expect("non-zero limits");
+        cache.invalidate_tile(facet, (0, 0), 0).expect("a revision");
+        queue.refresh_dirty(&cache);
+        let key = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        assert_eq!(queue.take_for_producer(), vec![key]);
+
+        let complete = RadarChunk::new(key, vec![GREEN; chunk_pixel_count()]).expect("complete product");
+        assert!(queue.finish(&mut cache, complete));
+        assert!(cache.get(key).is_some());
+        assert_eq!(queue.counters(), RadarWorkCounters::default());
+
+        let undispatched = RadarChunk::new(key, vec![RED; chunk_pixel_count()]).expect("complete product");
+        assert!(!queue.finish(&mut cache, undispatched));
+
+        cache.invalidate_tile(facet, (0, 0), 0).expect("new revision");
+        queue.refresh_dirty(&cache);
+        let stale_key = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        assert_eq!(queue.take_for_producer(), vec![stale_key]);
+        cache.invalidate_tile(facet, (0, 0), 0).expect("newer revision");
+        let stale = RadarChunk::new(stale_key, vec![RED; chunk_pixel_count()]).expect("complete product");
+        assert!(
+            !queue.finish(&mut cache, stale),
+            "a dispatched result from a superseded revision is rejected"
+        );
+        assert_eq!(
+            queue.counters(),
+            RadarWorkCounters::default(),
+            "the rejected job released its slot"
+        );
+
+        queue.refresh_dirty(&cache);
+        let current_key = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        assert_eq!(queue.take_for_producer(), vec![current_key]);
+        let current =
+            RadarChunk::new(current_key, vec![WHITE; chunk_pixel_count()]).expect("complete product");
+        assert!(queue.finish(&mut cache, current));
+        assert_eq!(
+            cache.get(current_key).expect("current product").pixels()[0],
+            WHITE
+        );
     }
 }
