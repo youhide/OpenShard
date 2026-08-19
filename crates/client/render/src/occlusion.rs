@@ -2871,6 +2871,7 @@ mod tests {
     use openshard_uofiles::map::{LandCell, Map};
 
     use super::*;
+    use openshard_protocol::items::ItemAmount;
 
     /// A static tile with the flags and height a test is about.
     fn tile(flags: u64, height: u8) -> StaticTile {
@@ -4790,6 +4791,7 @@ mod tests {
         let items: Vec<GroundItem> = (2..=6u16)
             .flat_map(|x| {
                 (2..=6u16).map(move |y| GroundItem {
+                    amount: ItemAmount::ONE,
                     at: Point::new(x, y, 20),
                     graphic,
                     hue: Hue::NONE,
@@ -4857,6 +4859,7 @@ mod tests {
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(graphic.0, tile(TileFlags::NO_SHOOT, 20));
         let items = [GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(4, 4, 40),
             graphic,
             hue: Hue::NONE,

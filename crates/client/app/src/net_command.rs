@@ -580,11 +580,14 @@ impl App {
                         MultiDraw::NotAMulti => {
                             self.world.presentation.items.push(GroundItem {
                                 at: item.position,
-                                graphic: openshard_client_render::items::displayed_graphic(
-                                    item.graphic,
-                                    amount,
-                                ),
+                                // The shard's own graphic, not the pile art it
+                                // draws as: `GroundItem::displayed` chooses that
+                                // every time the list is drawn, and the base
+                                // graphic is what says whether the pile is
+                                // counted — see that field's doc.
+                                graphic: item.graphic,
                                 hue: item.hue,
+                                amount,
                             });
                             self.world.presentation.item_serials.push(*serial);
                         }
@@ -603,11 +606,9 @@ impl App {
         {
             self.world.presentation.items.push(GroundItem {
                 at,
-                graphic: openshard_client_render::items::displayed_graphic(
-                    drag.item.graphic,
-                    drag.item.amount,
-                ),
+                graphic: drag.item.graphic,
                 hue: drag.item.hue,
+                amount: drag.item.amount,
             });
             self.world.presentation.item_serials.push(drag.item.serial);
         }
@@ -996,6 +997,10 @@ fn laid_out(components: &[openshard_uofiles::multi::Component], at: Point, hue: 
             ),
             graphic: Graphic(component.graphic),
             hue,
+            // A house's wall is a wall, not a pile of walls: a multi's parts
+            // are pictures laid out from a component list and have no stack of
+            // their own to count. See `GroundItem::amount`.
+            amount: openshard_protocol::items::ItemAmount::ONE,
         })
         .collect()
 }

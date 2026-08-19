@@ -47,6 +47,7 @@ use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, 
 use openshard_client_render::statics::StaticGeometry;
 use openshard_client_render::{dump, ground};
 use openshard_protocol::direction::Direction;
+use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::animdata::AnimData;
@@ -295,6 +296,7 @@ fn a_real_frames_view_normal_draws_the_bookcases_lid_inside_that_slab() {
     let items: Vec<GroundItem> = BOOKCASES
         .iter()
         .map(|&(id, x, y)| GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(x, y, 27),
             graphic: Graphic(id),
             hue: Hue::NONE,

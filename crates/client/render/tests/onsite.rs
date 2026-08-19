@@ -40,6 +40,7 @@ use openshard_client_render::light::{self, Spot};
 use openshard_client_render::occlusion;
 use openshard_client_render::place::Stance;
 use openshard_client_render::statics;
+use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
@@ -144,6 +145,7 @@ fn what_the_lighting_knows_about_a_place() {
 
     // The flame the report is about, standing in the street where the player was.
     let lamp = [GroundItem {
+        amount: ItemAmount::ONE,
         at: Point::new(LAMP_AT.0, LAMP_AT.1, 0),
         graphic: LAMP,
         hue: Hue::NONE,

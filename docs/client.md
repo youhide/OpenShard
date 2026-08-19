@@ -3093,8 +3093,20 @@ own understanding had written.
   cover this frame" has to be *one* question — asked twice with the item half
   forgotten in one of them, the atlas is rebuilt every frame an item is on
   screen and never holds it, which is a stutter rather than an error.
-  Deliberately not done: an item's *amount*. A pile of 500 gold is one sprite
-  here, where the client picks a different graphic per size band.
+  The *amount* used to be deliberately left out of this, on the grounds that a
+  pile of 500 gold is one sprite. Both halves of it are done now: the coin
+  bands pick the sprite (`items::displayed_graphic`, from the shard's own
+  graphic and the count), and the count itself is written over the pile —
+  `items::stack_label` decides whether there is a number and what it reads,
+  `items::labels` hangs it over the picture in the world, and
+  `container::amount_label` puts it in the bottom-right corner of an icon in a
+  bag and of the pack on the cursor. One rule for all three, because a pile
+  counted in a bag and silent on the floor is the same pile telling two
+  stories. **Not the reference client's picture**: no 2D client writes a count
+  on a pile — the classic one puts the number in the name over the item and
+  ClassicUO draws the art a second time five pixels up and left — so this is
+  the client's own addition and the whole rule is stated at `stack_label`
+  rather than cited to a reference that has none.
 - **The facet is a startup constant and `0x1B` only carries a size.** The app
   loads Felucca and compares the shard's map size once, warning when they
   differ rather than following. Following means decoding `0xBF 0x08` and

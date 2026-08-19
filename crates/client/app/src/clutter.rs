@@ -147,15 +147,16 @@ impl Clutter {
     pub fn of(items: &[GroundItem], tiles: &TileData) -> Self {
         let mut blocked: HashMap<Tile, Vec<Blocker>> = HashMap::new();
         for item in items {
-            let tile = tiles.static_tile(item.graphic.0);
-            if !tile.flags.is_blocking() || doors::is_open(item.graphic) {
+            // What is drawn is what is in the way — see `GroundItem::displayed`.
+            let tile = tiles.static_tile(item.displayed().0);
+            if !tile.flags.is_blocking() || doors::is_open(item.displayed()) {
                 continue;
             }
             let at = Tile::new(item.at.x, item.at.y);
             blocked.entry(at).or_default().push(Blocker {
                 z: item.at.z,
                 height: TileHeight::new(tile.height),
-                door: doors::is_door(item.graphic),
+                door: doors::is_door(item.displayed()),
             });
         }
         Self { tiles: blocked }
@@ -385,6 +386,7 @@ mod tests {
     use super::*;
     use openshard_movement::{Around, Detour, Heading, Lean, Leeway, OpenWorld, Step, step_allowed};
     use openshard_protocol::direction::Direction;
+    use openshard_protocol::items::ItemAmount;
     use openshard_protocol::wire::{Graphic, Hue};
 
     /// A barrel's tiledata height, so the span in these tests is a real one.
@@ -459,6 +461,7 @@ mod tests {
 
     fn item(x: u16, y: u16, z: i8, graphic: Graphic) -> GroundItem {
         GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(x, y, z),
             graphic,
             hue: Hue::NONE,

@@ -72,6 +72,15 @@ impl Hue {
     /// instead — see [`Notoriety::name_hue`](crate::mobile::Notoriety::name_hue),
     /// whose neutral entry lands on the same grey by way of a different table.
     pub const LABEL: Self = Self::MUTED_GREY;
+
+    /// The hue a stack's own count is written in, where the client draws one
+    /// over a pile — see `openshard-client-render`'s `items::stack_label`.
+    ///
+    /// The same grey as [`LABEL`](Self::LABEL) and named separately for the
+    /// reason stated above it: this is the client writing a number of its own
+    /// onto a picture, not the shard answering a click with a name, and a
+    /// shard that recolours one has not asked for the other to move.
+    pub const STACK_COUNT: Self = Self::MUTED_GREY;
 }
 
 /// An index into the client's sound files.

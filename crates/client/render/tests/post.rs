@@ -41,6 +41,7 @@ use openshard_client_render::light::{self, Tuning};
 use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, SpriteRenderer, Target};
 use openshard_client_render::statics::StaticGeometry;
 use openshard_client_render::{dump, ground};
+use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::animdata::AnimData;
@@ -313,6 +314,7 @@ fn a_posts_shadow_is_a_quarter_tiles_and_a_lost_footprint_makes_it_a_whole_tiles
     let items: Vec<GroundItem> = [(POST, AT), (FLAME, FLAME_AT)]
         .iter()
         .map(|&(id, (x, y))| GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(x, y, 0),
             graphic: Graphic(id),
             hue: Hue::NONE,

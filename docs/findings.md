@@ -261,6 +261,21 @@ gameplay decision rather than a fix. Pinned in
 `client/app/src/clutter.rs`. What it cost was a day of looking for the bug in
 three layers that were all behaving.
 
+**The stacking flag is on the graphic the shard sends, and not always on the
+one it draws as.** `tiledata`'s `0x0800` — ClassicUO's `Generic`, read as
+`IsStackable`, ServUO's `TileFlag.Generic` — is what says several of a thing
+are one item with a count. A pile also *changes art* as it grows (the coin
+bands in `client/render/src/items.rs`), and the two do not agree in the file:
+gold carries the flag on all three graphics (`0x0EED`/`0x0EEE`/`0x0EEF`,
+`0x800` each), while **copper carries it only on the single coin** — `0x0EEA`
+is `0x4800`, and its two pile graphics `0x0EEB`/`0x0EEC` are `0x4000`, no
+stacking bit at all. So anything that asks "is this a pile" about the art on
+screen answers *no* for a handful of coppers the moment there are two of them,
+and *yes* for the identical coins in a bag, where the shard's own graphic is
+what survives. The rule: keep the graphic the shard sent, and derive the drawn
+one where it is drawn (`GroundItem::displayed`). Verified by reading the four
+entries out of `tiledata.mul` by hand at the offsets below.
+
 **Read a tiledata answer straight out of the file before believing a layer is
 wrong.** The file is 3,188,736 bytes, which is the High Seas layout exactly —
 41 bytes a static entry, 8-byte flags — and that arithmetic is what says the

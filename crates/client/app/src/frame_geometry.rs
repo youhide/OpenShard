@@ -34,7 +34,11 @@ fn items_fingerprint(items: &[openshard_client_render::items::GroundItem]) -> u6
         add(u64::from(item.at.x));
         add(u64::from(item.at.y));
         add(item.at.z as u64);
-        add(u64::from(item.graphic.0));
+        // The graphic *drawn*, not the one the shard sent: a pile that
+        // crosses a coin band changes picture without changing either, and a
+        // fingerprint blind to that would hand the frame a cached geometry
+        // holding the old art. See `GroundItem::displayed`.
+        add(u64::from(item.displayed().0));
         add(u64::from(item.hue.0));
     }
     hash
@@ -569,6 +573,7 @@ pub(crate) struct FrameFacts {
 #[cfg(test)]
 mod tests {
     use openshard_client_render::items::GroundItem;
+    use openshard_protocol::items::ItemAmount;
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_protocol::world::Point;
 
@@ -576,6 +581,7 @@ mod tests {
 
     fn at(x: u16, y: u16) -> GroundItem {
         GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(x, y, 0),
             graphic: Graphic(0x0006),
             hue: Hue::NONE,

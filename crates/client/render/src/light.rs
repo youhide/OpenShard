@@ -3432,6 +3432,7 @@ mod tests {
     use openshard_uofiles::tiledata::{StaticTile, TileFlags};
 
     use super::*;
+    use openshard_protocol::items::ItemAmount;
 
     /// A tiledata table where exactly one graphic burns.
     fn lit(graphic: u16) -> TileData {
@@ -4223,6 +4224,7 @@ mod tests {
         let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
         let graphic = Graphic(0x0A12);
         let items = [GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(100, 100, 0),
             graphic,
             hue: Hue::NONE,
@@ -4256,6 +4258,7 @@ mod tests {
     fn an_unflagged_item_makes_no_light() {
         let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
         let items = [GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(100, 100, 0),
             graphic: Graphic(0x0FAE),
             hue: Hue::NONE,
@@ -4289,6 +4292,7 @@ mod tests {
     fn a_pool_covers_the_same_ground_at_every_zoom() {
         let graphic = Graphic(0x0A12);
         let items = [GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(100, 100, 0),
             graphic,
             hue: Hue::NONE,
@@ -4416,6 +4420,7 @@ mod tests {
             },
         );
         let items = [GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(101, 100, 0),
             graphic,
             hue: Hue::NONE,
@@ -4476,6 +4481,7 @@ mod tests {
         let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
         let graphic = Graphic(0x0A12);
         let items = [GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(100, 100, 40),
             graphic,
             hue: Hue::NONE,

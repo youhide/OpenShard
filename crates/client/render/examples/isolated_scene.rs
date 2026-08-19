@@ -193,6 +193,7 @@ use openshard_client_render::ground;
 use openshard_client_render::items::{self, GroundItem};
 use openshard_client_render::renderer::{GroundRenderer, MeshFaceRenderer, SpriteRenderer, Target};
 use openshard_client_render::{light, renderer};
+use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
@@ -322,6 +323,7 @@ fn parse_extra_item(spec: &str) -> GroundItem {
         _ => panic!("OPENSHARD_SCENE_EXTRA item wants `x,y,z,graphic[,hue]`, got {spec:?}"),
     };
     GroundItem {
+        amount: ItemAmount::ONE,
         at: Point::new(
             x.trim().parse().unwrap_or_else(|_| panic!("x: {x:?}")),
             y.trim().parse().unwrap_or_else(|_| panic!("y: {y:?}")),
@@ -677,6 +679,7 @@ fn main() {
                     }
                     let (sx, sy) = shift(anchor, (x, y));
                     items.push(GroundItem {
+                        amount: ItemAmount::ONE,
                         at: Point::new(sx, sy, s.z),
                         graphic: s.tile,
                         hue: s.hue,
@@ -742,6 +745,7 @@ fn main() {
             }
             let (sx, sy) = shift(anchor, (one.x, one.y));
             items.push(GroundItem {
+                amount: ItemAmount::ONE,
                 at: Point::new(sx, sy, one.z),
                 graphic: Graphic(one.graphic),
                 hue: Hue(one.hue),

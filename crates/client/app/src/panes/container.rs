@@ -474,6 +474,27 @@ impl ContainerPane {
                 text: action.label().to_owned(),
             });
         }
+        // How many are in each pile, in the corner of its own icon. Placed by
+        // the same module that laid the icons out — see
+        // `container::amount_labels` — so a count and the picture it belongs to
+        // cannot be measured against two different rectangles.
+        lines.extend(
+            container::amount_labels(
+                contents,
+                GumpPixel::new(0, 0),
+                frame.files.tiledata,
+                frame.files.gump_atlas,
+                frame.files.font_atlas,
+            )
+            .into_iter()
+            .map(|(at, text)| Line {
+                at,
+                font: openshard_client_render::items::STACK_COUNT_FONT,
+                hue: Hue::STACK_COUNT,
+                clip: None,
+                text,
+            }),
+        );
         if let Some(item) = self
             .hovered
             .and_then(|serial| contents.iter().find(|item| item.serial == serial))

@@ -91,9 +91,19 @@ impl App {
             .iter()
             .filter(|item| item.at.x == x && item.at.y == y)
             .map(|item| {
-                let priority_z =
-                    depth::static_priority_z(item.at.z, self.resources.tiledata.static_tile(item.graphic.0));
-                (item.graphic, Height(item.at.z), item.hue, PriorityZ(priority_z))
+                // The drawn graphic, not the shard's: this is what the frame
+                // put on the screen, and both the sort and the answer have to
+                // be about that picture. See `GroundItem::displayed`.
+                let priority_z = depth::static_priority_z(
+                    item.at.z,
+                    self.resources.tiledata.static_tile(item.displayed().0),
+                );
+                (
+                    item.displayed(),
+                    Height(item.at.z),
+                    item.hue,
+                    PriorityZ(priority_z),
+                )
             })
             .collect();
         let tile_depth = TileDepth(depth::base_for(i32::from(x), i32::from(y)));
@@ -316,11 +326,11 @@ impl App {
                         let item = self.world.presentation.items[index];
                         let priority_z = PriorityZ(depth::static_priority_z(
                             item.at.z,
-                            self.resources.tiledata.static_tile(item.graphic.0),
+                            self.resources.tiledata.static_tile(item.displayed().0),
                         ));
                         let picked = PickedItem {
                             serial,
-                            graphic: item.graphic,
+                            graphic: item.displayed(),
                             hue: item.hue,
                             at: item.at,
                             priority_z,

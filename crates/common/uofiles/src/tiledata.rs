@@ -161,6 +161,17 @@ impl TileFlags {
     /// `TileFlag.Animation` and ServUO's. Pinned in a test beside the constant,
     /// because a flag means what the engine *reads* it for.
     pub const ANIMATION: u64 = 0x0100_0000;
+    /// The graphic piles up: several of it are one item with an amount, rather
+    /// than one entity each.
+    ///
+    /// `0x0000_0800` — ClassicUO calls the bit `Generic` and reads it as
+    /// exactly this (`TileDataLoader`'s `IsStackable`), and ServUO's
+    /// `TileFlag.Generic` has the same value. Sphere's header has no name for
+    /// it. Pinned in a test beside the constant, because a flag means what the
+    /// engine *reads* it for — and what this one is read for is whether a pile
+    /// is drawn with its count written on it. See
+    /// `openshard-client-render`'s `items::stack_label`.
+    pub const STACKABLE: u64 = 0x0000_0800;
 
     /// Wrap a raw flag word.
     pub const fn new(bits: u64) -> Self {
@@ -212,6 +223,12 @@ impl TileFlags {
         self.has(Self::LIGHT_SOURCE)
     }
 
+    /// Whether several of this graphic pile into one item with a count. See
+    /// [`Self::STACKABLE`].
+    pub const fn is_stackable(self) -> bool {
+        self.has(Self::STACKABLE)
+    }
+
     /// Whether this is a roof. See [`Self::ROOF`].
     pub const fn is_roof(self) -> bool {
         self.has(Self::ROOF)
@@ -256,6 +273,7 @@ impl fmt::Debug for TileFlags {
             (Self::INTERNAL, "INTERNAL"),
             (Self::FOLIAGE, "FOLIAGE"),
             (Self::ROOF, "ROOF"),
+            (Self::STACKABLE, "STACKABLE"),
         ] {
             if self.has(mask) {
                 names.push(name);
@@ -636,6 +654,14 @@ mod tests {
         assert_eq!(TileFlags::LIGHT_SOURCE, 0x0080_0000);
         assert!(TileFlags::new(TileFlags::LIGHT_SOURCE).is_light_source());
         assert!(!TileFlags::new(TileFlags::ANIMATION).is_light_source());
+        // `TileFlag.Generic`, which ClassicUO reads as `IsStackable` and ServUO
+        // gives the same value. One bit off and every arrow in the pack would
+        // be counted or no reagent would be: `0x0000_0400` below it is the
+        // bridge a stair is and `0x0000_1000` above it is the archway a body
+        // walks through.
+        assert_eq!(TileFlags::STACKABLE, 0x0000_0800, "ClassicUO's Generic");
+        assert!(TileFlags::new(TileFlags::STACKABLE).is_stackable());
+        assert!(!TileFlags::new(TileFlags::CLIMBABLE).is_stackable());
     }
 
     #[test]

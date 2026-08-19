@@ -21,9 +21,12 @@
 
 use crate::items::{HIGHLIGHT_HUE, displayed_graphic};
 use openshard_protocol::containers::ContainedItem;
+use openshard_protocol::items::ItemAmount;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Graphic;
+use openshard_uofiles::tiledata::TileData;
 
+use crate::atlas::FontAtlas;
 use crate::gump::{GumpArt, GumpAtlas, GumpPixel, Picture};
 
 /// The compact client-side control shown beneath a loot container.
@@ -259,6 +262,87 @@ pub fn window_with_action(
     pictures
 }
 
+/// Where one icon's count sits and what it reads, or `None` for an icon that
+/// is drawn without one.
+///
+/// `at` is the icon's own top-left corner, wherever it is being drawn — a slot
+/// in a bag, or the negative grab offset a pack on the cursor is placed at.
+/// The three callers this has are the three places a count is drawn, and they
+/// share this function rather than each doing the arithmetic: a number in one
+/// corner in a bag and another corner on the pointer would be the same pile
+/// drawn twice.
+///
+/// **The bottom-right corner of the icon's own art**, which is where a count
+/// has to go: item art hangs its picture anywhere inside its rectangle, and a
+/// number written at a fixed offset from the icon's *top* left would sit over
+/// the drawing on a tall graphic and in empty space on a short one. Measured
+/// against the sprite the atlas actually packed, so the corner is the corner
+/// of the picture rather than of a rectangle guessed here.
+///
+/// Two atlases, because two things are being measured: `gumps` says how big
+/// the icon is, and `fonts` how wide the digits are — the count is
+/// right-aligned into that corner, so both are needed before it can be placed.
+/// An icon the gump atlas has not packed yet gets no number, the same frame's
+/// wait [`size`] describes: the count would have nothing to sit in the corner
+/// of.
+///
+/// Whether there is a number at all is [`crate::items::stack_label`]'s one
+/// rule, asked here rather than restated.
+pub fn amount_label(
+    graphic: Graphic,
+    amount: ItemAmount,
+    at: GumpPixel,
+    tiledata: &TileData,
+    gumps: &GumpAtlas,
+    fonts: &FontAtlas,
+) -> Option<(GumpPixel, String)> {
+    let text = crate::items::stack_label(graphic, amount, tiledata)?;
+    let icon = gumps.sprite(GumpArt::Item(displayed_graphic(graphic, amount)))?;
+    // The digits' own box: as wide as the line sets and as tall as one glyph —
+    // asked of `0`, since every character in it is a digit or the `.` and `k`
+    // `crate::items::abbreviated` may add, and `fonts.mul`'s digits are one
+    // height.
+    let width = crate::text::gump_width(&text, crate::items::STACK_COUNT_FONT, fonts);
+    let height = fonts
+        .glyph(crate::items::STACK_COUNT_FONT, b'0')
+        .map_or(0, |glyph| i32::from(glyph.height));
+    Some((
+        at.offset(GumpPixel::new(
+            i32::from(icon.width) - width,
+            i32::from(icon.height) - height,
+        )),
+        text,
+    ))
+}
+
+/// Every counted icon's digits in this window, in the same order [`window`]
+/// laid the pictures out.
+///
+/// The caller turns these into labels of its own, because a glyph comes out of
+/// the font atlas and this module has only ever placed pictures. `at` is the
+/// window's own corner, the same one [`window`] takes.
+pub fn amount_labels(
+    contents: &[ContainedItem],
+    at: GumpPixel,
+    tiledata: &TileData,
+    gumps: &GumpAtlas,
+    fonts: &FontAtlas,
+) -> Vec<(GumpPixel, String)> {
+    contents
+        .iter()
+        .filter_map(|item| {
+            amount_label(
+                item.graphic,
+                item.amount,
+                at.offset(GumpPixel::new(item.at.x, item.at.y)),
+                tiledata,
+                gumps,
+                fonts,
+            )
+        })
+        .collect()
+}
+
 /// Which item in an open container the cursor is over, if any.
 ///
 /// Topmost first, and against the **picture** rather than its bounding box: item
@@ -311,16 +395,19 @@ mod tests {
     const BAG: Graphic = Graphic(0x003C);
     const CANDLE: Graphic = Graphic(0x0A28);
     const COIN: Graphic = Graphic(0x0EED);
+    /// What a coin pile of more than five draws as — see `items::displayed_graphic`.
+    const COIN_PILE: Graphic = Graphic(0x0EEF);
 
     fn atlas() -> GumpAtlas {
         GumpAtlas::pack([
             (GumpArt::Gump(BAG), block(140, 100)),
             (GumpArt::Item(CANDLE), block(10, 20)),
             (GumpArt::Item(COIN), block(8, 8)),
+            (GumpArt::Item(COIN_PILE), block(12, 10)),
             (GumpArt::Gump(ACTION_UP), block(30, 22)),
             (GumpArt::Gump(ACTION_DOWN), block(30, 22)),
         ])
-        .expect("five small blocks fit an atlas 2048 on a side")
+        .expect("six small blocks fit an atlas 2048 on a side")
     }
 
     fn item(serial: u32, graphic: Graphic, x: i32, y: i32) -> ContainedItem {
@@ -361,6 +448,86 @@ mod tests {
             None,
             "the container's own art is packed but the button's is not, so there is nowhere to draw it"
         );
+    }
+
+    /// A font of solid blocks, so a count's placement can be measured without
+    /// a client's `fonts.mul`. Every digit the assertions below use is five
+    /// wide and seven tall.
+    fn digits() -> crate::atlas::FontAtlas {
+        crate::atlas::FontAtlas::pack((b'0'..=b'9').map(|char| {
+            (
+                crate::atlas::GlyphKey {
+                    font: crate::items::STACK_COUNT_FONT,
+                    char,
+                },
+                Image::new(5, 7, vec![Color16(0x7FFF); 5 * 7]),
+            )
+        }))
+        .expect("ten small blocks fit an atlas 2048 on a side")
+    }
+
+    /// A table in which the coin piles up and the candle does not.
+    fn stacking() -> openshard_uofiles::tiledata::TileData {
+        let mut tiledata = openshard_uofiles::tiledata::TileData::empty();
+        tiledata.set_static_tile(
+            COIN.0,
+            openshard_uofiles::tiledata::StaticTile {
+                flags: openshard_uofiles::tiledata::TileFlags::new(
+                    openshard_uofiles::tiledata::TileFlags::STACKABLE,
+                ),
+                ..Default::default()
+            },
+        );
+        tiledata
+    }
+
+    /// A count sits in the bottom-right corner of the icon's own art, and the
+    /// corner is the *sprite's* — measured off the atlas, not off a rectangle
+    /// written down here.
+    ///
+    /// **The corner is the *displayed* art's**, which for a coin pile is not
+    /// the graphic the shard sent: 123 gold draws as `0x0EEF`, 12×10 here,
+    /// where the single coin `0x0EED` is 8×8. A count measured against the
+    /// base graphic would hang off the picture it belongs to by the difference.
+    ///
+    /// `123` sets 15 wide and 7 tall against the pile's 12×10, so the digits
+    /// start 3 pixels left of the icon's left edge and 3 above its bottom —
+    /// outside the icon on the left, which is what right-aligning a line wider
+    /// than what it labels means and is why the assertion states it rather
+    /// than hiding it.
+    #[test]
+    fn a_count_sits_in_the_corner_of_its_own_icon() {
+        let mut coin = item(1, COIN, 30, 40);
+        coin.amount = openshard_protocol::items::ItemAmount(123);
+        let labels = amount_labels(
+            &[coin, item(2, CANDLE, 60, 10)],
+            GumpPixel::new(300, 200),
+            &stacking(),
+            &atlas(),
+            &digits(),
+        );
+        assert_eq!(
+            labels,
+            vec![(
+                GumpPixel::new(300 + 30 + 12 - 15, 200 + 40 + 10 - 7),
+                "123".to_owned()
+            )],
+            "the candle is not a pile, and the coin's count is in its own corner"
+        );
+    }
+
+    /// An icon whose art has not been packed yet gets no count.
+    ///
+    /// The same frame's wait `size` describes: the corner a count is placed in
+    /// is the sprite's, and there is no sprite to take one from. A number
+    /// drawn at the item's coordinate instead would sit in the middle of the
+    /// bag until the atlas caught up.
+    #[test]
+    fn an_unpacked_icon_has_no_count() {
+        let mut coin = item(1, COIN, 30, 40);
+        coin.amount = openshard_protocol::items::ItemAmount(123);
+        let bag_only = GumpAtlas::pack([(GumpArt::Gump(BAG), block(140, 100))]).unwrap();
+        assert!(amount_labels(&[coin], GumpPixel::new(0, 0), &stacking(), &bag_only, &digits()).is_empty());
     }
 
     #[test]

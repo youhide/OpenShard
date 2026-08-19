@@ -491,6 +491,7 @@ mod tests {
 
     use super::*;
     use crate::facing::Hole;
+    use openshard_protocol::items::ItemAmount;
 
     /// A tiledata entry that stops light: what a wall is, for the tests here.
     fn wall(height: u8) -> StaticTile {
@@ -584,6 +585,7 @@ mod tests {
         // a ground item that vanished under a baked block would be a door the
         // grid stopped knowing about.
         let items = [GroundItem {
+            amount: ItemAmount::ONE,
             graphic: WALL,
             at: Point::new(9, 9, 0),
             hue: Hue::NONE,

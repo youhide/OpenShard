@@ -1958,6 +1958,29 @@ impl App {
             })
             .flatten()
             .collect();
+        // How many are in each pile on the ground, over the pile. The list is
+        // `presentation.items` and not the chained one `frame_geometry` draws:
+        // the house under a placement cursor is components rather than piles,
+        // and every one of them carries `ItemAmount::ONE` by construction — a
+        // walk over it would find nothing to say and cost a placement each.
+        //
+        // Which piles get a number, and what the number reads, is
+        // `items::stack_label`'s single rule — see it, and `items::labels` for
+        // the anchor. Both live in the render crate beside the placement they
+        // are measured against, so a count cannot drift off the picture it
+        // belongs to.
+        overhead.extend(
+            items::labels(
+                &self.world.presentation.items,
+                &camera,
+                &self.resources.tiledata,
+                &self.world.presentation.tile_animations,
+                &window.atlases.statics,
+                &cutaway,
+            )
+            .into_iter()
+            .map(|(anchor, text)| (anchor, text, items::STACK_COUNT_FONT, Hue::STACK_COUNT)),
+        );
         // A combat number follows the same mobile anchor as speech, but its
         // y-coordinate is aged every frame so it rises smoothly rather than
         // moving only when the network sends another packet.

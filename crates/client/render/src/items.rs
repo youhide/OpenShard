@@ -21,6 +21,7 @@
 use std::collections::BTreeSet;
 
 use openshard_protocol::items::ItemAmount;
+use openshard_protocol::speech::Font;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::tiledata::TileData;
@@ -29,7 +30,7 @@ use crate::animate::StaticAnimations;
 use crate::atlas::StaticArt;
 #[cfg(test)]
 use crate::atlas::StaticAtlas;
-use crate::camera::{Camera, RealPixel};
+use crate::camera::{Camera, RealPixel, ViewPixel};
 use crate::cutaway::Cutaway;
 use crate::depth;
 use crate::sprite::SpriteQuad;
@@ -39,18 +40,54 @@ use crate::statics::{Placed, on_screen, place_cutaway, placed_rect, quad_of};
 ///
 /// A plain value and not a handle into a `WorldView`, for the reason
 /// [`Mobile`](crate::mobiles::Mobile) is one: this crate renders what it is
-/// given and owns no model of the world. The stack's *amount* is deliberately
-/// absent — a pile of 500 gold is one sprite, and which sprite is the caller's
-/// question, not the renderer's.
+/// given and owns no model of the world.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct GroundItem {
     /// Where it lies.
     pub at: Point,
     /// Its graphic, which is a static's graphic: the two share an art file and
     /// therefore an atlas.
+    ///
+    /// **The one the shard sent**, not the one on screen. A pile of coins is
+    /// drawn from a different graphic once there are two of it and again once
+    /// there are six — see [`displayed_graphic`] — and [`GroundItem::displayed`]
+    /// is where that choice is made, every time this list is drawn, picked or
+    /// packed. Storing the chosen one here instead was a real defect: the
+    /// client asks `tiledata` about a graphic to decide whether a pile is
+    /// counted, and copper's pile art (`0x0EEB`) does not carry the stacking
+    /// flag its single coin (`0x0EEA`) does — so the same handful of coppers
+    /// was counted in a bag, where the base graphic survives, and silent on
+    /// the floor, where it did not.
     pub graphic: Graphic,
     /// Its hue, or [`Hue::NONE`] for none.
     pub hue: Hue,
+    /// How many of it there are.
+    ///
+    /// This used to be deliberately absent, on the grounds that a pile of 500
+    /// gold is one sprite and picking that sprite is the caller's question. It
+    /// still is — [`displayed_graphic`] runs before a [`GroundItem`] is ever
+    /// built. What changed is that a pile is now drawn with its count written
+    /// over it, and a number the picture carries is part of the picture: see
+    /// [`stack_label`], and [`labels`] for the anchor it hangs from. It also
+    /// picks the art, through [`Self::displayed`]. One for everything that is
+    /// not a pile at all, which is what the wire's own default is.
+    pub amount: ItemAmount,
+}
+
+impl GroundItem {
+    /// The graphic actually on screen: [`displayed_graphic`] of what the shard
+    /// sent and how many there are.
+    ///
+    /// Everything in this module that draws, places, packs or picks this item
+    /// goes through here, so there is one answer to "which picture is this" —
+    /// the atlas is grown for it, the sprite is placed from it, and a click is
+    /// tested against it. What is deliberately **not** asked through it is
+    /// whether the pile is counted at all: that reads the shard's own graphic,
+    /// for the reason [`Self::graphic`] states.
+    #[must_use]
+    pub const fn displayed(&self) -> Graphic {
+        displayed_graphic(self.graphic, self.amount)
+    }
 }
 
 /// The art used for a counted coin stack.
@@ -66,6 +103,73 @@ pub const fn displayed_graphic(graphic: Graphic, amount: ItemAmount) -> Graphic 
         0x0EEA | 0x0EED | 0x0EF0 if amount.0 > 5 => Graphic(graphic.0 + 2),
         0x0EEA | 0x0EED | 0x0EF0 if amount.0 > 1 => Graphic(graphic.0 + 1),
         _ => graphic,
+    }
+}
+
+/// The face a stack's count is written in.
+///
+/// `fonts.mul`'s small face, which is what every caption this client writes
+/// over a window already uses — a count in the corner of a 30-pixel icon has
+/// less room than any of them, so nothing larger was ever a candidate. One
+/// constant for all three places a count is drawn, for [`stack_label`]'s
+/// reason: a pile counted in one face in a bag and another on the floor is
+/// the same pile drawn twice.
+pub const STACK_COUNT_FONT: Font = Font(1);
+
+/// The digits written on a pile, or `None` for a thing that is drawn without a
+/// count.
+///
+/// **The one rule, for all three places a count is drawn**: an icon in a bag,
+/// a pile on the ground, and the pack on the cursor between the two. Which of
+/// them draws a number is not three decisions — a pile that is counted in a bag
+/// and silent on the floor would be the same pile telling two stories.
+///
+/// Two conditions, both from the client's own files rather than from a guess at
+/// what looks like a heap:
+///
+/// - **The graphic stacks at all** — `tiledata`'s
+///   [`STACKABLE`](openshard_uofiles::tiledata::TileFlags::STACKABLE). A sword
+///   the shard sent with an amount is one sword, and writing `2` on it would be
+///   inventing a pile out of a field the wire happens to carry.
+/// - **There is more than one of it.** A single reagent is a reagent, not a
+///   stack of one — which is the same threshold ClassicUO's own stack drawing
+///   uses for its offset second sprite (`ItemGump.Draw`).
+///
+/// **This is not the reference client's picture.** No 2D client writes a count
+/// on a pile at all: the classic one puts the number in the name over the item
+/// (`NameOverheadGump`, "500 Gold Coins") and nowhere else, and ClassicUO draws
+/// the same art a second time five pixels up and left instead. The digits are
+/// this client's own addition, which is why the whole rule is stated here
+/// rather than cited to a reference that does not have one.
+///
+/// The number is abbreviated — see [`abbreviated`] — because the widest place
+/// it is drawn in is the corner of a 30-pixel icon.
+#[must_use]
+pub fn stack_label(graphic: Graphic, amount: ItemAmount, tiledata: &TileData) -> Option<String> {
+    let stacks = tiledata.static_tile(graphic.0).flags.is_stackable();
+    (stacks && amount.0 > 1).then(|| abbreviated(amount))
+}
+
+/// A stack's size, short enough to sit in the corner of an icon.
+///
+/// Three bands, and the number is **truncated** rather than rounded in all of
+/// them, so what is written is never more than what is there — a pack reading
+/// `1.0k` holds at least a thousand, and one reading `999` is not a thousand
+/// rounded down to look like less.
+///
+/// - Under a thousand: the figure itself. `500`.
+/// - Under ten thousand: one decimal. `1234` reads `1.2k`.
+/// - Above that: whole thousands. `60000` reads `60k`.
+///
+/// There is no `m` band and there never can be: an [`ItemAmount`] is a `u16`,
+/// so the largest pile the wire can describe is `65535`, which reads `65k`.
+#[must_use]
+pub fn abbreviated(amount: ItemAmount) -> String {
+    let count = u32::from(amount.0);
+    match count {
+        0..1_000 => count.to_string(),
+        1_000..10_000 => format!("{}.{}k", count / 1_000, (count % 1_000) / 100),
+        _ => format!("{}k", count / 1_000),
     }
 }
 
@@ -111,7 +215,7 @@ pub const HIGHLIGHT_HUE: Hue = Hue(0x0014);
 pub fn needed_graphics(items: &[GroundItem], animations: &StaticAnimations) -> BTreeSet<Graphic> {
     items
         .iter()
-        .flat_map(|item| animations.cycle(item.graphic))
+        .flat_map(|item| animations.cycle(item.displayed()))
         .collect()
 }
 
@@ -229,7 +333,7 @@ pub fn collect_with_fades(
                 // scenery that the frame deliberately omitted.
                 let Some(placed) = place_cutaway(
                     item.at,
-                    item.graphic,
+                    item.displayed(),
                     camera,
                     tiledata,
                     animations,
@@ -244,7 +348,7 @@ pub fn collect_with_fades(
                 (placed, 0)
             }
         };
-        let alpha = fades.advance(crate::cutaway::FadeKey::item(item.at, item.graphic), target);
+        let alpha = fades.advance(crate::cutaway::FadeKey::item(item.at, item.displayed()), target);
         if alpha == 0 {
             continue;
         }
@@ -258,12 +362,12 @@ pub fn collect_with_fades(
             true => u32::from(HIGHLIGHT_HUE.0),
             false => u32::from(item.hue.0),
         };
-        let key = crate::occlusion::Owner::new(item.at.z, item.graphic);
+        let key = crate::occlusion::Owner::new(item.at.z, item.displayed());
         let owner = occlusion.owner_at(
             i32::from(item.at.x),
             i32::from(item.at.y),
             item.at.z,
-            item.graphic,
+            item.displayed(),
         );
         // This item's own boxes, the same way `statics::collect` builds a map
         // static's — phase 6, and an item on the ground is a static that came
@@ -274,8 +378,8 @@ pub fn collect_with_fades(
                 false => &mut boxes,
             },
             item.at,
-            tiledata.static_tile(item.graphic.0),
-            &crate::occlusion::shape_of(Some(atlas), item.graphic),
+            tiledata.static_tile(item.displayed().0),
+            &crate::occlusion::shape_of(Some(atlas), item.displayed()),
             key,
             occlusion,
         );
@@ -377,7 +481,7 @@ fn place(
     // list never asks `statics::place` to cut one over the player.
     crate::statics::place(
         item.at,
-        item.graphic,
+        item.displayed(),
         camera,
         tiledata,
         animations,
@@ -385,6 +489,55 @@ fn place(
         cutaway,
         None,
     )
+}
+
+/// Where each counted pile's digits hang, and what they say.
+///
+/// The [`crate::text::Label`] anchor for every item [`stack_label`] gives a
+/// number to: the top edge of the sprite, centred across it — the exact pair
+/// [`crate::mobiles::head_anchor`] answers with for a body, and for the same
+/// reason. A `Label`'s anchor is its *baseline*, so a line hung from a
+/// sprite's top edge stands above the picture rather than across it.
+///
+/// Placed through the same [`place`] every other question about this list is
+/// asked through, so what is not drawn is not counted: a pile the storey cut
+/// moved into the late translucent layer keeps no number — the fade is the
+/// frame saying "this is behind a floor", and digits at full strength over it
+/// would undo that — and one the atlas has no art for yet is silent rather
+/// than a number floating over nothing. Off-screen items are dropped here
+/// rather than left for the text pass to clip, the way [`collect`] drops
+/// them.
+///
+/// Deliberately not folded into [`collect`]: that function answers in quads
+/// against the *static* atlas, and a glyph comes out of the font atlas, which
+/// this crate's item pass has never heard of. The caller hangs these on the
+/// same overhead list a mobile's speech goes on.
+pub fn labels(
+    items: &[GroundItem],
+    camera: &Camera,
+    tiledata: &TileData,
+    animations: &StaticAnimations,
+    atlas: &dyn StaticArt,
+    cutaway: &Cutaway,
+) -> Vec<(ViewPixel, String)> {
+    items
+        .iter()
+        .filter_map(|item| {
+            let text = stack_label(item.graphic, item.amount, tiledata)?;
+            let placed = place(item, camera, tiledata, animations, atlas, cutaway)?;
+            if !on_screen(camera, placed.at, &placed.sprite) {
+                return None;
+            }
+            let rect = placed_rect(&placed);
+            Some((
+                ViewPixel {
+                    x: (rect.x + rect.width / 2.0).round() as i32,
+                    y: rect.y.round() as i32,
+                },
+                text,
+            ))
+        })
+        .collect()
 }
 
 /// Which item the cursor is over: an index into `items`, or `None` for none.
@@ -458,6 +611,56 @@ mod tests {
         assert_eq!(displayed_graphic(gold, ItemAmount(6)), Graphic(0x0EEF));
     }
 
+    /// A table in which `graphic` piles up and nothing else does.
+    fn stacking(graphic: Graphic) -> TileData {
+        let mut tiledata = TileData::empty();
+        tiledata.set_static_tile(
+            graphic.0,
+            openshard_uofiles::tiledata::StaticTile {
+                flags: openshard_uofiles::tiledata::TileFlags::new(
+                    openshard_uofiles::tiledata::TileFlags::STACKABLE,
+                ),
+                ..Default::default()
+            },
+        );
+        tiledata
+    }
+
+    #[test]
+    fn only_a_pile_of_a_stacking_graphic_is_counted() {
+        let gold = Graphic(0x0EED);
+        let sword = Graphic(0x0F5E);
+        let tiledata = stacking(gold);
+
+        assert_eq!(
+            stack_label(gold, ItemAmount(500), &tiledata).as_deref(),
+            Some("500")
+        );
+        // One of a stacking thing is one of it, not a stack of one — the same
+        // threshold ClassicUO's offset second sprite uses.
+        assert_eq!(stack_label(gold, ItemAmount::ONE, &tiledata), None);
+        // The wire may carry an amount for anything. A sword is one sword.
+        assert_eq!(stack_label(sword, ItemAmount(2), &tiledata), None);
+    }
+
+    #[test]
+    fn a_count_is_truncated_rather_than_rounded() {
+        // Under a thousand is the figure itself.
+        assert_eq!(abbreviated(ItemAmount(2)), "2");
+        assert_eq!(abbreviated(ItemAmount(999)), "999");
+        // One decimal under ten thousand, and downward: `1999` is not `2.0k`,
+        // which would claim a thousand more than the pile holds.
+        assert_eq!(abbreviated(ItemAmount(1_000)), "1.0k");
+        assert_eq!(abbreviated(ItemAmount(1_234)), "1.2k");
+        assert_eq!(abbreviated(ItemAmount(1_999)), "1.9k");
+        // Whole thousands above it, downward again.
+        assert_eq!(abbreviated(ItemAmount(10_000)), "10k");
+        assert_eq!(abbreviated(ItemAmount(60_500)), "60k");
+        // The largest pile the wire can describe. There is no `m` band because
+        // an `ItemAmount` is a `u16` and can never reach one.
+        assert_eq!(abbreviated(ItemAmount(u16::MAX)), "65k");
+    }
+
     #[test]
     fn a_non_coin_keeps_its_base_art() {
         assert_eq!(
@@ -497,6 +700,7 @@ mod tests {
 
         let quads = collect(
             &[GroundItem {
+                amount: ItemAmount::ONE,
                 at: Point::new(100, 100, 0),
                 graphic,
                 hue: Hue::NONE,
@@ -520,6 +724,149 @@ mod tests {
         );
     }
 
+    /// A pile's count hangs from the top edge of its own picture, centred.
+    ///
+    /// The assertion is against the placement rather than two numbers, for the
+    /// reason the test above states: [`labels`] must be measuring the same
+    /// sprite the item pass drew, and a pair of constants here would go on
+    /// passing after the two drifted apart. The anchor is a
+    /// [`crate::text::Label`]'s baseline, so the top edge is what puts the
+    /// digits above the picture rather than across it.
+    #[test]
+    fn a_pile_is_counted_above_its_own_picture() {
+        let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
+        let graphic = Graphic(0x0EED);
+        let at = Point::new(100, 100, 0);
+        let pile = GroundItem {
+            amount: ItemAmount(500),
+            at,
+            graphic,
+            hue: Hue::NONE,
+        };
+        // Packed under the art five hundred coins actually draw as, which is
+        // not `graphic` — see `GroundItem::displayed`.
+        let atlas = atlas(pile.displayed(), 30, 50);
+        let tiledata = stacking(graphic);
+
+        let labelled = labels(
+            &[pile],
+            &camera,
+            &tiledata,
+            &StaticAnimations::default(),
+            &atlas,
+            &Cutaway::OPEN,
+        );
+
+        let sprite = atlas.sprite(pile.displayed()).expect("packed");
+        let placed = stand_on(&camera, at, &sprite);
+        assert_eq!(
+            labelled,
+            vec![(
+                ViewPixel {
+                    x: (placed.x + 30.0 / 2.0).round() as i32,
+                    y: placed.y.round() as i32,
+                },
+                "500".to_owned(),
+            )]
+        );
+    }
+
+    /// Whether a pile is counted is asked of the *shard's* graphic, never of
+    /// the art it happens to be drawing as.
+    ///
+    /// Not a hypothetical: a real `tiledata.mul` marks the single copper coin
+    /// `0x0EEA` as stacking and its two pile graphics `0x0EEB`/`0x0EEC` as not,
+    /// so a handful of coppers asked about by its drawn art answers "not a
+    /// pile" the moment there are two of it — while the same coins in a bag,
+    /// where the base graphic survives, answer "yes". That is one pile telling
+    /// two stories, and this is the assertion that keeps it from coming back.
+    #[test]
+    fn a_pile_is_counted_by_the_graphic_the_shard_sent() {
+        let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
+        let copper = Graphic(0x0EEA);
+        let pile_art = displayed_graphic(copper, ItemAmount(50));
+        assert_ne!(pile_art, copper, "fifty coins draw as the pile art");
+
+        // The table a client ships: the coin stacks, the pile art it draws as
+        // does not.
+        let tiledata = stacking(copper);
+        assert!(
+            !tiledata.static_tile(pile_art.0).flags.is_stackable(),
+            "the case this test is about"
+        );
+
+        let labelled = labels(
+            &[GroundItem {
+                amount: ItemAmount(50),
+                at: Point::new(100, 100, 0),
+                graphic: copper,
+                hue: Hue::NONE,
+            }],
+            &camera,
+            &tiledata,
+            &StaticAnimations::default(),
+            &atlas(pile_art, 30, 50),
+            &Cutaway::OPEN,
+        );
+        assert_eq!(
+            labelled.into_iter().map(|(_, text)| text).collect::<Vec<_>>(),
+            vec!["50".to_owned()]
+        );
+    }
+
+    /// A pile the frame does not draw is a pile with no number over it.
+    ///
+    /// Both halves of "not drawn" are the same one question asked through
+    /// [`place`], which is why one test covers them: a graphic the atlas holds
+    /// no art for, and a pile the storey cut hid. A number floating where the
+    /// picture is not is worse than no number.
+    #[test]
+    fn a_pile_the_frame_does_not_draw_is_not_counted() {
+        let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
+        let graphic = Graphic(0x0EED);
+        let tiledata = stacking(graphic);
+        let pile = GroundItem {
+            amount: ItemAmount(500),
+            at: Point::new(100, 100, 0),
+            graphic,
+            hue: Hue::NONE,
+        };
+
+        // Nothing packed at all: `place` has no sprite to stand on.
+        let empty = StaticAtlas::pack([]).expect("an empty atlas packs");
+        assert!(
+            labels(
+                &[pile],
+                &camera,
+                &tiledata,
+                &StaticAnimations::default(),
+                &empty,
+                &Cutaway::OPEN,
+            )
+            .is_empty()
+        );
+
+        // Packed, but on a storey this frame has cut away: the picture moves
+        // to the late translucent layer, where it is a hint of a thing rather
+        // than the thing, and a number over it would be the one part of it
+        // still drawn at full strength.
+        let atlas = atlas(graphic, 30, 50);
+        assert!(
+            labels(
+                &[pile],
+                &camera,
+                &tiledata,
+                &StaticAnimations::default(),
+                &atlas,
+                &Cutaway {
+                    max_z: 0,
+                    ..Cutaway::OPEN
+                },
+            )
+            .is_empty()
+        );
+    }
+
     /// Height lifts an item off the floor the way it lifts everything else, and
     /// it lifts its depth with it — a coin on a table is in front of the table's
     /// own tile, not behind it.
@@ -530,6 +877,7 @@ mod tests {
         let atlas = atlas(graphic, 30, 50);
         let tiledata = TileData::empty();
         let at = |z: i8| GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(100, 100, z),
             graphic,
             hue: Hue::NONE,
@@ -573,6 +921,7 @@ mod tests {
         let tiledata = TileData::empty();
         let quads = collect(
             &[GroundItem {
+                amount: ItemAmount::ONE,
                 at: Point::new(100, 100, 0),
                 graphic: Graphic(0x0EEE),
                 hue: Hue::NONE,
@@ -599,6 +948,7 @@ mod tests {
         let atlas = atlas(graphic, 30, 50);
         let tiledata = TileData::empty();
         let item = |x: u16, y: u16| GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(x, y, 0),
             graphic,
             hue: Hue::NONE,
@@ -655,6 +1005,7 @@ mod tests {
         let atlas = holed(graphic, 40, 60);
         let tiledata = TileData::empty();
         let item = GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(100, 100, 0),
             graphic,
             hue: Hue::NONE,
@@ -697,6 +1048,7 @@ mod tests {
         let atlas = atlas(graphic, 44, 120);
         let tiledata = TileData::empty();
         let item = |x: u16, y: u16| GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(x, y, 0),
             graphic,
             hue: Hue::NONE,
@@ -734,6 +1086,7 @@ mod tests {
         let tiledata = TileData::empty();
         // Its own hue, so the assertion below is "replaced" and not "set".
         let item = |x: u16| GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(x, 100, 0),
             graphic,
             hue: Hue(0x03B2),
@@ -771,6 +1124,7 @@ mod tests {
         let atlas = atlas(graphic, 44, 88);
         let tiledata = TileData::empty();
         let item = GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(100, 100, 0),
             graphic,
             hue: Hue::NONE,
@@ -824,6 +1178,7 @@ mod tests {
         let graphic = Graphic(0x0EED);
         let atlas = atlas(graphic, 44, 88);
         let item = GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(100, 100, 0),
             graphic,
             hue: Hue::NONE,
@@ -860,6 +1215,7 @@ mod tests {
         let atlas = atlas(graphic, 40, 60);
         let tiledata = TileData::empty();
         let item = GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(100, 100, 0),
             graphic,
             hue: Hue::NONE,
@@ -884,6 +1240,7 @@ mod tests {
     #[test]
     fn the_needed_graphics_are_deduplicated() {
         let item = |graphic: u16| GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(0, 0, 0),
             graphic: Graphic(graphic),
             hue: Hue::NONE,

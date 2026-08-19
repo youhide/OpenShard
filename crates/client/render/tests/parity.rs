@@ -52,6 +52,7 @@ use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, 
 use openshard_client_render::statics::StaticGeometry;
 use openshard_client_render::{dump, ground, statics};
 use openshard_protocol::direction::Direction;
+use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_uofiles::animdata::AnimData;
@@ -166,6 +167,7 @@ fn pull_map_statics(real: &Map, camera: &Camera, tuning: &Tuning) -> Vec<GroundI
         for x in xs.clone() {
             for s in real.statics_at(x, y) {
                 items.push(GroundItem {
+                    amount: ItemAmount::ONE,
                     at: Point::new(x, y, s.z),
                     graphic: s.tile,
                     hue: s.hue,

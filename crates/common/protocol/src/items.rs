@@ -25,6 +25,17 @@ use crate::world::Point;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct ItemAmount(pub u16);
 
+impl ItemAmount {
+    /// One of the thing — what a stack size is when nothing stacked.
+    ///
+    /// Named because it is written down often and because `0` is what
+    /// [`Default`] gives: a single sword is one sword, and an amount of zero
+    /// is a stack that is not there. Anything that draws a count reads more
+    /// than one as "a pile" — see `openshard-client-render`'s
+    /// `items::stack_label`.
+    pub const ONE: Self = Self(1);
+}
+
 /// The value carried after a `WorldItem` graphic.
 ///
 /// For ordinary items this is a stack size. UO reserves graphic `0x2006` as a

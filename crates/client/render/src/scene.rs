@@ -26,6 +26,7 @@
 
 use openshard_movement::Tile;
 use openshard_protocol::direction::Direction;
+use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::map::{LandCell, Map};
@@ -277,6 +278,7 @@ impl Scene {
     /// And with it standing at a height — a roof, or a storey above one.
     fn with_at(mut self, at: SceneTile, z: i8, graphic: Graphic) -> Self {
         self.items.push(GroundItem {
+            amount: ItemAmount::ONE,
             at: Point::new(at.x, at.y, z),
             graphic,
             hue: Hue::NONE,
@@ -782,6 +784,7 @@ pub const CELLAR_DEPTH: i8 = -(7 * 11);
 pub fn cellar_under_street() -> Scene {
     let mut scene = empty("a torch in a cellar under an empty street");
     scene.items.push(GroundItem {
+        amount: ItemAmount::ONE,
         at: Point::new(CENTRE.x, CENTRE.y, CELLAR_DEPTH),
         graphic: TORCH,
         hue: Hue::NONE,
