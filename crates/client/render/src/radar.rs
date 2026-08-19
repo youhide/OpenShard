@@ -2,8 +2,8 @@
 //!
 //! No GPU, no window, no camera. It is a function of the map and
 //! [`RadarColors`], which is what lets the player's radar and `client.md`'s M3b
-//! facet map share it — the two differ in what they draw the pixels *into*, and
-//! in nothing else.
+//! facet map share it — the two differ only in which rectangle of the baked
+//! facet texture they show.
 //!
 //! # The walk is block-major, and that is not a micro-optimisation
 //!
@@ -32,7 +32,10 @@
 //!   hole through the window it is drawn in rather than reading as unmapped
 //!   ground.
 
+use std::collections::BTreeMap;
+
 use openshard_protocol::wire::Graphic;
+use openshard_protocol::world::Facet;
 use openshard_uofiles::color::Color16;
 use openshard_uofiles::map::{BLOCK_SIZE, Map};
 use openshard_uofiles::radarcol::RadarColors;
@@ -47,6 +50,351 @@ pub const UNKNOWN: Color16 = Color16(0x0001);
 /// How many tiles a map block is across. Re-exported so a caller sizing a buffer
 /// does not reach past this module for it.
 pub const BLOCK_TILES: u16 = BLOCK_SIZE as u16;
+
+/// The side of a base radar chunk, in world tiles.
+///
+/// Sixty-four tiles is eight map blocks.  A chunk therefore never needs to
+/// split a block walk, while still being small enough to replace independently
+/// when a terrain edit arrives.  Every base chunk has this complete size: the
+/// east and south border chunks fill cells beyond the facet with [`UNKNOWN`].
+/// That fixed shape is what lets a parent be reduced from exactly four child
+/// products without a map-edge special case.
+pub const BASE_CHUNK_TILES: u16 = BLOCK_TILES * 8;
+
+/// The number of map blocks along a base chunk edge.
+pub const BASE_CHUNK_BLOCKS: u16 = BASE_CHUNK_TILES / BLOCK_TILES;
+
+/// Convert a world tile to the level-zero chunk and local tile that contain it.
+///
+/// The conversion is floor division and remainder by [`BASE_CHUNK_TILES`]:
+/// tile `(64, 0)` is chunk `(1, 0)`, local tile `(0, 0)`, not the final tile
+/// of chunk `(0, 0)`.  It deliberately does not clamp to a facet; callers use
+/// the same conversion for an out-of-facet request, whose complete chunk
+/// carries [`UNKNOWN`] along its east and south borders.
+#[must_use]
+pub fn world_tile_to_base_chunk(world: (u32, u32)) -> (RadarChunkCoord, (u16, u16)) {
+    let side = u32::from(BASE_CHUNK_TILES);
+    (
+        RadarChunkCoord::new(world.0 / side, world.1 / side),
+        ((world.0 % side) as u16, (world.1 % side) as u16),
+    )
+}
+
+/// One immutable source version of a facet's terrain and statics.
+///
+/// A revision deliberately cannot be omitted from a [`RadarChunkKey`].  The
+/// map/content owner increments it on a mutation; moving a player does not.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+pub struct RadarRevision(pub u64);
+
+/// Coordinates of one chunk at one LOD level.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+pub struct RadarChunkCoord {
+    /// Horizontal chunk coordinate.
+    pub x: u32,
+    /// Vertical chunk coordinate.
+    pub y: u32,
+}
+
+impl RadarChunkCoord {
+    #[must_use]
+    pub const fn new(x: u32, y: u32) -> Self {
+        Self { x, y }
+    }
+}
+
+/// The complete identity of a cached terrain raster.
+///
+/// At LOD zero, `chunk` addresses [`BASE_CHUNK_TILES`] square world-tile
+/// products.  Each higher LOD addresses a product covering twice as much world
+/// space in each direction, but still contains the same number of pixels.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+pub struct RadarChunkKey {
+    facet: Facet,
+    lod: u8,
+    chunk: RadarChunkCoord,
+    revision: RadarRevision,
+}
+
+impl RadarChunkKey {
+    /// Constructed only by [`RadarCache`], the owner of source revisions.
+    ///
+    /// Keeping this crate-visible prevents a window or a player marker from
+    /// accidentally creating a second, position-keyed terrain cache.
+    #[must_use]
+    pub(crate) const fn new(facet: Facet, lod: u8, chunk: RadarChunkCoord, revision: RadarRevision) -> Self {
+        Self {
+            facet,
+            lod,
+            chunk,
+            revision,
+        }
+    }
+
+    #[must_use]
+    pub const fn facet(self) -> Facet {
+        self.facet
+    }
+
+    #[must_use]
+    pub const fn lod(self) -> u8 {
+        self.lod
+    }
+
+    #[must_use]
+    pub const fn chunk(self) -> RadarChunkCoord {
+        self.chunk
+    }
+
+    #[must_use]
+    pub const fn revision(self) -> RadarRevision {
+        self.revision
+    }
+
+    /// The north-west world tile a base chunk starts at, if it is representable
+    /// by the map reader's `u16` coordinates.
+    #[must_use]
+    pub fn base_origin(self) -> Option<(u16, u16)> {
+        if self.lod != 0 {
+            return None;
+        }
+        let x = self.chunk.x.checked_mul(u32::from(BASE_CHUNK_TILES))?;
+        let y = self.chunk.y.checked_mul(u32::from(BASE_CHUNK_TILES))?;
+        if x > u32::from(u16::MAX) || y > u32::from(u16::MAX) {
+            return None;
+        }
+        Some((x as u16, y as u16))
+    }
+}
+
+/// An immutable, complete terrain product ready for cache publication.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct RadarChunk {
+    key: RadarChunkKey,
+    pixels: Vec<Color16>,
+}
+
+/// The sole owner of ready radar terrain products and their source revisions.
+///
+/// This belongs with the map/content lifetime, not a minimap window. Closing a
+/// window therefore leaves ready chunks intact, while a source revision change
+/// makes them unreachable without any player movement or UI event. Production
+/// and dirty-parent tracking deliberately arrive in the next cache phase; this
+/// type establishes the one authoritative identity they operate on.
+#[derive(Debug, Default)]
+pub struct RadarCache {
+    revisions: BTreeMap<Facet, RadarRevision>,
+    ready: BTreeMap<RadarChunkKey, RadarChunk>,
+}
+
+impl RadarCache {
+    /// The source revision currently authoritative for a facet.
+    #[must_use]
+    pub fn revision(&self, facet: Facet) -> RadarRevision {
+        self.revisions.get(&facet).copied().unwrap_or(RadarRevision(0))
+    }
+
+    /// Construct a cache key under the facet's current source revision.
+    #[must_use]
+    pub fn key(&self, facet: Facet, lod: u8, chunk: RadarChunkCoord) -> RadarChunkKey {
+        RadarChunkKey::new(facet, lod, chunk, self.revision(facet))
+    }
+
+    /// Adopt a newer revision named by the map/content owner.
+    ///
+    /// Existing products are retained only as stale, recreatable storage; all
+    /// normal lookup is through [`Self::key`] and therefore cannot return one
+    /// for the superseded source revision.
+    /// Returns `false` for an old or unchanged revision, so a delayed source
+    /// notification cannot make an older ready product current again.
+    pub fn set_revision(&mut self, facet: Facet, revision: RadarRevision) -> bool {
+        if revision <= self.revision(facet) {
+            return false;
+        }
+        self.revisions.insert(facet, revision);
+        true
+    }
+
+    /// Publish one complete CPU product if it still matches the source.
+    ///
+    /// A producer that finishes after a terrain/static edit loses this race and
+    /// cannot make stale pixels ready again.
+    pub fn publish(&mut self, chunk: RadarChunk) -> bool {
+        let key = chunk.key();
+        if key.revision != self.revision(key.facet) {
+            return false;
+        }
+        self.ready.insert(key, chunk);
+        true
+    }
+
+    /// The complete product ready for a current cache key.
+    #[must_use]
+    pub fn get(&self, key: RadarChunkKey) -> Option<&RadarChunk> {
+        (key.revision == self.revision(key.facet))
+            .then(|| self.ready.get(&key))
+            .flatten()
+    }
+
+    /// Number of retained complete products, including superseded products
+    /// awaiting the cache budget/eviction policy from Phase 2.
+    #[must_use]
+    pub fn retained_len(&self) -> usize {
+        self.ready.len()
+    }
+}
+
+impl RadarChunk {
+    /// Construct a complete fixed-size raster.  A partial chunk is never a
+    /// cache value: map borders are represented by [`UNKNOWN`] pixels instead.
+    #[must_use]
+    pub fn new(key: RadarChunkKey, pixels: Vec<Color16>) -> Option<Self> {
+        (pixels.len() == chunk_pixel_count()).then_some(Self { key, pixels })
+    }
+
+    #[must_use]
+    pub const fn key(&self) -> RadarChunkKey {
+        self.key
+    }
+
+    #[must_use]
+    pub fn pixels(&self) -> &[Color16] {
+        &self.pixels
+    }
+}
+
+/// A terrain sampling request for a minimap draw.
+///
+/// This is deliberately only a region in world coordinates.  A caller may
+/// centre it on a player, but it contains neither a player marker nor a reason
+/// to generate or upload terrain; cache selection is solely by chunk key.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RadarRegion {
+    pub facet: Facet,
+    pub lod: u8,
+    pub origin: (u32, u32),
+    pub extent: (u16, u16),
+}
+
+/// Build a level-zero chunk from the authoritative terrain-colour rule.
+///
+/// `key.lod` must be zero.  Out-of-facet cells, including the fixed-size map
+/// border, are [`UNKNOWN`], exactly as [`fill`] specifies.
+#[must_use]
+pub fn build_base_chunk(map: &Map, colors: &RadarColors, key: RadarChunkKey) -> Option<RadarChunk> {
+    let origin = key.base_origin()?;
+    let mut pixels = vec![UNKNOWN; chunk_pixel_count()];
+    fill(
+        map,
+        colors,
+        origin,
+        BASE_CHUNK_TILES,
+        BASE_CHUNK_TILES,
+        &mut pixels,
+    );
+    RadarChunk::new(key, pixels)
+}
+
+/// Reduce four categorical colours to one categorical parent pixel.
+///
+/// The most frequent colour wins.  A tie is resolved by the first sample in
+/// north-west, north-east, south-west, south-east order.  [`UNKNOWN`] is an
+/// ordinary candidate, rather than transparency or black, so an unmapped area
+/// remains visibly unmapped at every LOD.  This is intentionally not RGB
+/// averaging: radar colours name terrain categories, not light values.
+#[must_use]
+pub fn reduce_lod_pixel(samples: [Color16; 4]) -> Color16 {
+    let mut winner = 0;
+    let mut winner_count = 0;
+    for candidate in 0..samples.len() {
+        let count = samples
+            .iter()
+            .filter(|&&colour| colour == samples[candidate])
+            .count();
+        if count > winner_count {
+            winner = candidate;
+            winner_count = count;
+        }
+    }
+    samples[winner]
+}
+
+/// Build one LOD parent from its four complete children.
+///
+/// Children are ordered north-west, north-east, south-west, south-east.  Their
+/// keys must be the direct children of `key`, on the same facet and revision.
+/// Refusing a mismatched family prevents a cache from publishing mixed-source
+/// terrain after an invalidation.
+#[must_use]
+pub fn build_lod_parent(key: RadarChunkKey, children: [&RadarChunk; 4]) -> Option<RadarChunk> {
+    let child_lod = key.lod.checked_sub(1)?;
+    let child_x = key.chunk.x.checked_mul(2)?;
+    let child_y = key.chunk.y.checked_mul(2)?;
+    let expected = [
+        RadarChunkCoord::new(child_x, child_y),
+        RadarChunkCoord::new(child_x.checked_add(1)?, child_y),
+        RadarChunkCoord::new(child_x, child_y.checked_add(1)?),
+        RadarChunkCoord::new(child_x.checked_add(1)?, child_y.checked_add(1)?),
+    ];
+    if children.iter().zip(expected).any(|(child, chunk)| {
+        let child_key = child.key();
+        child_key.facet != key.facet
+            || child_key.lod != child_lod
+            || child_key.chunk != chunk
+            || child_key.revision != key.revision
+    }) {
+        return None;
+    }
+
+    let side = usize::from(BASE_CHUNK_TILES);
+    let mut pixels = vec![UNKNOWN; chunk_pixel_count()];
+    for y in 0..side {
+        for x in 0..side {
+            let index = |x: usize, y: usize| y * side + x;
+            let sample = |x: usize, y: usize| {
+                let child = (y / side) * 2 + x / side;
+                children[child].pixels[index(x % side, y % side)]
+            };
+            let source_x = x * 2;
+            let source_y = y * 2;
+            pixels[index(x, y)] = reduce_lod_pixel([
+                sample(source_x, source_y),
+                sample(source_x + 1, source_y),
+                sample(source_x, source_y + 1),
+                sample(source_x + 1, source_y + 1),
+            ]);
+        }
+    }
+    RadarChunk::new(key, pixels)
+}
+
+const fn chunk_pixel_count() -> usize {
+    (BASE_CHUNK_TILES as usize) * (BASE_CHUNK_TILES as usize)
+}
+
+/// Bake one colour for every tile in a facet snapshot.
+///
+/// This is the building block for a radar cache, not a promise that a facet can
+/// never change.  Its caller owns the snapshot's revision and uses it to build
+/// or rebuild an invalidated LOD level.  Walking only changes which rectangle
+/// is sampled; it must not rebuild this raster.  A live marker belongs in a
+/// small overlay, not in the cached terrain pixels.
+///
+/// UO map coordinates and [`fill`] are `u16`; a map outside that format has no
+/// representable radar image and returns an empty vector rather than wrapping
+/// its dimensions into a different facet.
+#[must_use]
+pub fn bake(map: &Map, colors: &RadarColors) -> Vec<Color16> {
+    let (Ok(width), Ok(height)) = (u16::try_from(map.width()), u16::try_from(map.height())) else {
+        return Vec::new();
+    };
+    let Some(len) = usize::from(width).checked_mul(usize::from(height)) else {
+        return Vec::new();
+    };
+    let mut pixels = vec![UNKNOWN; len];
+    fill(map, colors, (0, 0), width, height, &mut pixels);
+    pixels
+}
 
 /// The colour of one tile.
 ///
@@ -182,10 +530,11 @@ pub fn fill(
 /// invisible against ground of a similar colour. Five pixels in a shape nothing
 /// in `radarcol.mul` produces is the smallest thing a person can actually find.
 ///
-/// Written into the bitmap rather than drawn as a second quad, so the marker
-/// travels with the upload the map already costs and the pass stays one draw.
-/// The arms clip at the edges, so a marker on the first row keeps the four
-/// pixels that are on the map instead of wrapping to the last.
+/// This is a small bitmap utility for callers that own a transient image.  A
+/// [`RadarChunk`] must never be passed here: player and waypoint markers are
+/// overlays and do not change cached terrain products.  The arms clip at the
+/// edges, so a marker on the first row keeps the pixels that are on the map
+/// instead of wrapping to the last.
 pub fn mark(into: &mut [Color16], width: u16, height: u16, at: (u16, u16), color: Color16) {
     let (column, row) = at;
     if column >= width || row >= height {
@@ -260,6 +609,145 @@ mod tests {
             z,
             hue: Hue(0),
         });
+    }
+
+    #[test]
+    fn bake_is_the_whole_facet_once_in_row_major_order() {
+        let mut map = a_field();
+        put(&mut map, 1, 7, 7, 1);
+
+        let baked = bake(&map, &colors());
+
+        assert_eq!(baked.len(), 64);
+        assert_eq!(baked[0], GREEN);
+        assert_eq!(baked[63], RED);
+    }
+
+    #[test]
+    fn world_tiles_use_one_block_aligned_base_chunk_conversion() {
+        assert_eq!(BASE_CHUNK_BLOCKS, 8);
+        assert_eq!(
+            world_tile_to_base_chunk((0, 0)),
+            (RadarChunkCoord::new(0, 0), (0, 0))
+        );
+        assert_eq!(
+            world_tile_to_base_chunk((u32::from(BASE_CHUNK_TILES) - 1, 63)),
+            (RadarChunkCoord::new(0, 0), (63, 63))
+        );
+        assert_eq!(
+            world_tile_to_base_chunk((u32::from(BASE_CHUNK_TILES), 64)),
+            (RadarChunkCoord::new(1, 1), (0, 0))
+        );
+    }
+
+    #[test]
+    fn a_base_chunk_is_block_aligned_and_keeps_the_map_edge_complete() {
+        let mut map = a_field();
+        put(&mut map, 1, 7, 7, 1);
+        let key = RadarChunkKey::new(Facet(0), 0, RadarChunkCoord::new(0, 0), RadarRevision(7));
+
+        let chunk = build_base_chunk(&map, &colors(), key).expect("a level-zero key");
+        let mut reference = vec![UNKNOWN; chunk_pixel_count()];
+        fill(
+            &map,
+            &colors(),
+            (0, 0),
+            BASE_CHUNK_TILES,
+            BASE_CHUNK_TILES,
+            &mut reference,
+        );
+
+        assert_eq!(chunk.key(), key);
+        assert_eq!(
+            chunk.pixels(),
+            reference,
+            "the chunk builder is the rectangle walk"
+        );
+        assert_eq!(chunk.pixels().len(), usize::from(BASE_CHUNK_TILES).pow(2));
+        assert_eq!(chunk.pixels()[7 * usize::from(BASE_CHUNK_TILES) + 7], RED);
+        assert_eq!(chunk.pixels()[8], UNKNOWN, "the first tile beyond the east edge");
+        assert_eq!(
+            chunk.pixels()[usize::from(BASE_CHUNK_TILES) * 8],
+            UNKNOWN,
+            "the first tile beyond the south edge"
+        );
+    }
+
+    #[test]
+    fn a_lod_parent_reduces_its_four_children_without_blending_colours() {
+        let revision = RadarRevision(11);
+        let child = |x, y, colour| {
+            RadarChunk::new(
+                RadarChunkKey::new(Facet(0), 0, RadarChunkCoord::new(x, y), revision),
+                vec![colour; chunk_pixel_count()],
+            )
+            .expect("a complete child")
+        };
+        let northwest = child(0, 0, RED);
+        let northeast = child(1, 0, WHITE);
+        let southwest = child(0, 1, UNKNOWN);
+        let southeast = child(1, 1, BLUE);
+        let key = RadarChunkKey::new(Facet(0), 1, RadarChunkCoord::new(0, 0), revision);
+
+        let parent = build_lod_parent(key, [&northwest, &northeast, &southwest, &southeast])
+            .expect("four direct children");
+        let side = usize::from(BASE_CHUNK_TILES);
+
+        assert_eq!(parent.pixels()[0], RED, "ties prefer the north-west sample");
+        assert_eq!(
+            parent.pixels()[side - 1],
+            WHITE,
+            "the north-east child is sampled"
+        );
+        assert_eq!(parent.pixels()[(side - 1) * side], UNKNOWN, "unknown is retained");
+        assert_eq!(
+            parent.pixels()[side * side - 1],
+            BLUE,
+            "the south-east child is sampled"
+        );
+        assert_eq!(reduce_lod_pixel([RED, WHITE, RED, WHITE]), RED);
+    }
+
+    #[test]
+    fn lod_reduction_keeps_unknown_and_resolves_all_ties_in_sample_order() {
+        assert_eq!(
+            reduce_lod_pixel([UNKNOWN, RED, UNKNOWN, WHITE]),
+            UNKNOWN,
+            "unknown is a categorical map colour, not transparent"
+        );
+        assert_eq!(
+            reduce_lod_pixel([BLUE, RED, WHITE, UNKNOWN]),
+            BLUE,
+            "four-way ties retain the north-west sample"
+        );
+    }
+
+    #[test]
+    fn cache_keys_and_publication_follow_the_content_revision_not_a_window() {
+        let facet = Facet(0);
+        let coord = RadarChunkCoord::new(3, 4);
+        let mut cache = RadarCache::default();
+        let first_key = cache.key(facet, 0, coord);
+        let first = RadarChunk::new(first_key, vec![GREEN; chunk_pixel_count()]).expect("a complete chunk");
+
+        assert!(cache.publish(first));
+        assert!(cache.get(first_key).is_some());
+        assert_eq!(cache.retained_len(), 1);
+
+        assert!(cache.set_revision(facet, RadarRevision(1)));
+        let current_key = cache.key(facet, 0, coord);
+        assert_ne!(current_key, first_key);
+        assert!(cache.get(first_key).is_none(), "old source is not ready");
+        assert!(cache.get(current_key).is_none(), "no new product was built yet");
+
+        let late_old =
+            RadarChunk::new(first_key, vec![RED; chunk_pixel_count()]).expect("a complete old chunk");
+        assert!(!cache.publish(late_old), "an edit rejects a late worker result");
+        assert_eq!(cache.retained_len(), 1, "the stale result was not published");
+        assert!(
+            !cache.set_revision(facet, RadarRevision(0)),
+            "a delayed source notification cannot revive the old product"
+        );
     }
 
     #[test]

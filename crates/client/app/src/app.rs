@@ -28,6 +28,7 @@ use openshard_client_render::control::Control;
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::lod::BlockLodSelector;
 use openshard_client_render::mobiles;
+use openshard_client_render::radar::RadarCache;
 use openshard_movement::Tile;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::world::Point;
@@ -148,6 +149,10 @@ pub(crate) struct App {
     pub(crate) terrain_cache: Option<TerrainCache>,
     /// The HUD's separate occlusion grid for an unchanged world/camera view.
     pub(crate) occluder_cache: Option<OccluderCache>,
+    /// Ready minimap terrain lives with world content, never with a minimap
+    /// window. Closing that window must not discard its CPU products.
+    #[allow(dead_code)] // Phase 3's minimap recorder will consume it.
+    pub(crate) radar_cache: RadarCache,
     /// Bounded requests for immutable map-block composites.  It is updated
     /// from the camera snapshot; a future idle producer takes jobs from it,
     /// never from the camera frame itself.
