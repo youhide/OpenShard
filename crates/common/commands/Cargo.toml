@@ -1,0 +1,18 @@
+[package]
+name = "openshard-commands"
+description = "The staff command vocabulary: the names both ends of the wire agree on."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+# No dependencies, and there is nothing here that could want one: this crate is
+# a table of names, argument shapes and one-line summaries. It sits in `common`
+# because both ends read it — the world runs the command, the client completes
+# it as it is typed — and neither may depend on the other.
+[dependencies]

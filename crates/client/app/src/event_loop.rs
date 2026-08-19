@@ -18,7 +18,48 @@ use winit::window::WindowId;
 use crate::app::App;
 use crate::picking::SelectedIdentity;
 use crate::world::{cluttered, cluttered_with_doors_open, terrain};
-use crate::{DOUBLE_CLICK, PAGE_PIXELS, desk, keys, panes, shell, steer};
+use crate::{DOUBLE_CLICK, PAGE_PIXELS, desk, keyboard, keys, panes, shell, steer};
+
+impl App {
+    /// A key the speech line owns. Answers whether the picture changed.
+    ///
+    /// Every arm is a call into [`crate::chat::Chat`] and nothing here decides
+    /// what a key means — that is [`keyboard::Edit`], which is a table with
+    /// tests rather than a `match` inside an event handler. What is left is the
+    /// one thing the table cannot answer: whether a key that is not a binding
+    /// carried any *text*, which is what a keyboard layout and an input method
+    /// speak through.
+    fn speech_key(&mut self, code: KeyCode, text: Option<&str>) -> bool {
+        let Some(edit) = keyboard::Edit::of(code, self.input.shift_held) else {
+            let Some(text) = text else {
+                return false;
+            };
+            self.chat.insert(text);
+            return true;
+        };
+        match edit {
+            keyboard::Edit::Submit => {
+                if let Some(line) = self.chat.take() {
+                    self.say(line);
+                }
+            }
+            keyboard::Edit::Cancel => {
+                self.chat.cancel();
+            }
+            keyboard::Edit::Complete => return self.chat.complete(),
+            keyboard::Edit::NextChannel => self.chat.channel = self.chat.channel.next(),
+            keyboard::Edit::NextCandidate => return self.chat.highlight_next(),
+            keyboard::Edit::PreviousCandidate => return self.chat.highlight_previous(),
+            keyboard::Edit::Backspace => self.chat.backspace(),
+            keyboard::Edit::Delete => self.chat.delete(),
+            keyboard::Edit::Left => self.chat.left(),
+            keyboard::Edit::Right => self.chat.right(),
+            keyboard::Edit::Start => self.chat.cursor = 0,
+            keyboard::Edit::End => self.chat.cursor = self.chat.typed.len(),
+        }
+        true
+    }
+}
 
 impl ApplicationHandler<()> for App {
     /// The shard thread staged one or more updates for us.
@@ -112,6 +153,10 @@ impl ApplicationHandler<()> for App {
                 let PhysicalKey::Code(code) = event.physical_key else {
                     return;
                 };
+                // Whose key this is, asked once and in one place — see
+                // `keyboard::Owner`, which is also where the fourth owner (egui,
+                // answered above by `Shell::on_window_event`) is written down.
+                let owner = keyboard::Owner::of(self.chat.focused, self.keyboard_window().is_some());
                 // The speech line, ahead of every hotkey and every walk key:
                 // once it has the keyboard, a letter is a letter typed and not
                 // a body walked. Arrows move the caret here rather than the
@@ -119,36 +164,8 @@ impl ApplicationHandler<()> for App {
                 // and not after it, and Escape closes the line rather than
                 // reaching the `KeyCode::Escape` arm further down that quits
                 // the client.
-                if self.chat.focused {
-                    if event.state == ElementState::Pressed {
-                        match code {
-                            KeyCode::Enter | KeyCode::NumpadEnter => {
-                                if let Some(line) = self.chat.take() {
-                                    self.say(line);
-                                }
-                            }
-                            KeyCode::Escape => {
-                                self.chat.typed.clear();
-                                self.chat.cursor = 0;
-                                self.chat.focused = false;
-                            }
-                            // The channel selector. Tab, because the line has
-                            // no widgets to move focus between and so nothing
-                            // else wants it — see `chat::Channel` for why this
-                            // is a channel rather than a `/` prefix.
-                            KeyCode::Tab => self.chat.channel = self.chat.channel.next(),
-                            KeyCode::Backspace => self.chat.backspace(),
-                            KeyCode::Delete => self.chat.delete(),
-                            KeyCode::ArrowLeft => self.chat.left(),
-                            KeyCode::ArrowRight => self.chat.right(),
-                            KeyCode::Home => self.chat.cursor = 0,
-                            KeyCode::End => self.chat.cursor = self.chat.typed.len(),
-                            _ => {
-                                if let Some(text) = event.text.as_deref() {
-                                    self.chat.insert(text);
-                                }
-                            }
-                        }
+                if owner == keyboard::Owner::Speech {
+                    if event.state == ElementState::Pressed && self.speech_key(code, event.text.as_deref()) {
                         self.ask_redraw();
                     }
                     return;
@@ -162,7 +179,7 @@ impl ApplicationHandler<()> for App {
                 //
                 // Escape gives the keyboard back rather than quitting the
                 // client, which is what the arm further down would do.
-                if self.keyboard_window().is_some() {
+                if owner == keyboard::Owner::Pane {
                     if event.state == ElementState::Pressed {
                         // Which physical key means which of the three things a
                         // box can be told is decided here and nowhere else — see
@@ -208,6 +225,12 @@ impl ApplicationHandler<()> for App {
                 // on the first press and returns to peace mode on release.
                 // Handle both states before the pressed-only hotkeys below so
                 // an operating-system repeat cannot act as another press.
+                //
+                // This arm is reached at all only because egui is never handed a
+                // `Tab` — see `keyboard::egui_may_see`. It used to be reached
+                // exactly once per launch: the first press entered war mode and
+                // gave an egui widget the focus, and from the next frame egui
+                // claimed every key.
                 if code == KeyCode::Tab {
                     self.set_war_mode_held(event.state == ElementState::Pressed);
                     return;
@@ -316,6 +339,17 @@ impl ApplicationHandler<()> for App {
                     // the worn backpack directly, exactly as that button does.
                     KeyCode::KeyI => {
                         self.open_own_inventory();
+                        true
+                    }
+                    // Provisional: the minimap's own opening affordance
+                    // (`docs/minimap_lod_plan.md` Phase 4) is still an open
+                    // product decision. `M` is local like `WindowSubject::Skills`
+                    // and `::Status` — no round trip, unlike `KeyP`/`KeyI` above.
+                    KeyCode::KeyM => {
+                        crate::windows::open_local_window(
+                            &mut self.windows.own_windows,
+                            crate::windows::WindowSubject::Minimap,
+                        );
                         true
                     }
                     // Page up and down lift the eye rather than the body,

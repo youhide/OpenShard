@@ -5,6 +5,7 @@
 use openshard_client_render::gump::{self as gump_art, GumpPixel};
 use openshard_client_render::sprite::SpriteQuad;
 use openshard_client_render::text::{self, GumpLabel};
+use openshard_commands::{PREFIX, StaffCommand};
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 
@@ -64,6 +65,134 @@ impl Channel {
     }
 }
 
+/// How many completions are drawn above the speech line at once.
+///
+/// A lone `.` matches all twenty-five commands and the journal is six lines: a
+/// popup that drew every match would push the conversation off the top of the
+/// window to show a list nobody reads past the first screen of. What does not
+/// fit is counted on the last row instead — see [`Offer::rows`].
+///
+/// [`CHAT_LINES`] and not a number of its own: the popup and the journal are
+/// drawn in the same column at the same line height, so the two together are
+/// what has to fit above the input line, and at `desk::ChatScale`'s largest that
+/// is already a third of a small window.
+const COMPLETION_ROWS: usize = CHAT_LINES;
+
+/// What the speech line is offering to complete, right now.
+///
+/// Derived from [`Chat::typed`] on every edit rather than stored alongside it
+/// (see [`Chat::refresh`]): an offer that is recomputed cannot disagree with the
+/// line it is offering against, and "the popup is showing yesterday's matches"
+/// is the whole class of bug a completer has.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub(crate) enum Offer {
+    /// Nothing to offer: the line is not a command, no command matches what has
+    /// been typed, or the popup has been put away with Escape.
+    #[default]
+    Nothing,
+    /// The command word is still being typed, and these begin with it.
+    ///
+    /// `at` is which one is highlighted — always a valid index into `of`, which
+    /// is why this variant can only be built by [`Chat::refresh`].
+    Candidates { of: Vec<StaffCommand>, at: usize },
+    /// The word is a whole command and its arguments are being typed. There is
+    /// nothing left to complete, so what is offered is what to type next.
+    Arguments(StaffCommand),
+}
+
+/// One line of the popup, ready to draw.
+pub(crate) struct Row {
+    /// What it says.
+    pub(crate) text: String,
+    /// Whether it is the one Tab would take. Drawn in the player's own chat
+    /// hue, where the rest are drawn in the shard's grey — the gump pass has no
+    /// primitive that paints a solid rectangle (see the caret in
+    /// [`draw_chat_and_speech`]), so a highlight is ink and a marker rather than
+    /// a bar.
+    pub(crate) highlighted: bool,
+}
+
+impl Offer {
+    /// The command Tab would take, if the popup is offering one.
+    #[must_use]
+    pub(crate) fn highlighted(&self) -> Option<StaffCommand> {
+        match self {
+            Self::Candidates { of, at } => of.get(*at).copied(),
+            Self::Nothing | Self::Arguments(_) => None,
+        }
+    }
+
+    /// The popup, top row first — that is, furthest from the input line.
+    ///
+    /// Empty when there is nothing to offer, which is what "no popup" is: there
+    /// is no separate visibility flag to disagree with the contents.
+    #[must_use]
+    pub(crate) fn rows(&self) -> Vec<Row> {
+        match self {
+            Self::Nothing => Vec::new(),
+            // A whole command with its arguments spelled out: the same sentence
+            // the shard answers a mistyped command with, before it is mistyped.
+            Self::Arguments(command) => vec![Row {
+                text: describe(*command),
+                highlighted: false,
+            }],
+            // `refresh` never builds this variant empty — an offer of nothing is
+            // `Nothing` — but the slice below would panic rather than draw an
+            // empty popup if it ever did, and that is not a trade worth taking.
+            Self::Candidates { of, .. } if of.is_empty() => Vec::new(),
+            Self::Candidates { of, at } => {
+                // The window scrolls with the highlight rather than sitting at
+                // the top: a player arrowing down past the eighth match must not
+                // be moving a highlight they cannot see.
+                let start = at.saturating_sub(COMPLETION_ROWS - 1).min(of.len() - 1);
+                let end = (start + COMPLETION_ROWS).min(of.len());
+                let mut rows: Vec<Row> = of[start..end]
+                    .iter()
+                    .enumerate()
+                    .map(|(row, command)| Row {
+                        text: format!(
+                            "{} {}",
+                            match start + row == *at {
+                                true => '>',
+                                false => ' ',
+                            },
+                            describe(*command)
+                        ),
+                        highlighted: start + row == *at,
+                    })
+                    .collect();
+                // What did not fit, counted rather than dropped silently: a list
+                // that stops at eight with no sign of it is a list that says the
+                // ninth command does not exist.
+                let hidden = of.len() - (end - start);
+                if hidden > 0 {
+                    rows.insert(
+                        0,
+                        Row {
+                            text: format!("  ... {hidden} more"),
+                            highlighted: false,
+                        },
+                    );
+                }
+                rows
+            }
+        }
+    }
+}
+
+/// One command on one line: what to type, and what it does.
+fn describe(command: StaffCommand) -> String {
+    match command.arguments().is_empty() {
+        true => format!("{PREFIX}{}  -  {}", command.name(), command.summary()),
+        false => format!(
+            "{PREFIX}{} {}  -  {}",
+            command.name(),
+            command.arguments(),
+            command.summary()
+        ),
+    }
+}
+
 /// The speech line: what has not been said yet, and whether the keyboard is
 /// listening for it.
 ///
@@ -86,11 +215,26 @@ pub(crate) struct Chat {
     /// there is no mouse hit test for it, so nothing else about picking has
     /// to change for this to work.
     pub(crate) focused: bool,
-    /// Where the next line goes. Cycled with Tab while the line has the
-    /// keyboard, and **kept** across sends — see [`Channel`], and note that a
-    /// channel which reset itself after every line would make a conversation on
-    /// one channel four keystrokes a sentence.
+    /// Where the next line goes. Cycled with **Shift+Tab** while the line has
+    /// the keyboard, and **kept** across sends — see [`Channel`], and note that
+    /// a channel which reset itself after every line would make a conversation
+    /// on one channel four keystrokes a sentence.
+    ///
+    /// It was plain Tab until the completer took that key: a channel is chosen
+    /// once a conversation and a command completed once a word, so the cheaper
+    /// gesture goes to the commoner act. The intended end state is neither —
+    /// a button on screen, which is what the reference client's dropdown is.
     pub(crate) channel: Channel,
+    /// What the completer is offering against [`typed`](Self::typed) right now.
+    ///
+    /// Never written from outside: every path that changes the line ends in
+    /// [`refresh`](Self::refresh), so the offer cannot be stale. See [`Offer`].
+    pub(crate) offer: Offer,
+    /// Whether Escape has put the popup away for the line as it stands.
+    ///
+    /// Cleared by the next edit, because the player who types another letter is
+    /// asking a new question and the old refusal was about the old one.
+    dismissed: bool,
 }
 
 impl Chat {
@@ -98,6 +242,7 @@ impl Chat {
     pub(crate) fn insert(&mut self, text: &str) {
         self.typed.insert_str(self.cursor, text);
         self.cursor += text.len();
+        self.edited();
     }
 
     /// Delete the `char` before the caret, if any.
@@ -108,6 +253,7 @@ impl Chat {
         let start = self.cursor - before.len_utf8();
         self.typed.replace_range(start..self.cursor, "");
         self.cursor = start;
+        self.edited();
     }
 
     /// Delete the `char` after the caret, if any.
@@ -117,6 +263,117 @@ impl Chat {
         };
         let end = self.cursor + after.len_utf8();
         self.typed.replace_range(self.cursor..end, "");
+        self.edited();
+    }
+
+    /// The line changed under the player's own hand: a dismissed popup is asked
+    /// again, and the offer is recomputed.
+    fn edited(&mut self) {
+        self.dismissed = false;
+        self.refresh();
+    }
+
+    /// Recompute [`offer`](Self::offer) from the line.
+    ///
+    /// The one place the popup's contents are decided, and it reads nothing but
+    /// `typed` and `dismissed`. Note what it does *not* read: the caret. An
+    /// offer that followed the caret would flicker as it was walked back through
+    /// a finished line, and Tab replaces the command word wherever the caret
+    /// stands — which is the only word a `.` line has that can be completed.
+    fn refresh(&mut self) {
+        // What was highlighted before, so that a narrowing list keeps the
+        // player's choice instead of snapping back to the alphabetically first.
+        let chosen = self.offer.highlighted();
+        self.offer = Offer::Nothing;
+        if self.dismissed {
+            return;
+        }
+        let Some(body) = self.typed.strip_prefix(PREFIX) else {
+            return;
+        };
+        match body.split_once(char::is_whitespace) {
+            // Past the word: the command is settled, and what is left to offer
+            // is its arguments. A first word that is not a command offers
+            // nothing — the shard will say so on Enter, and a popup that
+            // repeated the refusal while the rest of the line is typed is noise.
+            Some((word, _)) => {
+                if let Some(command) = StaffCommand::parse(word) {
+                    self.offer = Offer::Arguments(command);
+                }
+            }
+            // Still in the word.
+            None => {
+                let of = StaffCommand::matching(body);
+                if of.is_empty() {
+                    return;
+                }
+                let at = chosen
+                    .and_then(|command| of.iter().position(|other| *other == command))
+                    .unwrap_or(0);
+                self.offer = Offer::Candidates { of, at };
+            }
+        }
+    }
+
+    /// Take the highlighted completion — Tab. Answers whether the line changed.
+    ///
+    /// The whole command word is replaced, and a space is left after it: the
+    /// next thing a player types is an argument, and a completer that made them
+    /// press space themselves has completed half a word.
+    pub(crate) fn complete(&mut self) -> bool {
+        let Some(command) = self.offer.highlighted() else {
+            return false;
+        };
+        let word = self.typed.find(char::is_whitespace).unwrap_or(self.typed.len());
+        let name = format!("{PREFIX}{}", command.name());
+        self.typed.replace_range(..word, &name);
+        // Exactly one space after it, whether or not the line already had one —
+        // a completion in front of existing arguments must not double the gap.
+        if !self.typed[name.len()..].starts_with(char::is_whitespace) {
+            self.typed.insert(name.len(), ' ');
+        }
+        self.cursor = name.len() + 1;
+        self.edited();
+        true
+    }
+
+    /// Move the highlight down the popup, wrapping. Answers whether it moved.
+    pub(crate) fn highlight_next(&mut self) -> bool {
+        self.highlight(1)
+    }
+
+    /// Move the highlight up the popup, wrapping. Answers whether it moved.
+    pub(crate) fn highlight_previous(&mut self) -> bool {
+        self.highlight(-1)
+    }
+
+    /// One step round the popup. Wraps, because a list a player can fall off the
+    /// end of makes them look for the end.
+    fn highlight(&mut self, by: isize) -> bool {
+        let Offer::Candidates { of, at } = &mut self.offer else {
+            return false;
+        };
+        let count = of.len() as isize;
+        *at = ((*at as isize + by).rem_euclid(count)) as usize;
+        true
+    }
+
+    /// Escape: put the popup away, or — with no popup — the line itself.
+    ///
+    /// Answers whether the line is still open. Two meanings on one key and in
+    /// that order, which is every editor's rule: the innermost thing showing is
+    /// the thing dismissed.
+    pub(crate) fn cancel(&mut self) -> bool {
+        if self.offer != Offer::Nothing {
+            self.dismissed = true;
+            self.refresh();
+            return true;
+        }
+        self.typed.clear();
+        self.cursor = 0;
+        self.focused = false;
+        self.dismissed = false;
+        false
     }
 
     /// Move the caret one `char` left, if it is not already at the start.
@@ -140,6 +397,11 @@ impl Chat {
     pub(crate) fn take(&mut self) -> Option<String> {
         let line = std::mem::take(&mut self.typed);
         self.cursor = 0;
+        // The popup belongs to the line that has just left. Both halves of it:
+        // an offer against an empty line is nothing, and a refusal of an offer
+        // that no longer exists would silence the next command's popup.
+        self.offer = Offer::Nothing;
+        self.dismissed = false;
         // Submitting a line gives the keyboard back to the game.  Leaving this
         // true made every following hotkey look like more chat input: after
         // asking a vendor to buy, `P` was typed into the empty line instead of
@@ -201,9 +463,33 @@ pub(crate) fn draw_chat_and_speech(
     // the caller's own chat, so both need somewhere to live for the length of
     // `collect_gump`'s borrow.
     let mut rows: Vec<(GumpPixel, Hue, Font, String)> = Vec::new();
+    // The completion popup, directly above the input line and below the
+    // journal: what is being typed and what it could become read as one block,
+    // and the conversation moves up out of the way rather than being drawn over.
+    //
+    // Bottom-up, so `Offer::rows`' first row — its own top — ends up furthest
+    // from the line. The count is carried into the journal's own offset below,
+    // which is the whole of "the popup pushes the conversation up".
+    let popup = match chat.focused {
+        true => chat.offer.rows(),
+        false => Vec::new(),
+    };
+    let mut above = 0;
+    for row in popup.iter().rev() {
+        above += 1;
+        let at = GumpPixel::new(CHAT_MARGIN, input_at.y - line_height * above);
+        // The highlighted row in the player's own chat ink and the rest in the
+        // shard's grey — see `chat::Row::highlighted` for why the highlight is
+        // ink rather than a bar behind it.
+        let hue = match row.highlighted {
+            true => Hue(chat_style.hue),
+            false => Hue::SYSTEM,
+        };
+        rows.push((at, hue, font, row.text.clone()));
+    }
     if let Some(view) = world.authoritative.view.as_ref() {
         for (row, line) in view.journal.iter().rev().take(CHAT_LINES).enumerate() {
-            let at = GumpPixel::new(CHAT_MARGIN, input_at.y - line_height * (row as i32 + 1));
+            let at = GumpPixel::new(CHAT_MARGIN, input_at.y - line_height * (above + row as i32 + 1));
             let text = match line.name.is_empty() {
                 true => line.text.clone(),
                 false => format!("{}: {}", line.name, line.text),
@@ -391,7 +677,20 @@ pub(crate) fn draw_chat_and_speech(
 
 #[cfg(test)]
 mod tests {
-    use super::{Channel, Chat};
+    use openshard_commands::StaffCommand;
+
+    use super::{Channel, Chat, Offer};
+
+    /// A line as a player would have typed it: the caret at the end, the offer
+    /// recomputed, which is the state every method below is entered from.
+    fn typing(line: &str) -> Chat {
+        let mut chat = Chat {
+            focused: true,
+            ..Chat::default()
+        };
+        chat.insert(line);
+        chat
+    }
 
     #[test]
     fn submitting_speech_returns_the_keyboard_to_the_game() {
@@ -400,6 +699,7 @@ mod tests {
             cursor: 3,
             focused: true,
             channel: Channel::Say,
+            ..Chat::default()
         };
 
         assert_eq!(chat.take().as_deref(), Some("buy"));
@@ -419,9 +719,164 @@ mod tests {
             cursor: 7,
             focused: true,
             channel: Channel::Guild,
+            ..Chat::default()
         };
         assert_eq!(chat.take().as_deref(), Some("regroup"));
         assert_eq!(chat.channel, Channel::Guild);
+    }
+
+    /// Ordinary speech is not a command and offers nothing: a popup that opened
+    /// on "hello" would cover the conversation for every line anybody says.
+    #[test]
+    fn speech_offers_nothing_and_a_dot_offers_everything() {
+        assert_eq!(typing("hello there").offer, Offer::Nothing);
+        let Offer::Candidates { of, at } = typing(".").offer else {
+            panic!("a lone prefix offers the whole vocabulary");
+        };
+        assert_eq!(of.len(), StaffCommand::ALL.len());
+        assert_eq!(at, 0);
+    }
+
+    #[test]
+    fn a_prefix_narrows_the_offer_and_a_word_that_matches_nothing_closes_it() {
+        let Offer::Candidates { of, .. } = typing(".hd").offer else {
+            panic!("three house commands begin with hd");
+        };
+        assert_eq!(
+            of,
+            vec![
+                StaffCommand::HDemolish,
+                StaffCommand::HDesign,
+                StaffCommand::HDrop
+            ]
+        );
+        assert_eq!(typing(".zzz").offer, Offer::Nothing);
+    }
+
+    /// The whole gesture: type a prefix, arrow to the one you meant, Tab.
+    #[test]
+    fn tab_takes_the_highlighted_command_and_leaves_a_space_for_its_arguments() {
+        let mut chat = typing(".hd");
+        assert!(chat.highlight_next(), "hdemolish -> hdesign");
+        assert!(chat.complete());
+        assert_eq!(chat.typed, ".hdesign ");
+        assert_eq!(
+            chat.cursor,
+            chat.typed.len(),
+            "the caret is where the argument goes"
+        );
+        assert_eq!(
+            chat.offer,
+            Offer::Arguments(StaffCommand::HDesign),
+            "and the popup turns into the usage hint"
+        );
+    }
+
+    /// Completing what is already complete is not a no-op worth guarding: it is
+    /// how a player who typed the whole word gets the space and the hint.
+    #[test]
+    fn tab_on_a_finished_word_still_completes_it() {
+        let mut chat = typing(".save");
+        assert!(chat.complete());
+        assert_eq!(chat.typed, ".save ");
+    }
+
+    #[test]
+    fn tab_does_nothing_when_nothing_is_offered() {
+        let mut chat = typing("hello");
+        assert!(!chat.complete());
+        assert_eq!(chat.typed, "hello");
+    }
+
+    /// The highlight is kept as the list narrows around it — a completer that
+    /// snapped back to the first match would undo the arrow the player just
+    /// pressed with the letter they typed next.
+    #[test]
+    fn narrowing_the_list_keeps_what_was_chosen() {
+        let mut chat = typing(".h");
+        chat.highlight_next();
+        chat.highlight_next();
+        let chosen = chat.offer.highlighted().expect("a highlight");
+        chat.insert(&chosen.name()[1..2]);
+        assert_eq!(chat.offer.highlighted(), Some(chosen));
+    }
+
+    #[test]
+    fn the_highlight_wraps_in_both_directions() {
+        let mut chat = typing(".hd");
+        assert_eq!(chat.offer.highlighted(), Some(StaffCommand::HDemolish));
+        chat.highlight_previous();
+        assert_eq!(
+            chat.offer.highlighted(),
+            Some(StaffCommand::HDrop),
+            "up from the first is the last"
+        );
+        chat.highlight_next();
+        assert_eq!(chat.offer.highlighted(), Some(StaffCommand::HDemolish));
+    }
+
+    /// Escape twice: the popup, then the line. The first must not close the line
+    /// — a player dismissing a suggestion has not given up on the sentence.
+    #[test]
+    fn escape_puts_the_popup_away_before_the_line() {
+        let mut chat = typing(".hd");
+        assert!(chat.cancel(), "the line stays open");
+        assert_eq!(chat.offer, Offer::Nothing);
+        assert_eq!(chat.typed, ".hd", "and keeps what was typed");
+        assert!(!chat.cancel(), "the second closes the line");
+        assert!(!chat.focused);
+        assert!(chat.typed.is_empty());
+    }
+
+    /// A dismissed popup comes back on the next letter: the refusal was about
+    /// the word as it stood, and the next keystroke asks a different question.
+    #[test]
+    fn typing_after_a_dismissal_asks_again() {
+        let mut chat = typing(".h");
+        chat.cancel();
+        assert_eq!(chat.offer, Offer::Nothing);
+        chat.insert("d");
+        assert!(matches!(chat.offer, Offer::Candidates { .. }));
+    }
+
+    /// The popup does not survive the line it was offered against.
+    #[test]
+    fn sending_a_line_clears_the_offer() {
+        let mut chat = typing(".save");
+        assert!(matches!(chat.offer, Offer::Candidates { .. }));
+        assert_eq!(chat.take().as_deref(), Some(".save"));
+        assert_eq!(chat.offer, Offer::Nothing);
+    }
+
+    /// Past the word, the popup stops being a list and becomes the usage line —
+    /// the same sentence the shard answers a mistyped command with.
+    #[test]
+    fn arguments_are_offered_once_the_word_is_settled() {
+        assert_eq!(typing(".go ").offer, Offer::Arguments(StaffCommand::Go));
+        assert_eq!(typing(".go 1425 1690").offer, Offer::Arguments(StaffCommand::Go));
+        assert_eq!(
+            typing(".nosuch arg").offer,
+            Offer::Nothing,
+            "a first word that is no command offers nothing rather than repeating a refusal"
+        );
+    }
+
+    /// The list is longer than the popup, and what does not fit is counted
+    /// rather than dropped — with the highlight always among the rows drawn.
+    #[test]
+    fn a_long_list_is_windowed_around_the_highlight_and_says_how_many_are_hidden() {
+        let mut chat = typing(".");
+        let rows = chat.offer.rows();
+        assert_eq!(rows.len(), super::COMPLETION_ROWS + 1, "eight rows and a count");
+        assert!(rows[0].text.contains("more"));
+        assert!(rows.iter().any(|row| row.highlighted));
+        for _ in 0..StaffCommand::ALL.len() - 1 {
+            chat.highlight_next();
+            assert!(
+                chat.offer.rows().iter().any(|row| row.highlighted),
+                "the highlight is never scrolled out of the popup"
+            );
+        }
     }
 
     #[test]

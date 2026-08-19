@@ -3667,6 +3667,56 @@ holds a `Link`. What is left:
   shares — nothing remembers where it was left — and the question plate is the
   one kind where the reference's own answer is *not* "wherever you last put it".
 
+### The keyboard has an owner now — backlog
+
+`Tab` used to enter war mode exactly once per launch. egui's
+`egui_wants_keyboard_input` is literally "some widget has the focus", `Tab` is
+what hands out that focus, so the first press entered war mode *and* focused a
+button in the dev desk — and from the next frame egui claimed every key, war
+mode, `Enter` and the arrows included. A self-arming trap: the key that broke
+the keyboard was the key that could no longer be pressed.
+
+`crates/client/app/src/keyboard.rs` is the layer that replaced the implicit
+ladder of early `return`s inside `App::window_event`: `Owner` names who a
+keystroke belongs to (speech line, pane field, world) and `Edit` is the binding
+table for a line being typed, both with tests that need no window. egui is
+handed no `Tab` at all (`egui_may_see`) and may claim the keyboard only while a
+text field inside it has the focus (`Shell::holds_keyboard`) — of which this
+client has none, every box a player types into being drawn by `chat.rs` or
+`panes.rs`.
+
+The speech line completes staff commands as they are typed, from
+`openshard-commands` — one table the world dispatches on *and* the client
+offers, so a command that runs is a command that is offered and the two cannot
+drift: `gm::run` matches `StaffCommand` exhaustively. `Tab` takes the highlight,
+arrows move it, `Escape` puts the popup away before the line, and past the
+command word the popup becomes the usage hint. The channel moved to `Shift+Tab`.
+What is left:
+
+- **The channel wants a button, not a key.** `Shift+Tab` is the interim and is
+  written down as such in `chat::Chat::channel`: the reference client puts a
+  dropdown above its entry field, and a modifier chord is what a client has
+  instead of a control it has not drawn yet.
+- **The world's own hotkeys are still an inline ladder.** F1–F12, `P`, `I`,
+  `Home` and the two page keys are a `match` in `event_loop.rs` rather than
+  entries in `keyboard.rs`'s table, so none of them can be rebound and none is
+  tested. They are not *contested* — only the owner's keys had to move first —
+  but the day this client grows a key-bindings window is the day the rest of the
+  ladder follows the typing keys into the table.
+- **The completer offers commands the player may not run.** Authority is the
+  world's and never reaches the client, so the popup offers all twenty-five to
+  everyone. A word the shard refuses reads the same as a mistyped one, which is
+  why this is a note and not a defect — but if a `0xBF` ever carries a staff
+  flag, `StaffCommand::matching` is where it would be filtered.
+- **The popup's highlight is ink, not a bar.** The gump pass draws through an
+  atlas of packed sprites and has no primitive that paints a solid rectangle —
+  the same reason the caret is a `|` glyph. A real selection plate needs that
+  primitive first.
+- **Nothing checks that the chat block fits.** The journal is six lines and the
+  popup is now up to six more, both at `desk::ChatScale`'s line height, and the
+  column is laid out upward from the input line without ever asking how tall the
+  window is. At scale 4 on a small window the top of it runs off the screen.
+
 ## Later
 
 LLM NPCs, quest generation, GM assistant, Discord integration. All optional, all

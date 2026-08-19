@@ -12,6 +12,7 @@
 //! the item, `skills` re-caps the stat — rather than reaching into the registry
 //! themselves, the same "emit, don't reimplement" the rest of the world follows.
 
+use openshard_commands::StaffCommand;
 use openshard_entities::EntityId;
 use openshard_movement::Tile;
 use openshard_protocol::direction::Direction;
@@ -28,7 +29,12 @@ use openshard_skills as skills;
 
 /// The character that turns speech into a command. Sphere's, and what the
 /// `Command::Say` handler strips before calling [`run`].
-pub const COMMAND_PREFIX: char = '.';
+///
+/// The value itself is [`openshard_commands::PREFIX`] and not a second `'.'`
+/// written here: the client reads the same character to know that the line
+/// being typed is a command, and the two must be the same character or one end
+/// offers a vocabulary the other will not run.
+pub const COMMAND_PREFIX: char = openshard_commands::PREFIX;
 
 /// The hue and font a command reply is drawn in — a muted grey, the client's
 /// usual system-message colour, so it reads as the server talking, not a mobile.
@@ -43,38 +49,46 @@ const SYSTEM_FONT: Font = Font::DEFAULT;
 /// like a broken shard.
 pub fn run(state: &mut WorldState, actor: EntityId, rest: &str) {
     let mut words = rest.split_whitespace();
-    let Some(command) = words.next() else {
+    let Some(word) = words.next() else {
         return; // a lone "." is nothing to do
     };
     let args: Vec<&str> = words.collect();
 
-    match command.to_lowercase().as_str() {
-        "gm" => toggle_gm_mode(state, actor, &args),
-        "where" => where_am_i(state, actor),
-        "tele" => teleport_cursor(state, actor),
-        "go" => go_to(state, actor, &args),
-        "add" => add_item(state, actor, &args),
-        "key" => make_key(state, actor, &args),
-        "poison" => make_poison(state, actor, &args),
-        "trap" => set_trap(state, actor, &args),
-        "spellbook" => full_spellbook(state, actor),
-        "quests" => openshard_quests::open_log_for(state, actor),
-        "set" => set_stat(state, actor, &args),
-        "skill" => set_skill(state, actor, &args),
-        "house" => place_house(state, actor, &args),
-        "deed" => make_deed(state, actor, &args),
-        "hfriend" => house_list(state, actor, HouseChange::Friend),
-        "hcoowner" => house_list(state, actor, HouseChange::CoOwner),
-        "hdrop" => house_list(state, actor, HouseChange::Drop),
-        "hban" => house_list(state, actor, HouseChange::Ban),
-        "hunban" => house_list(state, actor, HouseChange::Unban),
-        "hdemolish" => demolish_house(state, actor),
-        "hdesign" => design_house(state, actor, &args),
-        "boat" => launch_boat(state, actor, &args),
-        "sail" => sail_boat(state, actor, &args),
-        "admin" => crate::admin::open_menu(state, actor),
-        "save" => save_world(state, actor),
-        other => notify(state, actor, &format!("Unknown command '{other}'.")),
+    // The vocabulary is `openshard_commands::StaffCommand` and the match below
+    // is **exhaustive** on it, which is the whole point of it being an enum: a
+    // command added to that table does not compile until it has an arm here,
+    // and the client — which completes from the same table — cannot offer a
+    // word this function would answer with "unknown".
+    let Some(command) = StaffCommand::parse(word) else {
+        notify(state, actor, &format!("Unknown command '{word}'."));
+        return;
+    };
+    match command {
+        StaffCommand::Gm => toggle_gm_mode(state, actor, &args),
+        StaffCommand::Where => where_am_i(state, actor),
+        StaffCommand::Tele => teleport_cursor(state, actor),
+        StaffCommand::Go => go_to(state, actor, &args),
+        StaffCommand::Add => add_item(state, actor, &args),
+        StaffCommand::Key => make_key(state, actor, &args),
+        StaffCommand::Poison => make_poison(state, actor, &args),
+        StaffCommand::Trap => set_trap(state, actor, &args),
+        StaffCommand::Spellbook => full_spellbook(state, actor),
+        StaffCommand::Quests => openshard_quests::open_log_for(state, actor),
+        StaffCommand::Set => set_stat(state, actor, &args),
+        StaffCommand::Skill => set_skill(state, actor, &args),
+        StaffCommand::House => place_house(state, actor, &args),
+        StaffCommand::Deed => make_deed(state, actor, &args),
+        StaffCommand::HFriend => house_list(state, actor, HouseChange::Friend),
+        StaffCommand::HCoOwner => house_list(state, actor, HouseChange::CoOwner),
+        StaffCommand::HDrop => house_list(state, actor, HouseChange::Drop),
+        StaffCommand::HBan => house_list(state, actor, HouseChange::Ban),
+        StaffCommand::HUnban => house_list(state, actor, HouseChange::Unban),
+        StaffCommand::HDemolish => demolish_house(state, actor),
+        StaffCommand::HDesign => design_house(state, actor, &args),
+        StaffCommand::Boat => launch_boat(state, actor, &args),
+        StaffCommand::Sail => sail_boat(state, actor, &args),
+        StaffCommand::Admin => crate::admin::open_menu(state, actor),
+        StaffCommand::Save => save_world(state, actor),
     }
 }
 

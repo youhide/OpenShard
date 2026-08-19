@@ -70,6 +70,7 @@ mod graphics;
 mod hand;
 mod input;
 mod jank;
+mod keyboard;
 mod keys;
 mod link;
 mod movement_trace;
@@ -178,6 +179,7 @@ use openshard_uofiles::font::AsciiFonts;
 use openshard_uofiles::gumpart::Gumps;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::map::Map;
+use openshard_uofiles::radarcol::RadarColors;
 use openshard_uofiles::skillgrp::SkillGroups;
 use openshard_uofiles::skills::Skills as SkillNames;
 use openshard_uofiles::texmaps::TexMaps;
@@ -612,6 +614,16 @@ pub fn run<D: Dial + Send + 'static>(
             None
         }
     };
+    // The minimap's one colour per graphic. Absent the same way `gumps` and
+    // `cliloc` are: a client directory without `radarcol.mul` still runs, it
+    // simply has no terrain to draw when the minimap window opens.
+    let radar_colors = match RadarColors::load(dir.join("radarcol.mul")) {
+        Ok(colors) => Some(colors),
+        Err(error) => {
+            eprintln!("opening radarcol.mul: {error} — the minimap will draw no terrain");
+            None
+        }
+    };
     checkpoint("interface resources opened");
     // Read and parsed once, only when asked for: a shard that never sets
     // `ttf_font` has no reason to hold a second face in memory beside
@@ -849,6 +861,7 @@ pub fn run<D: Dial + Send + 'static>(
             equip_conv,
             skill_names,
             skill_groups,
+            radar_colors,
         },
         graphics: graphics::GraphicsSettings {
             cutaway_disabled: std::env::var_os("OPENSHARD_DISABLE_CUTAWAY").is_some(),
@@ -942,6 +955,7 @@ pub fn run<D: Dial + Send + 'static>(
         terrain_cache: None,
         occluder_cache: None,
         radar_cache: openshard_client_render::radar::RadarCache::default(),
+        radar_queue: openshard_client_render::radar::RadarWorkQueue::default(),
         composite_work: openshard_client_render::composite::CompositeWorkQueue::default(),
         composite_lod: openshard_client_render::lod::BlockLodSelector::new(
             openshard_client_render::lod::LodThresholds::DEFAULT,

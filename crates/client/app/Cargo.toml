@@ -23,6 +23,10 @@ openshard-client-artscan.workspace = true
 # protocol itself — see `link.rs`.
 openshard-client-net.workspace = true
 openshard-protocol.workspace = true
+# The staff command vocabulary the speech line completes from — the same table
+# the world dispatches on, so a command this offers is a command that runs. See
+# that crate's docs for why it is one list and not two.
+openshard-commands.workspace = true
 # For one constant: how long a step on foot takes, which is what decides when a
 # body that stopped hearing steps stops walking. Shared with the server rather
 # than guessed at again here.

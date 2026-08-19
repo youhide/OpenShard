@@ -323,13 +323,24 @@ impl Shell {
     ///
     /// A `true` here means the camera and the walk keys must not see the event.
     pub fn on_window_event(&mut self, window: &Window, event: &winit::event::WindowEvent) -> bool {
+        // One key egui is not merely refused but never told about — see
+        // [`crate::keyboard::egui_may_see`] for the trap that costs, and note
+        // that returning early here means `state` never records it either, which
+        // is the point: focus navigation cannot run on an event it never got.
+        if let winit::event::WindowEvent::KeyboardInput { event, .. } = event {
+            if let winit::keyboard::PhysicalKey::Code(code) = event.physical_key {
+                if !crate::keyboard::egui_may_see(code) {
+                    return false;
+                }
+            }
+        }
         let consumed = self.state.on_window_event(window, event).consumed;
         if !consumed {
             return false;
         }
         match event {
             winit::event::WindowEvent::KeyboardInput { .. } | winit::event::WindowEvent::Ime(_) => {
-                self.context.egui_wants_keyboard_input()
+                self.holds_keyboard()
             }
             winit::event::WindowEvent::CursorMoved { .. }
             | winit::event::WindowEvent::MouseInput { .. }
@@ -338,6 +349,22 @@ impl Shell {
             // Lifecycle events do not belong to either interaction layer.
             _ => false,
         }
+    }
+
+    /// Whether the keyboard belongs to the UI rather than to the game.
+    ///
+    /// **A text field**, and not egui's own `egui_wants_keyboard_input`, which
+    /// is literally "some widget has the focus" — a focused button or slider
+    /// answers `true` to that, and `Tab` is what hands out the focus. See
+    /// [`crate::keyboard`]'s module docs for the whole of that defect.
+    ///
+    /// Today this is always `false`: there is not one `egui::TextEdit` in this
+    /// client, because every box a player types into is drawn by `chat.rs` or by
+    /// `panes.rs`. It is asked rather than assumed because the day a text field
+    /// appears in a panel is the day it has to work, and a hard-coded `false`
+    /// would be a keyboard that never reached it.
+    pub fn holds_keyboard(&self) -> bool {
+        self.context.text_edit_focused()
     }
 
     /// Whether the pointer belongs to the UI rather than to the world.

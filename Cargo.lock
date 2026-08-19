@@ -2568,6 +2568,7 @@ dependencies = [
  "openshard-client-artscan",
  "openshard-client-net",
  "openshard-client-render",
+ "openshard-commands",
  "openshard-movement",
  "openshard-protocol",
  "openshard-uofiles",
@@ -2653,6 +2654,10 @@ dependencies = [
  "openshard-skills",
  "openshard-state",
 ]
+
+[[package]]
+name = "openshard-commands"
+version = "0.0.1"
 
 [[package]]
 name = "openshard-config"
@@ -2936,6 +2941,7 @@ dependencies = [
  "openshard-boats",
  "openshard-chat",
  "openshard-combat",
+ "openshard-commands",
  "openshard-config",
  "openshard-crafting",
  "openshard-entities",
