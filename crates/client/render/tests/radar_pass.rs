@@ -11,9 +11,11 @@
 
 use openshard_client_render::gump::Frame;
 use openshard_client_render::radar::{
-    BASE_CHUNK_TILES, RadarCache, RadarChunk, RadarChunkCoord, RadarRegion,
+    BASE_CHUNK_TILES, PLAYER_MARKER, RadarCache, RadarChunk, RadarChunkCoord, RadarRegion,
 };
-use openshard_client_render::radar_pass::{Placement, RadarChunkRenderer, RadarRenderer};
+use openshard_client_render::radar_pass::{
+    Placement, RadarChunkRenderer, RadarMarker, RadarOverlayRenderer, RadarRenderer,
+};
 use openshard_protocol::world::Facet;
 use openshard_uofiles::color::Color16;
 
@@ -241,40 +243,8 @@ fn adjacent_chunks_each_draw_their_own_pixels() {
 
     // Two whole chunks wide and one tall, drawn at one screen pixel a tile.
     let (width, height) = (u32::from(BASE_CHUNK_TILES) * 2, u32::from(BASE_CHUNK_TILES));
-    let target = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("radar chunk test target"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-    encoder
-        .begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("clear"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            multiview_mask: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        })
-        .forget_lifetime();
+    let (target, view) = cleared_target(&device, &mut encoder, width, height);
 
     let mut chunks = RadarChunkRenderer::new(&device, FORMAT, 16 * 1024 * 1024);
     chunks.render_region(
@@ -319,4 +289,127 @@ fn adjacent_chunks_each_draw_their_own_pixels() {
         (0, 255, 0),
         "and reaches the east edge"
     );
+}
+
+/// **The body's marker is drawn over the terrain, not into it.** The overlay's
+/// own pipeline is validated by being built, and the cross's shape and place are
+/// asserted against the one chunk under it: a marker that landed a tile out, or
+/// that the terrain pass drew over, is what this catches.
+#[test]
+fn a_marker_lands_on_its_tile_over_the_terrain() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU: skipping");
+        return;
+    };
+    let cache = RadarCache::default();
+    let facet = Facet(0);
+    let ground = RadarChunk::new(
+        cache.key(facet, 0, RadarChunkCoord::new(0, 0)),
+        vec![Color16(0x7C00); usize::from(BASE_CHUNK_TILES) * usize::from(BASE_CHUNK_TILES)],
+    )
+    .expect("a complete chunk");
+
+    // One chunk, one screen pixel a tile, so a tile coordinate and a pixel
+    // coordinate are the same number and the cross can be written down.
+    let side = u32::from(BASE_CHUNK_TILES);
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let (target, view) = cleared_target(&device, &mut encoder, side, side);
+    let frame = Frame {
+        target: &view,
+        width: side,
+        height: side,
+        scale: 1.0,
+    };
+    let region = RadarRegion {
+        facet,
+        lod: 0,
+        origin: (0, 0),
+        extent: (BASE_CHUNK_TILES, BASE_CHUNK_TILES),
+    };
+    let at = Placement {
+        origin: (0.0, 0.0),
+        extent: (side as f32, side as f32),
+    };
+
+    let mut chunks = RadarChunkRenderer::new(&device, FORMAT, 16 * 1024 * 1024);
+    chunks.render_region(&device, &queue, &mut encoder, frame, region, at, [&ground]);
+    let overlay = RadarOverlayRenderer::new(&device, FORMAT);
+    overlay.render_markers(
+        &device,
+        &queue,
+        &mut encoder,
+        frame,
+        region,
+        at,
+        &[RadarMarker {
+            tile: (10, 20),
+            color: PLAYER_MARKER,
+        }],
+    );
+
+    let pixels = read_back(&device, &queue, encoder, &target, side, side);
+    let colour_at = |x: u32, y: u32| {
+        let i = ((y * side + x) * 4) as usize;
+        (pixels[i], pixels[i + 1], pixels[i + 2])
+    };
+    assert_eq!(colour_at(10, 20), (255, 255, 255), "the tile the body stands on");
+    assert_eq!(colour_at(9, 20), (255, 255, 255), "and the arm west of it");
+    assert_eq!(colour_at(10, 21), (255, 255, 255), "and the arm south of it");
+    assert_eq!(
+        colour_at(8, 20),
+        (255, 0, 0),
+        "two tiles out is terrain again — the cross is five tiles, not a blob",
+    );
+    assert_eq!(
+        colour_at(9, 19),
+        (255, 0, 0),
+        "and the diagonal is not an arm, which is what says the marker was not \
+         drawn as a square",
+    );
+}
+
+/// A cleared colour target to draw a radar into, and the view of it.
+///
+/// Every pass here loads rather than clears, for the gump pass's reason, so
+/// something has to have painted the target before one runs.
+fn cleared_target(
+    device: &wgpu::Device,
+    encoder: &mut wgpu::CommandEncoder,
+    width: u32,
+    height: u32,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("radar test target"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    encoder
+        .begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("clear"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            multiview_mask: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        })
+        .forget_lifetime();
+    (target, view)
 }

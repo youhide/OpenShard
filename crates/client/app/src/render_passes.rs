@@ -16,6 +16,8 @@ use openshard_client_render::geometry::Rect;
 use openshard_client_render::gump::{self as gump_art};
 use openshard_client_render::lod::BlockLod;
 use openshard_client_render::outline::{self, Ring};
+use openshard_client_render::radar::{self, RadarCache, region_base_chunks};
+use openshard_client_render::radar_pass::{Placement, RadarMarker};
 use openshard_client_render::renderer::Target;
 use openshard_client_render::select::{self, Selection};
 use openshard_client_render::sprite::SpriteQuad;
@@ -78,6 +80,13 @@ use crate::{graphics, panes, profile, resources, shell, windows, world};
 /// deciding *what* the pointer is asking about needs the pick order and the
 /// view, and answering it may put a `0xD6` on the wire — see
 /// `App::hover_tooltip`, and this function is the part that only draws.
+///
+/// `scale` is how big every window here is drawn, from the desk — see
+/// [`crate::desk::WindowScale`]. It reaches the surface through
+/// `gump::place` and the pointer through
+/// [`OwnWindow::local_cursor`](windows::OwnWindow::local_cursor), and the two
+/// have to be the same number on the same frame or a click lands where the
+/// picture is not.
 // Named individually on purpose — see the doc above: reaching them through
 // `&mut self` is what this function exists to avoid.
 #[allow(clippy::too_many_arguments)]
@@ -85,13 +94,18 @@ pub(crate) fn draw_gump_windows(
     resources: &mut resources::Resources,
     world: &world::WorldState,
     windows: &mut windows::Windows,
+    radar_cache: &RadarCache,
     cursor: gump_art::GumpPixel,
     hover: &[String],
+    scale: crate::desk::WindowScale,
     shell: Option<&shell::Shell>,
     window: &mut Screen,
     encoder: &mut wgpu::CommandEncoder,
     view: &wgpu::TextureView,
 ) {
+    // Read once for the whole pass: every window on this frame is placed with
+    // it, and a pane's own cursor was divided by it a moment ago.
+    let magnify = scale.factor();
     // `drawn_windows` is both the previous frame's hit-test map and the
     // source of the text overlay assembled later in `App::draw_from`.  It
     // must therefore describe *this* frame's art pass, including the frame in
@@ -130,11 +144,6 @@ pub(crate) fn draw_gump_windows(
             // (`panes::PaneFiles::gump_atlas`) — packing inside the walk would
             // be growing the very thing the walk is holding.
             let hand = windows.hand;
-            // The pointer, in each window's own gump pixels — see
-            // `PaneFrame::cursor`'s doc for why this is the one arithmetic a
-            // pane never has to do for itself.
-            let local_cursor =
-                |at: gump_art::GumpPixel| gump_art::GumpPixel::new(cursor.x - at.x, cursor.y - at.y);
             let wanted: Vec<(WindowSubject, Vec<gump_art::GumpArt>)> = windows
                 .own_windows
                 .iter()
@@ -146,7 +155,13 @@ pub(crate) fn draw_gump_windows(
                         // the pass: it borrows `resources`, and the packing sweep
                         // between the two grows the atlas.
                         files: panes::PaneFiles::of(resources),
-                        cursor: local_cursor(open.at),
+                        // The pointer, in this window's own gump pixels — see
+                        // `PaneFrame::cursor`'s doc for why this is the one
+                        // arithmetic a pane never has to do for itself, and
+                        // `OwnWindow::local_cursor` for why all three callers
+                        // ask the window rather than each subtracting for
+                        // themselves.
+                        cursor: open.local_cursor(cursor, scale),
                         hand,
                         has_keyboard: windows.keyboard == Some(open.subject),
                         has_prompt: windows.prompt == Some(crate::windows::Asking::Window(open.subject)),
@@ -181,7 +196,7 @@ pub(crate) fn draw_gump_windows(
                     // the pass: it borrows `resources`, and the packing sweep
                     // between the two grows the atlas.
                     files: panes::PaneFiles::of(resources),
-                    cursor: local_cursor(open.at),
+                    cursor: open.local_cursor(cursor, scale),
                     hand,
                     has_keyboard: windows.keyboard == Some(open.subject),
                     has_prompt: windows.prompt == Some(crate::windows::Asking::Window(open.subject)),
@@ -212,8 +227,10 @@ pub(crate) fn draw_gump_windows(
                     // `0x11` in one press, so a frame or two can pass in which
                     // this client has none of the numbers to write on it.
                     WindowSubject::Status => {}
-                    // The GPU radar content pass records its generated terrain
-                    // at this painter position in the next integration step.
+                    // Laid out by `panes::minimap::MinimapPane` above, the
+                    // same as a sheet's: it always has a layout, so its
+                    // terrain is drawn from the second loop below, keyed by
+                    // `Drawn::Minimap` rather than reached from here.
                     WindowSubject::Minimap => {}
                     // Laid out by `panes::split::SplitPane` above, and
                     // **unreachable**: it is the one kind that draws nothing out
@@ -288,13 +305,24 @@ pub(crate) fn draw_gump_windows(
             ) {
                 eprintln!("packing dragged item art: {error}");
             }
+            // At the *negative* of where the pointer took hold of it, and
+            // placed at the cursor below with every window's own magnification
+            // — see `gump::place`. `grab` is an offset inside the item's own
+            // art (`hand::centre_of`), so it is in the same unmagnified pixels
+            // a window is laid out in, and subtracting it here rather than
+            // from the cursor is what makes the icon keep the same corner
+            // under the hand at every scale. The icon is drawn as big as the
+            // bag it came out of, which is the whole reason the scale is one
+            // number for every window: an item that changed size in the
+            // player's hand on the way between two of them would be this
+            // preview disagreeing with both.
             pictures.push(
                 gump_art::Picture::plain(
                     gump_art::GumpArt::Item(openshard_client_render::items::displayed_graphic(
                         drag.item.graphic,
                         drag.item.amount,
                     )),
-                    gump_art::GumpPixel::new(cursor.x - drag.grab.x, cursor.y - drag.grab.y),
+                    gump_art::GumpPixel::new(-drag.grab.x, -drag.grab.y),
                 )
                 .hued(drag.item.hue),
             );
@@ -317,10 +345,11 @@ pub(crate) fn draw_gump_windows(
         // belonging to that frame, before the next window is allowed to cover
         // it.  A global text pass cannot express this ordering.
         for (subject, drawn) in &windows.drawn_windows {
-            // Every pane laid this window out window-local — see
-            // `PaneFrame::cursor`'s doc — so this is the one place its
-            // pictures and its text become the screen-space geometry a pass
-            // draws: the window's own absolute placement, added back once.
+            // Every pane laid this window out window-local and at its art's
+            // own size — see `PaneFrame::cursor`'s doc — so this is the one
+            // place its pictures and its text become the screen-space geometry
+            // a pass draws: magnified by the desk's scale and moved to the
+            // window's own placement, both added back once, by `gump::place`.
             // Looked up in `own_windows` rather than carried on
             // `drawn_windows` itself, because it is the *current* position
             // that has to agree with what is on screen this frame — the same
@@ -332,12 +361,8 @@ pub(crate) fn draw_gump_windows(
                 .find(|open| open.subject == *subject)
                 .map(|open| open.at)
                 .unwrap_or_default();
-            let offset_pictures: Vec<gump_art::Picture> = drawn
-                .pictures()
-                .iter()
-                .map(|picture| picture.offset(at))
-                .collect();
-            let art = gump_art::collect(&offset_pictures, &resources.gump_atlas);
+            let mut art = gump_art::collect(drawn.pictures(), &resources.gump_atlas);
+            gump_art::place(&mut art, at, magnify);
             pass.render_layer(&window.device, &window.queue, encoder, frame, &art);
             let mut labels = Vec::new();
             let mut cut = Vec::new();
@@ -349,37 +374,43 @@ pub(crate) fn draw_gump_windows(
                 // the typed contents of every field — the second half of the
                 // window, worked out in a different place from the first.
                 (WindowSubject::Dialog(_), Drawn::Dialog(laid_out)) => {
-                    labels.extend(laid_out.lines.iter().map(|line| line.label().offset(at)));
+                    labels.extend(laid_out.lines.iter().map(|line| line.label()));
                 }
                 // A dialog's arm and a shop's: the pane resolved the name and
                 // the hover label when it laid the window out, and this pass
                 // reads what the layout produced and looks nothing up.
                 (WindowSubject::Paperdoll(_), Drawn::Paperdoll(window)) => {
-                    labels.extend(window.lines.iter().map(|line| line.label().offset(at)));
+                    labels.extend(window.lines.iter().map(|line| line.label()));
                 }
                 (WindowSubject::Skills, Drawn::Skills(sheet)) => {
                     for line in &sheet.lines {
                         let mut quads = openshard_client_render::text::collect_gump(
-                            &[line.label().offset(at)],
+                            &[line.label()],
                             &resources.font_atlas,
                         );
+                        // Cut in the window's own pixels, before the placement
+                        // below magnifies what survived: a row is scissored to
+                        // the list's viewport, and both are the sheet's own
+                        // unmagnified coordinates. Cutting after would be
+                        // cutting a glyph whose texel grid has already been
+                        // stretched — see `gump::place`.
                         if let Some(scissor) = line.scissor {
-                            scissor.offset(at).cut(&mut quads);
+                            scissor.cut(&mut quads);
                         }
                         cut.extend(quads);
                     }
                 }
                 (WindowSubject::Status, Drawn::Status(status)) => {
-                    labels.extend(status.lines.iter().map(|line| line.label().offset(at)));
+                    labels.extend(status.lines.iter().map(|line| line.label()));
                 }
                 // One line, the number being chosen — the reference's own text
                 // box, which is a control rather than a readout: it is where an
                 // exact figure is typed into a pile the bar has no pixels for.
                 (WindowSubject::Split { .. }, Drawn::Split(split)) => {
-                    labels.extend(split.lines.iter().map(|line| line.label().offset(at)));
+                    labels.extend(split.lines.iter().map(|line| line.label()));
                 }
                 (WindowSubject::Vendor(_), Drawn::Vendor(vendor)) => {
-                    labels.extend(vendor.lines.iter().map(|line| line.label().offset(at)));
+                    labels.extend(vendor.lines.iter().map(|line| line.label()));
                 }
                 // A bag's plate caption and its hover label, resolved by the
                 // pane that laid the window out — the same shape as a
@@ -389,28 +420,134 @@ pub(crate) fn draw_gump_windows(
                 // under the pointer, looked up in the view a second time. Both
                 // are decided where they are drawn now.
                 (WindowSubject::Container(_), Drawn::Container(window)) => {
-                    labels.extend(window.lines.iter().map(|line| line.label().offset(at)));
+                    labels.extend(window.lines.iter().map(|line| line.label()));
                 }
                 // The question itself, wrapped by the layout that placed the
                 // plate — the same shape as every arm above: this pass reads
                 // what the layout produced and looks nothing up.
                 (WindowSubject::Confirm(_), Drawn::Confirm(window)) => {
-                    labels.extend(window.lines.iter().map(|line| line.label().offset(at)));
+                    labels.extend(window.lines.iter().map(|line| line.label()));
                 }
                 (WindowSubject::Party, Drawn::Party(window)) => {
-                    labels.extend(window.lines.iter().map(|line| line.label().offset(at)));
+                    labels.extend(window.lines.iter().map(|line| line.label()));
                 }
-                (WindowSubject::Minimap, Drawn::Minimap(_)) => {}
+                (WindowSubject::Minimap, Drawn::Minimap(bounds)) => {
+                    if let Some(player) = world.authoritative.view.as_ref().map(|view| view.player.position) {
+                        let region = panes::minimap::radar_region_for(player, bounds.extent);
+                        let ready: Vec<_> = region_base_chunks(region)
+                            .filter_map(|chunk| radar_cache.get(radar_cache.key(region.facet, 0, chunk)))
+                            .collect();
+                        // The rectangle the terrain and the marker over it are
+                        // both drawn into: worked out once here, because the
+                        // overlay is only in the right place if it is the
+                        // *same* rectangle — see `RadarOverlayRenderer`.
+                        // The one window whose picture is not gump art: its own
+                        // pass draws the radar chunks straight into this
+                        // rectangle, so the magnification has to be applied to
+                        // the rectangle rather than to quads. The *region* is
+                        // untouched by it — how much world the minimap shows is
+                        // the pane's answer (`radar_region_for`, asked with the
+                        // window's own unmagnified extent), and a bigger window
+                        // at the same scale would be a different window rather
+                        // than the same one drawn larger.
+                        let placement = Placement {
+                            origin: (at.x as f32, at.y as f32),
+                            extent: (
+                                (bounds.extent.0 * magnify as i32) as f32,
+                                (bounds.extent.1 * magnify as i32) as f32,
+                            ),
+                        };
+                        window.radar_chunks.render_region(
+                            &window.device,
+                            &window.queue,
+                            encoder,
+                            frame,
+                            region,
+                            placement,
+                            ready,
+                        );
+                        // After the terrain and into the same window: where the
+                        // body stands. It is an overlay rather than a pixel in
+                        // a cached chunk, so a step costs this one instance and
+                        // no raster work at all.
+                        window.radar_overlay.render_markers(
+                            &window.device,
+                            &window.queue,
+                            encoder,
+                            frame,
+                            region,
+                            placement,
+                            &[RadarMarker {
+                                tile: (u32::from(player.x), u32::from(player.y)),
+                                color: radar::PLAYER_MARKER,
+                            }],
+                        );
+                    }
+                }
                 _ => {}
             }
             let mut text = openshard_client_render::text::collect_gump(&labels, &resources.font_atlas);
             text.extend(cut);
+            // The same placement the art above got, and it has to be: a
+            // caption drawn at a different scale from the plate it sits on
+            // would slide off it by a pixel per pixel of magnification. The
+            // glyphs are `fonts.mul`'s own bitmaps, which magnify the way the
+            // art does — `desk::ChatScale` is the same upscale for the HUD's
+            // own chat box.
+            gump_art::place(&mut text, at, magnify);
             window
                 .gump_text_pass
                 .render_layer(&window.device, &window.queue, encoder, frame, &text);
         }
-        let dragged = gump_art::collect(&pictures, &resources.gump_atlas);
+        let mut dragged = gump_art::collect(&pictures, &resources.gump_atlas);
+        // Placed at the cursor rather than at a window's corner: the icon is
+        // held by the pointer. Its own coordinate is the negative of where it
+        // was grabbed — see where it was pushed — so this magnifies that grab
+        // offset with the picture it belongs to.
+        gump_art::place(&mut dragged, cursor, magnify);
         pass.render_layer(&window.device, &window.queue, encoder, frame, &dragged);
+        // How many are on the cursor, in the corner of the icon that is on it
+        // — the third and last place a pile is counted, and the same rule and
+        // the same corner as the two before it: `container::amount_label`
+        // places all three. A partial lift is exactly when a person needs to
+        // read this, and it is the one moment the bag they took it out of no
+        // longer shows the number.
+        //
+        // Its own layer after the icon rather than inside `pictures`, because
+        // digits are glyphs: the art pass draws pictures and the text pass
+        // draws text, which is the split every window above already has.
+        if let Some(drag) = windows
+            .hand
+            .filter(|hand| hand.pending_drop().is_none())
+            .map(crate::hand::Hand::drag)
+        {
+            if let Some((at, count)) = openshard_client_render::container::amount_label(
+                drag.item.graphic,
+                drag.item.amount,
+                gump_art::GumpPixel::new(-drag.grab.x, -drag.grab.y),
+                &resources.tiledata,
+                &resources.gump_atlas,
+                &resources.font_atlas,
+            ) {
+                let mut text = openshard_client_render::text::collect_gump(
+                    &[openshard_client_render::text::GumpLabel {
+                        at,
+                        text: &count,
+                        font: openshard_client_render::items::STACK_COUNT_FONT,
+                        hue: openshard_protocol::wire::Hue::STACK_COUNT,
+                        clip: None,
+                    }],
+                    &resources.font_atlas,
+                );
+                // The same placement the icon above got, for the reason a
+                // window's caption shares its plate's: a count drawn at another
+                // scale slides off the picture it is counting.
+                gump_art::place(&mut text, cursor, magnify);
+                window
+                    .gump_text_pass
+                    .render_layer(&window.device, &window.queue, encoder, frame, &text);
+            }
+        }
         // The shard's tooltip for whatever the pointer is on, last of all so it
         // stands over every window and over the dragged item both. Its own
         // layer and not one of the windows': the object it describes may be in

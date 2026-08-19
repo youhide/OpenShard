@@ -29,6 +29,7 @@ use openshard_client_render::hue::HueRamp;
 use openshard_client_render::items::{self, GroundItem};
 use openshard_client_render::mobiles::{self, Mobile};
 use openshard_client_render::outline::{self, Outline};
+use openshard_client_render::radar_pass::{RadarChunkRenderer, RadarOverlayRenderer};
 use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, SpriteRenderer};
 use openshard_client_render::select::Select;
 use openshard_client_render::solids::SolidsRenderer;
@@ -693,6 +694,16 @@ pub(crate) struct Screen {
     /// has not seen. Beside the passes rather than inside them because the CPU
     /// side of an atlas is what builds a quad and the texture is what draws it.
     pub(crate) atlases: Atlases,
+    /// Bounded GPU residency for the minimap's terrain chunks — the immutable
+    /// texture-array counterpart to [`Self::composites`]. Bound to the
+    /// surface's own format, the same as [`Self::gump_pass`]: a minimap
+    /// window is drawn on the finished picture, not into the world texture.
+    pub(crate) radar_chunks: RadarChunkRenderer,
+    /// The minimap's overlay pass: where the body stands, drawn over the
+    /// terrain in the same window. It owns no residency at all — a marker is a
+    /// handful of tile-sized rectangles, rebuilt every frame, which is what
+    /// keeps a step off [`Self::radar_chunks`]'s upload path entirely.
+    pub(crate) radar_overlay: RadarOverlayRenderer,
     /// The pass that draws overhead speech, bound to `App::font_atlas` once:
     /// unlike `statics` and `mobile_pass`, nothing ever rebuilds it — the
     /// glyph atlas it is bound to is the whole of `fonts.mul` and does not go
@@ -1216,6 +1227,12 @@ impl App {
             self.resources.font_atlas.pixels(),
             &self.resources.hue_ramp,
         );
+        // A generous bound rather than a measured one — `docs/minimap_lod_plan.md`
+        // leaves the exact byte budget to a later benchmark. Sixteen mebibytes
+        // is four thousand ninety-six chunks at sixteen kibibytes each, far past
+        // what one 160-tile-square window ever has resident at once.
+        let radar_chunks = RadarChunkRenderer::new(&device, format, 16 * 1024 * 1024);
+        let radar_overlay = RadarOverlayRenderer::new(&device, format);
         // The HUD, with the surface's own format: egui picks its fragment entry
         // point from whether that format is sRGB, and this one deliberately is
         // not.
@@ -1249,6 +1266,8 @@ impl App {
             mobile_pass,
             mesh_pass,
             atlases,
+            radar_chunks,
+            radar_overlay,
             text_pass,
             ttf_atlas,
             ttf_gump_pass,

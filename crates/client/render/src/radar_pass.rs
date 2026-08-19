@@ -41,7 +41,7 @@ use openshard_uofiles::color::Color16;
 use std::collections::BTreeMap;
 
 use crate::gump::Frame;
-use crate::radar::{BASE_CHUNK_TILES, RadarChunk, RadarChunkKey, RadarRegion};
+use crate::radar::{BASE_CHUNK_TILES, MARKER_ARMS, RadarChunk, RadarChunkKey, RadarRegion};
 use crate::renderer::{QUAD, upload};
 
 /// Bytes of the radar pass's uniform block: the target, the quad's place and
@@ -135,6 +135,69 @@ mod tests {
         );
         assert_eq!(draws.len(), 1);
         assert_eq!(draws[0].chunk.key(), matching.key());
+    }
+
+    /// A region of `side` tiles drawn at `magnify` window pixels a tile.
+    fn window(side: u16, magnify: f32) -> (RadarRegion, Placement) {
+        (
+            RadarRegion {
+                facet: Facet(0),
+                lod: 0,
+                origin: (100, 100),
+                extent: (side, side),
+            },
+            Placement {
+                origin: (10.0, 20.0),
+                extent: (f32::from(side) * magnify, f32::from(side) * magnify),
+            },
+        )
+    }
+
+    #[test]
+    fn a_marker_is_a_cross_of_tile_sized_quads_where_the_body_stands() {
+        let (region, at) = window(16, 2.0);
+        let marker = RadarMarker {
+            tile: (104, 108),
+            color: Color16(0x7FFF),
+        };
+        let quads = select_marker_quads(region, at, [&marker]);
+
+        assert_eq!(quads.len(), MARKER_ARMS.len(), "every arm is on the map");
+        // The centre arm comes first, and it is the tile itself: four tiles east
+        // and eight south of the region's corner, at two window pixels a tile.
+        assert_eq!(quads[0].0.origin, (10.0 + 8.0, 20.0 + 16.0));
+        assert_eq!(
+            quads[0].0.extent,
+            (2.0, 2.0),
+            "a marker pixel is a tile, so it keeps its size as the window is magnified"
+        );
+        assert!(quads.iter().all(|(_, color)| *color == marker.color));
+    }
+
+    #[test]
+    fn a_markers_arms_are_dropped_at_the_regions_edge_rather_than_clamped_onto_it() {
+        let (region, at) = window(16, 1.0);
+        // The region's own north-west tile: the west and north arms are outside
+        // the window, and drawing them at the edge would put the cross's centre
+        // one tile from where the body actually is.
+        let corner = RadarMarker {
+            tile: (100, 100),
+            color: Color16(0x7FFF),
+        };
+        let quads = select_marker_quads(region, at, [&corner]);
+        assert_eq!(quads.len(), 3);
+        assert!(quads.iter().all(|(placement, _)| {
+            placement.origin.0 >= at.origin.0 && placement.origin.1 >= at.origin.1
+        }));
+
+        let outside = RadarMarker {
+            tile: (200, 200),
+            color: Color16(0x7FFF),
+        };
+        assert!(
+            select_marker_quads(region, at, [&outside]).is_empty(),
+            "a body off the shown rectangle has no marker at all, not one at its edge"
+        );
     }
 }
 
@@ -830,17 +893,9 @@ impl RadarChunkRenderer {
             );
             draws.truncate(self.capacity as usize);
         }
-        let x = (at.origin.0 * frame.scale).max(0.0).floor() as u32;
-        let y = (at.origin.1 * frame.scale).max(0.0).floor() as u32;
-        let right = ((at.origin.0 + at.extent.0) * frame.scale)
-            .clamp(0.0, frame.width as f32)
-            .ceil() as u32;
-        let bottom = ((at.origin.1 + at.extent.1) * frame.scale)
-            .clamp(0.0, frame.height as f32)
-            .ceil() as u32;
-        if x >= right || y >= bottom {
+        let Some(scissor) = window_scissor(frame, at) else {
             return;
-        }
+        };
         let mut uniform_bytes = Vec::with_capacity(CHUNK_UNIFORM_BYTES as usize);
         for value in [frame.width as f32, frame.height as f32, frame.scale, 0.0] {
             uniform_bytes.extend_from_slice(&value.to_le_bytes());
@@ -893,7 +948,308 @@ impl RadarChunkRenderer {
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.quad.slice(..));
         pass.set_vertex_buffer(1, instances.slice(..));
-        pass.set_scissor_rect(x, y, right - x, bottom - y);
+        pass.set_scissor_rect(scissor.0, scissor.1, scissor.2, scissor.3);
         pass.draw(0..4, 0..draws.len() as u32);
+    }
+}
+
+/// The window's own clip rectangle in surface pixels: `(x, y, width, height)`,
+/// or `None` where the placement has no pixels on this frame at all.
+///
+/// One rule for the terrain and for the overlay over it. Two windows'-worth of
+/// this arithmetic would be two chances for a marker to survive a clip its own
+/// terrain did not, which is a player dot outside the window it belongs to.
+fn window_scissor(frame: Frame<'_>, at: Placement) -> Option<(u32, u32, u32, u32)> {
+    let x = (at.origin.0 * frame.scale).max(0.0).floor() as u32;
+    let y = (at.origin.1 * frame.scale).max(0.0).floor() as u32;
+    let right = ((at.origin.0 + at.extent.0) * frame.scale)
+        .clamp(0.0, frame.width as f32)
+        .ceil() as u32;
+    let bottom = ((at.origin.1 + at.extent.1) * frame.scale)
+        .clamp(0.0, frame.height as f32)
+        .ceil() as u32;
+    (x < right && y < bottom).then_some((x, y, right - x, bottom - y))
+}
+
+/// One overlay dot over ready terrain: where a body stands, in world tiles.
+///
+/// Deliberately *not* part of a [`RadarChunk`]. A marker moves every step and a
+/// terrain product does not, so stamping one into a cached raster would make a
+/// step invalidate terrain — the one thing `docs/minimap_lod_plan.md` exists to
+/// prevent. It is drawn after the chunks, from per-frame data that costs an
+/// instance rather than an upload.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct RadarMarker {
+    /// The world tile it stands on — the same coordinate space a
+    /// [`RadarRegion`]'s origin is in, not a pixel inside the window.
+    pub tile: (u32, u32),
+    pub color: Color16,
+}
+
+/// Bytes per overlay quad: placement origin and extent, then a colour.
+const MARKER_INSTANCE_STRIDE: u64 = 32;
+
+/// The screen rectangles a region's markers occupy, one per arm of each cross.
+///
+/// A marker outside the region contributes nothing, and an arm that falls off
+/// the region's edge is dropped rather than clamped onto it — the same
+/// clipping [`radar::mark`](crate::radar::mark) does in a bitmap, so the cross
+/// beside the window's edge looks the same in both pictures.
+#[must_use]
+pub fn select_marker_quads<'a>(
+    region: RadarRegion,
+    at: Placement,
+    markers: impl IntoIterator<Item = &'a RadarMarker>,
+) -> Vec<(Placement, Color16)> {
+    if region.extent.0 == 0 || region.extent.1 == 0 || at.extent.0 <= 0.0 || at.extent.1 <= 0.0 {
+        return Vec::new();
+    }
+    // One tile's worth of window, which is also one marker pixel's size: the
+    // cross is drawn in tiles, so it keeps its shape at any window scale
+    // instead of shrinking to a dot as the region grows.
+    let scale_x = at.extent.0 / f32::from(region.extent.0);
+    let scale_y = at.extent.1 / f32::from(region.extent.1);
+    let mut quads = Vec::new();
+    for marker in markers {
+        for (dx, dy) in MARKER_ARMS {
+            let (Some(x), Some(y)) = (
+                marker.tile.0.checked_add_signed(dx),
+                marker.tile.1.checked_add_signed(dy),
+            ) else {
+                continue;
+            };
+            let (Some(column), Some(row)) = (x.checked_sub(region.origin.0), y.checked_sub(region.origin.1))
+            else {
+                continue;
+            };
+            if column >= u32::from(region.extent.0) || row >= u32::from(region.extent.1) {
+                continue;
+            }
+            quads.push((
+                Placement {
+                    origin: (
+                        at.origin.0 + column as f32 * scale_x,
+                        at.origin.1 + row as f32 * scale_y,
+                    ),
+                    extent: (scale_x, scale_y),
+                },
+                marker.color,
+            ));
+        }
+    }
+    quads
+}
+
+/// The pass that draws radar overlays: solid tile-sized quads, after terrain.
+///
+/// It owns a pipeline and nothing else. There is no residency here and there is
+/// nothing to evict — the whole of a frame's overlay is a handful of rectangles
+/// written into a fresh instance buffer, which is why a walking player uploads
+/// no texture at all.
+#[derive(Debug)]
+pub struct RadarOverlayRenderer {
+    pipeline: wgpu::RenderPipeline,
+    bind_group: wgpu::BindGroup,
+    uniforms: wgpu::Buffer,
+    quad: wgpu::Buffer,
+}
+
+impl RadarOverlayRenderer {
+    /// Build the overlay pass against the **surface's** format, for
+    /// [`RadarChunkRenderer::new`]'s reason: a minimap is drawn on the finished
+    /// picture rather than into the world texture.
+    #[must_use]
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+        let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("radar overlay frame"),
+            size: CHUNK_UNIFORM_BYTES,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("radar overlay"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("radar overlay"),
+            layout: &layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniforms.as_entire_binding(),
+            }],
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("radar overlay"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("radar_marker.wgsl").into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("radar overlay"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("radar overlay"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: 8,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &[wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 0,
+                            shader_location: 0,
+                        }],
+                    }),
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: MARKER_INSTANCE_STRIDE,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &[
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x2,
+                                offset: 0,
+                                shader_location: 1,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x2,
+                                offset: 8,
+                                shader_location: 2,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x4,
+                                offset: 16,
+                                shader_location: 3,
+                            },
+                        ],
+                    }),
+                ],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                // No blending: a marker replaces the terrain under it, exactly
+                // as the bitmap stamp does. A translucent player dot would take
+                // the colour of the ground it stands on, which is the one thing
+                // it must not do.
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let quad = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("radar overlay quad"),
+            size: std::mem::size_of_val(&QUAD) as u64,
+            usage: wgpu::BufferUsages::VERTEX,
+            mapped_at_creation: true,
+        });
+        let bytes: Vec<u8> = QUAD.iter().flat_map(|value| value.to_le_bytes()).collect();
+        quad.get_mapped_range_mut(..)
+            .expect("fresh quad is mapped")
+            .copy_from_slice(&bytes);
+        quad.unmap();
+        Self {
+            pipeline,
+            bind_group,
+            uniforms,
+            quad,
+        }
+    }
+
+    /// Draw `markers` over the terrain already recorded for this window.
+    ///
+    /// `region` and `at` must be the pair [`RadarChunkRenderer::render_region`]
+    /// was given, and the call must come after it: this is the same window,
+    /// clipped by the same rectangle, painted on top.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_markers<'a>(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: Frame<'_>,
+        region: RadarRegion,
+        at: Placement,
+        markers: impl IntoIterator<Item = &'a RadarMarker>,
+    ) {
+        let quads = select_marker_quads(region, at, markers);
+        if quads.is_empty() {
+            return;
+        }
+        let Some(scissor) = window_scissor(frame, at) else {
+            return;
+        };
+        let mut uniform_bytes = Vec::with_capacity(CHUNK_UNIFORM_BYTES as usize);
+        for value in [frame.width as f32, frame.height as f32, frame.scale, 0.0] {
+            uniform_bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        queue.write_buffer(&self.uniforms, 0, &uniform_bytes);
+        let mut instance_bytes = Vec::with_capacity(quads.len() * MARKER_INSTANCE_STRIDE as usize);
+        for (placement, color) in &quads {
+            let rgb = color.rgb8();
+            for value in [
+                placement.origin.0,
+                placement.origin.1,
+                placement.extent.0,
+                placement.extent.1,
+                f32::from(rgb.red) / 255.0,
+                f32::from(rgb.green) / 255.0,
+                f32::from(rgb.blue) / 255.0,
+                1.0,
+            ] {
+                instance_bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        let instances = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("radar overlay instances"),
+            size: quads.len() as u64 * MARKER_INSTANCE_STRIDE,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&instances, 0, &instance_bytes);
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("radar overlay"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: frame.target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            multiview_mask: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_vertex_buffer(0, self.quad.slice(..));
+        pass.set_vertex_buffer(1, instances.slice(..));
+        pass.set_scissor_rect(scissor.0, scissor.1, scissor.2, scissor.3);
+        pass.draw(0..4, 0..quads.len() as u32);
     }
 }

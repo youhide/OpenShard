@@ -81,6 +81,29 @@ pub fn world_tile_to_base_chunk(world: (u32, u32)) -> (RadarChunkCoord, (u16, u1
     )
 }
 
+/// Every level-zero chunk coordinate a region's rectangle touches.
+///
+/// Shared between a producer, which requests exactly these keys, and a
+/// content pass, which reads back exactly the ones that are ready — the two
+/// must agree on what "the visible chunks" are, or a chunk the queue never
+/// saw requested would sit ready and undrawn, or one the pass never asks for
+/// would build forever. `region.lod` is not consulted: level zero is the
+/// only chunk grid a rectangle of world tiles maps onto directly.
+pub fn region_base_chunks(region: RadarRegion) -> impl Iterator<Item = RadarChunkCoord> {
+    let last_x = region
+        .origin
+        .0
+        .saturating_add(u32::from(region.extent.0.saturating_sub(1)));
+    let last_y = region
+        .origin
+        .1
+        .saturating_add(u32::from(region.extent.1.saturating_sub(1)));
+    let (first_chunk, _) = world_tile_to_base_chunk(region.origin);
+    let (last_chunk, _) = world_tile_to_base_chunk((last_x, last_y));
+    (first_chunk.y..=last_chunk.y)
+        .flat_map(move |y| (first_chunk.x..=last_chunk.x).map(move |x| RadarChunkCoord::new(x, y)))
+}
+
 /// One immutable source version of a facet's terrain and statics.
 ///
 /// A revision deliberately cannot be omitted from a [`RadarChunkKey`].  The
@@ -829,13 +852,32 @@ pub fn fill(
     }
 }
 
+/// The tiles a marker covers, relative to the one it stands on.
+///
+/// The centre and its four neighbours: a cross, and that is not decoration. At
+/// one pixel a tile a single dot is a single pixel — indistinguishable from a
+/// lamp post, and invisible against ground of a similar colour. Five pixels in
+/// a shape nothing in `radarcol.mul` produces is the smallest thing a person
+/// can actually find.
+///
+/// One constant because a marker is drawn two ways — stamped into a transient
+/// bitmap by [`mark`], and recorded as overlay quads over cached terrain by the
+/// radar pass — and a player who is a cross in one picture and a plus-sign in
+/// the other would be two markers rather than one.
+pub const MARKER_ARMS: [(i32, i32); 5] = [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)];
+
+/// What the body this client is looking through draws as on the radar.
+///
+/// White, which `radarcol.mul` does contain: the shape is what makes the marker
+/// findable ([`MARKER_ARMS`]), so the colour only has to be bright rather than
+/// unique. A colour no terrain uses would still be one pixel wide.
+pub const PLAYER_MARKER: Color16 = Color16(0x7FFF);
+
 /// Stamp a marker over a filled buffer, at the tile `column`, `row` in from its
 /// north-west corner.
 ///
-/// A cross rather than a pixel, and that is not decoration. At one pixel a tile
-/// a single dot is a single pixel — indistinguishable from a lamp post, and
-/// invisible against ground of a similar colour. Five pixels in a shape nothing
-/// in `radarcol.mul` produces is the smallest thing a person can actually find.
+/// A cross rather than a pixel — see [`MARKER_ARMS`] for why, and for the other
+/// place that same shape is drawn.
 ///
 /// This is a small bitmap utility for callers that own a transient image.  A
 /// [`RadarChunk`] must never be passed here: player and waypoint markers are
@@ -847,8 +889,7 @@ pub fn mark(into: &mut [Color16], width: u16, height: u16, at: (u16, u16), color
     if column >= width || row >= height {
         return;
     }
-    let arms = [(0i32, 0i32), (-1, 0), (1, 0), (0, -1), (0, 1)];
-    for (dx, dy) in arms {
+    for (dx, dy) in MARKER_ARMS {
         let (Ok(x), Ok(y)) = (
             u16::try_from(i32::from(column) + dx),
             u16::try_from(i32::from(row) + dy),
@@ -1142,6 +1183,38 @@ mod tests {
         assert!(cache.publish(complete));
         assert!(!cache.is_dirty(base), "publication settles only that product");
         assert!(cache.is_dirty(cache.key(facet, 1, RadarChunkCoord::new(3, 2))));
+    }
+
+    #[test]
+    fn region_base_chunks_covers_every_chunk_a_rectangle_touches() {
+        let aligned = RadarRegion {
+            facet: Facet(0),
+            lod: 0,
+            origin: (0, 0),
+            extent: (BASE_CHUNK_TILES, BASE_CHUNK_TILES),
+        };
+        assert_eq!(
+            region_base_chunks(aligned).collect::<Vec<_>>(),
+            vec![RadarChunkCoord::new(0, 0)],
+            "one chunk exactly fills one chunk-aligned region"
+        );
+
+        let straddling = RadarRegion {
+            facet: Facet(0),
+            lod: 0,
+            origin: (32, 32),
+            extent: (BASE_CHUNK_TILES, BASE_CHUNK_TILES),
+        };
+        assert_eq!(
+            region_base_chunks(straddling).collect::<Vec<_>>(),
+            vec![
+                RadarChunkCoord::new(0, 0),
+                RadarChunkCoord::new(1, 0),
+                RadarChunkCoord::new(0, 1),
+                RadarChunkCoord::new(1, 1),
+            ],
+            "a region straddling all four neighbours touches all four"
+        );
     }
 
     #[test]
