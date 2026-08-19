@@ -26,8 +26,12 @@
 //! **No hue.** `hues.mul` tints art, and there is no ramp for a colour that was
 //! never in a client file — `radarcol.mul`'s entries *are* the colours.
 //!
-//! **No instances.** There is one quad, so its place lives in the uniform block
-//! rather than in a vertex buffer with one element in it.
+//! **No instances, in [`RadarRenderer`].** There is one quad, so its place lives
+//! in the uniform block rather than in a vertex buffer with one element in it.
+//! [`RadarChunkRenderer`] draws several — one rectangle per resident chunk — and
+//! therefore does the opposite: everything that differs between them travels in
+//! an instance buffer, because a uniform rewritten between two recorded draws
+//! reaches both of them with the last values written.
 //!
 //! **No blending, and nothing to discard.** A radar tile with no colour is
 //! [`radar::UNKNOWN`](crate::radar::UNKNOWN) rather than transparent, so the
@@ -501,7 +505,11 @@ struct ResidentPage {
     last_used: u64,
 }
 
-const CHUNK_UNIFORM_BYTES: u64 = 48;
+/// Surface size, and the scale it is drawn at: the whole of what every chunk in
+/// one region draw shares.
+const CHUNK_UNIFORM_BYTES: u64 = 16;
+/// Placement origin and extent, source UV origin and extent, page layer.
+const CHUNK_INSTANCE_STRIDE: u64 = 36;
 const CHUNK_RGBA_BYTES: u64 = (BASE_CHUNK_TILES as u64) * (BASE_CHUNK_TILES as u64) * 4;
 
 impl RadarChunkRenderer {
@@ -613,15 +621,52 @@ impl RadarChunkRenderer {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: 8,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x2,
-                        offset: 0,
-                        shader_location: 0,
-                    }],
-                })],
+                buffers: &[
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: 8,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &[wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 0,
+                            shader_location: 0,
+                        }],
+                    }),
+                    // One instance a chunk rectangle — the same shape as the
+                    // gump pass's, and for the same reason: what differs between
+                    // the draws of one layer belongs in a buffer written once,
+                    // not in a uniform rewritten between them.
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: CHUNK_INSTANCE_STRIDE,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &[
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x2,
+                                offset: 0,
+                                shader_location: 1,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x2,
+                                offset: 8,
+                                shader_location: 2,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x2,
+                                offset: 16,
+                                shader_location: 3,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x2,
+                                offset: 24,
+                                shader_location: 4,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Uint32,
+                                offset: 32,
+                                shader_location: 5,
+                            },
+                        ],
+                    }),
+                ],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
@@ -748,6 +793,15 @@ impl RadarChunkRenderer {
 
     /// Draw complete ready chunks, clipped to the minimap window.  Call this
     /// before recording player/waypoint geometry in the same window layer.
+    ///
+    /// Every selected chunk is one instance of a single draw.  That is not an
+    /// optimisation: a chunk's placement, source rectangle and page cannot live
+    /// in the uniform block, because [`wgpu::Queue::write_buffer`] is ordered
+    /// against the *submission* rather than against the commands inside it, so
+    /// a uniform rewritten between two recorded draws gives both of them the
+    /// last values written.  The same rule is why the page upload below is an
+    /// encoder copy from a staging buffer.
+    #[allow(clippy::too_many_arguments)]
     pub fn render_region<'a>(
         &mut self,
         device: &wgpu::Device,
@@ -758,9 +812,23 @@ impl RadarChunkRenderer {
         at: Placement,
         ready: impl IntoIterator<Item = &'a RadarChunk>,
     ) {
-        let draws = select_region_chunks(region, at, ready);
+        let mut draws = select_region_chunks(region, at, ready);
         if draws.is_empty() {
             return;
+        }
+        // A region wider than the whole page cache would evict a page this very
+        // call had already handed to an instance, and that instance would then
+        // sample whatever replaced it.  Dropping the surplus leaves those chunks
+        // undrawn instead of drawn wrong; it is unreachable at any sane budget —
+        // a 160-tile window touches at most sixteen chunks — so it is a bound
+        // rather than a policy.
+        if draws.len() > self.capacity as usize {
+            eprintln!(
+                "radar page cache holds {} of {} chunks this region needs: the rest go undrawn",
+                self.capacity,
+                draws.len()
+            );
+            draws.truncate(self.capacity as usize);
         }
         let x = (at.origin.0 * frame.scale).max(0.0).floor() as u32;
         let y = (at.origin.1 * frame.scale).max(0.0).floor() as u32;
@@ -773,48 +841,59 @@ impl RadarChunkRenderer {
         if x >= right || y >= bottom {
             return;
         }
-        for draw in draws {
+        let mut uniform_bytes = Vec::with_capacity(CHUNK_UNIFORM_BYTES as usize);
+        for value in [frame.width as f32, frame.height as f32, frame.scale, 0.0] {
+            uniform_bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        queue.write_buffer(&self.uniforms, 0, &uniform_bytes);
+        // Residency first, for all of them: every page copy has to be recorded
+        // before the pass that samples it begins, and a pass cannot be open
+        // while the encoder is asked for a copy.
+        let mut instance_bytes = Vec::with_capacity(draws.len() * CHUNK_INSTANCE_STRIDE as usize);
+        for draw in &draws {
             let layer = self.resident_layer(device, queue, encoder, draw.chunk);
-            let values = [
-                frame.width as f32,
-                frame.height as f32,
+            for value in [
                 draw.placement.origin.0,
                 draw.placement.origin.1,
                 draw.placement.extent.0,
                 draw.placement.extent.1,
-                frame.scale,
-                0.0,
                 draw.uv.origin.0,
                 draw.uv.origin.1,
                 draw.uv.extent.0,
                 draw.uv.extent.1,
-            ];
-            let bytes: Vec<u8> = values.iter().flat_map(|value| value.to_le_bytes()).collect();
-            queue.write_buffer(&self.uniforms, 0, &bytes);
-            // Array indices are supplied as a float uniform and converted by
-            // the shader; all supported layer counts fit exactly in f32.
-            queue.write_buffer(&self.uniforms, 28, &(layer as f32).to_le_bytes());
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("radar chunk"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: frame.target,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                multiview_mask: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.set_vertex_buffer(0, self.quad.slice(..));
-            pass.set_scissor_rect(x, y, right - x, bottom - y);
-            pass.draw(0..4, 0..1);
+            ] {
+                instance_bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            instance_bytes.extend_from_slice(&layer.to_le_bytes());
         }
+        let instances = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("radar chunk instances"),
+            size: draws.len() as u64 * CHUNK_INSTANCE_STRIDE,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&instances, 0, &instance_bytes);
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("radar chunk"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: frame.target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            multiview_mask: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_vertex_buffer(0, self.quad.slice(..));
+        pass.set_vertex_buffer(1, instances.slice(..));
+        pass.set_scissor_rect(x, y, right - x, bottom - y);
+        pass.draw(0..4, 0..draws.len() as u32);
     }
 }

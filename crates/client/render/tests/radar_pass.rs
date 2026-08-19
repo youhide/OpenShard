@@ -1,15 +1,20 @@
 //! The radar pass, against a real device.
 //!
-//! `radar.wgsl` is validated when its pipeline is created and at no other point:
-//! it is `include_str!`d, so a syntax error or a binding that does not match the
-//! layout compiles clean and fails at run time, on the first frame a player
-//! opens the window on. This is the test that moves that failure to CI.
+//! `radar.wgsl` and `radar_chunk.wgsl` are validated when their pipelines are
+//! created and at no other point: they are `include_str!`d, so a syntax error or
+//! a binding that does not match the layout compiles clean and fails at run
+//! time, on the first frame a player opens the window on. This is the test that
+//! moves that failure to CI.
 //!
 //! Skipped where there is no GPU, like every other test in this crate that
 //! needs one.
 
 use openshard_client_render::gump::Frame;
-use openshard_client_render::radar_pass::{Placement, RadarRenderer};
+use openshard_client_render::radar::{
+    BASE_CHUNK_TILES, RadarCache, RadarChunk, RadarChunkCoord, RadarRegion,
+};
+use openshard_client_render::radar_pass::{Placement, RadarChunkRenderer, RadarRenderer};
+use openshard_protocol::world::Facet;
 use openshard_uofiles::color::Color16;
 
 /// A radar's own size, small enough that a readback is cheap and not a power of
@@ -204,4 +209,114 @@ fn read_back(
         .to_vec();
     readback.unmap();
     bytes
+}
+
+/// **Two chunks in one region are two different pictures.** The regression this
+/// exists for: the placement, the source rectangle and the page of each chunk
+/// used to be written into one uniform buffer between recorded draws.
+/// `Queue::write_buffer` is ordered against the submission rather than against
+/// the commands inside it, so every draw in the frame read the *last* chunk's
+/// values and the minimap showed one chunk's slice where all of them belonged.
+/// Both halves being their own colour is what says each instance carries its
+/// own rectangle.
+#[test]
+fn adjacent_chunks_each_draw_their_own_pixels() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU: skipping");
+        return;
+    };
+    let cache = RadarCache::default();
+    let facet = Facet(0);
+    let solid = |x: u32, colour: Color16| {
+        RadarChunk::new(
+            cache.key(facet, 0, RadarChunkCoord::new(x, 0)),
+            vec![colour; usize::from(BASE_CHUNK_TILES) * usize::from(BASE_CHUNK_TILES)],
+        )
+        .expect("a complete chunk")
+    };
+    // Red west, green east: two colours no reduction or filter could produce
+    // from each other, so a half showing the wrong one is unambiguous.
+    let west = solid(0, Color16(0x7C00));
+    let east = solid(1, Color16(0x03E0));
+
+    // Two whole chunks wide and one tall, drawn at one screen pixel a tile.
+    let (width, height) = (u32::from(BASE_CHUNK_TILES) * 2, u32::from(BASE_CHUNK_TILES));
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("radar chunk test target"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    encoder
+        .begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("clear"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            multiview_mask: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        })
+        .forget_lifetime();
+
+    let mut chunks = RadarChunkRenderer::new(&device, FORMAT, 16 * 1024 * 1024);
+    chunks.render_region(
+        &device,
+        &queue,
+        &mut encoder,
+        Frame {
+            target: &view,
+            width,
+            height,
+            scale: 1.0,
+        },
+        RadarRegion {
+            facet,
+            lod: 0,
+            origin: (0, 0),
+            extent: (BASE_CHUNK_TILES * 2, BASE_CHUNK_TILES),
+        },
+        Placement {
+            origin: (0.0, 0.0),
+            extent: (width as f32, height as f32),
+        },
+        [&west, &east],
+    );
+
+    let pixels = read_back(&device, &queue, encoder, &target, width, height);
+    let at = |x: u32, y: u32| {
+        let i = ((y * width + x) * 4) as usize;
+        (pixels[i], pixels[i + 1], pixels[i + 2])
+    };
+    let last = u32::from(BASE_CHUNK_TILES) - 1;
+    assert_eq!(at(0, 0), (255, 0, 0), "the west chunk starts at the west edge");
+    assert_eq!(at(last, last), (255, 0, 0), "and reaches its own far corner");
+    assert_eq!(
+        at(last + 1, 0),
+        (0, 255, 0),
+        "the east chunk starts one column past it, with its own colour and its \
+         own page — not the west chunk's rectangle drawn twice",
+    );
+    assert_eq!(
+        at(width - 1, height - 1),
+        (0, 255, 0),
+        "and reaches the east edge"
+    );
 }
