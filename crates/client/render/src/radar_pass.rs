@@ -1040,7 +1040,8 @@ pub fn select_marker_quads<'a>(
     quads
 }
 
-/// The pass that draws radar overlays: solid tile-sized quads, after terrain.
+/// The pass that draws a radar's solid rectangles: the backdrop under the
+/// terrain, and the markers over it.
 ///
 /// It owns a pipeline and nothing else. There is no residency here and there is
 /// nothing to evict — the whole of a frame's overlay is a handful of rectangles
@@ -1194,7 +1195,50 @@ impl RadarOverlayRenderer {
         at: Placement,
         markers: impl IntoIterator<Item = &'a RadarMarker>,
     ) {
-        let quads = select_marker_quads(region, at, markers);
+        self.draw_quads(
+            device,
+            queue,
+            encoder,
+            frame,
+            at,
+            &select_marker_quads(region, at, markers),
+        );
+    }
+
+    /// Fill the whole window with one colour, **before** its terrain.
+    ///
+    /// A minimap with no ready chunk under part of it would otherwise show the
+    /// world through that part — a hole, which `docs/minimap_lod_plan.md`'s
+    /// contract rules out as firmly as it rules out stale pixels. Painting
+    /// [`radar::UNKNOWN`](crate::radar::UNKNOWN) under everything says the same
+    /// thing there that it says inside a chunk: this ground is not mapped yet.
+    /// It is a floor rather than a fallback — a ready coarser ancestor is still
+    /// the better picture wherever one exists.
+    pub fn render_backdrop(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: Frame<'_>,
+        at: Placement,
+        color: Color16,
+    ) {
+        self.draw_quads(device, queue, encoder, frame, at, &[(at, color)]);
+    }
+
+    /// Record one instanced draw of solid rectangles, clipped to `at`.
+    ///
+    /// Both of this pass's callers come through here, so a marker and the
+    /// backdrop under it cannot end up clipped by two different rectangles.
+    fn draw_quads(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: Frame<'_>,
+        at: Placement,
+        quads: &[(Placement, Color16)],
+    ) {
         if quads.is_empty() {
             return;
         }
@@ -1207,7 +1251,7 @@ impl RadarOverlayRenderer {
         }
         queue.write_buffer(&self.uniforms, 0, &uniform_bytes);
         let mut instance_bytes = Vec::with_capacity(quads.len() * MARKER_INSTANCE_STRIDE as usize);
-        for (placement, color) in &quads {
+        for (placement, color) in quads {
             let rgb = color.rgb8();
             for value in [
                 placement.origin.0,

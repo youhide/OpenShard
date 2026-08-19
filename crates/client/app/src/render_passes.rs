@@ -457,6 +457,18 @@ pub(crate) fn draw_gump_windows(
                                 (bounds.extent.1 * magnify as i32) as f32,
                             ),
                         };
+                        // Under everything, so the window is a window even
+                        // before its first chunk is built: unmapped ground
+                        // reads as unmapped rather than as the world showing
+                        // through a hole in the interface.
+                        window.radar_overlay.render_backdrop(
+                            &window.device,
+                            &window.queue,
+                            encoder,
+                            frame,
+                            placement,
+                            radar::UNKNOWN,
+                        );
                         window.radar_chunks.render_region(
                             &window.device,
                             &window.queue,

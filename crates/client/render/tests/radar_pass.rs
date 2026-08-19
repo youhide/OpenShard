@@ -11,7 +11,7 @@
 
 use openshard_client_render::gump::Frame;
 use openshard_client_render::radar::{
-    BASE_CHUNK_TILES, PLAYER_MARKER, RadarCache, RadarChunk, RadarChunkCoord, RadarRegion,
+    BASE_CHUNK_TILES, PLAYER_MARKER, RadarCache, RadarChunk, RadarChunkCoord, RadarRegion, UNKNOWN,
 };
 use openshard_client_render::radar_pass::{
     Placement, RadarChunkRenderer, RadarMarker, RadarOverlayRenderer, RadarRenderer,
@@ -366,6 +366,56 @@ fn a_marker_lands_on_its_tile_over_the_terrain() {
         "and the diagonal is not an arm, which is what says the marker was not \
          drawn as a square",
     );
+}
+
+/// **A window with no ready terrain is filled, not left see-through.** The
+/// backdrop is what makes an unbuilt minimap read as unmapped ground rather than
+/// as a hole with the world behind it, and it stops at the window's own edge.
+#[test]
+fn an_unmapped_window_is_filled_rather_than_left_transparent() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU: skipping");
+        return;
+    };
+    let (width, height) = (64u32, 64u32);
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let (target, view) = cleared_target(&device, &mut encoder, width, height);
+
+    let overlay = RadarOverlayRenderer::new(&device, FORMAT);
+    overlay.render_backdrop(
+        &device,
+        &queue,
+        &mut encoder,
+        Frame {
+            target: &view,
+            width,
+            height,
+            scale: 1.0,
+        },
+        Placement {
+            origin: (16.0, 16.0),
+            extent: (32.0, 32.0),
+        },
+        UNKNOWN,
+    );
+
+    let pixels = read_back(&device, &queue, encoder, &target, width, height);
+    let colour_at = |x: u32, y: u32| {
+        let i = ((y * width + x) * 4) as usize;
+        (pixels[i], pixels[i + 1], pixels[i + 2])
+    };
+    // `UNKNOWN` is deliberately not `Color16(0)`: near-black, but not the black
+    // an untouched target is, so "nothing was drawn here" and "this ground is
+    // not mapped" are two different pictures.
+    let unmapped = {
+        let rgb = UNKNOWN.rgb8();
+        (rgb.red, rgb.green, rgb.blue)
+    };
+    assert_ne!(unmapped, (0, 0, 0), "unmapped is not absent");
+    assert_eq!(colour_at(16, 16), unmapped, "the window's own north-west corner");
+    assert_eq!(colour_at(47, 47), unmapped, "and its far corner");
+    assert_eq!(colour_at(15, 16), (0, 0, 0), "one column short of it is not");
+    assert_eq!(colour_at(48, 47), (0, 0, 0), "and one column past it is not");
 }
 
 /// A cleared colour target to draw a radar into, and the view of it.
