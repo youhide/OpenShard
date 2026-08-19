@@ -18,9 +18,9 @@
 //! [`Zoom`] is egui's `zoom_factor` — the HUD's own scale, on top of the
 //! monitor's `scale_factor`, which is the platform's business and is never
 //! saved (a file that pinned it would fight the compositor on the next screen).
-//! It is *not* the density the world's TTF text is baked at: that atlas takes
-//! one pixel size at startup (see `TTF_BASE_PIXEL_HEIGHT`) and the HUD's scale
-//! has no bearing on it.
+//! It is *not* the density the world's TTF text is baked at: that atlas is
+//! [`Chat::ttf_scale`]'s own multiple of `TTF_BASE_PIXEL_HEIGHT`, and the
+//! HUD's scale has no bearing on it.
 
 use std::path::Path;
 
@@ -325,18 +325,91 @@ impl<'de> Deserialize<'de> for ChatScale {
     }
 }
 
+/// How big a TrueType face's glyphs rasterize, as a multiple of
+/// [`crate::TTF_BASE_PIXEL_HEIGHT`], when `App::ttf_font` is set.
+///
+/// [`ChatScale`]'s continuous twin, and the reason it need not be an integer
+/// the way that one is: `fonts.mul` has no continuous size to ask for and
+/// [`ChatScale::glyph_scale_factor`] upscales the *finished quad*,
+/// nearest-sampled, so a fractional factor would split a pixel across two —
+/// see that type's own doc. `fontdue` rasterizes a TrueType outline at
+/// whatever pixel height it is asked for, analytically, so there is no
+/// blockiness for a fractional multiple to introduce, and clamping this to
+/// whole numbers would only make the slider coarser for no reason.
+///
+/// Unlike `ChatScale`, this reaches past the chat box: overhead speech, the
+/// HUD's own speech line and every window's caption draw through the same one
+/// [`openshard_client_render::atlas::TtfAtlas`] this scales, because a
+/// TrueType face bakes one pixel size for all of them at once — see
+/// `openshard_uofiles::ttf_font`'s "One face, not ten" doc. It lives on
+/// [`Chat`] anyway, and not as a fourth field on [`Desk`] directly, because
+/// the Chat tab is where a player who finds `--ttf-font`'s text too small to
+/// read is already looking, and because the "back to the defaults" button
+/// there should undo this the same click it undoes [`ChatScale`] with.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TtfScale(f32);
+
+impl TtfScale {
+    /// Half `TTF_BASE_PIXEL_HEIGHT` and three times it — past which a
+    /// six-line journal stops fitting above the compose line the same way
+    /// [`ChatScale::MAX`] does.
+    pub const MIN: f32 = 0.5;
+    pub const MAX: f32 = 3.0;
+
+    /// Clamp into the range. Takes anything, including what a hand-edited
+    /// file offers, the same reason [`Zoom::new`] does.
+    pub fn new(factor: f32) -> Self {
+        if factor.is_nan() {
+            return Self(1.0);
+        }
+        Self(factor.clamp(Self::MIN, Self::MAX))
+    }
+
+    /// The multiplier on [`crate::TTF_BASE_PIXEL_HEIGHT`].
+    pub fn factor(self) -> f32 {
+        self.0
+    }
+}
+
+impl Default for TtfScale {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
+// The same reason [`Zoom`]'s pair exists: written and read as a bare number,
+// and built through [`TtfScale::new`] on the way in so a hand-edited `0` or
+// `4000` cannot reach the atlas.
+impl Serialize for TtfScale {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TtfScale {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(TtfScale::new(f32::deserialize(deserializer)?))
+    }
+}
+
 /// The HUD chat box's own look.
 ///
-/// Two knobs, both about the player's own line rather than the shard's:
-/// [`Chat::hue`] tints the compose line and its caret, never a journal row
+/// Three knobs. [`Chat::hue`] is about the player's own line rather than the
+/// shard's: it tints the compose line and its caret, never a journal row
 /// someone else's message already carries a hue of its own on the wire — see
-/// `App::draw`'s chat block for where that split is made.
+/// `App::draw`'s chat block for where that split is made. The two scales
+/// are about the same line's *size* instead, and only one of them ever
+/// draws anything: [`Chat::scale`] when `App::ttf_font` is unset,
+/// [`Chat::ttf_scale`] when it is — see [`TtfScale`]'s own doc for why they
+/// cannot both apply at once.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 #[derive(Default)]
 pub struct Chat {
     /// How big the classic face's glyphs draw — see [`ChatScale`].
     pub scale: ChatScale,
+    /// How big a TrueType face's glyphs draw instead — see [`TtfScale`].
+    pub ttf_scale: TtfScale,
     /// What the player's own compose line and caret are tinted, as a wire hue
     /// (`openshard_protocol::wire::Hue`'s own representation, not the type
     /// itself: this crate's `Deserialize` is what a hand-edited file can hand
@@ -601,6 +674,7 @@ mod tests {
             },
             chat: Chat {
                 scale: ChatScale::new(3),
+                ttf_scale: TtfScale::new(1.5),
                 hue: 33,
             },
             audio: Audio {
@@ -669,6 +743,19 @@ mod tests {
         assert_eq!(desk.chat.scale.glyph_scale_factor(), ChatScale::MAX);
         let desk: Desk = toml::from_str("[chat]\nscale = 0").unwrap();
         assert_eq!(desk.chat.scale.glyph_scale_factor(), ChatScale::MIN);
+    }
+
+    /// [`TtfScale`]'s own version of the same clamp — a hand-edited number
+    /// outside its range, or not a number at all, cannot reach
+    /// `Screen::sync_ttf_scale`.
+    #[test]
+    fn a_hand_edited_ttf_scale_is_clamped_on_the_way_in() {
+        let desk: Desk = toml::from_str("[chat]\nttf_scale = 400.0").unwrap();
+        assert_eq!(desk.chat.ttf_scale.factor(), TtfScale::MAX);
+        let desk: Desk = toml::from_str("[chat]\nttf_scale = 0.0").unwrap();
+        assert_eq!(desk.chat.ttf_scale.factor(), TtfScale::MIN);
+        let desk: Desk = toml::from_str("[chat]\nttf_scale = nan").unwrap();
+        assert_eq!(desk.chat.ttf_scale.factor(), 1.0);
     }
 
     /// A file written by a build that predates a field must not lose the rest of

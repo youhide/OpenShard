@@ -2192,6 +2192,16 @@ own understanding had written.
      which is a rasterisation artefact — and it collapses two render paths
      into one, since the Unicode face already goes through that reader.
 
+     Two hand-redrawn candidates, at opposite ends of what may be committed:
+     **CLF-UoClassic** (uo.clife.work, v1.1, SIL OFL 1.1 — free and
+     redistributable, sitting unwired at `assets/fonts/CLF-UoClassic/` with its
+     own `README.txt`/`LICENSE.txt`) and
+     [An Corp](https://blazetype.eu/typefaces/an-corp/) (Blaze Type, 2025 — a
+     from-scratch revival of the same client face, "low contrast, orthogonal
+     terminations, and slab serifs," but a paid proprietary EULA with no free
+     distribution, so it is a reference to look at, not a file to fetch and
+     bundle).
+
   **What may and may not be committed.** (2) produces a mechanical derivative
   of a copyrighted client file, so it is a build tool the player runs against
   their own install, writing to a cache beside `OPENSHARD_CLIENT` — the same

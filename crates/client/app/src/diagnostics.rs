@@ -219,6 +219,10 @@ pub struct Hud {
     pub goal: Option<PickedTile>,
     /// Producer queue and immutable map-composite cache pressure.
     pub composites: CompositeTelemetry,
+    /// Whether `App::ttf_font` is set — which of the Chat tab's two size
+    /// sliders, `ChatScale`'s or `TtfScale`'s, is the one actually drawing
+    /// anything this run. See `desk::TtfScale`'s own doc.
+    pub ttf_active: bool,
 }
 
 /// Read-only map-composite producer and cache counters for the development HUD.

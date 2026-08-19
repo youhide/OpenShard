@@ -711,7 +711,7 @@ fn layout(root: &mut egui::Ui, hud: &Hud, camera: Camera, world: &WorldState, de
                 Tab::World => world_panel(ui, hud, world, &mut request),
                 Tab::Tile => tile_tab(ui, hud, world, &mut request),
                 Tab::Light => light_panel(ui, hud, &mut desk.light, &mut request),
-                Tab::Chat => chat_panel(ui, &mut desk.chat),
+                Tab::Chat => chat_panel(ui, &mut desk.chat, hud.ttf_active),
                 Tab::Audio => audio_panel(ui, &mut desk.audio, &mut request),
             });
     });
@@ -944,27 +944,55 @@ fn audio_panel(ui: &mut egui::Ui, audio: &mut crate::desk::Audio, request: &mut 
 
 /// How big the HUD chat box's glyphs draw, and what colour the player's own
 /// line takes.
-fn chat_panel(ui: &mut egui::Ui, chat: &mut crate::desk::Chat) {
-    use crate::desk::ChatScale;
+///
+/// `ttf_active` — `App::ttf_font.is_some()` — picks which of the two size
+/// sliders is shown: only one of [`crate::desk::ChatScale`] and
+/// [`crate::desk::TtfScale`] ever draws anything in a given run, so showing
+/// both would leave one of them a control for nothing on screen. See
+/// [`crate::desk::TtfScale`]'s own doc for why that split exists at all.
+fn chat_panel(ui: &mut egui::Ui, chat: &mut crate::desk::Chat, ttf_active: bool) {
+    use crate::desk::{ChatScale, TtfScale};
 
     ui.label("Size");
-    let mut scale = chat.scale.glyph_scale_factor();
-    if ui
-        .add(egui::Slider::new(&mut scale, ChatScale::MIN..=ChatScale::MAX).text("scale"))
-        .changed()
-    {
-        chat.scale = ChatScale::new(scale);
+    if ttf_active {
+        let mut factor = chat.ttf_scale.factor();
+        if ui
+            .add(egui::Slider::new(&mut factor, TtfScale::MIN..=TtfScale::MAX).text("scale"))
+            .changed()
+        {
+            chat.ttf_scale = TtfScale::new(factor);
+        }
+        ui.label(
+            egui::RichText::new(
+                "A multiple of `--ttf-font`'s own base pixel height. Every \
+                 TrueType-drawn line shares this — the journal, the compose \
+                 line, overhead speech and every window's caption — since one \
+                 face is baked at one size for all of them. Redrawing at a new \
+                 size re-rasterizes every glyph seen so far, which takes a \
+                 moment.",
+            )
+            .small()
+            .weak(),
+        );
+    } else {
+        let mut scale = chat.scale.glyph_scale_factor();
+        if ui
+            .add(egui::Slider::new(&mut scale, ChatScale::MIN..=ChatScale::MAX).text("scale"))
+            .changed()
+        {
+            chat.scale = ChatScale::new(scale);
+        }
+        ui.label(
+            egui::RichText::new(
+                "An integer upscale on `fonts.mul`'s own pixels — a bitmap face has \
+                 no continuous size to ask for instead. Only the journal and the \
+                 compose line below it; a shard's own dialogs draw at the size it \
+                 sent them.",
+            )
+            .small()
+            .weak(),
+        );
     }
-    ui.label(
-        egui::RichText::new(
-            "An integer upscale on `fonts.mul`'s own pixels — a bitmap face has \
-             no continuous size to ask for instead. Only the journal and the \
-             compose line below it; a shard's own dialogs draw at the size it \
-             sent them.",
-        )
-        .small()
-        .weak(),
-    );
 
     ui.separator();
     ui.label("Colour");

@@ -45,6 +45,7 @@ use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 use openshard_uofiles::map::Map;
 
+use crate::TTF_BASE_PIXEL_HEIGHT;
 use crate::app::App;
 use crate::chat::draw_chat_and_speech;
 use crate::crowd::{Crowd, Who};
@@ -1844,6 +1845,13 @@ impl App {
         let Some(window) = self.window.as_mut() else {
             return;
         };
+        // Ahead of `ready_atlases`, and not folded into it: this is a
+        // different atlas, keyed by a pixel height rather than by what the
+        // camera has walked onto, and a no-op far more often than not — see
+        // `Screen::sync_ttf_scale`'s own doc.
+        let ttf_pixel_height =
+            TTF_BASE_PIXEL_HEIGHT * chat_style.ttf_scale.factor() * window.window.scale_factor() as f32;
+        window.sync_ttf_scale(&self.resources.hue_ramp, ttf_pixel_height);
         let atlases_started = Instant::now();
         let (repacked, atlas_work) = ready_atlases(
             &mut self.resources,

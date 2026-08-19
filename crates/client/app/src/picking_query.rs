@@ -903,6 +903,7 @@ impl App {
                 .map(|identity| self.resolve_selection(identity)),
             health_bars: self.health_bars(camera, drawn_mobiles),
             goal: self.steer.goal().map(|tile| self.tile_info(tile)),
+            ttf_active: self.resources.ttf_font.is_some(),
             composites: self
                 .window
                 .as_ref()

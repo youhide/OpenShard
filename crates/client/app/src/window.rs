@@ -704,8 +704,9 @@ pub(crate) struct Screen {
     /// for has no "whole file" to pack up front the way `fonts.mul` does.
     pub(crate) ttf_atlas: Option<TtfAtlas>,
     /// The pass bound to [`Screen::ttf_atlas`]'s texture, rebuilt whenever that
-    /// atlas is (see `App::draw`'s handling of [`AtlasError::Full`] there).
-    /// Bound to the *surface's* format, [`gump_text_pass`](Screen::gump_text_pass)'s
+    /// atlas is — see [`Screen::sync_ttf_scale`], the Chat tab's `TtfScale`
+    /// slider's own trigger for that. Bound to the *surface's* format,
+    /// [`gump_text_pass`](Screen::gump_text_pass)'s
     /// own reason: overhead speech and the HUD's speech line and journal both
     /// draw through this, after the blit, rather than through a `SpriteRenderer`
     /// bound to [`blit::WORLD_FORMAT`] the way [`Screen::text_pass`] is — see
@@ -853,6 +854,55 @@ impl Screen {
         );
         self.atlases = atlases;
     }
+
+    /// Re-bake [`Screen::ttf_atlas`] at a new pixel height, and
+    /// [`Screen::ttf_gump_pass`] with it — [`App::create_window`]'s own pair,
+    /// built again once there is a live `Screen` to hold the result rather
+    /// than only at startup.
+    ///
+    /// A no-op with no `ttf_atlas` yet (no `--ttf-font`, or the offline map
+    /// viewer) or with `target_pixel_height` already what it is baked at —
+    /// called every frame regardless, the same "harmless when there is
+    /// nothing to do" contract [`Screen::upload_ttf_dirty`] gives. Never
+    /// incremental: unlike [`Screen::upload_ttf_dirty`]'s newly-packed rows,
+    /// every glyph already in the old atlas was rasterized at the old
+    /// height, so there is nothing in it a new size could reuse — the whole
+    /// texture starts over empty, and whichever lines are still on screen
+    /// this frame re-pack themselves into it the way a fresh launch would.
+    pub(crate) fn sync_ttf_scale(&mut self, hue_ramp: &HueRamp, target_pixel_height: f32) {
+        let Some(atlas) = self.ttf_atlas.as_ref() else {
+            return;
+        };
+        if (atlas.pixel_height() - target_pixel_height).abs() < 0.01 {
+            return;
+        }
+        let (atlas, pass) = build_ttf(
+            &self.device,
+            &self.queue,
+            self.config.format,
+            hue_ramp,
+            target_pixel_height,
+        );
+        self.ttf_atlas = Some(atlas);
+        self.ttf_gump_pass = Some(pass);
+    }
+}
+
+/// A fresh, empty [`TtfAtlas`] at `pixel_height`, and the [`GumpRenderer`]
+/// bound to its texture — the pair `App::ttf_font`, given, always has one of.
+/// Shared by [`App::create_window`]'s first bake and
+/// [`Screen::sync_ttf_scale`]'s later ones: the same two calls either way,
+/// since a [`TtfAtlas`] has no way to change its own baked size in place.
+fn build_ttf(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    format: wgpu::TextureFormat,
+    hue_ramp: &HueRamp,
+    pixel_height: f32,
+) -> (TtfAtlas, GumpRenderer) {
+    let atlas = TtfAtlas::empty(pixel_height);
+    let pass = GumpRenderer::new(device, queue, format, atlas.pixels(), hue_ramp);
+    (atlas, pass)
 }
 
 impl App {
@@ -1065,22 +1115,21 @@ impl App {
             self.resources.font_atlas.pixels(),
             &self.resources.hue_ramp,
         );
-        // Scaled by the window's own density: a `TtfAtlas` bakes one pixel
-        // size into every glyph it packs (see its doc), so the size has to be
-        // picked once, here, where a real `Window` first exists to ask —
-        // `run` cannot ask before one does, and rebuilding a size already
-        // packed at is exactly the "ten faces" cost `ttf_font`'s doc explains
-        // this engine does not pay.
+        // Scaled by the window's own density and by the Chat tab's own
+        // `desk::TtfScale` — the player's last-saved answer, since this is
+        // the first point in a fresh launch a `Screen` exists to bake one
+        // into. `Screen::sync_ttf_scale` re-bakes this same pair later, on
+        // whatever frame the slider moves, at the cost of every glyph seen so
+        // far being rasterized again — the "ten faces" cost `ttf_font`'s doc
+        // means the engine still does not pay is never asking `fontdue` for
+        // more than one size in the *same* frame, not never asking twice.
         let (ttf_atlas, ttf_gump_pass) = match &self.resources.ttf_font {
             Some(_) => {
-                let atlas = TtfAtlas::empty(TTF_BASE_PIXEL_HEIGHT * window.scale_factor() as f32);
-                // The surface's format, `gump_text_pass`'s own reason: overhead
-                // speech and the HUD's speech line and journal both draw over
-                // the finished frame, not into the world image — see
-                // `Screen::ttf_gump_pass`'s doc.
-                let gump_pass =
-                    GumpRenderer::new(&device, &queue, format, atlas.pixels(), &self.resources.hue_ramp);
-                (Some(atlas), Some(gump_pass))
+                let pixel_height =
+                    TTF_BASE_PIXEL_HEIGHT * self.desk.chat.ttf_scale.factor() * window.scale_factor() as f32;
+                let (atlas, pass) =
+                    build_ttf(&device, &queue, format, &self.resources.hue_ramp, pixel_height);
+                (Some(atlas), Some(pass))
             }
             None => (None, None),
         };
