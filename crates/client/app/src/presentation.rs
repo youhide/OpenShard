@@ -37,7 +37,7 @@ use openshard_client_render::items::{self};
 use openshard_client_render::lod::BlockLod;
 use openshard_client_render::mobiles::{self, Mobile};
 use openshard_client_render::outline::{self};
-use openshard_client_render::radar::{build_base_chunk, region_base_chunks};
+use openshard_client_render::radar::{self, build_base_chunk, build_ready_ancestors, region_base_chunks};
 use openshard_client_render::renderer::{self, Target};
 use openshard_client_render::sprite::SpriteQuad;
 use openshard_client_render::text::{self, Label};
@@ -1844,6 +1844,11 @@ impl App {
         // follows the pointer.
         self.refresh_multi_preview(camera);
 
+        // How big this client's own windows draw, read before the surface is
+        // borrowed below: it is the shell's live copy and not the app's loaded
+        // one (see `App::window_scale`), so asking for it holds the whole of
+        // `self` — which the `&mut self.window` on the next line would refuse.
+        let window_scale = self.window_scale();
         let Some(window) = self.window.as_mut() else {
             return;
         };
@@ -1941,8 +1946,22 @@ impl App {
             }
             self.radar_queue.refresh_dirty(&self.radar_cache);
             for key in self.radar_queue.take_for_producer() {
-                if let Some(chunk) = build_base_chunk(&self.resources.map, colors, key) {
-                    self.radar_queue.finish(&mut self.radar_cache, chunk);
+                // A derived level is never dispatched: it is reduced from its
+                // four children the moment the last of them lands, below. What
+                // a producer builds is the one thing only the map can answer.
+                let built = (key.lod() == 0)
+                    .then(|| build_base_chunk(&self.resources.map, colors, key))
+                    .flatten();
+                let Some(chunk) = built else {
+                    // The slot goes back rather than being lost — see
+                    // `RadarWorkQueue::abandon`.
+                    self.radar_queue.abandon(key);
+                    continue;
+                };
+                if self.radar_queue.finish(&mut self.radar_cache, chunk) {
+                    // The coarse pictures a fallback stands in with, built
+                    // here because this is where a family becomes complete.
+                    build_ready_ancestors(&mut self.radar_cache, key, radar::MAX_LOD);
                 }
             }
         }
@@ -2332,7 +2351,7 @@ impl App {
             &self.radar_cache,
             self.input.pointer_gump,
             &hover,
-            self.desk.window_scale,
+            window_scale,
             self.shell.as_ref(),
             window,
             &mut encoder,

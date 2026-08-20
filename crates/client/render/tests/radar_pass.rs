@@ -418,6 +418,80 @@ fn an_unmapped_window_is_filled_rather_than_left_transparent() {
     assert_eq!(colour_at(48, 47), (0, 0, 0), "and one column past it is not");
 }
 
+/// **A coarse stand-in fills the ground its children have not been built for,
+/// and the built one paints over it.** The fallback the cache selects is only
+/// worth selecting if the pass can draw it at its own LOD — which is the whole
+/// of what this asserts, on the two products at once.
+#[test]
+fn a_coarse_ancestor_draws_under_the_one_chunk_that_is_ready() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU: skipping");
+        return;
+    };
+    let cache = RadarCache::default();
+    let facet = Facet(0);
+    let pixels = |colour| vec![colour; usize::from(BASE_CHUNK_TILES) * usize::from(BASE_CHUNK_TILES)];
+    // The level-one product over all four base chunks at the origin, and the
+    // one base chunk of the four that has been built.
+    let coarse = RadarChunk::new(
+        cache.key(facet, 1, RadarChunkCoord::new(0, 0)),
+        pixels(Color16(0x03E0)),
+    )
+    .expect("a complete chunk");
+    let fine = RadarChunk::new(
+        cache.key(facet, 0, RadarChunkCoord::new(0, 0)),
+        pixels(Color16(0x7C00)),
+    )
+    .expect("a complete chunk");
+
+    let side = u32::from(BASE_CHUNK_TILES) * 2;
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let (target, view) = cleared_target(&device, &mut encoder, side, side);
+    let mut chunks = RadarChunkRenderer::new(&device, FORMAT, 16 * 1024 * 1024);
+    chunks.render_region(
+        &device,
+        &queue,
+        &mut encoder,
+        Frame {
+            target: &view,
+            width: side,
+            height: side,
+            scale: 1.0,
+        },
+        RadarRegion {
+            facet,
+            lod: 0,
+            origin: (0, 0),
+            extent: (BASE_CHUNK_TILES * 2, BASE_CHUNK_TILES * 2),
+        },
+        Placement {
+            origin: (0.0, 0.0),
+            extent: (side as f32, side as f32),
+        },
+        [&fine, &coarse],
+    );
+
+    let pixels = read_back(&device, &queue, encoder, &target, side, side);
+    let colour_at = |x: u32, y: u32| {
+        let i = ((y * side + x) * 4) as usize;
+        (pixels[i], pixels[i + 1], pixels[i + 2])
+    };
+    let half = u32::from(BASE_CHUNK_TILES);
+    assert_eq!(
+        colour_at(0, 0),
+        (255, 0, 0),
+        "the built chunk owns its own quarter"
+    );
+    assert_eq!(colour_at(half - 1, half - 1), (255, 0, 0), "all of it");
+    assert_eq!(
+        colour_at(half, 0),
+        (0, 255, 0),
+        "and the stand-in covers the three quarters that are not built yet",
+    );
+    assert_eq!(colour_at(0, half), (0, 255, 0));
+    assert_eq!(colour_at(side - 1, side - 1), (0, 255, 0));
+}
+
 /// A cleared colour target to draw a radar into, and the view of it.
 ///
 /// Every pass here loads rather than clears, for the gump pass's reason, so

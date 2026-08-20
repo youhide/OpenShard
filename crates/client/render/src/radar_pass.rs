@@ -108,15 +108,10 @@ mod tests {
     }
 
     #[test]
-    fn selecting_a_region_does_not_mix_facets_or_lods() {
+    fn selecting_a_region_does_not_mix_facets() {
         let matching = chunk(0, 0);
         let other_facet = RadarChunk::new(
             RadarChunkKey::new(Facet(1), 0, RadarChunkCoord::new(0, 0), RadarRevision(0)),
-            vec![Color16(0x03e0); usize::from(BASE_CHUNK_TILES).pow(2)],
-        )
-        .unwrap();
-        let other_lod = RadarChunk::new(
-            RadarChunkKey::new(Facet(0), 1, RadarChunkCoord::new(0, 0), RadarRevision(0)),
             vec![Color16(0x03e0); usize::from(BASE_CHUNK_TILES).pow(2)],
         )
         .unwrap();
@@ -131,10 +126,78 @@ mod tests {
                 origin: (0.0, 0.0),
                 extent: (16.0, 16.0),
             },
-            [&matching, &other_facet, &other_lod],
+            [&matching, &other_facet],
         );
         assert_eq!(draws.len(), 1);
         assert_eq!(draws[0].chunk.key(), matching.key());
+    }
+
+    #[test]
+    fn a_coarse_stand_in_is_placed_by_its_own_lod_and_painted_under_the_fine_one() {
+        // The level-one product covering the four base chunks at the origin: the
+        // same pixel count over twice the ground in each direction.
+        let parent = RadarChunk::new(
+            RadarChunkKey::new(Facet(0), 1, RadarChunkCoord::new(0, 0), RadarRevision(0)),
+            vec![Color16(0x03e0); usize::from(BASE_CHUNK_TILES).pow(2)],
+        )
+        .unwrap();
+        let north_west = chunk(0, 0);
+        let side = BASE_CHUNK_TILES * 2;
+        let draws = select_region_chunks(
+            RadarRegion {
+                facet: Facet(0),
+                lod: 0,
+                origin: (0, 0),
+                extent: (side, side),
+            },
+            Placement {
+                origin: (0.0, 0.0),
+                extent: (f32::from(side), f32::from(side)),
+            },
+            // Handed in fine-first on purpose: the order drawn is this
+            // function's answer, not its caller's.
+            [&north_west, &parent],
+        );
+
+        assert_eq!(draws.len(), 2);
+        assert_eq!(draws[0].chunk.key().lod(), 1, "the stand-in is painted first");
+        assert_eq!(
+            draws[0].placement.extent,
+            (f32::from(side), f32::from(side)),
+            "and it covers all four children's ground, not one chunk's",
+        );
+        assert_eq!(draws[0].uv.extent, (1.0, 1.0), "all of its own pixels");
+        assert_eq!(draws[1].chunk.key().lod(), 0, "the exact product paints over it");
+        assert_eq!(
+            draws[1].placement.extent,
+            (f32::from(BASE_CHUNK_TILES), f32::from(BASE_CHUNK_TILES)),
+        );
+    }
+
+    #[test]
+    fn one_product_is_one_draw_however_many_requests_fell_back_to_it() {
+        let parent = RadarChunk::new(
+            RadarChunkKey::new(Facet(0), 1, RadarChunkCoord::new(0, 0), RadarRevision(0)),
+            vec![Color16(0x03e0); usize::from(BASE_CHUNK_TILES).pow(2)],
+        )
+        .unwrap();
+        let side = BASE_CHUNK_TILES * 2;
+        let draws = select_region_chunks(
+            RadarRegion {
+                facet: Facet(0),
+                lod: 0,
+                origin: (0, 0),
+                extent: (side, side),
+            },
+            Placement {
+                origin: (0.0, 0.0),
+                extent: (f32::from(side), f32::from(side)),
+            },
+            // What four base-chunk requests all falling back to one ancestor
+            // hand in — the same product, four times.
+            [&parent, &parent, &parent, &parent],
+        );
+        assert_eq!(draws.len(), 1);
     }
 
     /// A region of `side` tiles drawn at `magnify` window pixels a tile.
@@ -480,10 +543,17 @@ pub struct RadarChunkDraw<'a> {
 
 /// Select the chunks and exact source UVs covering a region.
 ///
-/// `ready` may contain a larger cache working set.  Products at another facet
-/// or LOD are ignored: mixing LODs at an edge would turn categorical terrain
-/// into a visible seam.  Missing products are omitted so the cache owner can
-/// supply its coarser-ready fallback before this function is called.
+/// `ready` may contain a larger cache working set, and products from another
+/// facet are ignored. Each chunk is placed by **its own** LOD rather than the
+/// region's: that is what lets a coarse ancestor stand in for a child the cache
+/// has not built yet — see
+/// [`RadarCache::select_ready`](crate::radar::RadarCache::select_ready). The
+/// result is ordered coarsest first, so a ready fine product paints over the
+/// stand-in that covers it, and one key contributes one draw however many
+/// requests fell back to it.
+///
+/// Missing products are still omitted. A rectangle no product covers is the
+/// backdrop's to fill, not this function's to fake.
 #[must_use]
 pub fn select_region_chunks<'a>(
     region: RadarRegion,
@@ -493,8 +563,6 @@ pub fn select_region_chunks<'a>(
     if region.extent.0 == 0 || region.extent.1 == 0 || at.extent.0 <= 0.0 || at.extent.1 <= 0.0 {
         return Vec::new();
     }
-    let texel_world = 1_u64.checked_shl(u32::from(region.lod)).unwrap_or(u64::MAX);
-    let chunk_world = u64::from(BASE_CHUNK_TILES).saturating_mul(texel_world);
     let left = u64::from(region.origin.0);
     let top = u64::from(region.origin.1);
     let right = left.saturating_add(u64::from(region.extent.0));
@@ -503,9 +571,14 @@ pub fn select_region_chunks<'a>(
         .into_iter()
         .filter_map(|chunk| {
             let key = chunk.key();
-            if key.facet() != region.facet || key.lod() != region.lod {
+            if key.facet() != region.facet {
                 return None;
             }
+            // How much world one of this product's texels is, and therefore how
+            // much of it the whole product is. A level-one chunk is the same
+            // number of pixels over twice the ground in each direction.
+            let texel_world = 1_u64.checked_shl(u32::from(key.lod()))?;
+            let chunk_world = u64::from(BASE_CHUNK_TILES).saturating_mul(texel_world);
             let chunk_left = u64::from(key.chunk().x).saturating_mul(chunk_world);
             let chunk_top = u64::from(key.chunk().y).saturating_mul(chunk_world);
             let chunk_right = chunk_left.saturating_add(chunk_world);
@@ -540,7 +613,22 @@ pub fn select_region_chunks<'a>(
             })
         })
         .collect();
-    selected.sort_by_key(|draw| (draw.chunk.key().chunk().y, draw.chunk.key().chunk().x));
+    // Coarsest first, then newest, then in reading order: a stand-in is painted
+    // before whatever covers it more exactly, and the sort is total so a frame's
+    // draw list does not depend on the order the cache happened to answer in.
+    selected.sort_by_key(|draw| {
+        let key = draw.chunk.key();
+        (
+            std::cmp::Reverse(key.lod()),
+            key.revision(),
+            key.chunk().y,
+            key.chunk().x,
+        )
+    });
+    // One product, one draw. Four requests falling back to the same ancestor
+    // are four answers naming one rectangle, and drawing it four times would be
+    // three redundant passes over the same window pixels.
+    selected.dedup_by_key(|draw| draw.chunk.key());
     selected
 }
 

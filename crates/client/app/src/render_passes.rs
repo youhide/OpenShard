@@ -434,8 +434,17 @@ pub(crate) fn draw_gump_windows(
                 (WindowSubject::Minimap, Drawn::Minimap(bounds)) => {
                     if let Some(player) = world.authoritative.view.as_ref().map(|view| view.player.position) {
                         let region = panes::minimap::radar_region_for(player, bounds.extent);
+                        // `select_ready` and not `get`: a chunk the producer
+                        // has not reached yet is answered with the coarse
+                        // ancestor that covers it, and a chunk whose facet has
+                        // been edited since is answered with its own last
+                        // complete picture. Only ground no product has ever
+                        // covered is left to the backdrop below.
                         let ready: Vec<_> = region_base_chunks(region)
-                            .filter_map(|chunk| radar_cache.get(radar_cache.key(region.facet, 0, chunk)))
+                            .filter_map(|chunk| {
+                                radar_cache.select_ready(radar_cache.key(region.facet, 0, chunk))
+                            })
+                            .map(|ready| ready.chunk())
                             .collect();
                         // The rectangle the terrain and the marker over it are
                         // both drawn into: worked out once here, because the

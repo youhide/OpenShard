@@ -572,6 +572,19 @@ impl RadarWorkQueue {
         }
         cache.publish(chunk)
     }
+
+    /// Release a dispatched job the producer could not build at all.
+    ///
+    /// Not the same as a stale result, which [`Self::finish`] handles: this is
+    /// work whose *source* was unavailable — a key naming a rectangle the map
+    /// reader cannot address, or a derived product whose children are not all
+    /// ready. Without it a slot handed out is a slot lost, and enough of them
+    /// silently fill `max_queued` until no terrain is ever requested again.
+    /// A key still named by the cache's dirty set is re-queued by the next
+    /// [`Self::refresh_dirty`].
+    pub fn abandon(&mut self, key: RadarChunkKey) -> bool {
+        self.in_flight.remove(&key)
+    }
 }
 
 impl RadarChunk {
@@ -700,6 +713,91 @@ pub fn build_lod_parent(key: RadarChunkKey, children: [&RadarChunk; 4]) -> Optio
 
 const fn chunk_pixel_count() -> usize {
     (BASE_CHUNK_TILES as usize) * (BASE_CHUNK_TILES as usize)
+}
+
+/// The product one LOD coarser that covers this one.
+///
+/// A chunk's parent is its coordinates halved, which is why the ladder is a
+/// shift rather than a lookup: every product at every level names exactly one
+/// rectangle of world tiles, and the four that share a parent tile it exactly.
+#[must_use]
+pub fn parent_key(key: RadarChunkKey) -> Option<RadarChunkKey> {
+    Some(RadarChunkKey::new(
+        key.facet,
+        key.lod.checked_add(1)?,
+        RadarChunkCoord::new(key.chunk.x / 2, key.chunk.y / 2),
+        key.revision,
+    ))
+}
+
+/// The four direct children of a product, in the order [`build_lod_parent`]
+/// requires: north-west, north-east, south-west, south-east.
+///
+/// `None` at LOD zero, which has no children — a base chunk is built from the
+/// map rather than reduced from anything.
+#[must_use]
+pub fn child_keys(key: RadarChunkKey) -> Option<[RadarChunkKey; 4]> {
+    let lod = key.lod.checked_sub(1)?;
+    let x = key.chunk.x.checked_mul(2)?;
+    let y = key.chunk.y.checked_mul(2)?;
+    let child = |x, y| RadarChunkKey::new(key.facet, lod, RadarChunkCoord::new(x, y), key.revision);
+    Some([
+        child(x, y),
+        child(x.checked_add(1)?, y),
+        child(x, y.checked_add(1)?),
+        child(x.checked_add(1)?, y.checked_add(1)?),
+    ])
+}
+
+/// How many coarser levels the fallback ladder is built to.
+///
+/// Two, because a level-two product covers 256 world tiles across — already
+/// more than the whole minimap window shows — so a third would never be the
+/// level a fallback selected. It is the ladder's depth rather than a property
+/// of the map: a minimap that could be zoomed out would raise this, and that is
+/// the change to make, not a second cache keyed by zoom.
+pub const MAX_LOD: u8 = 2;
+
+/// Build every ancestor that publishing one chunk has just completed, and
+/// publish them too.  Returns how many were built.
+///
+/// The parent of a chunk is built when — and only when — its fourth child
+/// lands, so this walks up until it meets a level whose family is incomplete.
+/// That is what makes a coarse fallback exist without anybody scheduling one:
+/// no ancestor is ever requested, and none is ever built from terrain that is
+/// partly missing.
+///
+/// Work is bounded by [`MAX_LOD`] and by the arithmetic: one reduction is four
+/// complete children into one product of the same pixel count, and it happens
+/// on one child in four.
+pub fn build_ready_ancestors(cache: &mut RadarCache, key: RadarChunkKey, max_lod: u8) -> usize {
+    let mut built = 0;
+    let mut child = key;
+    while child.lod < max_lod {
+        let Some(parent) = parent_key(child) else {
+            break;
+        };
+        // Scoped so the four borrows of the cache end before the parent —
+        // which owns its own pixels — is handed back to it to publish.
+        let Some(chunk) = ({
+            let Some(family) = child_keys(parent) else {
+                break;
+            };
+            let ready: Option<Vec<&RadarChunk>> = family.iter().map(|key| cache.get(*key)).collect();
+            match ready {
+                Some(ready) => build_lod_parent(parent, [ready[0], ready[1], ready[2], ready[3]]),
+                None => None,
+            }
+        }) else {
+            break;
+        };
+        if !cache.publish(chunk) {
+            break;
+        }
+        built += 1;
+        child = parent;
+    }
+    built
 }
 
 /// Bake one colour for every tile in a facet snapshot.
@@ -1054,6 +1152,90 @@ mod tests {
             "the south-east child is sampled"
         );
         assert_eq!(reduce_lod_pixel([RED, WHITE, RED, WHITE]), RED);
+    }
+
+    #[test]
+    fn an_ancestor_is_built_by_the_child_that_completes_its_family() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::default();
+        let child = |cache: &RadarCache, x, y| {
+            RadarChunk::new(
+                cache.key(facet, 0, RadarChunkCoord::new(x, y)),
+                vec![RED; chunk_pixel_count()],
+            )
+            .expect("a complete child")
+        };
+        let parent = cache.key(facet, 1, RadarChunkCoord::new(0, 0));
+        let grandparent = cache.key(facet, 2, RadarChunkCoord::new(0, 0));
+
+        // Three of the four: nothing above them can be built from a family with
+        // a hole in it, and a reduction over one is not a coarser picture of
+        // the ground — it is a picture of three quarters of it.
+        for (x, y) in [(0, 0), (1, 0), (0, 1)] {
+            let key = child(&cache, x, y).key();
+            assert!(cache.publish(child(&cache, x, y)));
+            assert_eq!(build_ready_ancestors(&mut cache, key, MAX_LOD), 0);
+        }
+        assert!(cache.get(parent).is_none());
+
+        let last = child(&cache, 1, 1);
+        let key = last.key();
+        assert!(cache.publish(last));
+        assert_eq!(
+            build_ready_ancestors(&mut cache, key, MAX_LOD),
+            1,
+            "the fourth child completes exactly one level — the level above it \
+             still has three quarters missing"
+        );
+        assert!(cache.get(parent).is_some());
+        assert!(cache.get(grandparent).is_none());
+        assert_eq!(
+            cache.get(parent).expect("just built").pixels()[0],
+            RED,
+            "four red children reduce to red, not to an average of one colour",
+        );
+    }
+
+    #[test]
+    fn the_ladder_is_climbed_no_further_than_it_was_asked_for() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::default();
+        for (x, y) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            let chunk = RadarChunk::new(
+                cache.key(facet, 0, RadarChunkCoord::new(x, y)),
+                vec![RED; chunk_pixel_count()],
+            )
+            .expect("a complete child");
+            assert!(cache.publish(chunk));
+        }
+        let last = cache.key(facet, 0, RadarChunkCoord::new(1, 1));
+        assert_eq!(
+            build_ready_ancestors(&mut cache, last, 0),
+            0,
+            "a ladder of no levels builds nothing"
+        );
+        assert!(
+            cache
+                .get(cache.key(facet, 1, RadarChunkCoord::new(0, 0)))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn an_abandoned_job_returns_its_slot_instead_of_losing_it() {
+        let facet = Facet(0);
+        let cache = RadarCache::default();
+        // One slot, so a lost one is the difference between a queue that works
+        // and a queue that never accepts another request.
+        let mut queue = RadarWorkQueue::new(1, 1).expect("non-zero limits");
+        let key = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        assert!(queue.request(key));
+        assert_eq!(queue.take_for_producer(), vec![key]);
+        assert!(!queue.request(cache.key(facet, 0, RadarChunkCoord::new(1, 0))));
+
+        assert!(queue.abandon(key));
+        assert!(!queue.abandon(key), "a job is released once");
+        assert!(queue.request(cache.key(facet, 0, RadarChunkCoord::new(1, 0))));
     }
 
     #[test]
