@@ -738,7 +738,7 @@ fn layout(root: &mut egui::Ui, hud: &Hud, camera: Camera, world: &WorldState, de
                 Tab::World => world_panel(ui, hud, world, &mut request),
                 Tab::Tile => tile_tab(ui, hud, world, &mut request),
                 Tab::Light => light_panel(ui, hud, &mut desk.light, &mut request),
-                Tab::Chat => chat_panel(ui, &mut desk.chat, hud.ttf_active),
+                Tab::Chat => chat_panel(ui, &mut desk.chat, &mut desk.fonts, hud.ttf_active),
                 Tab::Audio => audio_panel(ui, &mut desk.audio, &mut request),
                 Tab::Windows => windows_panel(ui, &mut desk.window_scale),
             });
@@ -973,31 +973,53 @@ fn audio_panel(ui: &mut egui::Ui, audio: &mut crate::desk::Audio, request: &mut 
 /// How big the HUD chat box's glyphs draw, and what colour the player's own
 /// line takes.
 ///
-/// `ttf_active` — `App::ttf_font.is_some()` — picks which of the two size
-/// sliders is shown: only one of [`crate::desk::ChatScale`] and
-/// [`crate::desk::TtfScale`] ever draws anything in a given run, so showing
-/// both would leave one of them a control for nothing on screen. See
-/// [`crate::desk::TtfScale`]'s own doc for why that split exists at all.
-fn chat_panel(ui: &mut egui::Ui, chat: &mut crate::desk::Chat, ttf_active: bool) {
-    use crate::desk::{ChatScale, TtfScale};
+/// `ttf_active` — `App::ttf_font.is_some()` — picks which kind of size control
+/// is shown, because the two faces are sized by two different kinds of number
+/// and only one face draws in a given run. A TrueType face has a **real size
+/// in pixels** per kind of text ([`crate::desk::FontSizes`]); `fonts.mul` has
+/// a fixed height per face and an integer upscale on top of it
+/// ([`crate::desk::ChatScale`]). Showing both would leave one of them a
+/// control for nothing on screen. See `docs/text_sizes.md`.
+fn chat_panel(
+    ui: &mut egui::Ui,
+    chat: &mut crate::desk::Chat,
+    fonts: &mut crate::desk::FontSizes,
+    ttf_active: bool,
+) {
+    use crate::desk::ChatScale;
+    use openshard_client_render::atlas::TextSize;
 
     ui.label("Size");
     if ttf_active {
-        let mut factor = chat.ttf_scale.factor();
-        if ui
-            .add(egui::Slider::new(&mut factor, TtfScale::MIN..=TtfScale::MAX).text("scale"))
-            .changed()
-        {
-            chat.ttf_scale = TtfScale::new(factor);
-        }
+        // One row per role, each a real pixel size — see `FontSizes`. A tenth
+        // of a pixel a step, because the whole point of a rasterized size is
+        // that 13.5 is a size a person can actually have.
+        let row = |ui: &mut egui::Ui, label: &str, size: &mut TextSize| {
+            let mut pixels = size.pixels();
+            if ui
+                .add(
+                    egui::Slider::new(&mut pixels, TextSize::MIN..=TextSize::MAX)
+                        .step_by(0.1)
+                        .suffix(" px")
+                        .text(label),
+                )
+                .changed()
+            {
+                *size = TextSize::new(pixels);
+            }
+        };
+        row(ui, "speech", &mut fonts.speech);
+        row(ui, "window", &mut fonts.window);
+        row(ui, "tooltip", &mut fonts.tooltip);
+        row(ui, "count", &mut fonts.stack_count);
         ui.label(
             egui::RichText::new(
-                "A multiple of `--ttf-font`'s own base pixel height. Every \
-                 TrueType-drawn line shares this — the journal, the compose \
-                 line, overhead speech and every window's caption — since one \
-                 face is baked at one size for all of them. Redrawing at a new \
-                 size re-rasterizes every glyph seen so far, which takes a \
-                 moment.",
+                "Real sizes, in pixels, rasterized at that size rather than \
+                 scaled up from one — so a fraction is a size and not a \
+                 stretch. `speech` is a line over a head and the box below; \
+                 `window` is this client's own window captions; `count` is the \
+                 number written on a pile. A dense display multiplies these \
+                 before the glyph is drawn, never after.",
             )
             .small()
             .weak(),
@@ -1043,6 +1065,7 @@ fn chat_panel(ui: &mut egui::Ui, chat: &mut crate::desk::Chat, ttf_active: bool)
     ui.separator();
     if ui.button("back to the defaults").clicked() {
         *chat = crate::desk::Chat::default();
+        *fonts = crate::desk::FontSizes::default();
     }
 }
 

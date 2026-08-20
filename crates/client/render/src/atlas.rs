@@ -2235,6 +2235,66 @@ impl FontAtlas {
     }
 }
 
+/// How big a line of TrueType text is drawn: a real size in pixels, and a
+/// fractional one.
+///
+/// **Not a factor.** `fontdue` rasterizes an outline at whatever pixel height
+/// it is asked for, analytically, so there is nothing here that has to land on
+/// a whole number and nothing that multiplies a finished quad — see
+/// `docs/text_sizes.md`, whose whole subject this type is. A caller says
+/// eleven pixels and gets eleven pixels.
+///
+/// Ordered and hashed by the bits of a **finite, positive** `f32`, which
+/// [`TextSize::new`] is what guarantees: for those, the IEEE bit pattern
+/// compares in the same order the number does, so a `BTreeMap` keyed by this
+/// is keyed by size in the ordinary sense. That is the whole reason the
+/// clamping constructor is the only way in.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct TextSize(u32);
+
+impl TextSize {
+    /// Smaller than this is not text any more — the smallest of `fonts.mul`'s
+    /// own faces is eight pixels tall, and a face rasterized below that has
+    /// glyphs that are one or two rows of grey.
+    pub const MIN: f32 = 6.0;
+    /// Bigger than this is a title card rather than a client's text, and the
+    /// atlas is 2048 on a side: a full alphabet at 96 pixels already asks for
+    /// a fair share of it, and several sizes have to live there at once.
+    pub const MAX: f32 = 96.0;
+
+    /// Clamp into the range and keep it. Takes anything, including what a
+    /// hand-edited file offers — `NaN` lands on [`TextSize::MIN`] rather than
+    /// poisoning every comparison this is the key of.
+    #[must_use]
+    pub fn new(pixels: f32) -> Self {
+        let clamped = match pixels.is_nan() {
+            true => Self::MIN,
+            false => pixels.clamp(Self::MIN, Self::MAX),
+        };
+        Self(clamped.to_bits())
+    }
+
+    /// The size itself, in pixels.
+    #[must_use]
+    pub fn pixels(self) -> f32 {
+        f32::from_bits(self.0)
+    }
+
+    /// This size on a display of `density` — a dense screen wants the *glyph*
+    /// rasterized bigger, not the quad stretched.
+    ///
+    /// The one place a size is multiplied by anything, and it is
+    /// `docs/text_sizes.md`'s D4: the product is what reaches the rasterizer,
+    /// so what comes out is a real glyph at the real size rather than a
+    /// smaller one enlarged. `winit`'s `scale_factor` is one such density; a
+    /// window's own magnification is another, and a caption inside a magnified
+    /// window passes both.
+    #[must_use]
+    pub fn scaled(self, density: f32) -> Self {
+        Self::new(self.pixels() * density)
+    }
+}
+
 /// One rasterized TrueType glyph, packed and ready to place.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct TtfSprite {
@@ -2268,16 +2328,21 @@ pub struct TtfSprite {
 /// the right place — see its doc for what happens to a byte this atlas never
 /// packed.
 pub struct TtfAtlas {
-    /// The pixel height every glyph in this atlas is rasterized at. One face,
-    /// one size — see the "One face, not ten" note in
-    /// `openshard_uofiles::ttf_font`.
-    pixel_height: f32,
-    sprites: BTreeMap<char, TtfSprite>,
-    /// Every character ever asked for, whether or not it drew ink. Same
-    /// purpose as the other atlases' `asked` sets: a character with no
+    /// Every glyph packed so far, keyed by the character **and the size it was
+    /// rasterized at**.
+    ///
+    /// One face, many sizes: `openshard_uofiles::ttf_font`'s "One face, not
+    /// ten" note is about *faces* — `fonts.mul` has ten of them and a
+    /// TrueType file is one — and says nothing about size, which an outline
+    /// answers for continuously. Keying by the pair is what lets a pile's
+    /// count be smaller than a spoken line without a second texture, a second
+    /// bind group and a second pass; see `docs/text_sizes.md`'s D2.
+    sprites: BTreeMap<(char, TextSize), TtfSprite>,
+    /// Every (character, size) ever asked for, whether or not it drew ink.
+    /// Same purpose as the other atlases' `asked` sets: a character with no
     /// glyph — impossible for a TrueType face, which always has `.notdef` —
     /// would otherwise be rasterized once per frame forever.
-    asked: BTreeSet<char>,
+    asked: BTreeSet<(char, TextSize)>,
     shelf: Shelf,
     /// `ATLAS_SIDE * ATLAS_SIDE` RGBA8 pixels, row-major.
     pixels: Vec<u8>,
@@ -2288,7 +2353,7 @@ impl fmt::Debug for TtfAtlas {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TtfAtlas")
             .field("glyphs", &self.sprites.len())
-            .field("pixel_height", &self.pixel_height)
+            .field("sizes", &self.sizes().count())
             .field("side", &ATLAS_SIDE)
             .finish()
     }
@@ -2297,10 +2362,9 @@ impl fmt::Debug for TtfAtlas {
 impl TtfAtlas {
     /// An atlas holding nothing, ready to be grown into.
     #[must_use]
-    pub fn empty(pixel_height: f32) -> Self {
+    pub fn empty() -> Self {
         let side = ATLAS_SIDE as usize;
         Self {
-            pixel_height,
             sprites: BTreeMap::new(),
             asked: BTreeSet::new(),
             shelf: Shelf::default(),
@@ -2309,27 +2373,92 @@ impl TtfAtlas {
         }
     }
 
-    /// The pixel height this atlas rasterizes at.
-    pub fn pixel_height(&self) -> f32 {
-        self.pixel_height
+    /// Every size this atlas currently holds a glyph at, smallest first.
+    ///
+    /// For a caller deciding whether it has grown too many of them, and for
+    /// [`fmt::Debug`]. Nothing draws from it.
+    pub fn sizes(&self) -> impl Iterator<Item = TextSize> {
+        // Through a set rather than a dedup of the walk: the map is ordered by
+        // `(char, size)`, so one size's entries are scattered across every
+        // character rather than adjacent. A handful of sizes, so the set costs
+        // nothing worth measuring.
+        self.sprites
+            .keys()
+            .map(|&(_, size)| size)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
     }
 
     /// Rasterize and pack whichever of `wanted` this atlas has not been
-    /// offered before. [`StaticAtlas::add`], for characters instead of
-    /// graphics.
-    pub fn add(&mut self, font: &TtfFont, wanted: impl IntoIterator<Item = char>) -> Result<(), AtlasError> {
+    /// offered at `size` before. [`StaticAtlas::add`], for characters instead
+    /// of graphics — and for one size of them, since the same character at two
+    /// sizes is two glyphs.
+    pub fn add(
+        &mut self,
+        font: &TtfFont,
+        size: TextSize,
+        wanted: impl IntoIterator<Item = char>,
+    ) -> Result<(), AtlasError> {
         let wanted: BTreeSet<char> = wanted.into_iter().collect();
-        let fresh: Vec<char> = wanted.into_iter().filter(|ch| !self.asked.contains(ch)).collect();
+        let fresh: Vec<char> = wanted
+            .into_iter()
+            .filter(|&ch| !self.asked.contains(&(ch, size)))
+            .collect();
         if fresh.is_empty() {
             return Ok(());
         }
-        let glyphs: Vec<(char, TtfGlyph)> = fresh
+        let glyphs: Vec<((char, TextSize), TtfGlyph)> = fresh
             .iter()
-            .map(|&ch| (ch, font.glyph(ch, self.pixel_height)))
+            .map(|&ch| ((ch, size), font.glyph(ch, size.pixels())))
             .collect();
         self.insert(glyphs)?;
-        self.asked.extend(fresh);
+        self.asked.extend(fresh.into_iter().map(|ch| (ch, size)));
         Ok(())
+    }
+
+    /// [`TtfAtlas::add`], emptying the atlas and trying once more when it is
+    /// full.
+    ///
+    /// The way every caller should grow one, and the reason [`TtfAtlas::reset`]
+    /// exists: an atlas keyed by size fills up in ordinary use — a slider
+    /// dragged from 8 pixels to 30 asks for twenty-odd alphabets — where one
+    /// baked at a single size never could. What it costs when it fires is one
+    /// frame of text drawn from stale regions: quads collected *earlier in the
+    /// same frame*, at another size, were measured against the old shelves and
+    /// the texture underneath them has just been overwritten. A frame of
+    /// scrambled captions once in a drag, against a client that stops drawing
+    /// text until something changes — the alternative — is the easy trade.
+    pub fn add_or_reset(
+        &mut self,
+        font: &TtfFont,
+        size: TextSize,
+        wanted: impl IntoIterator<Item = char>,
+    ) -> Result<(), AtlasError> {
+        let wanted: Vec<char> = wanted.into_iter().collect();
+        match self.add(font, size, wanted.iter().copied()) {
+            Err(AtlasError::Full { .. }) => {
+                self.reset();
+                self.add(font, size, wanted)
+            }
+            other => other,
+        }
+    }
+
+    /// Empty the atlas, keeping its texture: every glyph goes, and the whole
+    /// picture is marked dirty so the upload overwrites what was there.
+    ///
+    /// The answer to [`AtlasError::Full`], which a sized atlas can reach the
+    /// ordinary way a fixed-size one cannot: a slider dragged from 8 pixels to
+    /// 30 asks for twenty-odd alphabets, and all but the last of them are dead
+    /// the moment the drag moves on. Emptying costs the frame after it a
+    /// re-pack of whatever is actually on screen — a few dozen glyphs — which
+    /// is what the old re-bake on every size change cost *every* time.
+    pub fn reset(&mut self) {
+        self.sprites.clear();
+        self.asked.clear();
+        self.shelf = Shelf::default();
+        self.pixels.fill(0);
+        self.dirty.mark(0, ATLAS_SIDE);
     }
 
     /// The rows written since this was last asked, cleared. See
@@ -2345,11 +2474,14 @@ impl TtfAtlas {
     /// exactly as [`StaticAtlas::pack`] does for graphics.
     pub fn pack(
         glyphs: impl IntoIterator<Item = (char, TtfGlyph)>,
-        pixel_height: f32,
+        size: TextSize,
     ) -> Result<Self, AtlasError> {
-        let mut atlas = Self::empty(pixel_height);
-        let glyphs: Vec<(char, TtfGlyph)> = glyphs.into_iter().collect();
-        atlas.asked.extend(glyphs.iter().map(|(ch, _)| *ch));
+        let mut atlas = Self::empty();
+        let glyphs: Vec<((char, TextSize), TtfGlyph)> = glyphs
+            .into_iter()
+            .map(|(ch, glyph)| ((ch, size), glyph))
+            .collect();
+        atlas.asked.extend(glyphs.iter().map(|(key, _)| *key));
         atlas.insert(glyphs)?;
         atlas.dirty.take();
         Ok(atlas)
@@ -2360,14 +2492,18 @@ impl TtfAtlas {
     /// Tallest first, for the reason [`StaticAtlas::insert`] is — and a glyph
     /// with no ink sorts to the very end, where its zero height means it never
     /// starts a row for anything else to waste space under.
-    fn insert(&mut self, glyphs: impl IntoIterator<Item = (char, TtfGlyph)>) -> Result<(), AtlasError> {
-        let glyphs: BTreeMap<char, TtfGlyph> = glyphs.into_iter().collect();
+    fn insert(
+        &mut self,
+        glyphs: impl IntoIterator<Item = ((char, TextSize), TtfGlyph)>,
+    ) -> Result<(), AtlasError> {
+        let glyphs: BTreeMap<(char, TextSize), TtfGlyph> = glyphs.into_iter().collect();
         let wanted = self.sprites.len() + glyphs.len();
-        let mut order: Vec<(char, TtfGlyph)> = glyphs.into_iter().collect();
+        let mut order: Vec<((char, TextSize), TtfGlyph)> = glyphs.into_iter().collect();
         order.sort_by_key(|(_, glyph)| std::cmp::Reverse(glyph.image.height()));
 
-        for (ch, glyph) in order {
-            if self.sprites.contains_key(&ch) {
+        for (key, glyph) in order {
+            let ch = key.0;
+            if self.sprites.contains_key(&key) {
                 continue;
             }
             let (width, height) = (glyph.image.width(), glyph.image.height());
@@ -2376,7 +2512,7 @@ impl TtfAtlas {
             // inserted rather than left for `glyph()` to answer `None`.
             if width == 0 || height == 0 {
                 self.sprites.insert(
-                    ch,
+                    key,
                     TtfSprite {
                         sprite: Sprite {
                             region: Region {
@@ -2411,7 +2547,7 @@ impl TtfAtlas {
             self.dirty.mark(origin_y, u32::from(height));
             copy_sprite(&mut self.pixels, &glyph.image, origin_x, origin_y);
             self.sprites.insert(
-                ch,
+                key,
                 TtfSprite {
                     sprite: Sprite {
                         region: region_at(origin_x, origin_y, width, height),
@@ -2449,9 +2585,15 @@ impl TtfAtlas {
         self.sprites.is_empty()
     }
 
-    /// A character's packed glyph, or `None` if it was never asked for.
-    pub fn glyph(&self, ch: char) -> Option<TtfSprite> {
-        self.sprites.get(&ch).copied()
+    /// A character's packed glyph **at one size**, or `None` if that pair was
+    /// never asked for.
+    ///
+    /// The size is part of the question, not a property of the atlas: the same
+    /// character at eleven pixels and at sixteen is two glyphs, and answering
+    /// with whichever one happens to be packed would draw a pile's count in a
+    /// spoken line's size the moment somebody had spoken.
+    pub fn glyph(&self, ch: char, size: TextSize) -> Option<TtfSprite> {
+        self.sprites.get(&(ch, size)).copied()
     }
 }
 
@@ -3056,6 +3198,13 @@ mod tests {
         assert!(atlas.glyph(Font(0), b'B').is_none(), "zero-sized, not packed");
     }
 
+    /// The size every TrueType test below packs and reads at — one of them,
+    /// since what those tests are about is the packing rather than the size.
+    /// The one that is about two sizes says so.
+    fn size() -> TextSize {
+        TextSize::new(16.0)
+    }
+
     /// A synthetic rasterized glyph: `width`x`height` of one grey level, the
     /// baseline `baseline_from_top` pixels down from the top, advancing the
     /// pen by `advance`.
@@ -3076,8 +3225,8 @@ mod tests {
     /// the placement numbers `crate::text::collect_ttf` depends on.
     #[test]
     fn a_packed_ttf_glyph_keeps_its_advance_and_baseline() {
-        let atlas = TtfAtlas::pack([('A', ttf_glyph(10, 14, 11, 12))], 16.0).expect("one glyph fits");
-        let glyph = atlas.glyph('A').expect("packed");
+        let atlas = TtfAtlas::pack([('A', ttf_glyph(10, 14, 11, 12))], size()).expect("one glyph fits");
+        let glyph = atlas.glyph('A', size()).expect("packed");
         assert_eq!((glyph.sprite.width, glyph.sprite.height), (10, 14));
         assert_eq!(glyph.baseline_from_top, 11);
         assert_eq!(glyph.advance, 12);
@@ -3089,8 +3238,8 @@ mod tests {
     /// `fonts.mul` glyph.
     #[test]
     fn a_glyph_with_no_ink_is_still_packed_with_its_advance() {
-        let atlas = TtfAtlas::pack([(' ', ttf_glyph(0, 0, 0, 6))], 16.0).expect("packs");
-        let glyph = atlas.glyph(' ').expect("a space is packed, just empty");
+        let atlas = TtfAtlas::pack([(' ', ttf_glyph(0, 0, 0, 6))], size()).expect("packs");
+        let glyph = atlas.glyph(' ', size()).expect("a space is packed, just empty");
         assert_eq!((glyph.sprite.width, glyph.sprite.height), (0, 0));
         assert_eq!(glyph.advance, 6);
     }
@@ -3099,8 +3248,8 @@ mod tests {
     /// same contract [`FontAtlas::glyph`] and [`StaticAtlas::sprite`] give.
     #[test]
     fn an_unpacked_ttf_character_is_none() {
-        let atlas = TtfAtlas::pack([('A', ttf_glyph(10, 14, 11, 12))], 16.0).expect("packs");
-        assert!(atlas.glyph('Z').is_none());
+        let atlas = TtfAtlas::pack([('A', ttf_glyph(10, 14, 11, 12))], size()).expect("packs");
+        assert!(atlas.glyph('Z', size()).is_none());
     }
 
     /// The property every shelf-packed atlas needs: two glyphs never claim the
@@ -3111,12 +3260,12 @@ mod tests {
             .enumerate()
             .map(|(i, ch)| (ch, ttf_glyph(6 + (i as u16) % 5, 10 + (i as u16) % 7, 8, 8)))
             .collect();
-        let atlas = TtfAtlas::pack(glyphs.clone(), 16.0).expect("26 small glyphs fit");
+        let atlas = TtfAtlas::pack(glyphs.clone(), size()).expect("26 small glyphs fit");
 
         let side = ATLAS_SIDE as usize;
         let mut claimed = vec![None; side * side];
         for (ch, glyph) in glyphs {
-            let packed = atlas.glyph(ch).expect("packed");
+            let packed = atlas.glyph(ch, size()).expect("packed");
             assert_eq!(
                 (packed.sprite.width, packed.sprite.height),
                 (glyph.image.width(), glyph.image.height())
@@ -3131,6 +3280,86 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The same character at two sizes is two glyphs, and each answers with
+    /// its own.
+    ///
+    /// The whole of `docs/text_sizes.md`'s D2, asserted: before the atlas was
+    /// keyed by `(char, size)` there was one glyph per character and a second
+    /// size had nowhere to go — which is why a pile's count was drawn in a
+    /// spoken line's size.
+    #[test]
+    fn one_character_at_two_sizes_is_two_glyphs() {
+        let small = TextSize::new(11.0);
+        let large = TextSize::new(22.0);
+        let mut atlas = TtfAtlas::pack([('A', ttf_glyph(6, 8, 7, 7))], small).expect("packs");
+        atlas
+            .insert([(('A', large), ttf_glyph(12, 16, 14, 13))])
+            .expect("a second size fits beside the first");
+
+        assert_eq!(atlas.glyph('A', small).expect("packed").advance, 7);
+        assert_eq!(atlas.glyph('A', large).expect("packed").advance, 13);
+        assert_eq!(
+            atlas.glyph('A', TextSize::new(16.0)),
+            None,
+            "a size nobody packed is not answered with a neighbour's glyph"
+        );
+        assert_eq!(atlas.sizes().collect::<Vec<_>>(), vec![small, large]);
+    }
+
+    /// A size is what a person wrote, clamped only where it stops being text.
+    #[test]
+    fn a_text_size_is_pixels_and_orders_by_size() {
+        assert_eq!(TextSize::new(13.5).pixels(), 13.5);
+        assert_eq!(TextSize::new(0.0).pixels(), TextSize::MIN);
+        assert_eq!(TextSize::new(4000.0).pixels(), TextSize::MAX);
+        // `NaN` cannot be allowed through: this is a `BTreeMap` key, and one
+        // `NaN` in an ordered map is a comparison that answers `false` to
+        // everything it is asked.
+        assert_eq!(TextSize::new(f32::NAN).pixels(), TextSize::MIN);
+        // Ordered by size, which is what makes the bit pattern a legitimate
+        // key: `sizes()` promises smallest first.
+        assert!(TextSize::new(11.0) < TextSize::new(11.5));
+        assert!(TextSize::new(11.5) < TextSize::new(96.0));
+    }
+
+    /// A density multiplies the size rather than the finished glyph —
+    /// `docs/text_sizes.md`'s D4.
+    #[test]
+    fn a_density_is_folded_into_the_size() {
+        assert_eq!(TextSize::new(11.0).scaled(2.0).pixels(), 22.0);
+        assert_eq!(TextSize::new(13.0).scaled(1.5).pixels(), 19.5);
+    }
+
+    /// A full atlas empties itself and takes the glyphs that would not fit.
+    ///
+    /// The policy `TtfAtlas::add_or_reset` exists for: an atlas keyed by size
+    /// fills up in ordinary use, and a client that answered a full atlas by
+    /// drawing no text ever again would be one bad drag from silence.
+    #[test]
+    fn a_full_atlas_empties_itself_rather_than_refusing() {
+        let mut atlas = TtfAtlas::empty();
+        // One glyph the size of the whole texture: nothing fits beside it,
+        // above it or below it, so the next one asked for is refused.
+        let huge = TextSize::new(96.0);
+        atlas
+            .insert([(('A', huge), ttf_glyph(ATLAS_SIDE as u16, ATLAS_SIDE as u16, 8, 8))])
+            .expect("one fits exactly");
+        assert!(
+            atlas
+                .insert([(('B', huge), ttf_glyph(ATLAS_SIDE as u16, ATLAS_SIDE as u16, 8, 8))])
+                .is_err(),
+            "the test's premise: the atlas is full"
+        );
+
+        atlas.reset();
+        assert!(atlas.is_empty());
+        assert_eq!(atlas.glyph('A', huge), None);
+        atlas
+            .insert([(('B', huge), ttf_glyph(ATLAS_SIDE as u16, ATLAS_SIDE as u16, 8, 8))])
+            .expect("the emptied atlas takes what would not fit before");
+        assert!(atlas.glyph('B', huge).is_some());
     }
 
     /// A real face, read from wherever `OPENSHARD_TTF_FONT_TEST` points.
@@ -3149,16 +3378,16 @@ mod tests {
     #[test]
     fn a_character_already_packed_is_not_rasterized_again() {
         let Some(font) = test_ttf_font() else { return };
-        let mut atlas = TtfAtlas::empty(16.0);
-        atlas.add(&font, ['H', 'i']).expect("packs");
-        let before = atlas.glyph('H').expect("packed");
+        let mut atlas = TtfAtlas::empty();
+        atlas.add(&font, size(), ['H', 'i']).expect("packs");
+        let before = atlas.glyph('H', size()).expect("packed");
 
         // Asking again, alongside something new, must not disturb 'H' — if it
         // were rasterized and re-inserted it would still look the same here,
         // which is exactly why the real regression this guards is `len()`
         // growing every time a line repeats a letter, not a pixel changing.
-        atlas.add(&font, ['H', '!']).expect("packs");
-        let after = atlas.glyph('H').expect("still packed");
+        atlas.add(&font, size(), ['H', '!']).expect("packs");
+        let after = atlas.glyph('H', size()).expect("still packed");
         assert_eq!(before, after);
         assert_eq!(atlas.len(), 3, "'H', 'i' and '!' — not 'H' twice");
     }

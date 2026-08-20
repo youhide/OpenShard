@@ -15,7 +15,7 @@
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 
-use crate::atlas::{FontAtlas, TtfAtlas};
+use crate::atlas::{FontAtlas, TextSize, TtfAtlas};
 use crate::camera::ViewPixel;
 use crate::geometry::Rect;
 use crate::gump::GumpPixel;
@@ -112,10 +112,14 @@ pub fn collect(labels: &[Label<'_>], atlas: &FontAtlas) -> Vec<SpriteQuad> {
 /// table — but a `TtfAtlas` packs whatever it is asked to grow with (see
 /// [`TtfAtlas::add`](crate::atlas::TtfAtlas::add)), so in practice this only
 /// fires for a character nobody grew the atlas for yet.
-pub fn collect_ttf(labels: &[Label<'_>], atlas: &TtfAtlas) -> Vec<SpriteQuad> {
+pub fn collect_ttf(labels: &[Label<'_>], atlas: &TtfAtlas, size: TextSize) -> Vec<SpriteQuad> {
     let mut quads = Vec::new();
     for label in labels {
-        let glyphs: Vec<_> = label.text.chars().filter_map(|ch| atlas.glyph(ch)).collect();
+        let glyphs: Vec<_> = label
+            .text
+            .chars()
+            .filter_map(|ch| atlas.glyph(ch, size))
+            .collect();
         let total_width: i32 = glyphs.iter().map(|glyph| i32::from(glyph.advance)).sum();
         let mut x = label.anchor.x - total_width / 2;
         for glyph in glyphs {
@@ -183,10 +187,14 @@ pub struct ScreenLabel<'a> {
 /// `fonts.mul` zooms with the world on purpose (its blocky nearest-sampled
 /// magnification is the look every other sprite already has), so only a
 /// TrueType face ever needs this.
-pub fn collect_screen_ttf(labels: &[ScreenLabel<'_>], atlas: &TtfAtlas) -> Vec<SpriteQuad> {
+pub fn collect_screen_ttf(labels: &[ScreenLabel<'_>], atlas: &TtfAtlas, size: TextSize) -> Vec<SpriteQuad> {
     let mut quads = Vec::new();
     for label in labels {
-        let glyphs: Vec<_> = label.text.chars().filter_map(|ch| atlas.glyph(ch)).collect();
+        let glyphs: Vec<_> = label
+            .text
+            .chars()
+            .filter_map(|ch| atlas.glyph(ch, size))
+            .collect();
         let total_width: i32 = glyphs.iter().map(|glyph| i32::from(glyph.advance)).sum();
         let mut x = label.anchor.x - total_width / 2;
         for glyph in glyphs {
@@ -369,14 +377,14 @@ const BASELINE_SHARE: f32 = 0.8;
 ///
 /// A `char` the atlas never packed is skipped and does not advance the line,
 /// [`collect_gump`]'s contract carried over unchanged.
-pub fn collect_gump_ttf(labels: &[GumpLabel<'_>], atlas: &TtfAtlas) -> Vec<SpriteQuad> {
-    let baseline_from_top = (atlas.pixel_height() * BASELINE_SHARE).round() as i32;
+pub fn collect_gump_ttf(labels: &[GumpLabel<'_>], atlas: &TtfAtlas, size: TextSize) -> Vec<SpriteQuad> {
+    let baseline_from_top = (size.pixels() * BASELINE_SHARE).round() as i32;
     let mut quads = Vec::new();
     for label in labels {
         let mut x = label.at.x;
         let baseline = label.at.y + baseline_from_top;
         for ch in label.text.chars() {
-            let Some(glyph) = atlas.glyph(ch) else {
+            let Some(glyph) = atlas.glyph(ch, size) else {
                 continue;
             };
             let y = baseline - glyph.baseline_from_top;
@@ -413,9 +421,9 @@ pub fn collect_gump_ttf(labels: &[GumpLabel<'_>], atlas: &TtfAtlas) -> Vec<Sprit
 /// [`gump_width`]'s TrueType twin, the same per-glyph advance
 /// [`collect_gump_ttf`] walks by, in the same real screen pixels — what
 /// places the chat line's caret at a byte offset into a TrueType-drawn line.
-pub fn gump_width_ttf(text: &str, atlas: &TtfAtlas) -> i32 {
+pub fn gump_width_ttf(text: &str, atlas: &TtfAtlas, size: TextSize) -> i32 {
     text.chars()
-        .filter_map(|ch| atlas.glyph(ch))
+        .filter_map(|ch| atlas.glyph(ch, size))
         .map(|glyph| i32::from(glyph.advance))
         .sum()
 }
@@ -592,8 +600,14 @@ mod tests {
             }
         }
 
+        /// The size these tests pack and read at — one of them, since what
+        /// they are about is the layout of a line rather than how big it is.
+        fn size() -> TextSize {
+            TextSize::new(16.0)
+        }
+
         fn atlas() -> TtfAtlas {
-            TtfAtlas::pack([('H', glyph(6, 10, 10, 7)), ('i', glyph(2, 10, 10, 3))], 16.0)
+            TtfAtlas::pack([('H', glyph(6, 10, 10, 7)), ('i', glyph(2, 10, 10, 3))], size())
                 .expect("two glyphs fit")
         }
 
@@ -616,7 +630,7 @@ mod tests {
         #[test]
         fn glyphs_are_placed_left_to_right_by_their_advance() {
             let atlas = atlas();
-            let quads = collect_ttf(&[label(ViewPixel { x: 100, y: 50 }, "Hi")], &atlas);
+            let quads = collect_ttf(&[label(ViewPixel { x: 100, y: 50 }, "Hi")], &atlas, size());
             assert_eq!(quads.len(), 2);
             assert_eq!(
                 quads[1].rect.x,
@@ -632,7 +646,7 @@ mod tests {
         #[test]
         fn a_glyphs_top_is_offset_by_its_own_baseline_not_its_height() {
             let atlas = atlas();
-            let quads = collect_ttf(&[label(ViewPixel { x: 100, y: 50 }, "H")], &atlas);
+            let quads = collect_ttf(&[label(ViewPixel { x: 100, y: 50 }, "H")], &atlas, size());
             assert_eq!(quads[0].rect.y, 40.0, "50 - baseline_from_top (10)");
         }
 
@@ -642,7 +656,7 @@ mod tests {
         #[test]
         fn the_line_is_centred_on_its_anchor_by_total_advance() {
             let atlas = atlas();
-            let quads = collect_ttf(&[label(ViewPixel { x: 100, y: 50 }, "Hi")], &atlas);
+            let quads = collect_ttf(&[label(ViewPixel { x: 100, y: 50 }, "Hi")], &atlas, size());
             assert_eq!(quads[0].rect.x, 95.0, "100 - 10/2");
         }
 
@@ -652,8 +666,8 @@ mod tests {
         #[test]
         fn an_unpacked_character_is_skipped_and_does_not_widen_the_line() {
             let atlas = atlas();
-            let with_gap = collect_ttf(&[label(ViewPixel { x: 100, y: 50 }, "H!i")], &atlas);
-            let without = collect_ttf(&[label(ViewPixel { x: 100, y: 50 }, "Hi")], &atlas);
+            let with_gap = collect_ttf(&[label(ViewPixel { x: 100, y: 50 }, "H!i")], &atlas, size());
+            let without = collect_ttf(&[label(ViewPixel { x: 100, y: 50 }, "Hi")], &atlas, size());
             assert_eq!(with_gap, without, "the missing '!' left no trace");
         }
 
@@ -672,7 +686,7 @@ mod tests {
         #[test]
         fn glyphs_are_placed_left_to_right_by_their_advance_in_gump_space() {
             let atlas = atlas();
-            let quads = collect_gump_ttf(&[gump_label(GumpPixel::new(10, 20), "Hi")], &atlas);
+            let quads = collect_gump_ttf(&[gump_label(GumpPixel::new(10, 20), "Hi")], &atlas, size());
             assert_eq!(quads.len(), 2);
             assert_eq!(
                 quads[1].rect.x,
@@ -689,8 +703,8 @@ mod tests {
         #[test]
         fn the_line_is_anchored_by_its_top_not_a_baseline() {
             let atlas = atlas();
-            let top = collect_gump_ttf(&[gump_label(GumpPixel::new(10, 0), "H")], &atlas);
-            let lower = collect_gump_ttf(&[gump_label(GumpPixel::new(10, 5), "H")], &atlas);
+            let top = collect_gump_ttf(&[gump_label(GumpPixel::new(10, 0), "H")], &atlas, size());
+            let lower = collect_gump_ttf(&[gump_label(GumpPixel::new(10, 5), "H")], &atlas, size());
             assert_eq!(
                 lower[0].rect.y,
                 top[0].rect.y + 5.0,
@@ -705,7 +719,7 @@ mod tests {
         #[test]
         fn glyph_measurements_are_the_atlas_own_unrounded() {
             let atlas = atlas();
-            let quads = collect_gump_ttf(&[gump_label(GumpPixel::new(0, 0), "Hi")], &atlas);
+            let quads = collect_gump_ttf(&[gump_label(GumpPixel::new(0, 0), "Hi")], &atlas, size());
             assert_eq!(quads[0].rect.width, 6.0, "H's own packed width");
             assert_eq!(quads[1].rect.x, 7.0, "H's own advance, exactly");
         }
@@ -715,8 +729,8 @@ mod tests {
         #[test]
         fn an_unpacked_character_is_skipped_in_gump_space_too() {
             let atlas = atlas();
-            let with_gap = collect_gump_ttf(&[gump_label(GumpPixel::new(10, 20), "H!i")], &atlas);
-            let without = collect_gump_ttf(&[gump_label(GumpPixel::new(10, 20), "Hi")], &atlas);
+            let with_gap = collect_gump_ttf(&[gump_label(GumpPixel::new(10, 20), "H!i")], &atlas, size());
+            let without = collect_gump_ttf(&[gump_label(GumpPixel::new(10, 20), "Hi")], &atlas, size());
             assert_eq!(with_gap, without, "the missing '!' left no trace");
         }
 
@@ -726,7 +740,7 @@ mod tests {
         #[test]
         fn gump_width_ttf_sums_advances() {
             let atlas = atlas();
-            assert_eq!(gump_width_ttf("Hi", &atlas), 10, "7 + 3");
+            assert_eq!(gump_width_ttf("Hi", &atlas, size()), 10, "7 + 3");
         }
     }
 

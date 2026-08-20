@@ -354,24 +354,16 @@ pub(crate) const CHAT_LINES: usize = 6;
 /// gump pixels.
 ///
 /// A fixed approximation and not a per-glyph measurement: `fonts.mul` has no
-/// exposed line-height, its faces run roughly 8 to 14 pixels tall (the same
-/// range [`TTF_BASE_PIXEL_HEIGHT`]'s doc cites), and 16 leaves a line of air
-/// above the tallest of them.
+/// exposed line-height and its faces run roughly 8 to 14 pixels tall, so 16
+/// leaves a line of air above the tallest of them. `fonts.mul`'s own step, and
+/// only its: a TrueType line is spaced by the size the player asked for — see
+/// `chat::line_height` and `docs/text_sizes.md`.
 pub(crate) const CHAT_LINE_HEIGHT: i32 = 16;
 
 /// Where the speech line's own left edge sits, in gump pixels from the
 /// surface's corners — the same margin on every side a status strip would
 /// leave, so the line does not draw into the window's own frame.
 pub(crate) const CHAT_MARGIN: i32 = 4;
-
-/// The pixel height [`TtfAtlas`] rasterizes at, before the window's own
-/// [`winit::window::Window::scale_factor`] scales it up for a dense display —
-/// see where [`App::create_window`] builds one. Chosen to sit near
-/// `fonts.mul`'s own faces (its glyphs run roughly 8 to 14 pixels tall), not
-/// measured against any one of them: see the "One face, not ten" note on
-/// [`openshard_uofiles::ttf_font`] for why there is only one size to choose at
-/// all.
-pub(crate) const TTF_BASE_PIXEL_HEIGHT: f32 = 16.0;
 
 /// [`text::collect_gump`]'s own quads, grown around each label's own top-left
 /// corner by the Chat tab's [`desk::ChatScale`].

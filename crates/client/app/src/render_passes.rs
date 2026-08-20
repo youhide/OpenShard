@@ -98,6 +98,7 @@ pub(crate) fn draw_gump_windows(
     cursor: gump_art::GumpPixel,
     hover: &[String],
     scale: crate::desk::WindowScale,
+    fonts: crate::desk::FontSizes,
     shell: Option<&shell::Shell>,
     window: &mut Screen,
     encoder: &mut wgpu::CommandEncoder,
@@ -364,8 +365,13 @@ pub(crate) fn draw_gump_windows(
             let mut art = gump_art::collect(drawn.pictures(), &resources.gump_atlas);
             gump_art::place(&mut art, at, magnify);
             pass.render_layer(&window.device, &window.queue, encoder, frame, &art);
-            let mut labels = Vec::new();
-            let mut cut = Vec::new();
+            // Each window's captions, in that window's own unmagnified gump
+            // pixels, paired with the box the row is cut to when there is one.
+            #[allow(clippy::type_complexity)]
+            let mut labels: Vec<(
+                openshard_client_render::text::GumpLabel<'_>,
+                Option<gump_art::Scissor>,
+            )> = Vec::new();
             match (subject, drawn) {
                 // A shop's arm and a status frame's, now that a dialog's
                 // captions are resolved by the pane that laid it out: this pass
@@ -374,43 +380,33 @@ pub(crate) fn draw_gump_windows(
                 // the typed contents of every field — the second half of the
                 // window, worked out in a different place from the first.
                 (WindowSubject::Dialog(_), Drawn::Dialog(laid_out)) => {
-                    labels.extend(laid_out.lines.iter().map(|line| line.label()));
+                    labels.extend(laid_out.lines.iter().map(|line| (line.label(), None)));
                 }
                 // A dialog's arm and a shop's: the pane resolved the name and
                 // the hover label when it laid the window out, and this pass
                 // reads what the layout produced and looks nothing up.
                 (WindowSubject::Paperdoll(_), Drawn::Paperdoll(window)) => {
-                    labels.extend(window.lines.iter().map(|line| line.label()));
+                    labels.extend(window.lines.iter().map(|line| (line.label(), None)));
                 }
                 (WindowSubject::Skills, Drawn::Skills(sheet)) => {
-                    for line in &sheet.lines {
-                        let mut quads = openshard_client_render::text::collect_gump(
-                            &[line.label()],
-                            &resources.font_atlas,
-                        );
-                        // Cut in the window's own pixels, before the placement
-                        // below magnifies what survived: a row is scissored to
-                        // the list's viewport, and both are the sheet's own
-                        // unmagnified coordinates. Cutting after would be
-                        // cutting a glyph whose texel grid has already been
-                        // stretched — see `gump::place`.
-                        if let Some(scissor) = line.scissor {
-                            scissor.cut(&mut quads);
-                        }
-                        cut.extend(quads);
-                    }
+                    // The one kind whose rows are cut to a viewport, so the
+                    // one kind that carries a scissor alongside its label.
+                    // Both are in the sheet's own unmagnified pixels, and
+                    // whichever face draws them puts the two into its own
+                    // space together — see `window_text`.
+                    labels.extend(sheet.lines.iter().map(|line| (line.label(), line.scissor)));
                 }
                 (WindowSubject::Status, Drawn::Status(status)) => {
-                    labels.extend(status.lines.iter().map(|line| line.label()));
+                    labels.extend(status.lines.iter().map(|line| (line.label(), None)));
                 }
                 // One line, the number being chosen — the reference's own text
                 // box, which is a control rather than a readout: it is where an
                 // exact figure is typed into a pile the bar has no pixels for.
                 (WindowSubject::Split { .. }, Drawn::Split(split)) => {
-                    labels.extend(split.lines.iter().map(|line| line.label()));
+                    labels.extend(split.lines.iter().map(|line| (line.label(), None)));
                 }
                 (WindowSubject::Vendor(_), Drawn::Vendor(vendor)) => {
-                    labels.extend(vendor.lines.iter().map(|line| line.label()));
+                    labels.extend(vendor.lines.iter().map(|line| (line.label(), None)));
                 }
                 // A bag's plate caption and its hover label, resolved by the
                 // pane that laid the window out — the same shape as a
@@ -420,16 +416,16 @@ pub(crate) fn draw_gump_windows(
                 // under the pointer, looked up in the view a second time. Both
                 // are decided where they are drawn now.
                 (WindowSubject::Container(_), Drawn::Container(window)) => {
-                    labels.extend(window.lines.iter().map(|line| line.label()));
+                    labels.extend(window.lines.iter().map(|line| (line.label(), None)));
                 }
                 // The question itself, wrapped by the layout that placed the
                 // plate — the same shape as every arm above: this pass reads
                 // what the layout produced and looks nothing up.
                 (WindowSubject::Confirm(_), Drawn::Confirm(window)) => {
-                    labels.extend(window.lines.iter().map(|line| line.label()));
+                    labels.extend(window.lines.iter().map(|line| (line.label(), None)));
                 }
                 (WindowSubject::Party, Drawn::Party(window)) => {
-                    labels.extend(window.lines.iter().map(|line| line.label()));
+                    labels.extend(window.lines.iter().map(|line| (line.label(), None)));
                 }
                 (WindowSubject::Minimap, Drawn::Minimap(bounds)) => {
                     if let Some(player) = world.authoritative.view.as_ref().map(|view| view.player.position) {
@@ -507,18 +503,27 @@ pub(crate) fn draw_gump_windows(
                 }
                 _ => {}
             }
-            let mut text = openshard_client_render::text::collect_gump(&labels, &resources.font_atlas);
-            text.extend(cut);
-            // The same placement the art above got, and it has to be: a
-            // caption drawn at a different scale from the plate it sits on
-            // would slide off it by a pixel per pixel of magnification. The
-            // glyphs are `fonts.mul`'s own bitmaps, which magnify the way the
-            // art does — `desk::ChatScale` is the same upscale for the HUD's
-            // own chat box.
-            gump_art::place(&mut text, at, magnify);
-            window
-                .gump_text_pass
-                .render_layer(&window.device, &window.queue, encoder, frame, &text);
+            window_text(
+                WindowText {
+                    labels: &labels,
+                    at,
+                    magnify,
+                    density: frame.scale,
+                    size: fonts.window,
+                },
+                resources.ttf_font.as_ref(),
+                &resources.font_atlas,
+                TextTarget {
+                    device: &window.device,
+                    queue: &window.queue,
+                    width: window.config.width,
+                    height: window.config.height,
+                    bitmap: &mut window.gump_text_pass,
+                    truetype: window.ttf_atlas.as_mut().zip(window.ttf_gump_pass.as_mut()),
+                },
+                encoder,
+                view,
+            );
         }
         let mut dragged = gump_art::collect(&pictures, &resources.gump_atlas);
         // Placed at the cursor rather than at a window's corner: the icon is
@@ -550,23 +555,40 @@ pub(crate) fn draw_gump_windows(
                 &resources.gump_atlas,
                 &resources.font_atlas,
             ) {
-                let mut text = openshard_client_render::text::collect_gump(
-                    &[openshard_client_render::text::GumpLabel {
-                        at,
-                        text: &count,
-                        font: openshard_client_render::items::STACK_COUNT_FONT,
-                        hue: openshard_protocol::wire::Hue::STACK_COUNT,
-                        clip: None,
-                    }],
+                // Placed at the cursor the way the icon above is, and drawn
+                // through the same `window_text` every caption goes through —
+                // so a count on the pointer is the same face at the same real
+                // size as a count in the bag it came out of.
+                window_text(
+                    WindowText {
+                        labels: &[(
+                            openshard_client_render::text::GumpLabel {
+                                at,
+                                text: &count,
+                                font: openshard_client_render::items::STACK_COUNT_FONT,
+                                hue: openshard_protocol::wire::Hue::STACK_COUNT,
+                                clip: None,
+                            },
+                            None,
+                        )],
+                        at: cursor,
+                        magnify,
+                        density: frame.scale,
+                        size: fonts.stack_count,
+                    },
+                    resources.ttf_font.as_ref(),
                     &resources.font_atlas,
+                    TextTarget {
+                        device: &window.device,
+                        queue: &window.queue,
+                        width: window.config.width,
+                        height: window.config.height,
+                        bitmap: &mut window.gump_text_pass,
+                        truetype: window.ttf_atlas.as_mut().zip(window.ttf_gump_pass.as_mut()),
+                    },
+                    encoder,
+                    view,
                 );
-                // The same placement the icon above got, for the reason a
-                // window's caption shares its plate's: a count drawn at another
-                // scale slides off the picture it is counting.
-                gump_art::place(&mut text, cursor, magnify);
-                window
-                    .gump_text_pass
-                    .render_layer(&window.device, &window.queue, encoder, frame, &text);
             }
         }
         // The shard's tooltip for whatever the pointer is on, last of all so it
@@ -579,29 +601,207 @@ pub(crate) fn draw_gump_windows(
         // hover uses, so a pointer never sits on top of the first line it is
         // asking about.
         if !hover.is_empty() {
-            let step = tooltip_line_step(&resources.font_atlas);
+            let step = tooltip_line_step(
+                &resources.font_atlas,
+                resources.ttf_font.as_ref().map(|_| fonts.tooltip),
+            );
             let labels: Vec<_> = hover
                 .iter()
                 .enumerate()
-                .map(|(row, line)| openshard_client_render::text::GumpLabel {
-                    at: cursor.offset(gump_art::GumpPixel::new(
-                        TOOLTIP_OFFSET.x,
-                        TOOLTIP_OFFSET.y + step * row as i32,
-                    )),
-                    text: line,
-                    font: TOOLTIP_FONT,
-                    hue: openshard_protocol::wire::Hue::LABEL,
-                    clip: None,
+                .map(|(row, line)| {
+                    (
+                        openshard_client_render::text::GumpLabel {
+                            at: cursor.offset(gump_art::GumpPixel::new(
+                                TOOLTIP_OFFSET.x,
+                                TOOLTIP_OFFSET.y + step * row as i32,
+                            )),
+                            text: line.as_str(),
+                            font: TOOLTIP_FONT,
+                            hue: openshard_protocol::wire::Hue::LABEL,
+                            clip: None,
+                        },
+                        None,
+                    )
                 })
                 .collect();
-            let text = openshard_client_render::text::collect_gump(&labels, &resources.font_atlas);
-            window
-                .gump_text_pass
-                .render_layer(&window.device, &window.queue, encoder, frame, &text);
+            // At the cursor and **not magnified**: a tooltip is not part of any
+            // window, so `desk::WindowScale` has nothing to say about it — the
+            // lines are already laid out in gump pixels around the pointer, and
+            // the display's density is the only thing left to apply.
+            window_text(
+                WindowText {
+                    labels: &labels,
+                    at: gump_art::GumpPixel::new(0, 0),
+                    magnify: 1.0,
+                    density: frame.scale,
+                    size: fonts.tooltip,
+                },
+                resources.ttf_font.as_ref(),
+                &resources.font_atlas,
+                TextTarget {
+                    device: &window.device,
+                    queue: &window.queue,
+                    width: window.config.width,
+                    height: window.config.height,
+                    bitmap: &mut window.gump_text_pass,
+                    truetype: window.ttf_atlas.as_mut().zip(window.ttf_gump_pass.as_mut()),
+                },
+                encoder,
+                view,
+            );
         }
     } else {
         windows.drawn_windows.clear();
     }
+}
+
+/// One window's captions, and everything needed to put them on the screen.
+///
+/// A struct rather than seven arguments, and the fields are what
+/// `docs/text_sizes.md`'s D4 is made of: `magnify` and `density` are the two
+/// things a caption is scaled by, and the whole point is that they reach the
+/// *rasterizer* rather than the finished glyph.
+struct WindowText<'a> {
+    /// The captions in this window's own unmagnified gump pixels, each with
+    /// the box its row is cut to when it has one.
+    labels: &'a [(
+        openshard_client_render::text::GumpLabel<'a>,
+        Option<gump_art::Scissor>,
+    )],
+    /// Where the window's own corner sits, in gump pixels.
+    at: gump_art::GumpPixel,
+    /// How much bigger than its art the window draws — `desk::WindowScale`.
+    magnify: f32,
+    /// The display's own density, which the gump pass would otherwise apply in
+    /// its shader.
+    density: f32,
+    /// The size captions are drawn at, before either of the two above.
+    size: openshard_client_render::atlas::TextSize,
+}
+
+/// Where a window's captions go: the two passes and the device behind them.
+///
+/// Disjoint borrows of [`Screen`]'s own fields rather than the whole of it,
+/// because the caller is already holding one of its passes — a window's art
+/// is being drawn through `gump_pass` while this draws that window's text, and
+/// that is the ordering the whole loop exists for.
+struct TextTarget<'a> {
+    device: &'a wgpu::Device,
+    queue: &'a wgpu::Queue,
+    width: u32,
+    height: u32,
+    /// The `fonts.mul` pass, always present.
+    bitmap: &'a mut openshard_client_render::gump::GumpRenderer,
+    /// The TrueType atlas and the pass bound to its texture, present exactly
+    /// when a face was loaded.
+    truetype: Option<(
+        &'a mut openshard_client_render::atlas::TtfAtlas,
+        &'a mut openshard_client_render::gump::GumpRenderer,
+    )>,
+}
+
+/// Draw one window's captions, through whichever face this client is running.
+///
+/// **The two faces are placed differently on purpose**, and that is the whole
+/// of this function:
+///
+/// - `fonts.mul` is a bitmap face. Its glyphs are magnified the way the art
+///   beside them is — a caption drawn at a different scale from the plate it
+///   sits on would slide off it by a pixel per pixel of magnification — so the
+///   quads are collected in the window's own pixels and `gump::place` scales
+///   both position and size, exactly as the art pass did a moment ago.
+/// - A TrueType face has a real size. It is rasterized at
+///   `size × magnify × density` and drawn one texel to one pixel: the
+///   *position* still moves with the window's magnification, the glyph does
+///   not stretch with it. Blowing up a 14-pixel glyph to 28 is the soft,
+///   sawtoothed line `text::collect_gump_ttf`'s doc describes; asking
+///   `fontdue` for 28 is a 28-pixel glyph. See `docs/text_sizes.md`.
+///
+/// A row's scissor follows its label into whichever space that is, so a skill
+/// sheet's list is cut to its viewport either way.
+fn window_text(
+    text: WindowText<'_>,
+    font: Option<&openshard_uofiles::ttf_font::TtfFont>,
+    font_atlas: &openshard_client_render::atlas::FontAtlas,
+    target: TextTarget<'_>,
+    encoder: &mut wgpu::CommandEncoder,
+    view: &wgpu::TextureView,
+) {
+    if text.labels.is_empty() {
+        return;
+    }
+    let frame = |scale: f32| gump_art::Frame {
+        target: view,
+        width: target.width,
+        height: target.height,
+        scale,
+    };
+    let (Some(font), Some((atlas, pass))) = (font, target.truetype) else {
+        let mut quads = Vec::new();
+        for (label, scissor) in text.labels {
+            let mut line =
+                openshard_client_render::text::collect_gump(std::slice::from_ref(label), font_atlas);
+            // Cut in the window's own pixels, before the placement below
+            // magnifies what survived: a row and its viewport are both the
+            // sheet's own unmagnified coordinates, and cutting after would be
+            // cutting a glyph whose texel grid has already been stretched.
+            if let Some(scissor) = scissor {
+                scissor.cut(&mut line);
+            }
+            quads.extend(line);
+        }
+        gump_art::place(&mut quads, text.at, text.magnify);
+        target
+            .bitmap
+            .render_layer(target.device, target.queue, encoder, frame(text.density), &quads);
+        return;
+    };
+    let size = text.size.scaled(text.magnify * text.density);
+    if let Err(error) = atlas.add_or_reset(
+        font,
+        size,
+        text.labels.iter().flat_map(|(label, _)| label.text.chars()),
+    ) {
+        // `eprintln!` and a window drawn anyway, the same corner every other
+        // atlas cuts on a failure — see `docs/client.md`.
+        eprintln!("packing ttf glyphs: {error}");
+    }
+    // Window pixels to real ones, once: the window's own magnification and
+    // then the display's density, both applied to the *position* only.
+    let real = |point: gump_art::GumpPixel| {
+        gump_art::GumpPixel::new(
+            ((point.x as f32 * text.magnify + text.at.x as f32) * text.density).round() as i32,
+            ((point.y as f32 * text.magnify + text.at.y as f32) * text.density).round() as i32,
+        )
+    };
+    let mut quads = Vec::new();
+    for (label, scissor) in text.labels {
+        let mut line = openshard_client_render::text::collect_gump_ttf(
+            &[openshard_client_render::text::GumpLabel {
+                at: real(label.at),
+                ..*label
+            }],
+            atlas,
+            size,
+        );
+        if let Some(scissor) = scissor {
+            // The same box in the same space the glyphs are now in, so a row
+            // is cut where the list's edge actually is on the screen.
+            gump_art::Scissor {
+                at: real(scissor.at),
+                width: (scissor.width as f32 * text.magnify * text.density).round() as i32,
+                height: (scissor.height as f32 * text.magnify * text.density).round() as i32,
+            }
+            .cut(&mut line);
+        }
+        quads.extend(line);
+    }
+    if let Some(rows) = atlas.take_dirty() {
+        pass.upload_rows(target.queue, atlas.pixels(), rows);
+    }
+    // Not `density`: these quads are already in real pixels, so the shader's
+    // own multiply would apply it twice.
+    pass.render_layer(target.device, target.queue, encoder, frame(1.0), &quads);
 }
 
 /// The face a tooltip is drawn in — `fonts.mul`'s face 1, the same one every
@@ -621,7 +821,17 @@ const TOOLTIP_OFFSET: gump_art::GumpPixel = gump_art::GumpPixel { x: 14, y: 18 }
 /// in every face and no descender — plus two pixels so consecutive lines do not
 /// touch. The fallback is only reachable with a font atlas that packed no `M`,
 /// which is a broken `fonts.mul` rather than a case to be right about.
-fn tooltip_line_step(fonts: &openshard_client_render::atlas::FontAtlas) -> i32 {
+fn tooltip_line_step(
+    fonts: &openshard_client_render::atlas::FontAtlas,
+    truetype: Option<openshard_client_render::atlas::TextSize>,
+) -> i32 {
+    // A TrueType face has a size, and the step is that size plus the same two
+    // pixels of air: nothing has to be measured off a glyph, because the
+    // number the player asked for *is* the height. `fonts.mul` has no such
+    // number, which is what the `M` below is for.
+    if let Some(size) = truetype {
+        return size.pixels().round() as i32 + 2;
+    }
     fonts
         .glyph(TOOLTIP_FONT, b'M')
         .map_or(16, |sprite| i32::from(sprite.height) + 2)

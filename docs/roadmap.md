@@ -3487,21 +3487,25 @@ metric — see `BASELINE_SHARE`'s doc in `text.rs` for why (this crate never
 reads an `hhea` table) — worth revisiting if a real TrueType face ever reads
 visibly off its line.
 
-### Backlog: the Chat tab's size knob only reaches the classic face
+### ~~Backlog: the Chat tab's size knob only reaches the classic face~~ — built
 
-The HUD chat box (journal + compose line) now has a Chat tab in the dev
-window (`desk::Chat`, `desk::ChatScale`, `shell::chat_panel`): an integer
-upscale on `fonts.mul`'s own glyph quads (default 2×, `App::draw`'s
-`scaled_gump_quads`, nearest-sampled the same way a camera zoom step grows a
-world sprite), and a hue that tints the player's own compose line and caret
-without touching a journal row's own server-sent hue. It only reaches the
-classic path — `--ttf-font` still draws the chat box at the fixed
-`TTF_BASE_PIXEL_HEIGHT`, deliberately, because integer-upscaling an
-antialiased TTF glyph is exactly the blockiness `collect_screen_ttf` exists to
-avoid (see `scaled_gump_quads`'s doc). A real size knob for the TTF path would
-have to grow the atlas's own rasterization height instead of the finished
-quad — a second, differently-shaped feature, not built here because nobody
-has asked for a bigger *TrueType* chat yet, only a bigger classic one.
+The HUD chat box (journal + compose line) has a Chat tab in the dev window
+(`desk::Chat`, `desk::ChatScale`, `shell::chat_panel`): an integer upscale on
+`fonts.mul`'s own glyph quads (default 2×, `App::draw`'s `scaled_gump_quads`,
+nearest-sampled the same way a camera zoom step grows a world sprite), and a
+hue that tints the player's own compose line and caret without touching a
+journal row's own server-sent hue.
+
+That knob only ever reached the classic path, and this entry said a real one
+for the TrueType path "would have to grow the atlas's own rasterization
+height instead of the finished quad — a second, differently-shaped feature".
+That is what `docs/text_sizes.md` built: `TtfAtlas` is keyed by
+`(char, TextSize)` rather than baked at one height, so every kind of text has
+a **real pixel size** of its own (`desk::FontSizes` — speech, window, tooltip,
+stack count), fractional, rasterized at that size and never stretched. The
+Chat tab's TrueType half is four pixel sliders now; `ChatScale` stays an
+integer and stays `fonts.mul`-only, because a bitmap face has no continuous
+size to ask for.
 
 ### The reopening window, and the overlay that replaced the patch — see `client_window_state.md`
 

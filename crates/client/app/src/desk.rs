@@ -18,12 +18,13 @@
 //! [`Zoom`] is egui's `zoom_factor` — the HUD's own scale, on top of the
 //! monitor's `scale_factor`, which is the platform's business and is never
 //! saved (a file that pinned it would fight the compositor on the next screen).
-//! It is *not* the density the world's TTF text is baked at: that atlas is
-//! [`Chat::ttf_scale`]'s own multiple of `TTF_BASE_PIXEL_HEIGHT`, and the
-//! HUD's scale has no bearing on it.
+//! It is *not* the size the world's TTF text is drawn at: that is
+//! [`FontSizes`], a real pixel size per kind of text, and the HUD's scale has
+//! no bearing on it. See `docs/text_sizes.md`.
 
 use std::path::Path;
 
+use openshard_client_render::atlas::TextSize;
 use openshard_client_render::light;
 use serde::{Deserialize, Serialize};
 
@@ -400,91 +401,102 @@ impl<'de> Deserialize<'de> for ChatScale {
     }
 }
 
-/// How big a TrueType face's glyphs rasterize, as a multiple of
-/// [`crate::TTF_BASE_PIXEL_HEIGHT`], when `App::ttf_font` is set.
+/// A real pixel size for each kind of text this client draws through a
+/// TrueType face.
 ///
-/// [`ChatScale`]'s continuous twin, and the reason it need not be an integer
-/// the way that one is: `fonts.mul` has no continuous size to ask for and
-/// [`ChatScale::glyph_scale_factor`] upscales the *finished quad*,
-/// nearest-sampled, so a fractional factor would split a pixel across two —
-/// see that type's own doc. `fontdue` rasterizes a TrueType outline at
-/// whatever pixel height it is asked for, analytically, so there is no
-/// blockiness for a fractional multiple to introduce, and clamping this to
-/// whole numbers would only make the slider coarser for no reason.
+/// **Sizes, not scales** — `docs/text_sizes.md`, whose whole subject this is.
+/// The number in `client_ui.toml` is what reaches the rasterizer: eleven means
+/// eleven pixels tall, and a dense display multiplies it *before* the glyph is
+/// drawn rather than stretching the glyph afterwards. `fontdue` shades an
+/// outline analytically at whatever height it is asked for, so a fractional
+/// size costs nothing and lands where it says it does.
 ///
-/// Unlike `ChatScale`, this reaches past the chat box: overhead speech, the
-/// HUD's own speech line and every window's caption draw through the same one
-/// [`openshard_client_render::atlas::TtfAtlas`] this scales, because a
-/// TrueType face bakes one pixel size for all of them at once — see
-/// `openshard_uofiles::ttf_font`'s "One face, not ten" doc. It lives on
-/// [`Chat`] anyway, and not as a fourth field on [`Desk`] directly, because
-/// the Chat tab is where a player who finds `--ttf-font`'s text too small to
-/// read is already looking, and because the "back to the defaults" button
-/// there should undo this the same click it undoes [`ChatScale`] with.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TtfScale(f32);
-
-impl TtfScale {
-    /// Half `TTF_BASE_PIXEL_HEIGHT` and three times it — past which a
-    /// six-line journal stops fitting above the compose line the same way
-    /// [`ChatScale::MAX`] does.
-    pub const MIN: f32 = 0.5;
-    pub const MAX: f32 = 3.0;
-
-    /// Clamp into the range. Takes anything, including what a hand-edited
-    /// file offers, the same reason [`Zoom::new`] does.
-    pub fn new(factor: f32) -> Self {
-        if factor.is_nan() {
-            return Self(1.0);
-        }
-        Self(factor.clamp(Self::MIN, Self::MAX))
-    }
-
-    /// The multiplier on [`crate::TTF_BASE_PIXEL_HEIGHT`].
-    pub fn factor(self) -> f32 {
-        self.0
-    }
+/// One per *role*, and a role is what the text is rather than where it is
+/// drawn: a shard's hover text is a tooltip whether it is over the world or
+/// over a bag. Not one size with per-role offsets, because an offset is a
+/// scale again — the point is that a person can write `stack_count = 11.0` and
+/// get eleven pixels.
+///
+/// [`ChatScale`] is untouched by any of this and stays an integer: it upscales
+/// finished `fonts.mul` quads, and a bitmap face has no continuous size to ask
+/// for at all.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FontSizes {
+    /// A line over a head, and the HUD chat box — the same voice in two
+    /// places, so one size.
+    #[serde(with = "text_size")]
+    pub speech: TextSize,
+    /// Captions inside this client's own windows: a button's word, a shop's
+    /// row, a sheet's column.
+    #[serde(with = "text_size")]
+    pub window: TextSize,
+    /// The shard's hover text.
+    #[serde(with = "text_size")]
+    pub tooltip: TextSize,
+    /// The digits written on a pile — see `openshard_client_render`'s
+    /// `items::stack_label`. Smaller than the rest on purpose: it sits in the
+    /// corner of a 30-pixel icon, and it is a number *about* a thing rather
+    /// than something anybody said.
+    #[serde(with = "text_size")]
+    pub stack_count: TextSize,
 }
 
-impl Default for TtfScale {
+impl Default for FontSizes {
+    /// Sixteen for a voice, fourteen for a window, eleven for a count.
+    ///
+    /// Sixteen is where the client's one baked TrueType height used to sit, chosen to land
+    /// near `fonts.mul`'s own faces (roughly 8 to 14 pixels tall) with a line
+    /// of air above them. The other two are that size read down for text that
+    /// is denser on the screen than speech is: a window is full of captions,
+    /// and a count has an icon's corner to fit into.
     fn default() -> Self {
-        Self(1.0)
+        Self {
+            speech: TextSize::new(16.0),
+            window: TextSize::new(14.0),
+            tooltip: TextSize::new(14.0),
+            stack_count: TextSize::new(11.0),
+        }
     }
 }
 
-// The same reason [`Zoom`]'s pair exists: written and read as a bare number,
-// and built through [`TtfScale::new`] on the way in so a hand-edited `0` or
-// `4000` cannot reach the atlas.
-impl Serialize for TtfScale {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(serializer)
-    }
-}
+/// A [`TextSize`] as the bare number a person writes in the file.
+///
+/// A `with` shim rather than a second newtype beside
+/// [`openshard_client_render::atlas::TextSize`]: the clamping already lives on
+/// that type, and a `FontSize(f32)` here would be the same invariant written
+/// twice with the two free to disagree. Reading goes through `TextSize::new`,
+/// so a hand-edited `0.0` or `400.0` is clamped the way every other knob in
+/// this file clamps.
+mod text_size {
+    use openshard_client_render::atlas::TextSize;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-impl<'de> Deserialize<'de> for TtfScale {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(TtfScale::new(f32::deserialize(deserializer)?))
+    pub fn serialize<S: Serializer>(size: &TextSize, serializer: S) -> Result<S::Ok, S::Error> {
+        size.pixels().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<TextSize, D::Error> {
+        Ok(TextSize::new(f32::deserialize(deserializer)?))
     }
 }
 
 /// The HUD chat box's own look.
 ///
-/// Three knobs. [`Chat::hue`] is about the player's own line rather than the
+/// Two knobs. [`Chat::hue`] is about the player's own line rather than the
 /// shard's: it tints the compose line and its caret, never a journal row
 /// someone else's message already carries a hue of its own on the wire — see
-/// `App::draw`'s chat block for where that split is made. The two scales
-/// are about the same line's *size* instead, and only one of them ever
-/// draws anything: [`Chat::scale`] when `App::ttf_font` is unset,
-/// [`Chat::ttf_scale`] when it is — see [`TtfScale`]'s own doc for why they
-/// cannot both apply at once.
+/// `App::draw`'s chat block for where that split is made. [`Chat::scale`] is
+/// about that same line's *size*, and only while `App::ttf_font` is unset: a
+/// TrueType face is sized in pixels by [`Desk::fonts`] instead, which is a
+/// size rather than a multiple of the box's own and therefore does not live
+/// here. See `docs/text_sizes.md`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 #[derive(Default)]
 pub struct Chat {
     /// How big the classic face's glyphs draw — see [`ChatScale`].
     pub scale: ChatScale,
-    /// How big a TrueType face's glyphs draw instead — see [`TtfScale`].
-    pub ttf_scale: TtfScale,
     /// What the player's own compose line and caret are tinted, as a wire hue
     /// (`openshard_protocol::wire::Hue`'s own representation, not the type
     /// itself: this crate's `Deserialize` is what a hand-edited file can hand
@@ -613,6 +625,14 @@ pub struct Desk {
     pub light: Light,
     /// What the HUD chat box has been turned to — [`Chat`].
     pub chat: Chat,
+    /// How big each kind of TrueType text draws — [`FontSizes`].
+    ///
+    /// On [`Desk`] rather than on [`Chat`], where the old multiplier lived,
+    /// because these reach every piece of text this client draws and not one
+    /// box: a window's caption, a tooltip, the count on a pile. Remembered for
+    /// the same reason the window's own place is — a person who has found the
+    /// size they can read should not have to find it again every launch.
+    pub fonts: FontSizes,
     /// What the audio mixer has been turned to — [`Audio`].
     pub audio: Audio,
 }
@@ -627,6 +647,7 @@ impl Default for Desk {
             panel: None,
             zoom: Zoom::default(),
             window_scale: WindowScale::default(),
+            fonts: FontSizes::default(),
             light: Light::new(),
             window: None,
             chat: Chat::default(),
@@ -757,8 +778,13 @@ mod tests {
             },
             chat: Chat {
                 scale: ChatScale::new(3),
-                ttf_scale: TtfScale::new(1.5),
                 hue: 33,
+            },
+            fonts: FontSizes {
+                speech: TextSize::new(18.5),
+                window: TextSize::new(13.0),
+                tooltip: TextSize::new(12.5),
+                stack_count: TextSize::new(9.5),
             },
             audio: Audio {
                 effects: 0.25,
@@ -847,20 +873,49 @@ mod tests {
     #[test]
     fn a_file_without_a_window_scale_draws_at_the_arts_own_size() {
         let desk: Desk = toml::from_str("zoom = 1.0").unwrap();
-        assert_eq!(desk.window_scale.factor(), 1);
+        assert_eq!(desk.window_scale.factor(), 1.0);
     }
 
-    /// [`TtfScale`]'s own version of the same clamp — a hand-edited number
-    /// outside its range, or not a number at all, cannot reach
-    /// `Screen::sync_ttf_scale`.
+    /// The same clamp for a font size — a hand-edited number outside the
+    /// range, or not a number at all, cannot reach the rasterizer.
+    ///
+    /// `NaN` lands on the smallest size rather than on a default: it is the
+    /// key a glyph is packed under, and one `NaN` in an ordered map is a
+    /// comparison that answers `false` to everything.
     #[test]
-    fn a_hand_edited_ttf_scale_is_clamped_on_the_way_in() {
-        let desk: Desk = toml::from_str("[chat]\nttf_scale = 400.0").unwrap();
-        assert_eq!(desk.chat.ttf_scale.factor(), TtfScale::MAX);
-        let desk: Desk = toml::from_str("[chat]\nttf_scale = 0.0").unwrap();
-        assert_eq!(desk.chat.ttf_scale.factor(), TtfScale::MIN);
-        let desk: Desk = toml::from_str("[chat]\nttf_scale = nan").unwrap();
-        assert_eq!(desk.chat.ttf_scale.factor(), 1.0);
+    fn a_hand_edited_font_size_is_clamped_on_the_way_in() {
+        let desk: Desk = toml::from_str("[fonts]\nspeech = 400.0").unwrap();
+        assert_eq!(desk.fonts.speech.pixels(), TextSize::MAX);
+        let desk: Desk = toml::from_str("[fonts]\nspeech = 0.0").unwrap();
+        assert_eq!(desk.fonts.speech.pixels(), TextSize::MIN);
+        let desk: Desk = toml::from_str("[fonts]\nspeech = nan").unwrap();
+        assert_eq!(desk.fonts.speech.pixels(), TextSize::MIN);
+    }
+
+    /// A size a person wrote is the size that is drawn, to the fraction.
+    ///
+    /// The assertion that says this is a *size* and not a factor: 13.5 in the
+    /// file is 13.5 pixels at the rasterizer, with nothing multiplying it on
+    /// the way. See `docs/text_sizes.md`.
+    #[test]
+    fn a_font_size_is_pixels_and_survives_a_round_trip() {
+        let desk: Desk = toml::from_str("[fonts]\nstack_count = 13.5").unwrap();
+        assert_eq!(desk.fonts.stack_count.pixels(), 13.5);
+        let written = toml::to_string(&desk).unwrap();
+        assert!(written.contains("stack_count = 13.5"), "{written}");
+    }
+
+    /// A file written before font sizes existed opens with the defaults, and
+    /// an old `ttf_scale` in it is ignored rather than read as a size.
+    ///
+    /// It was a multiplier of a base this file no longer has, so there is
+    /// nothing to migrate it *to* — see `docs/text_sizes.md`'s P2.
+    #[test]
+    fn an_old_ttf_scale_is_ignored_and_the_rest_of_the_file_survives() {
+        let desk: Desk = toml::from_str("zoom = 1.25\n[chat]\nttf_scale = 2.0\nscale = 3").unwrap();
+        assert_eq!(desk.fonts, FontSizes::default());
+        assert_eq!(desk.chat.scale.glyph_scale_factor(), 3);
+        assert_eq!(desk.zoom.hud_scale_factor(), 1.25);
     }
 
     /// A file written by a build that predates a field must not lose the rest of

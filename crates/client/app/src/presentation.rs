@@ -46,7 +46,6 @@ use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 use openshard_uofiles::map::Map;
 
-use crate::TTF_BASE_PIXEL_HEIGHT;
 use crate::app::App;
 use crate::chat::draw_chat_and_speech;
 use crate::crowd::{Crowd, Who};
@@ -1786,6 +1785,10 @@ impl App {
         // gathered before the window is borrowed below, since `App::chat_style`
         // also reads the whole of `self`.
         let chat_style = self.chat_style();
+        // The player's own sizes, read before the window is borrowed for the
+        // reason the line above is: they are `self.desk`'s, and the window is
+        // part of `self`.
+        let fonts = self.desk.fonts;
         // What the camera has walked onto since the atlases were last grown.
         // Gathered before the window is borrowed, and not inside the borrow: it
         // reads the whole of `self`, and the window is part of it.
@@ -1852,13 +1855,6 @@ impl App {
         let Some(window) = self.window.as_mut() else {
             return;
         };
-        // Ahead of `ready_atlases`, and not folded into it: this is a
-        // different atlas, keyed by a pixel height rather than by what the
-        // camera has walked onto, and a no-op far more often than not — see
-        // `Screen::sync_ttf_scale`'s own doc.
-        let ttf_pixel_height =
-            TTF_BASE_PIXEL_HEIGHT * chat_style.ttf_scale.factor() * window.window.scale_factor() as f32;
-        window.sync_ttf_scale(&self.resources.hue_ramp, ttf_pixel_height);
         let atlases_started = Instant::now();
         let (repacked, atlas_work) = ready_atlases(
             &mut self.resources,
@@ -2017,18 +2013,22 @@ impl App {
         // the anchor. Both live in the render crate beside the placement they
         // are measured against, so a count cannot drift off the picture it
         // belongs to.
-        overhead.extend(
-            items::labels(
-                &self.world.presentation.items,
-                &camera,
-                &self.resources.tiledata,
-                &self.world.presentation.tile_animations,
-                &window.atlases.statics,
-                &cutaway,
-            )
-            .into_iter()
-            .map(|(anchor, text)| (anchor, text, items::STACK_COUNT_FONT, Hue::STACK_COUNT)),
-        );
+        //
+        // Its own list rather than another `overhead` entry, because a count
+        // is its own *role*: it is drawn in `FontSizes::stack_count` and
+        // speech is drawn in `FontSizes::speech`, and one list can only be
+        // handed to one size — see `docs/text_sizes.md`'s D1a.
+        let counts: Vec<(ViewPixel, String, Font, Hue)> = items::labels(
+            &self.world.presentation.items,
+            &camera,
+            &self.resources.tiledata,
+            &self.world.presentation.tile_animations,
+            &window.atlases.statics,
+            &cutaway,
+        )
+        .into_iter()
+        .map(|(anchor, text)| (anchor, text, items::STACK_COUNT_FONT, Hue::STACK_COUNT))
+        .collect();
         // A combat number follows the same mobile anchor as speech, but its
         // y-coordinate is aged every frame so it rises smoothly rather than
         // moving only when the network sends another packet.
@@ -2195,75 +2195,81 @@ impl App {
         // `text::ScreenLabel`'s doc for why the pass and `hud_quads`'s own
         // comment for why it has to be one call.
         let encode_started = Instant::now();
-        let (text_quads, screen_speech): (Vec<SpriteQuad>, Vec<text::ScreenLabel<'_>>) =
-            match &self.resources.ttf_font {
-                Some(font) => {
-                    let atlas = window
-                        .ttf_atlas
-                        .as_mut()
-                        .expect("create_window builds ttf_atlas whenever ttf_font is set");
-                    // Unlike `font_atlas`, `ttf_atlas` is grown a line at a time:
-                    // there is no bounded "whole file" to pack up front for a
-                    // face that answers to all of Unicode, so this asks it to
-                    // rasterize whatever of this frame's speech it has not seen
-                    // yet, the way `window.atlases` grows for graphics newly on
-                    // screen.
-                    if let Err(error) =
-                        atlas.add(font, overhead.iter().flat_map(|(.., line, _, _)| line.chars()))
-                    {
-                        // `eprintln!` and a frame that draws anyway, the same
-                        // corner `AtlasError::Full` already cuts for the map's
-                        // own atlases — see docs/client.md. Unreachable in
-                        // practice: a shard's whole spoken character set is a
-                        // few hundred glyphs at most, nowhere near one 2048
-                        // texture.
-                        eprintln!("packing ttf glyphs: {error}");
-                    }
-                    let screen_speech = overhead
-                        .iter()
-                        .map(|(anchor, line, _font, hue)| {
-                            // `to_viewport` and not the projection directly:
-                            // it is the one place that already undoes both a
-                            // magnifying zoom's vertex-shader scale *and* a
-                            // minifying one's blit-shrink with the same number
-                            // — see its own doc. `viewport`'s own corner is
-                            // added because `to_viewport` answers in pixels of
-                            // the rect the world goes into, not the surface.
-                            let real = camera.to_viewport(*anchor);
-                            text::ScreenLabel {
-                                anchor: GumpPixel::new(
-                                    viewport.x as i32 + real.x.round() as i32,
-                                    viewport.y as i32 + real.y.round() as i32,
-                                ),
-                                text: line.as_str(),
-                                hue: *hue,
-                            }
-                        })
-                        .collect();
-                    (Vec::new(), screen_speech)
-                }
-                None => {
-                    let labels: Vec<Label<'_>> = overhead
-                        .iter()
-                        .map(|(anchor, line, font, hue)| Label {
-                            anchor: *anchor,
+        #[allow(clippy::type_complexity)]
+        let (text_quads, screen_speech, screen_counts): (
+            Vec<SpriteQuad>,
+            Vec<text::ScreenLabel<'_>>,
+            Vec<text::ScreenLabel<'_>>,
+        ) = match self.resources.ttf_font.is_some() {
+            true => {
+                // Nothing is packed here any more. Growing the atlas needs
+                // the *size* each line is drawn at, and the sizes live with
+                // the draw that uses them — `draw_chat_and_speech` grows
+                // both roles and draws both, so there is one place that
+                // knows what was rasterized at what. This only projects.
+                //
+                // `to_viewport` and not the projection directly: it is the
+                // one place that already undoes both a magnifying zoom's
+                // vertex-shader scale *and* a minifying one's blit-shrink
+                // with the same number — see its own doc. `viewport`'s own
+                // corner is added because `to_viewport` answers in pixels
+                // of the rect the world goes into, not the surface.
+                let project = |anchor: &ViewPixel| {
+                    let real = camera.to_viewport(*anchor);
+                    GumpPixel::new(
+                        viewport.x as i32 + real.x.round() as i32,
+                        viewport.y as i32 + real.y.round() as i32,
+                    )
+                };
+                // A named function rather than a closure: a closure that
+                // both takes a borrow and returns something borrowed from
+                // it cannot state that the two are the same lifetime, and
+                // this one is handed two different lists.
+                fn screen_of<'a>(
+                    list: &'a [(ViewPixel, String, Font, Hue)],
+                    project: impl Fn(&ViewPixel) -> GumpPixel,
+                ) -> Vec<text::ScreenLabel<'a>> {
+                    list.iter()
+                        .map(|(anchor, line, _font, hue)| text::ScreenLabel {
+                            anchor: project(anchor),
                             text: line.as_str(),
-                            font: *font,
                             hue: *hue,
-                            // Nearer than anything the world draws, rather than
-                            // an `Order` of its own: speech reads as an overlay
-                            // above whoever said it in every reference client,
-                            // and there is no real case here of a wall in front
-                            // of the speaker hiding it that a viewer would want
-                            // honoured. Worth revisiting with a
-                            // `depth::text_priority_z` alongside the mobile's
-                            // own if that ever stops being true.
-                            depth: 0.0,
                         })
-                        .collect();
-                    (text::collect(&labels, &self.resources.font_atlas), Vec::new())
+                        .collect()
                 }
-            };
+                (
+                    Vec::new(),
+                    screen_of(&overhead, project),
+                    screen_of(&counts, project),
+                )
+            }
+            false => {
+                let labels: Vec<Label<'_>> = overhead
+                    .iter()
+                    .chain(counts.iter())
+                    .map(|(anchor, line, font, hue)| Label {
+                        anchor: *anchor,
+                        text: line.as_str(),
+                        font: *font,
+                        hue: *hue,
+                        // Nearer than anything the world draws, rather than
+                        // an `Order` of its own: speech reads as an overlay
+                        // above whoever said it in every reference client,
+                        // and there is no real case here of a wall in front
+                        // of the speaker hiding it that a viewer would want
+                        // honoured. Worth revisiting with a
+                        // `depth::text_priority_z` alongside the mobile's
+                        // own if that ever stops being true.
+                        depth: 0.0,
+                    })
+                    .collect();
+                (
+                    text::collect(&labels, &self.resources.font_atlas),
+                    Vec::new(),
+                    Vec::new(),
+                )
+            }
+        };
         // Uploads whatever the `add` above (and the HUD's own, further down
         // this frame) packed fresh — see `Screen::upload_ttf_dirty`'s doc for
         // why this is the one place both call through rather than each taking
@@ -2352,6 +2358,7 @@ impl App {
             self.input.pointer_gump,
             &hover,
             window_scale,
+            fonts,
             self.shell.as_ref(),
             window,
             &mut encoder,
@@ -2394,7 +2401,9 @@ impl App {
             &mut encoder,
             &view,
             chat_style,
+            fonts,
             &screen_speech,
+            &screen_counts,
             &mut text_quads,
         );
         let encode_cost = encode_started.elapsed();
