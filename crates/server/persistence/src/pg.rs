@@ -971,7 +971,7 @@ impl Store for PgStore {
         let rows = client
             .query(
                 "SELECT id, facet, x, y, width, height, max_count, \
-                 respawn_secs, remaining_secs, creatures FROM spawners",
+                 respawn_secs, remaining_secs, creatures FROM spawners ORDER BY id",
                 &[],
             )
             .await

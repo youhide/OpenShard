@@ -535,9 +535,39 @@ connection takes the mobile off every screen that had it.
   saves the region, its creatures and the timer as the **seconds still to wait**,
   not a tick count (which resets at boot) or a wall-clock time (the tick reads no
   clock) — so downtime pauses the timer rather than eating it, the semantics chosen
-  for a rare spawn. Registering a region twice replaces it rather than stacking a
-  second, and after a restart the regions come from the store rather than being
-  re-laid, so a re-populate is not needed and the timers hold.
+  for a rare spawn. Registering the *same* region twice lays one rather than
+  stacking a second, and after a restart the regions come from the store rather
+  than being re-laid, so a re-populate is not needed and the timers hold. "The same
+  region" is the whole region — box, creatures, ceiling and pace
+  (`Spawner::is_the_same_region`), not the box alone: Britannia's regions overlap,
+  and matching on the box read 120 of the 1,430 shipped regions as re-registrations
+  of the region already there and dropped them, which is how the forest north-east
+  of Britain came to hold orcs and no skeletons.
+### Backlog: a spawn region's owner link is its index, not its id
+
+`maintain_spawners` tags each creature `SpawnedBy(index as u32)` — its region's
+position in `World::spawners` — while `SpawnerRecord` persists `Spawner::id`, which
+`register_spawner` hands out from `next_spawner_id`. The two agree only by
+accident: a world laid once from empty has `id == index + 1`, and `restore_spawners`
+pushes the records back in the order the store returns them, so the ownership
+survives a restart. Nothing enforces either half. `clear_spawners` empties the
+vector without rewinding `next_spawner_id`, and the two stores' `spawners()` had no
+`ORDER BY id` until this was written down (they have one now), so a re-ordered load
+would have re-pointed every live creature at a neighbouring region — some regions
+permanently at their ceiling and never spawning again, others over their ceiling
+with no way to notice. The fix is to key `SpawnedBy` by the id and count by the id,
+which needs a one-time migration of the saved link (`spawned_by` in `MobileRecord`)
+because the values on disk are indices.
+
+### Backlog: the playground never lays the shipped content
+
+`e2e/shard` calls `run_shard(..., &[])`, so `openshard-playground` seeds no verbs: a
+world it opens holds exactly what the database holds. A shard whose save predates a
+content fix (this one, say) does not pick the fix up by restarting — the regions
+come from the store, and only `.admin` → Populate, or `openshard-server --seed
+populate:felucca`, lays what is new. Worth a flag on the playground rather than a
+thing to remember.
+
 - [x] **The save is the whole world (schema v5), the Sphere/ServUO model.** Every
   live NPC mobile — townsfolk, vendors with their priced stock, spawner creatures
   with their current wounds and `SpawnedBy` link (`MobileRecord`) — and every

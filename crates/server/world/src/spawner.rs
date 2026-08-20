@@ -74,7 +74,8 @@ pub struct SpawnArea {
 /// A region the tick keeps populated.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Spawner {
-    /// Its stable id — the key it persists and is de-duplicated by.
+    /// Its stable id — the key it persists under. Not what a re-`populate`
+    /// de-duplicates on; that is [`Spawner::is_the_same_region`].
     pub id: u32,
     /// Where it spawns.
     pub area: SpawnArea,
@@ -92,6 +93,22 @@ pub struct Spawner {
 }
 
 impl Spawner {
+    /// Whether this is the *same region* as `other` — everything the content
+    /// declares, and nothing the engine assigned: the box, the creatures, the
+    /// ceiling and the pace, but not the id and not the live timer.
+    ///
+    /// This is the identity a re-`populate` de-duplicates on. The box alone is not
+    /// it: Britannia's regions overlap, and two regions over one box with different
+    /// creature lists are two regions, not one laid twice. See
+    /// [`World::register_spawner`](crate::World).
+    #[must_use]
+    pub fn is_the_same_region(&self, other: &Self) -> bool {
+        self.area == other.area
+            && self.max_count == other.max_count
+            && self.respawn_delay == other.respawn_delay
+            && self.creatures == other.creatures
+    }
+
     /// A region that starts able to spawn immediately.
     pub fn new(
         id: u32,

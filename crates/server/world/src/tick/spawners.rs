@@ -116,19 +116,25 @@ impl World {
         }
     }
 
-    /// Drop every spawn region and despawn the creatures they were maintaining —
-    /// Register a spawn region, giving it a fresh id and replacing any earlier one
-    /// over the same box. Re-running "populate" does not stack a second
-    /// spawner on a region — it re-places it, with a reset timer — and after a
-    /// restart the regions come from the store, not from here, so their timers hold.
+    /// Register a spawn region, giving it a fresh id — unless the same region is
+    /// already standing, in which case this is a no-op. Re-running "populate" does
+    /// not stack a second copy of a region, and after a restart the regions come
+    /// from the store, not from here, so their timers hold.
     pub(super) fn register_spawner(&mut self, mut spawner: crate::spawner::Spawner) {
-        // A region already standing over this box wins, and keeps its timer. That
-        // timer may have come from the database with hours still to wait, and the
-        // boot re-populate (or a second staff click) must not reset it — a hard
-        // reset is Clear, then Populate. This is also what lets the
-        // `populate` run on every boot, to re-place the townsfolk it does not save,
-        // without stacking a second spawner or resetting the restored ones.
-        if self.spawners.iter().any(|s| s.area == spawner.area) {
+        // The same region already standing wins, and keeps its timer. That timer
+        // may have come from the database with hours still to wait, and the boot
+        // re-populate (or a second staff click) must not reset it — a hard reset is
+        // Clear, then Populate. This is also what lets the `populate` run on every
+        // boot, to re-place the townsfolk it does not save, without stacking a
+        // second spawner or resetting the restored ones.
+        //
+        // "The same region" is the whole region, not its box. Britannia's regions
+        // overlap by design: an orc camp and a patch of undead share one 60×60
+        // square north-east of Britain, and 74 boxes in the shipped data carry two
+        // regions each. Matching on [`SpawnArea`] alone read those as one region
+        // re-registered and dropped 120 of them on the floor — the forest kept its
+        // orcs and lost its skeletons, silently, because nothing said no.
+        if self.spawners.iter().any(|s| s.is_the_same_region(&spawner)) {
             return;
         }
         spawner.id = self.next_spawner_id;

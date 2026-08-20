@@ -10036,6 +10036,96 @@ fn re_registering_a_region_keeps_the_first_and_its_timer() {
     );
 }
 
+/// Two regions may share one box, and both must be laid.
+///
+/// Britannia's converted spawn data has 74 boxes carrying two regions each — an
+/// orc camp and a patch of undead over the same 60×60 north-east of Britain is the
+/// one a player notices. De-duplicating on the box alone read the second as the
+/// first laid twice and dropped it, taking the skeletons out of the forest with no
+/// error anywhere. What a re-populate must not stack is the *same* region.
+#[test]
+fn two_different_regions_over_one_box_are_both_laid() {
+    use crate::spawner::{CreatureTemplate, SpawnArea, Spawner};
+
+    let mut world = world();
+    let area = SpawnArea {
+        x: 100,
+        y: 100,
+        width: 60,
+        height: 60,
+        facet: Facet(0),
+    };
+    let creature = |body: u16| CreatureTemplate {
+        fame: 0,
+        karma: 0,
+        body: openshard_protocol::wire::Graphic(body),
+        hue: openshard_protocol::wire::Hue(0),
+        hits: 10,
+        notoriety: openshard_protocol::mobile::Notoriety::Murderer,
+        damage: 1,
+        resistance: openshard_protocol::world::PhysicalResistance::new(0),
+        swing: 0,
+        sight: Sight(0),
+        aggression: Aggression::from_bits(2),
+        beat: 0,
+        ranged: None,
+        ranged_kind: DamageType::Physical,
+        wander: false,
+        skills: Vec::new(),
+    };
+    // An orc camp, and the undead patch that overlaps it.
+    let orcs = Spawner::new(0, area, vec![creature(0x0011)], 5, 40);
+    let undead = Spawner::new(0, area, vec![creature(0x0032)], 7, 40);
+    world.register_spawner(orcs.clone());
+    world.register_spawner(undead.clone());
+    assert_eq!(
+        world.spawners.len(),
+        2,
+        "a second region over the same box is a region, not a re-registration"
+    );
+    // And a re-populate still stacks neither of them.
+    world.register_spawner(orcs);
+    world.register_spawner(undead);
+    assert_eq!(
+        world.spawners.len(),
+        2,
+        "re-laying the same two regions stacks nothing"
+    );
+}
+
+/// Every region the tree ships reaches the world.
+///
+/// The engine gets its regions in one flat stream and answers each with a yes or a
+/// silent no, so a de-duplication rule that is too coarse costs content and says
+/// nothing. This pins the count: the only regions the shipped data loses are the
+/// ones that are byte-for-byte the same region written twice.
+#[test]
+fn every_region_the_tree_ships_reaches_the_world() {
+    let shipped: Vec<crate::spawner::Spawner> = crate::spawner::shipped()
+        .into_iter()
+        .flat_map(|set| set.spawners)
+        .collect();
+    assert!(!shipped.is_empty(), "the tree ships no spawn regions at all");
+
+    // What the data itself says is distinct, counted the way the world will.
+    let mut distinct: Vec<&crate::spawner::Spawner> = Vec::new();
+    for spawner in &shipped {
+        if !distinct.iter().any(|kept| kept.is_the_same_region(spawner)) {
+            distinct.push(spawner);
+        }
+    }
+
+    let mut world = world();
+    for spawner in shipped.iter().cloned() {
+        world.register_spawner(spawner);
+    }
+    assert_eq!(
+        world.spawners.len(),
+        distinct.len(),
+        "the world dropped regions the data means to be different"
+    );
+}
+
 #[test]
 fn a_vendor_and_its_priced_stock_survive_a_restart() {
     use openshard_state::components::{Price, Vendor};

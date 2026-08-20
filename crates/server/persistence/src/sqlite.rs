@@ -1044,7 +1044,7 @@ impl Store for SqliteStore {
             let mut statement = guard
                 .prepare(
                     "SELECT id, facet, x, y, width, height, max_count, \
-                     respawn_secs, remaining_secs, creatures FROM spawners",
+                     respawn_secs, remaining_secs, creatures FROM spawners ORDER BY id",
                 )
                 .map_err(database)?;
             let rows = statement
