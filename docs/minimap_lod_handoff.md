@@ -59,6 +59,24 @@ a second mutable radar texture nothing draws is a trap rather than a fallback.
 seams, the coarse stand-in under a built chunk, the marker's shape and place, and
 the backdrop's edge.
 
+## One defect the phases left behind
+
+The window drew a black square and never anything else, on a shard whose
+`radarcol.mul` and map both loaded. Two demands feed `RadarWorkQueue` — a
+mutation's dirty keys, and a window asking for ground it is about to draw — and
+reconciliation only knew about the first: `pending.retain(|key| cache.is_dirty(key))`
+dropped every request the minimap had just made, because demand for never-built
+ground is not an invalidation. The producer was handed an empty batch every
+frame, no chunk was ever published, `select_ready` had nothing to answer with,
+and the pass fell through to its `UNKNOWN` backdrop for as long as the window
+stayed open.
+
+`refresh_dirty` is now `reconcile`, and it keeps a pending key while the key is
+still worth building: the facet's current revision, and no complete product
+published for it yet. The second half matters as much as the first — a window
+re-asks for all of its visible chunks every frame, so keeping every current key
+would rebuild ready terrain forever.
+
 ## Next work
 
 1. **Phase 2.2 has no caller.** `RadarCache::invalidate_tile` is written and

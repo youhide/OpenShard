@@ -532,14 +532,31 @@ impl RadarWorkQueue {
         true
     }
 
-    /// Reconcile pending work with the cache's current dirty snapshot.
+    /// Reconcile pending work with what the cache already holds.
     ///
-    /// Superseded pending keys are discarded before admitting current work.
+    /// Two demands feed this queue, and one rule prunes both: work a mutation
+    /// named through [`RadarCache::invalidate_tile`], and work a window asked
+    /// for through [`Self::request`] because it is about to draw ground no
+    /// product has ever covered. A pending key survives only while it still
+    /// names something worth building — the facet's current source revision,
+    /// and no complete product published for it yet.
+    ///
+    /// Both halves of that test are load-bearing. Keeping only dirty keys
+    /// would discard every request a window made, since demand for unbuilt
+    /// ground is never an invalidation, and the minimap would wait forever on
+    /// a queue that emptied itself each frame. Keeping every current key would
+    /// rebuild ready terrain for as long as the window stayed open, because a
+    /// window re-asks for all of its visible chunks every frame.
+    ///
     /// An already-running old revision is left to finish safely: publication
     /// rejects it against the cache revision, rather than attempting to cancel
     /// a producer that may already be reading its immutable source snapshot.
-    pub fn refresh_dirty(&mut self, cache: &RadarCache) {
-        self.pending.retain(|key| cache.is_dirty(*key));
+    pub fn reconcile(&mut self, cache: &RadarCache) {
+        // `get` answers `None` for a superseded revision as well as for a key
+        // never built, so the revision is tested on its own: a stale pending
+        // key has to go, not be kept because no product answers to it.
+        self.pending
+            .retain(|key| key.revision == cache.revision(key.facet) && cache.get(*key).is_none());
         for key in cache.dirty_keys() {
             self.request(key);
         }
@@ -563,7 +580,7 @@ impl RadarWorkQueue {
     ///
     /// Results not dispatched by this queue are refused.  A result made stale
     /// by a later mutation still releases its slot, but [`RadarCache::publish`]
-    /// rejects the pixels; a later [`Self::refresh_dirty`] queues the newer
+    /// rejects the pixels; a later [`Self::reconcile`] queues the newer
     /// source key.
     pub fn finish(&mut self, cache: &mut RadarCache, chunk: RadarChunk) -> bool {
         let key = chunk.key();
@@ -581,7 +598,7 @@ impl RadarWorkQueue {
     /// ready. Without it a slot handed out is a slot lost, and enough of them
     /// silently fill `max_queued` until no terrain is ever requested again.
     /// A key still named by the cache's dirty set is re-queued by the next
-    /// [`Self::refresh_dirty`].
+    /// [`Self::reconcile`].
     pub fn abandon(&mut self, key: RadarChunkKey) -> bool {
         self.in_flight.remove(&key)
     }
@@ -1617,7 +1634,7 @@ mod tests {
         let mut cache = RadarCache::default();
         let mut queue = RadarWorkQueue::new(4, 1).expect("non-zero limits");
         cache.invalidate_tile(facet, (0, 0), 0).expect("a revision");
-        queue.refresh_dirty(&cache);
+        queue.reconcile(&cache);
         let key = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
         assert_eq!(queue.take_for_producer(), vec![key]);
 
@@ -1630,7 +1647,7 @@ mod tests {
         assert!(!queue.finish(&mut cache, undispatched));
 
         cache.invalidate_tile(facet, (0, 0), 0).expect("new revision");
-        queue.refresh_dirty(&cache);
+        queue.reconcile(&cache);
         let stale_key = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
         assert_eq!(queue.take_for_producer(), vec![stale_key]);
         cache.invalidate_tile(facet, (0, 0), 0).expect("newer revision");
@@ -1645,7 +1662,7 @@ mod tests {
             "the rejected job released its slot"
         );
 
-        queue.refresh_dirty(&cache);
+        queue.reconcile(&cache);
         let current_key = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
         assert_eq!(queue.take_for_producer(), vec![current_key]);
         let current =
@@ -1654,6 +1671,42 @@ mod tests {
         assert_eq!(
             cache.get(current_key).expect("current product").pixels()[0],
             WHITE
+        );
+    }
+
+    /// The exact sequence one minimap frame runs: ask for every chunk the
+    /// window is about to draw, reconcile, dispatch what is left.
+    ///
+    /// Regression. Reconciliation used to keep only the cache's dirty keys,
+    /// and demand for never-built ground is not an invalidation — so a
+    /// window's own request was thrown away between being made and being
+    /// dispatched, the producer was handed nothing on every frame, and the
+    /// minimap drew its `UNKNOWN` backdrop forever.
+    #[test]
+    fn a_window_request_survives_reconciliation_until_its_product_lands() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::default();
+        let mut queue = RadarWorkQueue::new(4, 1).expect("non-zero limits");
+        let key = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+
+        assert!(queue.request(key));
+        queue.reconcile(&cache);
+        assert_eq!(
+            queue.take_for_producer(),
+            vec![key],
+            "ground no product covers is work to do, not a superseded key"
+        );
+
+        let built = RadarChunk::new(key, vec![GREEN; chunk_pixel_count()]).expect("complete product");
+        assert!(queue.finish(&mut cache, built));
+
+        // The frame after: the window asks for the same chunk again, because
+        // it asks for all of its visible chunks every frame.
+        assert!(queue.request(key));
+        queue.reconcile(&cache);
+        assert!(
+            queue.take_for_producer().is_empty(),
+            "terrain already ready is not rebuilt for as long as the window stays open"
         );
     }
 }

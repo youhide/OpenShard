@@ -1940,7 +1940,7 @@ impl App {
                 self.radar_queue
                     .request(self.radar_cache.key(region.facet, 0, coord));
             }
-            self.radar_queue.refresh_dirty(&self.radar_cache);
+            self.radar_queue.reconcile(&self.radar_cache);
             for key in self.radar_queue.take_for_producer() {
                 // A derived level is never dispatched: it is reduced from its
                 // four children the moment the last of them lands, below. What
