@@ -245,6 +245,16 @@ impl World {
             });
         }
         gm::notify(&mut self.state, actor, &format!("Admin: {verb}."));
+        // A reply button takes the gump off the screen at the client's end —
+        // that is what `GumpButton::Reply` *is* on the wire, not a client
+        // misbehaving — so a menu meant to survive its own button has to be
+        // drawn again from this side. The operator clicks these verbs in runs
+        // (populate, then decorate, then regions), and a menu that closes after
+        // each one costs a `.admin` between every pair.
+        //
+        // `open_menu` closes before it draws, so the re-draw replaces the window
+        // rather than stacking a second copy on a client that kept the first.
+        crate::admin::open_menu(&mut self.state, actor);
     }
 }
 

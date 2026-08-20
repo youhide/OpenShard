@@ -9294,6 +9294,26 @@ fn the_deco_button_emits_the_pack_verb() {
 }
 
 #[test]
+fn a_pressed_button_draws_the_menu_again() {
+    // A reply button closes the gump at the client's end, so a menu that is
+    // meant to stay up is one the shard re-draws on every press. Without this
+    // the operator pays a `.admin` between every two verbs.
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let _ = packets_for(&mut world, gm);
+
+    world.queue(admin_response(gm, 22)); // Decorate Felucca
+    world.tick(now);
+
+    let packets = packets_for(&mut world, gm);
+    assert!(
+        packets.iter().any(|packet| packet[0] == 0xB0),
+        "the menu was drawn again after the button"
+    );
+}
+
+#[test]
 fn the_populate_button_emits_an_admin_action_for_the_pack() {
     // The engine holds no spawn data now: the button emits a verb the script
     // pack acts on. Here we assert the verb reaches the bus; the pack turning

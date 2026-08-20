@@ -252,6 +252,18 @@ impl App {
                     .remove(&crate::windows::WindowSubject::Vendor(open.container));
             }
         }
+        // And the same for a dialog, for the same reason one layer over: a reply
+        // button closes the window at this end (see `App::answer_gump`), so a
+        // shard that means its menu to survive the click sends the `0xB0`
+        // again — the admin menu does exactly that. The overlay entry is a
+        // prediction that the window is gone, and a fresh `0xB0` is the shard
+        // saying it is not; without this the re-drawn gump would be suppressed
+        // until the view forgot it, which for a re-opened gump is never.
+        if let ServerPacket::GumpDisplay(display) = packet {
+            self.windows
+                .locally_closed
+                .remove(&crate::windows::WindowSubject::Dialog(display.gump_id));
+        }
         // A `0x20` is authoritative for the locally controlled body even if a
         // caller delivers it as an ordinary mutation rather than through the
         // socket thread's `link::fold`.  In particular, combat retaliation is
