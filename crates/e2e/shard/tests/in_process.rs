@@ -34,7 +34,7 @@ async fn a_client_enters_the_world_with_no_socket_anywhere() {
     // The handle is held for the length of the test: dropping it stops the
     // shard, and `stopping_a_shard_ends_its_thread_and_hangs_up` below is where
     // that is the subject rather than the housekeeping.
-    let (dial, _shard) = in_process::spawn(stock_config);
+    let (dial, _shard) = in_process::spawn(stock_config, Vec::new());
 
     let (mut socket, mut view) = tokio::time::timeout(WAIT, enter_world_with(dial, plan(), version()))
         .await
@@ -100,7 +100,7 @@ async fn stopping_a_shard_ends_its_thread_and_hangs_up() {
     // saved (`run_shard` returns after the last write, and `stop` joins), and
     // the client's zero read proves the same word reached the connection task,
     // which is a different loop on the other side of the gate.
-    let (dial, shard) = in_process::spawn(stock_config);
+    let (dial, shard) = in_process::spawn(stock_config, Vec::new());
 
     let (mut socket, _view) = tokio::time::timeout(WAIT, enter_world_with(dial, plan(), version()))
         .await
@@ -142,7 +142,7 @@ async fn a_stop_tells_the_player_before_it_hangs_up() {
     // let go one line too early — swallows the line without failing anything
     // else. Checking only that the text arrived would pass on a machine fast
     // enough for the bytes to win the race, and fail on someone else's.
-    let (dial, shard) = in_process::spawn(stock_config);
+    let (dial, shard) = in_process::spawn(stock_config, Vec::new());
 
     let (mut socket, _view) = tokio::time::timeout(WAIT, enter_world_with(dial, plan(), version()))
         .await
@@ -196,7 +196,7 @@ async fn dialling_a_shard_that_has_stopped_gets_a_closed_pipe() {
     // id was minted and the world told about a session that will never speak.
     // What this one is for is the whole path — that a dial after a stop *ends*,
     // by whichever mechanism, rather than hanging until a deadline.
-    let (dial, shard) = in_process::spawn(stock_config);
+    let (dial, shard) = in_process::spawn(stock_config, Vec::new());
 
     // Cloned before the stop, because that is the case: something took a dialler
     // while the shard was up and still holds it afterwards.

@@ -66,6 +66,12 @@ const PIPE: usize = 64 * 1024;
 /// because the shard's future holds a V8 isolate and is not `Send`, and a
 /// current-thread runtime on it, because that is what the binary does too.
 ///
+/// `seed` is the admin verbs to send the shard once, before the first tick — the
+/// binary's `--seed`, and the only way a world that has never been populated gets
+/// its townsfolk, its doors and its spawn regions. Empty is the ordinary case: a
+/// shard with a database behind it has them already, and laying them again is
+/// idempotent but not free.
+///
 /// The returned [`InProcess`] is what a client is given in place of an address.
 /// It can be cloned, and each clone opens its own connections — which is what a
 /// second character, or a hundred virtual ones, will need.
@@ -76,7 +82,10 @@ const PIPE: usize = 64 * 1024;
 /// a dialler with nothing behind it: it still dials, and every stream it hands
 /// back is closed before the caller sees it. `Gate::serve` is what makes that
 /// deliberate rather than a race between the stop and the runtime going away.
-pub fn spawn(config: impl FnOnce(SocketAddr) -> Config + Send + 'static) -> (InProcess, Running) {
+pub fn spawn(
+    config: impl FnOnce(SocketAddr) -> Config + Send + 'static,
+    seed: Vec<String>,
+) -> (InProcess, Running) {
     let started = Instant::now();
     eprintln!("in-process shard: starting");
     let (ready, opened) = std::sync::mpsc::channel();
@@ -131,7 +140,7 @@ pub fn spawn(config: impl FnOnce(SocketAddr) -> Config + Send + 'static) -> (InP
             // The tally inside the reins goes unread, as in `crate::spawn` —
             // see there.
             let reins = openshard_server::shard::Reins::over(served);
-            openshard_server::shard::run_shard(events, config, world, store, reins, &[]).await;
+            openshard_server::shard::run_shard(events, config, world, store, reins, &seed).await;
         });
     });
 

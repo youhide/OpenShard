@@ -45,8 +45,12 @@
 //! difference between a window onto a world and a window onto bare ground: an
 //! unseeded shard with no saved world draws the map's own statics and nothing
 //! else. No townsfolk, no doors, no shop signs — those are laid by the admin
-//! verbs (`--seed populate:felucca,decorate:felucca`), and they arrive over the
-//! wire like any other item.
+//! verbs, which this binary takes too
+//! (`--seed populate:felucca,decorate:felucca`), and they arrive over the wire
+//! like any other item. A world with a database behind it needs no seed: it
+//! restores what it holds. It also lays nothing *new*, so content that has grown
+//! since it was populated — a fixed dataset, a region the engine used to drop —
+//! arrives on a seed or on the staff menu's Populate, and never on a restart.
 //!
 //! It follows that this *can* now open the world an operator has saved, and
 //! write to it: a config naming a database is that database. Not a second copy.
@@ -126,6 +130,18 @@ struct Cli {
     )]
     config: PathBuf,
 
+    /// Admin verbs to lay before the first tick, comma-separated:
+    /// `--seed populate:felucca,decorate:felucca`. The server binary's flag, and
+    /// the only way a world that has never been populated gets its spawn regions,
+    /// its townsfolk and its doors — a database restores what it holds and lays
+    /// nothing new, so a content fix that adds regions needs this (or the staff
+    /// menu's Populate) once, not a restart.
+    ///
+    /// Laying twice is safe: every verb is idempotent, an already-standing region
+    /// keeps its timer, and a townsperson is not placed on top of itself.
+    #[arg(long, env = "OPENSHARD_SEED", value_delimiter = ',', value_name = "VERBS")]
+    seed: Vec<String>,
+
     /// The `tracing` filter, in `RUST_LOG` syntax.
     #[arg(long, env = "RUST_LOG", default_value = "info", value_name = "FILTER")]
     log: String,
@@ -193,18 +209,21 @@ fn main() -> ExitCode {
     // Overridden whichever config this is, because the window is the one naming
     // the install and an operator's config may name none.
     let files = dir.to_string_lossy().into_owned();
-    let (dial, shard) = openshard_e2e_shard::in_process::spawn(move |stated| {
-        let mut config = operator.unwrap_or_else(|| openshard_e2e_shard::stock_config(stated));
-        // Both addresses, whichever config this is: nothing binds a port here,
-        // but the `0x8C` relay still tells the client where to dial and the
-        // client still obeys it. An operator's `advertise` — a LAN address, a
-        // public one — would send this window somewhere that is not this
-        // process, and the login would end politely and silently.
-        config.server.listen = stated;
-        config.server.advertise = stated;
-        config.world.client_files = files;
-        config
-    });
+    let (dial, shard) = openshard_e2e_shard::in_process::spawn(
+        move |stated| {
+            let mut config = operator.unwrap_or_else(|| openshard_e2e_shard::stock_config(stated));
+            // Both addresses, whichever config this is: nothing binds a port
+            // here, but the `0x8C` relay still tells the client where to dial
+            // and the client still obeys it. An operator's `advertise` — a LAN
+            // address, a public one — would send this window somewhere that is
+            // not this process, and the login would end politely and silently.
+            config.server.listen = stated;
+            config.server.advertise = stated;
+            config.world.client_files = files;
+            config
+        },
+        cli.seed.clone(),
+    );
     eprintln!(
         "shard up in this process; logging in as {} to play {}",
         cli.account, cli.character

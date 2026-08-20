@@ -543,30 +543,45 @@ connection takes the mobile off every screen that had it.
   and matching on the box read 120 of the 1,430 shipped regions as re-registrations
   of the region already there and dropped them, which is how the forest north-east
   of Britain came to hold orcs and no skeletons.
-### Backlog: a spawn region's owner link is its index, not its id
+### A spawn region's id is its slot — and now it is that by construction
 
-`maintain_spawners` tags each creature `SpawnedBy(index as u32)` — its region's
-position in `World::spawners` — while `SpawnerRecord` persists `Spawner::id`, which
-`register_spawner` hands out from `next_spawner_id`. The two agree only by
-accident: a world laid once from empty has `id == index + 1`, and `restore_spawners`
-pushes the records back in the order the store returns them, so the ownership
-survives a restart. Nothing enforces either half. `clear_spawners` empties the
-vector without rewinding `next_spawner_id`, and the two stores' `spawners()` had no
-`ORDER BY id` until this was written down (they have one now), so a re-ordered load
-would have re-pointed every live creature at a neighbouring region — some regions
-permanently at their ceiling and never spawning again, others over their ceiling
-with no way to notice. The fix is to key `SpawnedBy` by the id and count by the id,
-which needs a one-time migration of the saved link (`spawned_by` in `MobileRecord`)
-because the values on disk are indices.
+`maintain_spawners` tags each creature `SpawnedBy(id)`; the tag is saved with the
+creature and read back against a list a later boot rebuilt. So the only id that
+survives that trip is one the *list* defines. It used to be a counter beside the
+list (`World::next_spawner_id`, starting at one), and the tag was the creature's
+region's **index** — two numberings that agreed only by luck, and by luck of a
+particular kind: a world laid once from empty has `id == index + 1`, so the tag and
+the ceiling it was counted against lined up all the way through a restart. Nothing
+enforced either half. `clear_spawners` emptied the list without rewinding the
+counter, and neither store's `spawners()` had an `ORDER BY id`. Either one drifting
+re-points every live creature at a neighbouring region: one region permanently at
+its ceiling and never spawning again, its neighbour over its ceiling, and no error
+anywhere — the same silence the box-shaped de-duplication had.
 
-### Backlog: the playground never lays the shipped content
+The counter is gone. `register_spawner` gives a region the slot it is about to
+take, `restore_spawners` gives it the slot it lands in rather than the number in
+the row, and `spawner_records` writes that number out — `a_regions_id_is_its_slot_
+however_the_list_was_built` walks all three paths plus a Clear. There is no
+migration and none is needed: the tags on disk were always indices, which is what
+the ids now are. Clear stays safe because it takes the creatures with the regions,
+so no tag outlives the numbering it was written against.
 
-`e2e/shard` calls `run_shard(..., &[])`, so `openshard-playground` seeds no verbs: a
-world it opens holds exactly what the database holds. A shard whose save predates a
-content fix (this one, say) does not pick the fix up by restarting — the regions
-come from the store, and only `.admin` → Populate, or `openshard-server --seed
-populate:felucca`, lays what is new. Worth a flag on the playground rather than a
-thing to remember.
+What this rules out, and it is worth naming because nothing in the type system
+does: **a region may not be removed on its own.** The list is laid whole or cleared
+whole. A future "delete this one region" renumbers every region after it and
+re-points their creatures — that feature needs a real id and the migration this
+did not.
+
+### The playground lays the shipped content when asked — `--seed`
+
+`e2e/shard`'s `in_process::spawn` took no verbs and handed `run_shard` an empty
+slice, so `openshard-playground` opened exactly what its database held and had no
+way to lay anything else; the module doc pointed at a `--seed` that was the server
+binary's. It takes one now (`OPENSHARD_SEED`, comma-separated, the same verbs), and
+the in-process shard passes it through. This is the difference between a restart
+and a re-populate: content that has grown since a world was laid — a fixed dataset,
+a region the engine used to drop — arrives on a seed or on the staff menu's
+Populate, never on a boot, because a boot restores and lays nothing new.
 
 - [x] **The save is the whole world (schema v5), the Sphere/ServUO model.** Every
   live NPC mobile — townsfolk, vendors with their priced stock, spawner creatures

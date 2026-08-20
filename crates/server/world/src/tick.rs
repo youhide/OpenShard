@@ -196,10 +196,14 @@ pub struct World {
     /// The spawn regions the tick keeps populated. Laid by the `populate:` verb,
     /// maintained here, and persisted — a populated area stays populated across a
     /// restart, and a rare spawn keeps its remaining respawn wait.
+    ///
+    /// **A region's id is its index here**, and nothing else may assign one. That
+    /// is the invariant every creature's [`SpawnedBy`] rides on: the tag holds the
+    /// id, the tick counts a region's live members by it, and the save writes it
+    /// out. See [`register_spawner`](World::register_spawner).
+    ///
+    /// [`SpawnedBy`]: openshard_state::components::SpawnedBy
     spawners: Vec<crate::spawner::Spawner>,
-    /// The next id to hand a newly registered spawner. Bumped past every id loaded
-    /// from the store so a fresh registration never collides with a restored one.
-    next_spawner_id: u32,
     /// Saved inventories waiting for their owners to log in, keyed by character
     /// serial. Loaded from the store at boot by [`restore_inventory`]; a character
     /// entering takes its own and equips it, once.
@@ -294,7 +298,6 @@ impl World {
             crossed: Cursor::default(),
             inbox: Vec::new(),
             spawners: Vec::new(),
-            next_spawner_id: 1,
             pending_inventories: HashMap::new(),
             clock_base: 0,
             player_sectors: HashMap::new(),

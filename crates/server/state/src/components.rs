@@ -384,13 +384,19 @@ pub struct Lock {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct KeyValue(pub u32);
 
-/// Which spawn region put this mobile here — an index into the world's spawner
-/// list.
+/// Which spawn region put this mobile here — the region's id, which *is* its
+/// index in the world's spawner list. The two are one number by construction;
+/// nothing hands a region an id from anywhere else.
 ///
 /// The region counts its live creatures by this to know when to refill. A
 /// creature dies and is despawned, the component goes with it, the count drops,
 /// and the region spawns another. Absent on players and on script- or GM-spawned
 /// mobiles, which no region maintains.
+///
+/// It is saved with the creature and restored with it, so a region comes back
+/// knowing which of its creatures are still alive. That is the whole reason the id
+/// may not be a counter of its own: the tag written last week is read against the
+/// list rebuilt this morning, and only a slot survives that trip.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SpawnedBy(pub u32);
 

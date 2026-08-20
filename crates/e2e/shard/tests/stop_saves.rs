@@ -81,16 +81,19 @@ async fn a_stop_leaves_the_world_on_disk_before_it_returns() {
     let scratch = Scratch::new("stop-saves");
     let database = scratch.path().to_string_lossy().into_owned();
 
-    let (dial, shard) = in_process::spawn(move |address| {
-        let mut config = stock_config(address);
-        config.persistence.database = database;
-        // The periodic save turned off, so that anything found on the disk
-        // afterwards was written by the stop and not by a cadence that happened
-        // to fire while the test was walking. Without this the test would pass on
-        // a slow machine and prove nothing about shutdown.
-        config.persistence.save_seconds = 0;
-        config
-    });
+    let (dial, shard) = in_process::spawn(
+        move |address| {
+            let mut config = stock_config(address);
+            config.persistence.database = database;
+            // The periodic save turned off, so that anything found on the disk
+            // afterwards was written by the stop and not by a cadence that happened
+            // to fire while the test was walking. Without this the test would pass on
+            // a slow machine and prove nothing about shutdown.
+            config.persistence.save_seconds = 0;
+            config
+        },
+        Vec::new(),
+    );
 
     let (mut socket, mut view) = tokio::time::timeout(WAIT, enter_world_with(dial, plan(), version()))
         .await

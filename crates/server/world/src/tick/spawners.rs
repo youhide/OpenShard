@@ -19,7 +19,8 @@ impl World {
         // rather than re-scanning all creatures once per region. That turned the
         // cost from O(regions × creatures) — millions of comparisons a tick on a
         // full facet, the freeze a staff Populate caused — into O(regions +
-        // creatures). The key is the same `index as u32` stored in `SpawnedBy`.
+        // creatures). The key is the id stored in `SpawnedBy`, which is the
+        // region's index here — see `register_spawner`.
         let mut live_counts: HashMap<u32, u16> = HashMap::new();
         for (_, owner) in self.state.registry.query::<SpawnedBy>() {
             *live_counts.entry(owner.0).or_default() += 1;
@@ -30,9 +31,13 @@ impl World {
             if now < self.spawners[index].next_spawn {
                 continue;
             }
-            let id = index as u32;
-            let live = live_counts.get(&id).copied().unwrap_or(0);
             let spawner = &self.spawners[index];
+            let id = spawner.id;
+            debug_assert_eq!(
+                id as usize, index,
+                "a region's id is its slot; a creature's SpawnedBy points at the wrong region"
+            );
+            let live = live_counts.get(&id).copied().unwrap_or(0);
             if spawner.creatures.is_empty() || live >= spawner.max_count {
                 continue;
             }
@@ -137,8 +142,15 @@ impl World {
         if self.spawners.iter().any(|s| s.is_the_same_region(&spawner)) {
             return;
         }
-        spawner.id = self.next_spawner_id;
-        self.next_spawner_id += 1;
+        // The id is the slot it is about to take, and there is no counter beside
+        // the list to disagree with it. A creature's `SpawnedBy` holds this number,
+        // is saved with the creature and read back against the list a later boot
+        // rebuilt — so the only id that survives the trip is one the list itself
+        // defines. A counter of its own drifted from the index the moment anything
+        // was laid in a different order, and the drift was silent: creatures
+        // counted against a neighbouring region, one of them permanently at its
+        // ceiling and never spawning again.
+        spawner.id = u32::try_from(self.spawners.len()).expect("a facet has far fewer than 4bn regions");
         // Stagger the first spawn across the respawn window. Populating a whole
         // facet registers hundreds of regions in one tick; without this they are
         // all due at once and fire together, a thundering herd that spikes the
@@ -209,7 +221,6 @@ impl World {
     pub fn restore_spawners(&mut self, records: Vec<openshard_persistence::SpawnerRecord>) {
         let now = self.state.ticks;
         for record in records {
-            self.next_spawner_id = self.next_spawner_id.max(record.id + 1);
             let area = crate::spawner::SpawnArea {
                 x: record.x,
                 y: record.y,
@@ -245,8 +256,16 @@ impl World {
                         .collect(),
                 })
                 .collect();
+            // The slot it lands in, not the number in the row. They are the same
+            // for anything this build wrote, and where they are not — a save from
+            // before the id was pinned to the slot — the slot is the one the
+            // creatures' `SpawnedBy` tags were written against, so the slot wins.
+            // The records arrive in id order (both stores `ORDER BY id`), which is
+            // the order they were saved in, which is the order of the list they
+            // came from.
+            let id = u32::try_from(self.spawners.len()).expect("a facet has far fewer than 4bn regions");
             let mut spawner = crate::spawner::Spawner::new(
-                record.id,
+                id,
                 area,
                 creatures,
                 record.max_count,
@@ -267,6 +286,12 @@ impl World {
     /// `SpawnedBy` and so used to survive a clear, reading as "clear did nothing".
     /// Each mobile takes its worn gear (and a vendor's stock crate and its wares)
     /// with it, and is taken off every screen before it goes.
+    ///
+    /// The two halves are one act, and that is what makes the region ids safe to
+    /// hand out again from zero: no creature is left holding a [`SpawnedBy`] that
+    /// the next Populate would re-point at a different region.
+    ///
+    /// [`SpawnedBy`]: openshard_state::components::SpawnedBy
     pub(super) fn clear_spawners(&mut self) {
         self.spawners.clear();
         let mobiles: Vec<EntityId> = self

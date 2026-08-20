@@ -10041,7 +10041,10 @@ fn a_spawner_respawn_timer_survives_a_restart() {
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].remaining_secs, 60, "sixty seconds still to wait");
     assert_eq!(records[0].respawn_secs, 100);
-    assert!(records[0].id > 0, "it was given a real id on registration");
+    assert_eq!(
+        records[0].id, 0,
+        "the first region's id is its slot, which is where its creatures point"
+    );
 
     // Restart: a fresh world, tick counter back at zero, restores the region.
     let mut shard = world();
@@ -10139,6 +10142,64 @@ fn two_different_regions_over_one_box_are_both_laid() {
         world.spawners.len(),
         2,
         "re-laying the same two regions stacks nothing"
+    );
+}
+
+/// A region's id is its slot, through every path that builds the list.
+///
+/// This is the invariant `SpawnedBy` rides on. The tag is written into a creature,
+/// saved with it, and read back against a list some later boot rebuilt — so if a
+/// region's id can ever be anything but its position, a restart re-points live
+/// creatures at their neighbours: a region silently over its ceiling and one
+/// silently at it, never spawning again. It used to be a counter that started at
+/// one and was only ever bumped, which agreed with the index by luck.
+#[test]
+fn a_regions_id_is_its_slot_however_the_list_was_built() {
+    use crate::spawner::{SpawnArea, Spawner};
+
+    let area = |x: u16| SpawnArea {
+        x,
+        y: 100,
+        width: 5,
+        height: 5,
+        facet: Facet(0),
+    };
+    let slots_hold = |world: &World, what: &str| {
+        for (slot, spawner) in world.spawners.iter().enumerate() {
+            assert_eq!(spawner.id as usize, slot, "{what}: a region's id left its slot");
+        }
+    };
+
+    let mut laid = world();
+    for x in 0..5u16 {
+        laid.register_spawner(Spawner::new(0, area(x * 10), vec![], 3, 40));
+    }
+    slots_hold(&laid, "freshly registered");
+
+    // A restart: the records carry the ids, and the rebuilt list must land on the
+    // same numbers rather than trusting them.
+    let records = laid.spawner_records();
+    let mut restarted = world();
+    restarted.restore_spawners(records);
+    slots_hold(&restarted, "restored from the save");
+    // And a boot re-populate over the restored list neither stacks nor renumbers.
+    for x in 0..5u16 {
+        restarted.register_spawner(Spawner::new(0, area(x * 10), vec![], 3, 40));
+    }
+    assert_eq!(restarted.spawners.len(), 5, "the re-populate stacked a region");
+    slots_hold(&restarted, "after a boot re-populate");
+
+    // A staff Clear takes every region and every creature that pointed at one, so
+    // the numbering may start again from zero without stranding a tag.
+    restarted.clear_spawners();
+    assert!(restarted.spawners.is_empty());
+    for x in 0..3u16 {
+        restarted.register_spawner(Spawner::new(0, area(x * 10), vec![], 3, 40));
+    }
+    slots_hold(&restarted, "after Clear and Populate");
+    assert_eq!(
+        restarted.spawners[0].id, 0,
+        "the ids start again at zero rather than carrying a counter past the clear"
     );
 }
 

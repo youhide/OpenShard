@@ -74,8 +74,16 @@ pub struct SpawnArea {
 /// A region the tick keeps populated.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Spawner {
-    /// Its stable id — the key it persists under. Not what a re-`populate`
-    /// de-duplicates on; that is [`Spawner::is_the_same_region`].
+    /// Its id — **its index in the world's spawner list**, assigned by
+    /// [`World::register_spawner`](crate::World) and by nothing else. It is the
+    /// key its creatures point at ([`SpawnedBy`]), the key the tick counts them
+    /// by, and the key it persists under.
+    ///
+    /// Not what a re-`populate` de-duplicates on; that is
+    /// [`Spawner::is_the_same_region`]. The value a caller passes to
+    /// [`Spawner::new`] is a placeholder the world overwrites.
+    ///
+    /// [`SpawnedBy`]: openshard_state::components::SpawnedBy
     pub id: u32,
     /// Where it spawns.
     pub area: SpawnArea,
