@@ -966,6 +966,19 @@ Roughly in dependency order, each script-first:
     beside the corpse's story rather than in a column of its own — the item row's
     `amount` already carries the body — so a corpse restored from a save written
     before this comes back lying north.
+  - [ ] **The corpse hand-off is matched by tile, body and group.** When a
+    creature dies the client moves the death animation still playing under the
+    mobile's serial onto the corpse item's serial, and finds it by comparing
+    position, body graphic and animation group (`Crowd::corpse`). Two identical
+    creatures dying on one tile in one batch can therefore claim each other's
+    fall. The wire has no field that pairs a corpse with the mobile it was — a
+    `0x2006` names only itself — so closing this means either the shard saying so
+    or the client tracking the removal that preceded the corpse.
+  - [ ] **`0x1A`'s light byte is refused for anything but a corpse.** The same
+    byte carries a light source's id for ordinary items, and nothing here models
+    item light, so a decode that meets one errors rather than dropping it (see
+    `WorldItem::decode_body`). Fine while both ends are ours; a client pointed at
+    a shard that lights its lanterns would stop reading that item.
   - [x] **Ghosts and resurrection.** A player who dies no longer stands at zero
     hits: `reap` now lays a **player corpse** holding their worn armour (the
     backpack and bank box stay on them — worn containers, not loot) and puts them
