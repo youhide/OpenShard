@@ -1343,6 +1343,52 @@ impl WorldState {
         self.send_player_update(mobile, from);
     }
 
+    /// Tell everyone watching that `mobile` just died, and which corpse it leaves.
+    ///
+    /// `0xAF`, and the only thing on the wire that pairs the two. A death is
+    /// otherwise two unrelated facts — a mobile stops being drawn, an item
+    /// appears — so a client that wants to run the fall into the body lying there
+    /// has to guess the pairing, and a tile with two identical creatures dying on
+    /// it is enough to make the guess wrong.
+    ///
+    /// Not sent to the dying mobile's own client. ServUO skips it the same way
+    /// (`Mobile.Kill` excludes `m_NetState` from the range loop): that client is
+    /// told it died by `0x2C`, and what it is watching afterwards is its own
+    /// ghost, not a corpse it has to pair anything with.
+    ///
+    /// `corpse` is `None` for a death that leaves no body — a creature with no
+    /// `Body`, which is the same case that leaves the corpse item bodiless.
+    pub fn announce_death(&mut self, mobile: EntityId, corpse: Option<Serial>) {
+        let Some(serial) = self.registry.serial_of(mobile) else {
+            return;
+        };
+        // What the body was doing when it fell. A client with a second death
+        // group draws a running death differently; ours has one, and sending the
+        // truth costs nothing and cannot be recovered later.
+        let running = self
+            .registry
+            .get::<Heading>(mobile)
+            .is_some_and(|Heading(facing)| facing.running);
+        let packet = ServerPacket::DeathAnimation(openshard_protocol::world::DeathAnimation {
+            killed: serial,
+            corpse,
+            running,
+        });
+        let own = self
+            .registry
+            .get::<Client>(mobile)
+            .map(|client| client.connection);
+        for (connection, version) in self.audience_of(mobile) {
+            if Some(connection) == own {
+                continue;
+            }
+            self.outbox.push(Outbound {
+                connection,
+                packet: packet.encode(version),
+            });
+        }
+    }
+
     /// Animate `mobile` performing `action` — a swing, a death throe, a cast
     /// gesture — for everyone who can see it.
     ///
@@ -2102,6 +2148,11 @@ impl WorldState {
             payload,
             position,
             hue,
+            // An item's light comes from its graphic here, and what a player may
+            // pick up is decided at the moment they try — see `items::drag`. Both
+            // bytes exist for a shard that says otherwise; this one does not.
+            light: None,
+            flags: openshard_protocol::items::ItemFlags::NONE,
         })
     }
 

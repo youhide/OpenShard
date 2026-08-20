@@ -395,10 +395,40 @@ pub enum CommandedMove {
     Snap { at: Point },
 }
 
+/// A death heard of, waiting for the corpse it was promised.
+#[derive(Clone, Copy, Debug)]
+struct Fall {
+    /// The body mid-fall, as it stood when the shard named its corpse.
+    body: Tracked,
+    /// When that was, so an unclaimed pairing does not live for ever.
+    heard: Duration,
+}
+
+/// How long a death waits for its corpse before the pairing is forgotten.
+///
+/// The corpse normally arrives in the same batch as the death, and always within
+/// a tick of it. This is not a timeout the mechanism relies on — it is the bound
+/// on a pairing whose corpse never comes, because it was laid out of view or the
+/// shard changed its mind. Longer than any death animation, and short enough that
+/// a serial cannot plausibly be reused inside it.
+const FALL_HELD: Duration = Duration::from_secs(5);
+
 /// Everyone on screen, aged.
 #[derive(Clone, Debug)]
 pub struct Crowd {
     tracked: HashMap<Who, Tracked>,
+    /// The deaths this client was told about, by the corpse each one leaves.
+    ///
+    /// A death is two unrelated facts on the wire — a mobile stops being drawn,
+    /// an item appears — and `0xAF` is the one packet that pairs them. It
+    /// arrives while the fall is still playing, so the falling body is lifted
+    /// out of [`Crowd::tracked`] and kept here until its corpse is drawn; that
+    /// way the hand-off survives the mobile being pruned in between, which is
+    /// what happens when the removal and the corpse land in different batches.
+    ///
+    /// Keyed by the *corpse's* serial, because that is what asks for it. An
+    /// entry nobody claims is dropped by [`FALL_HELD`].
+    falls: HashMap<Serial, Fall>,
     /// The lines each serial was heard saying, oldest first, each still within
     /// [`SPEECH_HOLD`]. Separate from `tracked`: the system talks (`who` is
     /// `None` for it too, same as the offline placeholder) and a body nobody
@@ -436,6 +466,7 @@ impl Default for Crowd {
     fn default() -> Self {
         Self {
             tracked: HashMap::new(),
+            falls: HashMap::new(),
             speech: HashMap::new(),
             now: Duration::ZERO,
             commanded: None,
@@ -509,6 +540,10 @@ impl Crowd {
         let was = self.now;
         self.now += dt;
         let (now, ease) = (self.now, self.ease);
+        // A pairing whose corpse never arrived. See [`FALL_HELD`] — this is a
+        // bound on a leak, not part of how the hand-off works.
+        self.falls
+            .retain(|_, fall| now.saturating_sub(fall.heard) < FALL_HELD);
         for tracked in self.tracked.values_mut() {
             let action_done = if let Some(action) = tracked.action.as_mut() {
                 action.elapsed += dt;
@@ -872,6 +907,44 @@ impl Crowd {
         })
     }
 
+    /// A mobile died, and the shard has named the corpse it leaves (`0xAF`).
+    ///
+    /// The fall is already playing — combat sends the death action before the
+    /// world lays the body down — so what this does is *lift* the falling body
+    /// out of the crowd and hold it under the corpse's serial, for
+    /// [`Crowd::corpse`] to finish. Holding it rather than leaving it in place is
+    /// what makes the hand-off survive the mobile being pruned first: the removal
+    /// and the corpse do not have to reach this client in one batch.
+    ///
+    /// A death with no corpse (`None`) or a body this client never saw fall is
+    /// nothing to hold: the corpse, when it comes, is drawn already prone. That
+    /// is the same picture a client gets for a corpse that was lying there before
+    /// it arrived, and it is the honest one — there is no fall to run.
+    pub fn died(&mut self, killed: Serial, corpse: Option<Serial>) {
+        let Some(corpse) = corpse else {
+            return;
+        };
+        // Only a body in mid-action is worth keeping. `action` is the death
+        // throe the shard sent; without one there is nothing to play out, and
+        // the tracked entry belongs to whatever the mobile was doing instead.
+        let Some(body) = self
+            .tracked
+            .get(&Some(killed))
+            .filter(|tracked| tracked.action.is_some() && !tracked.corpse)
+            .copied()
+        else {
+            return;
+        };
+        self.tracked.remove(&Some(killed));
+        self.falls.insert(
+            corpse,
+            Fall {
+                body,
+                heard: self.now,
+            },
+        );
+    }
+
     /// Project an item corpse through the mobile renderer.
     ///
     /// The server sends a corpse as item `0x2006`; its payload is the dead
@@ -884,20 +957,19 @@ impl Crowd {
     pub fn corpse(&mut self, who: Who, at: Point, body: Graphic, facing: Direction, hue: Hue) -> Mobile {
         let facing = Facing::walking(facing);
         let group = BodyKind::of(body).dying();
-        // Move a just-started death action to the corpse item's identity.  The
-        // live mobile was removed from `WorldView` in the same tick, so keeping
-        // it under its old serial would make `retain` discard it before it drew.
-        // Body and tile make a sufficiently exact hand-off: a death action is
-        // a one-shot Die1 group, and the corpse is laid exactly where it fell.
-        let dying = self.tracked.iter().find_map(|(serial, tracked)| {
-            (*serial != who
-                && !tracked.corpse
-                && tracked.at == at
-                && tracked.body == body
-                && tracked.group == group
-                && tracked.action.is_some())
-            .then_some(*tracked)
-        });
+        // The fall this corpse was promised, if the shard named one: `0xAF` said
+        // which body becomes which corpse while that body was still falling, and
+        // [`Crowd::died`] has been holding it since. Taken by serial and not by
+        // tile — two of the same creature dying together on one tile is the case
+        // a tile hand-off gets wrong, and it is not a rare one where a spawn
+        // stands in a group.
+        //
+        // Nothing is claimed when there is no pairing: a corpse that was already
+        // lying there when this client came into range has no fall to finish, and
+        // is drawn in its final pose from its first frame.
+        let dying = who
+            .and_then(|serial| self.falls.remove(&serial))
+            .map(|fall| fall.body);
         let tracked = self.tracked.entry(who).or_insert_with(|| {
             dying.map_or(
                 Tracked {
@@ -2820,6 +2892,11 @@ mod tests {
             action: 0,
             delay: 80,
         });
+        // What the shard says next: this body becomes that corpse.
+        crowd.died(
+            mob.expect("a real mobile serial"),
+            Some(corpse.expect("a real corpse serial")),
+        );
 
         let falling = crowd.corpse(corpse, at, skeleton, Direction::SouthEast, Hue::NONE);
         assert_eq!(falling.group, BodyKind::Monster.dying());
@@ -2839,6 +2916,128 @@ mod tests {
             crowd.frame_for(corpse, AnimationFrameCount(4)),
             3,
             "once finished it remains at the final corpse pose"
+        );
+    }
+
+    /// Two of the same creature dying on one tile keep their own falls.
+    ///
+    /// The hand-off used to be a search of the crowd for *a* body of the right
+    /// graphic, on the right tile, playing the right group — which is every one
+    /// of a pair that died together. One corpse claimed the other's fall, and
+    /// with the two falls a step apart in their cadence the swap showed as one
+    /// corpse jumping to a frame it had not reached. `0xAF` names the pair, so
+    /// there is nothing left to search.
+    #[test]
+    fn two_bodies_falling_on_one_tile_keep_their_own_deaths() {
+        let mut crowd = Crowd::default();
+        let at = Point::new(10, 10, 0);
+        let skeleton = Graphic(0x0038);
+        let (first, second) = (serial(1), serial(2));
+        let (first_corpse, second_corpse) = (serial(0x4000_0001), serial(0x4000_0002));
+        for (who, facing) in [(first, Direction::West), (second, Direction::East)] {
+            crowd.see(who, at, skeleton, Facing::walking(facing), Hue::NONE, false);
+            crowd.play_new(NewAnimation {
+                serial: who.expect("a real mobile serial"),
+                animation_type: 3,
+                action: 0,
+                delay: 80,
+            });
+        }
+        // The first fell a frame before the second, and each was named with the
+        // corpse it becomes.
+        crowd.advance(Duration::from_millis(80));
+        crowd.died(
+            first.expect("a real mobile serial"),
+            Some(first_corpse.expect("a real corpse serial")),
+        );
+        crowd.died(
+            second.expect("a real mobile serial"),
+            Some(second_corpse.expect("a real corpse serial")),
+        );
+
+        let one = crowd.corpse(first_corpse, at, skeleton, Direction::West, Hue::NONE);
+        let two = crowd.corpse(second_corpse, at, skeleton, Direction::East, Hue::NONE);
+        assert_eq!(one.facing, Direction::West);
+        assert_eq!(
+            two.facing,
+            Direction::East,
+            "the second did not inherit the first's fall"
+        );
+        // Both are still finishing their own animation rather than one of them
+        // being handed a fall that was already spoken for.
+        assert_eq!(crowd.frame_for(first_corpse, AnimationFrameCount(4)), 1);
+        assert_eq!(crowd.frame_for(second_corpse, AnimationFrameCount(4)), 1);
+    }
+
+    /// A corpse the shard never paired is drawn prone, not frozen mid-fall.
+    ///
+    /// The ordinary case for one that was already lying there when this client
+    /// came into range: there is no fall to run, and inventing one out of
+    /// whatever body happens to be standing on the tile is what the tile
+    /// hand-off did.
+    #[test]
+    fn an_unannounced_corpse_is_drawn_in_its_final_pose() {
+        let mut crowd = Crowd::default();
+        let at = Point::new(10, 10, 0);
+        let skeleton = Graphic(0x0038);
+        let mob = serial(1);
+        crowd.see(
+            mob,
+            at,
+            skeleton,
+            Facing::walking(Direction::West),
+            Hue::NONE,
+            false,
+        );
+        crowd.play_new(NewAnimation {
+            serial: mob.expect("a real mobile serial"),
+            animation_type: 3,
+            action: 0,
+            delay: 80,
+        });
+
+        let corpse = serial(0x4000_0001);
+        crowd.corpse(corpse, at, skeleton, Direction::West, Hue::NONE);
+        assert_eq!(
+            crowd.frame_for(corpse, AnimationFrameCount(4)),
+            3,
+            "no pairing, no fall to finish"
+        );
+    }
+
+    /// A pairing whose corpse never arrives is forgotten rather than held for
+    /// ever — see [`FALL_HELD`].
+    #[test]
+    fn a_death_whose_corpse_never_comes_is_let_go() {
+        let mut crowd = Crowd::default();
+        let at = Point::new(10, 10, 0);
+        let skeleton = Graphic(0x0038);
+        let mob = serial(1);
+        let corpse = serial(0x4000_0001);
+        crowd.see(
+            mob,
+            at,
+            skeleton,
+            Facing::walking(Direction::West),
+            Hue::NONE,
+            false,
+        );
+        crowd.play_new(NewAnimation {
+            serial: mob.expect("a real mobile serial"),
+            animation_type: 3,
+            action: 0,
+            delay: 80,
+        });
+        crowd.died(
+            mob.expect("a real mobile serial"),
+            Some(corpse.expect("a real corpse serial")),
+        );
+        assert_eq!(crowd.falls.len(), 1);
+
+        crowd.advance(FALL_HELD + Duration::from_millis(1));
+        assert!(
+            crowd.falls.is_empty(),
+            "the promise expired with nothing to claim it"
         );
     }
 
@@ -2873,6 +3072,10 @@ mod tests {
             action: 0,
             delay: 80,
         });
+        crowd.died(
+            mob.expect("a real mobile serial"),
+            Some(corpse.expect("a real corpse serial")),
+        );
 
         let falling = crowd.corpse(corpse, at, skeleton, Direction::West, Hue::NONE);
         assert_eq!(falling.facing, Direction::West, "it falls the way it faced");

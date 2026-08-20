@@ -108,6 +108,45 @@ impl WorldItemPayload {
 /// floor. See `docs/protocol_newtypes.md` N3 amendment 4.
 pub const DROP_TO_GROUND: RawSerial = RawSerial(0xFFFF_FFFF);
 
+/// A light source's id, as `light.mul` numbers them.
+///
+/// What a shard sends to say that *this* item burns with *that* flame, rather
+/// than leaving the client to decide from the graphic's `LightSource` tiledata
+/// flag. Nothing in this engine sets one — our own client picks a flame by
+/// graphic, since `light.mul` is not read yet — but a `0x1A` from a shard that
+/// does is otherwise an item this client cannot read at all, which is the whole
+/// reason the value is carried rather than skipped.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct LightId(pub u8);
+
+/// The client-side flags a `0x1A` may carry about an item.
+///
+/// Two bits, both ServUO's (`Item.GetPacketFlags`): `0x20` for an item the player
+/// may drag, `0x80` for one it must not draw. A shard sends the byte whenever
+/// either is set, which for ServUO is nearly every loose item on the ground —
+/// so a decoder that refuses the byte refuses most of a real shard's world.
+///
+/// Absent and zero are the same statement: the byte is only written when it is
+/// non-zero, so [`ItemFlags::NONE`] is what "no byte" means and not a stand-in
+/// for one that failed to arrive.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct ItemFlags(pub u8);
+
+impl ItemFlags {
+    /// Nothing set — an ordinary item, and what an absent flags byte says.
+    pub const NONE: Self = Self(0);
+    /// `0x20` — the player may pick this up.
+    pub const MOVABLE: Self = Self(0x20);
+    /// `0x80` — the client must not draw it.
+    pub const INVISIBLE: Self = Self(0x80);
+
+    /// Whether every bit of `flag` is set here.
+    #[must_use]
+    pub const fn has(self, flag: Self) -> bool {
+        self.0 & flag.0 == flag.0
+    }
+}
+
 /// The item graphic that makes a `WorldItem` carry a corpse body instead of a
 /// stack amount.
 pub const CORPSE_GRAPHIC: Graphic = Graphic(0x2006);
@@ -146,6 +185,21 @@ pub struct WorldItem {
     pub position: Point,
     /// Its hue, or [`Hue::NONE`] for none.
     pub hue: Hue,
+    /// The flame this item burns with, if the sender named one.
+    ///
+    /// `None` is "the packet said nothing about light", which is what this shard
+    /// always sends: an item's light comes from its graphic's tiledata here. A
+    /// corpse is always `None` too, and that is not a gap — the byte a light id
+    /// would ride in is the corpse's facing, and a corpse's facing belongs with
+    /// its body in [`WorldItem::payload`]. The graphic decides which of the two
+    /// the byte was, on the way out and on the way in.
+    pub light: Option<LightId>,
+    /// What the client is told about handling and drawing it.
+    ///
+    /// [`ItemFlags::NONE`] for everything this shard sends — movability is
+    /// decided here rather than announced — but a real shard sets `0x20` on most
+    /// of the ground, so this is what stops those items being refused.
+    pub flags: ItemFlags,
 }
 
 impl EncodePacket for WorldItem {
@@ -172,29 +226,44 @@ impl EncodePacket for WorldItem {
             out.u16(self.payload.wire_value());
         }
 
-        // x keeps its low 15 bits; its top bit means a direction/light byte
-        // follows — a corpse's facing, and nothing else here.
-        let direction = self.payload.direction_byte();
+        // One byte, two meanings, and the graphic picks: a corpse's facing, else
+        // the light id. A corpse takes it — its payload owns the byte — so a
+        // corpse handed a light id sends its facing and not the light, which is
+        // the only reading the client has for `0x2006` anyway.
+        let directed = self
+            .payload
+            .direction_byte()
+            .or_else(|| self.light.map(|LightId(id)| id));
+        let flagged = self.flags != ItemFlags::NONE;
+
+        // x keeps its low 15 bits; its top bit means that byte follows.
         let mut x = self.position.x & 0x7FFF;
-        if direction.is_some() {
+        if directed.is_some() {
             x |= 0x8000;
         }
         out.u16(x);
-        // y keeps its low 14 bits; the top bit flags a hue word.
+        // y keeps its low 14 bits; the top bit flags a hue word, the next one a
+        // flags byte.
         let mut y = self.position.y & 0x3FFF;
         if hued {
             y |= 0x8000;
         }
+        if flagged {
+            y |= 0x4000;
+        }
         out.u16(y);
-        // The direction byte sits between y and z. Its position is the whole
-        // reason the flag bit is on x and not here: put it after x, where it
-        // reads naturally, and every field from y on is one byte out.
-        if let Some(direction) = direction {
-            out.u8(direction);
+        // The direction/light byte sits between y and z. Its position is the
+        // whole reason the flag bit is on x and not here: put it after x, where
+        // it reads naturally, and every field from y on is one byte out.
+        if let Some(byte) = directed {
+            out.u8(byte);
         }
         out.u8(self.position.z as u8);
         if hued {
             out.u16(self.hue.0);
+        }
+        if flagged {
+            out.u8(self.flags.0);
         }
     }
 }
@@ -220,46 +289,44 @@ impl DecodePacket for WorldItem {
 
         let raw_x = reader.u16()?;
         let directed = raw_x & 0x8000 != 0;
-        if directed && graphic != CORPSE_GRAPHIC {
-            // The same byte is a light source's id for anything that is not a
-            // corpse, and nothing here models item light. Refused rather than
-            // read and dropped: a silently skipped byte is a value the sender
-            // believed it had delivered.
-            return Err(DecodeError::Unsupported {
-                packet: <Self as DecodePacket>::ID,
-                form: "a light byte on a non-corpse item, which this engine never sends",
-            });
-        }
         let x = raw_x & 0x7FFF;
 
         let raw_y = reader.u16()?;
-        if raw_y & 0x4000 != 0 {
-            return Err(DecodeError::Unsupported {
-                packet: <Self as DecodePacket>::ID,
-                form: "a flags byte after y, which this engine never sends",
-            });
-        }
         let hued = raw_y & 0x8000 != 0;
+        let flagged = raw_y & 0x4000 != 0;
         let y = raw_y & 0x3FFF;
 
-        // Between y and z, and only when x said so. A corpse described without
-        // it faces north — the wire's own rule, not a fallback: north is the
-        // zero the sender had nothing to write.
-        let facing = match directed {
-            true => Direction::from_bits(reader.u8()?),
-            false => Direction::North,
+        // Between y and z, and only when x said so. What it says depends on the
+        // graphic: a corpse's facing, or a light source's id. A corpse described
+        // without it faces north — the wire's own rule, not a fallback: north is
+        // the zero the sender had nothing to write.
+        let byte = match directed {
+            true => Some(reader.u8()?),
+            false => None,
         };
-        let payload = if graphic == CORPSE_GRAPHIC {
+        let corpse = graphic == CORPSE_GRAPHIC;
+        let payload = if corpse {
             WorldItemPayload::Corpse {
                 body: Graphic(value),
-                facing,
+                facing: byte.map_or(Direction::North, Direction::from_bits),
             }
         } else {
             WorldItemPayload::Stack(ItemAmount(value))
         };
+        // ...and the same byte is not also a light: a corpse's is spoken for, so
+        // reading it into both would make an encode of what was just decoded
+        // send the facing twice over.
+        let light = match corpse {
+            true => None,
+            false => byte.map(LightId),
+        };
 
         let z = reader.u8()? as i8;
         let hue = if hued { Hue(reader.u16()?) } else { Hue::NONE };
+        let flags = match flagged {
+            true => ItemFlags(reader.u8()?),
+            false => ItemFlags::NONE,
+        };
 
         Ok(Self {
             serial,
@@ -267,6 +334,8 @@ impl DecodePacket for WorldItem {
             payload,
             position: Point::new(x, y, z),
             hue,
+            light,
+            flags,
         })
     }
 }
@@ -622,6 +691,8 @@ mod tests {
                 payload: WorldItemPayload::Stack(ItemAmount(1)),
                 position: Point::new(1000, 2000, 5),
                 hue: Hue::NONE,
+                light: None,
+                flags: ItemFlags::NONE,
             },
             version(),
         );
@@ -648,6 +719,8 @@ mod tests {
                 payload: WorldItemPayload::Stack(ItemAmount(500)),
                 position: Point::new(1000, 2000, 5),
                 hue: Hue(0x0021),
+                light: None,
+                flags: ItemFlags::NONE,
             },
             version(),
         );
@@ -679,6 +752,8 @@ mod tests {
             },
             position: Point::new(1000, 2000, 5),
             hue: Hue::NONE,
+            light: None,
+            flags: ItemFlags::NONE,
         };
 
         let packet = encode_packet(&corpse, version());
@@ -705,6 +780,8 @@ mod tests {
             },
             position: Point::new(1000, 2000, 5),
             hue: Hue::NONE,
+            light: None,
+            flags: ItemFlags::NONE,
         };
 
         let packet = encode_packet(&corpse, version());
@@ -734,6 +811,8 @@ mod tests {
                 },
                 position: Point::new(1000, 2000, 5),
                 hue: Hue::NONE,
+                light: None,
+                flags: ItemFlags::NONE,
             },
             version(),
         );
@@ -744,25 +823,69 @@ mod tests {
     }
 
     #[test]
-    fn a_light_byte_on_an_ordinary_item_is_refused() {
-        // The same bit means "a light source's id follows" for anything that is
-        // not a corpse, and nothing here models item light. Reading past it
-        // would hand back a z and a hue that are one byte out of place.
-        let mut packet = encode_packet(
+    fn a_lantern_from_a_real_shard_keeps_its_light_and_its_flags() {
+        // ServUO's shape for an ordinary movable item that burns: the light id in
+        // the byte after y, `0x20` in the flags byte after the hue. Both used to
+        // be refused, which lost the item rather than the hint — and `0x20` is on
+        // nearly everything lying on a real shard's ground.
+        let lantern = WorldItem {
+            serial: item(),
+            graphic: Graphic(0x0A15),
+            payload: WorldItemPayload::Stack(ItemAmount(1)),
+            position: Point::new(1000, 2000, 5),
+            hue: Hue(0x0021),
+            light: Some(LightId(9)),
+            flags: ItemFlags::MOVABLE,
+        };
+
+        let packet = encode_packet(&lantern, version());
+        // x announces the light byte, y announces both the hue and the flags.
+        assert_eq!(u16::from_be_bytes([packet[9], packet[10]]), 1000 | 0x8000);
+        assert_eq!(
+            u16::from_be_bytes([packet[11], packet[12]]),
+            2000 | 0x8000 | 0x4000
+        );
+        assert_eq!(packet[13], 9, "the light id, between y and z");
+        assert_eq!(packet[14], 5, "z");
+        assert_eq!(&packet[15..17], &0x0021u16.to_be_bytes(), "hue");
+        assert_eq!(packet[17], ItemFlags::MOVABLE.0, "and the flags byte last");
+
+        let mut reader = PacketReader::new(&packet[3..]);
+        let read = WorldItem::decode_body(&mut reader, version()).unwrap();
+        assert_eq!(read, lantern);
+        assert!(read.flags.has(ItemFlags::MOVABLE));
+    }
+
+    #[test]
+    fn a_corpses_byte_is_its_facing_and_never_a_light() {
+        // One byte, and the graphic picks which reading it gets. Decoding a
+        // corpse into both would make a re-encode send the facing as a light id.
+        let packet = encode_packet(
             &WorldItem {
                 serial: item(),
-                graphic: Graphic(0x0EED),
-                payload: WorldItemPayload::Stack(ItemAmount(1)),
+                graphic: CORPSE_GRAPHIC,
+                payload: WorldItemPayload::Corpse {
+                    body: Graphic(0x0190),
+                    facing: Direction::West,
+                },
                 position: Point::new(1000, 2000, 5),
                 hue: Hue::NONE,
+                light: None,
+                flags: ItemFlags::NONE,
             },
             version(),
         );
-        let x = u16::from_be_bytes([packet[9], packet[10]]) | 0x8000;
-        packet[9..11].copy_from_slice(&x.to_be_bytes());
 
         let mut reader = PacketReader::new(&packet[3..]);
-        assert!(WorldItem::decode_body(&mut reader, version()).is_err());
+        let read = WorldItem::decode_body(&mut reader, version()).unwrap();
+        assert_eq!(read.light, None, "the byte was the facing");
+        assert_eq!(
+            read.payload,
+            WorldItemPayload::Corpse {
+                body: Graphic(0x0190),
+                facing: Direction::West,
+            }
+        );
     }
 
     #[test]
@@ -776,6 +899,8 @@ mod tests {
                 payload: WorldItemPayload::Stack(ItemAmount(1)),
                 position: Point::new(0, 0, -5),
                 hue: Hue::NONE,
+                light: None,
+                flags: ItemFlags::NONE,
             },
             version(),
         );

@@ -1473,7 +1473,7 @@ mod tests {
     use openshard_protocol::combat::WarMode;
     use openshard_protocol::containers::{AddToContainer, ContainerContents};
     use openshard_protocol::direction::Direction;
-    use openshard_protocol::items::{ItemAmount, WorldItem, WorldItemPayload};
+    use openshard_protocol::items::{ItemAmount, ItemFlags, WorldItem, WorldItemPayload};
     use openshard_protocol::mobile::{MobileIncoming, MobileMove, MobileStatus, Remove};
     use openshard_protocol::skill::SkillLock;
     use openshard_protocol::world::{DeathStatus, PlayerUpdate};
@@ -1951,6 +1951,8 @@ mod tests {
             payload: WorldItemPayload::Stack(ItemAmount(500)),
             position: Point::new(1000, 2000, 5),
             hue: Hue(0x0021),
+            light: None,
+            flags: ItemFlags::NONE,
         };
         assert!(view.apply(&ServerPacket::WorldItem(item)));
         assert_eq!(
@@ -1972,6 +1974,8 @@ mod tests {
             payload: WorldItemPayload::Stack(candle().amount),
             position: Point::new(1000, 2000, 5),
             hue: candle().hue,
+            light: None,
+            flags: ItemFlags::NONE,
         })));
         assert!(view.contents.get(&chest()).is_none_or(Vec::is_empty));
         assert!(view.items.contains_key(&candle().serial));
@@ -1988,6 +1992,8 @@ mod tests {
             payload: WorldItemPayload::Stack(ItemAmount(1)),
             position: Point::new(1000, 2000, 5),
             hue: Hue::NONE,
+            light: None,
+            flags: ItemFlags::NONE,
         };
         view.apply(&ServerPacket::WorldItem(item));
 
@@ -2361,6 +2367,8 @@ mod tests {
             payload: WorldItemPayload::Stack(candle().amount),
             position: Point::new(1000, 2000, 5),
             hue: candle().hue,
+            light: None,
+            flags: ItemFlags::NONE,
         };
         view.apply(&ServerPacket::WorldItem(item));
         assert!(view.apply(&ServerPacket::AddToContainer(AddToContainer {

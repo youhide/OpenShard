@@ -684,6 +684,84 @@ impl DecodePacket for DeathStatus {
     }
 }
 
+// -- 0xAF death animation -------------------------------------------------
+
+/// `0xAF` — a mobile died, and this is the corpse it leaves. 13 bytes.
+///
+/// The one packet that says which corpse was which body. Everything else about a
+/// death is two unrelated facts on the wire — a mobile stops being drawn (`0x1D`)
+/// and an item appears (`0x1A`) — and a client that wants to run the fall into
+/// the body lying there has to pair them. Pairing them by *tile* is what a client
+/// does without this packet, and two identical creatures dying on one tile in one
+/// batch is enough to swap their falls.
+///
+/// ServUO sends it to every client in range except the dying player's own (`0x2C`
+/// is what that client is told), and ClassicUO answers it by playing the death
+/// group itself and holding the corpse item back until the animation is done —
+/// `CorpseManager`, which is a serial pair and a direction, and nothing else.
+///
+/// Ours is not the mechanism that *starts* the fall: this shard sends the death
+/// action as an ordinary animation (`0x6E`/`0xE2`) the moment combat announces
+/// the death, and the corpse follows a tick later. What this packet adds is the
+/// identity — which fall belongs to which corpse.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DeathAnimation {
+    /// The mobile that died.
+    pub killed: Serial,
+    /// The corpse it leaves.
+    ///
+    /// `None` for a death that leaves no body — ServUO writes a zero serial for
+    /// one, and there genuinely is nothing to pair the fall with, which is not
+    /// the same as a corpse whose serial we failed to learn.
+    pub corpse: Option<Serial>,
+    /// Whether it fell in mid-run.
+    ///
+    /// A client with two death groups picks the second one for a running death
+    /// (ClassicUO passes this straight into `GetDeathAction`). ServUO writes a
+    /// plain zero here and never sets it; we send what the body was actually
+    /// doing, which is a superset of that and costs nothing.
+    pub running: bool,
+}
+
+impl EncodePacket for DeathAnimation {
+    const ID: u8 = 0xAF;
+    const LENGTH: PacketLength = PacketLength::Fixed(13);
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u32(self.killed.raw());
+        out.u32(self.corpse.map_or(0, Serial::raw));
+        out.u32(u32::from(self.running));
+    }
+}
+
+impl DecodePacket for DeathAnimation {
+    const ID: u8 = 0xAF;
+
+    fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
+        let raw_killed = reader.u32()?;
+        let killed = Serial::new(raw_killed).ok_or(DecodeError::UnknownValue {
+            field: "0xAF death animation serial",
+            value: raw_killed,
+        })?;
+        // Zero is "no corpse" and every other value has to be a serial: a
+        // corpse the sender named and this end could not read is a fall that
+        // would silently pair with nothing.
+        let raw_corpse = reader.u32()?;
+        let corpse = match raw_corpse {
+            0 => None,
+            raw => Some(Serial::new(raw).ok_or(DecodeError::UnknownValue {
+                field: "0xAF death animation corpse serial",
+                value: raw,
+            })?),
+        };
+        Ok(Self {
+            killed,
+            corpse,
+            running: reader.u32()? != 0,
+        })
+    }
+}
+
 // -- 0x02 walk request ----------------------------------------------------
 
 /// The sequence byte of a `0x02` walk request, exactly as the client sent it.
@@ -1790,6 +1868,50 @@ mod tests {
         assert_eq!(dead, vec![0x2C, 0x00], "0 puts the client in ghost mode");
         let alive = encode_packet(&DeathStatus { dead: false }, version());
         assert_eq!(alive, vec![0x2C, 0x02], "2 is the alive-again answer");
+    }
+
+    #[test]
+    fn a_death_animation_names_the_body_and_the_corpse() {
+        // The pairing is the whole packet: without it a client watching two
+        // identical creatures fall on one tile cannot tell which corpse is which.
+        let death = DeathAnimation {
+            killed: Serial::new(0x0000_02BC).unwrap(),
+            corpse: Some(Serial::new(0x4000_0001).unwrap()),
+            running: true,
+        };
+        let bytes = encode_packet(&death, version());
+
+        assert_eq!(bytes.len(), 13);
+        assert_eq!(bytes[0], 0xAF);
+        assert_eq!(&bytes[1..5], &0x0000_02BCu32.to_be_bytes(), "the body");
+        assert_eq!(&bytes[5..9], &0x4000_0001u32.to_be_bytes(), "its corpse");
+        assert_eq!(&bytes[9..13], &1u32.to_be_bytes(), "it fell running");
+
+        let mut reader = PacketReader::new(&bytes[1..]);
+        assert_eq!(
+            DeathAnimation::decode_body(&mut reader, version()).unwrap(),
+            death
+        );
+    }
+
+    #[test]
+    fn a_death_that_leaves_no_body_sends_a_zero_serial() {
+        // ServUO's `Serial.Zero` for a mobile whose corpse never got made. It has
+        // to survive as "no corpse" rather than as serial zero, which is not a
+        // serial at all.
+        let death = DeathAnimation {
+            killed: Serial::new(0x0000_02BC).unwrap(),
+            corpse: None,
+            running: false,
+        };
+        let bytes = encode_packet(&death, version());
+
+        assert_eq!(&bytes[5..9], &[0, 0, 0, 0], "no corpse");
+        let mut reader = PacketReader::new(&bytes[1..]);
+        assert_eq!(
+            DeathAnimation::decode_body(&mut reader, version()).unwrap(),
+            death
+        );
     }
 
     #[test]

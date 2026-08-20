@@ -3740,6 +3740,80 @@ fn a_slain_creature_leaves_a_corpse_with_loot() {
 }
 
 #[test]
+fn a_death_tells_the_watchers_which_corpse_the_body_became() {
+    // `0xAF`, and the only thing on the wire that pairs a fall with the body
+    // lying there. Without it a client matches the two by tile, and two of the
+    // same creature dying together swap their falls.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let spot = Point::new(START.0 + 2, START.1, 0);
+    let mob = spawn_mobile_at(&mut world, spot, 8, now);
+    let _ = packets_for(&mut world, player);
+    world.queue(Command::Damage {
+        serial: mob,
+        amount: 500,
+        damage_type: 0,
+        by: None,
+    });
+    world.tick(now);
+
+    let corpse = world
+        .state
+        .registry
+        .query::<Drawn>()
+        .find(|(_, g)| g.id == openshard_protocol::wire::Graphic(0x2006))
+        .map(|(entity, _)| entity)
+        .expect("a corpse was laid");
+    let corpse_serial = world.registry().serial_of(corpse).unwrap();
+
+    let death = packets_for(&mut world, player)
+        .into_iter()
+        .find(|p| p[0] == 0xAF)
+        .expect("the watching player was told the creature died");
+    assert_eq!(death.len(), 13);
+    assert_eq!(
+        u32::from_be_bytes(death[1..5].try_into().unwrap()),
+        mob.raw(),
+        "the body that fell"
+    );
+    assert_eq!(
+        u32::from_be_bytes(death[5..9].try_into().unwrap()),
+        corpse_serial.raw(),
+        "and the corpse it became"
+    );
+}
+
+#[test]
+fn a_dying_player_is_not_told_about_its_own_corpse() {
+    // ServUO excludes the dying player's own connection from the `0xAF` loop:
+    // that client is told by `0x2C` and has a ghost to watch, not a corpse to
+    // pair a fall with.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let serial = serial_of(&world, player);
+    let _ = packets_for(&mut world, player);
+    world.queue(Command::Damage {
+        serial,
+        amount: 500,
+        damage_type: 0,
+        by: None,
+    });
+    world.tick(now);
+
+    let packets = packets_for(&mut world, player);
+    assert!(
+        packets.iter().any(|p| p.as_slice() == [0x2C, 0x00]),
+        "it is told it died"
+    );
+    assert!(
+        !packets.iter().any(|p| p[0] == 0xAF),
+        "and not told to watch its own body fall"
+    );
+}
+
+#[test]
 fn a_corpse_lies_the_way_its_body_was_facing() {
     // A body falls the way it was facing, and the client draws the death group
     // *for a direction*. Until the corpse carried one, every body on the shard

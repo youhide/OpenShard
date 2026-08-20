@@ -312,6 +312,12 @@ impl App {
                 self.windows.hand = None;
             }
         }
+        // A death is an event for the same reason: it says which corpse a body
+        // becomes, and the fall it hands over is playing *now*. Taken before the
+        // view is folded, because the fold is what removes the falling mobile.
+        if let ServerPacket::DeathAnimation(death) = packet {
+            self.world.presentation.crowd.died(death.killed, death.corpse);
+        }
         // Sound and music are events, not facts in `WorldView`: a second
         // identical packet must play twice, while a view fold can correctly be
         // a no-op.  Take the listener from the same authoritative anchor the

@@ -246,6 +246,29 @@ era a from-scratch shard implements first. The live measurement is
 anima-client's, on a running ServUO (its issue #1); everything else above is
 checkable in the two checkouts.
 
+**`0xAF` is the only packet that says which corpse was which body.** A death on
+the wire is otherwise two unrelated facts — a mobile stops being drawn (`0x1D`)
+and an item appears (`0x1A`) — so a client that wants to run the fall into the
+body lying there has to pair them itself, and the only material to pair them with
+is the tile. Two of the same creature dying on one tile swap falls under that
+rule, which is not an exotic case where a spawn stands in a group. The packet is
+thirteen bytes: killed serial, corpse serial (zero for a death that leaves none),
+and a run flag ServUO always writes as zero. ServUO sends it from `Mobile.Kill` to
+every client in range *except* the dying player's own — that one gets `0x2C` and
+watches its own ghost. ClassicUO's whole `CorpseManager` is this pair plus a
+direction: it plays the death group itself off this packet and refuses to draw the
+corpse item at all (`ItemView.Draw` returns false while `CorpseManager.Exists`)
+until the animation finishes.
+
+**ServUO sends `0x1A`'s flags byte for nearly every item on the ground.**
+`Item.GetPacketFlags` sets `0x20` for anything movable and `0x80` for anything
+invisible, and the byte is written whenever either is set — so "the flags byte is
+rare and can be refused" is wrong by an order of magnitude. A decoder that errors
+on it drops most of a real shard's world; one that reads it loses, at worst, a
+hint it does not model. The light byte in the same packet is the opposite case —
+genuinely rare — but it shares the flag bit on `x` with a corpse's facing, so the
+graphic is what picks which of the two a present byte was.
+
 **A corpse is an item that faces somewhere, and the byte saying so is not where
 the flag bit is.** `0x2006` is a corpse marker, and the client draws it through
 the *mobile* renderer: the last frame of the dead body's death group, for one

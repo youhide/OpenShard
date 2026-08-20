@@ -47,8 +47,8 @@ use crate::target::{MultiTargetRequest, TargetCursor};
 use crate::vendor::{BuyList, SellList};
 use crate::version::ClientVersion;
 use crate::world::{
-    DeathStatus, LightLevel, LoginComplete, LogoutAck, MapChange, PlayMusic, PlayerStart, PlayerUpdate,
-    SERVER_CHANGE_LENGTH, SeasonChange, WalkAck, WalkReject,
+    DeathAnimation, DeathStatus, LightLevel, LoginComplete, LogoutAck, MapChange, PlayMusic, PlayerStart,
+    PlayerUpdate, SERVER_CHANGE_LENGTH, SeasonChange, WalkAck, WalkReject,
 };
 
 /// A packet the server sends to a client.
@@ -96,6 +96,8 @@ pub enum ServerPacket {
     PlayerUpdate(PlayerUpdate),
     /// `0x2C` — the player's own character died, or came back.
     DeathStatus(DeathStatus),
+    /// `0xAF` — somebody else died, and this is the corpse they leave.
+    DeathAnimation(DeathAnimation),
     /// `0x22` — a walk request is allowed.
     WalkAck(WalkAck),
     /// `0x21` — a walk request is refused.
@@ -216,6 +218,7 @@ impl ServerPacket {
             Self::PlayerStart(_) => <PlayerStart as EncodePacket>::ID,
             Self::PlayerUpdate(_) => <PlayerUpdate as EncodePacket>::ID,
             Self::DeathStatus(_) => <DeathStatus as EncodePacket>::ID,
+            Self::DeathAnimation(_) => <DeathAnimation as EncodePacket>::ID,
             Self::WalkAck(_) => <WalkAck as EncodePacket>::ID,
             Self::WalkReject(_) => <WalkReject as EncodePacket>::ID,
             Self::LoginComplete(_) => <LoginComplete as EncodePacket>::ID,
@@ -289,6 +292,7 @@ impl ServerPacket {
             Self::PlayerStart(_) => <PlayerStart as EncodePacket>::LENGTH,
             Self::PlayerUpdate(_) => PlayerUpdate::LENGTH,
             Self::DeathStatus(_) => DeathStatus::LENGTH,
+            Self::DeathAnimation(_) => DeathAnimation::LENGTH,
             Self::WalkAck(_) => WalkAck::LENGTH,
             Self::WalkReject(_) => WalkReject::LENGTH,
             Self::LoginComplete(_) => <LoginComplete as EncodePacket>::LENGTH,
@@ -364,6 +368,7 @@ impl ServerPacket {
             Self::PlayerStart(packet) => packet.encode_body(out, version),
             Self::PlayerUpdate(packet) => packet.encode_body(out, version),
             Self::DeathStatus(packet) => packet.encode_body(out, version),
+            Self::DeathAnimation(packet) => packet.encode_body(out, version),
             Self::WalkAck(packet) => packet.encode_body(out, version),
             Self::WalkReject(packet) => packet.encode_body(out, version),
             Self::LoginComplete(packet) => packet.encode_body(out, version),
@@ -664,6 +669,9 @@ impl ServerPacket {
             <DeathStatus as DecodePacket>::ID => decode_server(packet, version)
                 .map(Self::DeathStatus)
                 .map_err(ServerDecodeError::DeathStatus)?,
+            <DeathAnimation as DecodePacket>::ID => decode_server(packet, version)
+                .map(Self::DeathAnimation)
+                .map_err(ServerDecodeError::DeathAnimation)?,
             // Both `0x3A`s. The id routes them together and the type byte tells
             // them apart, which is why this is the one arm that decodes into a
             // decision rather than into a variant — see `SkillsPacket`.
@@ -751,6 +759,8 @@ pub enum ServerDecodeError {
     NewAnimation(DecodeError),
     /// `0x2C` did not decode.
     DeathStatus(DecodeError),
+    /// `0xAF` did not decode.
+    DeathAnimation(DecodeError),
     /// `0xD1` did not decode.
     LogoutAck(DecodeError),
     /// `0x3A` did not decode — either of the two, since the id is shared and
@@ -824,6 +834,7 @@ impl fmt::Display for ServerDecodeError {
             Self::Animation(error) => ("0x6E animation", error),
             Self::NewAnimation(error) => ("0xE2 new animation", error),
             Self::DeathStatus(error) => ("0x2C death status", error),
+            Self::DeathAnimation(error) => ("0xAF death animation", error),
             Self::LogoutAck(error) => ("0xD1 logout ack", error),
             Self::Skills(error) => ("0x3A skills", error),
             Self::LocalizedMessage(error) => ("0xC1 localized message", error),
@@ -934,6 +945,7 @@ pub fn server_packet_length(id: u8, version: ClientVersion) -> Option<PacketLeng
         0xA9 => <CharacterList as EncodePacket>::LENGTH,
         0xAA => AttackTarget::LENGTH,
         0xAE => UnicodeMessage::LENGTH,
+        0xAF => <DeathAnimation as EncodePacket>::LENGTH,
         0xB0 => GumpDisplay::LENGTH,
         0xBC => SeasonChange::LENGTH,
         // 0xBF is the one id whose payloads disagree with the table on purpose.
@@ -1187,6 +1199,8 @@ mod tests {
                 payload: crate::items::WorldItemPayload::Stack(crate::items::ItemAmount(1)),
                 position: crate::world::Point::new(1000, 2000, 5),
                 hue: crate::wire::Hue::NONE,
+                light: None,
+                flags: crate::items::ItemFlags::NONE,
             }),
             ServerPacket::DragCancel(crate::items::DragCancel {
                 reason: crate::items::DragCancelReason::OutOfRange,
@@ -1665,6 +1679,8 @@ mod tests {
                 payload: crate::items::WorldItemPayload::Stack(crate::items::ItemAmount(500)),
                 position: crate::world::Point::new(1000, 2000, -5),
                 hue: crate::wire::Hue(0x0021),
+                light: None,
+                flags: crate::items::ItemFlags::NONE,
             }),
         ];
 

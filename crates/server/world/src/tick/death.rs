@@ -153,6 +153,9 @@ impl World {
                 ..Corpse::default()
             };
             if let Some(corpse) = self.spawn_corpse(at, facet, body, facing, name, story) {
+                // Everyone but the dying player, who is about to be told by
+                // `0x2C` and has a ghost to watch rather than a corpse to pair.
+                self.state.announce_death(entity, Some(corpse));
                 // A ghost keeps its backpack and bank box — worn containers, not
                 // loot — and its mount saddle, which the `Riding` link still points
                 // at (sweeping it into the corpse would strand the ridden creature
@@ -479,6 +482,11 @@ impl World {
             self.despawn_creature(entity, serial);
             return;
         };
+        // Which corpse this body became, said while the body is still in the
+        // world for its watchers to have it. Without this the client pairs the
+        // fall it is playing with a corpse by tile, and two of the same creature
+        // dying together swap falls.
+        self.state.announce_death(entity, Some(corpse));
         // Its worn gear falls into the corpse. Named creature tables add their
         // own loot; every other creature keeps the core's baseline gold.
         self.move_gear_to_corpse(serial, corpse, &[]);

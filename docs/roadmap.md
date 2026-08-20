@@ -981,19 +981,26 @@ Roughly in dependency order, each script-first:
     beside the corpse's story rather than in a column of its own — the item row's
     `amount` already carries the body — so a corpse restored from a save written
     before this comes back lying north.
-  - [ ] **The corpse hand-off is matched by tile, body and group.** When a
-    creature dies the client moves the death animation still playing under the
-    mobile's serial onto the corpse item's serial, and finds it by comparing
-    position, body graphic and animation group (`Crowd::corpse`). Two identical
-    creatures dying on one tile in one batch can therefore claim each other's
-    fall. The wire has no field that pairs a corpse with the mobile it was — a
-    `0x2006` names only itself — so closing this means either the shard saying so
-    or the client tracking the removal that preceded the corpse.
-  - [ ] **`0x1A`'s light byte is refused for anything but a corpse.** The same
-    byte carries a light source's id for ordinary items, and nothing here models
-    item light, so a decode that meets one errors rather than dropping it (see
-    `WorldItem::decode_body`). Fine while both ends are ours; a client pointed at
-    a shard that lights its lanterns would stop reading that item.
+  - [x] **The shard says which corpse a body became (`0xAF`).** The premise of
+    the entry this replaces — that the wire has no field pairing a corpse with the
+    mobile it was — was wrong: `0xAF` is exactly that packet, thirteen bytes of
+    killed serial, corpse serial and a run flag, and it is what ClassicUO's
+    `CorpseManager` is built on. `WorldState::announce_death` sends it to everyone
+    watching except the dying player's own client (ServUO excludes it too — that
+    client has `0x2C` and a ghost, not a corpse to pair), and `Crowd::died` lifts
+    the falling body out of the crowd and holds it under the corpse's serial for
+    `Crowd::corpse` to finish. The tile-and-body search is gone, and with it the
+    case where two of the same creature dying together swapped falls. Holding the
+    fall by serial also means the removal and the corpse no longer have to arrive
+    in one batch for the hand-off to work.
+  - [x] **`0x1A`'s light and flags bytes are read instead of refused.** Both used
+    to make the decoder reject the packet, which lost the whole item to save a
+    hint — and the flags byte is not rare: ServUO sets `0x20` on everything a
+    player may pick up, so the rule refused most of a real shard's ground.
+    `WorldItem` now carries `light: Option<LightId>` and `flags: ItemFlags`; this
+    shard sends neither (an item's light comes from its graphic's tiledata, and
+    what may be lifted is decided when the player tries), so they exist to keep a
+    foreign shard's item readable and to be there the day `light.mul` is.
   - [x] **Ghosts and resurrection.** A player who dies no longer stands at zero
     hits: `reap` now lays a **player corpse** holding their worn armour (the
     backpack and bank box stay on them — worn containers, not loot) and puts them
