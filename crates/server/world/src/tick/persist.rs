@@ -394,7 +394,7 @@ impl World {
         let amount = if graphic.id == openshard_state::components::CORPSE_GRAPHIC {
             registry
                 .get::<openshard_state::components::CorpseBody>(item)
-                .map_or(1, |body| body.0.0)
+                .map_or(1, |corpse| corpse.body.0)
         } else {
             registry.get::<Amount>(item).map_or(1, |amount| amount.0)
         };
@@ -422,6 +422,12 @@ impl World {
                 killer: story.killer.clone(),
                 examined_by: story.examined_by.clone(),
                 looters: story.looters.clone(),
+                // The half of the picture `amount` cannot carry — see
+                // `CorpseData::facing`. A corpse with no `CorpseBody` is the
+                // bodiless sack `lay_corpse` lays, which faces nowhere.
+                facing: registry
+                    .get::<openshard_state::components::CorpseBody>(item)
+                    .map_or(0, |corpse| corpse.facing.to_bits()),
             }),
             // And the poison on it, bottled or smeared: all four potions are the
             // same graphic, so an unsaved bottle comes back empty.
@@ -1130,7 +1136,10 @@ impl World {
         if record.graphic == openshard_state::components::CORPSE_GRAPHIC.0 {
             self.state.registry.insert(
                 entity,
-                openshard_state::components::CorpseBody(Graphic(record.amount)),
+                openshard_state::components::CorpseBody {
+                    body: Graphic(record.amount),
+                    facing: restored_facing(record),
+                },
             );
         } else if record.amount > 1 {
             self.state.registry.insert(entity, Amount(record.amount));
@@ -1231,7 +1240,10 @@ impl World {
             if record.graphic == openshard_state::components::CORPSE_GRAPHIC.0 {
                 self.state.registry.insert(
                     entity,
-                    openshard_state::components::CorpseBody(Graphic(record.amount)),
+                    openshard_state::components::CorpseBody {
+                        body: Graphic(record.amount),
+                        facing: restored_facing(record),
+                    },
                 );
             } else if record.amount > 1 {
                 self.state.registry.insert(entity, Amount(record.amount));
@@ -1690,6 +1702,16 @@ impl World {
         self.state.registry.insert(mount, Ridden { rider });
         self.state.registry.insert(rider, Riding { mount, item });
     }
+}
+
+/// Which way a restored corpse lies. Saved with the story rather than in a column
+/// of its own — see [`CorpseData::facing`], which is also where the north a save
+/// written before facings were saved comes back as.
+fn restored_facing(record: &ItemRecord) -> Direction {
+    record
+        .corpse
+        .as_ref()
+        .map_or(Direction::North, |story| Direction::from_bits(story.facing))
 }
 
 /// A saved corpse story back into the component. The two shapes are deliberately

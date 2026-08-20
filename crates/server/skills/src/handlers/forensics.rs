@@ -133,5 +133,5 @@ fn corpse_was_human(state: &WorldState, corpse: EntityId) -> bool {
     state
         .registry
         .get::<CorpseBody>(corpse)
-        .is_some_and(|body| body_type(body.0) == BodyType::Human)
+        .is_some_and(|corpse| body_type(corpse.body) == BodyType::Human)
 }

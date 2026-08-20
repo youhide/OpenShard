@@ -875,12 +875,14 @@ impl Crowd {
     /// Project an item corpse through the mobile renderer.
     ///
     /// The server sends a corpse as item `0x2006`; its payload is the dead
-    /// body's graphic. Static art has no picture for that protocol marker, so
-    /// the corpse instead holds the last frame of that body's `Die1` group.
-    /// Direction is not yet carried by `WorldItem`, hence the stable southeast
-    /// fallback until the wire grows the corpse-direction bit.
-    pub fn corpse(&mut self, who: Who, at: Point, body: Graphic, hue: Hue) -> Mobile {
-        let facing = Facing::walking(Direction::SouthEast);
+    /// body's graphic and the direction it fell in. Static art has no picture
+    /// for that protocol marker, so the corpse instead holds the last frame of
+    /// that body's `Die1` group — and that frame exists per direction, which is
+    /// why the facing has to come off the wire rather than be picked here: a
+    /// corpse drawn facing anywhere but the way the death animation just played
+    /// spins on the ground the moment it settles.
+    pub fn corpse(&mut self, who: Who, at: Point, body: Graphic, facing: Direction, hue: Hue) -> Mobile {
+        let facing = Facing::walking(facing);
         let group = BodyKind::of(body).dying();
         // Move a just-started death action to the corpse item's identity.  The
         // live mobile was removed from `WorldView` in the same tick, so keeping
@@ -2780,7 +2782,7 @@ mod tests {
         let mut crowd = Crowd::default();
         let at = Point::new(10, 10, 0);
         let skeleton = Graphic(0x0038);
-        let corpse = crowd.corpse(serial(0x4000_0001), at, skeleton, Hue::NONE);
+        let corpse = crowd.corpse(serial(0x4000_0001), at, skeleton, Direction::SouthEast, Hue::NONE);
 
         assert_eq!(corpse.group, BodyKind::Monster.dying());
         assert_eq!(corpse.at, at);
@@ -2819,7 +2821,7 @@ mod tests {
             delay: 80,
         });
 
-        let falling = crowd.corpse(corpse, at, skeleton, Hue::NONE);
+        let falling = crowd.corpse(corpse, at, skeleton, Direction::SouthEast, Hue::NONE);
         assert_eq!(falling.group, BodyKind::Monster.dying());
         assert_eq!(
             crowd.frame_for(corpse, AnimationFrameCount(4)),
@@ -2837,6 +2839,50 @@ mod tests {
             crowd.frame_for(corpse, AnimationFrameCount(4)),
             3,
             "once finished it remains at the final corpse pose"
+        );
+    }
+
+    /// The body falls one way and lies another — the defect this facing was
+    /// added for.
+    ///
+    /// The death animation played in the direction the mobile was last seen
+    /// facing, and it looked right, because a settling corpse inherits the dying
+    /// body's tracked facing. The corpse then went on being mentioned by every
+    /// later fold of the world, and each of those overwrote that facing with a
+    /// fixed southeast — so the body spun on the ground a moment after it
+    /// stopped moving. Both halves are asserted here: the fall, and the second
+    /// telling.
+    #[test]
+    fn a_corpse_keeps_lying_the_way_it_fell() {
+        let mut crowd = Crowd::default();
+        let at = Point::new(10, 10, 0);
+        let skeleton = Graphic(0x0038);
+        let mob = serial(1);
+        let corpse = serial(0x4000_0001);
+        crowd.see(
+            mob,
+            at,
+            skeleton,
+            Facing::walking(Direction::West),
+            Hue::NONE,
+            false,
+        );
+        crowd.play_new(NewAnimation {
+            serial: mob.expect("a real mobile serial"),
+            animation_type: 3,
+            action: 0,
+            delay: 80,
+        });
+
+        let falling = crowd.corpse(corpse, at, skeleton, Direction::West, Hue::NONE);
+        assert_eq!(falling.facing, Direction::West, "it falls the way it faced");
+        crowd.advance(Duration::from_millis(400));
+
+        let settled = crowd.corpse(corpse, at, skeleton, Direction::West, Hue::NONE);
+        assert_eq!(
+            settled.facing,
+            Direction::West,
+            "and the next telling of the same corpse does not turn it"
         );
     }
 

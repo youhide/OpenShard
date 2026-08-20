@@ -2090,8 +2090,8 @@ impl WorldState {
         let Position(position) = *self.registry.get::<Position>(entity)?;
         // No `Amount` means a single. The encoder treats 1 and absent the same.
         let payload = if id == crate::components::CORPSE_GRAPHIC {
-            let CorpseBody(body) = *self.registry.get::<CorpseBody>(entity)?;
-            openshard_protocol::items::WorldItemPayload::CorpseBody(body)
+            let CorpseBody { body, facing } = *self.registry.get::<CorpseBody>(entity)?;
+            openshard_protocol::items::WorldItemPayload::Corpse { body, facing }
         } else {
             let amount = self.registry.get::<Amount>(entity).map_or(1, |a| a.0);
             openshard_protocol::items::WorldItemPayload::Stack(openshard_protocol::items::ItemAmount(amount))

@@ -1038,7 +1038,8 @@ pub struct PetData {
     pub order_target: Option<Serial>,
 }
 
-/// A corpse's story, as saved — a plain mirror of the world's `Corpse` component.
+/// A corpse's story, as saved — a mirror of the world's `Corpse` component, plus
+/// the one thing about the corpse's *picture* the item row has no column for.
 ///
 /// Saved because a corpse lies for seven minutes and a shard restarts inside that
 /// window: without it, the body of the character somebody was investigating comes
@@ -1056,6 +1057,17 @@ pub struct CorpseData {
     /// Everyone who has taken something off it.
     #[serde(default)]
     pub looters: Vec<String>,
+    /// Which way it fell, as the wire's direction byte — `0` north, running
+    /// clockwise, exactly `Direction::to_bits`.
+    ///
+    /// The other half of the picture, the body graphic, rides [`ItemRecord::amount`]
+    /// like a stack size; this half rides here because the item row has nowhere
+    /// else to put it and this column already exists on precisely the rows that
+    /// need it. A save written before facings were saved has no field, and its
+    /// corpses come back lying north — the same thing every corpse on the shard
+    /// did before this was carried at all.
+    #[serde(default)]
+    pub facing: u8,
 }
 
 /// One creature kind a spawn region may put down, as saved — a plain mirror of
@@ -1574,6 +1586,7 @@ mod tests {
                     killer: Some("an orc".into()),
                     examined_by: Some("Mordred".into()),
                     looters: vec!["Vesper".into()],
+                    facing: 6,
                 }),
                 poison: Some((2, 14)),
                 trap: Some(TrapRecord {

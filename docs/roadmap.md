@@ -956,6 +956,16 @@ Roughly in dependency order, each script-first:
     nothing is orphaned). `combat::die` stopped despawning — it announces, `reap`
     disposes. The corpse persists as a ground container; a restored one gets a
     fresh decay timer (the tick is not saved).
+  - [x] **A corpse lies the way it fell.** The corpse's picture is a pair — which
+    body, and facing where — so `CorpseBody` carries both and `0x1A` sends the
+    facing in its direction/light byte (announced by the top bit of `x`, written
+    between `y` and `z`; see `docs/findings.md`). Before this the client drew every
+    corpse southeast: the death *animation* was right, because it is the mobile's
+    own, and the body then turned as it settled and again on every later fold of
+    the world. The facing is the heading the mobile died with, and it is saved
+    beside the corpse's story rather than in a column of its own — the item row's
+    `amount` already carries the body — so a corpse restored from a save written
+    before this comes back lying north.
   - [x] **Ghosts and resurrection.** A player who dies no longer stands at zero
     hits: `reap` now lays a **player corpse** holding their worn armour (the
     backpack and bank box stay on them — worn containers, not loot) and puts them

@@ -552,13 +552,16 @@ impl App {
                 continue;
             }
             match item.payload {
-                WorldItemPayload::CorpseBody(body) => {
+                WorldItemPayload::Corpse { body, facing } => {
                     self.world.presentation.corpses.push((
                         Some(*serial),
-                        self.world
-                            .presentation
-                            .crowd
-                            .corpse(Some(*serial), item.position, body, item.hue),
+                        self.world.presentation.crowd.corpse(
+                            Some(*serial),
+                            item.position,
+                            body,
+                            facing,
+                            item.hue,
+                        ),
                     ));
                 }
                 WorldItemPayload::Stack(amount) => {

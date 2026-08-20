@@ -3038,7 +3038,7 @@ fn a_dead_player_leaves_a_corpse_but_keeps_its_backpack() {
         .expect("a player corpse was laid");
     let corpse_serial = world.registry().serial_of(corpse).unwrap();
     assert_eq!(
-        world.registry().get::<CorpseBody>(corpse).unwrap().0,
+        world.registry().get::<CorpseBody>(corpse).unwrap().body,
         Graphic(0x0190),
         "a human corpse draws right"
     );
@@ -3715,7 +3715,7 @@ fn a_slain_creature_leaves_a_corpse_with_loot() {
         "the corpse is a container to be looted"
     );
     assert_eq!(
-        world.registry().get::<CorpseBody>(corpse).unwrap().0,
+        world.registry().get::<CorpseBody>(corpse).unwrap().body,
         Graphic(0x0190),
         "the corpse body is a human male"
     );
@@ -3737,6 +3737,55 @@ fn a_slain_creature_leaves_a_corpse_with_loot() {
                 .is_some_and(|g| g.id == openshard_protocol::wire::Graphic(GOLD))
         });
     assert!(gold, "the corpse holds a gold pile");
+}
+
+#[test]
+fn a_corpse_lies_the_way_its_body_was_facing() {
+    // A body falls the way it was facing, and the client draws the death group
+    // *for a direction*. Until the corpse carried one, every body on the shard
+    // ended up lying southeast whichever way it had died facing — the death
+    // animation played right and then the corpse spun as it settled.
+    const CORPSE: u16 = 0x2006;
+    let now = Instant::now();
+    let mut world = world();
+    let _player = enter(&mut world, now);
+    let spot = Point::new(START.0 + 2, START.1, 0);
+    let mob = spawn_mobile_at(&mut world, spot, 8, now);
+    let entity = world.registry().entity_of(mob).expect("the creature spawned");
+    // Turned west and then killed outright, so the heading under test is the one
+    // this test set rather than one a swing turned it to.
+    world
+        .state
+        .registry
+        .insert(entity, Heading(Facing::walking(Direction::West)));
+    world.queue(Command::Damage {
+        serial: mob,
+        amount: 500,
+        damage_type: 0,
+        by: None,
+    });
+    world.tick(now);
+
+    let corpse = world
+        .state
+        .registry
+        .query::<Drawn>()
+        .find(|(_, g)| g.id == openshard_protocol::wire::Graphic(CORPSE))
+        .map(|(entity, _)| entity)
+        .expect("a corpse was laid where it fell");
+    assert_eq!(
+        world.registry().get::<CorpseBody>(corpse).unwrap().facing,
+        Direction::West,
+        "the corpse kept the heading its body died with"
+    );
+    assert_eq!(
+        world.state.world_item(corpse).unwrap().payload,
+        openshard_protocol::items::WorldItemPayload::Corpse {
+            body: Graphic(0x0190),
+            facing: Direction::West,
+        },
+        "and the 0x1A that draws it says so"
+    );
 }
 
 #[test]

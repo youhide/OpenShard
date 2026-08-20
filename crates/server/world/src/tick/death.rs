@@ -131,6 +131,12 @@ impl World {
         if let Some(&Position(at)) = self.state.registry.get::<Position>(entity) {
             let facet = self.state.facet_of(entity);
             let body = self.state.registry.get::<Body>(entity).copied();
+            // The heading the player died with — see `lay_corpse`.
+            let facing = self
+                .state
+                .registry
+                .get::<Heading>(entity)
+                .map(|Heading(facing)| facing.direction);
             let owner = self
                 .state
                 .registry
@@ -146,7 +152,7 @@ impl World {
                 killer,
                 ..Corpse::default()
             };
-            if let Some(corpse) = self.spawn_corpse(at, facet, body, name, story) {
+            if let Some(corpse) = self.spawn_corpse(at, facet, body, facing, name, story) {
                 // A ghost keeps its backpack and bank box — worn containers, not
                 // loot — and its mount saddle, which the `Riding` link still points
                 // at (sweeping it into the corpse would strand the ridden creature
@@ -444,6 +450,14 @@ impl World {
         };
         let facet = self.state.facet_of(entity);
         let body = self.state.registry.get::<Body>(entity).copied();
+        // Which way it fell: the heading it died with, read while the body is
+        // still in the world. The run bit is dropped — a corpse does not run,
+        // and the client masks it off anyway.
+        let facing = self
+            .state
+            .registry
+            .get::<Heading>(entity)
+            .map(|Heading(facing)| facing.direction);
         let max_hits = self.state.registry.get::<Hitpoints>(entity).map_or(0, |h| h.max);
         // A creature's own name if the pack gave it one, else its kind's.
         let owner = self
@@ -461,7 +475,7 @@ impl World {
             ..Corpse::default()
         };
 
-        let Some(corpse) = self.spawn_corpse(at, facet, body, name, story) else {
+        let Some(corpse) = self.spawn_corpse(at, facet, body, facing, name, story) else {
             self.despawn_creature(entity, serial);
             return;
         };
@@ -484,13 +498,15 @@ impl World {
         self.despawn_creature(entity, serial);
     }
 
-    /// Spawn a corpse item at `at`, drawn as `body` and named `name`, and return
-    /// its serial. A container (the loot window) that rots after a while.
+    /// Spawn a corpse item at `at`, drawn as `body` lying `facing` and named
+    /// `name`, and return its serial. A container (the loot window) that rots
+    /// after a while.
     fn spawn_corpse(
         &mut self,
         at: Point,
         facet: Facet,
         body: Option<Body>,
+        facing: Option<Direction>,
         name: String,
         story: Corpse,
     ) -> Option<Serial> {
@@ -503,11 +519,24 @@ impl World {
                 hue,
             },
         );
-        // The wire puts this body id in `0x1A`'s stack word, but it is not a stack size.
-        if let Some(body) = body {
-            self.state
-                .registry
-                .insert(entity, openshard_state::components::CorpseBody(body.id));
+        // What the corpse is a picture of. The wire puts the body id in `0x1A`'s
+        // stack word (it is not a stack size) and the facing in the direction
+        // byte, because the client draws the last frame of that body's death
+        // group *for a direction* — a body with no direction is half a corpse.
+        //
+        // The pair is inserted only when the dead mobile had both. That is not a
+        // guard against a missing heading so much as the same condition twice: a
+        // mobile the client could draw at all has a body and a heading — see
+        // `WorldState::mobile_incoming`, which answers `None` without either — so
+        // a bodiless death leaves the plain sack it always left.
+        if let (Some(body), Some(facing)) = (body, facing) {
+            self.state.registry.insert(
+                entity,
+                openshard_state::components::CorpseBody {
+                    body: body.id,
+                    facing,
+                },
+            );
         }
         self.state.registry.insert(entity, Position(at));
         self.state.registry.insert(entity, facet);

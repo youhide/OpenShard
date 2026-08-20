@@ -246,6 +246,22 @@ era a from-scratch shard implements first. The live measurement is
 anima-client's, on a running ServUO (its issue #1); everything else above is
 checkable in the two checkouts.
 
+**A corpse is an item that faces somewhere, and the byte saying so is not where
+the flag bit is.** `0x2006` is a corpse marker, and the client draws it through
+the *mobile* renderer: the last frame of the dead body's death group, for one
+direction. That direction rides `0x1A`'s direction/light byte — the top bit of
+`x` (`0x8000`) announces it, but the byte itself is written after `y` and before
+`z` (ClassicUO `PacketHandlers.UpdateItem`, ServUO `Packets.cs`'s `WorldItem`).
+Put it after `x`, where the flag is, and every field from `y` on is one byte out.
+ServUO writes it only when non-zero (`Corpse.Light = (LightType)Direction`), so a
+corpse facing north sends no byte at all and the client's zero-initialised
+`direction` means the two forms say the same thing. On the way in the client
+stows it in a field it has spare — `item.Layer = (Layer)direction` for `0x2006`
+only — and reads it back masked, `(byte)Layer & 0x7F & 7`, so the run bit is
+never part of a corpse's facing. Miss the byte and the shard is not visibly
+broken: the death *animation* plays correctly, because it is the mobile's own,
+and only the corpse it leaves lies the wrong way.
+
 ## The client's data files
 
 **A tiledata flag means what the engine reads it for, and a barrel is not

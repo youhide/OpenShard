@@ -8,6 +8,7 @@
 //! put it down.
 
 use crate::codec::{PacketReader, PacketWriter};
+use crate::direction::Direction;
 use crate::error::DecodeError;
 use crate::feature::Feature;
 use crate::gump::GumpPoint;
@@ -41,24 +42,59 @@ impl ItemAmount {
 /// For ordinary items this is a stack size. UO reserves graphic `0x2006` as a
 /// corpse marker; for that one graphic the same wire word is the dead mobile's
 /// body graphic, which tells the client which death animation to draw.
+///
+/// # A corpse also faces somewhere
+///
+/// A body falls in the direction it was facing, and the client draws the last
+/// frame of that body's death group *for a direction* — so a corpse without one
+/// is a corpse pointing wherever the client last guessed. That is why the facing
+/// lives in this variant rather than beside it: `0x1A` carries it in the
+/// direction/light byte, which this engine sends for a corpse and for nothing
+/// else, exactly as ServUO does (`Corpse.Light = (LightType)Direction`) and as
+/// the client reads it back (`item.Layer = (Layer)direction` for `0x2006`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WorldItemPayload {
     Stack(ItemAmount),
-    CorpseBody(Graphic),
+    Corpse {
+        /// The dead mobile's body graphic — which death animation to draw.
+        body: Graphic,
+        /// Which way it fell. The run bit is never set: the client masks it off
+        /// (`(byte)Layer & 0x7F & 7`) and a corpse does not run.
+        facing: Direction,
+    },
 }
 
 impl WorldItemPayload {
     const fn wire_value(self) -> u16 {
         match self {
             Self::Stack(amount) => amount.0,
-            Self::CorpseBody(body) => body.0,
+            Self::Corpse { body, .. } => body.0,
         }
     }
 
     const fn follows_graphic(self) -> bool {
         match self {
             Self::Stack(amount) => amount.0 > 1,
-            Self::CorpseBody(_) => true,
+            Self::Corpse { .. } => true,
+        }
+    }
+
+    /// The direction byte to send after `y`, if this payload has one to send.
+    ///
+    /// `None` for a stack — an ordinary item has no facing, and the byte's other
+    /// meaning (a light source's id) is not modelled here. `None` for a corpse
+    /// facing north too, and that is the wire's own rule rather than a shortcut:
+    /// north is `0`, ServUO writes the byte only when it is non-zero, and a
+    /// client that reads no byte defaults to north. Sending a zero would be
+    /// legal and identical; not sending it is what every shard the client has
+    /// ever met does.
+    const fn direction_byte(self) -> Option<u8> {
+        match self {
+            Self::Stack(_) => None,
+            Self::Corpse { facing, .. } => match facing.to_bits() {
+                0 => None,
+                bits => Some(bits),
+            },
         }
     }
 }
@@ -86,8 +122,10 @@ pub const CORPSE_GRAPHIC: Graphic = Graphic(0x2006);
 ///
 /// - The top bit of the **serial** (`0x8000_0000`) means "a stack amount
 ///   follows the graphic". A single item does not set it and sends no amount.
-/// - The top bit of **x** (`0x8000`) means "a direction or light byte follows".
-///   We send neither, so it stays clear. `x` itself is 15 bits.
+/// - The top bit of **x** (`0x8000`) means "a direction or light byte follows",
+///   and the byte itself comes *after* y, not after x. We send it only for a
+///   corpse, whose facing rides in it — see [`WorldItemPayload`]. `x` itself is
+///   15 bits.
 /// - The top bit of **y** (`0x8000`) means "a hue word follows"; the next bit
 ///   (`0x4000`) means "a flags byte follows". `y` itself is 14 bits.
 ///
@@ -134,15 +172,26 @@ impl EncodePacket for WorldItem {
             out.u16(self.payload.wire_value());
         }
 
-        // x keeps its low 15 bits; its top bit would mean a direction/light byte
-        // follows, and we send neither.
-        out.u16(self.position.x & 0x7FFF);
+        // x keeps its low 15 bits; its top bit means a direction/light byte
+        // follows — a corpse's facing, and nothing else here.
+        let direction = self.payload.direction_byte();
+        let mut x = self.position.x & 0x7FFF;
+        if direction.is_some() {
+            x |= 0x8000;
+        }
+        out.u16(x);
         // y keeps its low 14 bits; the top bit flags a hue word.
         let mut y = self.position.y & 0x3FFF;
         if hued {
             y |= 0x8000;
         }
         out.u16(y);
+        // The direction byte sits between y and z. Its position is the whole
+        // reason the flag bit is on x and not here: put it after x, where it
+        // reads naturally, and every field from y on is one byte out.
+        if let Some(direction) = direction {
+            out.u8(direction);
+        }
         out.u8(self.position.z as u8);
         if hued {
             out.u16(self.hue.0);
@@ -153,11 +202,12 @@ impl EncodePacket for WorldItem {
 impl DecodePacket for WorldItem {
     const ID: u8 = 0x1A;
 
-    /// The two stolen bits this engine never sets on the way out —
-    /// "a direction/light byte follows" on `x`, "a flags byte follows" on `y` —
-    /// are refused rather than silently skipped: nothing here models what they
-    /// would introduce, and reading past them as if they were the next field
-    /// would produce a wrong value instead of an honest error.
+    /// The stolen bits this engine never sets on the way out — "a flags byte
+    /// follows" on `y`, and "a direction/light byte follows" on `x` for anything
+    /// that is not a corpse — are refused rather than silently skipped: nothing
+    /// here models what they would introduce, and reading past them as if they
+    /// were the next field would produce a wrong value instead of an honest
+    /// error.
     fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
         let raw_serial = reader.u32()?;
         let stacked = raw_serial & 0x8000_0000 != 0;
@@ -167,19 +217,20 @@ impl DecodePacket for WorldItem {
         })?;
         let graphic = Graphic(reader.u16()?);
         let value = if stacked { reader.u16()? } else { 1 };
-        let payload = if graphic == CORPSE_GRAPHIC {
-            WorldItemPayload::CorpseBody(Graphic(value))
-        } else {
-            WorldItemPayload::Stack(ItemAmount(value))
-        };
 
         let raw_x = reader.u16()?;
-        if raw_x & 0x8000 != 0 {
+        let directed = raw_x & 0x8000 != 0;
+        if directed && graphic != CORPSE_GRAPHIC {
+            // The same byte is a light source's id for anything that is not a
+            // corpse, and nothing here models item light. Refused rather than
+            // read and dropped: a silently skipped byte is a value the sender
+            // believed it had delivered.
             return Err(DecodeError::Unsupported {
                 packet: <Self as DecodePacket>::ID,
-                form: "a direction/light byte after x, which this engine never sends",
+                form: "a light byte on a non-corpse item, which this engine never sends",
             });
         }
+        let x = raw_x & 0x7FFF;
 
         let raw_y = reader.u16()?;
         if raw_y & 0x4000 != 0 {
@@ -191,6 +242,22 @@ impl DecodePacket for WorldItem {
         let hued = raw_y & 0x8000 != 0;
         let y = raw_y & 0x3FFF;
 
+        // Between y and z, and only when x said so. A corpse described without
+        // it faces north — the wire's own rule, not a fallback: north is the
+        // zero the sender had nothing to write.
+        let facing = match directed {
+            true => Direction::from_bits(reader.u8()?),
+            false => Direction::North,
+        };
+        let payload = if graphic == CORPSE_GRAPHIC {
+            WorldItemPayload::Corpse {
+                body: Graphic(value),
+                facing,
+            }
+        } else {
+            WorldItemPayload::Stack(ItemAmount(value))
+        };
+
         let z = reader.u8()? as i8;
         let hue = if hued { Hue(reader.u16()?) } else { Hue::NONE };
 
@@ -198,7 +265,7 @@ impl DecodePacket for WorldItem {
             serial,
             graphic,
             payload,
-            position: Point::new(raw_x, y, z),
+            position: Point::new(x, y, z),
             hue,
         })
     }
@@ -606,7 +673,10 @@ mod tests {
         let corpse = WorldItem {
             serial: item(),
             graphic: CORPSE_GRAPHIC,
-            payload: WorldItemPayload::CorpseBody(Graphic(0x0190)),
+            payload: WorldItemPayload::Corpse {
+                body: Graphic(0x0190),
+                facing: Direction::North,
+            },
             position: Point::new(1000, 2000, 5),
             hue: Hue::NONE,
         };
@@ -619,6 +689,80 @@ mod tests {
         assert_eq!(&packet[9..11], &0x0190u16.to_be_bytes());
         let mut reader = PacketReader::new(&packet[3..]);
         assert_eq!(WorldItem::decode_body(&mut reader, version()).unwrap(), corpse);
+    }
+
+    #[test]
+    fn a_corpse_carries_the_way_it_fell_in_the_direction_byte() {
+        // The body falls the way it was facing, and the client draws the death
+        // group *for a direction*: without this byte every corpse on the shard
+        // lies the same way, whichever way it died facing.
+        let corpse = WorldItem {
+            serial: item(),
+            graphic: CORPSE_GRAPHIC,
+            payload: WorldItemPayload::Corpse {
+                body: Graphic(0x0190),
+                facing: Direction::West,
+            },
+            position: Point::new(1000, 2000, 5),
+            hue: Hue::NONE,
+        };
+
+        let packet = encode_packet(&corpse, version());
+        // x carries the "a direction byte follows" flag, and keeps its own value.
+        assert_eq!(u16::from_be_bytes([packet[11], packet[12]]), 1000 | 0x8000);
+        assert_eq!(u16::from_be_bytes([packet[13], packet[14]]), 2000);
+        // The byte itself sits between y and z — not after x, where the flag is.
+        assert_eq!(packet[15], Direction::West.to_bits());
+        assert_eq!(packet[16], 5);
+
+        let mut reader = PacketReader::new(&packet[3..]);
+        assert_eq!(WorldItem::decode_body(&mut reader, version()).unwrap(), corpse);
+    }
+
+    #[test]
+    fn a_corpse_facing_north_sends_no_direction_byte() {
+        // North is zero, and a zero byte is what ServUO leaves out: the client
+        // reads a missing one as north, so the two forms say the same thing and
+        // the shorter is the one every client has been met with.
+        let packet = encode_packet(
+            &WorldItem {
+                serial: item(),
+                graphic: CORPSE_GRAPHIC,
+                payload: WorldItemPayload::Corpse {
+                    body: Graphic(0x0190),
+                    facing: Direction::North,
+                },
+                position: Point::new(1000, 2000, 5),
+                hue: Hue::NONE,
+            },
+            version(),
+        );
+
+        assert_eq!(u16::from_be_bytes([packet[11], packet[12]]), 1000);
+        assert_eq!(packet[15], 5);
+        assert_eq!(packet.len(), 16);
+    }
+
+    #[test]
+    fn a_light_byte_on_an_ordinary_item_is_refused() {
+        // The same bit means "a light source's id follows" for anything that is
+        // not a corpse, and nothing here models item light. Reading past it
+        // would hand back a z and a hue that are one byte out of place.
+        let mut packet = encode_packet(
+            &WorldItem {
+                serial: item(),
+                graphic: Graphic(0x0EED),
+                payload: WorldItemPayload::Stack(ItemAmount(1)),
+                position: Point::new(1000, 2000, 5),
+                hue: Hue::NONE,
+            },
+            version(),
+        );
+        let x = u16::from_be_bytes([packet[9], packet[10]]) | 0x8000;
+        packet[9..11].copy_from_slice(&x.to_be_bytes());
+
+        let mut reader = PacketReader::new(&packet[3..]);
+        assert!(WorldItem::decode_body(&mut reader, version()).is_err());
     }
 
     #[test]

@@ -2200,6 +2200,9 @@ mod tests {
             killer: Some("Rowena".into()),
             examined_by: Some("Mordred".into()),
             looters: vec!["Vesper".into(), "Rowena".into()],
+            // And which way it lies: the picture's other half, saved here
+            // because the item row's `amount` already carries the body.
+            facing: 6,
         };
         {
             let store = SqliteStore::open(&path).expect("open");

@@ -383,7 +383,11 @@ fn a_corpses_story_comes_back_after_a_restart() {
     );
     assert_eq!(
         reborn.state.world_item(corpse).unwrap().payload,
-        openshard_protocol::items::WorldItemPayload::CorpseBody(Graphic(0x0190)),
+        openshard_protocol::items::WorldItemPayload::Corpse {
+            body: Graphic(0x0190),
+            // The way it fell came back with the story it is saved beside.
+            facing: openshard_protocol::direction::Direction::South,
+        },
         "the restored corpse still carries a body, not a stack amount"
     );
 }

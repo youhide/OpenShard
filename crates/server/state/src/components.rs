@@ -89,14 +89,24 @@ pub struct Drawn {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Amount(pub u16);
 
-/// The mobile graphic a corpse marker (`0x2006`) represents.
+/// What a corpse marker (`0x2006`) is a picture of: which body, lying which way.
 ///
-/// UO puts this value in the same `0x1A` wire word as a stack size, but it is
-/// not a quantity: the client uses it to choose the deceased body's animation.
+/// UO puts the body graphic in the same `0x1A` wire word as a stack size, but it
+/// is not a quantity: the client uses it to choose the deceased body's animation.
 /// Keeping it separate from [`Amount`] prevents corpse body ids from entering
 /// stack, weight, and tooltip rules.
+///
+/// The facing is here rather than in the [`Corpse`] story because it belongs to
+/// the *picture*: the client draws the last frame of that body's death group for
+/// one direction, so a body and no direction is half a corpse. It is the dead
+/// mobile's own heading, taken the moment it fell.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct CorpseBody(pub Graphic);
+pub struct CorpseBody {
+    /// The mobile graphic the corpse represents.
+    pub body: Graphic,
+    /// Which way it fell — the heading it died with.
+    pub facing: Direction,
+}
 
 /// Marks an item as a container: something other items can be put inside.
 ///
