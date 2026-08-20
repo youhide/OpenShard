@@ -28,7 +28,7 @@ use openshard_client_render::control::Control;
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::lod::BlockLodSelector;
 use openshard_client_render::mobiles;
-use openshard_client_render::radar::RadarCache;
+use openshard_client_render::radar::{RadarCache, RadarWorkQueue};
 use openshard_movement::Tile;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::world::Point;
@@ -151,8 +151,13 @@ pub(crate) struct App {
     pub(crate) occluder_cache: Option<OccluderCache>,
     /// Ready minimap terrain lives with world content, never with a minimap
     /// window. Closing that window must not discard its CPU products.
-    #[allow(dead_code)] // Phase 3's minimap recorder will consume it.
     pub(crate) radar_cache: RadarCache,
+    /// Bounded, coalescing requests for the minimap's terrain chunks — the
+    /// radar's counterpart to [`Self::composite_work`]. Kept beside
+    /// [`Self::radar_cache`] and not on [`Screen`] for the same reason: it
+    /// survives a closed minimap window, and production only ever removes a
+    /// key once [`RadarCache::publish`] has a complete chunk for it.
+    pub(crate) radar_queue: RadarWorkQueue,
     /// Bounded requests for immutable map-block composites.  It is updated
     /// from the camera snapshot; a future idle producer takes jobs from it,
     /// never from the camera frame itself.

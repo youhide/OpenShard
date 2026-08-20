@@ -29,6 +29,10 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 toml.workspace = true
 
 [dev-dependencies]
+# For `StaffCommand::matching` in `tests/staff_authority.rs`: what the shard's
+# `AuthorityNotice` is *for* is the completer, so the test asserts the
+# consequence and not only the byte.
+openshard-commands.workspace = true
 # For `WALK_BUFFER` only: the burst that provokes the `0x21` this test needs as
 # an oracle has to be bigger than the pace budget, and a number written here
 # would stop being bigger the day the budget grew.

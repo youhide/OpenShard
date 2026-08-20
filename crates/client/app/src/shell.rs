@@ -740,6 +740,7 @@ fn layout(root: &mut egui::Ui, hud: &Hud, camera: Camera, world: &WorldState, de
                 Tab::Light => light_panel(ui, hud, &mut desk.light, &mut request),
                 Tab::Chat => chat_panel(ui, &mut desk.chat, hud.ttf_active),
                 Tab::Audio => audio_panel(ui, &mut desk.audio, &mut request),
+                Tab::Windows => windows_panel(ui, &mut desk.window_scale),
             });
     });
     desk.open = open;
@@ -1042,6 +1043,50 @@ fn chat_panel(ui: &mut egui::Ui, chat: &mut crate::desk::Chat, ttf_active: bool)
     ui.separator();
     if ui.button("back to the defaults").clicked() {
         *chat = crate::desk::Chat::default();
+    }
+}
+
+/// How big the client's own windows draw — a bag, a doll, a shop, a sheet.
+///
+/// One knob for all of them rather than one per kind: see
+/// [`crate::desk::WindowScale`], whose doc says why an item that changed size
+/// on its way between two windows is the reason.
+fn windows_panel(ui: &mut egui::Ui, scale: &mut crate::desk::WindowScale) {
+    use crate::desk::WindowScale;
+
+    ui.label("Size");
+    let mut factor = scale.factor();
+    if ui
+        .add(egui::Slider::new(&mut factor, WindowScale::MIN..=WindowScale::MAX).text("scale"))
+        .changed()
+    {
+        *scale = WindowScale::new(factor);
+    }
+    ui.label(
+        egui::RichText::new(
+            "An integer upscale on the window art's own pixels, on top of the \
+             HUD's zoom. 1 is the reference client exactly — which had no \
+             display scaling at all, so its windows are postage stamps on a \
+             modern screen. Whole numbers only: gump art is pixel art, and \
+             half a pixel of magnification is a border two rows thick along \
+             one edge of a window and one along the other.",
+        )
+        .small()
+        .weak(),
+    );
+    ui.label(
+        egui::RichText::new(
+            "The shard's own tooltip and the HUD chat box are not this — they \
+             are drawn over the world as well as over a window, and the chat \
+             box has its own scale on the Chat tab.",
+        )
+        .small()
+        .weak(),
+    );
+
+    ui.separator();
+    if ui.button("back to the defaults").clicked() {
+        *scale = WindowScale::default();
     }
 }
 

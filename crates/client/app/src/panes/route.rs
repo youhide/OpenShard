@@ -27,8 +27,6 @@
 
 use std::time::Instant;
 
-use openshard_client_render::gump::GumpPixel;
-
 use crate::app::App;
 use crate::hand::Hand;
 use crate::panes::{Button, Effect, Input, Modifiers, Pane, PaneCtx, PaneFiles, PaneFrame, Response};
@@ -228,6 +226,11 @@ impl App {
         // `render_passes.rs` does when it builds a `PaneFrame` for `art` and
         // `layout`. See `PaneFrame::cursor`'s doc.
         let cursor = self.input.pointer_gump;
+        // How big every window is drawn, which is half of what turns that
+        // absolute cursor into a window's own — see `OwnWindow::local_cursor`.
+        // Copied out above the loop for the same reason the borrows above are:
+        // the pane list is held mutably below.
+        let window_scale = self.desk.window_scale;
         let modifiers = Modifiers {
             shift: self.input.shift_held,
             ctrl: self.input.ctrl_held,
@@ -244,7 +247,7 @@ impl App {
                 continue;
             }
             let under_pointer = owner == Some(open.subject);
-            let local_cursor = GumpPixel::new(cursor.x - open.at.x, cursor.y - open.at.y);
+            let local_cursor = open.local_cursor(cursor, window_scale);
             let ctx = PaneCtx {
                 frame: PaneFrame {
                     view,

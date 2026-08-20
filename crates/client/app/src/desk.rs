@@ -60,6 +60,8 @@ pub enum Tab {
     Chat,
     /// The effects and music mixer gains.
     Audio,
+    /// How big the client's own windows draw — [`WindowScale`].
+    Windows,
 }
 
 impl Tab {
@@ -67,7 +69,7 @@ impl Tab {
     ///
     /// One list, so the bar and anything that iterates the pages cannot come to
     /// disagree about which tabs exist.
-    pub const ALL: [Tab; 8] = [
+    pub const ALL: [Tab; 9] = [
         Tab::Camera,
         Tab::Rig,
         Tab::Frames,
@@ -76,6 +78,7 @@ impl Tab {
         Tab::Light,
         Tab::Chat,
         Tab::Audio,
+        Tab::Windows,
     ];
 
     /// What the bar calls it.
@@ -89,6 +92,7 @@ impl Tab {
             Tab::Light => "Light",
             Tab::Chat => "Chat",
             Tab::Audio => "Audio",
+            Tab::Windows => "Windows",
         }
     }
 }
@@ -261,6 +265,77 @@ impl Serialize for Zoom {
 impl<'de> Deserialize<'de> for Zoom {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Ok(Zoom::new(f32::deserialize(deserializer)?))
+    }
+}
+
+/// How much bigger than its own art the client's windows draw: a bag, a doll,
+/// a shop, a sheet, the amount picker — every window
+/// [`crate::windows::Windows`] holds.
+///
+/// **Not [`Zoom`], and not `gump::Frame::scale`.** That pair is the *display's*
+/// density — egui's `zoom_factor` on top of the monitor's, which the gump pass
+/// is handed unchanged so that the art lines up with whatever egui drew beside
+/// it (see `App::gump_scale`). This is the one number on top of it that says a
+/// window is drawn bigger than the reference client drew it, and it exists
+/// because that client had no display scaling at all: its windows are sized in
+/// raw art pixels, which on a modern screen makes a container the size of a
+/// postage stamp however good the monitor is.
+///
+/// An integer, for the reason `gump::place` gives: gump art is five-bit pixel
+/// art sampled with `Nearest`, and a fractional factor doubles some of a
+/// border's rows and not others. [`ChatScale`]'s reason, one rung out from the
+/// glyph to the whole window.
+///
+/// One number for every window and not one per kind: the windows are dragged
+/// around each other and drop items into each other, and a bag drawn at twice a
+/// doll's size makes the icon that crosses between them change size in the
+/// player's hand.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WindowScale(u32);
+
+impl WindowScale {
+    /// The art's own size — the reference client exactly — and three times it,
+    /// past which a container is most of a small screen and the cascade drops
+    /// later windows off the bottom of it.
+    pub const MIN: u32 = 1;
+    pub const MAX: u32 = 3;
+
+    /// Clamp into the range. Takes anything, including what a hand-edited file
+    /// offers, the same reason [`Zoom::new`] does.
+    pub fn new(factor: u32) -> Self {
+        Self(factor.clamp(Self::MIN, Self::MAX))
+    }
+
+    /// Real art pixels per drawn pixel, for both halves of the placement: pass
+    /// it to `gump::place` when a window's quads go to the surface, and to
+    /// [`crate::windows::OwnWindow::local_cursor`] when the pointer comes back
+    /// the other way.
+    pub fn factor(self) -> u32 {
+        self.0
+    }
+}
+
+impl Default for WindowScale {
+    /// The art's own size, which is what this client drew before the knob
+    /// existed: a saved file that predates it must not move anybody's windows
+    /// or change their size on the first launch after an upgrade.
+    fn default() -> Self {
+        Self(Self::MIN)
+    }
+}
+
+// [`Zoom`]'s pair again: written and read as a bare number, and built through
+// [`WindowScale::new`] on the way in so a hand-edited `0` — a window drawn at
+// nothing, which cannot be clicked to fix itself — cannot reach the pass.
+impl Serialize for WindowScale {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for WindowScale {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(WindowScale::new(u32::deserialize(deserializer)?))
     }
 }
 
@@ -518,6 +593,12 @@ pub struct Desk {
     pub panel: Option<Panel>,
     /// The HUD's scale.
     pub zoom: Zoom,
+    /// How big the client's own windows draw — [`WindowScale`].
+    ///
+    /// Remembered for [`Light`]'s reason two fields down: a person who has
+    /// found the size they can read a bag at should not have to find it again
+    /// every launch.
+    pub window_scale: WindowScale,
     /// Where the operating system's window was left. `None` on a first run, and
     /// ignored when it names a screen that is no longer there — see
     /// [`Desk::fits`].
@@ -545,6 +626,7 @@ impl Default for Desk {
             open: true,
             panel: None,
             zoom: Zoom::default(),
+            window_scale: WindowScale::default(),
             light: Light::new(),
             window: None,
             chat: Chat::default(),
@@ -650,6 +732,7 @@ mod tests {
                 height: 240.0,
             }),
             zoom: Zoom::new(1.25),
+            window_scale: WindowScale::new(2),
             window: Some(Frame {
                 x: -1920,
                 y: 40,
@@ -688,6 +771,7 @@ mod tests {
         assert!(!back.open);
         assert_eq!(back.panel, desk.panel);
         assert_eq!(back.zoom, desk.zoom);
+        assert_eq!(back.window_scale, desk.window_scale);
         assert_eq!(back.window, desk.window);
         assert_eq!(back.light, desk.light);
         assert_eq!(back.chat, desk.chat);
@@ -743,6 +827,27 @@ mod tests {
         assert_eq!(desk.chat.scale.glyph_scale_factor(), ChatScale::MAX);
         let desk: Desk = toml::from_str("[chat]\nscale = 0").unwrap();
         assert_eq!(desk.chat.scale.glyph_scale_factor(), ChatScale::MIN);
+    }
+
+    /// [`WindowScale`]'s own version of the same clamp. A `0` here is worse
+    /// than a `0` in either of its neighbours: a window drawn at nothing is a
+    /// window with nothing to click, so the value that would make the client
+    /// unusable is exactly the one a hand-edited file must not be able to set.
+    #[test]
+    fn a_hand_edited_window_scale_is_clamped_on_the_way_in() {
+        let desk: Desk = toml::from_str("window_scale = 400").unwrap();
+        assert_eq!(desk.window_scale.factor(), WindowScale::MAX);
+        let desk: Desk = toml::from_str("window_scale = 0").unwrap();
+        assert_eq!(desk.window_scale.factor(), WindowScale::MIN);
+    }
+
+    /// A file written before the knob existed says nothing about it, and what
+    /// it must then draw is what it drew: the art's own size, windows exactly
+    /// where and how big they were.
+    #[test]
+    fn a_file_without_a_window_scale_draws_at_the_arts_own_size() {
+        let desk: Desk = toml::from_str("zoom = 1.0").unwrap();
+        assert_eq!(desk.window_scale.factor(), 1);
     }
 
     /// [`TtfScale`]'s own version of the same clamp — a hand-edited number

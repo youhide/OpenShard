@@ -2658,6 +2658,9 @@ dependencies = [
 [[package]]
 name = "openshard-commands"
 version = "0.0.1"
+dependencies = [
+ "openshard-protocol",
+]
 
 [[package]]
 name = "openshard-config"
@@ -2688,6 +2691,7 @@ name = "openshard-e2e-shard"
 version = "0.0.1"
 dependencies = [
  "openshard-client-net",
+ "openshard-commands",
  "openshard-config",
  "openshard-gateway",
  "openshard-movement",
@@ -2913,6 +2917,7 @@ dependencies = [
 name = "openshard-state"
 version = "0.0.1"
 dependencies = [
+ "openshard-commands",
  "openshard-config",
  "openshard-entities",
  "openshard-events",

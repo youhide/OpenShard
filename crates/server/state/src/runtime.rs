@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use openshard_commands::StaffCommand;
 use openshard_config::CombatEra;
 use openshard_entities::{EntityId, Registry};
 use openshard_events::EventBus;
@@ -2118,17 +2119,37 @@ impl WorldState {
         }
     }
 
+    /// What `watcher`'s *account* is held at — [`AccessLevel::Player`] for one
+    /// with no [`Access`] of its own, which is every ordinary character and
+    /// every creature the world spawned.
+    ///
+    /// The level itself rather than the gate, for the one caller that reports it
+    /// instead of testing it: `AuthorityNotice`, which tells a client what it may
+    /// offer to complete. Every *gate* asks [`staff_authority`](Self::staff_authority),
+    /// which is this compared against a level and is what a permission check
+    /// should read.
+    #[must_use]
+    pub fn access_level(&self, watcher: EntityId) -> AccessLevel {
+        self.registry
+            .get::<Access>(watcher)
+            .map_or(AccessLevel::Player, |access| access.0)
+    }
+
     /// Whether `watcher`'s *account* may command — a GameMaster or above.
     ///
     /// The authority half of Sphere's split: `PLEVEL` says who may run a staff
     /// command, and it never moves within a session. Every `.`-command gate reads
     /// this, which is what lets a game master who has turned their staff mode
     /// *off* turn it back on again.
+    ///
+    /// The threshold is [`StaffCommand::AUTHORITY`] and not a level written
+    /// here, because the client's completer filters by the same constant
+    /// (`StaffCommand::matching`): a shard that raised its bar and a client that
+    /// did not would offer words this refuses, which is the drift the shared
+    /// vocabulary crate exists to make impossible.
     #[must_use]
     pub fn staff_authority(&self, watcher: EntityId) -> bool {
-        self.registry
-            .get::<Access>(watcher)
-            .is_some_and(|access| access.0 >= AccessLevel::GameMaster)
+        self.access_level(watcher).allows(StaffCommand::AUTHORITY)
     }
 
     /// Whether `watcher` is *acting* as staff right now — the exemptions half.

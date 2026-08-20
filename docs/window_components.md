@@ -755,22 +755,40 @@ never a half-routed frame.
 
   **The "one place that measures a cursor" is two, one per direction**, and
   each is named where it lives: `render_passes.rs`'s `draw_gump_windows`
-  moves the *art* into screen space, once per window per frame, with the new
-  `Picture::offset`/`Scissor::offset`/`GumpLabel::offset` (`gump.rs`,
-  `text.rs`) — the picture and its scissor move together, because a scissor
-  is only meaningful next to the picture it crops. `own_windows.rs`'s
-  `App::window_under_pointer` moves the *cursor* into each candidate
-  window's own space instead, before testing it against that window's
-  (already window-local) last-drawn pictures. `panes/route.rs`'s
-  `offer_to_panes` and `render_passes.rs`'s two `PaneFrame` builders do the
-  same subtraction before a pane ever sees `ctx.frame.cursor` — that is what
+  moves the *art* into screen space, once per window per frame, and
+  `own_windows.rs`'s `App::window_under_pointer` moves the *cursor* into each
+  candidate window's own space instead, before testing it against that
+  window's (already window-local) last-drawn pictures. `panes/route.rs`'s
+  `offer_to_panes` and `render_passes.rs`'s two `PaneFrame` builders convert
+  the same way before a pane ever sees `ctx.frame.cursor` — that is what
   makes a pane's own hit test (`window.hit(ctx.frame.cursor, ...)`, `Effect::
   Grab(ctx.frame.cursor)`, and so on) need no arithmetic of its own at all,
   which was the whole complaint this entry opened with. A test in `gump.rs`
-  (`offsetting_pictures_and_offsetting_the_cursor_pick_the_same_answer`)
-  pins the identity both directions rely on: picking a window-local list
-  against a local cursor and picking the same list moved into screen space
-  against the absolute cursor must always agree.
+  (`a_magnified_window_picks_what_it_draws`) pins the identity both
+  directions rely on: the pixel the draw pass puts a picture's texel on must
+  be the pixel whose local cursor picks that picture.
+
+  **Since: the placement gained a scale, and that made both directions one
+  function each.** `desk::WindowScale` is how big every window draws — an
+  integer upscale on the art's own pixels, saved as `window_scale` in
+  `client_ui.toml` and turned by the dev window's Windows tab — because the
+  reference client has no display scaling at all and its windows are postage
+  stamps on a modern screen. A window is therefore *magnified and moved*
+  rather than only moved, and the three per-`Picture` movers this entry
+  introduced (`Picture::offset`, `Scissor::offset`, `GumpLabel::offset`) are
+  **gone**, replaced by one `gump::place(&mut quads, at, magnify)` that the
+  draw pass calls on a window's art and on its text alike: art, labels and a
+  scissored row all end as `SpriteQuad`s in the same window-local pixels, and
+  three ways to place them would be three things to keep in step with the
+  pointer. The pointer's own half is `windows::OwnWindow::local_cursor`,
+  which subtracts the placement and divides by the same factor — `div_euclid`,
+  not `/`, because a cursor left of a window is a negative local coordinate
+  and truncating division would round it onto column `0`, inside the picture
+  that starts there. Anything cropped is cut *before* `place`, in the
+  window's own pixels, where the cut is exact. Two things deliberately keep
+  the art's own size: the shard's hover tooltip (it is drawn over the world
+  as well, and belongs to no window) and the HUD chat box (`desk::ChatScale`
+  is its own knob).
 - ~~**The vendor window and the skill window disagree about what a wheel over a
   window means.** Skills claims its whole frame; the vendor claims only its
   catalogue viewport (`catalogue_contains`), so a notch over the shop's buttons
@@ -1035,6 +1053,24 @@ settle:
 - **`shell::Request` is shrinking.** The split field is gone from it, and what is
   left is party and diagnostics. When the last window-shaped member goes, `apply`
   is a frame-late door with nothing window-shaped left to carry.
+- **What `WindowScale` does *not* reach, and each is a decision somebody should
+  make rather than a gap.** The cascade constants (`CONTAINER_ORIGIN`,
+  `CONTAINER_CASCADE`, `windows.rs`) are screen placement and are left
+  unmagnified, so at three times the art two cascaded bags overlap by far more
+  of each other than the 24-pixel step was chosen to leave — and the eighth
+  window runs off a small screen sooner, which is the entry above's second
+  symptom arriving earlier. `SPLIT_OFFSET` *is* magnified, because it is half
+  the picker's own art rather than a screen distance, and the two being
+  different kinds of constant in the same file is the thing to notice. The
+  shard's hover tooltip and the HUD chat box keep the art's own size on
+  purpose (the first is drawn over the world too; the second has
+  `desk::ChatScale`), which at three times a window is a legible bag with an
+  illegible tooltip beside it.
+- **The diagnostic tools do not know the scale.** `tests/gumpshot.rs` and
+  everything else in `docs/parity.md`'s list assemble a frame by hand and place
+  windows themselves, so a tool's picture is the client's only at
+  `WindowScale::MIN`. That is one more caller of the placement that is not
+  `gump::place` — the shape `parity.md` exists to complain about.
 
 ## Status
 

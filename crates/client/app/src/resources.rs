@@ -18,6 +18,7 @@ use openshard_uofiles::cliloc::Cliloc;
 use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::gumpart::Gumps;
 use openshard_uofiles::map::Map;
+use openshard_uofiles::radarcol::RadarColors;
 use openshard_uofiles::skillgrp::SkillGroups;
 use openshard_uofiles::skills::Skills as SkillNames;
 use openshard_uofiles::texmaps::TexMaps;
@@ -120,4 +121,10 @@ pub struct Resources {
     pub skill_names: SkillNames,
     /// Which heading each skill is under — see [`Resources::skill_names`].
     pub skill_groups: SkillGroups,
+    /// The one colour a land or static graphic draws as on the radar/minimap,
+    /// or `None` for an install this build could not read `radarcol.mul`
+    /// from — see `client/render/src/radar.rs`'s module doc. `None` means the
+    /// minimap draws no terrain, the same tolerance a missing `gumps` or
+    /// `cliloc` table gets.
+    pub radar_colors: Option<RadarColors>,
 }

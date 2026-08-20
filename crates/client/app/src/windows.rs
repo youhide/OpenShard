@@ -82,6 +82,35 @@ pub struct OwnWindow {
     pub pane: crate::panes::AnyPane,
 }
 
+impl OwnWindow {
+    /// The pointer, in this window's own pixels: the surface's cursor, less
+    /// where this window sits, divided by how big it is being drawn.
+    ///
+    /// **The inverse of `gump::place`, and the only one.** A pane lays itself
+    /// out at the origin and at the art's own size
+    /// (`docs/window_components.md`'s window-local coordinates), so everything
+    /// the manager decides about a window — its placement and its scale — has
+    /// to be undone here before a pane is handed a cursor, exactly as it is
+    /// applied there before the pane's quads reach the surface. Three callers
+    /// ask this — the layout pass, the input router and the hit test — and they
+    /// ask *this*, rather than each subtracting `at` for itself, because three
+    /// copies of one transform is three chances for the picture and the click
+    /// to disagree.
+    ///
+    /// `div_euclid` and not `/`: a cursor left of or above the window is a
+    /// negative local coordinate, and truncating division rounds those *up*
+    /// toward zero — which would put the column left of a window's edge on
+    /// column `0`, inside the picture that starts there, and hand a pane a
+    /// click that landed outside it.
+    pub fn local_cursor(&self, cursor: GumpPixel, scale: crate::desk::WindowScale) -> GumpPixel {
+        let factor = scale.factor() as i32;
+        GumpPixel::new(
+            (cursor.x - self.at.x).div_euclid(factor),
+            (cursor.y - self.at.y).div_euclid(factor),
+        )
+    }
+}
+
 /// What a window is over: a bag's contents, a body, or a dialog the shard
 /// drew.
 ///
@@ -461,7 +490,19 @@ const SPLIT_OFFSET: GumpPixel = GumpPixel::new(80, 40);
 /// the screen only in so far as it is never placed at a negative corner: a
 /// prompt hanging off the right-hand edge is the reference's behaviour too, and
 /// this client has no idea how wide the surface is down here.
-pub fn open_split_window(own_windows: &mut Vec<OwnWindow>, prompt: crate::panes::SplitPrompt, at: GumpPixel) {
+///
+/// `scale` is how big the picker will be *drawn* ([`crate::desk::WindowScale`]),
+/// and it is here rather than only in the draw pass because [`SPLIT_OFFSET`] is
+/// half the frame's own art: a constant in art pixels, subtracted from a cursor
+/// in screen pixels. Left unmagnified, the window that is supposed to arrive
+/// under the hand would arrive up and to the left of it by half its size at
+/// twice the scale, and by a whole frame at three times.
+pub fn open_split_window(
+    own_windows: &mut Vec<OwnWindow>,
+    prompt: crate::panes::SplitPrompt,
+    at: GumpPixel,
+    scale: crate::desk::WindowScale,
+) {
     let subject = WindowSubject::Split {
         item: prompt.item,
         most: prompt.most,
@@ -475,9 +516,13 @@ pub fn open_split_window(own_windows: &mut Vec<OwnWindow>, prompt: crate::panes:
     }) {
         return;
     }
+    let magnify = scale.factor() as i32;
     own_windows.push(OwnWindow {
         subject,
-        at: GumpPixel::new((at.x - SPLIT_OFFSET.x).max(0), (at.y - SPLIT_OFFSET.y).max(0)),
+        at: GumpPixel::new(
+            (at.x - SPLIT_OFFSET.x * magnify).max(0),
+            (at.y - SPLIT_OFFSET.y * magnify).max(0),
+        ),
         pane: crate::panes::AnyPane::of(subject),
     });
 }

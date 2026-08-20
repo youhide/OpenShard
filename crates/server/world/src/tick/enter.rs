@@ -544,6 +544,20 @@ impl World {
             self.state
                 .send_packet(connection, &ServerPacket::MobileIncoming(mine));
         }
+        // What this shard holds the character at, so its client can stop
+        // offering staff commands nobody may run. This engine's own `0xBF`
+        // subcommand and no reference client's — see `AuthorityNotice`, which
+        // is also where "a stock client ignores it" is argued.
+        //
+        // The *authority* and not the staff mode: `.gm` moves the mode all
+        // session and this never moves at all, which is why it is sent once,
+        // here, and never refreshed.
+        self.state.send_packet(
+            connection,
+            &ServerPacket::AuthorityNotice(AuthorityNotice {
+                level: self.state.access_level(entity),
+            }),
+        );
         self.state
             .send_packet(connection, &ServerPacket::LoginComplete(LoginComplete));
 

@@ -304,7 +304,12 @@ impl App {
     /// now, drawn by the same pass as every other, and the gesture works in any
     /// build that can draw a container.
     pub(crate) fn open_split_prompt(&mut self, asker: windows::Asking, prompt: crate::panes::SplitPrompt) {
-        windows::open_split_window(&mut self.windows.own_windows, prompt, self.input.pointer_gump);
+        windows::open_split_window(
+            &mut self.windows.own_windows,
+            prompt,
+            self.input.pointer_gump,
+            self.desk.window_scale,
+        );
         self.windows.prompt = Some(asker);
         // The keys go to the picker from the moment it opens — the reference's
         // own `SetKeyboardFocus`, and what lets an exact figure be typed into a
@@ -423,12 +428,13 @@ impl App {
         let cursor = self.input.pointer_gump;
         self.windows.own_windows.iter().rev().find_map(|window| {
             let drawn = self.drawn(window.subject)?;
-            // Every pane laid this window out window-local (see
-            // `panes::PaneFrame::cursor`'s doc), so the pointer has to be
-            // converted into *this* window's own pixels before it is tested
-            // against what that window drew — the other half of the one
-            // arithmetic `render_passes.rs`'s draw pass does with `.offset`.
-            let local = gump_art::GumpPixel::new(cursor.x - window.at.x, cursor.y - window.at.y);
+            // Every pane laid this window out window-local and at its art's
+            // own size (see `panes::PaneFrame::cursor`'s doc), so the pointer
+            // has to be converted into *this* window's own pixels before it is
+            // tested against what that window drew — the other half of the one
+            // arithmetic `render_passes.rs`'s draw pass does with
+            // `gump::place`.
+            let local = window.local_cursor(cursor, self.desk.window_scale);
             if let Drawn::Vendor(vendor) = drawn {
                 return vendor.contains(local).then_some(window.subject);
             }

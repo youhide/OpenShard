@@ -2,10 +2,12 @@
 //! sent yet, and [`draw_chat_and_speech`] is the speech line and the journal
 //! above it, over the finished picture and under egui's.
 
-use openshard_client_render::gump::{self as gump_art, GumpPixel};
+use openshard_client_render::geometry::Rect;
+use openshard_client_render::gump::{self as gump_art, GumpPixel, Scissor};
 use openshard_client_render::sprite::SpriteQuad;
 use openshard_client_render::text::{self, GumpLabel};
 use openshard_commands::{PREFIX, StaffCommand};
+use openshard_protocol::access::AccessLevel;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 
@@ -22,10 +24,10 @@ use crate::{
 /// speech with a different **mode byte**, which is a property of the line rather
 /// than of its first character (`docs/roadmap.md` §6, guild chat). A reference
 /// client puts a dropdown above the entry field for exactly that reason, and
-/// this is that dropdown: the prompt already draws the channel's name, so
-/// cycling it with a key costs no new widget and no new hit test, and a player
-/// can always see which channel they are about to speak on rather than
-/// discovering it after pressing Enter.
+/// this is that dropdown: [`channel_button`] draws it at the left end of the
+/// input line, a click turns it, and it is drawn whether or not the line is
+/// open — so a player can always see which channel they are about to speak on
+/// rather than discovering it after pressing Enter.
 ///
 /// The alternative — reserving `/` or `\` at the front of the line — was
 /// rejected because it makes a character unsayable and hides the state it sets.
@@ -76,7 +78,171 @@ impl Channel {
 /// drawn in the same column at the same line height, so the two together are
 /// what has to fit above the input line, and at `desk::ChatScale`'s largest that
 /// is already a third of a small window.
+///
+/// A *taste* and not a limit: what the window can actually hold is
+/// [`room_above`], and the popup is drawn to whichever of the two is smaller.
 const COMPLETION_ROWS: usize = CHAT_LINES;
+
+/// How dark the chat's own plates are: the channel button, and the bar behind
+/// the highlighted completion.
+///
+/// A quarter of the way up `hues.mul`'s thirty-two rungs, and neither end of
+/// them on purpose. Black would read as a hole cut in the world rather than as a
+/// piece of interface — the gump pass does no blending, so a plate covers what
+/// is under it outright (see [`gump_art::plate`]) — and anything bright enough
+/// to read as a plate at a glance is bright enough to swallow the grey the rows
+/// are drawn in. This is the rung at which the shard's own system grey still
+/// stands off it.
+///
+/// One shade for both, because they are one thing: the furniture the chat draws
+/// under its own text. Two constants of the same value would be two things to
+/// change when this is next argued about.
+const PLATE_SHADE: f32 = 0.25;
+
+/// A plate filling `box_`, in whichever space the caller draws in.
+///
+/// `to_real` is `1.0` for the `fonts.mul` path, whose quads are in gump pixels
+/// and are multiplied by the shader, and the surface's own scale for the
+/// TrueType path, whose quads are already real (see [`text::collect_gump_ttf`]).
+/// The box itself is always in gump pixels, which is the space every layout
+/// answer in this module is in.
+fn plate_of(box_: Scissor, to_real: f32) -> SpriteQuad {
+    gump_art::plate(
+        Rect {
+            x: (box_.at.x as f32 * to_real).round(),
+            y: (box_.at.y as f32 * to_real).round(),
+            width: box_.width as f32 * to_real,
+            height: box_.height as f32 * to_real,
+        },
+        Hue::NONE,
+        gump_art::Shade::new(PLATE_SHADE),
+    )
+}
+
+/// How many rows of chat fit between the input line and the top of the window.
+///
+/// The column is laid out **upward** from the input line — the popup first and
+/// the journal above it — and until this function existed nothing asked how tall
+/// the window was: six journal lines and up to six popup rows were drawn at
+/// `desk::ChatScale`'s line height wherever that landed, which at scale 4 on a
+/// small window is off the top of the screen. What does not fit is not drawn,
+/// which is the only answer that does not lie: a line above the surface is a
+/// line the player cannot read, and drawing it costs the same as drawing one
+/// they can.
+///
+/// Both arguments are in gump pixels, the space
+/// [`draw_chat_and_speech`] lays the column out in. `canvas_height` is the
+/// surface's own height there, and `line_height` is one row of it — which is
+/// [`CHAT_LINE_HEIGHT`] scaled by `desk::ChatScale` for `fonts.mul`, and
+/// unscaled for a TrueType face (see the call site).
+///
+/// The arithmetic is the layout's own, read back: the input line's top sits at
+/// `canvas_height - CHAT_MARGIN - line_height`, row `k` above it at
+/// `line_height * k` higher, and the topmost row drawn must still start at or
+/// below [`CHAT_MARGIN`]. Zero is a real answer — a window shorter than its own
+/// margins plus one line has room for the input line and nothing else.
+pub(crate) fn room_above(canvas_height: i32, line_height: i32) -> usize {
+    // A line height of zero would be a division by it; it is a constant times a
+    // clamped scale and cannot be, but the layout must not depend on that being
+    // true two refactors from now.
+    if line_height <= 0 {
+        return 0;
+    }
+    let input_top = canvas_height - CHAT_MARGIN - line_height;
+    usize::try_from((input_top - CHAT_MARGIN) / line_height).unwrap_or(0)
+}
+
+/// One row of the chat column, in gump pixels.
+///
+/// The TrueType path draws at `TTF_BASE_PIXEL_HEIGHT` regardless of
+/// `desk::ChatScale` — see [`scaled_gump_quads`]'s doc for why an integer
+/// upscale is right for `fonts.mul` and wrong for an antialiased face — so the
+/// line spacing only grows when the glyphs it is spacing actually will.
+///
+/// A function and not a line inside the draw, for [`channel_width`]'s reason:
+/// the pointer has to land on the same row the frame drew.
+pub(crate) fn line_height(truetype: bool, chat_style: desk::Chat) -> i32 {
+    match truetype {
+        true => CHAT_LINE_HEIGHT,
+        false => CHAT_LINE_HEIGHT * chat_style.scale.glyph_scale_factor() as i32,
+    }
+}
+
+/// The surface's height in gump pixels rather than real ones — `Frame::scale`'s
+/// doc is what the pass multiplies back out, and this is that arithmetic done
+/// once for where the bottom of the window is.
+pub(crate) fn canvas_height(surface_height: u32, scale: f32) -> i32 {
+    (surface_height as f32 / scale) as i32
+}
+
+/// How wide the widest channel's name is drawn, in gump pixels.
+///
+/// **The one measurement the channel button's box is built from**, and it is a
+/// function rather than a number for `docs/parity.md`'s reason: the frame that
+/// draws the button and the click that lands on it are two places, and a box
+/// they each worked out for themselves would agree by coincidence. They call
+/// this instead.
+///
+/// The *widest* of the four and not the one showing, so the button does not
+/// change size under the pointer when the channel is cycled — a control that
+/// moves as it is pressed is a control that is hard to press twice.
+///
+/// `ttf` is the atlas when a TrueType face is set, which measures in **real**
+/// pixels (see [`text::gump_width_ttf`]) and is divided back here — this
+/// answers in gump pixels whichever face is in use, because that is the space
+/// the layout and the pointer both speak. `magnify` is `desk::ChatScale`'s
+/// factor, which multiplies `fonts.mul`'s own pixels and does nothing to a
+/// TrueType face.
+pub(crate) fn channel_width(
+    font_atlas: &openshard_client_render::atlas::FontAtlas,
+    ttf: Option<&openshard_client_render::atlas::TtfAtlas>,
+    magnify: i32,
+    scale: f32,
+) -> i32 {
+    let widest = Channel::ALL
+        .iter()
+        .map(|channel| match ttf {
+            Some(atlas) => text::gump_width_ttf(channel.label(), atlas),
+            None => text::gump_width(channel.label(), Font::DEFAULT, font_atlas) * magnify,
+        })
+        .max()
+        .unwrap_or_default();
+    match ttf {
+        // Real pixels back to gump ones, once and here, rather than at each of
+        // the two call sites — where one of them would eventually round it the
+        // other way.
+        Some(_) => (widest as f32 / scale).round() as i32,
+        None => widest,
+    }
+}
+
+/// The channel button's box, in gump pixels: at the left end of the input line,
+/// exactly as tall as it.
+///
+/// A **button** and not a chord. `Shift+Tab` still turns the channel and is
+/// documented on [`Chat::channel`], but a modifier chord was what this client
+/// had instead of a control it had not drawn — the reference client puts a
+/// dropdown above its entry field, and a player who has never read a key list
+/// cannot find a chord at all.
+///
+/// The air around the label is [`CHAT_MARGIN`] rather than a padding of its own:
+/// the same gap the chat column keeps from the edge of the window, kept from the
+/// edge of the plate.
+///
+/// `channel_width` is [`channel_width`]'s answer — the two are separate so that
+/// the pointer's side can measure once and this can stay pure arithmetic.
+pub(crate) fn channel_button(canvas_height: i32, line_height: i32, channel_width: i32) -> Scissor {
+    Scissor {
+        at: GumpPixel::new(CHAT_MARGIN, canvas_height - CHAT_MARGIN - line_height),
+        width: channel_width + CHAT_MARGIN * 2,
+        height: line_height,
+    }
+}
+
+/// Where the typed line starts: past the button, with the same air after it.
+fn line_starts_at(button: Scissor) -> GumpPixel {
+    GumpPixel::new(button.at.x + button.width + CHAT_MARGIN, button.at.y)
+}
 
 /// What the speech line is offering to complete, right now.
 ///
@@ -104,11 +270,14 @@ pub(crate) enum Offer {
 pub(crate) struct Row {
     /// What it says.
     pub(crate) text: String,
-    /// Whether it is the one Tab would take. Drawn in the player's own chat
-    /// hue, where the rest are drawn in the shard's grey — the gump pass has no
-    /// primitive that paints a solid rectangle (see the caret in
-    /// [`draw_chat_and_speech`]), so a highlight is ink and a marker rather than
-    /// a bar.
+    /// Whether it is the one Tab would take.
+    ///
+    /// Drawn on a plate — [`gump_art::plate`] at [`PLATE_SHADE`], as wide as
+    /// the widest row of the popup — rather than in a second ink, which is what
+    /// it was while the gump pass had no primitive that painted an area. The `>`
+    /// marker [`Offer::rows`] puts at the front of the row stays: a plate says
+    /// which row is highlighted to somebody looking at the popup, and the marker
+    /// still says it in the text itself, which is what a test can read.
     pub(crate) highlighted: bool,
 }
 
@@ -126,8 +295,18 @@ impl Offer {
     ///
     /// Empty when there is nothing to offer, which is what "no popup" is: there
     /// is no separate visibility flag to disagree with the contents.
+    ///
+    /// `limit` is how many rows the caller has room for — never more than
+    /// [`COMPLETION_ROWS`] and often fewer, because the window has a top
+    /// ([`room_above`]). It is a hard cap on the length of what comes back,
+    /// counting the "… n more" row: a popup that answered with more rows than it
+    /// was given room for would be the caller's problem to crop, and cropping it
+    /// there is what would drop the highlighted row rather than the furthest one.
     #[must_use]
-    pub(crate) fn rows(&self) -> Vec<Row> {
+    pub(crate) fn rows(&self, limit: usize) -> Vec<Row> {
+        if limit == 0 {
+            return Vec::new();
+        }
         match self {
             Self::Nothing => Vec::new(),
             // A whole command with its arguments spelled out: the same sentence
@@ -141,11 +320,28 @@ impl Offer {
             // empty popup if it ever did, and that is not a trade worth taking.
             Self::Candidates { of, .. } if of.is_empty() => Vec::new(),
             Self::Candidates { of, at } => {
+                // A list longer than the box spends one of its own rows saying
+                // how many it did not draw, so the commands get one fewer than
+                // `limit` exactly when there is something left over to count.
+                let shown = match limit < of.len() {
+                    true => limit - 1,
+                    false => of.len(),
+                };
+                // One row of room and a list that does not fit in it: the count
+                // is all there is space for, and it is the more useful of the
+                // two — a single command drawn out of twenty-five reads as *the*
+                // match rather than as one of them.
+                if shown == 0 {
+                    return vec![Row {
+                        text: format!("  ... {} more", of.len()),
+                        highlighted: false,
+                    }];
+                }
                 // The window scrolls with the highlight rather than sitting at
                 // the top: a player arrowing down past the eighth match must not
                 // be moving a highlight they cannot see.
-                let start = at.saturating_sub(COMPLETION_ROWS - 1).min(of.len() - 1);
-                let end = (start + COMPLETION_ROWS).min(of.len());
+                let start = at.saturating_sub(shown - 1).min(of.len() - 1);
+                let end = (start + shown).min(of.len());
                 let mut rows: Vec<Row> = of[start..end]
                     .iter()
                     .enumerate()
@@ -215,15 +411,18 @@ pub(crate) struct Chat {
     /// there is no mouse hit test for it, so nothing else about picking has
     /// to change for this to work.
     pub(crate) focused: bool,
-    /// Where the next line goes. Cycled with **Shift+Tab** while the line has
-    /// the keyboard, and **kept** across sends — see [`Channel`], and note that
-    /// a channel which reset itself after every line would make a conversation
-    /// on one channel four keystrokes a sentence.
+    /// Where the next line goes. **Kept** across sends — see [`Channel`], and
+    /// note that a channel which reset itself after every line would make a
+    /// conversation on one channel four keystrokes a sentence.
     ///
-    /// It was plain Tab until the completer took that key: a channel is chosen
-    /// once a conversation and a command completed once a word, so the cheaper
-    /// gesture goes to the commoner act. The intended end state is neither —
-    /// a button on screen, which is what the reference client's dropdown is.
+    /// Turned two ways, which are the same state and not two: the **button** at
+    /// the left of the input line ([`channel_button`], and what a hand on the
+    /// mouse reaches for), and **Shift+Tab** while the line has the keyboard —
+    /// which stays because a hand already typing should not have to leave the
+    /// keyboard to answer in the same channel it was answering in. It was plain
+    /// Tab until the completer took that key: a channel is chosen once a
+    /// conversation and a command completed once a word, so the cheaper gesture
+    /// went to the commoner act.
     pub(crate) channel: Channel,
     /// What the completer is offering against [`typed`](Self::typed) right now.
     ///
@@ -239,48 +438,61 @@ pub(crate) struct Chat {
 
 impl Chat {
     /// Insert typed text at the caret and move the caret past it.
-    pub(crate) fn insert(&mut self, text: &str) {
+    ///
+    /// `authority` is what the shard holds this character at — see
+    /// [`Chat::refresh`] for why every path that changes the line carries it
+    /// rather than the line remembering it.
+    pub(crate) fn insert(&mut self, text: &str, authority: AccessLevel) {
         self.typed.insert_str(self.cursor, text);
         self.cursor += text.len();
-        self.edited();
+        self.edited(authority);
     }
 
     /// Delete the `char` before the caret, if any.
-    pub(crate) fn backspace(&mut self) {
+    pub(crate) fn backspace(&mut self, authority: AccessLevel) {
         let Some(before) = self.typed[..self.cursor].chars().next_back() else {
             return;
         };
         let start = self.cursor - before.len_utf8();
         self.typed.replace_range(start..self.cursor, "");
         self.cursor = start;
-        self.edited();
+        self.edited(authority);
     }
 
     /// Delete the `char` after the caret, if any.
-    pub(crate) fn delete(&mut self) {
+    pub(crate) fn delete(&mut self, authority: AccessLevel) {
         let Some(after) = self.typed[self.cursor..].chars().next() else {
             return;
         };
         let end = self.cursor + after.len_utf8();
         self.typed.replace_range(self.cursor..end, "");
-        self.edited();
+        self.edited(authority);
     }
 
     /// The line changed under the player's own hand: a dismissed popup is asked
     /// again, and the offer is recomputed.
-    fn edited(&mut self) {
+    fn edited(&mut self, authority: AccessLevel) {
         self.dismissed = false;
-        self.refresh();
+        self.refresh(authority);
     }
 
     /// Recompute [`offer`](Self::offer) from the line.
     ///
     /// The one place the popup's contents are decided, and it reads nothing but
-    /// `typed` and `dismissed`. Note what it does *not* read: the caret. An
+    /// `typed`, `dismissed` and the authority it is handed.
+    ///
+    /// **The authority is a parameter and not a field.** It is the shard's
+    /// answer, it lives on the view
+    /// (`openshard_client_net::view::WorldView::authority`), and a copy kept
+    /// here would be a second place for it to be wrong — the offer is recomputed
+    /// on every keystroke, so reading it at every keystroke costs nothing and
+    /// cannot go stale. Every path that changes the line therefore carries it.
+    ///
+    /// Note what it does *not* read: the caret. An
     /// offer that followed the caret would flicker as it was walked back through
     /// a finished line, and Tab replaces the command word wherever the caret
     /// stands — which is the only word a `.` line has that can be completed.
-    fn refresh(&mut self) {
+    fn refresh(&mut self, authority: AccessLevel) {
         // What was highlighted before, so that a narrowing list keeps the
         // player's choice instead of snapping back to the alphabetically first.
         let chosen = self.offer.highlighted();
@@ -291,6 +503,15 @@ impl Chat {
         let Some(body) = self.typed.strip_prefix(PREFIX) else {
             return;
         };
+        // Nothing at all for somebody who may command nothing — the *usage
+        // hint* below included, which `StaffCommand::parse` would otherwise hand
+        // out for a finished word: a player who may not run `.go` must not be
+        // shown how to spell it either. `matching` makes the same test for the
+        // list; both read `StaffCommand::AUTHORITY`, which is also the constant
+        // the shard's own gate compares against.
+        if !authority.allows(StaffCommand::AUTHORITY) {
+            return;
+        }
         match body.split_once(char::is_whitespace) {
             // Past the word: the command is settled, and what is left to offer
             // is its arguments. A first word that is not a command offers
@@ -303,7 +524,7 @@ impl Chat {
             }
             // Still in the word.
             None => {
-                let of = StaffCommand::matching(body);
+                let of = StaffCommand::matching(body, authority);
                 if of.is_empty() {
                     return;
                 }
@@ -320,7 +541,7 @@ impl Chat {
     /// The whole command word is replaced, and a space is left after it: the
     /// next thing a player types is an argument, and a completer that made them
     /// press space themselves has completed half a word.
-    pub(crate) fn complete(&mut self) -> bool {
+    pub(crate) fn complete(&mut self, authority: AccessLevel) -> bool {
         let Some(command) = self.offer.highlighted() else {
             return false;
         };
@@ -333,7 +554,7 @@ impl Chat {
             self.typed.insert(name.len(), ' ');
         }
         self.cursor = name.len() + 1;
-        self.edited();
+        self.edited(authority);
         true
     }
 
@@ -363,10 +584,10 @@ impl Chat {
     /// Answers whether the line is still open. Two meanings on one key and in
     /// that order, which is every editor's rule: the innermost thing showing is
     /// the thing dismissed.
-    pub(crate) fn cancel(&mut self) -> bool {
+    pub(crate) fn cancel(&mut self, authority: AccessLevel) -> bool {
         if self.offer != Offer::Nothing {
             self.dismissed = true;
-            self.refresh();
+            self.refresh(authority);
             return true;
         }
         self.typed.clear();
@@ -411,6 +632,64 @@ impl Chat {
     }
 }
 
+impl crate::app::App {
+    /// What the shard holds this character's authority at, or
+    /// [`AccessLevel::Player`] before there is a view to ask.
+    ///
+    /// The one reader is the speech line's completer. It is asked at every
+    /// keystroke rather than copied onto [`Chat`] — see [`Chat::refresh`] — and
+    /// the answer is always the view's, never this end's opinion: nothing here
+    /// gates anything, the shard refuses what it refuses.
+    pub(crate) fn authority(&self) -> AccessLevel {
+        self.world
+            .authoritative
+            .view
+            .as_ref()
+            .map_or(AccessLevel::default(), |view| view.authority)
+    }
+
+    /// The channel button, pressed — answers whether the click was its.
+    ///
+    /// **Asked before the window layer.** The chat is drawn over every window
+    /// this client has (one pass, and it is the last one — see the call in
+    /// `presentation.rs`), so a click that lands on both belongs to whatever is
+    /// on top, and that is this. A button drawn over a container and picked
+    /// under it would be the pointer disagreeing with the picture, which is
+    /// `docs/parity.md`'s defect in the one place a player can feel it.
+    ///
+    /// The box comes out of [`channel_button`] and [`channel_width`], the same
+    /// two the frame draws it with, so the two cannot disagree about where it
+    /// is. The measurement needs the atlas the glyphs were packed into, which is
+    /// why this reads the window and not only the chat.
+    pub(crate) fn press_channel_button(&mut self) -> bool {
+        let Some(window) = self.window.as_ref() else {
+            return false;
+        };
+        let scale = self.gump_scale();
+        let chat_style = self.chat_style();
+        // `ttf_atlas` is `Some` exactly when a face is set (`create_window`), so
+        // this reads the face rather than the atlas and cannot pick the
+        // TrueType arithmetic for a `fonts.mul` frame.
+        let truetype = self.resources.ttf_font.is_some();
+        let ttf = window.ttf_atlas.as_ref().filter(|_| truetype);
+        let button = channel_button(
+            canvas_height(window.config.height, scale),
+            line_height(truetype, chat_style),
+            channel_width(
+                &self.resources.font_atlas,
+                ttf,
+                chat_style.scale.glyph_scale_factor() as i32,
+                scale,
+            ),
+        );
+        if !button.contains(self.input.pointer_gump) {
+            return false;
+        }
+        self.chat.channel = self.chat.channel.next();
+        true
+    }
+}
+
 /// The speech line and the journal above it, over the finished picture and
 /// under egui's — the same corner `shell::speech_line`'s `egui::Panel::bottom`
 /// used to claim before this moved to the client's own rendering. Always
@@ -443,18 +722,10 @@ pub(crate) fn draw_chat_and_speech(
     // rather than for every quad in it.
     let canvas = GumpPixel::new(
         (window.config.width as f32 / scale) as i32,
-        (window.config.height as f32 / scale) as i32,
+        canvas_height(window.config.height, scale),
     );
     let font = Font::DEFAULT;
-    // The TrueType path draws at [`TTF_BASE_PIXEL_HEIGHT`] regardless
-    // of [`desk::ChatScale`] — see [`scaled_gump_quads`]'s doc for
-    // why an integer upscale is right for `fonts.mul` and wrong for an
-    // antialiased face — so the line spacing only grows when the
-    // glyphs it is spacing actually will.
-    let line_height = match resources.ttf_font {
-        Some(_) => CHAT_LINE_HEIGHT,
-        None => CHAT_LINE_HEIGHT * chat_style.scale.glyph_scale_factor() as i32,
-    };
+    let line_height = line_height(resources.ttf_font.is_some(), chat_style);
     let input_at = GumpPixel::new(CHAT_MARGIN, canvas.y - CHAT_MARGIN - line_height);
 
     // Owned before it is borrowed into `GumpLabel`s: the journal's own
@@ -463,6 +734,12 @@ pub(crate) fn draw_chat_and_speech(
     // the caller's own chat, so both need somewhere to live for the length of
     // `collect_gump`'s borrow.
     let mut rows: Vec<(GumpPixel, Hue, Font, String)> = Vec::new();
+    // How much column there is between the input line and the top of the
+    // window, which is what both blocks below are cut to — see [`room_above`].
+    // The popup is served first because it is the one a keystroke is moving:
+    // the journal is a record and can wait a line, an offer the player is
+    // arrowing through cannot.
+    let room = room_above(canvas.y, line_height);
     // The completion popup, directly above the input line and below the
     // journal: what is being typed and what it could become read as one block,
     // and the conversation moves up out of the way rather than being drawn over.
@@ -471,24 +748,40 @@ pub(crate) fn draw_chat_and_speech(
     // from the line. The count is carried into the journal's own offset below,
     // which is the whole of "the popup pushes the conversation up".
     let popup = match chat.focused {
-        true => chat.offer.rows(),
+        true => chat.offer.rows(room.min(COMPLETION_ROWS)),
         false => Vec::new(),
     };
     let mut above = 0;
+    // Which of `rows` the highlighted one is, so the plate can be laid under it
+    // below — where the two font paths part company over what a pixel is.
+    let mut highlighted: Option<usize> = None;
     for row in popup.iter().rev() {
         above += 1;
         let at = GumpPixel::new(CHAT_MARGIN, input_at.y - line_height * above);
-        // The highlighted row in the player's own chat ink and the rest in the
-        // shard's grey — see `chat::Row::highlighted` for why the highlight is
-        // ink rather than a bar behind it.
-        let hue = match row.highlighted {
-            true => Hue(chat_style.hue),
-            false => Hue::SYSTEM,
-        };
-        rows.push((at, hue, font, row.text.clone()));
+        // Every row in the shard's grey, including the highlighted one: the
+        // highlight is the plate behind it now (see [`PLATE_SHADE`]), and a
+        // row that changed ink *as well* would be saying the same thing twice —
+        // which is what it did while there was no primitive to say it with.
+        if row.highlighted {
+            highlighted = Some(rows.len());
+        }
+        rows.push((at, Hue::SYSTEM, font, row.text.clone()));
     }
+    // The popup's own rows, which is what the plate is measured across: a bar as
+    // wide as the widest offer reads as one list, where a bar cut to the
+    // highlighted row's own text would jog in and out as the highlight moves.
+    let popup_rows = popup.len();
     if let Some(view) = world.authoritative.view.as_ref() {
-        for (row, line) in view.journal.iter().rev().take(CHAT_LINES).enumerate() {
+        // What the popup left of the column, and never more than the journal's
+        // own six: the newest lines, since the walk is `rev`.
+        //
+        // `saturating_sub` states an invariant rather than guarding a case:
+        // `Offer::rows` was given `room` as a hard cap, so it cannot have
+        // answered with more. Underflowing here would wrap to a number the
+        // `.min` below would happily clamp to six — a silent return of the very
+        // defect this reads the window's height to avoid.
+        let journal_rows = room.saturating_sub(popup.len()).min(CHAT_LINES);
+        for (row, line) in view.journal.iter().rev().take(journal_rows).enumerate() {
             let at = GumpPixel::new(CHAT_MARGIN, input_at.y - line_height * (above + row as i32 + 1));
             let text = match line.name.is_empty() {
                 true => line.text.clone(),
@@ -497,23 +790,19 @@ pub(crate) fn draw_chat_and_speech(
             rows.push((at, line.hue, line.font, text));
         }
     }
+    // What stands on the input line beside the button: the line as typed, or —
+    // with the line shut — the key that opens it.
+    //
+    // A hint and not an empty line, because there is no mouse click to discover
+    // it by (see `App::window_event`'s `Hotkey::Speak` arm). The channel is
+    // *not* named here any more: it is the button's own label, drawn whether or
+    // not the line is open, which is what a player who left it on `guild` reads
+    // without having to open anything.
     let prompt = match chat.focused {
-        // The channel's own name, which is the whole of its UI: there is no
-        // widget, and a player has to be able to see what they are about to
-        // speak on *before* they press Enter.
-        true => format!("{}: {}", chat.channel.label(), chat.typed),
-        // A hint and not an empty line: there is no mouse click to
-        // discover this by any more (see `App::window_event`'s
-        // `KeyCode::Enter` arm), so the one thing worth saying here is
-        // the key that opens it. The channel is named even when shut, because
-        // it survives a send and a player who left it on `guild` should not
-        // have to open the line to find that out.
-        false => match chat.channel {
-            Channel::Say => "[Enter] say".to_owned(),
-            other => format!("[Enter] {}", other.label()),
-        },
+        true => chat.typed.clone(),
+        false => "[Enter] to speak".to_owned(),
     };
-    let mut labels: Vec<GumpLabel<'_>> = rows
+    let labels: Vec<GumpLabel<'_>> = rows
         .iter()
         .map(|(at, hue, font, text)| GumpLabel {
             at: *at,
@@ -523,13 +812,9 @@ pub(crate) fn draw_chat_and_speech(
             clip: None,
         })
         .collect();
-    labels.push(GumpLabel {
-        at: input_at,
-        text: &prompt,
-        font,
-        hue: Hue(chat_style.hue),
-        clip: None,
-    });
+    // The channel, on a plate, at the left end of the line — see
+    // [`channel_button`] for why this is a control and not a chord.
+    let channel_label = chat.channel.label();
     // The caret, a lone glyph rather than a new quad primitive: the
     // gump pass draws through an atlas of packed sprites and has
     // nothing that paints a solid rectangle, and `fonts.mul` already
@@ -554,9 +839,15 @@ pub(crate) fn draw_chat_and_speech(
             .ttf_atlas
             .as_mut()
             .expect("create_window builds ttf_atlas whenever ttf_font is set");
+        // Every channel's name and not only the one showing: the button is as
+        // wide as the widest of the four (see [`channel_width`]), so all four
+        // have to be measurable — and a glyph the atlas has not packed measures
+        // zero, which would size the button off one frame's worth of letters.
         let wanted = labels
             .iter()
             .flat_map(|label| label.text.chars())
+            .chain(prompt.chars())
+            .chain(Channel::ALL.iter().flat_map(|channel| channel.label().chars()))
             .chain(std::iter::once('|'));
         if let Err(error) = atlas.add(font, wanted) {
             // Same corner as the speech line's own `atlas.add` above.
@@ -580,23 +871,64 @@ pub(crate) fn draw_chat_and_speech(
                 ..*label
             })
             .collect();
-        // The channel's own prefix, not the constant `"say: "` this used to
-        // measure: the caret would sit under the wrong letter the moment the
-        // prompt said "alliance".
-        let prefix = format!("{}: ", chat.channel.label());
-        let prefix_width = text::gump_width_ttf(&prefix, atlas);
+        // The button's box, in gump pixels like every other layout answer here,
+        // and converted once — the pointer reads the same box out of the same
+        // two functions, which is the whole of why they are functions.
+        let button = channel_button(
+            canvas.y,
+            line_height,
+            channel_width(&resources.font_atlas, Some(atlas), 1, scale),
+        );
+        let line_at = to_real(line_starts_at(button));
+        real_labels.push(GumpLabel {
+            at: to_real(GumpPixel::new(button.at.x + CHAT_MARGIN, button.at.y)),
+            text: channel_label,
+            font: Font::DEFAULT,
+            hue: Hue(chat_style.hue),
+            clip: None,
+        });
+        real_labels.push(GumpLabel {
+            at: line_at,
+            text: &prompt,
+            font: Font::DEFAULT,
+            hue: Hue(chat_style.hue),
+            clip: None,
+        });
         if chat.focused && blink_on {
-            let real_input_at = to_real(input_at);
-            let caret_x = prefix_width + text::gump_width_ttf(&chat.typed[..chat.cursor], atlas);
+            let caret_x = text::gump_width_ttf(&chat.typed[..chat.cursor], atlas);
             real_labels.push(GumpLabel {
-                at: GumpPixel::new(real_input_at.x + caret_x, real_input_at.y),
+                at: GumpPixel::new(line_at.x + caret_x, line_at.y),
                 text: caret_text,
                 font: Font::DEFAULT,
                 hue: Hue(chat_style.hue),
                 clip: None,
             });
         }
-        let mut hud_quads = text::collect_gump_ttf(&real_labels, atlas);
+        // The plate first, so the row's own glyphs land on it: this pass has no
+        // depth and painter's order is the only order there is. In real pixels
+        // like everything else in this branch, which is why the row's height is
+        // multiplied here and not in the branch below.
+        let mut hud_quads = Vec::new();
+        hud_quads.push(plate_of(button, scale));
+        if let Some(index) = highlighted {
+            let widest = rows[..popup_rows]
+                .iter()
+                .map(|(_, _, _, text)| text::gump_width_ttf(text, atlas))
+                .max()
+                .unwrap_or_default();
+            let at = to_real(rows[index].0);
+            hud_quads.push(gump_art::plate(
+                Rect {
+                    x: at.x as f32,
+                    y: at.y as f32,
+                    width: widest as f32,
+                    height: (line_height as f32 * scale).round(),
+                },
+                Hue::NONE,
+                gump_art::Shade::new(PLATE_SHADE),
+            ));
+        }
+        hud_quads.extend(text::collect_gump_ttf(&real_labels, atlas));
         // Overhead speech's own quads, folded into this same list
         // rather than a render call of their own — `GumpRenderer::render`'s
         // doc is explicit that a second call the same frame does not
@@ -634,19 +966,73 @@ pub(crate) fn draw_chat_and_speech(
             );
         profile::end(window.gpu.as_ref(), encoder, timed);
     } else {
-        // See the TrueType path above: the prefix is the channel's.
-        let prefix = format!("{}: ", chat.channel.label());
-        let prefix_width = text::gump_width(&prefix, font, &resources.font_atlas);
+        let magnify = chat_style.scale.glyph_scale_factor() as i32;
+        let mut labels = labels;
+        // The same two functions the TrueType branch above calls and the pointer
+        // calls — measured through `fonts.mul` here, which is the whole of the
+        // difference between the two branches.
+        let button = channel_button(
+            canvas.y,
+            line_height,
+            channel_width(&resources.font_atlas, None, magnify, scale),
+        );
+        let line_at = line_starts_at(button);
+        labels.push(GumpLabel {
+            at: GumpPixel::new(button.at.x + CHAT_MARGIN, button.at.y),
+            text: channel_label,
+            font,
+            hue: Hue(chat_style.hue),
+            clip: None,
+        });
+        labels.push(GumpLabel {
+            at: line_at,
+            text: &prompt,
+            font,
+            hue: Hue(chat_style.hue),
+            clip: None,
+        });
         if chat.focused && blink_on {
-            let caret_x =
-                prefix_width + text::gump_width(&chat.typed[..chat.cursor], font, &resources.font_atlas);
+            let caret_x = text::gump_width(&chat.typed[..chat.cursor], font, &resources.font_atlas);
             labels.push(GumpLabel {
-                at: GumpPixel::new(input_at.x + caret_x, input_at.y),
+                // **Magnified**, like the glyphs it is counting past.
+                // `gump_width` measures `fonts.mul`'s own pixels and
+                // `scaled_gump_quads` draws them at `magnify` times that, each
+                // label from its own anchor — so an anchor placed at the
+                // unmagnified width put the caret at a fraction of the way along
+                // the line it was measuring, which at `ChatScale`'s default of
+                // two was halfway back through what had been typed.
+                at: GumpPixel::new(line_at.x + caret_x * magnify, line_at.y),
                 text: caret_text,
                 font,
                 hue: Hue(chat_style.hue),
                 clip: None,
             });
+        }
+        // The button's plate, before every label that stands on it — including
+        // the journal's, which cannot reach it, and the button's own, which is
+        // the point.
+        text_quads.push(plate_of(button, 1.0));
+        // The plate under the highlighted row, before the text that stands on
+        // it — the TrueType branch's own paragraph, in gump pixels: `magnify`
+        // is what `fonts.mul`'s measured widths are drawn at, and `line_height`
+        // already carries it.
+        if let Some(index) = highlighted {
+            let widest = rows[..popup_rows]
+                .iter()
+                .map(|(_, _, row_font, text)| text::gump_width(text, *row_font, &resources.font_atlas))
+                .max()
+                .unwrap_or_default();
+            let at = rows[index].0;
+            text_quads.push(gump_art::plate(
+                Rect {
+                    x: at.x as f32,
+                    y: at.y as f32,
+                    width: (widest * magnify) as f32,
+                    height: line_height as f32,
+                },
+                Hue::NONE,
+                gump_art::Shade::new(PLATE_SHADE),
+            ));
         }
         text_quads.extend(scaled_gump_quads(
             &labels,
@@ -677,18 +1063,31 @@ pub(crate) fn draw_chat_and_speech(
 
 #[cfg(test)]
 mod tests {
+    use openshard_client_render::gump::GumpPixel;
     use openshard_commands::StaffCommand;
+    use openshard_protocol::access::AccessLevel;
 
     use super::{Channel, Chat, Offer};
+
+    /// The authority these tests type under: a game master, because the
+    /// completer has nothing at all to offer anybody else — that rule is
+    /// `StaffCommand::matching`'s and is tested there, and the one test below
+    /// that cares about it names its own level.
+    const STAFF: AccessLevel = AccessLevel::GameMaster;
 
     /// A line as a player would have typed it: the caret at the end, the offer
     /// recomputed, which is the state every method below is entered from.
     fn typing(line: &str) -> Chat {
+        typed_by(line, STAFF)
+    }
+
+    /// The same, for somebody the shard holds at `authority`.
+    fn typed_by(line: &str, authority: AccessLevel) -> Chat {
         let mut chat = Chat {
             focused: true,
             ..Chat::default()
         };
-        chat.insert(line);
+        chat.insert(line, authority);
         chat
     }
 
@@ -758,7 +1157,7 @@ mod tests {
     fn tab_takes_the_highlighted_command_and_leaves_a_space_for_its_arguments() {
         let mut chat = typing(".hd");
         assert!(chat.highlight_next(), "hdemolish -> hdesign");
-        assert!(chat.complete());
+        assert!(chat.complete(STAFF));
         assert_eq!(chat.typed, ".hdesign ");
         assert_eq!(
             chat.cursor,
@@ -777,14 +1176,14 @@ mod tests {
     #[test]
     fn tab_on_a_finished_word_still_completes_it() {
         let mut chat = typing(".save");
-        assert!(chat.complete());
+        assert!(chat.complete(STAFF));
         assert_eq!(chat.typed, ".save ");
     }
 
     #[test]
     fn tab_does_nothing_when_nothing_is_offered() {
         let mut chat = typing("hello");
-        assert!(!chat.complete());
+        assert!(!chat.complete(STAFF));
         assert_eq!(chat.typed, "hello");
     }
 
@@ -797,7 +1196,7 @@ mod tests {
         chat.highlight_next();
         chat.highlight_next();
         let chosen = chat.offer.highlighted().expect("a highlight");
-        chat.insert(&chosen.name()[1..2]);
+        chat.insert(&chosen.name()[1..2], STAFF);
         assert_eq!(chat.offer.highlighted(), Some(chosen));
     }
 
@@ -820,10 +1219,10 @@ mod tests {
     #[test]
     fn escape_puts_the_popup_away_before_the_line() {
         let mut chat = typing(".hd");
-        assert!(chat.cancel(), "the line stays open");
+        assert!(chat.cancel(STAFF), "the line stays open");
         assert_eq!(chat.offer, Offer::Nothing);
         assert_eq!(chat.typed, ".hd", "and keeps what was typed");
-        assert!(!chat.cancel(), "the second closes the line");
+        assert!(!chat.cancel(STAFF), "the second closes the line");
         assert!(!chat.focused);
         assert!(chat.typed.is_empty());
     }
@@ -833,9 +1232,9 @@ mod tests {
     #[test]
     fn typing_after_a_dismissal_asks_again() {
         let mut chat = typing(".h");
-        chat.cancel();
+        chat.cancel(STAFF);
         assert_eq!(chat.offer, Offer::Nothing);
-        chat.insert("d");
+        chat.insert("d", STAFF);
         assert!(matches!(chat.offer, Offer::Candidates { .. }));
     }
 
@@ -866,17 +1265,178 @@ mod tests {
     #[test]
     fn a_long_list_is_windowed_around_the_highlight_and_says_how_many_are_hidden() {
         let mut chat = typing(".");
-        let rows = chat.offer.rows();
-        assert_eq!(rows.len(), super::COMPLETION_ROWS + 1, "eight rows and a count");
+        let rows = chat.offer.rows(super::COMPLETION_ROWS);
+        assert_eq!(
+            rows.len(),
+            super::COMPLETION_ROWS,
+            "the count is one of the rows it was given, not a row on top of them"
+        );
         assert!(rows[0].text.contains("more"));
         assert!(rows.iter().any(|row| row.highlighted));
         for _ in 0..StaffCommand::ALL.len() - 1 {
             chat.highlight_next();
             assert!(
-                chat.offer.rows().iter().any(|row| row.highlighted),
+                chat.offer
+                    .rows(super::COMPLETION_ROWS)
+                    .iter()
+                    .any(|row| row.highlighted),
                 "the highlight is never scrolled out of the popup"
             );
         }
+    }
+
+    /// The whole of the fit: a popup asked for `n` rows draws `n`, whatever it
+    /// has to say. What a window with no room asks for is nothing at all, and a
+    /// popup that answered anyway would be drawing above the top of the screen.
+    #[test]
+    fn the_popup_never_answers_with_more_rows_than_it_was_given() {
+        let long = typing(".");
+        let short = typing(".hd");
+        let hint = typing(".go ");
+        for limit in 0..=super::COMPLETION_ROWS {
+            for offer in [&long.offer, &short.offer, &hint.offer] {
+                assert!(
+                    offer.rows(limit).len() <= limit,
+                    "an offer drew {} rows into {limit}",
+                    offer.rows(limit).len()
+                );
+            }
+        }
+        assert!(long.offer.rows(0).is_empty());
+    }
+
+    /// One row of room and twenty-five matches: the count is what that row says.
+    /// A lone command drawn out of twenty-five would read as *the* match rather
+    /// than as one of them, which is the wrong of the two things to say.
+    #[test]
+    fn a_single_row_of_room_counts_rather_than_picks() {
+        let rows = typing(".").offer.rows(1);
+        assert_eq!(rows.len(), 1);
+        assert!(
+            rows[0]
+                .text
+                .contains(&format!("{} more", StaffCommand::ALL.len()))
+        );
+        assert!(!rows[0].highlighted);
+    }
+
+    /// The defect this arithmetic was written for: at `ChatScale` 4 on a small
+    /// window the chat block ran off the top of the screen. Whatever the window
+    /// and whatever the scale, the topmost row drawn starts at or below the
+    /// margin — which is the same statement as "every row is on the surface".
+    #[test]
+    fn no_row_is_ever_laid_out_above_the_top_of_the_window() {
+        for canvas_height in [0, 1, 32, 47, 48, 120, 480, 1080] {
+            for scale in 1..=4 {
+                let line_height = crate::CHAT_LINE_HEIGHT * scale;
+                let room = super::room_above(canvas_height, line_height) as i32;
+                let input_top = canvas_height - crate::CHAT_MARGIN - line_height;
+                let topmost = input_top - line_height * room;
+                assert!(
+                    room == 0 || topmost >= crate::CHAT_MARGIN,
+                    "canvas {canvas_height} at line height {line_height}: \
+                     {room} rows put the top one at {topmost}"
+                );
+                // And it is the *most* that fits: one more would not.
+                assert!(
+                    topmost - line_height < crate::CHAT_MARGIN,
+                    "canvas {canvas_height} at line height {line_height}: \
+                     {room} rows leave room for another"
+                );
+            }
+        }
+    }
+
+    /// A window too short for a single row above the line still draws the line
+    /// itself: the input is the one row that is never dropped, because a client
+    /// that hid what is being typed would be a client with no way to speak.
+    #[test]
+    fn a_window_with_no_room_above_the_line_asks_for_no_rows() {
+        assert_eq!(
+            super::room_above(crate::CHAT_LINE_HEIGHT * 2, crate::CHAT_LINE_HEIGHT),
+            0
+        );
+        assert_eq!(super::room_above(0, crate::CHAT_LINE_HEIGHT), 0);
+        assert_eq!(
+            super::room_above(4096, 0),
+            0,
+            "a line height of zero is no rows, not a division by it"
+        );
+    }
+
+    /// The button's box and the line's start, which are one arithmetic: what is
+    /// typed must never land on the control that would be clicked to change what
+    /// it is typed into.
+    #[test]
+    fn the_channel_button_holds_the_left_of_the_input_line() {
+        let line = crate::CHAT_LINE_HEIGHT * 2;
+        let button = super::channel_button(480, line, 40);
+
+        assert_eq!(
+            button.at.y,
+            480 - crate::CHAT_MARGIN - line,
+            "the input line's own row, which is the row a player is looking at"
+        );
+        assert_eq!(button.height, line, "and exactly as tall as it");
+        assert!(
+            button.contains(GumpPixel::new(button.at.x, button.at.y)),
+            "its own corner"
+        );
+        assert!(
+            !button.contains(GumpPixel::new(button.at.x + button.width, button.at.y)),
+            "and not the column one past its right edge — the box is half open"
+        );
+        assert!(
+            !button.contains(GumpPixel::new(button.at.x, button.at.y - 1)),
+            "nor the row above it, which is the popup's"
+        );
+
+        let line_at = super::line_starts_at(button);
+        assert!(
+            line_at.x >= button.at.x + button.width,
+            "what is typed starts past the button, not on it"
+        );
+        assert_eq!(line_at.y, button.at.y, "on the same row");
+    }
+
+    /// The button is as wide as the *widest* channel, so that pressing it does
+    /// not move it: a control that changed size under the pointer would be one
+    /// a player cannot press twice in a row.
+    #[test]
+    fn the_button_is_one_size_whatever_channel_it_is_showing() {
+        let widest = Channel::ALL
+            .iter()
+            .map(|channel| channel.label().len())
+            .max()
+            .expect("four channels");
+        assert_eq!(
+            Channel::Alliance.label().len(),
+            widest,
+            "alliance is the long one; if that changes, the button's width is measured over all four anyway"
+        );
+    }
+
+    /// The line still says whatever was typed — a player may say ".hello" out
+    /// loud, and the shard treats it as speech — but nothing is offered to
+    /// complete it with. The rule is the vocabulary's; what this pins is that
+    /// the speech line asks it at all, and asks it with the shard's own answer.
+    #[test]
+    fn an_ordinary_player_is_offered_no_commands() {
+        let player = typed_by(".hd", AccessLevel::Player);
+        assert_eq!(player.offer, Offer::Nothing);
+        assert_eq!(player.typed, ".hd", "and the line is untouched");
+        assert!(
+            matches!(typing(".hd").offer, Offer::Candidates { .. }),
+            "the same keystrokes from staff do offer"
+        );
+    }
+
+    /// Past the command word the popup is a usage hint, and that is an offer
+    /// too: a player who may not run `.go` must not be shown how to.
+    #[test]
+    fn an_ordinary_player_is_not_shown_a_usage_hint_either() {
+        assert_eq!(typed_by(".go ", AccessLevel::Player).offer, Offer::Nothing);
+        assert_eq!(typing(".go ").offer, Offer::Arguments(StaffCommand::Go));
     }
 
     #[test]

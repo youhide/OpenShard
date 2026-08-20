@@ -9574,7 +9574,9 @@ fn entering_sends_the_sequence_the_client_needs() {
     let ids: Vec<u8> = world.drain_outbound().map(|out| out.packet[0]).collect();
     assert_eq!(
         ids,
-        vec![0x1B, 0xBF, 0xB9, 0xBC, 0x20, 0x4F, 0x11, 0x3A, 0xBF, 0x78, 0x55],
+        vec![
+            0x1B, 0xBF, 0xB9, 0xBC, 0x20, 0x4F, 0x11, 0x3A, 0xBF, 0x78, 0xBF, 0x55
+        ],
         "0x1B first or there is no body; 0x55 last or the client draws early; \
              0xB9 AoS features after the map change (ServUO's DoLogin order), or a \
              modern client shows no tooltips; 0xBC season between the map change and \
@@ -9582,7 +9584,10 @@ fn entering_sends_the_sequence_the_client_needs() {
              player's own equipment before it, or the client has no stamina and no \
              backpack serial to open; 0x3A fills the skill window, and the second \
              0xBF after it carries the three stat arrows — nothing else sends them, \
-             so without it the bar draws all three pointing up"
+             so without it the bar draws all three pointing up; the third 0xBF is \
+             this engine's own authority notice, last before the 0x55 because it is \
+             the one packet here no reference client asked for — a stock client \
+             skips it, and ours needs it before a word can be typed"
     );
 }
 

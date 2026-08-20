@@ -11,8 +11,11 @@
 //! `App::window_event` — which meant it could not be tested, could not be
 //! stated, and could be got wrong by adding an arm in the wrong place.
 //!
-//! [`Owner`] is that question asked once, and [`Edit`] is the binding table for
-//! the one owner whose keys are not the body's.
+//! [`Owner`] is that question asked once, and [`Edit`] and [`Hotkey`] are the
+//! binding tables of two of the three: what a key does to a line being typed,
+//! and what it does to the world. (The third owner, a pane's `{ textentry }`,
+//! reads three keys and they are `panes::Key`'s, next to the windows that answer
+//! them.)
 //!
 //! # The fourth owner, and the bug it was
 //!
@@ -54,8 +57,8 @@ pub(crate) enum Owner {
     Speech,
     /// A `{ textentry }` in one of the client's own gump windows, clicked into.
     Pane,
-    /// The body. Walk keys, war mode, and the hotkey ladder in
-    /// `event_loop.rs` — which runs *only* under this owner, which is the point.
+    /// The body. Walk keys, war mode, and [`Hotkey`]'s own table — which is
+    /// consulted *only* under this owner, which is the point.
     World,
 }
 
@@ -95,9 +98,11 @@ pub(crate) enum Edit {
     Complete,
     /// The next channel round — say, guild, alliance, party.
     ///
-    /// **Shift+Tab**, until the channel is a button on screen: the plain `Tab`
-    /// it used to be is worth more as completion, and a channel is chosen once a
-    /// conversation while a command is completed once a word.
+    /// **Shift+Tab**, beside the button `chat::channel_button` draws rather than
+    /// instead of it: the mouse has the control and the keyboard keeps a way to
+    /// turn it without leaving the line. The plain `Tab` it used to be is worth
+    /// more as completion — a channel is chosen once a conversation while a
+    /// command is completed once a word.
     NextChannel,
     /// Highlight the completion above the current one.
     PreviousCandidate,
@@ -145,6 +150,193 @@ impl Edit {
     }
 }
 
+/// What a key means to the body, the eye and the picture — [`Owner::World`]'s
+/// own bindings.
+///
+/// [`Edit`]'s twin, one owner along, and written for the same three reasons:
+/// until this existed the world's keys were a `match` on a `KeyCode` inside
+/// `App::window_event`, so none of them could be **rebound** (there was no table
+/// to rebind), none could be **tested** (the arms do things to a window), and
+/// nothing could **say what is bound** without reading four hundred lines of
+/// event loop. A key is a name here and the doing is at the call site, which is
+/// the split that lets all three happen.
+///
+/// # What is deliberately not in the table
+///
+/// Three keys the world reads are answered before this one is consulted, and
+/// each is a different reason rather than an oversight:
+///
+/// * **The arrows**, which are held rather than pressed — a step is due every
+///   step's length while one is down, on our clock and not the operating
+///   system's repeat rate. See [`crate::keys::Held`].
+/// * **`Tab`**, war mode, which is also held: down is war and up is peace, so it
+///   is the one binding that acts on a release as well as a press.
+/// * **`Escape`**, which takes the topmost window down, and so is answered by
+///   the window layer before the world is asked at all.
+///
+/// A bindings window would have to reach all three eventually. It would also
+/// have to answer what they *are*, and a held key and a pressed one are not the
+/// same kind of binding — which is exactly why they are not filed here as though
+/// they were.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Hotkey {
+    /// Open the speech line — the reference client's own gesture.
+    ///
+    /// Costs the body nothing: movement is arrows only, so no key is taken from
+    /// it. What it does take is every following letter, which is why the call
+    /// site also lets go of whatever was held (see [`Owner::Speech`]).
+    Speak,
+    /// The dev window, the same switch the status strip's `dev` toggle is.
+    ///
+    /// Two ways in rather than one because the state is remembered: a window
+    /// closed once stays closed across launches, and the strip that reopens it
+    /// is itself a thing you have to know is there. A key is what you reach for
+    /// without knowing anything.
+    DevWindow,
+    /// Put the eye back on the body and lock it there.
+    Relock,
+    /// The character sheet, by the protocol's own paperdoll request rather than
+    /// a double click: it must stay reachable when the body is obscured or a
+    /// shop window covers it.
+    Paperdoll,
+    /// The worn backpack, exactly as the paperdoll's own button opens it — that
+    /// button can be covered or closed, and this cannot.
+    Inventory,
+    /// The minimap. Local, like the skills and status windows and unlike
+    /// [`Paperdoll`](Self::Paperdoll): no round trip.
+    ///
+    /// Provisional — the minimap's own opening affordance is still an open
+    /// product decision (`docs/minimap_lod_plan.md` phase 4).
+    Minimap,
+    /// Lift the eye rather than the body, which is a pan: the map has no
+    /// vertical axis to walk along, only a projection that folds `z` into `y`.
+    PanUp,
+    /// The same, downward.
+    PanDown,
+    /// A fixed mixed-case ASCII line, said without ever going through the
+    /// keyboard — no xkb group, no input method, no text field.
+    ///
+    /// A diagnostic and not a feature: whatever shows up over the head from this
+    /// key is exactly what `0xAD` → `0xAE` → `text::collect` do with known-good
+    /// bytes, with typing ruled out as a variable.
+    SpeechProbe,
+    /// Night on and off.
+    ///
+    /// A key and not a setting because the only honest test of firelight is the
+    /// two pictures side by side, and there is no time of day on the wire yet
+    /// for it to follow. The five below are keys for the same reason, and the
+    /// reason is `docs/lighting_pitfalls.md`'s: what is being read is the
+    /// difference between two pictures of *one instant*, and a hand that has to
+    /// find a checkbox has moved the camera by the time it is back.
+    Night,
+    /// The sun on and off — the only honest test of a shadow.
+    Sunlight,
+    /// The sky field on and off: what a roof does to the light under it,
+    /// against a flat ambient.
+    SkyField,
+    /// The torch in the player's own hand — also the only way to see what the
+    /// map's own fires are doing without a beam swinging across them.
+    Lantern,
+    /// The occlusion grid drawn as solids.
+    Solids,
+    /// The world image off underneath them: the box itself, with nothing behind
+    /// it arguing about what shape it is.
+    SolidsOnly,
+    /// How much of the grid either view draws — "is that floor missing, or is it
+    /// under my feet".
+    SolidsEverything,
+    /// The lighting's own values, one after another. See `crate::debug::View`.
+    LightView,
+    /// What a fragment whose ray met no box is answered with, one after another
+    /// — `impostor::Fringe`.
+    Fringe,
+    /// This frame, written out: every plane the blit can draw of it, plus the
+    /// inputs it was assembled from.
+    ///
+    /// A key and not a setting more than any of the others: what is dumped is
+    /// the instant a person is looking at, and anything that had to be switched
+    /// on beforehand would dump a different one.
+    FrameDump,
+}
+
+impl Hotkey {
+    /// Every binding there is, in the order a person would read them: what the
+    /// game does, then what the diagnostics do.
+    ///
+    /// The list exists so that "no two actions share a key" is a test rather
+    /// than a thing somebody notices — see [`Self::key`], which is also the
+    /// question a bindings window asks.
+    pub(crate) const ALL: [Self; 19] = [
+        Self::Speak,
+        Self::DevWindow,
+        Self::Relock,
+        Self::Paperdoll,
+        Self::Inventory,
+        Self::Minimap,
+        Self::PanUp,
+        Self::PanDown,
+        Self::SpeechProbe,
+        Self::Night,
+        Self::Sunlight,
+        Self::SkyField,
+        Self::Lantern,
+        Self::Solids,
+        Self::SolidsOnly,
+        Self::SolidsEverything,
+        Self::LightView,
+        Self::Fringe,
+        Self::FrameDump,
+    ];
+
+    /// Which key this is on today.
+    ///
+    /// The inverse of [`Self::of`], and the half a bindings window would replace
+    /// first: a table that can only be read forwards cannot draw itself.
+    pub(crate) const fn key(self) -> KeyCode {
+        match self {
+            Self::Speak => KeyCode::Enter,
+            Self::DevWindow => KeyCode::F1,
+            Self::Relock => KeyCode::Home,
+            Self::Paperdoll => KeyCode::KeyP,
+            Self::Inventory => KeyCode::KeyI,
+            Self::Minimap => KeyCode::KeyM,
+            Self::PanUp => KeyCode::PageUp,
+            Self::PanDown => KeyCode::PageDown,
+            Self::SpeechProbe => KeyCode::F9,
+            Self::Night => KeyCode::F10,
+            Self::Sunlight => KeyCode::F8,
+            Self::SkyField => KeyCode::F6,
+            Self::Lantern => KeyCode::F7,
+            Self::Solids => KeyCode::F5,
+            Self::SolidsOnly => KeyCode::F3,
+            Self::SolidsEverything => KeyCode::F4,
+            Self::LightView => KeyCode::F11,
+            Self::Fringe => KeyCode::F2,
+            Self::FrameDump => KeyCode::F12,
+        }
+    }
+
+    /// What a pressed key does in the world, or `None` for one that does
+    /// nothing.
+    ///
+    /// **Answered out of [`ALL`](Self::ALL) rather than by a second `match`.** A
+    /// forward table and a backward one are two statements of the same fact, and
+    /// two statements of one fact are a pair that can disagree — `docs/parity.md`
+    /// one rung down from a frame. The scan is nineteen comparisons on a
+    /// keystroke, which is not a cost worth a second table to avoid.
+    ///
+    /// `NumpadEnter` is the one key with two spellings, and it is answered
+    /// before the table rather than given a variant of its own: it is the same
+    /// action on the same keyboard, and [`Self::key`] answers with the one a
+    /// legend would print.
+    pub(crate) fn of(code: KeyCode) -> Option<Self> {
+        if matches!(code, KeyCode::NumpadEnter) {
+            return Some(Self::Speak);
+        }
+        Self::ALL.into_iter().find(|hotkey| hotkey.key() == code)
+    }
+}
+
 /// Whether egui is allowed to so much as *see* this key.
 ///
 /// `false` for `Tab`, in either direction, and for nothing else — see the module
@@ -163,7 +355,7 @@ pub(crate) const fn egui_may_see(code: KeyCode) -> bool {
 mod tests {
     use winit::keyboard::KeyCode;
 
-    use super::{Edit, Owner, egui_may_see};
+    use super::{Edit, Hotkey, Owner, egui_may_see};
 
     #[test]
     fn something_being_typed_into_outranks_the_body() {
@@ -192,6 +384,53 @@ mod tests {
     fn tab_completes_and_shift_tab_turns_the_channel() {
         assert_eq!(Edit::of(KeyCode::Tab, false), Some(Edit::Complete));
         assert_eq!(Edit::of(KeyCode::Tab, true), Some(Edit::NextChannel));
+    }
+
+    /// The world's table, read both ways: every binding answers for its own key
+    /// and no two of them answer for one. Neither half was checkable while the
+    /// bindings were arms of a `match` inside the event loop.
+    #[test]
+    fn every_hotkey_owns_exactly_one_key_and_no_key_is_owned_twice() {
+        let mut keys: Vec<KeyCode> = Vec::new();
+        for hotkey in Hotkey::ALL {
+            let key = hotkey.key();
+            assert_eq!(
+                Hotkey::of(key),
+                Some(hotkey),
+                "{hotkey:?} says it is on {key:?}, which answers with something else"
+            );
+            assert!(
+                !keys.contains(&key),
+                "{key:?} is bound twice, the second to {hotkey:?}"
+            );
+            keys.push(key);
+        }
+        assert_eq!(keys.len(), Hotkey::ALL.len());
+    }
+
+    /// The three keys the world reads and this table deliberately does not hold
+    /// — see [`Hotkey`]'s own doc for why each is answered earlier. A binding
+    /// that appeared here for one of them would be a second answer, and the
+    /// first one is the one that runs.
+    #[test]
+    fn the_held_keys_and_the_window_key_are_not_bindings_here() {
+        assert_eq!(Hotkey::of(KeyCode::Tab), None, "war mode is held, not pressed");
+        assert_eq!(Hotkey::of(KeyCode::ArrowUp), None, "an arrow is a step, held");
+        assert_eq!(Hotkey::of(KeyCode::Escape), None, "the topmost window's");
+    }
+
+    /// A letter the body walks on is not a hotkey, and a letter that opens a
+    /// window is — which is only safe because a letter reaching the world at all
+    /// means the speech line does not have the keyboard (see [`Owner`]).
+    #[test]
+    fn a_letter_is_a_hotkey_only_where_the_world_owns_the_keyboard() {
+        assert_eq!(Hotkey::of(KeyCode::KeyP), Some(Hotkey::Paperdoll));
+        assert_eq!(
+            Edit::of(KeyCode::KeyP, false),
+            None,
+            "the same key, typed, is text"
+        );
+        assert_eq!(Hotkey::of(KeyCode::KeyZ), None);
     }
 
     /// An arrow means the caret or the popup here — never a step. The body is a

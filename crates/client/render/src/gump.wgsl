@@ -42,7 +42,21 @@ struct VertexOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) @interpolate(flat) hue: u32,
+    // How bright a solid rectangle is, or below zero for a quad that is a
+    // picture and samples the atlas like every other one — see
+    // `crate::gump::plate`. Flat because it is a property of the instance and
+    // not of the corner: a plate is one colour, which is what makes it a plate.
+    @location(2) @interpolate(flat) shade: f32,
 };
+
+// A region with no extent at all. No packed sprite can have one — the packer
+// only ever hands out rectangles it put at least one texel into — so this is
+// free to mean something else, and what it means is "there is no picture here":
+// the quad is a solid rectangle and its `region.x` is the shade rather than a
+// texture coordinate. See `crate::gump::plate` for the CPU half.
+fn is_plate(region: vec4<f32>) -> bool {
+    return region.z == 0.0 && region.w == 0.0;
+}
 
 @vertex
 fn vs_main(
@@ -72,6 +86,9 @@ fn vs_main(
     out.clip = vec4<f32>(ndc, 0.0, 1.0);
     out.uv = region.xy + corner * region.zw;
     out.hue = hue;
+    // A plate's `uv` above is its own corner four times over and is never read;
+    // this is what the fragment shader reads instead.
+    out.shade = select(-1.0, region.x, is_plate(region));
     return out;
 }
 
@@ -83,6 +100,22 @@ const HUE_PARTIAL_FLAG: u32 = 0x8000u;
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    // The solid rectangle, before the atlas is touched: there is nothing to
+    // sample, nothing to discard on, and the hue — if there is one — is read at
+    // the shade's own rung of the ramp, which is exactly what a grey texel of
+    // that brightness would have picked below. A plate and a picture painted the
+    // same grey therefore come out the same colour, which is what keeps this one
+    // hue lookup and not two.
+    if in.shade >= 0.0 {
+        let index_bits = in.hue & HUE_INDEX_MASK;
+        var rgb = vec3<f32>(in.shade);
+        if index_bits != 0u {
+            let index = i32(round(in.shade * 31.0));
+            rgb = textureLoad(hue_ramp, vec2<i32>(index, i32(index_bits - 1u)), 0).rgb;
+        }
+        return vec4<f32>(rgb, 1.0);
+    }
+
     let color = textureSample(atlas_texture, atlas_sampler, in.uv);
 
     // Gump art is a picture with a shape, and zero is transparent in it — see
@@ -94,12 +127,19 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     }
 
     var rgb = color.rgb;
-    if in.hue != 0u {
+    // **The index bits and not the whole word.** `SpriteQuad::hue` carries more
+    // than the wire hue: `with_opacity` writes an opacity into bits 16-23 and
+    // `with_static_atlas_page` a page into 24-31, neither of which this pass
+    // reads. Testing the word meant an untinted picture with an opacity — a
+    // paperdoll's pending-equipment preview is one, `paperdoll::draw` — took this
+    // branch with an index of zero, whose row is `-1`: an out-of-bounds
+    // `textureLoad`, which WGSL answers with zeros, so the preview drew black.
+    let index_bits = in.hue & HUE_INDEX_MASK;
+    if index_bits != 0u {
         let partial = (in.hue & HUE_PARTIAL_FLAG) != 0u;
         if !partial || (color.r == color.g && color.g == color.b) {
             let index = i32(round(color.r * 31.0));
-            let row = i32((in.hue & HUE_INDEX_MASK) - 1u);
-            rgb = textureLoad(hue_ramp, vec2<i32>(index, row), 0).rgb;
+            rgb = textureLoad(hue_ramp, vec2<i32>(index, i32(index_bits - 1u)), 0).rgb;
         }
     }
 

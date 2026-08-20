@@ -156,21 +156,6 @@ pub struct Scissor {
 }
 
 impl Scissor {
-    /// The same box, moved by `by`.
-    ///
-    /// What turns a window-local scissor into the screen-space one a pass
-    /// draws against: a window's own layout carries its boxes at the origin
-    /// (`docs/window_components.md`'s window-local coordinates), and this is
-    /// the one step that adds the window's placement back, right beside
-    /// [`Picture::offset`] which does the same for the picture the box crops.
-    #[must_use]
-    pub const fn offset(self, by: GumpPixel) -> Self {
-        Self {
-            at: self.at.offset(by),
-            ..self
-        }
-    }
-
     /// Whether a point is inside — the hit test's half of the same box.
     ///
     /// Right and bottom edges are outside, which is the same half-open box
@@ -592,27 +577,6 @@ impl Picture {
             ..self
         }
     }
-
-    /// The same picture, moved by `by`: its own corner and, if it has one,
-    /// its scissor box move together — a scissor is only meaningful next to
-    /// the picture it crops.
-    ///
-    /// The one place a window-local picture (`docs/window_components.md`'s
-    /// window-local coordinates) becomes a screen-space one: every window
-    /// kind lays its pictures out at the origin now, and this is what the
-    /// draw pass and the pointer pick both use to add the window's own
-    /// placement back, once, rather than baking it into the layout.
-    #[must_use]
-    pub const fn offset(self, by: GumpPixel) -> Self {
-        Self {
-            at: self.at.offset(by),
-            scissor: match self.scissor {
-                Some(scissor) => Some(scissor.offset(by)),
-                None => None,
-            },
-            ..self
-        }
-    }
 }
 
 /// Every picture as quads, in the order given.
@@ -693,6 +657,128 @@ pub fn collect(pictures: &[Picture], atlas: &GumpAtlas) -> Vec<SpriteQuad> {
         }
     }
     quads
+}
+
+/// How bright a [`plate`] is: `0.0` is black and `1.0` is white.
+///
+/// A number and not a colour, because this pass has exactly one way to say what
+/// colour something is — `hues.mul`, the same ramp a wall is tinted through
+/// (see the fragment shader). A hued plate reads this as which of the ramp's
+/// thirty-two rungs to take, which is what a grey texel of the same brightness
+/// would already have picked; an unhued one paints the grey itself. So a plate
+/// can be any colour the client's own palette holds and no colour it does not,
+/// which is the same rule every picture in this pass obeys.
+///
+/// Clamped on the way in rather than checked at the boundary: a shade outside
+/// the range is not a caller's error to report, it is a rung off the end of a
+/// ramp that has thirty-two of them.
+#[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
+pub struct Shade(f32);
+
+impl Shade {
+    /// A shade from a brightness in `0.0..=1.0`, clamped into it.
+    #[must_use]
+    pub fn new(brightness: f32) -> Self {
+        // `clamp` panics on a NaN, which is the one input that has no rung at
+        // all; it becomes black, the shade that draws a plate nobody mistakes
+        // for a lit one.
+        match brightness.is_nan() {
+            true => Self(0.0),
+            false => Self(brightness.clamp(0.0, 1.0)),
+        }
+    }
+
+    /// The brightness back, for the instance buffer and for a test.
+    #[must_use]
+    pub fn brightness(self) -> f32 {
+        self.0
+    }
+}
+
+/// A solid rectangle: the one thing this pass draws that is not a picture.
+///
+/// # Why this is a quad and not an atlas entry
+///
+/// Everything else here samples a packed sprite, which is why the chat's caret
+/// is a `|` glyph and why the completer's highlighted row was drawn in a
+/// different ink rather than on a plate — there was no primitive that painted an
+/// area. A one-texel white block *packed into the atlas* would have been the
+/// other answer, and it is worse in the two ways that matter: this pass is bound
+/// to a different atlas in each of its three uses (gump art, `fonts.mul`
+/// glyphs, a TrueType face), so a block would have to be packed into all three
+/// and kept there as each grows, and a texel magnified over a hundred-pixel
+/// rectangle is a sampler's answer rather than a fill.
+///
+/// So a plate carries **no region**: `du` and `dv` are zero, a rectangle of the
+/// atlas with no texels in it, which no packed sprite can be. The shader reads
+/// that as "there is no picture here" and paints [`Shade`] through `hue`'s own
+/// ramp — see `gump.wgsl`'s `is_plate`. `u` carries the shade because a plate
+/// has no use for a texture coordinate; nothing else about [`SpriteQuad`]'s
+/// layout changes, so a plate rides in the same instance buffer, in the same
+/// painter's order, as the pictures and the glyphs it sits behind.
+///
+/// **Opaque.** This pass does no blending — see [`GumpRenderer::new`] — so a
+/// plate covers what it is drawn over, and what goes over *it* is whatever the
+/// caller lists after it. That is the whole of how a highlight bar works: plate,
+/// then the row's text.
+#[must_use]
+pub fn plate(rect: Rect, hue: Hue, shade: Shade) -> SpriteQuad {
+    SpriteQuad {
+        rect,
+        region: crate::atlas::Region {
+            u: shade.brightness(),
+            v: 0.0,
+            du: 0.0,
+            dv: 0.0,
+        },
+        // No depth test in this pass; see the module docs.
+        depth: 0.0,
+        hue: u32::from(hue.0),
+        // A plate stands on no tile and is never lit, like every other quad here.
+        place: crate::place::Place::NOWHERE,
+        twin: 0,
+        owner: u32::from(crate::occlusion::OwnerId::NONE.raw()),
+        volumes: crate::impostor::Range::default(),
+    }
+}
+
+/// Put a window's finished quads on the surface: magnified, then moved.
+///
+/// **The one arithmetic between a window's own pixels and the screen's.** Every
+/// window kind lays itself out at the origin (`docs/window_components.md`'s
+/// window-local coordinates) and at its art's own size; this is where the
+/// manager's two answers about that window — how big it is drawn and where it
+/// sits — are applied, once, to everything the window produced. It takes quads
+/// rather than [`Picture`]s so that art, text and a scissored line are one call
+/// each and not three different placements: all three end here as
+/// [`SpriteQuad`]s in the same window-local gump pixels, and a second way to
+/// place any of them is a second thing to keep in step with the pointer.
+///
+/// The pointer's own half is the inverse — the cursor, less the window's
+/// placement, divided by the same `magnify` — and it lives in the app crate
+/// beside the placement it undoes (`windows::OwnWindow::local_cursor`).
+///
+/// `magnify` is a whole number for [`Frame::scale`]'s reason one rung down: gump
+/// art is five-bit pixel art sampled with `Nearest`, and half a pixel of
+/// magnification is a border two rows thick along one edge of a window and one
+/// along the other. `1` is the art's own size, which is what the reference
+/// client draws and what this did before the knob existed.
+///
+/// Anything cropped — a picture's own [`Scissor`], a label's `clip`, a row
+/// scissored to a list's viewport — must already have been cut, in the window's
+/// own pixels, before this is called: cutting there is exact, and cutting after
+/// magnification would be cutting a picture whose texel grid has already been
+/// stretched.
+pub fn place(quads: &mut [SpriteQuad], at: GumpPixel, magnify: u32) {
+    let magnify = magnify as f32;
+    for quad in quads {
+        quad.rect = Rect {
+            x: quad.rect.x * magnify + at.x as f32,
+            y: quad.rect.y * magnify + at.y as f32,
+            width: quad.rect.width * magnify,
+            height: quad.rect.height * magnify,
+        };
+    }
 }
 
 /// Which picture in a laid-out window the cursor is over, topmost first.
@@ -1730,21 +1816,24 @@ mod tests {
     }
 
     /// The identity `docs/window_components.md`'s window-local coordinates
-    /// depend on: picking a window-local picture list against a *local*
-    /// cursor — `client/app`'s `App::window_under_pointer` shape — answers
-    /// exactly what picking that same list, each picture moved by the
-    /// window's placement with [`Picture::offset`], answers against the
-    /// *absolute* cursor — `client/app`'s `draw_gump_windows` shape. The two
-    /// call sites add a window's position back in two different ways (one
-    /// moves the cursor down, one moves the art up), and this is the proof
-    /// neither can silently disagree with the other about which pixel a
-    /// click landed on.
+    /// depend on, now that a window is magnified as well as moved: the pixel
+    /// [`place`] draws a picture's texel on is the pixel whose *local* cursor
+    /// — `client/app`'s `OwnWindow::local_cursor`, which divides by the same
+    /// factor and subtracts the same placement — [`pick`] answers that picture
+    /// for. The two call sites transform in opposite directions (one moves and
+    /// magnifies the art, the other moves and shrinks the cursor), and this is
+    /// the proof they cannot silently disagree about which pixel a click
+    /// landed on.
+    ///
+    /// At `magnify = 2`, where an off-by-one in either direction is visible as
+    /// a *pair* of pixels rather than one, and where truncating division would
+    /// be a difference rather than a rounding.
     #[test]
-    fn offsetting_pictures_and_offsetting_the_cursor_pick_the_same_answer() {
+    fn a_magnified_window_picks_what_it_draws() {
         let atlas = atlas_of([(Graphic(1), block(40, 40)), (Graphic(2), block(10, 10))]);
         // A window's own art, laid out exactly as a pane's `layout` produces
         // it now: at the origin, as if the manager had put the window at
-        // `(0, 0)`.
+        // `(0, 0)`, and at the art's own size whatever it is drawn at.
         let local = [
             Picture::plain(GumpArt::Gump(Graphic(1)), GumpPixel::new(0, 0)),
             Picture::plain(GumpArt::Gump(Graphic(2)), GumpPixel::new(15, 15)).inside(Scissor {
@@ -1753,29 +1842,91 @@ mod tests {
                 height: 10,
             }),
         ];
-        // Where the manager has actually put the window this frame.
+        // Where the manager has actually put the window this frame, and how
+        // big it is drawing it.
         let placed = GumpPixel::new(300, 200);
-        let cursor = GumpPixel::new(318, 218);
+        let magnify = 2;
+        // Inside the smaller picture: local `(18, 18)` doubled is `(36, 36)`,
+        // and the window's corner is added to that.
+        let cursor = GumpPixel::new(336, 236);
 
-        // `own_windows.rs`'s way: leave the pictures alone, move the cursor
-        // into the window's own space.
-        let local_cursor = GumpPixel::new(cursor.x - placed.x, cursor.y - placed.y);
-        let picked_by_local_cursor = pick(&local, local_cursor, &atlas);
-
-        // `render_passes.rs`'s way: leave the cursor alone, move every
-        // picture (and its scissor) into screen space.
-        let screen_space: Vec<Picture> = local.iter().map(|picture| picture.offset(placed)).collect();
-        let picked_by_offset_pictures = pick(&screen_space, cursor, &atlas);
-
-        assert_eq!(
-            picked_by_local_cursor, picked_by_offset_pictures,
-            "the pointer pick and the draw pass must agree on which picture a click landed on"
+        // The pointer's way: leave the art alone, bring the cursor into the
+        // window's own space — `own_windows.rs` and `panes/route.rs`.
+        let local_cursor = GumpPixel::new(
+            (cursor.x - placed.x).div_euclid(magnify),
+            (cursor.y - placed.y).div_euclid(magnify),
         );
+        let picked = pick(&local, local_cursor, &atlas);
         assert_eq!(
-            picked_by_local_cursor,
+            picked,
             Some(PictureIndex::new(1)),
             "the cursor is inside the smaller picture's scissor box"
         );
+
+        // The draw pass's way: leave the cursor alone, take the window's own
+        // quads out to the surface — `render_passes.rs`.
+        let mut quads = collect(&local, &atlas);
+        place(&mut quads, placed, magnify as u32);
+        let drawn = quads
+            .iter()
+            .rposition(|quad| {
+                let (x, y) = (cursor.x as f32, cursor.y as f32);
+                x >= quad.rect.x
+                    && y >= quad.rect.y
+                    && x < quad.rect.x + quad.rect.width
+                    && y < quad.rect.y + quad.rect.height
+            })
+            .map(PictureIndex::new);
+        // One quad per picture here — neither is tiled — so the quad's own
+        // index is the picture's, and topmost-first is the same walk `pick`
+        // makes.
+        assert_eq!(
+            drawn, picked,
+            "the pointer pick and the draw pass must agree on which picture a click landed on"
+        );
+    }
+
+    /// What the magnification means for the pixels themselves: twice as big,
+    /// from the window's own corner, and the atlas region untouched.
+    ///
+    /// The region is the half that would be wrong if magnification were done by
+    /// *sampling* instead of by stretching the quad — the art would be
+    /// resampled at the atlas's resolution and a five-bit picture would come
+    /// out soft. See [`place`], and `Frame::scale` for the same rule one rung
+    /// up.
+    #[test]
+    fn placing_scales_the_quad_and_not_the_region() {
+        let atlas = atlas_of([(Graphic(1), block(20, 20))]);
+        let local = [Picture::plain(GumpArt::Gump(Graphic(1)), GumpPixel::new(5, 7))];
+        let unplaced = collect(&local, &atlas);
+        let mut quads = unplaced.clone();
+        place(&mut quads, GumpPixel::new(100, 50), 3);
+
+        assert_eq!(quads.len(), 1);
+        assert_eq!(quads[0].rect.x, 5.0 * 3.0 + 100.0);
+        assert_eq!(quads[0].rect.y, 7.0 * 3.0 + 50.0);
+        assert_eq!(quads[0].rect.width, 20.0 * 3.0);
+        assert_eq!(quads[0].rect.height, 20.0 * 3.0);
+        assert_eq!(
+            quads[0].region, unplaced[0].region,
+            "the art is stretched, not resampled"
+        );
+    }
+
+    /// `magnify = 1` is the reference client's own size, and it must be the
+    /// placement this pass did before the knob existed — a plain move, exact
+    /// to the pixel.
+    #[test]
+    fn magnifying_by_one_only_moves() {
+        let atlas = atlas_of([(Graphic(1), block(20, 20))]);
+        let local = [Picture::plain(GumpArt::Gump(Graphic(1)), GumpPixel::new(5, 7))];
+        let mut quads = collect(&local, &atlas);
+        place(&mut quads, GumpPixel::new(100, 50), 1);
+
+        assert_eq!(quads[0].rect.x, 105.0);
+        assert_eq!(quads[0].rect.y, 57.0);
+        assert_eq!(quads[0].rect.width, 20.0);
+        assert_eq!(quads[0].rect.height, 20.0);
     }
 
     /// A picture wholly outside its box is not drawn at all — the ordinary case

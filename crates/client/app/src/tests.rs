@@ -654,3 +654,64 @@ fn a_step_stops_overshooting_further_out_than_the_dead_zone() {
         "every bearing is a case, and every one was checked"
     );
 }
+
+/// The pointer's half of a window's placement: `gump::place`'s inverse, which
+/// is what decides whether a click lands on the picture the player is pointing
+/// at once a window is drawn bigger than its art.
+///
+/// The picture's half is pinned in the render crate
+/// (`gump::a_magnified_window_picks_what_it_draws`); this is the arithmetic
+/// that has to match it, and the case it is here for is the *negative* one. A
+/// cursor left of or above a window has a negative local coordinate, and
+/// truncating division rounds those toward zero — which would put the column
+/// one pixel outside a window's left edge on column `0`, inside whatever
+/// picture starts there, and hand a pane a click that landed outside it.
+#[test]
+fn a_windows_own_cursor_is_its_placement_and_its_scale_undone() {
+    use crate::desk::WindowScale;
+    use crate::windows::OwnWindow;
+    use openshard_client_render::gump::GumpPixel;
+
+    let subject = WindowSubject::Skills;
+    let window = OwnWindow {
+        subject,
+        at: GumpPixel::new(300, 200),
+        pane: crate::panes::AnyPane::of(subject),
+    };
+
+    // At the art's own size the placement is a subtraction and nothing else —
+    // what this client did before the scale existed, and what a saved file
+    // without one still asks for.
+    assert_eq!(
+        window.local_cursor(GumpPixel::new(318, 218), WindowScale::new(1)),
+        GumpPixel::new(18, 18)
+    );
+
+    // Doubled, the same picture is under a cursor twice as far into the
+    // window: `(336, 236)` is local `(18, 18)` drawn at two pixels each.
+    assert_eq!(
+        window.local_cursor(GumpPixel::new(336, 236), WindowScale::new(2)),
+        GumpPixel::new(18, 18)
+    );
+    // And the pixel between two drawn ones belongs to the earlier of them,
+    // which is the same floor `place` drew it with.
+    assert_eq!(
+        window.local_cursor(GumpPixel::new(337, 237), WindowScale::new(2)),
+        GumpPixel::new(18, 18)
+    );
+
+    // Outside, up and to the left: negative, and not rounded up into the
+    // window. One pixel out at twice the scale is still one pixel out.
+    assert_eq!(
+        window.local_cursor(GumpPixel::new(299, 199), WindowScale::new(2)),
+        GumpPixel::new(-1, -1)
+    );
+    assert_eq!(
+        window.local_cursor(GumpPixel::new(298, 198), WindowScale::new(2)),
+        GumpPixel::new(-1, -1)
+    );
+    assert_eq!(
+        window.local_cursor(GumpPixel::new(297, 197), WindowScale::new(2)),
+        GumpPixel::new(-2, -2)
+    );
+}

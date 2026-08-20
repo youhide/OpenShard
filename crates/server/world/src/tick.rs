@@ -50,7 +50,7 @@ use openshard_protocol::world::{
     PlayerUpdate, Point, RawStepSequence, SeasonChange, Sight, WalkAck, WalkReject, WalkRequest,
 };
 use openshard_protocol::{
-    access::AccessLevel,
+    access::{AccessLevel, AuthorityNotice},
     direction::{Direction, Facing},
     feature::Feature,
     version::ClientVersion,

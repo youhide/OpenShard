@@ -3868,6 +3868,25 @@ lands inside some monitor: a laptop undocked since the last run has a saved fram
 that opens the window offscreen, which looks exactly like a client that failed to
 start.
 
+**How big this client's own windows draw is a third scale, and its own knob.**
+`desk::WindowScale` (`window_scale` in the file, the dev window's Windows tab) is
+an integer upscale on the window art's own pixels, applied on top of the two
+densities above — a bag, a doll, a shop, a sheet, the amount picker, all of them
+together. It exists because the reference client has no display scaling at all:
+its windows are sized in raw art pixels, so on a modern screen a container is a
+postage stamp however good the monitor is. Whole numbers only, for the reason
+`gump::Frame::scale` gives one rung up — gump art is five-bit pixel art sampled
+with `Nearest`, and half a pixel of magnification is a border two rows thick
+along one edge of a window and one along the other. One number for every window
+and not one per kind, because windows drop items into each other and an icon that
+changed size in the player's hand on the way between two of them would be the
+preview disagreeing with both. It reaches the surface through `gump::place` and
+the pointer through `windows::OwnWindow::local_cursor`, which are the same
+transform in the two directions — see `docs/window_components.md`'s window-local
+coordinates entry. The shard's hover tooltip and the HUD chat box are outside it:
+the first is drawn over the world as well as over a window, and the second has
+`desk::ChatScale`.
+
 The scale is *egui's* zoom and not the monitor's `scale_factor`, which stays the
 platform's business — a file that pinned it would fight the compositor on the
 next screen. Ctrl+`+` / Ctrl+`-` / Ctrl+`0` are egui's own shortcuts

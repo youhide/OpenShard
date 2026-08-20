@@ -30,11 +30,16 @@ impl App {
     /// carried any *text*, which is what a keyboard layout and an input method
     /// speak through.
     fn speech_key(&mut self, code: KeyCode, text: Option<&str>) -> bool {
+        // What the shard says this character may command, read fresh at every
+        // keystroke rather than kept on the chat — see `chat::Chat::refresh`. A
+        // client with no view yet has nobody's authority, which is the same
+        // answer as an ordinary player's and the safe direction to guess in.
+        let authority = self.authority();
         let Some(edit) = keyboard::Edit::of(code, self.input.shift_held) else {
             let Some(text) = text else {
                 return false;
             };
-            self.chat.insert(text);
+            self.chat.insert(text, authority);
             return true;
         };
         match edit {
@@ -44,14 +49,14 @@ impl App {
                 }
             }
             keyboard::Edit::Cancel => {
-                self.chat.cancel();
+                self.chat.cancel(authority);
             }
-            keyboard::Edit::Complete => return self.chat.complete(),
+            keyboard::Edit::Complete => return self.chat.complete(authority),
             keyboard::Edit::NextChannel => self.chat.channel = self.chat.channel.next(),
             keyboard::Edit::NextCandidate => return self.chat.highlight_next(),
             keyboard::Edit::PreviousCandidate => return self.chat.highlight_previous(),
-            keyboard::Edit::Backspace => self.chat.backspace(),
-            keyboard::Edit::Delete => self.chat.delete(),
+            keyboard::Edit::Backspace => self.chat.backspace(authority),
+            keyboard::Edit::Delete => self.chat.delete(authority),
             keyboard::Edit::Left => self.chat.left(),
             keyboard::Edit::Right => self.chat.right(),
             keyboard::Edit::Start => self.chat.cursor = 0,
@@ -287,19 +292,19 @@ impl ApplicationHandler<()> for App {
                     }
                     return;
                 }
-                let changed = match code {
-                    // The dev window, the same switch the status strip's `dev`
-                    // toggle is. Two ways in rather than one because the state is
-                    // remembered: a window closed once stays closed across
-                    // launches, and the strip that reopens it is itself a thing
-                    // you have to know is there. A key is what you reach for
-                    // without knowing anything.
-                    //
-                    // F1 and not a letter: a letter reaching here means the
-                    // chat line was not focused, and one that walked the body
-                    // instead of opening it would be the bug — see the
-                    // `self.chat.focused` branch above.
-                    KeyCode::F1 => {
+                // Every remaining key is a *binding*, looked up in one table
+                // rather than matched arm by arm here — see `keyboard::Hotkey`,
+                // which is also where each of them is written down. What is left
+                // below is only the doing: an arm that names its hotkey and
+                // answers whether the picture changed.
+                //
+                // A key with no binding asks for nothing, which is what the
+                // `match` this replaced said with a `_ => false` arm.
+                let Some(hotkey) = keyboard::Hotkey::of(code) else {
+                    return;
+                };
+                let changed = match hotkey {
+                    keyboard::Hotkey::DevWindow => {
                         // The shell's `Desk` and not this one: see
                         // `Shell::toggle_dev`. Before there is a shell there is no
                         // window either, so this arm cannot be reached without one.
@@ -308,144 +313,75 @@ impl ApplicationHandler<()> for App {
                         }
                         true
                     }
-                    // Opens the speech line — the reference client's own
-                    // gesture, and unbound until now: movement is arrows only
-                    // (`keys::Held::direction_of`), so no key is taken from it.
-                    // `steer.clear()` for the same reason the UI-consumed path
-                    // above does: an arrow held down when this fires would
-                    // otherwise never see its `Released` and walk forever,
-                    // since arrows move the caret and not the body once
-                    // `chat.focused` is true.
-                    KeyCode::Enter | KeyCode::NumpadEnter => {
+                    // `steer.clear()` for the reason the UI-consumed path above
+                    // does it: an arrow held down when this fires would otherwise
+                    // never see its `Released` and walk for ever, since arrows
+                    // move the caret and not the body once `chat.focused` is true.
+                    keyboard::Hotkey::Speak => {
                         self.chat.focused = true;
                         self.steer.clear();
                         self.set_war_mode_held(false);
                         true
                     }
-                    KeyCode::Home => {
+                    keyboard::Hotkey::Relock => {
                         self.relock();
                         true
                     }
-                    // The character sheet must remain reachable even when the
-                    // body is obscured or a shop window covers it.  `P` sends
-                    // the protocol's explicit paperdoll request, not an
-                    // ordinary double click.
-                    KeyCode::KeyP => {
+                    keyboard::Hotkey::Paperdoll => {
                         self.open_own_paperdoll();
                         true
                     }
-                    // The backpack button on the paperdoll is not the only
-                    // route to inventory: it can be covered or closed.  Use
-                    // the worn backpack directly, exactly as that button does.
-                    KeyCode::KeyI => {
+                    keyboard::Hotkey::Inventory => {
                         self.open_own_inventory();
                         true
                     }
-                    // Provisional: the minimap's own opening affordance
-                    // (`docs/minimap_lod_plan.md` Phase 4) is still an open
-                    // product decision. `M` is local like `WindowSubject::Skills`
-                    // and `::Status` — no round trip, unlike `KeyP`/`KeyI` above.
-                    KeyCode::KeyM => {
+                    keyboard::Hotkey::Minimap => {
                         crate::windows::open_local_window(
                             &mut self.windows.own_windows,
                             crate::windows::WindowSubject::Minimap,
                         );
                         true
                     }
-                    // Page up and down lift the eye rather than the body,
-                    // which is a pan: the map has no vertical axis to walk
-                    // along, only a projection that folds `z` into `y`.
-                    KeyCode::PageUp => self.control.pan(0, PAGE_PIXELS),
-                    KeyCode::PageDown => self.control.pan(0, -PAGE_PIXELS),
-                    // A diagnostic, not a feature: a fixed mixed-case ASCII
-                    // line, sent without ever going through the keyboard —
-                    // no xkb group, no IME, no `shell`'s `TextEdit`. Whatever
-                    // shows up over the head from this key is exactly what
-                    // `0xAD` → `0xAE` → `text::collect` do with known-good
-                    // bytes, with typing entirely ruled out as a variable.
-                    KeyCode::F9 => {
+                    keyboard::Hotkey::PanUp => self.control.pan(0, PAGE_PIXELS),
+                    keyboard::Hotkey::PanDown => self.control.pan(0, -PAGE_PIXELS),
+                    keyboard::Hotkey::SpeechProbe => {
                         self.say("AbCdEfGh The Quick Brown Fox 123".to_owned());
                         false
                     }
-                    // Night on and off. A key and not a setting because the
-                    // only honest test of firelight is the two pictures side
-                    // by side, and there is no time of day on the wire yet for
-                    // it to follow — see `App::night`.
-                    KeyCode::F10 => {
+                    keyboard::Hotkey::Night => {
                         self.graphics.night = !self.graphics.night;
                         true
                     }
-                    // The lighting's own values, one after another — see
-                    // `crate::debug::View`. A key rather than a setting for the
-                    // same reason F10 is one: what is being looked for is a
-                    // difference between two pictures of the same instant, and
-                    // anything that needed a restart would put a different world
-                    // on either side of the comparison.
-                    // The sun on and off, for the same reason F10 exists: the
-                    // only honest test of a shadow is the two pictures of the
-                    // same instant, one with it and one without.
-                    KeyCode::F8 => {
+                    keyboard::Hotkey::Sunlight => {
                         self.graphics.sunlit = !self.graphics.sunlit;
                         true
                     }
-                    // The sky field on and off — what a roof does to the light
-                    // under it, against a flat ambient. A key for the third time
-                    // for the same reason: the two pictures of one instant are the
-                    // only way to see which of the two terms a dark room came from.
-                    KeyCode::F6 => {
+                    keyboard::Hotkey::SkyField => {
                         self.graphics.sky_field = !self.graphics.sky_field;
                         true
                     }
-                    // The torch in the player's own hand, on and off — the same
-                    // two-pictures-of-one-instant reason F10 and F8 are keys,
-                    // and here it is also the only way to see what the map's own
-                    // fires are doing without a beam swinging across them.
-                    KeyCode::F7 => {
+                    keyboard::Hotkey::Lantern => {
                         self.graphics.lantern = !self.graphics.lantern;
                         true
                     }
-                    // The occlusion grid as solids — step 23.0. A key beside the
-                    // checkbox for the reason F10 and F8 are keys: what is being
-                    // read is the difference between two pictures of one
-                    // instant, here the world with the geometry drawn over it
-                    // and the world without, and a hand that has to find a
-                    // checkbox has moved the camera by the time it is back.
-                    KeyCode::F5 => {
+                    keyboard::Hotkey::Solids => {
                         self.graphics.show_solids = !self.graphics.show_solids;
                         true
                     }
-                    // The world image, off underneath the solids — the opposite
-                    // reading from F5's own (decision 39.2 draws the sprite on
-                    // purpose, so the box can be checked against it): this is for
-                    // looking at the box itself, with nothing behind it arguing
-                    // about what shape it is.
-                    KeyCode::F3 => {
+                    keyboard::Hotkey::SolidsOnly => {
                         self.graphics.solids_only = !self.graphics.solids_only;
                         true
                     }
-                    // And how much of the grid either view draws — the second
-                    // datum, and a key for the same reason F5 is one, only more
-                    // so: the question it answers is "is that floor missing, or
-                    // is it under my feet", and the two pictures that answer it
-                    // differ in nothing but this.
-                    KeyCode::F4 => {
+                    keyboard::Hotkey::SolidsEverything => {
                         self.graphics.solids_everything = !self.graphics.solids_everything;
                         true
                     }
-                    KeyCode::F11 => {
+                    keyboard::Hotkey::LightView => {
                         self.graphics.light_view = self.graphics.light_view.next();
                         tracing::info!(view = self.graphics.light_view.name(), "lighting view");
                         true
                     }
-                    // What a fragment whose ray met no box is answered with, one
-                    // after another — `impostor::Fringe`, and a key for exactly
-                    // the reason F10 and F11 are keys. Two of its three states
-                    // were refused on measurements
-                    // (`docs/lighting_state.md`'s fringe entry) and the
-                    // instrument that refusal is *supposed* to answer to is a
-                    // person looking at two pictures of one instant, which is
-                    // what a key gives and a setting read at start-up does not.
-                    KeyCode::F2 => {
+                    keyboard::Hotkey::Fringe => {
                         self.graphics.fringe = self.graphics.fringe.next();
                         // **The state on a line of its own**, which is the whole
                         // difference between a knob and a knob that looks
@@ -466,21 +402,10 @@ impl ApplicationHandler<()> for App {
                         tracing::info!(fringe = self.graphics.fringe.name(), "fringe");
                         true
                     }
-                    // This frame, written out: every plane the blit can draw of
-                    // it, plus the inputs it was assembled from. See
-                    // [`App::frame_dump`] for why the client having none was the
-                    // thing standing in front of `docs/parity.md`'s gate, and
-                    // [`frame_dump_root`] for where it lands.
-                    //
-                    // A key and not a setting, for the reason F5, F8 and F10 are
-                    // keys and more so: what is being dumped is the instant a
-                    // person is looking at, and anything that had to be switched
-                    // on beforehand would dump a different one.
-                    KeyCode::F12 => {
+                    keyboard::Hotkey::FrameDump => {
                         self.request_frame_dump();
                         true
                     }
-                    _ => false,
                 };
                 if changed {
                     self.ask_redraw();
@@ -592,6 +517,19 @@ impl ApplicationHandler<()> for App {
                     if response.redraw {
                         self.ask_redraw();
                     }
+                }
+                // The chat's own control, ahead of the windows and the world for
+                // the reason it is drawn ahead of both — see
+                // `App::press_channel_button`. It is the whole of the channel's
+                // interface now: `Shift+Tab` still turns it for a hand that is
+                // already typing, and this is what a hand on the mouse reaches
+                // for.
+                if button == winit::event::MouseButton::Left
+                    && state == ElementState::Pressed
+                    && self.press_channel_button()
+                {
+                    self.ask_redraw();
+                    return;
                 }
                 // A container window takes the press before the world sees it,
                 // the same way a panel does: the click that raises a bag must

@@ -3678,44 +3678,102 @@ the keyboard was the key that could no longer be pressed.
 
 `crates/client/app/src/keyboard.rs` is the layer that replaced the implicit
 ladder of early `return`s inside `App::window_event`: `Owner` names who a
-keystroke belongs to (speech line, pane field, world) and `Edit` is the binding
-table for a line being typed, both with tests that need no window. egui is
-handed no `Tab` at all (`egui_may_see`) and may claim the keyboard only while a
-text field inside it has the focus (`Shell::holds_keyboard`) — of which this
-client has none, every box a player types into being drawn by `chat.rs` or
-`panes.rs`.
+keystroke belongs to (speech line, pane field, world), `Edit` is the binding
+table for a line being typed and `Hotkey` the world's own, all with tests that
+need no window. egui is handed no `Tab` at all (`egui_may_see`) and may claim the
+keyboard only while a text field inside it has the focus
+(`Shell::holds_keyboard`) — of which this client has none, every box a player
+types into being drawn by `chat.rs` or `panes.rs`.
 
 The speech line completes staff commands as they are typed, from
 `openshard-commands` — one table the world dispatches on *and* the client
 offers, so a command that runs is a command that is offered and the two cannot
 drift: `gm::run` matches `StaffCommand` exhaustively. `Tab` takes the highlight,
 arrows move it, `Escape` puts the popup away before the line, and past the
-command word the popup becomes the usage hint. The channel moved to `Shift+Tab`.
-What is left:
+command word the popup becomes the usage hint — and it offers only what this
+character's authority lets it run, which the shard says once on world entry.
+The channel is a button on the input line, with `Shift+Tab` beside it.
 
-- **The channel wants a button, not a key.** `Shift+Tab` is the interim and is
-  written down as such in `chat::Chat::channel`: the reference client puts a
-  dropdown above its entry field, and a modifier chord is what a client has
-  instead of a control it has not drawn yet.
-- **The world's own hotkeys are still an inline ladder.** F1–F12, `P`, `I`,
-  `Home` and the two page keys are a `match` in `event_loop.rs` rather than
-  entries in `keyboard.rs`'s table, so none of them can be rebound and none is
-  tested. They are not *contested* — only the owner's keys had to move first —
-  but the day this client grows a key-bindings window is the day the rest of the
-  ladder follows the typing keys into the table.
-- **The completer offers commands the player may not run.** Authority is the
-  world's and never reaches the client, so the popup offers all twenty-five to
-  everyone. A word the shard refuses reads the same as a mistyped one, which is
-  why this is a note and not a defect — but if a `0xBF` ever carries a staff
-  flag, `StaffCommand::matching` is where it would be filtered.
-- **The popup's highlight is ink, not a bar.** The gump pass draws through an
-  atlas of packed sprites and has no primitive that paints a solid rectangle —
-  the same reason the caret is a `|` glyph. A real selection plate needs that
-  primitive first.
-- **Nothing checks that the chat block fits.** The journal is six lines and the
-  popup is now up to six more, both at `desk::ChatScale`'s line height, and the
-  column is laid out upward from the input line without ever asking how tall the
-  window is. At scale 4 on a small window the top of it runs off the screen.
+The five entries this backlog was left with are all closed, and what each of
+them turned into is worth keeping, because the next thing here will be built on
+one of them:
+
+- [x] **The channel is a button, not a chord.** `chat::channel_button` draws it
+      at the left end of the input line, on a plate, whether or not the line is
+      open; a left click cycles it, ahead of the window layer and the world
+      because the chat is drawn over both (`App::press_channel_button`). Its box
+      comes out of two functions — `channel_button` and `channel_width` — that
+      the frame and the pointer both call, which is `docs/parity.md`'s rule in
+      the one place a player can feel it being broken. `Shift+Tab` stays, beside
+      it rather than instead of it: a hand already typing should not have to
+      leave the keyboard.
+- [x] **The world's own hotkeys are a table.** `keyboard::Hotkey` names each of
+      the nineteen and `Hotkey::key` says which key it is on; `Hotkey::of` is
+      answered *out of* that one table rather than by a second `match`, so a
+      forward and a backward reading cannot disagree. `event_loop.rs` is left
+      with the doing. The arrows, `Tab` and `Escape` are deliberately not in it
+      — two are held rather than pressed and one belongs to the window layer —
+      and that is written down on the type.
+- [x] **The completer offers only what the shard would run.**
+      `openshard_protocol::access::AuthorityNotice` is this engine's own `0xBF`
+      subcommand (`0xE001`, in a reserved range no client version and no
+      ClassicUO uses), sent once on world entry, and it carries the account's
+      `AccessLevel`. The client keeps it on the view and hands it to
+      `StaffCommand::matching`, which offers a player nothing — the usage hint
+      past the command word included. The threshold itself is
+      `StaffCommand::AUTHORITY`, and `WorldState::staff_authority` compares
+      against the same constant, so the gate and the completer cannot drift.
+      `crates/e2e/shard/tests/staff_authority.rs` is both ends on one wire.
+- [x] **The popup's highlight is a plate.** `gump::plate` is the rectangle
+      primitive the pass had none of: a quad with no region at all — `du` and
+      `dv` zero, which no packed sprite can be — whose `u` carries a `Shade` the
+      shader paints through the hue's own ramp. No atlas entry, so it works in
+      all three of this pass's uses (gump art, `fonts.mul`, a TrueType face),
+      and the chat's furniture is drawn with it.
+- [x] **The chat block is cut to the window.** `chat::room_above` answers how
+      many rows fit between the input line and the top of the surface, and the
+      popup is served first because it is the one a keystroke is moving; the
+      journal takes what is left. `Offer::rows` takes that number as a hard cap
+      and spends one of its rows on the "… n more" count rather than adding a row
+      to it.
+
+What this left behind:
+
+- **The caret is still a glyph.** `gump::plate` now exists, so the `|` the chat
+  draws could be a one-pixel bar — which is what a caret is. Not done with the
+  rest because it is a *look* rather than a defect, and the width of a caret is a
+  decision nobody has argued yet.
+- **Nothing draws the bindings.** `Hotkey::key` is the half a key-bindings window
+  reads, and there is no such window; the table is rebindable-*ready* and not
+  rebindable. What is missing is a place to put it and a file to keep it in
+  (`desk::Desk` is the obvious home, `client_ui.toml` the obvious file).
+- **The authority notice is sent once and never again.** Right today — an
+  account's level does not move while a character is in the world, and `.gm`
+  moves the staff *mode* rather than the authority — but a shard that ever grows
+  a `.setaccess` would have to send it again, and nothing would notice that it
+  had not.
+- **A plate is opaque.** The gump pass does no blending, so the chat's furniture
+  covers the world under it rather than tinting it. That is the right first
+  answer (a highlight has to be readable) and the wrong final one for a chat
+  backdrop, which wants to be a wash. Blending is a pipeline decision for the
+  whole pass, not a plate's.
+
+Two defects were found on the way and fixed rather than filed, both in code the
+work had to touch anyway:
+
+- **The gump pass ran an untinted translucent picture through the hue ramp.**
+  `SpriteQuad::hue` carries more than the wire hue — `with_opacity` writes a byte
+  into bits 16-23 — and `gump.wgsl` asked whether the whole word was nonzero, so
+  a picture with an opacity and no tint took the lookup at index zero, whose row
+  is `-1`. An out-of-bounds `textureLoad` answers with zeros: the paperdoll's
+  pending-equipment preview drew black. The shader now tests the index bits, and
+  `crates/client/render/tests/gump.rs` pins it on a ramp built to fail if the
+  lookup runs at all.
+- **The chat's caret ignored `desk::ChatScale` on the `fonts.mul` path.**
+  `text::gump_width` measures the font's own pixels and `scaled_gump_quads` draws
+  them magnified, so an anchor placed at the unmagnified width put the caret a
+  fraction of the way along the line it was measuring — at the default scale of
+  two, halfway back through what had been typed.
 
 ## Later
 

@@ -37,6 +37,7 @@ use openshard_client_render::items::{self};
 use openshard_client_render::lod::BlockLod;
 use openshard_client_render::mobiles::{self, Mobile};
 use openshard_client_render::outline::{self};
+use openshard_client_render::radar::{build_base_chunk, region_base_chunks};
 use openshard_client_render::renderer::{self, Target};
 use openshard_client_render::sprite::SpriteQuad;
 use openshard_client_render::text::{self, Label};
@@ -52,6 +53,7 @@ use crate::crowd::{Crowd, Who};
 use crate::diagnostics::Pick;
 use crate::frame_geometry::{FrameFacts, assemble_geometry};
 use crate::graphics::HighlightTarget;
+use crate::panes::minimap::radar_region_for;
 use crate::picking::SelectedIdentity;
 use crate::profile;
 use crate::render_passes::{WorldPassAudit, draw_gump_windows, encode_world_passes};
@@ -1917,6 +1919,33 @@ impl App {
                 composite_producer::produce(&self.resources, window, &mut self.composite_work, work);
             }
         }
+        // The minimap's terrain, produced off this frame's hot path the same
+        // way the block above is: `radar_queue` only requests and hands out
+        // bounded batches, never builds a pixel itself. Unlike a composite,
+        // `build_base_chunk` is pure CPU — map and colour-table lookups, no
+        // encoder — so publishing a complete chunk needs no GPU step here at
+        // all; `Screen::radar_chunks` uploads one only once the content pass
+        // asks to draw it.
+        if let (Some(player), Some(colors)) = (
+            self.world
+                .authoritative
+                .view
+                .as_ref()
+                .map(|view| view.player.position),
+            self.resources.radar_colors.as_ref(),
+        ) {
+            let region = radar_region_for(player, crate::panes::minimap::EXTENT);
+            for coord in region_base_chunks(region) {
+                self.radar_queue
+                    .request(self.radar_cache.key(region.facet, 0, coord));
+            }
+            self.radar_queue.refresh_dirty(&self.radar_cache);
+            for key in self.radar_queue.take_for_producer() {
+                if let Some(chunk) = build_base_chunk(&self.resources.map, colors, key) {
+                    self.radar_queue.finish(&mut self.radar_cache, chunk);
+                }
+            }
+        }
         // Three time-varying halves of a mobile, filled in per frame rather
         // than per packet: the crowd is the only thing that knows what a
         // clock — and a group — has done since the `0x77` landed, and
@@ -2300,8 +2329,10 @@ impl App {
             &mut self.resources,
             &self.world,
             &mut self.windows,
+            &self.radar_cache,
             self.input.pointer_gump,
             &hover,
+            self.desk.window_scale,
             self.shell.as_ref(),
             window,
             &mut encoder,

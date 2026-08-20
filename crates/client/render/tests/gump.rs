@@ -10,9 +10,12 @@
 //! under test is placement and scaling, and a solid block proves those where a
 //! real gump would only make a failure harder to read.
 
-use openshard_client_render::gump::{self, Frame, GumpArt, GumpAtlas, GumpPixel, GumpRenderer, Picture};
+use openshard_client_render::geometry::Rect;
+use openshard_client_render::gump::{
+    self, Frame, GumpArt, GumpAtlas, GumpPixel, GumpRenderer, Picture, Shade,
+};
 use openshard_client_render::hue::HueRamp;
-use openshard_protocol::wire::Graphic;
+use openshard_protocol::wire::{Graphic, Hue};
 use openshard_uofiles::color::Color16;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::image::Image;
@@ -73,6 +76,35 @@ fn render(
     height: u32,
     scale: f32,
 ) -> Rendered {
+    render_quads(
+        device,
+        queue,
+        atlas,
+        &gump::collect(pictures, atlas),
+        &HueRamp::build(&Hues::parse(&[0u8; 708]).expect("one empty group")),
+        width,
+        height,
+        scale,
+    )
+}
+
+/// The same, for quads that are nobody's picture — a [`gump::plate`] has no
+/// [`Picture`] to be collected from, being the one thing this pass draws that
+/// the atlas holds nothing for.
+///
+/// The ramp is the caller's here, because a plate's colour *is* the ramp when it
+/// is hued.
+#[allow(clippy::too_many_arguments)]
+fn render_quads(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    atlas: &GumpAtlas,
+    quads: &[openshard_client_render::sprite::SpriteQuad],
+    ramp: &HueRamp,
+    width: u32,
+    height: u32,
+    scale: f32,
+) -> Rendered {
     assert_eq!(width * 4 % 256, 0, "a row copy has to be 256-byte aligned");
     let format = wgpu::TextureFormat::Rgba8Unorm;
     let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -97,10 +129,7 @@ fn render(
         mapped_at_creation: false,
     });
 
-    // One row of hues, all black: nothing here asks for a tint, and the ramp is
-    // bound whether or not it is read.
-    let ramp = HueRamp::build(&Hues::parse(&[0u8; 708]).expect("one empty group"));
-    let mut pass = GumpRenderer::new(device, queue, format, atlas.pixels(), &ramp);
+    let mut pass = GumpRenderer::new(device, queue, format, atlas.pixels(), ramp);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     encoder
@@ -122,7 +151,6 @@ fn render(
         })
         .forget_lifetime();
 
-    let quads = gump::collect(pictures, atlas);
     pass.render(
         device,
         queue,
@@ -133,7 +161,7 @@ fn render(
             height,
             scale,
         },
-        &quads,
+        quads,
     );
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
@@ -262,6 +290,170 @@ fn a_tiled_strip_fills_its_box_to_the_pixel() {
     assert_eq!(frame.drawn_count(), 20 * 7, "the box, not a multiple of the art");
     assert!(frame.drawn(23, 10), "its far corner");
     assert!(!frame.drawn(24, 10), "and not one pixel past it");
+}
+
+/// A ramp whose rungs run the *other* way: hue 1's darkest colour is white and
+/// its brightest is black.
+///
+/// Inverted on purpose. A plate painted straight from its own shade and a plate
+/// painted through the ramp at that shade's rung come out the same colour under
+/// any honest ramp, so an honest one cannot tell the two apart — and telling
+/// them apart is the whole of what the hued case has to prove.
+fn inverted_ramp() -> HueRamp {
+    let mut bytes = vec![0u8; 708];
+    // Past the group's four-byte header, the first hue entry's 32 colours.
+    for rung in 0..32usize {
+        let level = (31 - rung) as u16;
+        let colour = (level << 10) | (level << 5) | level;
+        let at = 4 + rung * 2;
+        bytes[at..at + 2].copy_from_slice(&colour.to_le_bytes());
+    }
+    HueRamp::build(&Hues::parse(&bytes).expect("one group of eight hues"))
+}
+
+/// The primitive this pass had none of: a rectangle with no picture behind it.
+///
+/// Its area is its own, to the pixel, and its colour is its shade — which is
+/// what a highlight bar behind a row of text is made of, and what the chat's
+/// completer drew in a second ink for want of.
+#[test]
+fn a_plate_fills_its_rectangle_with_its_own_shade() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter; skipping");
+        return;
+    };
+    // Nothing is sampled, so the atlas holds nothing — which is also the proof
+    // that a plate needs no entry in it.
+    let atlas = atlas_of([]);
+    let frame = render_quads(
+        &device,
+        &queue,
+        &atlas,
+        &[gump::plate(
+            Rect {
+                x: 10.0,
+                y: 6.0,
+                width: 8.0,
+                height: 4.0,
+            },
+            Hue::NONE,
+            Shade::new(0.5),
+        )],
+        &inverted_ramp(),
+        64,
+        64,
+        1.0,
+    );
+
+    assert_eq!(
+        frame.drawn_count(),
+        8 * 4,
+        "the rectangle it was given, and no more"
+    );
+    assert!(frame.drawn(10, 6), "its top-left corner");
+    assert!(frame.drawn(17, 9), "its bottom-right corner");
+    assert!(!frame.drawn(18, 9), "one pixel right of it");
+    let at = ((6 * frame.width + 10) * 4) as usize;
+    let grey = frame.pixels[at];
+    assert!(
+        (120..=136).contains(&grey),
+        "half a shade is mid grey, not {grey}"
+    );
+    assert_eq!(frame.pixels[at], frame.pixels[at + 1], "and it is grey");
+    assert_eq!(frame.pixels[at + 1], frame.pixels[at + 2]);
+}
+
+/// A hued plate is a rung of that hue's ramp, chosen by its shade — the same
+/// lookup a picture's grey texel makes, so a plate and the art beside it cannot
+/// come out two different colours from one hue.
+#[test]
+fn a_hued_plate_reads_its_shade_off_the_ramp() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter; skipping");
+        return;
+    };
+    let atlas = atlas_of([]);
+    let frame = render_quads(
+        &device,
+        &queue,
+        &atlas,
+        &[
+            gump::plate(
+                Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 4.0,
+                    height: 4.0,
+                },
+                Hue(1),
+                Shade::new(1.0),
+            ),
+            gump::plate(
+                Rect {
+                    x: 8.0,
+                    y: 0.0,
+                    width: 4.0,
+                    height: 4.0,
+                },
+                Hue(1),
+                Shade::new(0.0),
+            ),
+        ],
+        &inverted_ramp(),
+        64,
+        64,
+        1.0,
+    );
+
+    let brightest = frame.pixels[0];
+    let darkest = frame.pixels[(8 * 4) as usize];
+    assert!(
+        brightest < 32,
+        "the ramp's top rung is black in this ramp, not {brightest}"
+    );
+    assert!(
+        darkest > 223,
+        "and its bottom rung is white, not {darkest} — a hued plate that \
+         painted its own shade would have these the other way round"
+    );
+}
+
+/// An untinted picture drawn at less than full opacity keeps its own colours.
+///
+/// `SpriteQuad::hue` is not only the wire hue — `with_opacity` writes a byte of
+/// its own into the same word — so a shader that asked "is the word nonzero"
+/// sent an *untinted* translucent picture through the hue lookup at index zero,
+/// whose row is `-1`, and an out-of-bounds `textureLoad` answers with zeros. The
+/// paperdoll's pending-equipment preview drew black.
+#[test]
+fn a_translucent_untinted_picture_is_not_run_through_the_ramp() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter; skipping");
+        return;
+    };
+    let atlas = atlas_of([(Graphic(1), block(4, 4))]);
+    let frame = render_quads(
+        &device,
+        &queue,
+        &atlas,
+        &gump::collect(
+            &[Picture::plain(GumpArt::Gump(Graphic(1)), GumpPixel::new(0, 0)).translucent(127)],
+            &atlas,
+        ),
+        // Every rung of hue 1 is black in this ramp, so a picture that went
+        // through the lookup at all comes back black and one that did not stays
+        // the white the block was packed as.
+        &inverted_ramp(),
+        64,
+        64,
+        1.0,
+    );
+
+    let white = frame.pixels[0];
+    assert!(
+        white > 223,
+        "the art's own white, not a ramp lookup's {white}"
+    );
 }
 
 /// Later covers earlier: with no depth buffer, the caller's order is the

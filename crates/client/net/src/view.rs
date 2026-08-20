@@ -28,6 +28,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 use rustc_hash::FxHashMap;
 
+use openshard_protocol::access::AccessLevel;
 use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::gump::layout::{Element, parse};
@@ -440,6 +441,22 @@ pub struct WorldView {
     /// packets said, and whoever holds the client's files holds what was made of
     /// it — the same split that keeps `WorldView` free of art.
     pub designs: FxHashMap<Serial, u32>,
+    /// What the shard says this character's authority is — the answer to "may I
+    /// run a staff command", and the only thing that reads it is the completer
+    /// on the speech line (`openshard_commands::StaffCommand::matching`).
+    ///
+    /// [`AccessLevel::Player`] until an
+    /// [`AuthorityNotice`](openshard_protocol::access::AuthorityNotice) says
+    /// otherwise, which the shard sends once on world entry. That is a *default*
+    /// and not an unknown: authority is never granted by accident, so the client
+    /// offers nothing until it is told, and a shard that never sends the packet
+    /// (an older one, or somebody else's) leaves a completer that offers no staff
+    /// words — which is right, since the vocabulary it would offer is this
+    /// engine's own.
+    ///
+    /// It is never a *permission*: nothing here is checked before a line goes
+    /// out, and the shard refuses what it refuses regardless of what this says.
+    pub authority: AccessLevel,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -644,6 +661,8 @@ impl WorldView {
             party: Party::default(),
             tooltips: FxHashMap::default(),
             designs: FxHashMap::default(),
+            // Nothing until the shard says so — see the field's own doc.
+            authority: AccessLevel::default(),
         }
     }
 
@@ -1422,6 +1441,15 @@ impl WorldView {
                 };
                 let changed = self.designs.get(&serial) != Some(&revision.revision.0);
                 self.designs.insert(serial, revision.revision.0);
+                changed
+            }
+            // What this shard holds us at. This engine's own subcommand, sent
+            // once on world entry — see `AuthorityNotice`. Nothing is enforced
+            // here: it decides what the speech line *offers*, and the shard
+            // still refuses whatever it refuses.
+            ServerPacket::AuthorityNotice(notice) => {
+                let changed = self.authority != notice.level;
+                self.authority = notice.level;
                 changed
             }
             // The list. Arrives either as the answer to our `0xD6` or, in the

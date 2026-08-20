@@ -11,8 +11,12 @@ authors.workspace = true
 [lints]
 workspace = true
 
-# No dependencies, and there is nothing here that could want one: this crate is
-# a table of names, argument shapes and one-line summaries. It sits in `common`
-# because both ends read it — the world runs the command, the client completes
-# it as it is typed — and neither may depend on the other.
+# One dependency, and it is the reason this crate can say who may type these
+# words: `AccessLevel` is `openshard-protocol`'s, the crate the login server, the
+# world and both clients already share, and `StaffCommand::AUTHORITY` names a
+# level. Everything else here is still a table of names, argument shapes and
+# one-line summaries. It sits in `common` because both ends read it — the world
+# runs the command, the client completes it as it is typed — and neither may
+# depend on the other.
 [dependencies]
+openshard-protocol.workspace = true

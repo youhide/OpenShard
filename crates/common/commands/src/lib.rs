@@ -16,11 +16,24 @@
 //! [`StaffCommand::ALL`], so the same variant is offered the moment it exists.
 //! Neither end can drift from the other without the compiler saying so.
 //!
-//! What this crate deliberately does *not* know: who may run a command. That is
-//! authority, it lives on the mobile, and the check is the world's — see
-//! `gm::run`'s own doc. A client that offers `.add` to somebody who may not use
-//! it has offered a word the shard will refuse, which is the same answer as
-//! mistyping it.
+//! # Who may type them, and where that is decided
+//!
+//! The **decision** is the world's and stays there: `World::say` gates on the
+//! actor's authority before `gm::run` is entered at all, and nothing a client
+//! says about itself is read. What lives here is the *threshold* that gate
+//! compares against — [`StaffCommand::AUTHORITY`] — for the same reason the
+//! names do: two statements of one rule are a pair that can drift, and this is
+//! the one crate both the gate and the completer can read.
+//!
+//! So [`StaffCommand::matching`] takes the level the shard holds the typist at
+//! (a client learns it from `openshard_protocol::access::AuthorityNotice`) and
+//! offers nothing to somebody who may run nothing. It offered all twenty-five to
+//! everybody until that packet existed, on the argument that a word the shard
+//! refuses reads the same as a mistyped one — which is true of the *answer* and
+//! false of the *offer*: a completer that lists verbs nobody may use is teaching
+//! them.
+
+use openshard_protocol::access::AccessLevel;
 
 /// The character that turns speech into a command.
 ///
@@ -238,13 +251,39 @@ impl StaffCommand {
             .find(|command| command.name().eq_ignore_ascii_case(word))
     }
 
+    /// The authority a shard requires of anybody typing one of these.
+    ///
+    /// **One threshold for the whole vocabulary**, because that is what the
+    /// world enforces: `World::say` asks `WorldState::staff_authority` once,
+    /// before dispatching, and no arm of `gm::run` asks for more. A per-command
+    /// level would be a client hiding words the shard would in fact have run, or
+    /// offering ones it would refuse — which is the same drift two lists have,
+    /// one rung down.
+    ///
+    /// [`AccessLevel::Administrator`] exists and is deliberately not used here:
+    /// it is a seam for account or shard commands that a game master should not
+    /// have, and the day one of these needs it, this constant becomes a method
+    /// on the command and both ends follow it at once.
+    pub const AUTHORITY: AccessLevel = AccessLevel::GameMaster;
+
     /// Every command whose name begins with `prefix`, in [`ALL`](Self::ALL)'s
-    /// order.
+    /// order — or nothing at all, for somebody `level` does not let command.
     ///
     /// An empty prefix matches everything, which is what an empty `.` should
-    /// offer: the whole vocabulary, which is the only way to find out it exists.
+    /// offer *to staff*: the whole vocabulary, which is the only way to find out
+    /// it exists. To everybody else an empty prefix matches nothing, which is
+    /// the honest answer to "what may I run" and not a refusal to answer.
+    ///
+    /// A client learns `level` from
+    /// [`AuthorityNotice`](openshard_protocol::access::AuthorityNotice) and
+    /// holds [`AccessLevel::Player`] until one arrives — so a shard that never
+    /// sends one offers no completions rather than offering words at random,
+    /// which is the safe direction for a guess about authority to be wrong in.
     #[must_use]
-    pub fn matching(prefix: &str) -> Vec<Self> {
+    pub fn matching(prefix: &str, level: AccessLevel) -> Vec<Self> {
+        if !level.allows(Self::AUTHORITY) {
+            return Vec::new();
+        }
         Self::ALL
             .into_iter()
             .filter(|command| {
@@ -257,6 +296,8 @@ impl StaffCommand {
 
 #[cfg(test)]
 mod tests {
+    use openshard_protocol::access::AccessLevel;
+
     use super::{PREFIX, StaffCommand};
 
     #[test]
@@ -290,18 +331,19 @@ mod tests {
 
     #[test]
     fn a_prefix_offers_what_begins_with_it() {
+        let staff = AccessLevel::GameMaster;
         assert_eq!(
-            StaffCommand::matching("hd"),
+            StaffCommand::matching("hd", staff),
             vec![
                 StaffCommand::HDemolish,
                 StaffCommand::HDesign,
                 StaffCommand::HDrop
             ]
         );
-        assert_eq!(StaffCommand::matching("skill"), vec![StaffCommand::Skill]);
-        assert!(StaffCommand::matching("zzz").is_empty());
+        assert_eq!(StaffCommand::matching("skill", staff), vec![StaffCommand::Skill]);
+        assert!(StaffCommand::matching("zzz", staff).is_empty());
         assert_eq!(
-            StaffCommand::matching("").len(),
+            StaffCommand::matching("", staff).len(),
             StaffCommand::ALL.len(),
             "a lone '{PREFIX}' offers the whole vocabulary"
         );
@@ -311,7 +353,35 @@ mod tests {
     /// particular does not panic slicing past the end.
     #[test]
     fn a_prefix_past_the_end_of_a_name_matches_nothing() {
-        assert!(StaffCommand::matching("wherever").is_empty());
+        assert!(StaffCommand::matching("wherever", AccessLevel::GameMaster).is_empty());
+    }
+
+    /// A player is offered nothing, however much of a command they type: the
+    /// shard would refuse every one of these words, and a completer that listed
+    /// them would be teaching verbs that do not work.
+    #[test]
+    fn an_ordinary_player_is_offered_nothing_at_all() {
+        for prefix in ["", "h", "hd", "save", "zzz"] {
+            assert!(
+                StaffCommand::matching(prefix, AccessLevel::Player).is_empty(),
+                "a player was offered something for {prefix:?}"
+            );
+        }
+    }
+
+    /// And every level at or above the threshold is offered the same list —
+    /// there is one gate, so there is one vocabulary.
+    #[test]
+    fn every_level_that_may_command_is_offered_the_whole_vocabulary() {
+        assert!(AccessLevel::GameMaster.allows(StaffCommand::AUTHORITY));
+        assert_eq!(
+            StaffCommand::matching("", AccessLevel::Administrator).len(),
+            StaffCommand::ALL.len()
+        );
+        assert_eq!(
+            StaffCommand::matching("h", AccessLevel::Administrator),
+            StaffCommand::matching("h", AccessLevel::GameMaster)
+        );
     }
 
     /// The summaries are read on one chat line beside the name and its

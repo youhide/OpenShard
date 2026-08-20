@@ -149,6 +149,13 @@ pub enum ServerPacket {
     /// reaches a client as `Event::Undecoded` with the bytes intact — see
     /// [`crate::design`].
     DesignRevision(crate::design::DesignRevision),
+    /// `0xBF` subcommand `0xE001` — the authority this shard holds the
+    /// connection's character at.
+    ///
+    /// This engine's own, not the reference protocol's: see
+    /// [`crate::access::AuthorityNotice`] for what the client does with it and
+    /// why inventing a subcommand is safe here.
+    AuthorityNotice(crate::access::AuthorityNotice),
     /// `0xDC` — the tooltip revision for one object.
     TooltipRevision(TooltipRevision),
     /// `0xD6` — the property list itself, answering a client's batch query.
@@ -233,6 +240,7 @@ impl ServerPacket {
             Self::SellList(_) => <SellList as EncodePacket>::ID,
             Self::TooltipRevision(_) => <TooltipRevision as EncodePacket>::ID,
             Self::DesignRevision(_) => <crate::design::DesignRevision as EncodePacket>::ID,
+            Self::AuthorityNotice(_) => <crate::access::AuthorityNotice as EncodePacket>::ID,
             Self::PropertyListReply(_) => <PropertyListReply as EncodePacket>::ID,
             Self::PartyMemberList(_) => <PartyMemberList as EncodePacket>::ID,
             Self::PartyRemoveMember(_) => <PartyRemoveMember as EncodePacket>::ID,
@@ -305,6 +313,7 @@ impl ServerPacket {
             Self::SellList(_) => SellList::LENGTH,
             Self::TooltipRevision(_) => TooltipRevision::LENGTH,
             Self::DesignRevision(_) => <crate::design::DesignRevision as EncodePacket>::LENGTH,
+            Self::AuthorityNotice(_) => <crate::access::AuthorityNotice as EncodePacket>::LENGTH,
             Self::PropertyListReply(_) => PropertyListReply::LENGTH,
             Self::PartyMemberList(_) => PartyMemberList::LENGTH,
             Self::PartyRemoveMember(_) => PartyRemoveMember::LENGTH,
@@ -379,6 +388,7 @@ impl ServerPacket {
             Self::SellList(packet) => packet.encode_body(out, version),
             Self::TooltipRevision(packet) => packet.encode_body(out, version),
             Self::DesignRevision(packet) => packet.encode_body(out, version),
+            Self::AuthorityNotice(packet) => packet.encode_body(out, version),
             Self::PropertyListReply(packet) => packet.encode_body(out, version),
             Self::PartyMemberList(packet) => packet.encode_body(out, version),
             Self::PartyRemoveMember(packet) => packet.encode_body(out, version),
@@ -440,6 +450,9 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
         crate::design::DesignRevision::SUBCOMMAND => decode_server(packet, version)
             .map(ServerPacket::DesignRevision)
             .map_err(ServerDecodeError::DesignRevision)?,
+        crate::access::AuthorityNotice::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::AuthorityNotice)
+            .map_err(ServerDecodeError::AuthorityNotice)?,
         crate::party::SUBCOMMAND => return decode_party(packet, version),
         _ => return Ok(None),
     }))
@@ -761,6 +774,8 @@ pub enum ServerDecodeError {
     TooltipRevision(DecodeError),
     /// `0xBF 0x1D` did not decode.
     DesignRevision(DecodeError),
+    /// `0xBF 0xE001` did not decode.
+    AuthorityNotice(DecodeError),
     /// `0xD6` did not decode.
     PropertyListReply(DecodeError),
     /// A `0xBF` subcommand `0x06` did not decode. One variant for all four,
@@ -793,6 +808,7 @@ impl fmt::Display for ServerDecodeError {
             Self::GumpDisplay(error) => ("0xB0 gump display", error),
             Self::TooltipRevision(error) => ("0xDC tooltip revision", error),
             Self::DesignRevision(error) => ("0xBF 0x1D design revision", error),
+            Self::AuthorityNotice(error) => ("0xBF 0xE001 authority notice", error),
             Self::PropertyListReply(error) => ("0xD6 property list", error),
             Self::Party(error) => ("0xBF 0x06 party", error),
             Self::CloseGump(error) => ("0xBF 0x04 close gump", error),
