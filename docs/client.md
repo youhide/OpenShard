@@ -932,51 +932,63 @@ block-major so `statics_in_block` is asked once per 8×8 rather than once per
 tile — the same cost `map.rs` records as the largest single phase of the
 lighting pass when it was asked per tile.
 
-**The radar gets its own texture and its own draw, outside `GumpAtlas`.** The
+**The radar gets its own pages and its own draws, outside `GumpAtlas`.** The
 deciding property is *mutability*, not identity: `GumpArt`'s two arms both name
 a picture in a client file and the atlas is a shelf packer for art that never
-changes, while a radar is generated and rewritten every step. It is also the
-cheaper way round — the gump atlas is 2048 square, so a corner of it for a
-256-tile radar would carry sixteen megabytes to draw a sixty-fourth of it.
+changes, while a radar is generated. It is also the cheaper way round — the gump
+atlas is 2048 square, so a corner of it for a radar would carry sixteen megabytes
+to draw a fraction of it. What it has instead is a bounded texture array of
+64-tile chunk pages, each uploaded once and kept until it is evicted; a step
+selects different pages rather than rewriting a texture.
 
-`radar.wgsl` has no hue (there is no ramp for a colour that was never in a
-client file) and no instances (one quad, so its place is in the uniform). **It is
-validated at pipeline creation and nowhere else**, being `include_str!`d — so
-`tests/radar_pass.rs` builds the pipeline on a real device, and earned itself
-immediately: the first draft named a uniform field `target`, which WGSL reserves.
+`radar_chunk.wgsl` has no hue — there is no ramp for a colour that was never in
+a client file. **It is validated at pipeline creation and nowhere else**, being
+`include_str!`d — so `tests/radar_pass.rs` builds every radar pipeline on a real
+device, and that earned itself immediately: the first draft named a uniform field
+`target`, which WGSL reserves.
 
-The player's marker is stamped into the bitmap rather than drawn as a second
-quad, so it rides the upload the map already costs. A cross and not a dot: at one
-pixel a tile a dot is indistinguishable from a lamp post.
+**Nothing about a chunk is in the uniform**, and that earned itself too. The
+first version wrote each chunk's placement, source rectangle and page into one
+uniform buffer between recorded draws, which cannot work: `Queue::write_buffer`
+is ordered against the *submission* rather than against the commands inside it,
+so every draw of the frame read the last chunk's values and the window showed one
+chunk's slice several times over. Per-chunk data travels in an instance buffer,
+the way the gump pass does it, and the whole window is one draw.
 
-**What is left, and it is the window.** `WindowSubject::Minimap` beside `Skills`
-and `Status` — the two whose *existence* is local UI state rather than something
-the shard opened — its input in `own_windows/minimap.rs`, `Resources` holding the
-colour table, `Screen` holding the pass beside `gump_pass`, and the per-frame
-fill from wherever the player is standing.
+The player's marker is an overlay drawn after the terrain, not a pixel stamped
+into a cached chunk: a chunk is immutable and a marker moves every step, so
+stamping it would make walking invalidate terrain — the one thing
+`docs/minimap_lod_plan.md` exists to prevent. A cross and not a dot, in both
+drawings (`radar::MARKER_ARMS`): at one pixel a tile a dot is indistinguishable
+from a lamp post.
 
-**And one decision it turns out to need, which is not taken.** Every other window
-here is hit-tested against the `Vec<Picture>` its layout produced: `Drawn` holds
-gump art, and dragging, raising and closing all ask which *picture* the pointer
-is on. The radar has no gump art. Its map is a texture of this client's own, so
-its `Drawn` would be an empty list — and an empty list is a window the pointer can
-never find, cannot drag and cannot close.
+Under both there is a backdrop of `radar::UNKNOWN`, because terrain arrives a
+chunk at a time and a window with no chunk yet would otherwise show the world
+through it. Where a chunk is missing but a coarser ancestor exists, the ancestor
+is drawn at its own LOD instead — see the plan's phase 2.4.
 
-Three ways out, and they are not equivalent:
+**The window it is drawn in.** `WindowSubject::Minimap` sits beside `Skills` and
+`Status` — the three whose *existence* is local UI state rather than something
+the shard opened. Opening it is `M`, which is provisional: the affordance is a
+product decision the plan holds open.
+
+**And the decision it needed, which is taken.** Every other window here is
+hit-tested against the `Vec<Picture>` its layout produced: `Drawn` holds gump
+art, and dragging, raising and closing all ask which *picture* the pointer is on.
+The radar has no gump art, so an empty list would be a window the pointer can
+never find. `Drawn::Minimap` carries **a rectangle that is not a picture** — the
+second of the three ways out below — and `panes::minimap::EXTENT` is the one
+place its size is decided, so the drag, the pointer and the terrain region cannot
+each invent their own.
 
 - **Give it a gump frame**, the way `status::window` opens with one
-  `Picture::plain(GumpArt::Gump(FRAME), at)`. Then the frame is the hit
-  rectangle and nothing else changes. It wants a real gump id out of a client
-  file, chosen the way `FRAME` was rather than guessed.
-- **Give `Drawn` a rectangle that is not a picture.** Honest about what the
-  window is, and it changes the shape of every hit test that currently assumes
-  art.
+  `Picture::plain(GumpArt::Gump(FRAME), at)`. Still open as *decoration* — it
+  wants a real gump id out of a client file, chosen the way `FRAME` was rather
+  than guessed — but it is no longer what holds the hit test up.
+- **Give `Drawn` a rectangle that is not a picture.** Taken. Honest about what
+  the window is, and the hit test asks the rectangle before it asks the art.
 - **Draw the map through the gump pass after all**, which is the decision
   `radar_pass` already refused, and for a reason that has not changed.
-
-A first attempt at the wiring was reverted rather than landed half-built: the
-enum variant and its five match arms are mechanical, and stopping at the one
-question they lead to is cheaper than answering it in passing.
 
 ### Where everybody is: the facet map
 
@@ -3870,22 +3882,32 @@ start.
 
 **How big this client's own windows draw is a third scale, and its own knob.**
 `desk::WindowScale` (`window_scale` in the file, the dev window's Windows tab) is
-an integer upscale on the window art's own pixels, applied on top of the two
-densities above — a bag, a doll, a shop, a sheet, the amount picker, all of them
-together. It exists because the reference client has no display scaling at all:
-its windows are sized in raw art pixels, so on a modern screen a container is a
-postage stamp however good the monitor is. Whole numbers only, for the reason
-`gump::Frame::scale` gives one rung up — gump art is five-bit pixel art sampled
-with `Nearest`, and half a pixel of magnification is a border two rows thick
-along one edge of a window and one along the other. One number for every window
-and not one per kind, because windows drop items into each other and an icon that
-changed size in the player's hand on the way between two of them would be the
-preview disagreeing with both. It reaches the surface through `gump::place` and
-the pointer through `windows::OwnWindow::local_cursor`, which are the same
-transform in the two directions — see `docs/window_components.md`'s window-local
-coordinates entry. The shard's hover tooltip and the HUD chat box are outside it:
-the first is drawn over the world as well as over a window, and the second has
-`desk::ChatScale`.
+an upscale on the window art's own pixels, applied on top of the two densities
+above — a bag, a doll, a shop, a sheet, the amount picker, all of them together.
+It exists because the reference client has no display scaling at all: its windows
+are sized in raw art pixels, so on a modern screen a container is a postage stamp
+however good the monitor is. One number for every window and not one per kind,
+because windows drop items into each other and an icon that changed size in the
+player's hand on the way between two of them would be the preview disagreeing
+with both. It reaches the surface through `gump::place` and the pointer through
+`windows::OwnWindow::local_cursor`, which are the same transform in the two
+directions — see `docs/window_components.md`'s window-local coordinates entry.
+The shard's hover tooltip and the HUD chat box are outside it: the first is drawn
+over the world as well as over a window, and the second has `desk::ChatScale`.
+
+**It is fractional, and that is a decision with a picture attached.** A whole
+number draws every art pixel as the same square block. A fraction cannot: this
+pass samples with `Nearest`, so 1.5 repeats every other row of texels and leaves
+a window's border two pixels thick along part of an edge and one along the rest,
+and a background's pieces meet with a seam that opens at some fractions and
+closes at others — `gump::Frame::scale`'s warning one rung up, arrived at
+deliberately rather than by accident. It is offered anyway because 1.5 is the
+size a great many screens actually want, and "this size or twice this size" is
+not a scale. Nothing snaps the result back onto whole pixels afterwards:
+rounding each *picture* onto the grid while its size stays fractional moves a
+window's own pieces relative to each other, which is a button drifting off its
+plate — worse than the seam it would tidy. The window's corner is whole, so the
+error stays inside one window instead of being reintroduced per picture.
 
 The scale is *egui's* zoom and not the monitor's `scale_factor`, which stays the
 platform's business — a file that pinned it would fight the compositor on the
@@ -3893,6 +3915,17 @@ next screen. Ctrl+`+` / Ctrl+`-` / Ctrl+`0` are egui's own shortcuts
 (`Options::zoom_with_keyboard`); the status strip shows the number because a
 client that reopened at yesterday's zoom and does not say so reads as one that is
 rendering at the wrong size.
+
+**A knob read from `App::desk` does nothing, and looks like a knob that is
+wired to nothing at all.** The `Desk` on `App` is the file *as it was loaded*;
+the one the dev window's widgets move is `Shell::desk`, and the two meet only at
+exit, where `event_loop.rs` reads the shell's copy back to save it. So a slider
+whose value is read from `self.desk` moves a number nobody draws from and takes
+effect on the next launch — which is what `WindowScale` did on the frame it was
+first written, and what `Shell::tuning`'s doc had already said about the
+lighting. Anything live is read through a getter on the shell
+(`Shell::tuning`, `Shell::chat`, `Shell::window_scale`), with the app's copy as
+the fallback for a run that has no shell at all.
 
 What was found on the way and left undone:
 

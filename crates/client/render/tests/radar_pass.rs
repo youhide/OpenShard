@@ -1,10 +1,10 @@
 //! The radar pass, against a real device.
 //!
-//! `radar.wgsl` and `radar_chunk.wgsl` are validated when their pipelines are
-//! created and at no other point: they are `include_str!`d, so a syntax error or
-//! a binding that does not match the layout compiles clean and fails at run
-//! time, on the first frame a player opens the window on. This is the test that
-//! moves that failure to CI.
+//! `radar_chunk.wgsl` and `radar_marker.wgsl` are validated when their
+//! pipelines are created and at no other point: they are `include_str!`d, so a
+//! syntax error or a binding that does not match the layout compiles clean and
+//! fails at run time, on the first frame a player opens the window on. Every
+//! test here builds its pass, which is what moves that failure to CI.
 //!
 //! Skipped where there is no GPU, like every other test in this crate that
 //! needs one.
@@ -13,204 +13,21 @@ use openshard_client_render::gump::Frame;
 use openshard_client_render::radar::{
     BASE_CHUNK_TILES, PLAYER_MARKER, RadarCache, RadarChunk, RadarChunkCoord, RadarRegion, UNKNOWN,
 };
-use openshard_client_render::radar_pass::{
-    Placement, RadarChunkRenderer, RadarMarker, RadarOverlayRenderer, RadarRenderer,
-};
+use openshard_client_render::radar_pass::{Placement, RadarChunkRenderer, RadarMarker, RadarOverlayRenderer};
 use openshard_protocol::world::Facet;
 use openshard_uofiles::color::Color16;
 
-/// A radar's own size, small enough that a readback is cheap and not a power of
-/// two, so a stride bug shows up rather than cancelling out.
-const SIDE: u32 = 24;
 /// What the surface is, and what the pass is built against.
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// A GPU to draw with, or `None` where there is none. `frame.rs`'s, without the
-/// G-buffer check: this pass draws one quad onto an ordinary colour target and
-/// asks for nothing above the defaults.
+/// G-buffer check: these passes draw quads onto an ordinary colour target and
+/// ask for nothing above the defaults.
 fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
-}
-
-/// **The pipeline builds, which is the whole of what the shader's syntax and its
-/// bindings are checked by.** A `RadarRenderer` that constructs has a validated
-/// `radar.wgsl` behind it.
-#[test]
-fn the_radar_pipeline_builds() {
-    let Some((device, queue)) = gpu() else {
-        eprintln!("no GPU: skipping");
-        return;
-    };
-    let radar = RadarRenderer::new(&device, &queue, FORMAT, SIDE, SIDE);
-    assert_eq!(radar.size(), (SIDE, SIDE));
-}
-
-/// An upload of the wrong length is refused rather than written.
-///
-/// It cannot be asserted from the outside — the refusal is a silent return by
-/// design, because the alternatives are a panic in a render path or a texture
-/// full of whatever followed the slice in memory. What this asserts is that it
-/// does not *panic*, which is the failure a length check written the other way
-/// round would produce.
-#[test]
-fn an_upload_of_the_wrong_length_is_ignored() {
-    let Some((device, queue)) = gpu() else {
-        eprintln!("no GPU: skipping");
-        return;
-    };
-    let radar = RadarRenderer::new(&device, &queue, FORMAT, SIDE, SIDE);
-
-    radar.upload(&queue, &[]);
-    radar.upload(&queue, &vec![Color16(0x7FFF); (SIDE * SIDE) as usize - 1]);
-    radar.upload(&queue, &vec![Color16(0x7FFF); (SIDE * SIDE) as usize + 1]);
-}
-
-/// **A drawn radar puts its own pixels on the target, and only where it was
-/// placed.** The one assertion that says the quad's arithmetic — gump pixels to
-/// clip space, and the `y` flip with it — is not upside down or off by a window.
-#[test]
-fn the_radar_draws_where_it_was_placed() {
-    let Some((device, queue)) = gpu() else {
-        eprintln!("no GPU: skipping");
-        return;
-    };
-
-    let radar = RadarRenderer::new(&device, &queue, FORMAT, SIDE, SIDE);
-    // Red everywhere, so any pixel the pass wrote is unmistakable against the
-    // black the target is cleared to.
-    radar.upload(&queue, &vec![Color16(0x7C00); (SIDE * SIDE) as usize]);
-
-    let (width, height) = (64u32, 64u32);
-    let target = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("radar test target"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-    // Clear first: the pass loads rather than clears, for the gump pass's
-    // reason, so something has to have painted the target before it runs.
-    encoder
-        .begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("clear"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            multiview_mask: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        })
-        .forget_lifetime();
-
-    // The top-left quarter, at scale 1 so a gump pixel is a real pixel and the
-    // expected rectangle can be written down.
-    radar.render(
-        &queue,
-        &mut encoder,
-        Frame {
-            target: &view,
-            width,
-            height,
-            scale: 1.0,
-        },
-        Placement {
-            origin: (0.0, 0.0),
-            extent: (32.0, 32.0),
-        },
-    );
-
-    let pixels = read_back(&device, &queue, encoder, &target, width, height);
-    let at = |x: u32, y: u32| {
-        let i = ((y * width + x) * 4) as usize;
-        (pixels[i], pixels[i + 1], pixels[i + 2])
-    };
-
-    assert_eq!(at(0, 0), (255, 0, 0), "the north-west corner is inside it");
-    assert_eq!(at(31, 31), (255, 0, 0), "and so is the far corner");
-    assert_eq!(at(32, 0), (0, 0, 0), "one column past it is not");
-    assert_eq!(
-        at(0, 32),
-        (0, 0, 0),
-        "and one row past it is not — which is the `y` flip, drawn the wrong way \
-         up this would be the corner that was red",
-    );
-}
-
-/// Submit `encoder` and read the target back as RGBA8 rows.
-fn read_back(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    mut encoder: wgpu::CommandEncoder,
-    target: &wgpu::Texture,
-    width: u32,
-    height: u32,
-) -> Vec<u8> {
-    // `copy_texture_to_buffer` wants 256-byte rows; 64 pixels is exactly one, so
-    // the fixture's width is chosen to make the padding arithmetic a no-op and
-    // the assertion above readable.
-    let stride = width * 4;
-    assert!(stride.is_multiple_of(256), "the fixture avoids row padding");
-
-    let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("radar readback"),
-        size: u64::from(stride * height),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    encoder.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo {
-            texture: target,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &readback,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(stride),
-                rows_per_image: Some(height),
-            },
-        },
-        wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-    queue.submit([encoder.finish()]);
-
-    let slice = readback.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |_| {});
-    device
-        .poll(wgpu::PollType::wait_indefinitely())
-        .expect("the readback maps");
-    let bytes = slice
-        .get_mapped_range()
-        .expect("the mapped range is there once the poll returned")
-        .to_vec();
-    readback.unmap();
-    bytes
 }
 
 /// **Two chunks in one region are two different pictures.** The regression this
@@ -536,4 +353,61 @@ fn cleared_target(
         })
         .forget_lifetime();
     (target, view)
+}
+
+/// Submit `encoder` and read the target back as RGBA8 rows.
+fn read_back(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    mut encoder: wgpu::CommandEncoder,
+    target: &wgpu::Texture,
+    width: u32,
+    height: u32,
+) -> Vec<u8> {
+    // `copy_texture_to_buffer` wants 256-byte rows; 64 pixels is exactly one, so
+    // the fixture's width is chosen to make the padding arithmetic a no-op and
+    // the assertion above readable.
+    let stride = width * 4;
+    assert!(stride.is_multiple_of(256), "the fixture avoids row padding");
+
+    let readback = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("radar readback"),
+        size: u64::from(stride * height),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &readback,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(stride),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit([encoder.finish()]);
+
+    let slice = readback.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("the readback maps");
+    let bytes = slice
+        .get_mapped_range()
+        .expect("the mapped range is there once the poll returned")
+        .to_vec();
+    readback.unmap();
+    bytes
 }

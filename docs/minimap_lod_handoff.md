@@ -1,53 +1,90 @@
 # Minimap LOD cache — handoff
 
-## Implemented groundwork
+Where `docs/minimap_lod_plan.md` stands. The plan is the model; this is the
+score.
 
-Phase 1 is implemented in `client/render/src/radar.rs`, with the first cache
-ownership step from Phase 2.
+## Built
 
-- `RadarChunkKey { facet, lod, chunk, revision }` is the complete identity of
-  an immutable terrain raster. Its constructor is crate-visible: only
-  `RadarCache` creates keys, so a window or player position cannot create a
-  competing terrain cache.
-- `RadarChunk` holds a complete fixed-size CPU product, and `RadarRegion` is a
-  world-space draw request with no player marker or upload reason.
-- `BASE_CHUNK_TILES` is 64 (eight `Map::BLOCK_SIZE` blocks). Base chunks are
-  always 64 by 64; east/south cells beyond the facet are `UNKNOWN`. The shared
-  `world_tile_to_base_chunk` conversion uses floor division/remainder, so tile
-  `(64, 0)` is chunk `(1, 0)`, local `(0, 0)`.
-- `build_base_chunk` uses the authoritative block-major `fill` walk. `bake`
-  remains the whole-facet convenience/reference builder.
-- LOD products are categorical reductions. `build_lod_parent` requires four
-  direct children from the same facet/revision and uses majority colour voting.
-  Ties select north-west, north-east, south-west, south-east order; `UNKNOWN`
-  is a normal candidate and colours are never RGB-averaged.
-- `RadarCache` owns current per-facet revisions and completed CPU chunks. A
-  revision change makes prior products unreachable through normal lookup, and a
-  worker result carrying an old revision is rejected at publication.
-- `App::radar_cache` owns this cache outside `Windows`/`Screen`; closing a
-  future minimap window cannot evict terrain products.
+**Phase 1 — immutable raster products.** `RadarChunkKey { facet, lod, chunk,
+revision }` is the complete identity of a terrain raster, constructible only by
+`RadarCache`. `BASE_CHUNK_TILES` is 64 (eight `Map::BLOCK_SIZE` blocks); base
+chunks are always complete, with cells beyond the facet `UNKNOWN`, which is what
+lets a parent be reduced from four children with no map-edge case.
+`build_base_chunk` uses the block-major `fill` walk; `reduce_lod_pixel` votes on
+categorical colours and never averages RGB.
+
+**Phase 2 — ownership, invalidation and bounded production.** `App::radar_cache`
+and `App::radar_queue` live with world content, not with a window, so closing the
+minimap discards nothing. `RadarWorkQueue` coalesces requests, hands out
+`builds_per_turn` keys and publishes only complete products; `abandon` returns a
+slot the producer could not build, which is what stops a lost dispatch from
+silently filling the bound.
+
+**Phase 2.4 — the fallback is live.** The draw path asks `select_ready`, which
+answers with the exact current product, else the nearest ready coarser ancestor,
+else that chunk's own newest complete picture. `build_ready_ancestors` is what
+makes an ancestor exist: the fourth child of a family reduces it into its parent
+and climbs to `radar::MAX_LOD`. Nothing schedules a derived level, and none is
+ever built from a family with a hole in it.
+
+**Phase 3 — GPU residency and the content pass.** `RadarChunkRenderer` keeps
+chunks in bounded texture-array pages, LRU-evicted, uploaded through an encoder
+copy so a page cannot be overwritten before the draw that reads it.
+`select_region_chunks` places each chunk by **its own** LOD, orders coarsest
+first so a built chunk paints over the stand-in covering it, and gives one
+product one draw however many requests fell back to it. Per-chunk data is an
+instance buffer, never the uniform block — see the commit that fixed it, and
+`docs/client.md`.
+
+**Phase 3.4 — overlays.** `RadarOverlayRenderer` draws the solid rectangles: the
+`UNKNOWN` backdrop under the terrain, so an unbuilt window is not a hole, and the
+player's cross over it. `radar::MARKER_ARMS` is the one shape the bitmap stamp
+and the overlay share.
+
+**Phase 4, in part.** `WindowSubject::Minimap`, `MinimapPane` and
+`Drawn::Minimap` are a first-class window: one authoritative rectangle
+(`panes::minimap::EXTENT`), dragged, raised and hit-tested by `Windows` like any
+other. `M` opens it.
+
+Retired on the way: the whole-bitmap `RadarRenderer` and `radar.wgsl`. It was
+phase 1's "replace the ambiguous whole-bitmap model", left standing as a stepping
+stone; once the chunk path ran end to end it had no caller but its own tests, and
+a second mutable radar texture nothing draws is a trap rather than a fallback.
 
 ## Verification
 
-The final local checks passed:
-
-- `cargo fmt --all`
-- `cargo test -p openshard-client-render radar --lib` — 18 passed
-- `cargo test -p openshard-client-app --lib` — 316 passed, 3 ignored
-- `git diff --check`
+`cargo test -p openshard-client-render` (604 lib + 4 GPU radar-pass tests),
+`cargo test -p openshard-client-app --lib` (350), `cargo clippy` on both crates,
+`cargo fmt`. The GPU tests need a device and skip without one; they cover chunk
+seams, the coarse stand-in under a built chunk, the marker's shape and place, and
+the backdrop's edge.
 
 ## Next work
 
-1. Phase 2.2: map/static mutations must mark their base chunk dirty and
-   recursively mark all LOD parents dirty.
-2. Phase 2.3: add a bounded, coalescing producer queue that publishes only
-   complete CPU chunks off the presentation path.
-3. Phase 2.4–2.5: implement ready fallback selection and cache/queue counters.
-4. Phase 3: introduce bounded GPU residency, chunk/UV selection with nearest
-   sampling and scissoring, then draw overlays after terrain.
+1. **Phase 2.2 has no caller.** `RadarCache::invalidate_tile` is written and
+   tested, and nothing in the client mutates map or statics yet, so no terrain
+   edit ever reaches it. It becomes real work when something can change the
+   ground — housing, or a shard-sent static.
+2. **Phase 2.5, counters.** `RadarCacheCounters` and `RadarWorkCounters` exist
+   and nobody reads them. They belong beside `CompositeTelemetry` in the HUD,
+   which is a UI addition and wants asking first.
+3. **Phase 4's decoration.** A gump frame and a close affordance; `M` is
+   provisional and named so in `event_loop.rs`.
+4. **Phase 5, measure and soak.** No radar numbers are in the frame report, so
+   "walking costs no raster work" is currently an argument rather than a
+   measurement.
+5. **`bake` and `mark` have no caller** but their own tests, the same shape the
+   retired `RadarRenderer` had. They are the CPU whole-facet path — worth keeping
+   only if something is going to want a whole-map image; otherwise they follow it
+   out.
+6. **Markers are only the player.** Party, waypoint and corpse are the same
+   overlay and the same cross; what is missing is the decision about which of
+   them belongs on a minimap, not the drawing.
 
-## Current limits
+## Known limits
 
-There is intentionally no producer queue, mutation hook, GPU atlas, minimap
-window or renderer integration yet. `RadarCache` is the revision-safe CPU
-owner those steps build on; it does not itself schedule work or render.
+Base chunks are the only level ever requested; derived levels appear only where a
+family completes, which walking over new ground does not do. The fallback
+therefore earns its keep on revisited ground and after an edit, not on a first
+visit — that is by design, since building a coarse picture of ground nobody has
+rastered would mean rastering it.

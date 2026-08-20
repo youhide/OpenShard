@@ -30,22 +30,16 @@ while that window's layer is recorded.
 - Every minimap surface is clipped to its window bounds and recorded at the
   point implied by `own_windows` painter order.
 
-## Current baseline — 2026-08-19
+## Where this stands
 
-`client/render/radar.rs` already has the authoritative terrain-colour rule:
-land, then the highest coloured static at or above the land. `fill` walks
-blocks efficiently, but `RadarRenderer` is still an isolated proof of concept:
-it owns one mutable bitmap and exposes whole-texture upload. It is not wired to
-`client/app`, so no player step currently invokes it.
-
-The first small preparatory change is in: `radar::bake` produces one complete
-facet snapshot with the same rule as `fill`. It is a testable primitive for a
-cache builder, not the final cache shape. `cargo test -p openshard-client-render
-radar --lib` passes after it.
+**Read `docs/minimap_lod_handoff.md` first.** It is the score to this plan's
+model: which phases are built, what was retired on the way, and what the next
+session picks up. This document is the shape the work has to keep, and it does
+not change as the work lands.
 
 ## Phase 1 — define immutable raster products
 
-1. Replace the ambiguous whole-bitmap `RadarRenderer` model with explicit
+1. Replace the ambiguous whole-bitmap radar model with explicit
    `RadarChunkKey { facet, lod, chunk, revision }`, `RadarChunk` and a
    `RadarRegion` draw request.
 2. Establish one fixed base chunk size, aligned to `Map::BLOCK_SIZE`; document
