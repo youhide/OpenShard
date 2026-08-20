@@ -153,6 +153,9 @@ pub struct GraphicsSettings {
     /// which is a bill worth a debugging picture and not worth a frame nobody is
     /// looking at.
     pub show_terrain: bool,
+    /// Whether the development overlay draws the R1 interior index. It does
+    /// not gate ordinary geometry until R2 explicitly makes it an input.
+    pub show_interiors: bool,
     /// Whether the HUD is drawing the lighting's occlusion grid as boxes — see
     /// `shell::draw_occluders` and `docs/lighting.md`, step 14.
     ///

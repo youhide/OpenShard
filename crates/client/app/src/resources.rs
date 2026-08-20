@@ -39,6 +39,10 @@ pub struct Resources {
     /// once, before the event loop starts, and only proposes a corridor; the
     /// live route still reads the map with the shard's clutter laid over it.
     pub coarse: Option<NavigationGraph>,
+    /// Static positive building space, baked from the facet's wall catalogue.
+    /// Unlike `coarse`, this is presentation topology: zero means the open
+    /// world and a non-zero label is the whole house in the first pass.
+    pub interiors: Option<openshard_client_render::interiors::BuildingMap>,
     pub art: Art,
     /// What was measured off that art off the clock, or `None` for a run with no
     /// table beside the install — see `run`, which says which it is and carries

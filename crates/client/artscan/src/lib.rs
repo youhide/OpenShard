@@ -47,6 +47,8 @@ use openshard_client_render::occlusion::Shape;
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
 
+pub mod interiors;
+
 /// The rows this repository ships: a table with no install behind it, holding
 /// only what somebody decided the detector gets wrong.
 ///

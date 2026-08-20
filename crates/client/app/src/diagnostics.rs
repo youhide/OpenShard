@@ -115,6 +115,47 @@ pub struct TerrainOverlay {
     pub blocked: Vec<openshard_protocol::world::Point>,
 }
 
+/// One cell in the interior-index diagnostic overlay.
+///
+/// This is a picture of R1's map fact only. Ordinary geometry does not consult
+/// it yet: the index must be inspectable before R2 can let it hide a pixel.
+#[derive(Clone, Copy)]
+pub struct InteriorCell {
+    pub at: openshard_protocol::world::Point,
+    /// The structural-floor ordinal inside its indexed building.
+    pub floor: u32,
+    /// A deterministic positive-space label from the facet bake.  In the first
+    /// pass it names a whole house; the room pass will refine it without making
+    /// the value depend on this camera frame.
+    pub room: u32,
+    /// Reserved for the future door-reachability pass. Whole-house labels are
+    /// all shown in the current diagnostic.
+    pub shown: bool,
+}
+
+/// One closed-door portal in the interior-index diagnostic overlay.
+#[derive(Clone, Copy)]
+pub struct InteriorDoor {
+    pub at: openshard_protocol::world::Point,
+    /// Whether both rooms at the portal are visible in this frame.
+    pub shown: bool,
+}
+
+/// One height-changing transition in the building graph.
+#[derive(Clone, Copy)]
+pub struct InteriorStair {
+    pub from: openshard_protocol::world::Point,
+    pub to: openshard_protocol::world::Point,
+}
+
+/// The visible map region's current interior-index reading.
+pub struct InteriorOverlay {
+    pub cells: Vec<InteriorCell>,
+    pub doors: Vec<InteriorDoor>,
+    pub stairs: Vec<InteriorStair>,
+    pub buildings: usize,
+}
+
 /// One occlusion surface in the painter order the wireframe needs.
 #[derive(Clone, Copy)]
 pub struct OccluderSurface {
@@ -208,6 +249,8 @@ pub struct Hud {
     pub body_overlap_transparency_disabled: bool,
     pub show_terrain: bool,
     pub terrain: Option<Arc<TerrainOverlay>>,
+    pub show_interiors: bool,
+    pub interiors: Option<Arc<InteriorOverlay>>,
     pub route: Option<Arc<Route>>,
     pub show_occluders: bool,
     pub show_solids: bool,

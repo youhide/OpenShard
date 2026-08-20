@@ -38,6 +38,7 @@ pub mod radarcol;
 pub mod skillgrp;
 pub mod skills;
 pub mod sound;
+pub mod surfaces;
 pub mod texmaps;
 pub mod tiledata;
 pub mod ttf_font;

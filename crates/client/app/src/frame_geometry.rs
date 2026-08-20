@@ -110,9 +110,8 @@ pub(crate) struct FrameGeometry {
     pub(crate) select_quads: Vec<SpriteQuad>,
     /// The silhouette the hover ring is grown from.
     pub(crate) outline_quads: Vec<SpriteQuad>,
-    /// The same, for the server-confirmed combat target or what a click is
-    /// holding when no target is active.
-    pub(crate) held_item_outline: Vec<SpriteQuad>,
+    /// The persistent diagnostic selection's item silhouette.
+    pub(crate) selected_item_outline: Vec<SpriteQuad>,
     /// The creature silhouette the hover ring is grown from.
     pub(crate) mobile_outline: Vec<SpriteQuad>,
     /// The same, for what a click is holding.
@@ -200,7 +199,7 @@ pub(crate) fn assemble_geometry(
     tuning: &light::Tuning,
     lit_item: Option<openshard_client_render::items::ItemIndex>,
     lit_mobile: Option<openshard_client_render::mobiles::MobileIndex>,
-    held_item: Option<openshard_client_render::items::ItemIndex>,
+    selected_item: Option<openshard_client_render::items::ItemIndex>,
     held_mobile: Option<openshard_client_render::mobiles::MobileIndex>,
     drawn: &[Mobile],
 ) -> FrameGeometry {
@@ -465,18 +464,18 @@ pub(crate) fn assemble_geometry(
         ringed,
     );
     // The held item's own silhouette, through the same function and for
-    // the same reason — a second call rather than folding `held_item` into
+    // the same reason — a second call rather than folding `selected_item` into
     // `ringed` above, because the two are drawn with different [`Ring`]s
     // into different masks: this is what a click named, not what the
     // cursor is over.
-    let held_item_outline = items::outlined(
+    let selected_item_outline = items::outlined(
         &world.presentation.items,
         &camera,
         &resources.tiledata,
         &world.presentation.tile_animations,
         &window.atlases.statics,
         cutaway,
-        held_item,
+        selected_item,
     );
     // The same two effects for a creature, off the same style switch and
     // the same one-pick-a-frame rule: `lit_mobile` and `lit_item` are never
@@ -492,7 +491,7 @@ pub(crate) fn assemble_geometry(
         &resources.equip_conv,
         mobile_ringed,
     );
-    // The held mobile's own silhouette — see `held_item_outline` above for
+    // The held mobile's own silhouette — see `selected_item_outline` above for
     // why this is a second call and not `mobile_ringed` itself.
     let held_mobile_outline = mobiles::outlined(
         drawn,
@@ -523,7 +522,7 @@ pub(crate) fn assemble_geometry(
         mesh,
         select_quads,
         outline_quads,
-        held_item_outline,
+        selected_item_outline,
         mobile_outline,
         held_mobile_outline,
         mobile_quads,
@@ -558,9 +557,9 @@ pub(crate) struct FrameFacts {
     /// The server-confirmed combat target, or what a click is holding when no
     /// target is active, turned back into an index into `drawn_mobiles`.
     pub(crate) held_mobile: Option<openshard_client_render::mobiles::MobileIndex>,
-    /// What a click is holding, turned back into an index into
+    /// The diagnostic selection, turned back into an index into
     /// `self.world.presentation.item_serials`.
-    pub(crate) held_item: Option<openshard_client_render::items::ItemIndex>,
+    pub(crate) selected_item: Option<openshard_client_render::items::ItemIndex>,
 }
 
 #[cfg(test)]

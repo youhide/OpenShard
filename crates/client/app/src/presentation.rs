@@ -1632,7 +1632,7 @@ impl App {
                 })
             });
         let held_mobile = targeted_mobile.or(selected_mobile);
-        let held_item = self
+        let selected_item = self
             .picking
             .selected
             .and_then(SelectedIdentity::as_item)
@@ -1658,7 +1658,7 @@ impl App {
             on_mobile,
             on_item,
             held_mobile,
-            held_item,
+            selected_item,
         }
     }
 
@@ -1678,15 +1678,15 @@ impl App {
     /// frame. The facts remain otherwise immutable: this is the only bridge
     /// from the current picture to next-frame click handling.
     fn publish_frame_picks(&mut self, facts: &FrameFacts) {
-        self.picking.on_static = facts.pick.static_;
-        self.picking.on_mobile = facts.on_mobile.and_then(|index| {
+        self.picking.hover.static_ = facts.pick.static_;
+        self.picking.hover.mobile = facts.on_mobile.and_then(|index| {
             facts
                 .drawn_mobiles
                 .as_ref()
                 .and_then(|drawn| drawn.get(index.position()))
                 .map(|(who, _)| *who)
         });
-        self.picking.on_item = facts
+        self.picking.hover.item = facts
             .on_item
             .map(|index| self.world.presentation.item_serials[index.position()]);
     }
@@ -1726,7 +1726,7 @@ impl App {
             on_mobile: _,
             on_item: _,
             held_mobile,
-            held_item,
+            selected_item,
         } = facts;
 
         // # Step three: present. Nothing below this line writes the world.
@@ -1938,20 +1938,21 @@ impl App {
             // Match the region the current minimap draw will ask for.  A
             // physical-pixel radar may be larger than its logical frame on a
             // HiDPI monitor; preparing only the old fixed 200×200 region is
-            // what left a black moat around the ready centre.
-            let ((logical_width, logical_height), zoom) =
-                minimap_extent.unwrap_or((crate::panes::minimap::LARGE_EXTENT, 1.0));
-            let native_extent = (
-                (logical_width as f32 * window_scale.factor() * gump_scale * std::f32::consts::SQRT_2 / zoom)
-                    .round()
-                    .max(1.0) as i32,
-                (logical_height as f32 * window_scale.factor() * gump_scale * std::f32::consts::SQRT_2 / zoom)
-                    .round()
-                    .max(1.0) as i32,
+            // what left a black moat around the ready centre. `radar_native_extent`
+            // is the one source of truth for this arithmetic — the draw path
+            // reads the same function rather than carrying its own copy.
+            let (logical_extent, zoom) = minimap_extent.unwrap_or((crate::panes::minimap::LARGE_EXTENT, 1.0));
+            let native_extent = crate::panes::minimap::radar_native_extent(
+                logical_extent,
+                window_scale.factor(),
+                gump_scale,
+                zoom,
             );
             let region = radar_region_for(player, native_extent);
-            let (player_chunk, _) =
-                radar::world_tile_to_base_chunk((u32::from(player.x), u32::from(player.y)));
+            let (player_chunk, _) = radar::world_tile_to_base_chunk(radar::RadarTile::new(
+                u32::from(player.x),
+                u32::from(player.y),
+            ));
             // Nearest-first, not `region_base_chunks`' raster order: a region
             // wider than `RadarWorkQueue::request`'s `max_queued` bound fills
             // that bound from wherever enumeration starts, and raster order
@@ -1963,7 +1964,7 @@ impl App {
             // them again below, but not before they had spent a slot a chunk
             // that still needs building could have used instead.
             for coord in radar::region_base_chunks_near(region, player_chunk) {
-                let key = self.radar_cache.key(region.facet, 0, coord);
+                let key = self.radar_cache.key(region.facet(), radar::RadarLod::BASE, coord);
                 if self.radar_cache.get(key).is_none() {
                     self.radar_queue.request(key);
                 }
@@ -1973,7 +1974,9 @@ impl App {
                 // A derived level is never dispatched: it is reduced from its
                 // four children the moment the last of them lands, below. What
                 // a producer builds is the one thing only the map can answer.
-                let built = (key.lod() == 0)
+                let built = key
+                    .lod()
+                    .is_base()
                     .then(|| build_base_chunk(&self.resources.map, colors, key))
                     .flatten();
                 let Some(chunk) = built else {
@@ -2200,7 +2203,7 @@ impl App {
             &tuning,
             pick.item,
             pick.mobile,
-            held_item,
+            selected_item,
             held_mobile,
             &drawn,
         );

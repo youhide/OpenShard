@@ -87,6 +87,9 @@ pub struct Request {
     /// walkability lookup per visible tile and a fresh plan per frame, and that
     /// is a bill the client should only pay while somebody is looking at it.
     pub show_terrain: Option<bool>,
+    /// Switch the R1 interior-index overlay on or off. It is deliberately a
+    /// diagnostic request: no normal world geometry consults this setting.
+    pub show_interiors: Option<bool>,
     /// Which of the world's producers to draw from now on, on the frame a box
     /// was ticked — see [`openshard_client_render::frame::Draw`].
     ///
@@ -1224,6 +1227,39 @@ fn world_panel(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut R
     );
 
     ui.separator();
+    let mut show_interiors = hud.show_interiors;
+    if ui
+        .checkbox(
+            &mut show_interiors,
+            "interiors — baked wall topology; whole buildings",
+        )
+        .changed()
+    {
+        request.show_interiors = Some(show_interiors);
+    }
+    if let Some(interiors) = &hud.interiors {
+        ui.label(format!(
+            "{} buildings in view; whole-house pass; {} doors",
+            interiors.buildings,
+            interiors.doors.len(),
+        ));
+        ui.label(
+            egui::RichText::new(format!(
+                "facet bake — {} coloured tiles in this view; no camera-local topology",
+                interiors.cells.len(),
+            ))
+            .small()
+            .weak(),
+        );
+    } else {
+        ui.label(
+            egui::RichText::new("off — ordinary rendering is unchanged")
+                .small()
+                .weak(),
+        );
+    }
+
+    ui.separator();
     let mobiles = view.map_or(0, |view| view.mobiles.len());
     let items = view.map_or(0, |view| view.items.len());
     ui.label(format!("{mobiles} mobiles, {items} ground items"));
@@ -1620,6 +1656,9 @@ fn draw_world_overlays(context: &egui::Context, hud: &Hud, camera: Camera, viewp
     // three markers below are read against it.
     if let Some(terrain) = &hud.terrain {
         draw_terrain(&world, &camera, terrain, viewport.min);
+    }
+    if let Some(interiors) = hud.interiors.as_ref().filter(|_| hud.show_interiors) {
+        draw_interiors(&world, &camera, interiors, viewport.min);
     }
     // Then what stands up out of it. Over the wash and under the markers: the
     // boxes are read against the ground the wash colours, and a highlight the
@@ -2585,6 +2624,20 @@ fn washed(colour: egui::Color32, alpha: u8) -> egui::Color32 {
     egui::Color32::from_rgba_unmultiplied(colour.r(), colour.g(), colour.b(), alpha)
 }
 
+/// A stable, high-contrast colour for a stitched-room ordinal.
+///
+/// Unlike a short palette this keeps neighbouring rooms distinguishable even
+/// in a large inn or dungeon level.  The ordinal is diagnostic-only, so it is
+/// deliberately turned into a colour here rather than becoming presentation
+/// data in the map index.
+fn room_colour(room: u32) -> egui::Color32 {
+    let [red, green, blue, _] = room
+        .wrapping_mul(0x9E37_79B1)
+        .wrapping_add(0x7F4A_7C15)
+        .to_le_bytes();
+    egui::Color32::from_rgb(88 + red / 2, 88 + green / 2, 88 + blue / 2)
+}
+
 /// The glow over one tile, drawn as the space the tile actually occupies: the
 /// surface a body would stand on, the column from the world's datum up to
 /// whatever roofs the tile over, and every height in between a body could stand
@@ -2751,6 +2804,68 @@ fn draw_terrain(
             }
             painter.add(egui::Shape::convex_polygon(corners, fill, egui::Stroke::NONE));
         }
+    }
+}
+
+/// R1's map index, projected over the same ground the ordinary renderer is
+/// drawing. Every indexed room is a contiguous coloured tile area; a room the
+/// reachability walk did not show is deliberately black.  Door portals are
+/// circles and height-changing walk edges (stairs, ramps or drops) are cyan
+/// arrows.  This is an inspection picture only — see `InteriorOverlay`.
+fn draw_interiors(
+    painter: &egui::Painter,
+    camera: &Camera,
+    interiors: &crate::diagnostics::InteriorOverlay,
+    viewport_origin: egui::Pos2,
+) {
+    let clip = painter.clip_rect();
+    for cell in &interiors.cells {
+        let corners = tile_corners(painter, camera, cell.at, viewport_origin);
+        let bounds = corners.iter().fold(egui::Rect::NOTHING, |rect, point| {
+            rect.union(egui::Rect::from_pos(*point))
+        });
+        if !clip.intersects(bounds) {
+            continue;
+        }
+        let colour = room_colour(cell.room);
+        let (fill, outline) = match cell.shown {
+            // The room colour identifies the connected area.  Varying its
+            // strength very slightly by floor preserves the distinction where
+            // two floors project over the same tile without turning the view
+            // into a per-tile rainbow.
+            true => (
+                washed(colour, 72 + (cell.floor % 3) as u8 * 12),
+                washed(colour, 180),
+            ),
+            false => (
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 220),
+                egui::Color32::from_rgba_unmultiplied(80, 80, 80, 230),
+            ),
+        };
+        painter.add(egui::Shape::convex_polygon(
+            corners,
+            fill,
+            egui::Stroke::new(0.8, outline),
+        ));
+    }
+    for stair in &interiors.stairs {
+        let from = tile_centre(painter, camera, stair.from, viewport_origin);
+        let to = tile_centre(painter, camera, stair.to, viewport_origin);
+        painter.line_segment(
+            [from, to],
+            egui::Stroke::new(2.5, egui::Color32::from_rgb(55, 245, 245)),
+        );
+        painter.circle_filled(to, 3.5, egui::Color32::from_rgb(55, 245, 245));
+    }
+    for door in &interiors.doors {
+        let centre = tile_centre(painter, camera, door.at, viewport_origin);
+        let colour = if door.shown {
+            egui::Color32::from_rgb(95, 255, 125)
+        } else {
+            egui::Color32::from_rgb(255, 80, 80)
+        };
+        painter.circle_filled(centre, 5.0, washed(colour, 225));
+        painter.circle_stroke(centre, 5.0, egui::Stroke::new(1.2, egui::Color32::WHITE));
     }
 }
 

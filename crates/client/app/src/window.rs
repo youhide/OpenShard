@@ -29,7 +29,9 @@ use openshard_client_render::hue::HueRamp;
 use openshard_client_render::items::{self, GroundItem};
 use openshard_client_render::mobiles::{self, Mobile};
 use openshard_client_render::outline::{self, Outline};
-use openshard_client_render::radar_pass::{RadarChunkRenderer, RadarOverlayRenderer};
+use openshard_client_render::radar_pass::{
+    RADAR_CHUNK_CACHE_BUDGET, RadarChunkRenderer, RadarOverlayRenderer, radar_chunk_array_layers,
+};
 use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, SpriteRenderer};
 use openshard_client_render::select::Select;
 use openshard_client_render::solids::SolidsRenderer;
@@ -986,9 +988,18 @@ impl App {
             true => profile::Gpu::REQUIRED,
             false => wgpu::Features::empty(),
         };
+        // The default WebGPU request exposes only 256 texture-array layers,
+        // even where the adapter supports many more.  A fully zoomed-out,
+        // rotated minimap needs 729 64×64 radar pages; leaving that default in
+        // place made the renderer deliberately drop its outer tiles. The radar
+        // pass owns the matching cache budget and layer count; `min` keeps the
+        // request within each adapter's limit.
+        let mut required_limits = openshard_client_render::gbuffer::required_limits();
+        required_limits.max_texture_array_layers =
+            radar_chunk_array_layers(adapter.limits().max_texture_array_layers);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_features: timers,
-            required_limits: openshard_client_render::gbuffer::required_limits(),
+            required_limits,
             ..Default::default()
         }))
         .map_err(|error| StartupError::NoDevice(error.to_string()))?;
@@ -1191,11 +1202,10 @@ impl App {
             self.resources.font_atlas.pixels(),
             &self.resources.hue_ramp,
         );
-        // A generous bound rather than a measured one — `docs/minimap_lod_plan.md`
-        // leaves the exact byte budget to a later benchmark. Sixteen mebibytes
-        // is four thousand ninety-six chunks at sixteen kibibytes each, far past
-        // what one 160-tile-square window ever has resident at once.
-        let radar_chunks = RadarChunkRenderer::new(&device, format, 16 * 1024 * 1024);
+        // One owner names both this byte budget and the texture-array request
+        // above. Keeping them paired prevents an otherwise invisible 256-page
+        // device default from truncating a larger cache.
+        let radar_chunks = RadarChunkRenderer::new(&device, format, RADAR_CHUNK_CACHE_BUDGET);
         let radar_overlay = RadarOverlayRenderer::new(&device, format);
         // The HUD, with the surface's own format: egui picks its fragment entry
         // point from whether that format is sRGB, and this one deliberately is

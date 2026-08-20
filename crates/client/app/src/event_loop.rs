@@ -578,9 +578,9 @@ impl ApplicationHandler<()> for App {
                     // do; a mobile or an item stands exactly where it says it
                     // does, so no such correction applies to either.
                     self.picking.selected = match (
-                        self.picking.on_mobile,
-                        self.picking.on_item,
-                        self.picking.on_static,
+                        self.picking.hover.mobile,
+                        self.picking.hover.item,
+                        self.picking.hover.static_,
                     ) {
                         (Some(who), _, _) => Some(SelectedIdentity::Mobile(who)),
                         (None, Some(serial), _) => Some(SelectedIdentity::Item(serial)),

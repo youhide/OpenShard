@@ -58,6 +58,7 @@ pub mod ground;
 pub mod gump;
 pub mod hue;
 pub mod impostor;
+pub mod interiors;
 pub mod items;
 pub mod light;
 pub mod lod;

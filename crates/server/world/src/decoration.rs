@@ -63,7 +63,11 @@ mod tests {
         let sets = shipped();
         assert_eq!(sets.len(), 1, "one facet is decorated");
         let set = sets[0];
-        assert!(set.statics.len() > 10_000, "{} statics", set.statics.len());
+        // 18,832 flattened rows, with 140 multi-tile addon roots replaced by
+        // their 391 component tiles.  This is the broad guard beside the oven
+        // witness below: a future import cannot quietly collapse all addons
+        // back to their root rows.
+        assert_eq!(set.statics.len(), 19_083, "{} statics", set.statics.len());
         assert!(!set.doors.is_empty() && !set.containers.is_empty());
         assert!(
             !set.door_regions.is_empty(),
@@ -81,6 +85,29 @@ mod tests {
                 door.closed.0 + 1,
                 "the door at {} does not open into the graphic beside it",
                 door.position
+            );
+        }
+    }
+
+    #[test]
+    fn east_stone_ovens_keep_both_addon_components() {
+        // `StoneOvenEastAddon` is not a single static: ServUO places its root
+        // `0x092C` plus `0x092B` immediately south.  The decoration converter
+        // originally retained the graphic on the .cfg type line but not this
+        // second component, leaving every east-facing oven as a one-tile prop.
+        // `deco_addons.json` now carries that component layout; keep this
+        // concrete original report as the regression witness.
+        let statics = shipped()[0].statics;
+        let roots: Vec<_> = statics
+            .iter()
+            .copied()
+            .filter(|&(graphic, _, _)| graphic == Graphic(0x092C))
+            .collect();
+        assert_eq!(roots.len(), 19, "unexpected east stone-oven population");
+        for (_, _, at) in roots {
+            assert!(
+                statics.contains(&(Graphic(0x092B), Hue(0), Point::new(at.x, at.y + 1, at.z))),
+                "the east stone oven rooted at {at} lost its south component"
             );
         }
     }

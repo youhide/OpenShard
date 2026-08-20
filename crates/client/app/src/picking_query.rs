@@ -29,8 +29,9 @@ use std::time::{Duration, Instant};
 use crate::app::App;
 use crate::crowd::Who;
 use crate::diagnostics::{
-    CompositeTelemetry, HealthBar, HealthPoints, Height, Hud, OccluderSurface, Pick, PickedItem,
-    PickedMobile, PickedTile, PriorityZ, Route, Selection, TerrainOverlay, TileDepth,
+    CompositeTelemetry, HealthBar, HealthPoints, Height, Hud, InteriorCell, InteriorDoor, InteriorOverlay,
+    OccluderSurface, Pick, PickedItem, PickedMobile, PickedTile, PriorityZ, Route, Selection, TerrainOverlay,
+    TileDepth,
 };
 use crate::graphics::HighlightTarget;
 use crate::picking::SelectedIdentity;
@@ -468,6 +469,76 @@ impl App {
         overlay
     }
 
+    /// The visible slice of the facet-wide interior artifact.
+    ///
+    /// The camera only selects which already-baked labels to draw.  It never
+    /// participates in joining them, so zooming or panning cannot recolour a
+    /// house or make a wall seam appear and disappear.
+    fn interiors_shown(&mut self, camera: Camera) -> Arc<InteriorOverlay> {
+        let Some(graph) = self.resources.interiors.as_ref() else {
+            return Arc::new(InteriorOverlay {
+                cells: Vec::new(),
+                doors: Vec::new(),
+                stairs: Vec::new(),
+                buildings: 0,
+            });
+        };
+        let Some((xs, ys)) = camera
+            .visible_tiles()
+            .clamp_to(self.resources.map.width(), self.resources.map.height())
+        else {
+            return Arc::new(InteriorOverlay {
+                cells: Vec::new(),
+                doors: Vec::new(),
+                stairs: Vec::new(),
+                buildings: 0,
+            });
+        };
+        let mut cells = Vec::new();
+        let mut visible_buildings = std::collections::BTreeSet::new();
+        for y in *ys.start()..=*ys.end() {
+            for x in *xs.start()..=*xs.end() {
+                let Some(building) = graph.building_at(x, y) else {
+                    continue;
+                };
+                visible_buildings.insert(building);
+                cells.push(InteriorCell {
+                    at: Point::new(x, y, self.resources.map.land(x, y).map_or(0, |land| land.z)),
+                    // This first artifact identifies a whole house.  The
+                    // storey/room graph follows on top of these ids.
+                    floor: 0,
+                    room: building,
+                    shown: true,
+                });
+            }
+        }
+        let doors = (*xs.start()..=*xs.end())
+            .flat_map(|x| (*ys.start()..=*ys.end()).map(move |y| (x, y)))
+            .filter_map(|(x, y)| {
+                self.resources
+                    .map
+                    .statics_at(x, y)
+                    .find(|item| {
+                        self.resources
+                            .tiledata
+                            .static_tile(item.tile.0)
+                            .flags
+                            .has(openshard_uofiles::tiledata::TileFlags::DOOR)
+                    })
+                    .map(|item| InteriorDoor {
+                        at: Point::new(x, y, item.z),
+                        shown: true,
+                    })
+            })
+            .collect();
+        Arc::new(InteriorOverlay {
+            cells,
+            doors,
+            stairs: Vec::new(),
+            buildings: visible_buildings.len(),
+        })
+    }
+
     /// The way to wherever the body was last told to go, as the two-coloured
     /// line the player is owed for a Ctrl-drag — or, with no destination and the
     /// terrain overlay switched on, the way that *would* be walked to the tile
@@ -681,6 +752,9 @@ impl App {
         if let Some(show) = request.show_terrain {
             self.graphics.show_terrain = show;
         }
+        if let Some(show) = request.show_interiors {
+            self.graphics.show_interiors = show;
+        }
         if let Some(show) = request.show_occluders {
             self.graphics.show_occluders = show;
         }
@@ -776,10 +850,10 @@ impl App {
         // `Who` is `Option<Serial>` and its `None` is the player's own body,
         // which has a serial like anything else and a tooltip like anything
         // else — hovering your own character is the ordinary way to read it.
-        if let Some(who) = self.picking.on_mobile {
+        if let Some(who) = self.picking.hover.mobile {
             return Some(who.unwrap_or(view.player.serial));
         }
-        self.picking.on_item
+        self.picking.hover.item
     }
 
     /// The tooltip to draw at the cursor this frame, and the request that fills
@@ -853,6 +927,8 @@ impl App {
             .then(|| self.occluders_shown(camera, cutaway));
         let occluders_cost = occluders_started.elapsed();
 
+        let interiors = self.graphics.show_interiors.then(|| self.interiors_shown(camera));
+
         let picking_started = Instant::now();
         let hud = Hud {
             locked: self.control.follow() == Follow::Body,
@@ -887,6 +963,8 @@ impl App {
             highlight: self.graphics.highlight,
             highlight_style: self.graphics.highlight_style,
             terrain,
+            show_interiors: self.graphics.show_interiors,
+            interiors,
             route,
             show_occluders: self.graphics.show_occluders,
             show_solids: self.graphics.show_solids,

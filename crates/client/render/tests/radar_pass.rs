@@ -11,7 +11,8 @@
 
 use openshard_client_render::gump::Frame;
 use openshard_client_render::radar::{
-    BASE_CHUNK_TILES, PLAYER_MARKER, RadarCache, RadarChunk, RadarChunkCoord, RadarRegion, UNKNOWN,
+    BASE_CHUNK_TILES, PLAYER_MARKER, RadarCache, RadarChunk, RadarChunkCoord, RadarExtent, RadarRegion,
+    RadarTile, UNKNOWN,
 };
 use openshard_client_render::radar_pass::{Placement, RadarChunkRenderer, RadarMarker, RadarOverlayRenderer};
 use openshard_protocol::world::Facet;
@@ -19,6 +20,14 @@ use openshard_uofiles::color::Color16;
 
 /// What the surface is, and what the pass is built against.
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+fn region(facet: Facet, origin: (u32, u32), extent: (u16, u16)) -> RadarRegion {
+    RadarRegion::new(
+        facet,
+        RadarTile::from(origin),
+        RadarExtent::new(extent.0, extent.1).expect("a non-empty GPU test region"),
+    )
+}
 
 /// A GPU to draw with, or `None` where there is none. `frame.rs`'s, without the
 /// G-buffer check: these passes draw quads onto an ordinary colour target and
@@ -74,11 +83,12 @@ fn adjacent_chunks_each_draw_their_own_pixels() {
             height,
             scale: 1.0,
         },
-        RadarRegion {
-            facet,
-            lod: 0,
-            origin: (0, 0),
-            extent: (BASE_CHUNK_TILES * 2, BASE_CHUNK_TILES),
+        region(facet, (0, 0), (BASE_CHUNK_TILES * 2, BASE_CHUNK_TILES)),
+        Placement {
+            origin: (0.0, 0.0),
+            extent: (width as f32, height as f32),
+            circle: false,
+            rotation: 0.0,
         },
         Placement {
             origin: (0.0, 0.0),
@@ -139,12 +149,7 @@ fn a_marker_lands_on_its_tile_over_the_terrain() {
         height: side,
         scale: 1.0,
     };
-    let region = RadarRegion {
-        facet,
-        lod: 0,
-        origin: (0, 0),
-        extent: (BASE_CHUNK_TILES, BASE_CHUNK_TILES),
-    };
+    let region = region(facet, (0, 0), (BASE_CHUNK_TILES, BASE_CHUNK_TILES));
     let at = Placement {
         origin: (0.0, 0.0),
         extent: (side as f32, side as f32),
@@ -153,7 +158,7 @@ fn a_marker_lands_on_its_tile_over_the_terrain() {
     };
 
     let mut chunks = RadarChunkRenderer::new(&device, FORMAT, 16 * 1024 * 1024);
-    chunks.render_region(&device, &queue, &mut encoder, frame, region, at, [&ground]);
+    chunks.render_region(&device, &queue, &mut encoder, frame, region, at, at, [&ground]);
     let overlay = RadarOverlayRenderer::new(&device, FORMAT);
     overlay.render_markers(
         &device,
@@ -162,8 +167,9 @@ fn a_marker_lands_on_its_tile_over_the_terrain() {
         frame,
         region,
         at,
+        at,
         &[RadarMarker {
-            tile: (10, 20),
+            tile: RadarTile::new(10, 20),
             color: PLAYER_MARKER,
         }],
     );
@@ -284,11 +290,12 @@ fn a_coarse_ancestor_draws_under_the_one_chunk_that_is_ready() {
             height: side,
             scale: 1.0,
         },
-        RadarRegion {
-            facet,
-            lod: 0,
-            origin: (0, 0),
-            extent: (BASE_CHUNK_TILES * 2, BASE_CHUNK_TILES * 2),
+        region(facet, (0, 0), (BASE_CHUNK_TILES * 2, BASE_CHUNK_TILES * 2)),
+        Placement {
+            origin: (0.0, 0.0),
+            extent: (side as f32, side as f32),
+            circle: false,
+            rotation: 0.0,
         },
         Placement {
             origin: (0.0, 0.0),

@@ -1,12 +1,8 @@
-//! What is under the cursor, and what a click named: [`Picking`].
+//! The live cursor answer and a persistent diagnostic selection: [`Picking`].
 //!
-//! Every field here is filled by the same one chain — creatures first, then
-//! the shard's own items, then the map's own furniture, see `App::draw`'s
-//! `on_mobile`/`on_item`/`on_static` walk — or by the click that reads it
-//! back a frame later. Pulled out of [`crate::App`] for the same reason
-//! [`crate::world::WorldState`] was: these four fields are written together,
-//! by one pass, and read together by [`crate::App::resolve_selection`] and
-//! the held-selection ring.
+//! [`Hover`] names only the object under the cursor in the last completed
+//! frame. [`SelectedIdentity`] is a left click's independent, durable answer
+//! for the selection panel. Neither is a fallback for the other.
 
 use openshard_client_render::statics::PickedStatic;
 use openshard_protocol::serial::Serial;
@@ -64,12 +60,15 @@ impl SelectedIdentity {
     }
 }
 
-/// What the cursor is on, and what the last click named — see the module
-/// docs.
+/// What the cursor was on in the last completed frame.
+///
+/// A click happens between frames, so it must read this already-drawn picture
+/// rather than ask a camera which may have moved since. Each answer is an
+/// identity rather than a collector index and therefore survives the next
+/// frame's rebuilt draw lists.
 #[derive(Default)]
-pub struct Picking {
-    /// What the last drawn frame found the cursor on, when it was the map's
-    /// own furniture and nothing nearer.
+pub struct Hover {
+    /// Map furniture under the cursor, when no closer dynamic object won.
     ///
     /// A frame behind, and that is what makes it right rather than what it
     /// costs: a click arrives *between* frames, so the picture it is a click
@@ -81,14 +80,18 @@ pub struct Picking {
     /// cursor is what the click would take, so the diamond on the ground
     /// behind it must not be drawn as well. See
     /// [`diagnostics::Hud::hover_lit`](crate::diagnostics::Hud::hover_lit).
-    pub on_static: Option<PickedStatic>,
-    /// The same, one rung up the pick order: a creature under the cursor, by
-    /// identity rather than by the frame's own transient index — [`Who`]
-    /// survives to the click, an index into a `Vec` rebuilt every frame does
-    /// not.
-    pub on_mobile: Option<Who>,
-    /// The same, for the shard's own items lying on the ground.
-    pub on_item: Option<Serial>,
+    pub static_: Option<PickedStatic>,
+    /// A mobile under the cursor; `None` inside `Some` is the local player.
+    pub mobile: Option<Who>,
+    /// A shard item under the cursor.
+    pub item: Option<Serial>,
+}
+
+/// The two independent pointer states — see the module docs.
+#[derive(Default)]
+pub struct Picking {
+    /// The live, temporary cursor answer. Replaced after every drawn frame.
+    pub hover: Hover,
     /// What a left click last landed on, kept by *identity* until the next
     /// click — a coordinate, a static's own graphic-and-place, or a
     /// creature's or item's serial. Never the data itself:
@@ -99,4 +102,31 @@ pub struct Picking {
     /// walking, and a selected item's row goes away the moment it is picked
     /// up, instead of the panel quietly lying about where either still is.
     pub selected: Option<SelectedIdentity>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_new_hover_does_not_replace_the_diagnostic_selection() {
+        let harp = Serial::new(0x4000_0001).expect("valid item serial");
+        let drum = Serial::new(0x4000_0002).expect("valid item serial");
+        let mut picking = Picking {
+            hover: Hover {
+                item: Some(harp),
+                ..Hover::default()
+            },
+            selected: Some(SelectedIdentity::Item(harp)),
+        };
+
+        picking.hover.item = Some(drum);
+
+        assert_eq!(picking.hover.item, Some(drum), "the cursor moved to the drum");
+        assert_eq!(
+            picking.selected,
+            Some(SelectedIdentity::Item(harp)),
+            "the inspector still holds the clicked harp"
+        );
+    }
 }

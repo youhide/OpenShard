@@ -767,6 +767,36 @@ pub fn run<D: Dial + Send + 'static>(
         .ok();
     checkpoint("navigation graph loaded");
 
+    let interior_path = openshard_client_artscan::interiors::artifact_path(dir, facet);
+    let interiors = openshard_client_artscan::interiors::stamp_of(dir, facet)
+        .and_then(|stamp| openshard_client_artscan::interiors::load_baked(&interior_path, &stamp))
+        .and_then(|graph| {
+            if graph.dimensions() == (map.width(), map.height()) {
+                Ok(graph)
+            } else {
+                Err(openshard_client_artscan::interiors::Error::Incompatible {
+                    path: interior_path.clone(),
+                    reason: format!(
+                        "dimensions {}x{}, expected {}x{}",
+                        graph.dimensions().0,
+                        graph.dimensions().1,
+                        map.width(),
+                        map.height(),
+                    ),
+                })
+            }
+        })
+        .map_err(|error| {
+            eprintln!(
+                "{error}; interior diagnostic disabled\ncreate it with: \\
+                 OPENSHARD_CLIENT={:?} cargo run --release -p openshard-client-artscan --bin \\
+                 openshard-interiors-bake -- --facet {FACET}",
+                dir
+            );
+        })
+        .ok();
+    checkpoint("interior graph loaded");
+
     // The sound mixer opens before a window exists, but its values belong to
     // the HUD's persisted settings just like light tuning does.
     let mut desk = match desk::Desk::load(std::path::Path::new(desk::PATH)) {
@@ -837,6 +867,7 @@ pub fn run<D: Dial + Send + 'static>(
         resources: resources::Resources {
             map,
             coarse,
+            interiors,
             art,
             surfaces,
             repack_forced: false,
@@ -882,6 +913,7 @@ pub fn run<D: Dial + Send + 'static>(
             frame_dump: None,
             frame_dumps: 0,
             show_terrain: false,
+            show_interiors: false,
             show_occluders: false,
             show_solids: solids,
             solids_only: false,

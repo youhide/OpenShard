@@ -117,7 +117,7 @@ impl App {
         if !self.world_owns_pointer() {
             return false;
         }
-        let object = match (self.picking.on_mobile, self.picking.on_item) {
+        let object = match (self.picking.hover.mobile, self.picking.hover.item) {
             (Some(Some(mobile)), _) => Some(mobile),
             (_, Some(item)) => Some(item),
             _ => None,
@@ -131,7 +131,7 @@ impl App {
         // reject an otherwise valid lumberjacking swing.  The static pick also
         // carries its placed z, which is the exact value the shard verifies
         // against the map.
-        let (location, graphic) = if let Some(picked) = self.picking.on_static {
+        let (location, graphic) = if let Some(picked) = self.picking.hover.static_ {
             (picked.at, Some(picked.graphic))
         } else {
             let Some(tile) = self.pick_tile(camera) else {
@@ -517,7 +517,8 @@ impl App {
     /// - **A body with no serial is the offline viewer's placeholder** and
     ///   there is nothing to name.
     ///
-    /// Reads [`App::on_mobile`] — what the *last frame* found under the cursor,
+    /// Reads [`Picking::hover`](crate::picking::Picking::hover) — what the
+    /// *last frame* found under the cursor,
     /// the same answer the highlight is drawn from — rather than picking again
     /// here. That is `use_under_cursor`'s own rule turned into the one it should
     /// always have been: what the player clicked is what they were shown they
@@ -532,7 +533,7 @@ impl App {
         // `on_mobile` is a `Who` — `None` inside the `Some` is a body no shard
         // has named, which the offline viewer draws and nothing can be asked
         // about.
-        let Some(Some(mobile)) = self.picking.on_mobile else {
+        let Some(Some(mobile)) = self.picking.hover.mobile else {
             return;
         };
         // A corpse is drawn through the mobile renderer so its body is visible,

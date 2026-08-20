@@ -7,6 +7,7 @@
 
 use openshard_client_render::blit::{self, ViewportRect};
 use std::collections::BTreeSet;
+use std::sync::{Once, OnceLock};
 
 use openshard_client_render::camera::Camera;
 use openshard_client_render::composite::{
@@ -60,6 +61,13 @@ pub(crate) struct WorldPassAudit {
 use crate::panes::Pane;
 use crate::windows::{Drawn, WindowSubject};
 use crate::{graphics, panes, profile, resources, shell, windows, world};
+
+/// Opt-in minimap geometry probe. The paired margin override is documented in
+/// `panes::minimap`.
+fn minimap_diagnostics() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("OPENSHARD_MINIMAP_DIAGNOSTIC").is_some())
+}
 
 /// The shard's dialogs, in the client's own art, packed and drawn — a
 /// container, a paperdoll, the skill sheet, all three through one machinery.
@@ -430,17 +438,15 @@ pub(crate) fn draw_gump_windows(
                 (WindowSubject::Minimap, Drawn::Minimap(bounds)) => {
                     if let Some(player) = world.authoritative.view.as_ref().map(|view| view.player.position) {
                         let (content_at, content_extent) = bounds.content();
-                        // The radar cache holds one texel per world tile.  A
-                        // logical gump pixel can cover several surface pixels
-                        // on HiDPI (or at a larger desk scale), so request that
-                        // many more tiles rather than magnifying its texels.
-                        // A 45°-rotated square otherwise becomes an inscribed
-                        // diamond and leaves the circular viewport's corners
-                        // black. Request its circumscribed source square.
-                        let physical_scale = magnify * frame.scale * std::f32::consts::SQRT_2 / bounds.zoom();
-                        let native_extent = (
-                            (content_extent.0 as f32 * physical_scale).round().max(1.0) as i32,
-                            (content_extent.1 as f32 * physical_scale).round().max(1.0) as i32,
+                        // How much world this window needs fetched, and why
+                        // there is no `sqrt(2)` margin for the rotation — see
+                        // `radar_native_extent`, the one source of truth this
+                        // and the producer's own preparation both read.
+                        let native_extent = panes::minimap::radar_native_extent(
+                            content_extent,
+                            magnify,
+                            frame.scale,
+                            bounds.zoom(),
                         );
                         let region = panes::minimap::radar_region_for(player, native_extent);
                         // `select_ready` and not `get`: a chunk the producer
@@ -456,14 +462,21 @@ pub(crate) fn draw_gump_windows(
                         // rotated edge region skip base cells altogether.
                         let ready: Vec<_> = region_base_chunks(region)
                             .filter_map(|chunk| {
-                                radar_cache.select_ready(radar_cache.key(region.facet, 0, chunk))
+                                radar_cache.select_ready(radar_cache.key(
+                                    region.facet(),
+                                    radar::RadarLod::BASE,
+                                    chunk,
+                                ))
                             })
                             .map(|ready| ready.chunk())
                             .collect();
-                        // The rectangle the terrain and the marker over it are
-                        // both drawn into: worked out once here, because the
-                        // overlay is only in the right place if it is the
-                        // *same* rectangle — see `RadarOverlayRenderer`.
+                        // The visible circle is deliberately distinct from the
+                        // map rectangle behind it.  The latter includes the
+                        // fetch margin and must stay at one screen pixel per
+                        // world tile; mapping the larger region back into the
+                        // visible rectangle would instead shrink the map into
+                        // the diamond visible before the sprite's own circular
+                        // clip had a chance to cut it off.
                         // The one window whose picture is not gump art: its own
                         // pass draws the radar chunks straight into this
                         // rectangle, so the magnification has to be applied to
@@ -473,7 +486,7 @@ pub(crate) fn draw_gump_windows(
                         // window's own unmagnified extent), and a bigger window
                         // at the same scale would be a different window rather
                         // than the same one drawn larger.
-                        let placement = Placement {
+                        let clip = Placement {
                             origin: (
                                 at.x as f32 + content_at.x as f32 * magnify,
                                 at.y as f32 + content_at.y as f32 * magnify,
@@ -485,6 +498,18 @@ pub(crate) fn draw_gump_windows(
                             circle: true,
                             rotation: std::f32::consts::FRAC_PI_4,
                         };
+                        let map_extent = (
+                            f32::from(native_extent.width()) * bounds.zoom() / frame.scale,
+                            f32::from(native_extent.height()) * bounds.zoom() / frame.scale,
+                        );
+                        let map = Placement {
+                            origin: (
+                                clip.origin.0 + (clip.extent.0 - map_extent.0) / 2.0,
+                                clip.origin.1 + (clip.extent.1 - map_extent.1) / 2.0,
+                            ),
+                            extent: map_extent,
+                            ..clip
+                        };
                         // Under everything, so the window is a window even
                         // before its first chunk is built: unmapped ground
                         // reads as unmapped rather than as the world showing
@@ -494,7 +519,7 @@ pub(crate) fn draw_gump_windows(
                             &window.queue,
                             encoder,
                             frame,
-                            placement,
+                            clip,
                             radar::UNKNOWN,
                         );
                         window.radar_chunks.render_region(
@@ -503,7 +528,8 @@ pub(crate) fn draw_gump_windows(
                             encoder,
                             frame,
                             region,
-                            placement,
+                            map,
+                            clip,
                             ready,
                         );
                         // After the terrain and into the same window: where the
@@ -516,12 +542,37 @@ pub(crate) fn draw_gump_windows(
                             encoder,
                             frame,
                             region,
-                            placement,
+                            map,
+                            clip,
                             &[RadarMarker {
-                                tile: (u32::from(player.x), u32::from(player.y)),
+                                tile: radar::RadarTile::new(u32::from(player.x), u32::from(player.y)),
                                 color: radar::PLAYER_MARKER,
                             }],
                         );
+                        if minimap_diagnostics() {
+                            static REPORT: Once = Once::new();
+                            REPORT.call_once(|| {
+                                eprintln!(
+                                    "minimap diagnostic: content={content_extent:?}, native={native_extent:?}, \
+                                     map_origin={:?}, map_extent={:?}, clip_origin={:?}, clip_extent={:?}, \
+                                     zoom={}, surface_scale={}",
+                                    map.origin,
+                                    map.extent,
+                                    clip.origin,
+                                    clip.extent,
+                                    bounds.zoom(),
+                                    frame.scale,
+                                );
+                            });
+                            window.radar_overlay.render_debug_map_bounds(
+                                &window.device,
+                                &window.queue,
+                                encoder,
+                                frame,
+                                map,
+                                clip,
+                            );
+                        }
                         // The keyed centre is transparent, so this second
                         // draw puts the classic rim and its ornaments above
                         // the generated terrain without blacking it out.
@@ -1204,8 +1255,8 @@ pub(crate) fn encode_world_passes(
     let held_view = window
         .held_mask
         .create_view(&wgpu::TextureViewDescriptor::default());
-    let held_item_rings: Vec<&[SpriteQuad]> = geometry
-        .held_item_outline
+    let selected_item_rings: Vec<&[SpriteQuad]> = geometry
+        .selected_item_outline
         .iter()
         .map(std::slice::from_ref)
         .collect();
@@ -1216,7 +1267,7 @@ pub(crate) fn encode_world_passes(
         encoder,
         target,
         &held_view,
-        &held_item_rings,
+        &selected_item_rings,
     );
     profile::end(window.gpu.as_ref(), encoder, timed);
     if !geometry.held_mobile_outline.is_empty() {
@@ -1414,7 +1465,7 @@ pub(crate) fn encode_world_passes(
     // and for the same reason. `Ring::SELECTED`'s own pipeline call: one
     // [`Ring`] per `Outline::render`, so the held ring's colour cannot be
     // the hover ring's even for one frame.
-    if !geometry.held_item_outline.is_empty() || !geometry.held_mobile_outline.is_empty() {
+    if !geometry.selected_item_outline.is_empty() || !geometry.held_mobile_outline.is_empty() {
         let timed = profile::begin(window.gpu.as_ref(), "held ring", encoder);
         window.outline.render(
             &window.device,

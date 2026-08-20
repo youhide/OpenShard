@@ -160,23 +160,7 @@ where
     /// body *fits* — that is [`can_fit`](crate::Terrain::can_fit), and the
     /// callers that care apply it. Unordered, and the tile's own order at that.
     pub fn surfaces(&self, x: u16, y: u16) -> Vec<i32> {
-        let mut candidates: Vec<i32> = Vec::new();
-        if self.land_is_ground(x, y) {
-            let (_, land_center, _) = self.land_heights(x, y);
-            candidates.push(land_center);
-        }
-        for item in self.map().statics_at(x, y) {
-            let tile = self.tiles().static_tile(item.tile.0);
-            if tile.flags.is_platform() {
-                let (_, our_z) = platform_surface(
-                    i32::from(item.z),
-                    i32::from(tile.height),
-                    tile.flags.is_climbable(),
-                );
-                candidates.push(our_z);
-            }
-        }
-        candidates
+        openshard_uofiles::surfaces::stand_surfaces(self.map(), self.tiles(), x, y, self.swimming)
     }
 
     /// How high the tile's contents reach — the top of the tallest static on it,

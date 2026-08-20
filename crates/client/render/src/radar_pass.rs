@@ -40,8 +40,33 @@ use openshard_uofiles::color::Color16;
 use std::collections::BTreeMap;
 
 use crate::gump::Frame;
-use crate::radar::{BASE_CHUNK_TILES, MARKER_ARMS, RadarChunk, RadarChunkKey, RadarRegion};
+use crate::radar::{
+    BASE_CHUNK_TILES, MARKER_ARMS, RadarChunk, RadarChunkKey, RadarRegion, RadarRevision, RadarTile,
+};
 use crate::renderer::QUAD;
+
+/// GPU bytes in one native 64×64 RGBA radar chunk page.
+pub const RADAR_CHUNK_PAGE_BYTES: u64 = (BASE_CHUNK_TILES as u64) * (BASE_CHUNK_TILES as u64) * 4;
+
+/// GPU memory reserved for ready minimap terrain.
+///
+/// This is deliberately the owner of both the renderer's cache budget and the
+/// device request below: a larger byte budget without enough texture-array
+/// layers silently drops pages during one draw.
+pub const RADAR_CHUNK_CACHE_BUDGET: u64 = 16 * 1024 * 1024;
+
+/// Texture-array pages that exactly consume [`RADAR_CHUNK_CACHE_BUDGET`].
+pub const RADAR_CHUNK_CACHE_LAYERS: u32 = (RADAR_CHUNK_CACHE_BUDGET / RADAR_CHUNK_PAGE_BYTES) as u32;
+
+/// The number of pages the client asks the device to expose for radar terrain.
+///
+/// The adapter remains authoritative. An adapter with fewer layers still
+/// opens normally, while the caller can make that constrained capacity visible
+/// in its diagnostic output.
+#[must_use]
+pub fn radar_chunk_array_layers(adapter_limit: u32) -> u32 {
+    adapter_limit.min(RADAR_CHUNK_CACHE_LAYERS)
+}
 
 /// Where the radar is drawn and how big it is, in gump pixels.
 ///
@@ -65,7 +90,7 @@ pub struct Placement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::radar::{RadarChunkCoord, RadarRevision};
+    use crate::radar::{RadarChunkCoord, RadarExtent, RadarRevision, RadarTile};
     use openshard_protocol::world::Facet;
 
     fn chunk(x: u32, y: u32) -> RadarChunk {
@@ -76,16 +101,30 @@ mod tests {
         .expect("a complete chunk")
     }
 
+    fn region(origin: (u32, u32), extent: (u16, u16)) -> RadarRegion {
+        RadarRegion::new(
+            Facet(0),
+            RadarTile::from(origin),
+            RadarExtent::new(extent.0, extent.1).expect("a non-empty test region"),
+        )
+    }
+
+    #[test]
+    fn the_radar_budget_and_device_request_name_the_same_page_count() {
+        assert_eq!(
+            RADAR_CHUNK_CACHE_BUDGET / RADAR_CHUNK_PAGE_BYTES,
+            u64::from(RADAR_CHUNK_CACHE_LAYERS)
+        );
+        assert_eq!(RADAR_CHUNK_CACHE_LAYERS, 1024);
+        assert_eq!(radar_chunk_array_layers(2048), RADAR_CHUNK_CACHE_LAYERS);
+        assert_eq!(radar_chunk_array_layers(256), 256);
+    }
+
     #[test]
     fn selecting_a_region_splits_at_chunk_edges_without_a_uv_gap() {
         let west = chunk(0, 0);
         let east = chunk(1, 0);
-        let region = RadarRegion {
-            facet: Facet(0),
-            lod: 0,
-            origin: (32, 0),
-            extent: (64, 16),
-        };
+        let region = region((32, 0), (64, 16));
         let draws = select_region_chunks(
             region,
             Placement {
@@ -118,12 +157,7 @@ mod tests {
         )
         .unwrap();
         let draws = select_region_chunks(
-            RadarRegion {
-                facet: Facet(0),
-                lod: 0,
-                origin: (0, 0),
-                extent: (16, 16),
-            },
+            region((0, 0), (16, 16)),
             Placement {
                 origin: (0.0, 0.0),
                 extent: (16.0, 16.0),
@@ -148,12 +182,7 @@ mod tests {
         let north_west = chunk(0, 0);
         let side = BASE_CHUNK_TILES * 2;
         let draws = select_region_chunks(
-            RadarRegion {
-                facet: Facet(0),
-                lod: 0,
-                origin: (0, 0),
-                extent: (side, side),
-            },
+            region((0, 0), (side, side)),
             Placement {
                 origin: (0.0, 0.0),
                 extent: (f32::from(side), f32::from(side)),
@@ -189,12 +218,7 @@ mod tests {
         .unwrap();
         let side = BASE_CHUNK_TILES * 2;
         let draws = select_region_chunks(
-            RadarRegion {
-                facet: Facet(0),
-                lod: 0,
-                origin: (0, 0),
-                extent: (side, side),
-            },
+            region((0, 0), (side, side)),
             Placement {
                 origin: (0.0, 0.0),
                 extent: (f32::from(side), f32::from(side)),
@@ -208,15 +232,119 @@ mod tests {
         assert_eq!(draws.len(), 1);
     }
 
+    #[test]
+    fn over_capacity_keeps_the_draws_nearest_the_windows_centre_not_the_northmost() {
+        let north = chunk(0, 0);
+        let south = chunk(0, 1);
+        let at = Placement {
+            origin: (0.0, 0.0),
+            extent: (100.0, 100.0),
+            circle: false,
+            rotation: 0.0,
+        };
+        let uv = ChunkUv {
+            origin: (0.0, 0.0),
+            extent: (1.0, 1.0),
+        };
+        // Centre is (50, 50). The north chunk is farther from it than the south
+        // one — a raster-order truncation would keep north regardless, since it
+        // sorts first; distance from centre must keep south instead.
+        let far_north = RadarChunkDraw {
+            chunk: &north,
+            placement: Placement {
+                origin: (50.0, 10.0),
+                extent: (0.0, 0.0),
+                circle: false,
+                rotation: 0.0,
+            },
+            uv,
+        };
+        let near_south = RadarChunkDraw {
+            chunk: &south,
+            placement: Placement {
+                origin: (50.0, 60.0),
+                extent: (0.0, 0.0),
+                circle: false,
+                rotation: 0.0,
+            },
+            uv,
+        };
+
+        let kept = cap_draws_by_distance(vec![far_north, near_south], 1, at);
+
+        assert_eq!(kept.len(), 1);
+        assert_eq!(
+            kept[0].chunk.key(),
+            south.key(),
+            "distance from the window's own centre decides, not raster order"
+        );
+    }
+
+    #[test]
+    fn capping_restores_paint_order_among_the_survivors() {
+        let far = chunk(9, 9);
+        let fine = chunk(0, 0);
+        let ancestor = RadarChunk::new(
+            RadarChunkKey::new(Facet(0), 1, RadarChunkCoord::new(0, 0), RadarRevision(0)),
+            vec![Color16(0x03e0); usize::from(BASE_CHUNK_TILES).pow(2)],
+        )
+        .unwrap();
+        let at = Placement {
+            origin: (0.0, 0.0),
+            extent: (100.0, 100.0),
+            circle: false,
+            rotation: 0.0,
+        };
+        let uv = ChunkUv {
+            origin: (0.0, 0.0),
+            extent: (1.0, 1.0),
+        };
+        let placement_at = |x: f32, y: f32| Placement {
+            origin: (x, y),
+            extent: (0.0, 0.0),
+            circle: false,
+            rotation: 0.0,
+        };
+        // Fed in fine-first and with the ancestor's placement, not its LOD,
+        // making it the *second*-nearest of the three: only distance decides
+        // who is dropped, and paint order has to be restored afterwards.
+        let draws = vec![
+            RadarChunkDraw {
+                chunk: &fine,
+                placement: placement_at(49.0, 49.0),
+                uv,
+            },
+            RadarChunkDraw {
+                chunk: &far,
+                placement: placement_at(1000.0, 1000.0),
+                uv,
+            },
+            RadarChunkDraw {
+                chunk: &ancestor,
+                placement: placement_at(50.0, 50.0),
+                uv,
+            },
+        ];
+
+        let kept = cap_draws_by_distance(draws, 2, at);
+
+        assert_eq!(kept.len(), 2);
+        assert!(
+            kept.iter().all(|draw| draw.chunk.key() != far.key()),
+            "the far chunk is what the budget should drop"
+        );
+        assert_eq!(
+            kept[0].chunk.key(),
+            ancestor.key(),
+            "paint order is restored on the survivors: the coarse stand-in still paints first"
+        );
+        assert_eq!(kept[1].chunk.key(), fine.key());
+    }
+
     /// A region of `side` tiles drawn at `magnify` window pixels a tile.
     fn window(side: u16, magnify: f32) -> (RadarRegion, Placement) {
         (
-            RadarRegion {
-                facet: Facet(0),
-                lod: 0,
-                origin: (100, 100),
-                extent: (side, side),
-            },
+            region((100, 100), (side, side)),
             Placement {
                 origin: (10.0, 20.0),
                 extent: (f32::from(side) * magnify, f32::from(side) * magnify),
@@ -230,7 +358,7 @@ mod tests {
     fn a_marker_is_a_cross_of_tile_sized_quads_where_the_body_stands() {
         let (region, at) = window(16, 2.0);
         let marker = RadarMarker {
-            tile: (104, 108),
+            tile: RadarTile::new(104, 108),
             color: Color16(0x7FFF),
         };
         let quads = select_marker_quads(region, at, [&marker]);
@@ -254,7 +382,7 @@ mod tests {
         // the window, and drawing them at the edge would put the cross's centre
         // one tile from where the body actually is.
         let corner = RadarMarker {
-            tile: (100, 100),
+            tile: RadarTile::new(100, 100),
             color: Color16(0x7FFF),
         };
         let quads = select_marker_quads(region, at, [&corner]);
@@ -264,7 +392,7 @@ mod tests {
         }));
 
         let outside = RadarMarker {
-            tile: (200, 200),
+            tile: RadarTile::new(200, 200),
             color: Color16(0x7FFF),
         };
         assert!(
@@ -310,27 +438,27 @@ pub fn select_region_chunks<'a>(
     at: Placement,
     ready: impl IntoIterator<Item = &'a RadarChunk>,
 ) -> Vec<RadarChunkDraw<'a>> {
-    if region.extent.0 == 0 || region.extent.1 == 0 || at.extent.0 <= 0.0 || at.extent.1 <= 0.0 {
+    if at.extent.0 <= 0.0 || at.extent.1 <= 0.0 {
         return Vec::new();
     }
-    let left = u64::from(region.origin.0);
-    let top = u64::from(region.origin.1);
-    let right = left.saturating_add(u64::from(region.extent.0));
-    let bottom = top.saturating_add(u64::from(region.extent.1));
+    let left = u64::from(region.origin().x());
+    let top = u64::from(region.origin().y());
+    let right = left.saturating_add(u64::from(region.extent().width()));
+    let bottom = top.saturating_add(u64::from(region.extent().height()));
     let mut selected: Vec<_> = ready
         .into_iter()
         .filter_map(|chunk| {
             let key = chunk.key();
-            if key.facet() != region.facet {
+            if key.facet() != region.facet() {
                 return None;
             }
             // How much world one of this product's texels is, and therefore how
             // much of it the whole product is. A level-one chunk is the same
             // number of pixels over twice the ground in each direction.
-            let texel_world = 1_u64.checked_shl(u32::from(key.lod()))?;
+            let texel_world = 1_u64.checked_shl(u32::from(key.lod().value()))?;
             let chunk_world = u64::from(BASE_CHUNK_TILES).saturating_mul(texel_world);
-            let chunk_left = u64::from(key.chunk().x).saturating_mul(chunk_world);
-            let chunk_top = u64::from(key.chunk().y).saturating_mul(chunk_world);
+            let chunk_left = u64::from(key.chunk().x()).saturating_mul(chunk_world);
+            let chunk_top = u64::from(key.chunk().y()).saturating_mul(chunk_world);
             let chunk_right = chunk_left.saturating_add(chunk_world);
             let chunk_bottom = chunk_top.saturating_add(chunk_world);
             let x0 = left.max(chunk_left);
@@ -338,8 +466,8 @@ pub fn select_region_chunks<'a>(
             let x1 = right.min(chunk_right);
             let y1 = bottom.min(chunk_bottom);
             (x0 < x1 && y0 < y1).then(|| {
-                let scale_x = at.extent.0 / f32::from(region.extent.0);
-                let scale_y = at.extent.1 / f32::from(region.extent.1);
+                let scale_x = at.extent.0 / f32::from(region.extent().width());
+                let scale_y = at.extent.1 / f32::from(region.extent().height());
                 RadarChunkDraw {
                     chunk,
                     placement: Placement {
@@ -368,20 +496,70 @@ pub fn select_region_chunks<'a>(
     // Coarsest first, then newest, then in reading order: a stand-in is painted
     // before whatever covers it more exactly, and the sort is total so a frame's
     // draw list does not depend on the order the cache happened to answer in.
-    selected.sort_by_key(|draw| {
-        let key = draw.chunk.key();
-        (
-            std::cmp::Reverse(key.lod()),
-            key.revision(),
-            key.chunk().y,
-            key.chunk().x,
-        )
-    });
+    selected.sort_by_key(paint_order);
     // One product, one draw. Four requests falling back to the same ancestor
     // are four answers naming one rectangle, and drawing it four times would be
     // three redundant passes over the same window pixels.
     selected.dedup_by_key(|draw| draw.chunk.key());
     selected
+}
+
+/// Paint order for a resolved set of chunk draws: coarsest first, so a ready
+/// fine product paints over the stand-in that covers it, then newest revision,
+/// then reading order — a total order so a frame's draw list never depends on
+/// the order the cache happened to answer in. Shared by [`select_region_chunks`]
+/// and [`cap_draws_by_distance`], which has to restore this order on whatever
+/// it keeps.
+fn paint_order(draw: &RadarChunkDraw<'_>) -> (std::cmp::Reverse<u8>, RadarRevision, u32, u32) {
+    let key = draw.chunk.key();
+    (
+        std::cmp::Reverse(key.lod().value()),
+        key.revision(),
+        key.chunk().y(),
+        key.chunk().x(),
+    )
+}
+
+/// When there are more distinct chunk products than the GPU page cache has
+/// room for, keep the ones nearest the window's own centre rather than
+/// whichever survive [`paint_order`]'s tail.
+///
+/// That order sorts coarsest-first and, within a LOD, north row before south
+/// row — exactly right for *painting*, wrong for *choosing what to drop*. A
+/// zoomed-out minimap in the middle of filling in has one coarse ancestor
+/// covering most of the region plus a *growing* pile of individual fine
+/// products near the player — nothing bounds that pile's size at the LOD
+/// grid, only at the page cache. Blind `truncate` after a paint-order sort
+/// keeps the (few) coarse entries and whichever fine ones happen to be
+/// northernmost, so as the pile grows past capacity the picture reads as
+/// filling in at the top and emptying at the bottom, forever, rather than as
+/// a disc of detail that stops growing once the budget is spent. Distance
+/// from centre has no preferred compass direction, so the shortfall — there
+/// still is one, at the same budget — comes off the *edge* of that disc
+/// instead of off one side of the window.
+#[must_use]
+fn cap_draws_by_distance<'a>(
+    mut draws: Vec<RadarChunkDraw<'a>>,
+    capacity: usize,
+    at: Placement,
+) -> Vec<RadarChunkDraw<'a>> {
+    if draws.len() <= capacity {
+        return draws;
+    }
+    let center = (at.origin.0 + at.extent.0 / 2.0, at.origin.1 + at.extent.1 / 2.0);
+    let distance_sq = |draw: &RadarChunkDraw<'_>| {
+        let dx = draw.placement.origin.0 + draw.placement.extent.0 / 2.0 - center.0;
+        let dy = draw.placement.origin.1 + draw.placement.extent.1 / 2.0 - center.1;
+        dx * dx + dy * dy
+    };
+    draws.sort_by(|a, b| {
+        distance_sq(a)
+            .partial_cmp(&distance_sq(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    draws.truncate(capacity);
+    draws.sort_by_key(paint_order);
+    draws
 }
 
 /// Fixed-size, recreatable GPU pages for immutable radar chunks.
@@ -413,15 +591,13 @@ struct ResidentPage {
 const CHUNK_UNIFORM_BYTES: u64 = 64;
 /// Placement origin and extent, source UV origin and extent, page layer.
 const CHUNK_INSTANCE_STRIDE: u64 = 36;
-const CHUNK_RGBA_BYTES: u64 = (BASE_CHUNK_TILES as u64) * (BASE_CHUNK_TILES as u64) * 4;
-
 impl RadarChunkRenderer {
     /// Create a texture-array page cache with at most `byte_budget` bytes.
     /// At least one page is retained even for a tiny non-zero budget.
     #[must_use]
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, byte_budget: u64) -> Self {
         let limit = u64::from(device.limits().max_texture_array_layers);
-        let capacity = (byte_budget / CHUNK_RGBA_BYTES)
+        let capacity = (byte_budget / RADAR_CHUNK_PAGE_BYTES)
             .clamp(1, limit)
             .try_into()
             .unwrap_or(u32::MAX);
@@ -615,7 +791,7 @@ impl RadarChunkRenderer {
 
     #[must_use]
     pub const fn byte_capacity(&self) -> u64 {
-        (self.capacity as u64) * CHUNK_RGBA_BYTES
+        (self.capacity as u64) * RADAR_CHUNK_PAGE_BYTES
     }
 
     #[must_use]
@@ -648,7 +824,7 @@ impl RadarChunkRenderer {
             self.pages.remove(&evict);
             layer
         };
-        let mut bytes = Vec::with_capacity(CHUNK_RGBA_BYTES as usize);
+        let mut bytes = Vec::with_capacity(RADAR_CHUNK_PAGE_BYTES as usize);
         for colour in chunk.pixels() {
             let rgb = colour.rgb8();
             bytes.extend_from_slice(&[rgb.red, rgb.green, rgb.blue, 255]);
@@ -658,7 +834,7 @@ impl RadarChunkRenderer {
         // overwrite the first chunk before its already-recorded draw executes.
         let staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("radar chunk upload"),
-            size: CHUNK_RGBA_BYTES,
+            size: RADAR_CHUNK_PAGE_BYTES,
             usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -712,36 +888,42 @@ impl RadarChunkRenderer {
         encoder: &mut wgpu::CommandEncoder,
         frame: Frame<'_>,
         region: RadarRegion,
-        at: Placement,
+        map: Placement,
+        clip: Placement,
         ready: impl IntoIterator<Item = &'a RadarChunk>,
     ) {
-        let mut draws = select_region_chunks(region, at, ready);
+        let mut draws = select_region_chunks(region, map, ready);
         if draws.is_empty() {
             return;
         }
         // A region wider than the whole page cache would evict a page this very
         // call had already handed to an instance, and that instance would then
         // sample whatever replaced it.  Dropping the surplus leaves those chunks
-        // undrawn instead of drawn wrong; it is unreachable at any sane budget —
-        // a 160-tile window touches at most sixteen chunks — so it is a bound
-        // rather than a policy.
+        // undrawn instead of drawn wrong. Reachable well short of a "sane
+        // budget": a coarse ancestor stands in for the whole region until its
+        // family completes, so the count this bounds is not the handful of
+        // chunks one steady frame touches but the pile of individual fine
+        // products a zoomed-out minimap accumulates *while it is still filling
+        // in* — see `cap_draws_by_distance` for why the ones kept are chosen by
+        // distance from the window's own centre rather than by truncating
+        // whatever `select_region_chunks`' paint order happens to end with.
         if draws.len() > self.capacity as usize {
             eprintln!(
-                "radar page cache holds {} of {} chunks this region needs: the rest go undrawn",
+                "radar page cache holds {} of {} chunks this region needs: keeping the ones nearest the window's centre",
                 self.capacity,
                 draws.len()
             );
-            draws.truncate(self.capacity as usize);
+            draws = cap_draws_by_distance(draws, self.capacity as usize, clip);
         }
-        let Some(scissor) = window_scissor(frame, at) else {
+        let Some(scissor) = window_scissor(frame, clip) else {
             return;
         };
         let mut uniform_bytes = Vec::with_capacity(CHUNK_UNIFORM_BYTES as usize);
         let center = (
-            (at.origin.0 + at.extent.0 / 2.0) * frame.scale,
-            (at.origin.1 + at.extent.1 / 2.0) * frame.scale,
+            (clip.origin.0 + clip.extent.0 / 2.0) * frame.scale,
+            (clip.origin.1 + clip.extent.1 / 2.0) * frame.scale,
         );
-        let radius = at.extent.0.min(at.extent.1) * frame.scale / 2.0;
+        let radius = clip.extent.0.min(clip.extent.1) * frame.scale / 2.0;
         for value in [
             frame.width as f32,
             frame.height as f32,
@@ -750,12 +932,12 @@ impl RadarChunkRenderer {
             center.0,
             center.1,
             radius,
-            if at.circle { 1.0 } else { 0.0 },
-            at.origin.0,
-            at.origin.1,
-            at.extent.0,
-            at.extent.1,
-            at.rotation,
+            if clip.circle { 1.0 } else { 0.0 },
+            map.origin.0,
+            map.origin.1,
+            map.extent.0,
+            map.extent.1,
+            map.rotation,
         ] {
             uniform_bytes.extend_from_slice(&value.to_le_bytes());
         }
@@ -841,7 +1023,7 @@ fn window_scissor(frame: Frame<'_>, at: Placement) -> Option<(u32, u32, u32, u32
 pub struct RadarMarker {
     /// The world tile it stands on — the same coordinate space a
     /// [`RadarRegion`]'s origin is in, not a pixel inside the window.
-    pub tile: (u32, u32),
+    pub tile: RadarTile,
     pub color: Color16,
 }
 
@@ -860,28 +1042,30 @@ pub fn select_marker_quads<'a>(
     at: Placement,
     markers: impl IntoIterator<Item = &'a RadarMarker>,
 ) -> Vec<(Placement, Color16)> {
-    if region.extent.0 == 0 || region.extent.1 == 0 || at.extent.0 <= 0.0 || at.extent.1 <= 0.0 {
+    if at.extent.0 <= 0.0 || at.extent.1 <= 0.0 {
         return Vec::new();
     }
     // One tile's worth of window, which is also one marker pixel's size: the
     // cross is drawn in tiles, so it keeps its shape at any window scale
     // instead of shrinking to a dot as the region grows.
-    let scale_x = at.extent.0 / f32::from(region.extent.0);
-    let scale_y = at.extent.1 / f32::from(region.extent.1);
+    let scale_x = at.extent.0 / f32::from(region.extent().width());
+    let scale_y = at.extent.1 / f32::from(region.extent().height());
     let mut quads = Vec::new();
     for marker in markers {
         for (dx, dy) in MARKER_ARMS {
             let (Some(x), Some(y)) = (
-                marker.tile.0.checked_add_signed(dx),
-                marker.tile.1.checked_add_signed(dy),
+                marker.tile.x().checked_add_signed(dx),
+                marker.tile.y().checked_add_signed(dy),
             ) else {
                 continue;
             };
-            let (Some(column), Some(row)) = (x.checked_sub(region.origin.0), y.checked_sub(region.origin.1))
-            else {
+            let (Some(column), Some(row)) = (
+                x.checked_sub(region.origin().x()),
+                y.checked_sub(region.origin().y()),
+            ) else {
                 continue;
             };
-            if column >= u32::from(region.extent.0) || row >= u32::from(region.extent.1) {
+            if column >= u32::from(region.extent().width()) || row >= u32::from(region.extent().height()) {
                 continue;
             }
             quads.push((
@@ -1053,7 +1237,8 @@ impl RadarOverlayRenderer {
         encoder: &mut wgpu::CommandEncoder,
         frame: Frame<'_>,
         region: RadarRegion,
-        at: Placement,
+        map: Placement,
+        clip: Placement,
         markers: impl IntoIterator<Item = &'a RadarMarker>,
     ) {
         self.draw_quads(
@@ -1061,8 +1246,9 @@ impl RadarOverlayRenderer {
             queue,
             encoder,
             frame,
-            at,
-            &select_marker_quads(region, at, markers),
+            map,
+            clip,
+            &select_marker_quads(region, map, markers),
         );
     }
 
@@ -1084,10 +1270,56 @@ impl RadarOverlayRenderer {
         at: Placement,
         color: Color16,
     ) {
-        self.draw_quads(device, queue, encoder, frame, at, &[(at, color)]);
+        self.draw_quads(device, queue, encoder, frame, at, at, &[(at, color)]);
     }
 
-    /// Record one instanced draw of solid rectangles, clipped to `at`.
+    /// Draw the boundary of the source-map rectangle over the terrain.
+    ///
+    /// This is a diagnostic for the round minimap: if the yellow diamond is
+    /// visible inside the circular frame, the map rectangle itself is too
+    /// small; if it is entirely clipped away, the fetch/map geometry reaches
+    /// past the frame and any remaining black area is missing content instead.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_debug_map_bounds(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: Frame<'_>,
+        map: Placement,
+        clip: Placement,
+    ) {
+        let line = (1.0 / frame.scale).max(f32::EPSILON);
+        let right = map.origin.0 + (map.extent.0 - line).max(0.0);
+        let bottom = map.origin.1 + (map.extent.1 - line).max(0.0);
+        let yellow = Color16(0x7FE0);
+        let border = [
+            Placement {
+                origin: map.origin,
+                extent: (map.extent.0, line),
+                ..map
+            },
+            Placement {
+                origin: (map.origin.0, bottom),
+                extent: (map.extent.0, line),
+                ..map
+            },
+            Placement {
+                origin: map.origin,
+                extent: (line, map.extent.1),
+                ..map
+            },
+            Placement {
+                origin: (right, map.origin.1),
+                extent: (line, map.extent.1),
+                ..map
+            },
+        ];
+        let quads: Vec<_> = border.into_iter().map(|placement| (placement, yellow)).collect();
+        self.draw_quads(device, queue, encoder, frame, map, clip, &quads);
+    }
+
+    /// Record one instanced draw of solid rectangles, clipped to `clip`.
     ///
     /// Both of this pass's callers come through here, so a marker and the
     /// backdrop under it cannot end up clipped by two different rectangles.
@@ -1097,21 +1329,22 @@ impl RadarOverlayRenderer {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         frame: Frame<'_>,
-        at: Placement,
+        map: Placement,
+        clip: Placement,
         quads: &[(Placement, Color16)],
     ) {
         if quads.is_empty() {
             return;
         }
-        let Some(scissor) = window_scissor(frame, at) else {
+        let Some(scissor) = window_scissor(frame, clip) else {
             return;
         };
         let mut uniform_bytes = Vec::with_capacity(CHUNK_UNIFORM_BYTES as usize);
         let center = (
-            (at.origin.0 + at.extent.0 / 2.0) * frame.scale,
-            (at.origin.1 + at.extent.1 / 2.0) * frame.scale,
+            (clip.origin.0 + clip.extent.0 / 2.0) * frame.scale,
+            (clip.origin.1 + clip.extent.1 / 2.0) * frame.scale,
         );
-        let radius = at.extent.0.min(at.extent.1) * frame.scale / 2.0;
+        let radius = clip.extent.0.min(clip.extent.1) * frame.scale / 2.0;
         for value in [
             frame.width as f32,
             frame.height as f32,
@@ -1120,12 +1353,12 @@ impl RadarOverlayRenderer {
             center.0,
             center.1,
             radius,
-            if at.circle { 1.0 } else { 0.0 },
-            at.origin.0,
-            at.origin.1,
-            at.extent.0,
-            at.extent.1,
-            at.rotation,
+            if clip.circle { 1.0 } else { 0.0 },
+            map.origin.0,
+            map.origin.1,
+            map.extent.0,
+            map.extent.1,
+            map.rotation,
         ] {
             uniform_bytes.extend_from_slice(&value.to_le_bytes());
         }

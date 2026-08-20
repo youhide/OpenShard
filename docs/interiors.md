@@ -179,17 +179,85 @@ will consume: a `BuildingId`, ordered structural `FloorId`s, cells, rooms and
 door portals. Each stage has a debug view, because the data must be judged before
 it can hide a pixel.
 
+### Implementation handoff — R1 in progress
+
+**Implemented, uncommitted:** `uofiles::surfaces::stand_surfaces` remains the
+shared *movement* walk. The interior bake deliberately uses only land and
+static art marked `FLOOR`: a character can stand on a table, bed or crate, but
+none is a structural storey. `render::interiors` has lazy per-block `CellId`s,
+excludes a gap lower than `PLAYER_HEIGHT`, and caches the
+same block's local closed-door `BlockRooms`: cardinally connected, vertically
+compatible cells form a room; `TileFlags::DOOR` is kept as a `Door` and a
+two-sided local doorway becomes a `Portal`. `StitchedRooms` composes a chosen
+set of these immutable bakes without treating an 8×8 edge as a wall: it gives
+the finished component a deterministic `StitchedRoomId`, resolves a doorway
+whose sides lie in different blocks, and keeps the same outdoor/player/open-door
+walk. The two-block test puts the door on the seam and pins shut versus open.
+
+`interior_census` measured body-compatible neighbour floors over central Britain
+as 92.90% within Δz ≤ 2 and over Wrong as 99.28% within Δz ≤ 2. That result is
+map evidence, **not** a floor identity: an elevation threshold would flatten a
+stair one edge at a time. `Buildings` therefore runs two independent detectors.
+`MapTerrain::can_step` supplies the map's actual walk graph: a changed-z edge is
+a stair between `FloorId`s, while a level edge is inside one floor. A shared map
+column is structural evidence for one `BuildingId`, but never merges the two
+floor ids. Closed portals join two sealed rooms into one building and never use
+the all-outdoor component as a bridge. Tests pin a walkable stair and the
+separate stacked-floor evidence.
+
+**Now inspectable, still deliberately not connected to geometry:** F1 → World
+has `interiors — structural floors; sealed rooms are black`. Its source is now
+a facet-wide offline artifact, `openshard-interiors-<facet>.bin`, rather than a
+camera block cache. The bake starts at every map boundary and floods through the
+open world until a wall or a door stops it: that is the **negative space**.
+Every unvisited tile is positive building space. Internal doors then join only
+their two positive sides, so this first pass deliberately paints an entire house
+one stable colour, while a front door never joins a house to the exterior.
+
+The wall predicate comes from the measured art table; `BLOCK` furniture,
+tabletops and movement walkability are not inputs. A roof remains vertical
+headroom only: **it never defines the horizontal outline of a room**. The app
+only slices the already baked labels to the camera, so panning and zooming
+cannot change topology or colours. Missing or stale output disables this
+diagnostic with the exact bake command; it never rebuilds during a frame:
+
+```sh
+OPENSHARD_CLIENT=/path/to/client \
+  cargo run --release -p openshard-client-artscan --bin openshard-interiors-bake -- --facet 0
+```
+
+The artifact is validated against the facet map/statics, `tiledata.mul`, and
+the art table (including a hand edit). It is an R1 instrument only: it has no
+renderer gate, geometry-cache fingerprint, picking input, Auto/Manual state, or
+keyboard binding. Therefore the normal picture is unchanged and floors do not
+yet switch.
+
+**Resume at:** inspect representative shop/cellar, courtyard and closed-door
+frames with the F1 overlay, then make its cell, floor, room and portal readings
+separately selectable for R1d. `cargo run --release -p
+openshard-client-render --example interior_census` remains the repeatable
+measurement against `OPENSHARD_CLIENT`; it samples central Britain and Wrong by
+default, and accepts `name:x,y,width,height` regions for specific buildings.
+Only after the debug views are verified should R2 claim Page Up/Page Down and
+gate geometry.
+
 - **R1a — cells and floors.** A cell is one tile, one floor band and one ceiling
-  band: the space a body could stand in. Build it from the shared column-surface
-  walk, not a third approximation. Its ceiling is the next surface or sky. The
-  debug view colours cells by floor band. Connected compatible bands form ordered
+  band: the space a body could stand in. Build its floors from land and static
+  art marked `FLOOR`, rather than the wider movement surface walk; its ceiling
+  is the next structural surface, roof, or sky. The debug view colours cells by
+  floor band.
+  Connected compatible bands form ordered
   `FloorId`s inside a `BuildingId`; they are not a global z ladder. The precise
   compatibility tolerance is measured against Britain and dungeons in this view
   before it becomes an implementation constant.
 - **R1b — rooms and portals.** Adjacent cells join when their bands overlap by a
-  body height and `WALL | BLOCK | NO_SHOOT` does not separate them. Doors bake
-  as walls and record portals instead. Union-find per block plus seam stitching
-  builds rooms; cache the immutable result per map block.
+  body height and their **shared edge** has no catalogued wall panel.
+  Which edge a wall occupies comes from the art-table facing measurement, not
+  from `tiledata.mul` (which has no direction); unread art is the conservative
+  all-edges fallback. `BLOCK` furniture — tables, beds, crates — is deliberately
+  not a room boundary: it matters to movement but never divides a room. Doors
+  bake as walls and record portals instead. Union-find per block plus seam
+  stitching builds rooms; cache the immutable result per map block.
 - **R1c — shown rooms.** Every frame, walk the small portal graph from outdoor
   rooms and the player's room through currently open doors. The result is a set
   of shown `RoomId`s. The debug view paints every other indexed room black;
@@ -198,6 +266,11 @@ it can hide a pixel.
   separately selectable in F1. The ordinary World panel stays unchanged in R1:
   Auto/Manual controls belong to the renderer in R2, after there is a real
   `FloorId` to select.
+- **R1e — whole-facet exterior bake.** Build the negative-space flood once
+  outside the client event loop and persist its positive labels beside the
+  client install. This is the stable base for R1b: it is already sufficient to
+  colour each house, while the next pass replaces each house label with
+  per-room labels and preserves doors/stairs as edges in that graph.
 
 **What R1 pins:** a cellar and shop above it are different cells and can be
 different floors; a courtyard is outdoor; a shut door keeps rooms separate; an

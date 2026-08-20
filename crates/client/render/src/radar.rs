@@ -41,6 +41,249 @@ use openshard_uofiles::color::Color16;
 use openshard_uofiles::map::{BLOCK_SIZE, Map};
 use openshard_uofiles::radarcol::RadarColors;
 
+/// Domain values that name radar space.
+///
+/// Keeping these distinct is deliberately more than documentation: a chunk
+/// coordinate, a world tile, a map-reader tile, and a raster extent all happen
+/// to be pairs of integers, but substituting one for another is a real cache
+/// or map-edge bug.  Raw integers stay at the UO-file and GPU boundaries;
+/// everything inside the radar model speaks these values.
+pub mod types {
+    use super::Facet;
+
+    /// One level in the radar reduction pyramid.
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+    pub struct RadarLod(u8);
+
+    impl RadarLod {
+        /// The only grid requested directly from world terrain.
+        pub const BASE: Self = Self(0);
+
+        #[must_use]
+        pub const fn new(value: u8) -> Self {
+            Self(value)
+        }
+
+        #[must_use]
+        pub const fn value(self) -> u8 {
+            self.0
+        }
+
+        #[must_use]
+        pub const fn is_base(self) -> bool {
+            self.0 == Self::BASE.0
+        }
+
+        #[must_use]
+        pub fn parent(self) -> Option<Self> {
+            self.0.checked_add(1).map(Self)
+        }
+
+        #[must_use]
+        pub fn child(self) -> Option<Self> {
+            self.0.checked_sub(1).map(Self)
+        }
+    }
+
+    impl From<u8> for RadarLod {
+        fn from(value: u8) -> Self {
+            Self::new(value)
+        }
+    }
+
+    impl PartialEq<u8> for RadarLod {
+        fn eq(&self, other: &u8) -> bool {
+            self.0 == *other
+        }
+    }
+
+    /// A tile in the facet's unbounded world-coordinate space.
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+    pub struct RadarTile {
+        x: u32,
+        y: u32,
+    }
+
+    impl RadarTile {
+        #[must_use]
+        pub const fn new(x: u32, y: u32) -> Self {
+            Self { x, y }
+        }
+
+        #[must_use]
+        pub const fn x(self) -> u32 {
+            self.x
+        }
+
+        #[must_use]
+        pub const fn y(self) -> u32 {
+            self.y
+        }
+
+        #[must_use]
+        pub fn saturating_sub(self, half: RadarExtent) -> Self {
+            Self::new(
+                self.x.saturating_sub(u32::from(half.width()) / 2),
+                self.y.saturating_sub(u32::from(half.height()) / 2),
+            )
+        }
+    }
+
+    impl From<(u32, u32)> for RadarTile {
+        fn from((x, y): (u32, u32)) -> Self {
+            Self::new(x, y)
+        }
+    }
+
+    /// A non-empty rectangular extent in native radar tiles.
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+    pub struct RadarExtent {
+        width: u16,
+        height: u16,
+    }
+
+    impl RadarExtent {
+        #[must_use]
+        pub fn new(width: u16, height: u16) -> Option<Self> {
+            (width != 0 && height != 0).then_some(Self { width, height })
+        }
+
+        #[must_use]
+        pub const fn width(self) -> u16 {
+            self.width
+        }
+
+        #[must_use]
+        pub const fn height(self) -> u16 {
+            self.height
+        }
+
+        #[must_use]
+        pub fn last_tile(self, origin: RadarTile) -> RadarTile {
+            RadarTile::new(
+                origin.x.saturating_add(u32::from(self.width - 1)),
+                origin.y.saturating_add(u32::from(self.height - 1)),
+            )
+        }
+    }
+
+    impl PartialEq<(i32, i32)> for RadarExtent {
+        fn eq(&self, other: &(i32, i32)) -> bool {
+            (i32::from(self.width), i32::from(self.height)) == *other
+        }
+    }
+
+    impl PartialEq<(u16, u16)> for RadarExtent {
+        fn eq(&self, other: &(u16, u16)) -> bool {
+            (self.width, self.height) == *other
+        }
+    }
+
+    impl PartialEq<(u32, u32)> for RadarTile {
+        fn eq(&self, other: &(u32, u32)) -> bool {
+            (self.x, self.y) == *other
+        }
+    }
+
+    /// A tile inside one fixed-size base chunk.
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+    pub struct RadarChunkLocalTile {
+        x: u16,
+        y: u16,
+    }
+
+    impl RadarChunkLocalTile {
+        #[must_use]
+        pub const fn new(x: u16, y: u16) -> Self {
+            Self { x, y }
+        }
+
+        #[must_use]
+        pub const fn x(self) -> u16 {
+            self.x
+        }
+
+        #[must_use]
+        pub const fn y(self) -> u16 {
+            self.y
+        }
+    }
+
+    impl PartialEq<(u16, u16)> for RadarChunkLocalTile {
+        fn eq(&self, other: &(u16, u16)) -> bool {
+            (self.x, self.y) == *other
+        }
+    }
+
+    /// A coordinate in the fixed-size radar chunk grid.
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+    pub struct RadarChunkCoord {
+        x: u32,
+        y: u32,
+    }
+
+    impl RadarChunkCoord {
+        #[must_use]
+        pub const fn new(x: u32, y: u32) -> Self {
+            Self { x, y }
+        }
+
+        #[must_use]
+        pub const fn x(self) -> u32 {
+            self.x
+        }
+
+        #[must_use]
+        pub const fn y(self) -> u32 {
+            self.y
+        }
+
+        #[must_use]
+        pub fn ancestor_at(self, levels: u8) -> Self {
+            Self::new(
+                self.x.checked_shr(u32::from(levels)).unwrap_or(0),
+                self.y.checked_shr(u32::from(levels)).unwrap_or(0),
+            )
+        }
+    }
+
+    /// A world rectangle sampled through the level-zero chunk grid.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct RadarRegion {
+        facet: Facet,
+        origin: RadarTile,
+        extent: RadarExtent,
+    }
+
+    impl RadarRegion {
+        #[must_use]
+        pub const fn new(facet: Facet, origin: RadarTile, extent: RadarExtent) -> Self {
+            Self {
+                facet,
+                origin,
+                extent,
+            }
+        }
+
+        #[must_use]
+        pub const fn facet(self) -> Facet {
+            self.facet
+        }
+
+        #[must_use]
+        pub const fn origin(self) -> RadarTile {
+            self.origin
+        }
+
+        #[must_use]
+        pub const fn extent(self) -> RadarExtent {
+            self.extent
+        }
+    }
+}
+
+pub use types::{RadarChunkCoord, RadarChunkLocalTile, RadarExtent, RadarLod, RadarRegion, RadarTile};
+
 /// What a tile with no colour of its own draws as.
 ///
 /// Deliberately non-zero: `Color16(0)` is *absent* in every one of these files,
@@ -73,11 +316,12 @@ pub const BASE_CHUNK_BLOCKS: u16 = BASE_CHUNK_TILES / BLOCK_TILES;
 /// the same conversion for an out-of-facet request, whose complete chunk
 /// carries [`UNKNOWN`] along its east and south borders.
 #[must_use]
-pub fn world_tile_to_base_chunk(world: (u32, u32)) -> (RadarChunkCoord, (u16, u16)) {
+pub fn world_tile_to_base_chunk(world: impl Into<RadarTile>) -> (RadarChunkCoord, RadarChunkLocalTile) {
+    let world = world.into();
     let side = u32::from(BASE_CHUNK_TILES);
     (
-        RadarChunkCoord::new(world.0 / side, world.1 / side),
-        ((world.0 % side) as u16, (world.1 % side) as u16),
+        RadarChunkCoord::new(world.x() / side, world.y() / side),
+        RadarChunkLocalTile::new((world.x() % side) as u16, (world.y() % side) as u16),
     )
 }
 
@@ -90,18 +334,10 @@ pub fn world_tile_to_base_chunk(world: (u32, u32)) -> (RadarChunkCoord, (u16, u1
 /// would build forever. `region.lod` is not consulted: level zero is the
 /// only chunk grid a rectangle of world tiles maps onto directly.
 pub fn region_base_chunks(region: RadarRegion) -> impl Iterator<Item = RadarChunkCoord> {
-    let last_x = region
-        .origin
-        .0
-        .saturating_add(u32::from(region.extent.0.saturating_sub(1)));
-    let last_y = region
-        .origin
-        .1
-        .saturating_add(u32::from(region.extent.1.saturating_sub(1)));
-    let (first_chunk, _) = world_tile_to_base_chunk(region.origin);
-    let (last_chunk, _) = world_tile_to_base_chunk((last_x, last_y));
-    (first_chunk.y..=last_chunk.y)
-        .flat_map(move |y| (first_chunk.x..=last_chunk.x).map(move |x| RadarChunkCoord::new(x, y)))
+    let (first_chunk, _) = world_tile_to_base_chunk(region.origin());
+    let (last_chunk, _) = world_tile_to_base_chunk(region.extent().last_tile(region.origin()));
+    (first_chunk.y()..=last_chunk.y())
+        .flat_map(move |y| (first_chunk.x()..=last_chunk.x()).map(move |x| RadarChunkCoord::new(x, y)))
 }
 
 /// Every level-zero chunk coordinate a region's rectangle touches, nearest
@@ -126,11 +362,11 @@ pub fn region_base_chunks_near(
     chunks.sort_by_key(|chunk| {
         (
             chunk
-                .x
-                .abs_diff(centre.x)
-                .saturating_add(chunk.y.abs_diff(centre.y)),
-            chunk.y,
-            chunk.x,
+                .x()
+                .abs_diff(centre.x())
+                .saturating_add(chunk.y().abs_diff(centre.y())),
+            chunk.y(),
+            chunk.x(),
         )
     });
     chunks.into_iter()
@@ -143,22 +379,6 @@ pub fn region_base_chunks_near(
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct RadarRevision(pub u64);
 
-/// Coordinates of one chunk at one LOD level.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
-pub struct RadarChunkCoord {
-    /// Horizontal chunk coordinate.
-    pub x: u32,
-    /// Vertical chunk coordinate.
-    pub y: u32,
-}
-
-impl RadarChunkCoord {
-    #[must_use]
-    pub const fn new(x: u32, y: u32) -> Self {
-        Self { x, y }
-    }
-}
-
 /// The complete identity of a cached terrain raster.
 ///
 /// At LOD zero, `chunk` addresses [`BASE_CHUNK_TILES`] square world-tile
@@ -167,7 +387,7 @@ impl RadarChunkCoord {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct RadarChunkKey {
     facet: Facet,
-    lod: u8,
+    lod: RadarLod,
     chunk: RadarChunkCoord,
     revision: RadarRevision,
 }
@@ -178,10 +398,15 @@ impl RadarChunkKey {
     /// Keeping this crate-visible prevents a window or a player marker from
     /// accidentally creating a second, position-keyed terrain cache.
     #[must_use]
-    pub(crate) const fn new(facet: Facet, lod: u8, chunk: RadarChunkCoord, revision: RadarRevision) -> Self {
+    pub(crate) fn new(
+        facet: Facet,
+        lod: impl Into<RadarLod>,
+        chunk: RadarChunkCoord,
+        revision: RadarRevision,
+    ) -> Self {
         Self {
             facet,
-            lod,
+            lod: lod.into(),
             chunk,
             revision,
         }
@@ -193,7 +418,7 @@ impl RadarChunkKey {
     }
 
     #[must_use]
-    pub const fn lod(self) -> u8 {
+    pub const fn lod(self) -> RadarLod {
         self.lod
     }
 
@@ -210,16 +435,16 @@ impl RadarChunkKey {
     /// The north-west world tile a base chunk starts at, if it is representable
     /// by the map reader's `u16` coordinates.
     #[must_use]
-    pub fn base_origin(self) -> Option<(u16, u16)> {
-        if self.lod != 0 {
+    pub fn base_origin(self) -> Option<RadarTile> {
+        if !self.lod.is_base() {
             return None;
         }
-        let x = self.chunk.x.checked_mul(u32::from(BASE_CHUNK_TILES))?;
-        let y = self.chunk.y.checked_mul(u32::from(BASE_CHUNK_TILES))?;
+        let x = self.chunk.x().checked_mul(u32::from(BASE_CHUNK_TILES))?;
+        let y = self.chunk.y().checked_mul(u32::from(BASE_CHUNK_TILES))?;
         if x > u32::from(u16::MAX) || y > u32::from(u16::MAX) {
             return None;
         }
-        Some((x as u16, y as u16))
+        Some(RadarTile::new(x, y))
     }
 }
 
@@ -310,7 +535,7 @@ impl RadarCache {
 
     /// Construct a cache key under the facet's current source revision.
     #[must_use]
-    pub fn key(&self, facet: Facet, lod: u8, chunk: RadarChunkCoord) -> RadarChunkKey {
+    pub fn key(&self, facet: Facet, lod: impl Into<RadarLod>, chunk: RadarChunkCoord) -> RadarChunkKey {
         RadarChunkKey::new(facet, lod, chunk, self.revision(facet))
     }
 
@@ -343,19 +568,22 @@ impl RadarCache {
     /// Returns `None` only if the facet revision has exhausted `u64`.  The map
     /// itself must not be changed in that case, because the cache can no longer
     /// name a newer immutable source product.
-    pub fn invalidate_tile(&mut self, facet: Facet, tile: (u32, u32), max_lod: u8) -> Option<RadarRevision> {
+    pub fn invalidate_tile(
+        &mut self,
+        facet: Facet,
+        tile: impl Into<RadarTile>,
+        max_lod: impl Into<RadarLod>,
+    ) -> Option<RadarRevision> {
+        let max_lod = max_lod.into();
         let revision = RadarRevision(self.revision(facet).0.checked_add(1)?);
         self.revisions.insert(facet, revision);
         self.dirty.retain(|key| key.facet != facet);
 
         let (base_chunk, _) = world_tile_to_base_chunk(tile);
-        for lod in 0..=max_lod {
-            let shift = u32::from(lod);
-            let chunk = RadarChunkCoord::new(
-                base_chunk.x.checked_shr(shift).unwrap_or(0),
-                base_chunk.y.checked_shr(shift).unwrap_or(0),
-            );
-            self.dirty.insert(RadarChunkKey::new(facet, lod, chunk, revision));
+        for lod in 0..=max_lod.value() {
+            let chunk = base_chunk.ancestor_at(lod);
+            self.dirty
+                .insert(RadarChunkKey::new(facet, RadarLod::new(lod), chunk, revision));
         }
         Some(revision)
     }
@@ -425,10 +653,7 @@ impl RadarCache {
                     candidate.facet == key.facet
                         && candidate.revision == current_revision
                         && candidate.lod > key.lod
-                        && key.chunk.x.checked_shr(u32::from(candidate.lod - key.lod))
-                            == Some(candidate.chunk.x)
-                        && key.chunk.y.checked_shr(u32::from(candidate.lod - key.lod))
-                            == Some(candidate.chunk.y)
+                        && key.chunk.ancestor_at(candidate.lod.value() - key.lod.value()) == candidate.chunk
                 })
                 .min_by_key(|(candidate, _)| candidate.lod)
                 .map(|(_, chunk)| chunk);
@@ -623,11 +848,11 @@ impl RadarWorkQueue {
             let chunk = key.chunk();
             (
                 chunk
-                    .x
-                    .abs_diff(centre.x)
-                    .saturating_add(chunk.y.abs_diff(centre.y)),
-                chunk.y,
-                chunk.x,
+                    .x()
+                    .abs_diff(centre.x())
+                    .saturating_add(chunk.y().abs_diff(centre.y())),
+                chunk.y(),
+                chunk.x(),
             )
         });
         keys.truncate(self.builds_per_turn);
@@ -685,19 +910,6 @@ impl RadarChunk {
     }
 }
 
-/// A terrain sampling request for a minimap draw.
-///
-/// This is deliberately only a region in world coordinates.  A caller may
-/// centre it on a player, but it contains neither a player marker nor a reason
-/// to generate or upload terrain; cache selection is solely by chunk key.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct RadarRegion {
-    pub facet: Facet,
-    pub lod: u8,
-    pub origin: (u32, u32),
-    pub extent: (u16, u16),
-}
-
 /// Build a level-zero chunk from the authoritative terrain-colour rule.
 ///
 /// `key.lod` must be zero.  Out-of-facet cells, including the fixed-size map
@@ -709,7 +921,7 @@ pub fn build_base_chunk(map: &Map, colors: &RadarColors, key: RadarChunkKey) -> 
     fill(
         map,
         colors,
-        origin,
+        (origin.x() as u16, origin.y() as u16),
         BASE_CHUNK_TILES,
         BASE_CHUNK_TILES,
         &mut pixels,
@@ -749,9 +961,9 @@ pub fn reduce_lod_pixel(samples: [Color16; 4]) -> Color16 {
 /// terrain after an invalidation.
 #[must_use]
 pub fn build_lod_parent(key: RadarChunkKey, children: [&RadarChunk; 4]) -> Option<RadarChunk> {
-    let child_lod = key.lod.checked_sub(1)?;
-    let child_x = key.chunk.x.checked_mul(2)?;
-    let child_y = key.chunk.y.checked_mul(2)?;
+    let child_lod = key.lod.child()?;
+    let child_x = key.chunk.x().checked_mul(2)?;
+    let child_y = key.chunk.y().checked_mul(2)?;
     let expected = [
         RadarChunkCoord::new(child_x, child_y),
         RadarChunkCoord::new(child_x.checked_add(1)?, child_y),
@@ -803,8 +1015,8 @@ const fn chunk_pixel_count() -> usize {
 pub fn parent_key(key: RadarChunkKey) -> Option<RadarChunkKey> {
     Some(RadarChunkKey::new(
         key.facet,
-        key.lod.checked_add(1)?,
-        RadarChunkCoord::new(key.chunk.x / 2, key.chunk.y / 2),
+        key.lod.parent()?,
+        RadarChunkCoord::new(key.chunk.x() / 2, key.chunk.y() / 2),
         key.revision,
     ))
 }
@@ -816,9 +1028,9 @@ pub fn parent_key(key: RadarChunkKey) -> Option<RadarChunkKey> {
 /// map rather than reduced from anything.
 #[must_use]
 pub fn child_keys(key: RadarChunkKey) -> Option<[RadarChunkKey; 4]> {
-    let lod = key.lod.checked_sub(1)?;
-    let x = key.chunk.x.checked_mul(2)?;
-    let y = key.chunk.y.checked_mul(2)?;
+    let lod = key.lod.child()?;
+    let x = key.chunk.x().checked_mul(2)?;
+    let y = key.chunk.y().checked_mul(2)?;
     let child = |x, y| RadarChunkKey::new(key.facet, lod, RadarChunkCoord::new(x, y), key.revision);
     Some([
         child(x, y),
@@ -835,7 +1047,7 @@ pub fn child_keys(key: RadarChunkKey) -> Option<[RadarChunkKey; 4]> {
 /// level a fallback selected. It is the ladder's depth rather than a property
 /// of the map: a minimap that could be zoomed out would raise this, and that is
 /// the change to make, not a second cache keyed by zoom.
-pub const MAX_LOD: u8 = 2;
+pub const MAX_LOD: RadarLod = RadarLod::new(2);
 
 /// Build every ancestor that publishing one chunk has just completed, and
 /// publish them too.  Returns how many were built.
@@ -849,7 +1061,12 @@ pub const MAX_LOD: u8 = 2;
 /// Work is bounded by [`MAX_LOD`] and by the arithmetic: one reduction is four
 /// complete children into one product of the same pixel count, and it happens
 /// on one child in four.
-pub fn build_ready_ancestors(cache: &mut RadarCache, key: RadarChunkKey, max_lod: u8) -> usize {
+pub fn build_ready_ancestors(
+    cache: &mut RadarCache,
+    key: RadarChunkKey,
+    max_lod: impl Into<RadarLod>,
+) -> usize {
+    let max_lod = max_lod.into();
     let mut built = 0;
     let mut child = key;
     while child.lod < max_lod {
@@ -1118,6 +1335,18 @@ mod tests {
     const RED: Color16 = Color16(0x7C00);
     const WHITE: Color16 = Color16(0x7FFF);
 
+    #[test]
+    fn radar_space_keeps_tiles_extents_and_lods_distinct() {
+        assert!(RadarExtent::new(0, 1).is_none());
+        assert!(RadarExtent::new(1, 0).is_none());
+
+        let extent = RadarExtent::new(64, 32).expect("a non-empty rectangle");
+        let region = RadarRegion::new(Facet(0), RadarTile::new(80, 40).saturating_sub(extent), extent);
+        assert_eq!(region.origin(), RadarTile::new(48, 24));
+        assert_eq!(RadarLod::BASE.parent(), Some(RadarLod::new(1)));
+        assert_eq!(RadarLod::BASE.child(), None);
+    }
+
     /// A one-block facet, every tile land id 1 at z 0.
     fn a_field() -> Map {
         Map::from_blocks(1, 1, |_, _| LandCell {
@@ -1150,12 +1379,11 @@ mod tests {
 
     #[test]
     fn base_chunks_near_a_centre_visit_the_closest_first_not_in_raster_order() {
-        let region = RadarRegion {
-            facet: Facet(0),
-            lod: 0,
-            origin: (0, 0),
-            extent: (BASE_CHUNK_TILES * 3, BASE_CHUNK_TILES * 3),
-        };
+        let region = RadarRegion::new(
+            Facet(0),
+            RadarTile::new(0, 0),
+            RadarExtent::new(BASE_CHUNK_TILES * 3, BASE_CHUNK_TILES * 3).unwrap(),
+        );
         let centre = RadarChunkCoord::new(2, 2);
 
         let ordered: Vec<_> = region_base_chunks_near(region, centre).collect();
@@ -1168,8 +1396,8 @@ mod tests {
         );
         let mut raster: Vec<_> = region_base_chunks(region).collect();
         let mut near = ordered;
-        raster.sort_by_key(|chunk| (chunk.y, chunk.x));
-        near.sort_by_key(|chunk| (chunk.y, chunk.x));
+        raster.sort_by_key(|chunk| (chunk.y(), chunk.x()));
+        near.sort_by_key(|chunk| (chunk.y(), chunk.x()));
         assert_eq!(
             raster, near,
             "distance order is a permutation of the raster walk, not a different set"
@@ -1181,15 +1409,15 @@ mod tests {
         assert_eq!(BASE_CHUNK_BLOCKS, 8);
         assert_eq!(
             world_tile_to_base_chunk((0, 0)),
-            (RadarChunkCoord::new(0, 0), (0, 0))
+            (RadarChunkCoord::new(0, 0), RadarChunkLocalTile::new(0, 0))
         );
         assert_eq!(
             world_tile_to_base_chunk((u32::from(BASE_CHUNK_TILES) - 1, 63)),
-            (RadarChunkCoord::new(0, 0), (63, 63))
+            (RadarChunkCoord::new(0, 0), RadarChunkLocalTile::new(63, 63))
         );
         assert_eq!(
             world_tile_to_base_chunk((u32::from(BASE_CHUNK_TILES), 64)),
-            (RadarChunkCoord::new(1, 1), (0, 0))
+            (RadarChunkCoord::new(1, 1), RadarChunkLocalTile::new(0, 0))
         );
     }
 
@@ -1476,24 +1704,22 @@ mod tests {
 
     #[test]
     fn region_base_chunks_covers_every_chunk_a_rectangle_touches() {
-        let aligned = RadarRegion {
-            facet: Facet(0),
-            lod: 0,
-            origin: (0, 0),
-            extent: (BASE_CHUNK_TILES, BASE_CHUNK_TILES),
-        };
+        let aligned = RadarRegion::new(
+            Facet(0),
+            RadarTile::new(0, 0),
+            RadarExtent::new(BASE_CHUNK_TILES, BASE_CHUNK_TILES).unwrap(),
+        );
         assert_eq!(
             region_base_chunks(aligned).collect::<Vec<_>>(),
             vec![RadarChunkCoord::new(0, 0)],
             "one chunk exactly fills one chunk-aligned region"
         );
 
-        let straddling = RadarRegion {
-            facet: Facet(0),
-            lod: 0,
-            origin: (32, 32),
-            extent: (BASE_CHUNK_TILES, BASE_CHUNK_TILES),
-        };
+        let straddling = RadarRegion::new(
+            Facet(0),
+            RadarTile::new(32, 32),
+            RadarExtent::new(BASE_CHUNK_TILES, BASE_CHUNK_TILES).unwrap(),
+        );
         assert_eq!(
             region_base_chunks(straddling).collect::<Vec<_>>(),
             vec![
