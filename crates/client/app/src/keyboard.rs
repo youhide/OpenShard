@@ -110,6 +110,8 @@ pub(crate) enum Edit {
     NextCandidate,
     /// Delete the `char` before the caret.
     Backspace,
+    /// Delete the whitespace and word before the caret.
+    BackspaceWord,
     /// Delete the `char` after the caret.
     Delete,
     /// Caret one `char` left.
@@ -125,10 +127,10 @@ pub(crate) enum Edit {
 impl Edit {
     /// What a key does to the line, or `None` for one that is text (or nothing).
     ///
-    /// `shift` is the modifier state as `ModifiersChanged` last reported it —
-    /// see `crate::input::Input::shift_held`, which is where a held modifier
-    /// honestly lives; `KeyEvent` carries no modifiers of its own.
-    pub(crate) const fn of(code: KeyCode, shift: bool) -> Option<Self> {
+    /// Modifier states are what `ModifiersChanged` last reported — see
+    /// [`crate::input::Input`], which is where a held modifier honestly lives;
+    /// `KeyEvent` carries no modifiers of its own.
+    pub(crate) const fn of(code: KeyCode, shift: bool, ctrl: bool) -> Option<Self> {
         Some(match code {
             KeyCode::Enter | KeyCode::NumpadEnter => Self::Submit,
             KeyCode::Escape => Self::Cancel,
@@ -139,6 +141,7 @@ impl Edit {
             KeyCode::Tab => Self::Complete,
             KeyCode::ArrowUp => Self::PreviousCandidate,
             KeyCode::ArrowDown => Self::NextCandidate,
+            KeyCode::Backspace if ctrl => Self::BackspaceWord,
             KeyCode::Backspace => Self::Backspace,
             KeyCode::Delete => Self::Delete,
             KeyCode::ArrowLeft => Self::Left,
@@ -382,8 +385,17 @@ mod tests {
 
     #[test]
     fn tab_completes_and_shift_tab_turns_the_channel() {
-        assert_eq!(Edit::of(KeyCode::Tab, false), Some(Edit::Complete));
-        assert_eq!(Edit::of(KeyCode::Tab, true), Some(Edit::NextChannel));
+        assert_eq!(Edit::of(KeyCode::Tab, false, false), Some(Edit::Complete));
+        assert_eq!(Edit::of(KeyCode::Tab, true, false), Some(Edit::NextChannel));
+    }
+
+    #[test]
+    fn ctrl_backspace_deletes_a_word_and_plain_backspace_a_character() {
+        assert_eq!(
+            Edit::of(KeyCode::Backspace, false, true),
+            Some(Edit::BackspaceWord)
+        );
+        assert_eq!(Edit::of(KeyCode::Backspace, false, false), Some(Edit::Backspace));
     }
 
     /// The world's table, read both ways: every binding answers for its own key
@@ -426,7 +438,7 @@ mod tests {
     fn a_letter_is_a_hotkey_only_where_the_world_owns_the_keyboard() {
         assert_eq!(Hotkey::of(KeyCode::KeyP), Some(Hotkey::Paperdoll));
         assert_eq!(
-            Edit::of(KeyCode::KeyP, false),
+            Edit::of(KeyCode::KeyP, false, false),
             None,
             "the same key, typed, is text"
         );
@@ -437,15 +449,18 @@ mod tests {
     /// different owner, and this is the table that says so.
     #[test]
     fn arrows_are_the_lines_own_and_a_letter_is_not_in_the_table() {
-        assert_eq!(Edit::of(KeyCode::ArrowLeft, false), Some(Edit::Left));
-        assert_eq!(Edit::of(KeyCode::ArrowUp, false), Some(Edit::PreviousCandidate));
+        assert_eq!(Edit::of(KeyCode::ArrowLeft, false, false), Some(Edit::Left));
         assert_eq!(
-            Edit::of(KeyCode::KeyA, false),
+            Edit::of(KeyCode::ArrowUp, false, false),
+            Some(Edit::PreviousCandidate)
+        );
+        assert_eq!(
+            Edit::of(KeyCode::KeyA, false, false),
             None,
             "a letter is text, not a binding"
         );
         assert_eq!(
-            Edit::of(KeyCode::F5, false),
+            Edit::of(KeyCode::F5, false, false),
             None,
             "a hotkey is the world's, not the line's"
         );

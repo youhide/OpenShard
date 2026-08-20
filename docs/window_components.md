@@ -769,8 +769,8 @@ never a half-routed frame.
   be the pixel whose local cursor picks that picture.
 
   **Since: the placement gained a scale, and that made both directions one
-  function each.** `desk::WindowScale` is how big every window draws — an
-  integer upscale on the art's own pixels, saved as `window_scale` in
+  function each.** `desk::WindowScale` is how big every window draws — a
+  fractional upscale on the art's own pixels, saved as `window_scale` in
   `client_ui.toml` and turned by the dev window's Windows tab — because the
   reference client has no display scaling at all and its windows are postage
   stamps on a modern screen. A window is therefore *magnified and moved*
@@ -781,14 +781,24 @@ never a half-routed frame.
   scissored row all end as `SpriteQuad`s in the same window-local pixels, and
   three ways to place them would be three things to keep in step with the
   pointer. The pointer's own half is `windows::OwnWindow::local_cursor`,
-  which subtracts the placement and divides by the same factor — `div_euclid`,
-  not `/`, because a cursor left of a window is a negative local coordinate
-  and truncating division would round it onto column `0`, inside the picture
-  that starts there. Anything cropped is cut *before* `place`, in the
-  window's own pixels, where the cut is exact. Two things deliberately keep
-  the art's own size: the shard's hover tooltip (it is drawn over the world
-  as well, and belongs to no window) and the HUD chat box (`desk::ChatScale`
-  is its own knob).
+  which subtracts the placement and divides by the same factor, **flooring**:
+  a cursor left of a window is a negative local coordinate and a truncating
+  cast would round it onto column `0`, inside the picture that starts there,
+  and floor is also the rounding a quad's own edge lands on, which is what
+  makes the two agree pixel for pixel at a fraction. Anything cropped is cut
+  *before* `place`, in the window's own pixels, where the cut is exact. Two
+  things deliberately keep the art's own size: the shard's hover tooltip (it
+  is drawn over the world as well, and belongs to no window) and the HUD chat
+  box (`desk::ChatScale` is its own knob).
+
+  **And it cost a round trip to learn what was already written down**: the
+  scale was read from `App::desk`, which is the file as it was *loaded* —
+  the copy the slider moves is `Shell::desk`, and the two meet only at exit.
+  The knob therefore did nothing at all, which reads from the outside as "the
+  window layer does not scale" rather than as "the number never arrived".
+  `Shell::tuning`'s own doc had said so about the lighting, in those words.
+  It is `App::window_scale` now: the shell's copy while there is a shell, the
+  app's only for a run that has none.
 - ~~**The vendor window and the skill window disagree about what a wheel over a
   window means.** Skills claims its whole frame; the vendor claims only its
   catalogue viewport (`catalogue_contains`), so a notch over the shop's buttons

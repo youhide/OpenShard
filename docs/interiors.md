@@ -1,11 +1,11 @@
-# A building, and what it lets you see
+# Buildings, rendered floor by floor
 
-Three things a person asked for, and they are one subject: **who decides how
-much of a building is drawn.**
+Three things a person asked for concern a building's picture, but they are not
+one `Cutaway` predicate. `Cutaway` is the old, global height-and-roof rule. An
+interior is a separate renderer policy over one building's cells and floors.
 
-1. **The storey is a choice.** Today one function decides — the client's own port
-   of `UpdateMaxDrawZ` — and nobody can overrule it. A person wants Auto or a
-   storey they picked, on Page Up / Page Down, with the switch in the F1 window.
+1. **The floor is a choice.** A person wants Auto or a floor they picked, on
+   Page Up / Page Down, with the switch in the F1 window.
 2. **A sealed room is a black area.** Not "its contents are not drawn" — *the
    room is not there*: no floor, no walls seen from inside, no furniture, no
    creature. And it is **any sealed room**, not only a house: a vault in a
@@ -15,30 +15,30 @@ much of a building is drawn.**
    stop at the knee instead of standing full height, so the room behind them is
    visible.
 
-They share a seam. All three are the same question asked of a different
-predicate, and the whole of that predicate lives in one module today
-([`cutaway.rs`](../crates/client/render/src/cutaway.rs)) — which is why this is
-one plan and not three.
+They share an index and a frame snapshot, not a type. `Cutaway` continues to
+answer its established question for every map object. The new interior path
+answers `is this cell of this building shown on this floor?`; it is consulted
+only for geometry belonging to an indexed building. This separation matters:
+one global `max_z` cannot describe a cellar below a shop, two neighbouring
+buildings at different elevations, or a selected floor without also cutting the
+street beside it.
 
-**And 1 and 2 are the same picture.** With the roof on, a sealed room is already
-invisible — the roof is drawn over it. The black area is what you see *once the
-roof comes off*, which is either the Auto cutaway doing its job or a person on
-Page Up doing it by hand. So R2 is not a rule that fires on its own: it is what
-stops R1 from turning every roof key into an x-ray.
+**The floor view and black rooms are one building picture.** With a roof on, a
+sealed room is already hidden by the roof. Once the building renderer opens the
+view to a floor, the room rule prevents that action from becoming x-ray vision.
 
 ## The order
 
-**R0 first — the refactor, on its own, with no feature in it.** Then the keys,
-then the rooms, then the knee. R0 is not tidying: two of its three findings are
-places where this plan would otherwise add a second way for one frame to
-disagree with itself, and the third is what the storey keys need before they can
-be bound at all.
+**R0 first — the refactor, on its own, with no feature in it.** Then the map
+index, then the building renderer, then the knee. R0 is not tidying: it keeps
+one frame from answering the existing cutaway question differently for drawing
+and picking, and gives the later building-frame input a single cache key.
 
 | | what | why in this order |
 |---|---|---|
-| **R0** | One `Cutaway` computation, a `Key` for the geometry cache, a `Hotkey` that can hold a modifier | Each is a precondition of a phase below, and each is a change nobody can see |
-| **R1** | Storeys and roofs on the keyboard and in F1 | The cheapest of the three, and it is what makes R2 visible enough to judge |
-| **R2** | The room index, and the black area | The dear one. Staged so the index can be looked at before anything is gated on it |
+| **R0** | One existing `Cutaway` computation and a `Key` for the geometry cache | Each is a no-picture-change precondition below |
+| **R1** | The building index: cells, structural floors, rooms and portals | The expensive, inspectable map fact; debug it before it decides one pixel |
+| **R2** | The separate building renderer: Auto/Manual floors, rooms and controls | It consumes R1 rather than extending `Cutaway` |
 | **R3** | Walls at knee height | Smallest change, last, because its scope wants R2's rooms |
 
 ## What exists, and where
@@ -47,10 +47,10 @@ be bound at all.
 |---|---|
 | The rule | `Cutaway { max_z, max_ground_z, no_draw_roofs }`, `Cutaway::at(map, tiledata, player, draw_roofs)` — `render/src/cutaway.rs:180-310`. A port of `GameScene.UpdateMaxDrawZ`, reading the player's own tile and the one diagonally in front of it. |
 | Who asks it | `ground.rs:217` (`shows_land`), `mobiles.rs:507,648` (`shows_mobile`), `statics.rs:847` (`shows_static`), `occlusion.rs:1022` (`shows_at`, for the shadow grid). Four readers, one rule. |
-| Who computes it | **Two places, copy for copy** — `app/src/presentation.rs:1483` and `app/src/ui_command.rs:451`, each spelling `if cutaway_disabled { OPEN } else { at(..) }`. Plus every tool and test: `render/tests/{post,dump,lid,parity}.rs`, `statics.rs:1964`. This is [`parity.md`](parity.md)'s complaint, on this exact rule. |
+| Who computes it | `App::cutaway()` computes the client's one frame/click answer. Tools and render tests call `Cutaway::at` directly with their explicitly supplied frame. |
 | The switch that exists | `GraphicsSettings::cutaway_disabled` (`app/src/graphics.rs:51`), `OPENSHARD_DISABLE_CUTAWAY`, a checkbox in the F1 World tab (`shell.rs:912-936`), plumbed through `shell::Request` → `picking_query.rs:675`. |
 | The keys | `Hotkey` (`app/src/keyboard.rs:272-320`), a 19-entry table with `key()` as the single forward statement and `of()` scanning it. **Page Up / Page Down are taken** — `PanUp`/`PanDown`, the camera pan. `of()` takes a bare `KeyCode` and cannot express a chord. |
-| What a tile has over it | `Occlusion::sky_at(x, y) -> u8` against `SKY_OPEN` (`render/src/occlusion.rs:1338,1929`) — the sky field the ambient is built from. A **column**'s answer, not a storey's; see R2a for why that matters. |
+| What a tile has over it | `Occlusion::sky_at(x, y) -> u8` against `SKY_OPEN` (`render/src/occlusion.rs:1338,1929`) — the sky field the ambient is built from. A **column**'s answer, not a floor cell's; see R1a for why that matters. |
 | What stops a step, and a look | `Terrain::sight_clear` on both ends (`common/movement/src/terrain.rs:657`, `server/state/src/obstruct.rs:331`), `Blocker::door` on the client's own `Clutter`, `Obstructions::blocker_at_z` on the server's. The client's `sight_clear` (`app/src/clutter.rs:362`) **has never had a reader** — `docs/client.md:3491` files it as exactly that. |
 | A fragment's world position | Per pixel, in the shader: `shaders/statics.wesl`'s `fs_main` meets the view ray with the boxes the instance stands as (`nearest`), and `at = best.at` **is the world point this pixel is a picture of**. Phase 6 of [`lighting_rebuild.md`](lighting_rebuild.md). This is what makes R3 a shader line rather than a re-cut of the art. |
 | What an undrawn pixel is | `renderer::CLEAR` — transparent black, `a = 0`, and every fragment shader writes `a = 1`. So "was anything drawn here" **is one byte**, which is the acceptance instrument R2 is measured with and the reason "black area" needs no new mechanism to paint. |
@@ -63,43 +63,37 @@ be bound at all.
   placed by [`housing.md`](housing.md) is an item the client does not draw at
   all. Every rule below is written over map statics and server items, and the day
   multis are drawn they arrive as more of the first kind.
-- **The static geometry cache is keyed on the `Cutaway`**
-  (`app/src/world.rs:229,269`). Any new input to "is this drawn" that is not in
-  that key is a stale frame that only shows up while walking. R2 adds such an
-  input, and R0b is what gives it somewhere to go.
+- **The static geometry cache has one `StaticGeometryCacheKey`**, including the
+  `Cutaway`. Any new input to "is this drawn" belongs in that key; otherwise it
+  is a stale frame that only shows up while walking. R2 adds the interior-frame
+  fingerprint.
 - **The map does not change.** Rooms are a function of the map's statics, which
   are read-only files. That is the whole reason an index is affordable: it is
   baked per block and cached, and the only thing that moves is a door.
 
 ## Decisions, taken here
 
-**D1 — one policy object, computed once.** `Cutaway::at`'s `draw_roofs: bool`
-becomes a `Storeys` policy, and the two copies at `presentation.rs:1483` and
-`ui_command.rs:451` become one `App::cutaway()`. This is a **precondition, not a
-tidy-up**: a picture drawn under one storey and a click tested under another is
-not a bug you find by looking, and R1 doubles the number of ways the two can
-disagree. Tools and tests keep calling `Cutaway::at` directly with an explicit
-policy — that is honest, they *are* a different frame — but the client has one
-caller.
+**D1 — two policies, each computed once.** `App::cutaway()` is the sole client
+caller of the existing global cutaway rule, so picture and picking agree.
+`Interiors::frame(...)` is a separate, immutable frame value for building
+rendering. It contains the selected structural floors and shown rooms, and is
+passed both to frame assembly and picking. Neither policy is encoded in the
+other.
 
-**D2 — the manual unit is a storey of 20 z, named and shown.** Not a ladder
-inferred from whatever happens to stand in the player's column: that is a guess
-whose answer changes as you walk, and a control that moves under you is worse
-than no control. `STOREY: i32 = 20` is what a UO building steps by (housing's own
-D9a says a villa's roof stands twenty above its foundation), the F1 panel shows
-the resulting `max_z` in world units, and a slider next to it moves that number
-directly for anyone who needs a cut the storeys do not name.
+**D2 — the manual unit is a structural floor, not a `z` arithmetic rule.** The
+index gives a building ordered `FloorId`s from its cells' floor bands. The UI may
+present a relative level, but `Manual` resolves that level to a `FloorId` before
+rendering. A constant 20-z ladder is useful map evidence, not the renderer's
+definition: it breaks on a cellar, a raised threshold, or a building authored
+with a non-standard height.
 
-**D3 — level 0 is the floor the player stands on.** `Manual { level }` cuts at
-`floor_z + (level + 1) * STOREY`, where `floor_z` is the surface under the player
-— which the client already knows, it is what `cutaway_at` carries. So level 0
-draws the storey you are in and nothing above it; +1 adds the one above; −1 takes
-the ceiling of the cellar off from inside it.
+**D3 — level 0 is the structural floor of the player's cell.** Manual level 0
+shows that floor and the floors below it; +1 adds the next indexed floor; −1
+opens the cellar floor. It never means “world z plus a constant”.
 
-**D4 — manual mode does not set `no_draw_roofs`.** It has no need to: a roof
-above the cut is removed by `max_z` alone, and a roof *below* it — a porch, a
-lean-to on the storey you are looking at — is part of the picture you asked for.
-`no_draw_roofs` stays what it is, the Auto rule's own flag.
+**D4 — floors do not mutate the roof setting.** `no_draw_roofs` remains solely
+the existing cutaway rule. The interior renderer decides which indexed roof or
+ceiling cells are shown for its selected floors.
 
 **D5 — the mode is not persisted.** `Desk` remembers the light, the zoom, the
 fonts. It will not remember this. A client that reopens with the roofs off is a
@@ -169,121 +163,91 @@ phase below, and each is worth its own commit.
   existing callers go through it. D1. A test asserts the picture and the pick
   were drawn under the same rule — which is a statement nothing makes today.
 - **R0b — the geometry cache key is a struct.** `StaticGeometryCache::new` and
-  `matches` take **the identical eight-argument list** twice
-  (`world.rs:240-282`), with `#[allow(clippy::too_many_arguments)]` on both and
-  a comment saying it wants a `Key` and that the change "belongs to whoever next
-  works on this cache". R2 is that person, and it arrives wanting a ninth field.
-  Two argument lists that must agree is exactly the shape of defect that gets
-  found by walking around.
-- **R0c — a `Hotkey` can hold a modifier.** `Hotkey::of` takes a bare `KeyCode`,
-  so no chord can be bound. R1 needs Ctrl+Page Up the moment the storey keys take
-  Page Up. Keep the table's own property while doing it: `key()` is the single
-  forward statement and `of()` scans it, deliberately, so there is one fact and
-  not two.
+  `matches` receive one `StaticGeometryCacheKey`, which records every input to
+  cached static geometry. R2 adds its interior-frame fingerprint there rather
+  than making a second key list.
+- **R0c — modifier bindings wait for the actual controls.** `Hotkey::of` takes a
+  bare `KeyCode` today. When R2 claims Page Up / Page Down it must grow a gesture
+  value (key plus modifier), preserving `key()` as the one forward table and
+  `of()` as its inverse. Do not fossilise that API before R2 has established the
+  exact controls.
 
-## R1 — which storey is drawn, and who chooses
+## R1 — the building index
 
-**What a person sees:** F1 → World → *Storeys*: Auto or Manual, and in Manual,
-Page Up and Page Down step a floor at a time. The camera pan moves to Ctrl+Page
-Up / Ctrl+Page Down.
+R1 changes no normal frame. It makes the durable map fact the building renderer
+will consume: a `BuildingId`, ordered structural `FloorId`s, cells, rooms and
+door portals. Each stage has a debug view, because the data must be judged before
+it can hide a pixel.
 
-- **R1a — the policy.** In `cutaway.rs`:
-  ```rust
-  pub enum Storeys {
-      /// The client's own rule: `UpdateMaxDrawZ`, with the roof setting it takes.
-      Auto { draw_roofs: bool },
-      /// A cut a person chose. `level` is storeys above the floor they stand on.
-      Manual { level: i8 },
-  }
-  ```
-  `Cutaway::at(map, tiledata, player, storeys)` takes it; `Manual` needs no map
-  walk at all — it is `floor_z + (level + 1) * STOREY` into all three fields per
-  D3/D4. `Cutaway::OPEN` stays what `cutaway_disabled` answers with.
-- **R1b — the keys.** `Hotkey::StoreyUp` / `StoreyDown` on `PageUp`/`PageDown`;
-  `PanUp`/`PanDown` become Ctrl-modified, on R0c. Pressing a storey key while
-  Auto is on **switches to Manual at the level that reproduces the current
-  picture**, so the first press changes nothing but the mode — a person stepping
-  off Auto does not lose their place.
-- **R1c — the roof, separately.** `Profile.DrawRoofs` exists in the port as
-  `draw_roofs` and is passed `true` from everywhere. It becomes a switch of its
-  own here — roofs on/off independent of the storey — because "take the roof off"
-  and "look at the third floor" are two things a person wants separately, and the
-  port already has the field for the first.
-- **R1d — the panel.** A *Storeys* group in the World tab beside the existing
-  cutaway checkbox: the Auto/Manual radio, the level, the resulting `max_z`, the
-  roof switch, and — read-only — what Auto would have answered, so the two can be
-  compared without toggling. The `Request` field follows the pattern
-  `cutaway_disabled` already set (`shell.rs:99` → `picking_query.rs:675`).
+- **R1a — cells and floors.** A cell is one tile, one floor band and one ceiling
+  band: the space a body could stand in. Build it from the shared column-surface
+  walk, not a third approximation. Its ceiling is the next surface or sky. The
+  debug view colours cells by floor band. Connected compatible bands form ordered
+  `FloorId`s inside a `BuildingId`; they are not a global z ladder. The precise
+  compatibility tolerance is measured against Britain and dungeons in this view
+  before it becomes an implementation constant.
+- **R1b — rooms and portals.** Adjacent cells join when their bands overlap by a
+  body height and `WALL | BLOCK | NO_SHOOT` does not separate them. Doors bake
+  as walls and record portals instead. Union-find per block plus seam stitching
+  builds rooms; cache the immutable result per map block.
+- **R1c — shown rooms.** Every frame, walk the small portal graph from outdoor
+  rooms and the player's room through currently open doors. The result is a set
+  of shown `RoomId`s. The debug view paints every other indexed room black;
+  ordinary frame assembly is still not gated.
+- **R1d — index acceptance.** The cell, floor, room and portal views must remain
+  separately selectable in F1. The ordinary World panel stays unchanged in R1:
+  Auto/Manual controls belong to the renderer in R2, after there is a real
+  `FloorId` to select.
 
-**What a test pins:** that `Manual { level: 0 }` standing on a second floor cuts
-above that floor and not above the ground floor (D3 is about `floor_z`, not the
-player's raw `z`); that a storey key in Auto lands on the level whose `Cutaway`
-equals the Auto one; that `Storeys` reaches the frame only through `Cutaway`, so
-the cache key needs nothing new.
+**What R1 pins:** a cellar and shop above it are different cells and can be
+different floors; a courtyard is outdoor; a shut door keeps rooms separate; an
+open door and the player's own room show the correct rooms. The alpha byte
+remains the final visual assertion, but only after R2 connects the index.
 
-**Open, needs a person's answer:** whether Manual mode says so anywhere outside
-the F1 window. A HUD line is the obvious answer and adding one is a UI decision,
-not an implementation detail, so it is not taken here.
+## R2 — the building renderer, and the black area
 
-## R2 — the room index, and the black area
+**What a person sees:** F1 → World → *Buildings*: Auto or Manual. In Manual,
+Page Up and Page Down select structural floors one at a time; camera pan moves to
+Ctrl+Page Up / Ctrl+Page Down. A selected floor shows its rooms and the floors
+below it, while sealed rooms remain black until a valid open-door path or the
+player's own room reaches them.
 
-**What a person sees:** with the roof off — by the Auto cutaway or by Page Up —
-the sealed rooms of a building are black. Walk in, and the room you are in is
-there, with whatever is joined to it through an open door.
+### R2a — one explicit building-frame value
 
-This is the phase with real design in it. It is staged so that each stage
-produces something that can be **looked at** before the next one is written,
-because a rule about what is *not* drawn cannot be judged from a frame where it
-is not drawn.
+`render/src/interiors.rs` owns the pure vocabulary and predicate:
+```rust
+pub enum FloorView { Auto, Manual { relative: i8 } }
+pub struct InteriorFrame { /* BuildingId, selected FloorIds, shown RoomIds */ }
+impl InteriorFrame { pub fn shows_cell(&self, cell: CellId) -> bool { /* ... */ } }
+```
+`Interiors::frame(index, player, doors, view)` resolves the relative choice to
+the player's `BuildingId` and `FloorId`, then produces the immutable frame value.
+No `Cutaway` field, `max_z`, or global map coordinate appears in this interface.
+Outside an indexed building it answers “not applicable”, so the ordinary render
+path stays exactly as it is.
 
-### R2a — the cell, and what a column holds
+### R2b — attach geometry to indexed cells
 
-A **cell** is one tile, one floor height, one ceiling height: the space a body
-could stand in. Building them is a walk of the column's surfaces — the land, and
-each platform static — which `cutaway::stack` already produces in the client's
-own order, and which `movement`'s `surfaces` already computes for the server's
-placement rules. The two are the same walk and this is a third caller, not a
-third copy: whichever of them this is written against, it is written **once**.
+Static assembly records the `CellId` (or “outside indexed building”) for every
+floor, static and server item. Mobile collection obtains the cell at its world
+position. `InteriorFrame::shows_cell` is then the single building-specific gate
+for all four. It is intentionally a different predicate from `shows_static`:
+the latter remains the existing global cutaway test.
 
-A cell's ceiling is the next surface above it, or the **sky** if there is none.
-`sky_at` is not the input (D7) — it is one byte per column and cannot tell a
-cellar from the room over it — but it *is* the cheap prefilter: a column that is
-open to the sky along its whole height holds no sealed cell, and Britain is
-mostly that.
+Outer walls are not owned by a hidden room and stay drawable; a hidden cell's
+floor, contents and occupants produce no geometry. No black pass is needed:
+those pixels remain `renderer::CLEAR`, with alpha zero.
 
-**Deliverable: a debug view that paints the cells**, one colour per floor height,
-over the visible rect. Nothing is gated yet.
+### R2c — controls, cache and picking
 
-### R2b — the room, and the portal
+The F1 *Buildings* group owns Auto/Manual, the selected relative floor and a
+read-only resolved `FloorId`/elevation. The regular roof setting remains its own
+existing setting. Page Up / Page Down select floors; camera pan moves to the
+explicit Ctrl chord when these bindings land.
 
-Two adjacent cells are joined when their z-bands overlap by a body's height and
-nothing walls them apart — the same `WALL | BLOCK | NO_SHOOT` reading that
-`sight_clear` uses, with `WINDOW` staying the hole it already is. Union-find over
-the cells of a block gives the rooms; block borders are stitched by the same test
-applied across the seam.
-
-Doors are baked as walls (D8), and each one is recorded as a **portal**: two room
-ids and the door's own identity, so the frame can ask whether it is open.
-
-**Baked per map block and cached**, like the occlusion grid and the LOD chunks
-already are — this is what D8's "the map does not change" buys. The cache is
-keyed on the block, not the frame, and a block is baked once per run.
-
-**Deliverable: the debug view paints rooms instead of cells**, one colour per
-room id, so a person can see a shop and its back office as two colours and a
-courtyard as none.
-
-### R2c — sealed, per frame
-
-A walk of the portal graph from every outdoor room and from the player's own
-room, through open doors only (D9, D10). What comes back is a set of room ids
-that are *shown*; every other room is sealed. The graph is rooms and doors, not
-tiles — a screenful is tens of nodes, and this is the only part of R2 that runs
-every frame.
-
-**Deliverable: the debug view paints sealed rooms black and the rest as they
-are.** This is the picture the feature is judged on, and it exists before
-anything downstream is gated.
+Frame assembly and an immediate click receive the same `InteriorFrame`; its
+fingerprint joins `StaticGeometryCacheKey`. The panel has one enable switch for
+an A/B comparison. It is not persisted (D5).
 
 ### R2d — the gate
 
@@ -292,20 +256,16 @@ server items, its mobiles. **Not its outer walls** — those belong to the tiles
 around it and are what you are meant to see. Per D11 this paints itself: the
 pixels stay at `CLEAR`, alpha zero.
 
-Which of the four cutaway readers this joins is the question R2a–R2c exist to
-answer, and the standing guess is **a fifth predicate beside them, not a change
-to any**: the cutaway is about height, this is about a place, and folding two
-different questions into `shows_static` is how a rule becomes impossible to
-attribute.
-
-The room set joins the geometry cache key as a fingerprint (R0b's `Key` field).
-An F1 switch turns the whole thing off, which is also the A/B a person judges it
-with.
+This is not a fifth `Cutaway` reader. `InteriorFrame::shows_cell` is the public
+boundary of the separate building renderer, and it is composed with the existing
+height rule at the assembly call sites. Folding floor selection into
+`shows_static` would again make a building decision indistinguishable from a
+global height decision.
 
 ### R2e — the cost
 
 Measured, not assumed. The bake is per block and amortised; the per-frame part is
-the portal walk plus a room lookup per drawn cell. If it does not measure out,
+the `InteriorFrame` walk plus a cell lookup per drawn object. If it does not measure out,
 **this is where the plan stops** and D6's server-side gate becomes the way in
 rather than an optimisation of this one.
 
@@ -372,23 +332,16 @@ the room behind them visible over the top.
   the client's, for drawing. Whether the server wants its own is a question this
   plan raises and does not answer.
 
-## Backlog, found while planning this
+## Remaining backlog
 
-- **`Cutaway` is computed in two places and asked in four.** R0a fixes the client;
-  the tools and tests each spell their own, which is `parity.md`'s standing
-  complaint and is *correct* for a tool — but nothing today makes a new tool's
-  author notice they have joined a list of seven.
-- **`StaticGeometryCache` keys on eight fields through two identical argument
-  lists** (`world.rs:240-282`), with its own comment saying they want to be a
-  `Key` struct. R0b.
 - **`Hotkey::of` takes a bare `KeyCode`** and so cannot express a modifier. R0c.
 - **A column's surfaces are walked in at least two places** — `cutaway::stack` on
   the client, `movement`'s `surfaces`/`spawn_z` on the server — with the same
-  question asked of the same files. R2a is a third caller and the moment to
+  question asked of the same files. R1a is a third caller and the moment to
   decide whether it is one function.
 - **`Cluttered::sight_clear` is the map's answer only**, missing the shut-door
   half the server has, with the reason on record (`docs/client.md:3491`) being
-  that it has no reader. R2b gives it one — the wall test, at least — and when it
+  that it has no reader. R1b gives it one — the wall test, at least — and when it
   lands, the shared arithmetic wants to live in `common/movement` once rather
   than on both ends, which is the same finding `client.md` files one bullet
   earlier about `blocker_at_z` / `blocked_at`.

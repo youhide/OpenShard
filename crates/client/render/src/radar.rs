@@ -104,6 +104,38 @@ pub fn region_base_chunks(region: RadarRegion) -> impl Iterator<Item = RadarChun
         .flat_map(move |y| (first_chunk.x..=last_chunk.x).map(move |x| RadarChunkCoord::new(x, y)))
 }
 
+/// Every level-zero chunk coordinate a region's rectangle touches, nearest
+/// `centre` first.
+///
+/// [`region_base_chunks`] is enumerated north-to-south, west-to-east within
+/// each row — fine for a caller that visits every chunk unconditionally, but
+/// not for one with a *bounded* budget: filling that budget in raster order
+/// starves whichever chunks are enumerated last, which for a region taller
+/// than the budget is every row south of wherever the budget ran out — a
+/// zoomed-out minimap reads as terrain that ends abruptly at some latitude and
+/// never resumes, however long the window stays open. `take_for_producer_near`
+/// already orders its *dequeue* this way for the identical reason (see its own
+/// doc); a caller that also *enqueues* under a bound — [`RadarWorkQueue::request`]
+/// refuses once `max_queued` is reached — needs the same order on that side
+/// too, or raster order still decides who is ever offered a slot at all.
+pub fn region_base_chunks_near(
+    region: RadarRegion,
+    centre: RadarChunkCoord,
+) -> impl Iterator<Item = RadarChunkCoord> {
+    let mut chunks: Vec<_> = region_base_chunks(region).collect();
+    chunks.sort_by_key(|chunk| {
+        (
+            chunk
+                .x
+                .abs_diff(centre.x)
+                .saturating_add(chunk.y.abs_diff(centre.y)),
+            chunk.y,
+            chunk.x,
+        )
+    });
+    chunks.into_iter()
+}
+
 /// One immutable source version of a facet's terrain and statics.
 ///
 /// A revision deliberately cannot be omitted from a [`RadarChunkKey`].  The
@@ -475,7 +507,11 @@ pub struct RadarWorkCounters {
 
 impl Default for RadarWorkQueue {
     fn default() -> Self {
-        Self::new(128, 1).expect("the shipped radar queue limits are non-zero")
+        // A zoomed-out, rotated minimap can expose hundreds of base chunks at
+        // once. One build per frame leaves a conspicuous patchwork of UNKNOWN
+        // while their LOD parents wait for all four children; eight keeps the
+        // work bounded without making the radar take seconds to fill.
+        Self::new(512, 8).expect("the shipped radar queue limits are non-zero")
     }
 }
 
@@ -569,6 +605,32 @@ impl RadarWorkQueue {
     #[must_use]
     pub fn take_for_producer(&mut self) -> Vec<RadarChunkKey> {
         let keys: Vec<_> = self.pending.iter().copied().take(self.builds_per_turn).collect();
+        for key in &keys {
+            self.pending.remove(key);
+            self.in_flight.insert(*key);
+        }
+        keys
+    }
+
+    /// Like [`Self::take_for_producer`], but starts with chunks closest to the
+    /// player.  A map viewport can expose more chunks than fit in one bounded
+    /// production turn; coordinate order would otherwise fill its north-west
+    /// corner first, which becomes a visibly displaced wedge after rotation.
+    #[must_use]
+    pub fn take_for_producer_near(&mut self, centre: RadarChunkCoord) -> Vec<RadarChunkKey> {
+        let mut keys: Vec<_> = self.pending.iter().copied().collect();
+        keys.sort_by_key(|key| {
+            let chunk = key.chunk();
+            (
+                chunk
+                    .x
+                    .abs_diff(centre.x)
+                    .saturating_add(chunk.y.abs_diff(centre.y)),
+                chunk.y,
+                chunk.x,
+            )
+        });
+        keys.truncate(self.builds_per_turn);
         for key in &keys {
             self.pending.remove(key);
             self.in_flight.insert(*key);
@@ -1084,6 +1146,34 @@ mod tests {
         assert_eq!(baked.len(), 64);
         assert_eq!(baked[0], GREEN);
         assert_eq!(baked[63], RED);
+    }
+
+    #[test]
+    fn base_chunks_near_a_centre_visit_the_closest_first_not_in_raster_order() {
+        let region = RadarRegion {
+            facet: Facet(0),
+            lod: 0,
+            origin: (0, 0),
+            extent: (BASE_CHUNK_TILES * 3, BASE_CHUNK_TILES * 3),
+        };
+        let centre = RadarChunkCoord::new(2, 2);
+
+        let ordered: Vec<_> = region_base_chunks_near(region, centre).collect();
+
+        assert_eq!(ordered[0], centre, "a chunk is its own nearest chunk");
+        assert_ne!(
+            ordered[0],
+            RadarChunkCoord::new(0, 0),
+            "raster order would visit the north-west corner first; distance order must not"
+        );
+        let mut raster: Vec<_> = region_base_chunks(region).collect();
+        let mut near = ordered;
+        raster.sort_by_key(|chunk| (chunk.y, chunk.x));
+        near.sort_by_key(|chunk| (chunk.y, chunk.x));
+        assert_eq!(
+            raster, near,
+            "distance order is a permutation of the raster walk, not a different set"
+        );
     }
 
     #[test]

@@ -51,6 +51,8 @@ pub const PREFIX: char = '.';
 pub enum StaffCommand {
     /// `.add <graphic> [amount]`
     Add,
+    /// `.addgold <amount>`
+    AddGold,
     /// `.admin`
     Admin,
     /// `.boat <multi id>`
@@ -106,8 +108,9 @@ impl StaffCommand {
     ///
     /// An array and not a `Vec`: it is a constant, and the client walks it on
     /// every keystroke while a command is being typed.
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::Add,
+        Self::AddGold,
         Self::Admin,
         Self::Boat,
         Self::Deed,
@@ -140,6 +143,7 @@ impl StaffCommand {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Add => "add",
+            Self::AddGold => "addgold",
             Self::Admin => "admin",
             Self::Boat => "boat",
             Self::Deed => "deed",
@@ -178,6 +182,7 @@ impl StaffCommand {
     pub const fn arguments(self) -> &'static str {
         match self {
             Self::Add => "<graphic> [amount]",
+            Self::AddGold => "<amount>",
             Self::Boat | Self::Deed | Self::HDesign | Self::House => "<multi id>",
             Self::Gm => "[on|off]",
             Self::Go => "<x> <y> [z] [facet]",
@@ -211,6 +216,7 @@ impl StaffCommand {
     pub const fn summary(self) -> &'static str {
         match self {
             Self::Add => "drop an item at your feet",
+            Self::AddGold => "put gold in your pack",
             Self::Admin => "open the administration menu",
             Self::Boat => "put a ship on the water at your feet",
             Self::Deed => "put a house deed in your pack",

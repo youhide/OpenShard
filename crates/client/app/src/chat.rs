@@ -463,6 +463,24 @@ impl Chat {
         self.edited(authority);
     }
 
+    /// Delete the word before the caret, together with whitespace immediately
+    /// before it — the conventional `Ctrl+Backspace` edit. A word is a run of
+    /// non-whitespace Unicode characters, so Cyrillic is handled exactly like
+    /// Latin and the cursor stays on a UTF-8 boundary.
+    pub(crate) fn backspace_word(&mut self, authority: AccessLevel) {
+        let before = &self.typed[..self.cursor];
+        let whitespace_end = before.trim_end_matches(char::is_whitespace).len();
+        let start = before[..whitespace_end]
+            .trim_end_matches(|character: char| !character.is_whitespace())
+            .len();
+        if start == self.cursor {
+            return;
+        }
+        self.typed.replace_range(start..self.cursor, "");
+        self.cursor = start;
+        self.edited(authority);
+    }
+
     /// Delete the `char` after the caret, if any.
     pub(crate) fn delete(&mut self, authority: AccessLevel) {
         let Some(after) = self.typed[self.cursor..].chars().next() else {
@@ -1141,6 +1159,18 @@ mod tests {
         assert!(chat.typed.is_empty());
         assert_eq!(chat.cursor, 0);
         assert!(!chat.focused, "hotkeys must work after a spoken line");
+    }
+
+    #[test]
+    fn ctrl_backspace_removes_the_preceding_unicode_word_and_its_trailing_space() {
+        let mut chat = typing("привет, мир   ");
+        chat.backspace_word(STAFF);
+        assert_eq!(chat.typed, "привет, ");
+        assert_eq!(chat.cursor, "привет, ".len());
+
+        chat.backspace_word(STAFF);
+        assert!(chat.typed.is_empty());
+        assert_eq!(chat.cursor, 0);
     }
 
     /// The channel survives a line, and a send does not put it back to `say`.

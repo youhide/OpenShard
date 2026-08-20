@@ -61,6 +61,7 @@ impl PictureIndex {
 }
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_uofiles::art::{Art, ArtError};
+use openshard_uofiles::color::Color16;
 use openshard_uofiles::gumpart::{GumpError, Gumps};
 use openshard_uofiles::image::Image;
 
@@ -242,6 +243,33 @@ pub enum GumpArt {
     Gump(Graphic),
     /// A static from `art.mul` — an item's icon.
     Item(Graphic),
+}
+
+/// ClassicUO turns the nearly-black fill in these two radar gumps into a live
+/// minimap texture.  We keep the generated terrain in its own pass, so the
+/// equivalent is a colour key: the rim remains drawable above the terrain,
+/// while its centre becomes transparent.
+fn minimap_frame(image: Image, art: GumpArt) -> Image {
+    let GumpArt::Gump(Graphic(5010 | 5011)) = art else {
+        return image;
+    };
+    let width = image.width();
+    let height = image.height();
+    Image::new(
+        width,
+        height,
+        image
+            .pixels()
+            .iter()
+            .map(|color| {
+                if color.rgb8() == Color16(0x0421).rgb8() {
+                    Color16::TRANSPARENT
+                } else {
+                    *color
+                }
+            })
+            .collect(),
+    )
 }
 
 /// The two files a window's pictures are read from.
@@ -435,6 +463,7 @@ impl GumpAtlas {
             // `gumpart`'s "Some entries really are 0x0" — and packing one would
             // ask the shelf for a rectangle with no area.
             let Some(image) = decoded else { continue };
+            let image = minimap_frame(image, *art);
             if image.width() == 0 || image.height() == 0 {
                 continue;
             }
@@ -758,19 +787,29 @@ pub fn plate(rect: Rect, hue: Hue, shade: Shade) -> SpriteQuad {
 /// placement, divided by the same `magnify` — and it lives in the app crate
 /// beside the placement it undoes (`windows::OwnWindow::local_cursor`).
 ///
-/// `magnify` is a whole number for [`Frame::scale`]'s reason one rung down: gump
-/// art is five-bit pixel art sampled with `Nearest`, and half a pixel of
-/// magnification is a border two rows thick along one edge of a window and one
-/// along the other. `1` is the art's own size, which is what the reference
-/// client draws and what this did before the knob existed.
+/// `magnify` is `1.0` for the art's own size, which is what the reference
+/// client draws and what this did before the knob existed. **A fraction is
+/// allowed and is not free**, for [`Frame::scale`]'s reason one rung down: this
+/// pass samples with `Nearest`, so a quad 1.5 times its art's size repeats
+/// every other row of texels and not the rest — a border two pixels thick along
+/// part of an edge and one along the rest, and a background's pieces meeting
+/// with a seam that opens at some fractions and not others. Whether that is
+/// worth the size it buys is the caller's to decide; see
+/// `desk::WindowScale`, which is where it is decided here.
+///
+/// The quad's corner is not snapped to a whole pixel afterwards. Snapping would
+/// make each *picture* land on the grid while leaving its size fractional,
+/// which moves pieces of one window relative to each other — a button drifting
+/// off the plate it is drawn on, which is worse than the seam it would tidy.
+/// The window's own corner is whole (`at`), so the error stays inside one
+/// window and grows across it rather than being reintroduced per picture.
 ///
 /// Anything cropped — a picture's own [`Scissor`], a label's `clip`, a row
 /// scissored to a list's viewport — must already have been cut, in the window's
 /// own pixels, before this is called: cutting there is exact, and cutting after
 /// magnification would be cutting a picture whose texel grid has already been
 /// stretched.
-pub fn place(quads: &mut [SpriteQuad], at: GumpPixel, magnify: u32) {
-    let magnify = magnify as f32;
+pub fn place(quads: &mut [SpriteQuad], at: GumpPixel, magnify: f32) {
     for quad in quads {
         quad.rect = Rect {
             x: quad.rect.x * magnify + at.x as f32,
@@ -1825,9 +1864,11 @@ mod tests {
     /// the proof they cannot silently disagree about which pixel a click
     /// landed on.
     ///
-    /// At `magnify = 2`, where an off-by-one in either direction is visible as
-    /// a *pair* of pixels rather than one, and where truncating division would
-    /// be a difference rather than a rounding.
+    /// At two magnifications and both are cases: `2.0`, where an off-by-one in
+    /// either direction is visible as a *pair* of pixels rather than one, and
+    /// `1.5`, where the two directions round — `floor` on the way in, a
+    /// fractional quad edge on the way out — and could disagree about the
+    /// pixel a picture's edge falls on if either used a different rounding.
     #[test]
     fn a_magnified_window_picks_what_it_draws() {
         let atlas = atlas_of([(Graphic(1), block(40, 40)), (Graphic(2), block(10, 10))]);
@@ -1842,47 +1883,73 @@ mod tests {
                 height: 10,
             }),
         ];
-        // Where the manager has actually put the window this frame, and how
-        // big it is drawing it.
+        // Where the manager has actually put the window this frame.
         let placed = GumpPixel::new(300, 200);
-        let magnify = 2;
-        // Inside the smaller picture: local `(18, 18)` doubled is `(36, 36)`,
-        // and the window's corner is added to that.
-        let cursor = GumpPixel::new(336, 236);
+        // Every pixel of a generous box around the window, at each
+        // magnification: outside it on all four sides, so the disagreements
+        // this is looking for — an edge landing a pixel apart in the two
+        // directions — are inside the walk rather than something the case had
+        // to be chosen to hit.
+        // How many pixels each picture was the answer for, so that a walk in
+        // which *nothing* was ever picked — an empty atlas, a scissor that ate
+        // the window — cannot pass by comparing `None` with `None` all the way
+        // through.
+        let mut hits = [0_u32; 2];
+        for magnify in [2.0_f32, 1.5] {
+            for y in -4..120 {
+                for x in -4..120 {
+                    let cursor = GumpPixel::new(placed.x + x, placed.y + y);
 
-        // The pointer's way: leave the art alone, bring the cursor into the
-        // window's own space — `own_windows.rs` and `panes/route.rs`.
-        let local_cursor = GumpPixel::new(
-            (cursor.x - placed.x).div_euclid(magnify),
-            (cursor.y - placed.y).div_euclid(magnify),
-        );
-        let picked = pick(&local, local_cursor, &atlas);
-        assert_eq!(
-            picked,
-            Some(PictureIndex::new(1)),
-            "the cursor is inside the smaller picture's scissor box"
-        );
+                    // The pointer's way: leave the art alone, bring the cursor
+                    // into the window's own space — `OwnWindow::local_cursor`,
+                    // whose arithmetic this repeats because the app crate is
+                    // one rung up from here.
+                    let local_cursor = GumpPixel::new(
+                        ((cursor.x - placed.x) as f32 / magnify).floor() as i32,
+                        ((cursor.y - placed.y) as f32 / magnify).floor() as i32,
+                    );
+                    let picked = pick(&local, local_cursor, &atlas);
 
-        // The draw pass's way: leave the cursor alone, take the window's own
-        // quads out to the surface — `render_passes.rs`.
-        let mut quads = collect(&local, &atlas);
-        place(&mut quads, placed, magnify as u32);
-        let drawn = quads
-            .iter()
-            .rposition(|quad| {
-                let (x, y) = (cursor.x as f32, cursor.y as f32);
-                x >= quad.rect.x
-                    && y >= quad.rect.y
-                    && x < quad.rect.x + quad.rect.width
-                    && y < quad.rect.y + quad.rect.height
-            })
-            .map(PictureIndex::new);
-        // One quad per picture here — neither is tiled — so the quad's own
-        // index is the picture's, and topmost-first is the same walk `pick`
-        // makes.
+                    // The draw pass's way: leave the cursor alone, take the
+                    // window's own quads out to the surface —
+                    // `render_passes.rs`.
+                    let mut quads = collect(&local, &atlas);
+                    place(&mut quads, placed, magnify);
+                    let drawn = quads
+                        .iter()
+                        .rposition(|quad| {
+                            let (x, y) = (cursor.x as f32, cursor.y as f32);
+                            x >= quad.rect.x
+                                && y >= quad.rect.y
+                                && x < quad.rect.x + quad.rect.width
+                                && y < quad.rect.y + quad.rect.height
+                        })
+                        .map(PictureIndex::new);
+                    // One quad per picture here — neither is tiled — so the
+                    // quad's own index is the picture's, and topmost-first is
+                    // the same walk `pick` makes.
+                    assert_eq!(
+                        drawn, picked,
+                        "at {magnify}× the pick and the draw pass disagree about the pixel \
+                         {x}, {y} into the window"
+                    );
+                    if let Some(index) = picked {
+                        hits[index.position()] += 1;
+                    }
+                }
+            }
+        }
+        // The big picture is 40×40 at two magnifications, the small one 10×10
+        // inside its own scissor: both are found, and found in the numbers
+        // their areas say, or this walk was agreeing about nothing.
         assert_eq!(
-            drawn, picked,
-            "the pointer pick and the draw pass must agree on which picture a click landed on"
+            hits[1],
+            10 * 10 * 4 + 15 * 15,
+            "the small picture, at 2× and at 1.5×"
+        );
+        assert!(
+            hits[0] > 4 * hits[1],
+            "the big picture covers most of the window at both scales: {hits:?}"
         );
     }
 
@@ -1900,7 +1967,7 @@ mod tests {
         let local = [Picture::plain(GumpArt::Gump(Graphic(1)), GumpPixel::new(5, 7))];
         let unplaced = collect(&local, &atlas);
         let mut quads = unplaced.clone();
-        place(&mut quads, GumpPixel::new(100, 50), 3);
+        place(&mut quads, GumpPixel::new(100, 50), 3.0);
 
         assert_eq!(quads.len(), 1);
         assert_eq!(quads[0].rect.x, 5.0 * 3.0 + 100.0);
@@ -1910,6 +1977,18 @@ mod tests {
         assert_eq!(
             quads[0].region, unplaced[0].region,
             "the art is stretched, not resampled"
+        );
+
+        // A fraction is the same arithmetic and is deliberately *not* snapped
+        // to a whole pixel: see [`place`] for why rounding each picture on to
+        // the grid would move a window's own pieces relative to each other.
+        let mut quads = unplaced.clone();
+        place(&mut quads, GumpPixel::new(100, 50), 1.5);
+        assert_eq!(quads[0].rect.x, 5.0 * 1.5 + 100.0);
+        assert_eq!(quads[0].rect.width, 20.0 * 1.5);
+        assert_eq!(
+            quads[0].region, unplaced[0].region,
+            "a fractional magnification stretches the same quad, not the sampling"
         );
     }
 
@@ -1921,7 +2000,7 @@ mod tests {
         let atlas = atlas_of([(Graphic(1), block(20, 20))]);
         let local = [Picture::plain(GumpArt::Gump(Graphic(1)), GumpPixel::new(5, 7))];
         let mut quads = collect(&local, &atlas);
-        place(&mut quads, GumpPixel::new(100, 50), 1);
+        place(&mut quads, GumpPixel::new(100, 50), 1.0);
 
         assert_eq!(quads[0].rect.x, 105.0);
         assert_eq!(quads[0].rect.y, 57.0);

@@ -230,7 +230,7 @@ impl App {
         // absolute cursor into a window's own — see `OwnWindow::local_cursor`.
         // Copied out above the loop for the same reason the borrows above are:
         // the pane list is held mutably below.
-        let window_scale = self.desk.window_scale;
+        let window_scale = self.window_scale();
         let modifiers = Modifiers {
             shift: self.input.shift_held,
             ctrl: self.input.ctrl_held,

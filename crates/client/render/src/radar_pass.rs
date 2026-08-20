@@ -48,13 +48,18 @@ use crate::renderer::QUAD;
 /// The same coordinate space every window in this client is placed in, so a
 /// radar beside a skill sheet is placed the way the skill sheet is. Not the
 /// terrain's own size: a region of 256 tiles shown in a 128-pixel window is
-/// drawn at half a pixel a tile, and the sampler is `Nearest` so what that
-/// drops is dropped rather than smeared.
+/// drawn at one physical pixel a tile. The caller expands the region for a
+/// HiDPI surface instead of enlarging texels, so the sampler remains nearest.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Placement {
     /// The top-left corner.
     pub origin: (f32, f32),
     pub extent: (f32, f32),
+    /// Clip all terrain and overlays to this circle.  The minimap uses this
+    /// with its classic round frame; rectangular consumers can leave it off.
+    pub circle: bool,
+    /// Clockwise rotation in screen coordinates, in radians.
+    pub rotation: f32,
 }
 
 #[cfg(test)]
@@ -86,6 +91,8 @@ mod tests {
             Placement {
                 origin: (10.0, 20.0),
                 extent: (128.0, 32.0),
+                circle: false,
+                rotation: 0.0,
             },
             [&west, &east],
         );
@@ -120,6 +127,8 @@ mod tests {
             Placement {
                 origin: (0.0, 0.0),
                 extent: (16.0, 16.0),
+                circle: false,
+                rotation: 0.0,
             },
             [&matching, &other_facet],
         );
@@ -148,6 +157,8 @@ mod tests {
             Placement {
                 origin: (0.0, 0.0),
                 extent: (f32::from(side), f32::from(side)),
+                circle: false,
+                rotation: 0.0,
             },
             // Handed in fine-first on purpose: the order drawn is this
             // function's answer, not its caller's.
@@ -187,6 +198,8 @@ mod tests {
             Placement {
                 origin: (0.0, 0.0),
                 extent: (f32::from(side), f32::from(side)),
+                circle: false,
+                rotation: 0.0,
             },
             // What four base-chunk requests all falling back to one ancestor
             // hand in — the same product, four times.
@@ -207,6 +220,8 @@ mod tests {
             Placement {
                 origin: (10.0, 20.0),
                 extent: (f32::from(side) * magnify, f32::from(side) * magnify),
+                circle: false,
+                rotation: 0.0,
             },
         )
     }
@@ -333,6 +348,8 @@ pub fn select_region_chunks<'a>(
                             at.origin.1 + (y0 - top) as f32 * scale_y,
                         ),
                         extent: ((x1 - x0) as f32 * scale_x, (y1 - y0) as f32 * scale_y),
+                        circle: at.circle,
+                        rotation: at.rotation,
                     },
                     uv: ChunkUv {
                         origin: (
@@ -393,7 +410,7 @@ struct ResidentPage {
 
 /// Surface size, and the scale it is drawn at: the whole of what every chunk in
 /// one region draw shares.
-const CHUNK_UNIFORM_BYTES: u64 = 16;
+const CHUNK_UNIFORM_BYTES: u64 = 64;
 /// Placement origin and extent, source UV origin and extent, page layer.
 const CHUNK_INSTANCE_STRIDE: u64 = 36;
 const CHUNK_RGBA_BYTES: u64 = (BASE_CHUNK_TILES as u64) * (BASE_CHUNK_TILES as u64) * 4;
@@ -720,7 +737,26 @@ impl RadarChunkRenderer {
             return;
         };
         let mut uniform_bytes = Vec::with_capacity(CHUNK_UNIFORM_BYTES as usize);
-        for value in [frame.width as f32, frame.height as f32, frame.scale, 0.0] {
+        let center = (
+            (at.origin.0 + at.extent.0 / 2.0) * frame.scale,
+            (at.origin.1 + at.extent.1 / 2.0) * frame.scale,
+        );
+        let radius = at.extent.0.min(at.extent.1) * frame.scale / 2.0;
+        for value in [
+            frame.width as f32,
+            frame.height as f32,
+            frame.scale,
+            0.0,
+            center.0,
+            center.1,
+            radius,
+            if at.circle { 1.0 } else { 0.0 },
+            at.origin.0,
+            at.origin.1,
+            at.extent.0,
+            at.extent.1,
+            at.rotation,
+        ] {
             uniform_bytes.extend_from_slice(&value.to_le_bytes());
         }
         queue.write_buffer(&self.uniforms, 0, &uniform_bytes);
@@ -855,6 +891,8 @@ pub fn select_marker_quads<'a>(
                         at.origin.1 + row as f32 * scale_y,
                     ),
                     extent: (scale_x, scale_y),
+                    circle: at.circle,
+                    rotation: at.rotation,
                 },
                 marker.color,
             ));
@@ -894,7 +932,7 @@ impl RadarOverlayRenderer {
             label: Some("radar overlay"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -1069,7 +1107,26 @@ impl RadarOverlayRenderer {
             return;
         };
         let mut uniform_bytes = Vec::with_capacity(CHUNK_UNIFORM_BYTES as usize);
-        for value in [frame.width as f32, frame.height as f32, frame.scale, 0.0] {
+        let center = (
+            (at.origin.0 + at.extent.0 / 2.0) * frame.scale,
+            (at.origin.1 + at.extent.1 / 2.0) * frame.scale,
+        );
+        let radius = at.extent.0.min(at.extent.1) * frame.scale / 2.0;
+        for value in [
+            frame.width as f32,
+            frame.height as f32,
+            frame.scale,
+            0.0,
+            center.0,
+            center.1,
+            radius,
+            if at.circle { 1.0 } else { 0.0 },
+            at.origin.0,
+            at.origin.1,
+            at.extent.0,
+            at.extent.1,
+            at.rotation,
+        ] {
             uniform_bytes.extend_from_slice(&value.to_le_bytes());
         }
         queue.write_buffer(&self.uniforms, 0, &uniform_bytes);

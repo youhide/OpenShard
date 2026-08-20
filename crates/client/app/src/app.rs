@@ -285,6 +285,25 @@ pub(crate) struct OccluderCache {
 }
 
 impl App {
+    /// The sole cutaway policy for this client's current frame.
+    ///
+    /// The frame and an immediate world click must ask the same question: a
+    /// thing hidden by architecture in the picture cannot honestly be under
+    /// the cursor. Keep this existing settings switch and map rule together;
+    /// the future building renderer has its own policy and frame value.
+    pub(crate) fn cutaway(&self) -> Cutaway {
+        if self.graphics.cutaway_disabled {
+            Cutaway::OPEN
+        } else {
+            Cutaway::at(
+                &self.resources.map,
+                &self.resources.tiledata,
+                self.world.presentation.cutaway_at,
+                true,
+            )
+        }
+    }
+
     /// Arm one ordinary rendered frame for a GPU dump. Both the visible HUD
     /// button and F12 call this so neither path can drift in naming or capture
     /// timing.
@@ -526,6 +545,25 @@ impl App {
             .as_ref()
             .map(|shell| shell.pixels_per_point())
             .unwrap_or(1.0)
+    }
+
+    /// How big this client's own windows are drawn — see
+    /// [`desk::WindowScale`](crate::desk::WindowScale).
+    ///
+    /// **From the shell while there is one, and from `self.desk` only when
+    /// there is not.** `App::desk` is the file as it was *loaded*, and it is
+    /// not written to again until the client is closing (`event_loop.rs` reads
+    /// `Shell::desk` back at exit); the copy the dev window's slider moves is
+    /// the shell's. Reading the app's here is therefore a knob that appears to
+    /// do nothing and takes effect on the next launch — which is exactly what
+    /// it did on the frame this was first written, and what `Shell::tuning`'s
+    /// doc had already said about the lighting. A run with no shell at all —
+    /// the offline map viewer — has no slider to have moved, so the loaded
+    /// value is the live one there.
+    pub(crate) fn window_scale(&self) -> crate::desk::WindowScale {
+        self.shell
+            .as_ref()
+            .map_or(self.desk.window_scale, |shell| shell.window_scale())
     }
 
     /// Put the eye back on the body and lock it there.

@@ -42,9 +42,16 @@ player's cross over it. `radar::MARKER_ARMS` is the one shape the bitmap stamp
 and the overlay share.
 
 **Phase 4, in part.** `WindowSubject::Minimap`, `MinimapPane` and
-`Drawn::Minimap` are a first-class window: one authoritative rectangle
-(`panes::minimap::EXTENT`), dragged, raised and hit-tested by `Windows` like any
-other. `M` opens it.
+`Drawn::Minimap` are a first-class window: one authoritative rectangle, sized
+from the packed `SMALL_FRAME`/`LARGE_FRAME` gump art (`SMALL_EXTENT`/
+`LARGE_EXTENT` fall back for an install that lacks it), dragged, raised and
+hit-tested by `Windows` like any other. `M` opens it; a double left-click
+toggles small/large, and ctrl+wheel over the window steps `zoom_steps`
+(`Window::zoom`, `1.25^steps`). The terrain and its overlays are clipped to
+the round frame (`Placement::circle`) and drawn at the classic 45°
+(`Placement::rotation`), with the rim art layered on top so the keyed centre
+of `SMALL_FRAME`/`LARGE_FRAME` shows generated terrain instead of blacking it
+out.
 
 Retired on the way: the whole-bitmap `RadarRenderer` and `radar.wgsl`. It was
 phase 1's "replace the ambiguous whole-bitmap model", left standing as a stepping
@@ -53,8 +60,8 @@ a second mutable radar texture nothing draws is a trap rather than a fallback.
 
 ## Verification
 
-`cargo test -p openshard-client-render` (604 lib + 4 GPU radar-pass tests),
-`cargo test -p openshard-client-app --lib` (350), `cargo clippy` on both crates,
+`cargo test -p openshard-client-render` (610 lib + 4 GPU radar-pass tests),
+`cargo test -p openshard-client-app --lib` (359), `cargo clippy` on both crates,
 `cargo fmt`. The GPU tests need a device and skip without one; they cover chunk
 seams, the coarse stand-in under a built chunk, the marker's shape and place, and
 the backdrop's edge.
@@ -77,6 +84,36 @@ published for it yet. The second half matters as much as the first — a window
 re-asks for all of its visible chunks every frame, so keeping every current key
 would rebuild ready terrain forever.
 
+## A second defect: the enqueue side raced the same wedge the dequeue side had already fixed
+
+Zoomed out, the minimap filled from its north-west corner and stopped partway
+down: everything north of some latitude had terrain, everything south of it
+stayed `UNKNOWN` forever, however long the window stayed open. Not a transient
+fill-in-progress state — a permanent line, because nothing ever revisited the
+south half once it was skipped.
+
+`take_for_producer_near` already exists to keep a *different* raster-order bias
+off the *dequeue* side — its own doc names "a visibly displaced wedge after
+rotation" as the reason coordinate order is wrong for a bounded batch. But the
+*enqueue* loop, in `App::draw_from`'s radar-preparation block, still walked
+`region_base_chunks` in its native north-to-south, west-to-east order and
+called `RadarWorkQueue::request` unconditionally.
+`request` silently refuses once `pending.len() + in_flight.len() ==
+max_queued`; a zoomed-out, HiDPI, desk-scaled region can need more level-zero
+chunks than the 512-key bound, and raster order means north rows always claim
+the bound first — south rows past the cutoff were never even inserted into
+`pending`, so `reconcile` never saw them, `take_for_producer_near` never built
+them, and no fallback ancestor could exist either, since an ancestor only comes
+from four *published* children.
+
+The fix is symmetric with the dequeue side: `region_base_chunks_near(region,
+player_chunk)` enumerates nearest-first, so when the bound is actually
+exceeded, the *farthest* ring from the player goes unbuilt — a radius that
+grows in, not a hemisphere that never resumes. The loop also skips a key
+`radar_cache.get` already answers for, which used to cost a `pending` slot a
+still-unbuilt chunk could have used, even though `reconcile` pruned it a moment
+later.
+
 ## Next work
 
 1. **Phase 2.2 has no caller.** `RadarCache::invalidate_tile` is written and
@@ -86,11 +123,15 @@ would rebuild ready terrain forever.
 2. **Phase 2.5, counters.** `RadarCacheCounters` and `RadarWorkCounters` exist
    and nobody reads them. They belong beside `CompositeTelemetry` in the HUD,
    which is a UI addition and wants asking first.
-3. **Phase 4's decoration.** A gump frame and a close affordance; `M` is
-   provisional and named so in `event_loop.rs`.
+3. **Phase 4's decoration.** A close affordance; `M` is provisional and named
+   so in `event_loop.rs`. The gump frame itself (`SMALL_FRAME`/`LARGE_FRAME`,
+   round clip, 45° rotation, zoom) is built — see above.
 4. **Phase 5, measure and soak.** No radar numbers are in the frame report, so
    "walking costs no raster work" is currently an argument rather than a
-   measurement.
+   measurement. `RadarWorkQueue`'s 512-key bound is untested against a real
+   HiDPI + desk-scale + fully-zoomed-out worst case; the fix above makes
+   exceeding it degrade radially instead of directionally, but does not prove
+   it is never exceeded in practice.
 5. **`bake` and `mark` have no caller** but their own tests, the same shape the
    retired `RadarRenderer` had. They are the CPU whole-facet path — worth keeping
    only if something is going to want a whole-map image; otherwise they follow it

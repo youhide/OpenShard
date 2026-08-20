@@ -429,13 +429,31 @@ pub(crate) fn draw_gump_windows(
                 }
                 (WindowSubject::Minimap, Drawn::Minimap(bounds)) => {
                     if let Some(player) = world.authoritative.view.as_ref().map(|view| view.player.position) {
-                        let region = panes::minimap::radar_region_for(player, bounds.extent);
+                        let (content_at, content_extent) = bounds.content();
+                        // The radar cache holds one texel per world tile.  A
+                        // logical gump pixel can cover several surface pixels
+                        // on HiDPI (or at a larger desk scale), so request that
+                        // many more tiles rather than magnifying its texels.
+                        // A 45°-rotated square otherwise becomes an inscribed
+                        // diamond and leaves the circular viewport's corners
+                        // black. Request its circumscribed source square.
+                        let physical_scale = magnify * frame.scale * std::f32::consts::SQRT_2 / bounds.zoom();
+                        let native_extent = (
+                            (content_extent.0 as f32 * physical_scale).round().max(1.0) as i32,
+                            (content_extent.1 as f32 * physical_scale).round().max(1.0) as i32,
+                        );
+                        let region = panes::minimap::radar_region_for(player, native_extent);
                         // `select_ready` and not `get`: a chunk the producer
                         // has not reached yet is answered with the coarse
                         // ancestor that covers it, and a chunk whose facet has
                         // been edited since is answered with its own last
                         // complete picture. Only ground no product has ever
                         // covered is left to the backdrop below.
+                        // Always address the world through the level-zero
+                        // grid. `select_ready` may still return a complete
+                        // LOD ancestor while a base product is unavailable,
+                        // but asking for parent coordinates directly made the
+                        // rotated edge region skip base cells altogether.
                         let ready: Vec<_> = region_base_chunks(region)
                             .filter_map(|chunk| {
                                 radar_cache.select_ready(radar_cache.key(region.facet, 0, chunk))
@@ -456,11 +474,16 @@ pub(crate) fn draw_gump_windows(
                         // at the same scale would be a different window rather
                         // than the same one drawn larger.
                         let placement = Placement {
-                            origin: (at.x as f32, at.y as f32),
-                            extent: (
-                                (bounds.extent.0 * magnify as i32) as f32,
-                                (bounds.extent.1 * magnify as i32) as f32,
+                            origin: (
+                                at.x as f32 + content_at.x as f32 * magnify,
+                                at.y as f32 + content_at.y as f32 * magnify,
                             ),
+                            extent: (
+                                (content_extent.0 * magnify as i32) as f32,
+                                (content_extent.1 * magnify as i32) as f32,
+                            ),
+                            circle: true,
+                            rotation: std::f32::consts::FRAC_PI_4,
                         };
                         // Under everything, so the window is a window even
                         // before its first chunk is built: unmapped ground
@@ -499,6 +522,12 @@ pub(crate) fn draw_gump_windows(
                                 color: radar::PLAYER_MARKER,
                             }],
                         );
+                        // The keyed centre is transparent, so this second
+                        // draw puts the classic rim and its ornaments above
+                        // the generated terrain without blacking it out.
+                        let mut rim = gump_art::collect(&[bounds.frame], &resources.gump_atlas);
+                        gump_art::place(&mut rim, at, magnify);
+                        pass.render_layer(&window.device, &window.queue, encoder, frame, &rim);
                     }
                 }
                 _ => {}

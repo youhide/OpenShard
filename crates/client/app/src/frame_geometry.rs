@@ -284,23 +284,22 @@ pub(crate) fn assemble_geometry(
     // leave the collector live whenever any are present. The cache is therefore
     // an exact reuse of a static-only, unchanged view — never an approximation.
     let has_occlusion = sky.is_some();
+    let static_geometry_key = world::StaticGeometryCacheKey::new(
+        camera,
+        *cutaway,
+        static_atlas_revision,
+        player_mask_fingerprint,
+        has_occlusion,
+        animation_tick,
+        items_fingerprint,
+    );
     let reusable_map_statics = (graphics.drawing.statics && world.presentation.cutaway_fades.is_empty())
         .then(|| {
             world
                 .presentation
                 .static_geometry_cache
                 .as_ref()
-                .filter(|cache| {
-                    cache.matches(
-                        camera,
-                        *cutaway,
-                        static_atlas_revision,
-                        player_mask_fingerprint,
-                        has_occlusion,
-                        animation_tick,
-                        items_fingerprint,
-                    )
-                })
+                .filter(|cache| cache.matches(static_geometry_key))
                 .map(|cache| cache.geometry().clone())
         })
         .flatten();
@@ -407,13 +406,7 @@ pub(crate) fn assemble_geometry(
         map_statics = cached;
     } else if graphics.drawing.statics && world.presentation.cutaway_fades.is_empty() {
         world.presentation.static_geometry_cache = Some(world::StaticGeometryCache::new(
-            camera,
-            *cutaway,
-            static_atlas_revision,
-            player_mask_fingerprint,
-            has_occlusion,
-            animation_tick,
-            items_fingerprint,
+            static_geometry_key,
             map_statics.clone(),
         ));
     } else {

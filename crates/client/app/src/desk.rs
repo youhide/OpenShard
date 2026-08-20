@@ -282,36 +282,48 @@ impl<'de> Deserialize<'de> for Zoom {
 /// raw art pixels, which on a modern screen makes a container the size of a
 /// postage stamp however good the monitor is.
 ///
-/// An integer, for the reason `gump::place` gives: gump art is five-bit pixel
-/// art sampled with `Nearest`, and a fractional factor doubles some of a
-/// border's rows and not others. [`ChatScale`]'s reason, one rung out from the
-/// glyph to the whole window.
+/// **Fractional, unlike [`ChatScale`], and that is a choice with a visible
+/// cost.** Gump art is five-bit pixel art sampled with `Nearest`, so a factor
+/// between two whole numbers repeats some rows of a picture and not others: a
+/// window's border comes out two pixels thick along part of an edge and one
+/// along the rest, and a one-pixel seam between two pieces of a background can
+/// open or close depending on where the fraction lands. A whole number cannot
+/// do either. It is offered anyway because the alternative is a client whose
+/// only sizes are *this* and *twice this* — 1.5 is the size a great many
+/// screens actually want, and the seam is a fair price for it. Whole numbers
+/// are still there for anybody who would rather have the clean picture.
 ///
 /// One number for every window and not one per kind: the windows are dragged
 /// around each other and drop items into each other, and a bag drawn at twice a
 /// doll's size makes the icon that crosses between them change size in the
 /// player's hand.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct WindowScale(u32);
+pub struct WindowScale(f32);
 
 impl WindowScale {
     /// The art's own size — the reference client exactly — and three times it,
     /// past which a container is most of a small screen and the cascade drops
     /// later windows off the bottom of it.
-    pub const MIN: u32 = 1;
-    pub const MAX: u32 = 3;
+    pub const MIN: f32 = 1.0;
+    pub const MAX: f32 = 3.0;
 
     /// Clamp into the range. Takes anything, including what a hand-edited file
-    /// offers, the same reason [`Zoom::new`] does.
-    pub fn new(factor: u32) -> Self {
+    /// offers, the same reason [`Zoom::new`] does — and a NaN becomes the art's
+    /// own size rather than propagating, because `f32::clamp` panics on one and
+    /// a window drawn at NaN is a window with no pixels to click.
+    pub fn new(factor: f32) -> Self {
+        if factor.is_nan() {
+            return Self(Self::MIN);
+        }
         Self(factor.clamp(Self::MIN, Self::MAX))
     }
 
     /// Real art pixels per drawn pixel, for both halves of the placement: pass
     /// it to `gump::place` when a window's quads go to the surface, and to
     /// [`crate::windows::OwnWindow::local_cursor`] when the pointer comes back
-    /// the other way.
-    pub fn factor(self) -> u32 {
+    /// the other way. Never zero and never NaN — see [`new`](Self::new) — so
+    /// dividing by it is safe wherever it is read.
+    pub fn factor(self) -> f32 {
         self.0
     }
 }
@@ -336,7 +348,7 @@ impl Serialize for WindowScale {
 
 impl<'de> Deserialize<'de> for WindowScale {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(WindowScale::new(u32::deserialize(deserializer)?))
+        Ok(WindowScale::new(f32::deserialize(deserializer)?))
     }
 }
 
@@ -753,7 +765,7 @@ mod tests {
                 height: 240.0,
             }),
             zoom: Zoom::new(1.25),
-            window_scale: WindowScale::new(2),
+            window_scale: WindowScale::new(1.5),
             window: Some(Frame {
                 x: -1920,
                 y: 40,
@@ -861,10 +873,19 @@ mod tests {
     /// unusable is exactly the one a hand-edited file must not be able to set.
     #[test]
     fn a_hand_edited_window_scale_is_clamped_on_the_way_in() {
-        let desk: Desk = toml::from_str("window_scale = 400").unwrap();
+        let desk: Desk = toml::from_str("window_scale = 400.0").unwrap();
         assert_eq!(desk.window_scale.factor(), WindowScale::MAX);
-        let desk: Desk = toml::from_str("window_scale = 0").unwrap();
+        let desk: Desk = toml::from_str("window_scale = 0.0").unwrap();
         assert_eq!(desk.window_scale.factor(), WindowScale::MIN);
+        // Neither a crash nor a window with no pixels: `f32::clamp` panics on a
+        // NaN, and drawing at one would leave nothing on screen to fix it with.
+        let desk: Desk = toml::from_str("window_scale = nan").unwrap();
+        assert_eq!(desk.window_scale.factor(), WindowScale::MIN);
+        // A fraction inside the range is kept as written — this is the knob's
+        // whole point, and a rounding here would be the type quietly refusing
+        // what the slider offers.
+        let desk: Desk = toml::from_str("window_scale = 1.5").unwrap();
+        assert_eq!(desk.window_scale.factor(), 1.5);
     }
 
     /// A file written before the knob existed says nothing about it, and what

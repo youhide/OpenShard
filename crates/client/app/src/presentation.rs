@@ -37,7 +37,7 @@ use openshard_client_render::items::{self};
 use openshard_client_render::lod::BlockLod;
 use openshard_client_render::mobiles::{self, Mobile};
 use openshard_client_render::outline::{self};
-use openshard_client_render::radar::{self, build_base_chunk, build_ready_ancestors, region_base_chunks};
+use openshard_client_render::radar::{self, build_base_chunk, build_ready_ancestors};
 use openshard_client_render::renderer::{self, Target};
 use openshard_client_render::sprite::SpriteQuad;
 use openshard_client_render::text::{self, Label};
@@ -1480,16 +1480,7 @@ impl App {
         // Here, in the snapshot, and not beside the passes that draw from it:
         // the item pick below needs it, and the pick has to be answered before
         // the HUD is built — see the next paragraph.
-        let cutaway = if self.graphics.cutaway_disabled {
-            Cutaway::OPEN
-        } else {
-            Cutaway::at(
-                &self.resources.map,
-                &self.resources.tiledata,
-                self.world.presentation.cutaway_at,
-                true,
-            )
-        };
+        let cutaway = self.cutaway();
         // The ground tile under the cursor, and its ring — asked here beside
         // the picks below rather than a second time when the HUD is built:
         // this used to be `App::hud`'s own call to `Self::pick_tile`, a second
@@ -1852,6 +1843,15 @@ impl App {
         // one (see `App::window_scale`), so asking for it holds the whole of
         // `self` — which the `&mut self.window` on the next line would refuse.
         let window_scale = self.window_scale();
+        let gump_scale = self.gump_scale();
+        let minimap_extent = self.windows.drawn_windows.iter().find_map(|(subject, drawn)| {
+            matches!(subject, crate::windows::WindowSubject::Minimap)
+                .then(|| match drawn {
+                    crate::windows::Drawn::Minimap(bounds) => Some((bounds.content().1, bounds.zoom())),
+                    _ => None,
+                })
+                .flatten()
+        });
         let Some(window) = self.window.as_mut() else {
             return;
         };
@@ -1935,13 +1935,41 @@ impl App {
                 .map(|view| view.player.position),
             self.resources.radar_colors.as_ref(),
         ) {
-            let region = radar_region_for(player, crate::panes::minimap::EXTENT);
-            for coord in region_base_chunks(region) {
-                self.radar_queue
-                    .request(self.radar_cache.key(region.facet, 0, coord));
+            // Match the region the current minimap draw will ask for.  A
+            // physical-pixel radar may be larger than its logical frame on a
+            // HiDPI monitor; preparing only the old fixed 200×200 region is
+            // what left a black moat around the ready centre.
+            let ((logical_width, logical_height), zoom) =
+                minimap_extent.unwrap_or((crate::panes::minimap::LARGE_EXTENT, 1.0));
+            let native_extent = (
+                (logical_width as f32 * window_scale.factor() * gump_scale * std::f32::consts::SQRT_2 / zoom)
+                    .round()
+                    .max(1.0) as i32,
+                (logical_height as f32 * window_scale.factor() * gump_scale * std::f32::consts::SQRT_2 / zoom)
+                    .round()
+                    .max(1.0) as i32,
+            );
+            let region = radar_region_for(player, native_extent);
+            let (player_chunk, _) =
+                radar::world_tile_to_base_chunk((u32::from(player.x), u32::from(player.y)));
+            // Nearest-first, not `region_base_chunks`' raster order: a region
+            // wider than `RadarWorkQueue::request`'s `max_queued` bound fills
+            // that bound from wherever enumeration starts, and raster order
+            // starts at the north-west corner. That reads as terrain ending at
+            // some latitude and never resuming south of it — the same wedge
+            // `take_for_producer_near` was written to keep off the *dequeue*
+            // side; the enqueue side needs it just as much. Already-ready keys
+            // are skipped rather than re-requested: `reconcile` would prune
+            // them again below, but not before they had spent a slot a chunk
+            // that still needs building could have used instead.
+            for coord in radar::region_base_chunks_near(region, player_chunk) {
+                let key = self.radar_cache.key(region.facet, 0, coord);
+                if self.radar_cache.get(key).is_none() {
+                    self.radar_queue.request(key);
+                }
             }
             self.radar_queue.reconcile(&self.radar_cache);
-            for key in self.radar_queue.take_for_producer() {
+            for key in self.radar_queue.take_for_producer_near(player_chunk) {
                 // A derived level is never dispatched: it is reduced from its
                 // four children the moment the last of them lands, below. What
                 // a producer builds is the one thing only the map can answer.

@@ -298,6 +298,16 @@ impl Shell {
         self.desk.chat
     }
 
+    /// How big the client's own windows are drawn right now — the Windows
+    /// tab's own number, and [`Shell::tuning`]'s reason again.
+    ///
+    /// Read once a frame by the draw pass and once per input by the pointer;
+    /// both go through `App::window_scale`, which is the one place this or the
+    /// app's own copy is chosen between.
+    pub fn window_scale(&self) -> crate::desk::WindowScale {
+        self.desk.window_scale
+    }
+
     /// Show or hide the dev window — the strip's `dev` toggle, reached from a key.
     ///
     /// It has to come through here, and not through the app's own [`Desk`]: the
@@ -1080,19 +1090,33 @@ fn windows_panel(ui: &mut egui::Ui, scale: &mut crate::desk::WindowScale) {
     ui.label("Size");
     let mut factor = scale.factor();
     if ui
-        .add(egui::Slider::new(&mut factor, WindowScale::MIN..=WindowScale::MAX).text("scale"))
+        .add(
+            egui::Slider::new(&mut factor, WindowScale::MIN..=WindowScale::MAX)
+                .step_by(0.05)
+                .fixed_decimals(2)
+                .text("scale"),
+        )
         .changed()
     {
         *scale = WindowScale::new(factor);
     }
     ui.label(
         egui::RichText::new(
-            "An integer upscale on the window art's own pixels, on top of the \
-             HUD's zoom. 1 is the reference client exactly — which had no \
-             display scaling at all, so its windows are postage stamps on a \
-             modern screen. Whole numbers only: gump art is pixel art, and \
-             half a pixel of magnification is a border two rows thick along \
-             one edge of a window and one along the other.",
+            "An upscale on the window art's own pixels, on top of the HUD's \
+             zoom. 1.00 is the reference client exactly — which had no display \
+             scaling at all, so its windows are postage stamps on a modern \
+             screen.",
+        )
+        .small()
+        .weak(),
+    );
+    ui.label(
+        egui::RichText::new(
+            "A whole number draws every art pixel as the same square block. A \
+             fraction does not: gump art is pixel art, sampled nearest, so 1.50 \
+             repeats every other row and leaves a window's border two pixels \
+             thick along part of an edge and one along the rest. Worth it for \
+             the size, if that is the size you want.",
         )
         .small()
         .weak(),

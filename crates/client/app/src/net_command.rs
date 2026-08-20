@@ -454,19 +454,35 @@ impl App {
         // route HUD depends on the item layer, not on every packet in the view;
         // invalidating it unconditionally made the same expensive plan run on
         // every update (and therefore effectively every frame) at a house.
-        // Keep the cache across player/mobile-only updates, but discard the
+        // Keep the cache across player and mobile-detail updates, but discard
         // terrain-derived pictures when an item was added, removed, or moved.
-        let terrain_changed = self
+        let items_changed = self
             .world
             .authoritative
             .view
             .as_ref()
             .is_none_or(|old| old.items != view.items);
-        if terrain_changed {
+        let mobile_obstacles_changed = self.world.authoritative.view.as_ref().is_none_or(|old| {
+            old.mobiles.len() != view.mobiles.len()
+                || old.mobiles.iter().any(|(serial, old_mobile)| {
+                    view.mobiles
+                        .get(serial)
+                        .is_none_or(|mobile| mobile.position != old_mobile.position)
+                })
+        });
+        if items_changed || mobile_obstacles_changed {
             self.steer.clear_plan_cache();
             self.route_cache = None;
+        }
+        if items_changed {
             self.terrain_cache = None;
             self.occluder_cache = None;
+        }
+        // NPCs are routing obstacles in the client. Discard any remainder of
+        // an order made before the latest mobile snapshot so it replans before
+        // sending the next step.
+        if mobile_obstacles_changed {
+            self.steer.clear_route();
         }
         // Movement has already been applied through `PlayerMotion` at the
         // mailbox boundary.  Rebuilding world presentation must not be a
@@ -637,8 +653,11 @@ impl App {
         // a step cannot go through. Rebuilt here rather than per decision: one
         // click plans a route over hundreds of tiles, and each of them would
         // otherwise rescan everything on screen. See `clutter.rs`.
-        self.world.presentation.clutter =
-            clutter::Clutter::of(&self.world.presentation.items, &self.resources.tiledata);
+        self.world.presentation.clutter = clutter::Clutter::of(
+            &self.world.presentation.items,
+            view.mobiles.values(),
+            &self.resources.tiledata,
+        );
         // The cutaway has already followed each locally valid prediction. An
         // acknowledgement repeats that answer; a correction is the one case
         // that has to replace it unconditionally.

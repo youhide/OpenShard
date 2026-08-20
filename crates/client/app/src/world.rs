@@ -220,11 +220,13 @@ pub struct PresentationWorld {
     pub crowd: Crowd,
 }
 
-/// A map-static result whose every input that can alter opaque/cutaway pixels
-/// is recorded. It is intentionally conservative: callers only populate it
-/// for non-animated, fully opaque collections with no fade in progress.
-#[derive(Debug)]
-pub struct StaticGeometryCache {
+/// Every input that can change cached map-static geometry.
+///
+/// This is deliberately one value: adding a drawing predicate must mean adding
+/// one field here, rather than remembering to extend two parallel argument
+/// lists in [`StaticGeometryCache`].
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct StaticGeometryCacheKey {
     camera: Camera,
     cutaway: Cutaway,
     atlas_revision: u64,
@@ -232,15 +234,10 @@ pub struct StaticGeometryCache {
     has_occlusion: bool,
     animation_tick: u128,
     items_fingerprint: u64,
-    geometry: StaticGeometry,
 }
 
-impl StaticGeometryCache {
-    // The eight fields the cache is keyed on. They *would* read better as a
-    // `Key` struct — `new` and `matches` take the identical list — but that is
-    // a change to every caller and belongs to whoever next works on this cache.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
+impl StaticGeometryCacheKey {
+    pub const fn new(
         camera: Camera,
         cutaway: Cutaway,
         atlas_revision: u64,
@@ -248,7 +245,6 @@ impl StaticGeometryCache {
         has_occlusion: bool,
         animation_tick: u128,
         items_fingerprint: u64,
-        geometry: StaticGeometry,
     ) -> Self {
         Self {
             camera,
@@ -258,28 +254,26 @@ impl StaticGeometryCache {
             has_occlusion,
             animation_tick,
             items_fingerprint,
-            geometry,
         }
     }
+}
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn matches(
-        &self,
-        camera: Camera,
-        cutaway: Cutaway,
-        atlas_revision: u64,
-        player_mask: Option<u64>,
-        has_occlusion: bool,
-        animation_tick: u128,
-        items_fingerprint: u64,
-    ) -> bool {
-        self.camera == camera
-            && self.cutaway == cutaway
-            && self.atlas_revision == atlas_revision
-            && self.player_mask == player_mask
-            && self.has_occlusion == has_occlusion
-            && self.animation_tick == animation_tick
-            && self.items_fingerprint == items_fingerprint
+/// A map-static result whose every input that can alter opaque/cutaway pixels
+/// is recorded. It is intentionally conservative: callers only populate it
+/// for non-animated, fully opaque collections with no fade in progress.
+#[derive(Debug)]
+pub struct StaticGeometryCache {
+    key: StaticGeometryCacheKey,
+    geometry: StaticGeometry,
+}
+
+impl StaticGeometryCache {
+    pub fn new(key: StaticGeometryCacheKey, geometry: StaticGeometry) -> Self {
+        Self { key, geometry }
+    }
+
+    pub fn matches(&self, key: StaticGeometryCacheKey) -> bool {
+        self.key == key
     }
 
     pub fn geometry(&self) -> &StaticGeometry {

@@ -69,6 +69,7 @@ pub fn run(state: &mut WorldState, actor: EntityId, rest: &str) {
         StaffCommand::Tele => teleport_cursor(state, actor),
         StaffCommand::Go => go_to(state, actor, &args),
         StaffCommand::Add => add_item(state, actor, &args),
+        StaffCommand::AddGold => add_gold(state, actor, &args),
         StaffCommand::Key => make_key(state, actor, &args),
         StaffCommand::Poison => make_poison(state, actor, &args),
         StaffCommand::Trap => set_trap(state, actor, &args),
@@ -406,6 +407,34 @@ fn add_item(state: &mut WorldState, actor: EntityId, args: &[&str]) {
             actor,
             &format!("Spawned {amount} of {:#06x} at your feet.", graphic.0),
         );
+    }
+}
+
+/// `.addgold <amount>` — put gold into the actor's own pack.
+///
+/// `items::give` is the same call a vendor sale makes (`vendor::sell`), so a
+/// pile from this command behaves exactly like one earned in play — it merges
+/// onto an existing pile in the backpack or starts a new one, with no capacity
+/// check, `.spellbook`'s reason for calling `give` directly rather than
+/// `give_to_backpack`.
+fn add_gold(state: &mut WorldState, actor: EntityId, args: &[&str]) {
+    let Some(amount) = args
+        .first()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|&amount| amount > 0)
+    else {
+        notify(state, actor, "Usage: .addgold <amount>");
+        return;
+    };
+    let Some(serial) = state.registry.serial_of(actor) else {
+        return;
+    };
+    let Some(backpack) = items::backpack_of(state, serial) else {
+        notify(state, actor, "You have no backpack.");
+        return;
+    };
+    if items::give(state, backpack, items::GOLD_GRAPHIC, Hue(0), amount).is_some() {
+        notify(state, actor, &format!("{amount} gold appears in your pack."));
     }
 }
 

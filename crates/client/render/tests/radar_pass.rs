@@ -83,6 +83,8 @@ fn adjacent_chunks_each_draw_their_own_pixels() {
         Placement {
             origin: (0.0, 0.0),
             extent: (width as f32, height as f32),
+            circle: false,
+            rotation: 0.0,
         },
         [&west, &east],
     );
@@ -146,6 +148,8 @@ fn a_marker_lands_on_its_tile_over_the_terrain() {
     let at = Placement {
         origin: (0.0, 0.0),
         extent: (side as f32, side as f32),
+        circle: false,
+        rotation: 0.0,
     };
 
     let mut chunks = RadarChunkRenderer::new(&device, FORMAT, 16 * 1024 * 1024);
@@ -187,7 +191,8 @@ fn a_marker_lands_on_its_tile_over_the_terrain() {
 
 /// **A window with no ready terrain is filled, not left see-through.** The
 /// backdrop is what makes an unbuilt minimap read as unmapped ground rather than
-/// as a hole with the world behind it, and it stops at the window's own edge.
+/// as a hole with the world behind it, and the circular mask excludes the
+/// square corners beneath the minimap's rim.
 #[test]
 fn an_unmapped_window_is_filled_rather_than_left_transparent() {
     let Some((device, queue)) = gpu() else {
@@ -212,6 +217,8 @@ fn an_unmapped_window_is_filled_rather_than_left_transparent() {
         Placement {
             origin: (16.0, 16.0),
             extent: (32.0, 32.0),
+            circle: true,
+            rotation: 0.0,
         },
         UNKNOWN,
     );
@@ -229,8 +236,10 @@ fn an_unmapped_window_is_filled_rather_than_left_transparent() {
         (rgb.red, rgb.green, rgb.blue)
     };
     assert_ne!(unmapped, (0, 0, 0), "unmapped is not absent");
-    assert_eq!(colour_at(16, 16), unmapped, "the window's own north-west corner");
-    assert_eq!(colour_at(47, 47), unmapped, "and its far corner");
+    assert_eq!(colour_at(32, 16), unmapped, "the circle's north edge");
+    assert_eq!(colour_at(32, 32), unmapped, "and its centre");
+    assert_eq!(colour_at(16, 16), (0, 0, 0), "the square corner is masked");
+    assert_eq!(colour_at(47, 47), (0, 0, 0), "and so is the opposite corner");
     assert_eq!(colour_at(15, 16), (0, 0, 0), "one column short of it is not");
     assert_eq!(colour_at(48, 47), (0, 0, 0), "and one column past it is not");
 }
@@ -284,6 +293,8 @@ fn a_coarse_ancestor_draws_under_the_one_chunk_that_is_ready() {
         Placement {
             origin: (0.0, 0.0),
             extent: (side as f32, side as f32),
+            circle: false,
+            rotation: 0.0,
         },
         [&fine, &coarse],
     );

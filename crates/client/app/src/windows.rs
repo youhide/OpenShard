@@ -97,16 +97,19 @@ impl OwnWindow {
     /// copies of one transform is three chances for the picture and the click
     /// to disagree.
     ///
-    /// `div_euclid` and not `/`: a cursor left of or above the window is a
-    /// negative local coordinate, and truncating division rounds those *up*
-    /// toward zero — which would put the column left of a window's edge on
-    /// column `0`, inside the picture that starts there, and hand a pane a
-    /// click that landed outside it.
+    /// `floor` and not a truncating cast: a cursor left of or above the window
+    /// is a negative local coordinate, and truncation rounds those *up* toward
+    /// zero — which would put the column left of a window's edge on column `0`,
+    /// inside the picture that starts there, and hand a pane a click that
+    /// landed outside it. It is also the rounding `gump::place` draws with,
+    /// which is what makes the two agree pixel for pixel at a fractional
+    /// scale: a quad covers `x` when `x >= corner`, so the pixel a fractional
+    /// edge falls inside belongs to the picture that started before it.
     pub fn local_cursor(&self, cursor: GumpPixel, scale: crate::desk::WindowScale) -> GumpPixel {
-        let factor = scale.factor() as i32;
+        let factor = scale.factor();
         GumpPixel::new(
-            (cursor.x - self.at.x).div_euclid(factor),
-            (cursor.y - self.at.y).div_euclid(factor),
+            ((cursor.x - self.at.x) as f32 / factor).floor() as i32,
+            ((cursor.y - self.at.y) as f32 / factor).floor() as i32,
         )
     }
 }
@@ -315,7 +318,7 @@ impl Drawn {
             Self::Split(split) => &split.pictures,
             Self::Confirm(question) => &question.pictures,
             Self::Party(manifest) => &manifest.pictures,
-            Self::Minimap(_) => &[],
+            Self::Minimap(minimap) => std::slice::from_ref(&minimap.frame),
         }
     }
 }
@@ -516,12 +519,12 @@ pub fn open_split_window(
     }) {
         return;
     }
-    let magnify = scale.factor() as i32;
+    let magnify = scale.factor();
     own_windows.push(OwnWindow {
         subject,
         at: GumpPixel::new(
-            (at.x - SPLIT_OFFSET.x * magnify).max(0),
-            (at.y - SPLIT_OFFSET.y * magnify).max(0),
+            (at.x - (SPLIT_OFFSET.x as f32 * magnify).round() as i32).max(0),
+            (at.y - (SPLIT_OFFSET.y as f32 * magnify).round() as i32).max(0),
         ),
         pane: crate::panes::AnyPane::of(subject),
     });

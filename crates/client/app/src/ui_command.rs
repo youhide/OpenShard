@@ -16,7 +16,6 @@
 use std::time::Instant;
 
 use openshard_client_render::camera::{self, Camera};
-use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::{items, mobiles};
 use openshard_movement::{Heading, Lean};
 use openshard_protocol::direction::{Direction, Facing};
@@ -448,16 +447,7 @@ impl App {
         // The same cutaway the frame was drawn with, computed the same way: a
         // barrel hidden under a roof this client is not drawing is not something
         // the player can have pointed at.
-        let cutaway = if self.graphics.cutaway_disabled {
-            Cutaway::OPEN
-        } else {
-            Cutaway::at(
-                &self.resources.map,
-                &self.resources.tiledata,
-                self.world.presentation.cutaway_at,
-                true,
-            )
-        };
+        let cutaway = self.cutaway();
         // A creature under the cursor takes the click, and no item is used: it
         // is what the highlight is telling the player they are pointing at, and
         // using the barrel *behind* the shopkeeper is the one answer that is

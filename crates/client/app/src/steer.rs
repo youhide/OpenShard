@@ -619,6 +619,13 @@ impl Steering {
         self.cached_plan = None;
     }
 
+    /// Discard a route made before dynamic courtesy obstacles changed. The
+    /// destination remains, so the next due step plans from the current tile.
+    pub(crate) fn clear_route(&mut self) {
+        self.route.clear();
+        self.clear_plan_cache();
+    }
+
     /// Start a new render frame. The movement step and the HUD may share one
     /// plan during that frame. A remembered coarse failure is kept separately
     /// so an impossible expensive query is not retried every frame.

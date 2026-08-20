@@ -304,11 +304,14 @@ impl App {
     /// now, drawn by the same pass as every other, and the gesture works in any
     /// build that can draw a container.
     pub(crate) fn open_split_prompt(&mut self, asker: windows::Asking, prompt: crate::panes::SplitPrompt) {
+        // Read before the list is borrowed: the scale comes off the shell, so
+        // asking for it holds the whole of `self`.
+        let scale = self.window_scale();
         windows::open_split_window(
             &mut self.windows.own_windows,
             prompt,
             self.input.pointer_gump,
-            self.desk.window_scale,
+            scale,
         );
         self.windows.prompt = Some(asker);
         // The keys go to the picker from the moment it opens — the reference's
@@ -434,7 +437,7 @@ impl App {
             // tested against what that window drew — the other half of the one
             // arithmetic `render_passes.rs`'s draw pass does with
             // `gump::place`.
-            let local = window.local_cursor(cursor, self.desk.window_scale);
+            let local = window.local_cursor(cursor, self.window_scale());
             if let Drawn::Vendor(vendor) = drawn {
                 return vendor.contains(local).then_some(window.subject);
             }

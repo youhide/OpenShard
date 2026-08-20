@@ -751,7 +751,7 @@ impl AnyPane {
             WindowSubject::Status => Self::Status(status::StatusPane),
             WindowSubject::Confirm(question) => Self::Confirm(confirm::ConfirmPane::new(question)),
             WindowSubject::Party => Self::Party(party::PartyPane::default()),
-            WindowSubject::Minimap => Self::Minimap(minimap::MinimapPane),
+            WindowSubject::Minimap => Self::Minimap(minimap::MinimapPane::default()),
             // The one subject that carries what its pane is built with rather
             // than what the pane looks up. Everything else here names something
             // in the view — a bag, a body, a gump — and the pane reads it every

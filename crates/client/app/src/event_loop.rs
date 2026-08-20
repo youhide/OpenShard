@@ -35,7 +35,7 @@ impl App {
         // client with no view yet has nobody's authority, which is the same
         // answer as an ordinary player's and the safe direction to guess in.
         let authority = self.authority();
-        let Some(edit) = keyboard::Edit::of(code, self.input.shift_held) else {
+        let Some(edit) = keyboard::Edit::of(code, self.input.shift_held, self.input.ctrl_held) else {
             let Some(text) = text else {
                 return false;
             };
@@ -56,6 +56,7 @@ impl App {
             keyboard::Edit::NextCandidate => return self.chat.highlight_next(),
             keyboard::Edit::PreviousCandidate => return self.chat.highlight_previous(),
             keyboard::Edit::Backspace => self.chat.backspace(authority),
+            keyboard::Edit::BackspaceWord => self.chat.backspace_word(authority),
             keyboard::Edit::Delete => self.chat.delete(authority),
             keyboard::Edit::Left => self.chat.left(),
             keyboard::Edit::Right => self.chat.right(),
@@ -336,10 +337,21 @@ impl ApplicationHandler<()> for App {
                         true
                     }
                     keyboard::Hotkey::Minimap => {
-                        crate::windows::open_local_window(
-                            &mut self.windows.own_windows,
-                            crate::windows::WindowSubject::Minimap,
-                        );
+                        if let Some(open) = self
+                            .windows
+                            .own_windows
+                            .iter_mut()
+                            .find(|open| open.subject == crate::windows::WindowSubject::Minimap)
+                        {
+                            if let crate::panes::AnyPane::Minimap(pane) = &mut open.pane {
+                                pane.toggle_size();
+                            }
+                        } else {
+                            crate::windows::open_local_window(
+                                &mut self.windows.own_windows,
+                                crate::windows::WindowSubject::Minimap,
+                            );
+                        }
                         true
                     }
                     keyboard::Hotkey::PanUp => self.control.pan(0, PAGE_PIXELS),

@@ -683,35 +683,58 @@ fn a_windows_own_cursor_is_its_placement_and_its_scale_undone() {
     // what this client did before the scale existed, and what a saved file
     // without one still asks for.
     assert_eq!(
-        window.local_cursor(GumpPixel::new(318, 218), WindowScale::new(1)),
+        window.local_cursor(GumpPixel::new(318, 218), WindowScale::new(1.0)),
         GumpPixel::new(18, 18)
     );
 
     // Doubled, the same picture is under a cursor twice as far into the
     // window: `(336, 236)` is local `(18, 18)` drawn at two pixels each.
     assert_eq!(
-        window.local_cursor(GumpPixel::new(336, 236), WindowScale::new(2)),
+        window.local_cursor(GumpPixel::new(336, 236), WindowScale::new(2.0)),
         GumpPixel::new(18, 18)
     );
     // And the pixel between two drawn ones belongs to the earlier of them,
     // which is the same floor `place` drew it with.
     assert_eq!(
-        window.local_cursor(GumpPixel::new(337, 237), WindowScale::new(2)),
+        window.local_cursor(GumpPixel::new(337, 237), WindowScale::new(2.0)),
         GumpPixel::new(18, 18)
     );
 
     // Outside, up and to the left: negative, and not rounded up into the
     // window. One pixel out at twice the scale is still one pixel out.
     assert_eq!(
-        window.local_cursor(GumpPixel::new(299, 199), WindowScale::new(2)),
+        window.local_cursor(GumpPixel::new(299, 199), WindowScale::new(2.0)),
         GumpPixel::new(-1, -1)
     );
     assert_eq!(
-        window.local_cursor(GumpPixel::new(298, 198), WindowScale::new(2)),
+        window.local_cursor(GumpPixel::new(298, 198), WindowScale::new(2.0)),
         GumpPixel::new(-1, -1)
     );
     assert_eq!(
-        window.local_cursor(GumpPixel::new(297, 197), WindowScale::new(2)),
+        window.local_cursor(GumpPixel::new(297, 197), WindowScale::new(2.0)),
         GumpPixel::new(-2, -2)
+    );
+
+    // A fraction, where the two directions have to agree about a boundary that
+    // is not on a pixel: at 1.5 the art pixel `12` is drawn from screen 18.0 up
+    // to 19.5, so both 18 and 19 into the window are that pixel and 20 is the
+    // next one. Floor is what makes that true, and the same floor is why the
+    // negative side above does not round toward zero.
+    let three_halves = WindowScale::new(1.5);
+    assert_eq!(
+        window.local_cursor(GumpPixel::new(318, 218), three_halves),
+        GumpPixel::new(12, 12)
+    );
+    assert_eq!(
+        window.local_cursor(GumpPixel::new(319, 219), three_halves),
+        GumpPixel::new(12, 12)
+    );
+    assert_eq!(
+        window.local_cursor(GumpPixel::new(320, 220), three_halves),
+        GumpPixel::new(13, 13)
+    );
+    assert_eq!(
+        window.local_cursor(GumpPixel::new(299, 199), three_halves),
+        GumpPixel::new(-1, -1)
     );
 }

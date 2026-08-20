@@ -54,14 +54,16 @@
 //! offsets and the open ones on the odd, and an open leaf is left out of the index
 //! entirely.
 //!
-//! # What is deliberately not here
+//! # Mobiles
 //!
-//! Mobiles. The shard does not block a step on another body either (nothing
-//! registers one in `Obstructions`), and a client that did would refuse steps
-//! the server allows — the mirror of this very bug, pointing the other way.
+//! Server-side movement remains authoritative. Mobiles are a client-side
+//! courtesy obstacle: the shard may permit occupying their tile, but a route
+//! that visibly walks through an NPC is not a useful route. The next snapshot
+//! replaces this short-lived projection and replans any active move order.
 
 use std::collections::HashMap;
 
+use openshard_client_net::view::Mobile;
 use openshard_client_render::doors;
 use openshard_client_render::items::GroundItem;
 use openshard_movement::{MapTerrain, Terrain, Tile};
@@ -127,8 +129,8 @@ pub struct Clutter {
 }
 
 impl Clutter {
-    /// Index whatever in `items` is in the way, and say of each whether it is a
-    /// door.
+    /// Index whatever in `items` or `mobiles` is in the way, and say of each
+    /// placed item whether it is a door.
     ///
     /// Two questions, two sources, and the module header is where the argument
     /// for the second one lives:
@@ -144,7 +146,11 @@ impl Clutter {
     /// An open leaf is therefore left out altogether — nothing is in the way of a
     /// body walking through an open door — and a shut one goes in marked, which
     /// is the list [`Clutter::blocked_through_doors`] reads.
-    pub fn of(items: &[GroundItem], tiles: &TileData) -> Self {
+    pub fn of<'a>(
+        items: &[GroundItem],
+        mobiles: impl IntoIterator<Item = &'a Mobile>,
+        tiles: &TileData,
+    ) -> Self {
         let mut blocked: HashMap<Tile, Vec<Blocker>> = HashMap::new();
         for item in items {
             // What is drawn is what is in the way — see `GroundItem::displayed`.
@@ -157,6 +163,16 @@ impl Clutter {
                 z: item.at.z,
                 height: TileHeight::new(tile.height),
                 door: doors::is_door(item.displayed()),
+            });
+        }
+        // The server may permit two mobiles on one tile, but routing a player
+        // visibly through an NPC is still a bad client-side result.
+        for mobile in mobiles {
+            let at = Tile::new(mobile.position.x, mobile.position.y);
+            blocked.entry(at).or_default().push(Blocker {
+                z: mobile.position.z,
+                height: TileHeight::new(MOBILE_HEIGHT as u8),
+                door: false,
             });
         }
         Self { tiles: blocked }
@@ -413,6 +429,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_step_into_an_npc_body_is_refused_by_this_end() {
+        let east = Point::new(HERE.x + 1, HERE.y, 0);
+        // Mobiles enter the shipping index with this same body-height span;
+        // keep the routing rule test independent of client art files.
+        let clutter = Clutter::placed(&[(east, MOBILE_HEIGHT as u8)]);
+        let terrain = clutter.over_terrain(OpenWorld);
+        assert!(
+            step_allowed(&terrain, HERE, Direction::East).is_none(),
+            "an NPC due east did not stop the step"
+        );
+        assert!(
+            step_allowed(&terrain, HERE, Direction::North).is_some(),
+            "an NPC due east stopped a step the other way"
+        );
+    }
+
     /// The bug as it was reported: a body walking at a barrel diagonally went
     /// straight at it every hold and was rolled back by the shard every hold,
     /// because this end could see no obstacle to go around. It goes around.
@@ -526,7 +559,7 @@ mod tests {
             "a water barrel's flags are no longer article-only"
         );
         assert!(!data.flags.is_blocking());
-        let clutter = Clutter::of(&[item(100, 100, 0, water_barrel)], &tiles);
+        let clutter = Clutter::of(&[item(100, 100, 0, water_barrel)], [], &tiles);
         assert!(
             !clutter.blocked_at(Tile::new(100, 100), 0),
             "a water barrel was made solid here and the shard would still allow the step"
@@ -538,7 +571,7 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = Clutter::of(&[item(100, 100, 0, BARREL)], &tiles);
+        let clutter = Clutter::of(&[item(100, 100, 0, BARREL)], [], &tiles);
         assert!(
             clutter.blocked_at(Tile::new(100, 100), 0),
             "a barrel underfoot is not in the way"
@@ -554,7 +587,7 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = Clutter::of(&[item(100, 100, 40, BARREL)], &tiles);
+        let clutter = Clutter::of(&[item(100, 100, 40, BARREL)], [], &tiles);
         assert!(
             !clutter.blocked_at(Tile::new(100, 100), 0),
             "a crate on an upper floor sealed the floor beneath it"
@@ -577,7 +610,7 @@ mod tests {
             !tiles.static_tile(gold.0).flags.is_blocking(),
             "gold's tiledata calls it impassable"
         );
-        let clutter = Clutter::of(&[item(100, 100, 0, gold)], &tiles);
+        let clutter = Clutter::of(&[item(100, 100, 0, gold)], [], &tiles);
         assert!(
             !clutter.blocked_at(Tile::new(100, 100), 0),
             "a coin on the floor stopped a step"
@@ -622,7 +655,7 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = Clutter::of(&[item(100, 100, 0, DOOR_OPEN)], &tiles);
+        let clutter = Clutter::of(&[item(100, 100, 0, DOOR_OPEN)], [], &tiles);
         assert!(
             !clutter.blocked_at(Tile::new(100, 100), 0),
             "an open door blocked its own doorway"
@@ -636,7 +669,7 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = Clutter::of(&[item(100, 100, 0, DOOR_SHUT)], &tiles);
+        let clutter = Clutter::of(&[item(100, 100, 0, DOOR_SHUT)], [], &tiles);
         let doorway = Tile::new(100, 100);
         assert!(clutter.blocked_at(doorway, 0), "a shut door let a step through");
         assert!(
@@ -654,7 +687,7 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = Clutter::of(&[item(100, 100, 0, BARREL)], &tiles);
+        let clutter = Clutter::of(&[item(100, 100, 0, BARREL)], [], &tiles);
         assert!(clutter.blocked_through_doors(Tile::new(100, 100), 0));
     }
 
@@ -667,7 +700,11 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = Clutter::of(&[item(100, 100, 0, DOOR_SHUT), item(100, 100, 0, BARREL)], &tiles);
+        let clutter = Clutter::of(
+            &[item(100, 100, 0, DOOR_SHUT), item(100, 100, 0, BARREL)],
+            [],
+            &tiles,
+        );
         assert!(
             clutter.blocked_through_doors(Tile::new(100, 100), 0),
             "a doorway with a barrel in it was called openable"
