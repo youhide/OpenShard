@@ -57,10 +57,10 @@ Ranked by what a person would notice first.
    time ([`interiors.rs:240`](../../../crates/client/artscan/src/interiors.rs#L240)),
    which is 29 million bounds-checked reads on the startup path. Run-length or
    a sparse per-block index would cut it by orders of magnitude.
-6. **`Vec<Vec<StaticItem>>` is 120,744 allocations.** A CSR pair — one
-   `Vec<StaticItem>` and a `Vec<u32>` of block offsets — is one allocation,
-   10 MiB smaller, better for locality, and trivially mappable or shareable.
-   Direction B should not inherit the current shape by default.
+6. **`Vec<Vec<StaticItem>>` is 120,744 allocations.** Sized and weighed under
+   [`plan.md`'s direction B](plan.md#what-felucca-measures-before-the-layout-is-chosen):
+   a CSR pair takes the statics layer from 38.2 MiB to about 13.5 MiB and from
+   120,745 allocations to two.
 7. **Both ends load the same install separately** —
    [`boot.rs:618`](../../../crates/server/server/src/boot.rs#L618) and
    [`lib.rs:461`](../../../crates/client/app/src/lib.rs#L461). Under
@@ -83,3 +83,46 @@ Ranked by what a person would notice first.
     and `statics::pick` breaks ties by taking the last. Our own chunk format
     should separate the two deliberately — store draw order as a field and sort
     by z — which turns every one of those scans into a suffix lookup.
+
+## The access pattern, and where it actually hurts
+
+Worth stating because the intuition "a 150 MiB array read through a camera must
+thrash" is right about one half and wrong about the other.
+
+`cells[i]` where `i = (block_x * blocks_down + block_y) * 64 + y_local * 8 +
+x_local`, `blocks_down = 512` on Felucca:
+
+| step | offset in memory |
+|---|---|
+| next tile east, same block | +4 B |
+| next tile south, same block | +32 B |
+| next block south | +256 B |
+| **next block east** | **+131,072 B (128 KiB)** |
+
+So the layout is column-major in blocks — southwards is contiguous, eastwards
+is a 128 KiB stride — while
+[`for_each_static_in`](../../../crates/client/render/src/statics.rs#L1184) and
+the ground walk both run **rows, `x` innermost**. The walk is transposed
+against the layout.
+
+**The land is fine anyway.** A block is 64 cells × 4 B = 256 B = exactly four
+cache lines. Walking a row takes 32 B from each of about 24 blocks; the next
+row takes the next 32 B of the same 24. Over eight rows every block is
+consumed whole — full line utilisation, and a working set of 6 KiB. A
+widest-zoom rectangle is roughly 187×187 tiles (the 35,000 lookups
+`for_each_static_in` names), which is 576 blocks and 147 KiB touched out of
+112 MiB resident. The 1997 tiling picked the cache line's size.
+
+**The statics are not.** Reaching one block means a 24-byte header out of the
+outer array and then a pointer into one of 120,744 separate allocations
+scattered across 28 MiB of heap. That is finding 6, and it is the half of the
+intuition that is correct.
+
+**And the rectangle is walked three to five times a frame**, independently:
+[`statics::collect_in_with_fades`](../../../crates/client/render/src/statics.rs#L547),
+[`occlusion::collect_with_interior`](../../../crates/client/render/src/occlusion.rs#L2765) —
+whose own doc says it walks *deliberately* rather than using the block bake —
+[`light::collect_with_interior`](../../../crates/client/render/src/light.rs#L976),
+plus `statics::pick` on cursor movement and the ground's own land walk. Same
+576 blocks, same binary searches, from scratch each time. That is a larger
+lever than the layout, and no direction in the plan currently owns it.
