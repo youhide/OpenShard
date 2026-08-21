@@ -461,6 +461,39 @@ the tile it is standing on, and staff walking through bodies is the same
 permission as walking through walls — see `gm.rs`, which has no such bypass
 either.
 
+### Backlog: a sector lookup is linear in a bucket, and a house makes the bucket fat
+
+`Sectors` (`state/src/sectors.rs`) is right where it was measured. Buckets are
+64 tiles square, `located` maps an entity to **its bucket and its row in it**,
+so insert, move and remove are all O(1) — the row half is already the lesson
+learned from this exact case, and its own doc says so: "in a decorated town
+that is thousands of entries, and finding an entity's own row in it by scanning
+was paid on *every step by anyone*".
+
+What is still linear is the read. `Sectors::nearby` walks **every entry** in up
+to four buckets and filters by Chebyshev distance. That is correct and was
+cheap while a bucket held mobiles; a decorated house makes it not cheap.
+Housing's own caps say how not: `LOCKDOWNS_PER_TILE` is 4, so a castle's 992
+tiles are worth about **4,000 locked-down items**, and at 64 tiles a side that
+castle sits in one or two buckets. Every `nearby` touching it compares four
+thousand rows.
+
+The callers are the problem, not the count. `nearby` is asked per NPC per tick
+by AI sight (`ai/src/lib.rs:365`), and again by guards, pets, chat, area spells,
+quest listeners and the broadcast audience (`runtime.rs:1104`). The cost lands
+on every NPC that happens to share a sector with someone's decorated house, not
+on the house.
+
+**Almost all of them want mobiles.** Only field spells (`tick/fields.rs`) and
+the crafting workshop scan (`crafting/environment.rs`) ask about items. So the
+fix is to split a bucket into two lists — mobiles and items — and let a caller
+say which it means. AI sight then compares about ten rows instead of four
+thousand, and no caller changes shape.
+
+This matters more, not less, once "a mobile is not an obstacle" above is closed
+the recommended way: that backlog puts a *second* per-step reader on the same
+lookup.
+
 ### The tick
 
 `World::tick` is the deterministic half of the boundary the gateway's channel
