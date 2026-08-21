@@ -1,8 +1,10 @@
 # The map: the work, and where it touches the code
 
 The plan behind [`overview.md`](overview.md), with the mechanics in
-[`mechanics.md`](mechanics.md). Six directions. The first one is not a feature — it is putting the map we already have behind one door,
-and everything after it is cheap only if it lands first.
+[`mechanics.md`](mechanics.md). Seven directions and one deferred. The first two
+are not features — they are putting the map we already have behind one door, and
+everything after them is cheap only if they land first. They have their own
+executable plan: [`snapshot.md`](snapshot.md).
 
 ## Who reads the world today
 
@@ -23,6 +25,8 @@ Both ends load the same install separately —
 whatever those files said.
 
 ## A0 — the cell array becomes a type that owns the order
+
+> Being executed first, on its own: [`snapshot.md`](snapshot.md).
 
 **Goal.** The block order stops being arithmetic five functions each write out,
 and becomes one newtype whose whole job is that arithmetic.
@@ -72,6 +76,8 @@ module — readers elsewhere only ever divide or multiply a coordinate by
 it is why it goes before A rather than inside it.
 
 ## A — one world, one door
+
+> Being executed first, on its own: [`snapshot.md`](snapshot.md).
 
 **Goal.** A named, revisioned snapshot that every reader above takes a handle
 to, so that later "the world changed" is one event with one meaning.
