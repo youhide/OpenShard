@@ -136,7 +136,24 @@ pub fn verb(action: &str) -> Vec<Command> {
                 });
             std::iter::once(batch).chain(scans)
         });
-    regions.chain(spawners).chain(people).chain(decor).collect()
+    // The three destructive menu rows name actions rather than datasets, but
+    // they belong here for the same reason the lay rows do: this is the shard's
+    // one translation from an admin verb into world commands.  Leaving them
+    // out made the buttons reach `AdminMenuAction` and then silently stop.
+    let clear = match action {
+        "clear" => vec![Command::ClearSpawners],
+        "clear:deco" => vec![Command::ClearDecorations],
+        "clear:regions" => vec![Command::ClearRegions {
+            facet: openshard_protocol::world::Facet(0),
+        }],
+        _ => Vec::new(),
+    };
+    regions
+        .chain(spawners)
+        .chain(people)
+        .chain(decor)
+        .chain(clear)
+        .collect()
 }
 
 #[cfg(test)]
@@ -239,6 +256,21 @@ mod tests {
             "something other than a door scan followed the decoration"
         );
         assert!(commands.len() > 1, "no region is scanned for implied doors");
+    }
+
+    #[test]
+    fn the_staff_menus_clear_buttons_remove_their_matching_content() {
+        assert!(matches!(verb("clear").as_slice(), [Command::ClearSpawners]));
+        assert!(matches!(
+            verb("clear:deco").as_slice(),
+            [Command::ClearDecorations]
+        ));
+        assert!(matches!(
+            verb("clear:regions").as_slice(),
+            [Command::ClearRegions {
+                facet: openshard_protocol::world::Facet(0)
+            }]
+        ));
     }
 
     #[test]

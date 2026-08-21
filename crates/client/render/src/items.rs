@@ -293,6 +293,36 @@ pub fn collect_with_fades(
     player_mask: Option<&crate::mobiles::OpaqueMask>,
     fades: &mut crate::cutaway::Fades,
 ) -> crate::statics::StaticGeometry {
+    collect_with_fades_with_interior(
+        items,
+        camera,
+        tiledata,
+        animations,
+        atlas,
+        cutaway,
+        highlight,
+        occlusion,
+        player_mask,
+        fades,
+        None,
+    )
+}
+
+/// [`collect_with_fades`] with the current building-cell picture gate.
+#[allow(clippy::too_many_arguments)]
+pub fn collect_with_fades_with_interior(
+    items: &[GroundItem],
+    camera: &Camera,
+    tiledata: &TileData,
+    animations: &StaticAnimations,
+    atlas: &dyn StaticArt,
+    cutaway: &Cutaway,
+    highlight: Option<ItemIndex>,
+    occlusion: &crate::occlusion::Occlusion,
+    player_mask: Option<&crate::mobiles::OpaqueMask>,
+    fades: &mut crate::cutaway::Fades,
+    interior: Option<&crate::interiors::InteriorFrame>,
+) -> crate::statics::StaticGeometry {
     let (eye_x, eye_y) = camera.eye_tile();
     let base = depth::base_for(eye_x, eye_y);
     let mut quads: Vec<(depth::Order, SpriteQuad)> = Vec::new();
@@ -305,6 +335,9 @@ pub fn collect_with_fades(
     let mut boxes = Vec::new();
 
     for (index, item) in items.iter().enumerate() {
+        if !interior.is_none_or(|frame| frame.shows_at(item.at)) {
+            continue;
+        }
         let (placed, target) = match place(item, camera, tiledata, animations, atlas, cutaway) {
             Some(placed) => {
                 if !on_screen(camera, placed.at, &placed.sprite) {
@@ -569,9 +602,27 @@ pub fn pick(
     cutaway: &Cutaway,
     cursor: RealPixel,
 ) -> Option<ItemIndex> {
+    pick_with_interior(items, camera, tiledata, animations, atlas, cutaway, cursor, None)
+}
+
+/// [`pick`] under the same building policy that collected this frame's items.
+#[must_use]
+pub fn pick_with_interior(
+    items: &[GroundItem],
+    camera: &Camera,
+    tiledata: &TileData,
+    animations: &StaticAnimations,
+    atlas: &dyn StaticArt,
+    cutaway: &Cutaway,
+    cursor: RealPixel,
+    interior: Option<&crate::interiors::InteriorFrame>,
+) -> Option<ItemIndex> {
     let in_view = camera.to_view(camera.pick(cursor));
     let mut hit: Option<(depth::Order, ItemIndex)> = None;
     for (index, item) in items.iter().enumerate() {
+        if !interior.is_none_or(|frame| frame.shows_at(item.at)) {
+            continue;
+        }
         let Some(placed) = place(item, camera, tiledata, animations, atlas, cutaway) else {
             continue;
         };

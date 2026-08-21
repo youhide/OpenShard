@@ -512,7 +512,11 @@ impl App {
                 });
             }
         }
-        let doors = (*xs.start()..=*xs.end())
+        // Map doors are the immutable leaves placed in the facet.  Generated
+        // doors arrive in the separate item layer, where their graphic is the
+        // authoritative live open/shut state; both belong in this inspection
+        // overlay.  The wall bake itself deliberately remains item-free.
+        let map_doors = (*xs.start()..=*xs.end())
             .flat_map(|x| (*ys.start()..=*ys.end()).map(move |y| (x, y)))
             .filter_map(|(x, y)| {
                 self.resources
@@ -527,10 +531,19 @@ impl App {
                     })
                     .map(|item| InteriorDoor {
                         at: Point::new(x, y, item.z),
-                        shown: true,
+                        shown: openshard_client_render::doors::is_open(item.tile),
                     })
+            });
+        let item_doors = self.world.presentation.items.iter().filter_map(|item| {
+            let graphic = item.displayed();
+            (graph.building_at(item.at.x, item.at.y).is_some()
+                && openshard_client_render::doors::is_door(graphic))
+            .then_some(InteriorDoor {
+                at: item.at,
+                shown: openshard_client_render::doors::is_open(graphic),
             })
-            .collect();
+        });
+        let doors = map_doors.chain(item_doors).collect();
         Arc::new(InteriorOverlay {
             cells,
             doors,
@@ -755,6 +768,18 @@ impl App {
         if let Some(show) = request.show_interiors {
             self.graphics.show_interiors = show;
         }
+        if let Some(buildings) = request.buildings {
+            self.graphics.buildings = buildings;
+        }
+        if let Some(z_slice) = request.z_slice {
+            self.graphics.z_slice = z_slice;
+        }
+        if let Some(z_slice_view) = request.z_slice_view {
+            self.graphics.z_slice_view = z_slice_view;
+        }
+        if let Some(floor_view) = request.floor_view {
+            self.graphics.floor_view = floor_view;
+        }
         if let Some(show) = request.show_occluders {
             self.graphics.show_occluders = show;
         }
@@ -965,6 +990,10 @@ impl App {
             terrain,
             show_interiors: self.graphics.show_interiors,
             interiors,
+            buildings: self.graphics.buildings,
+            z_slice: self.graphics.z_slice,
+            z_slice_view: self.graphics.z_slice_view,
+            floor_view: self.graphics.floor_view,
             route,
             show_occluders: self.graphics.show_occluders,
             show_solids: self.graphics.show_solids,

@@ -104,6 +104,7 @@ pub mod bvh;
 pub mod merge;
 
 use openshard_protocol::wire::Graphic;
+use openshard_protocol::world::Point;
 
 use crate::facing::{Face, Facing, Hole};
 use openshard_uofiles::map::Map;
@@ -2741,9 +2742,31 @@ pub fn collect(
     cutaway: &Cutaway,
     atlas: Option<&dyn crate::atlas::StaticArt>,
 ) -> Occlusion {
+    collect_with_interior(map, items, bounds, tiledata, cutaway, atlas, None)
+}
+
+/// [`collect`] constrained by one resolved building picture.
+///
+/// A room that is absent from the colour pass must also be absent from this
+/// grid: its boxes otherwise still claim occluder ownership and cast shadows
+/// over the room that remains on screen.  This deliberately walks instead of
+/// using the immutable block bake, whose entries describe the complete map.
+pub fn collect_with_interior(
+    map: &Map,
+    items: &[GroundItem],
+    bounds: TileBounds,
+    tiledata: &TileData,
+    cutaway: &Cutaway,
+    atlas: Option<&dyn crate::atlas::StaticArt>,
+    interior: Option<&crate::interiors::InteriorFrame>,
+) -> Occlusion {
     let mut occlusion = Builder::new(bounds);
 
     crate::statics::for_each_static_in(map, bounds, |item| {
+        let tile = tiledata.static_tile(item.tile.0);
+        if !interior.is_none_or(|frame| frame.shows_static_at(Point::new(item.x, item.y, item.z), tile)) {
+            return;
+        }
         place(
             &mut occlusion,
             map,
@@ -2755,7 +2778,12 @@ pub fn collect(
             item.tile,
         );
     });
-    put_items(&mut occlusion, map, items, tiledata, atlas);
+    let visible_items: Vec<_> = items
+        .iter()
+        .copied()
+        .filter(|item| interior.is_none_or(|frame| frame.shows_at(item.at)))
+        .collect();
+    put_items(&mut occlusion, map, &visible_items, tiledata, atlas);
 
     occlusion.blur_sky();
     occlusion.finish(cutaway)

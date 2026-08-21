@@ -253,6 +253,7 @@ fn assemble_and_draw(
         tiledata,
         animations,
         cutaway,
+        interior: None,
         land: &land,
         texmaps: &texmaps,
         statics: &static_atlas,

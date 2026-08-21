@@ -199,6 +199,7 @@ fn draw(
         tiledata,
         animations,
         cutaway: &cutaway,
+        interior: None,
         land: &land,
         texmaps: &texmaps,
         statics: &static_atlas,

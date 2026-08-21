@@ -165,7 +165,27 @@ pub fn collect(
     texmaps: &TexmapAtlas,
     cutaway: &Cutaway,
 ) -> Vec<GroundQuad> {
-    collect_in(map, camera, camera.visible_tiles(), atlas, texmaps, cutaway)
+    collect_with_interior(map, camera, atlas, texmaps, cutaway, None)
+}
+
+/// [`collect`] with a resolved building frame layered over the global cutaway.
+pub fn collect_with_interior(
+    map: &Map,
+    camera: &Camera,
+    atlas: &LandAtlas,
+    texmaps: &TexmapAtlas,
+    cutaway: &Cutaway,
+    interior: Option<&crate::interiors::InteriorFrame>,
+) -> Vec<GroundQuad> {
+    collect_in_with_interior(
+        map,
+        camera,
+        camera.visible_tiles(),
+        atlas,
+        texmaps,
+        cutaway,
+        interior,
+    )
 }
 
 /// The ground quads on one caller-selected tile rectangle.
@@ -182,6 +202,19 @@ pub fn collect_in(
     atlas: &LandAtlas,
     texmaps: &TexmapAtlas,
     cutaway: &Cutaway,
+) -> Vec<GroundQuad> {
+    collect_in_with_interior(map, camera, bounds, atlas, texmaps, cutaway, None)
+}
+
+/// [`collect_in`] with an optional building-cell gate.
+pub fn collect_in_with_interior(
+    map: &Map,
+    camera: &Camera,
+    bounds: TileBounds,
+    atlas: &LandAtlas,
+    texmaps: &TexmapAtlas,
+    cutaway: &Cutaway,
+    interior: Option<&crate::interiors::InteriorFrame>,
 ) -> Vec<GroundQuad> {
     let (eye_x, eye_y) = camera.eye_tile();
     let base = depth::base_for(eye_x, eye_y);
@@ -219,6 +252,9 @@ pub fn collect_in(
             }
             let corners = land.corners(x, y, cell.z);
             let (x, y) = (x as u16, y as u16);
+            if !interior.is_none_or(|frame| frame.shows_at(Point::new(x, y, cell.z))) {
+                continue;
+            }
             let at = camera.to_screen(Point::new(x, y, 0));
             let Some(region) = atlas.region(Graphic(cell.tile.0)) else {
                 continue;

@@ -8,6 +8,7 @@
 //! fields here change together, on every `Update::World`, and a method that
 //! only touches this half can be written and tested against it alone.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::time::{Duration, Instant};
@@ -188,6 +189,9 @@ pub struct PresentationWorld {
     pub cutaway_fades: openshard_client_render::cutaway::Fades,
     /// Last reusable map-static collection. Dynamic server items remain live.
     pub static_geometry_cache: Option<StaticGeometryCache>,
+    /// Per-block and per-building interior topology. It is changed only while
+    /// a frame resolves its immutable picture policy.
+    pub interior_cache: RefCell<InteriorCache>,
     /// Render mobiles beside the identity their animation clocks use.
     pub others: Vec<(Who, Mobile)>,
     /// Item corpses projected through the mobile renderer. Their serial remains
@@ -229,6 +233,7 @@ pub struct PresentationWorld {
 pub struct StaticGeometryCacheKey {
     camera: Camera,
     cutaway: Cutaway,
+    interior: Option<u64>,
     atlas_revision: u64,
     player_mask: Option<u64>,
     has_occlusion: bool,
@@ -240,6 +245,7 @@ impl StaticGeometryCacheKey {
     pub const fn new(
         camera: Camera,
         cutaway: Cutaway,
+        interior: Option<u64>,
         atlas_revision: u64,
         player_mask: Option<u64>,
         has_occlusion: bool,
@@ -249,6 +255,7 @@ impl StaticGeometryCacheKey {
         Self {
             camera,
             cutaway,
+            interior,
             atlas_revision,
             player_mask,
             has_occlusion,
@@ -265,6 +272,20 @@ impl StaticGeometryCacheKey {
 pub struct StaticGeometryCache {
     key: StaticGeometryCacheKey,
     geometry: StaticGeometry,
+}
+
+/// The durable map work behind one building picture.
+#[derive(Default, Debug)]
+pub struct InteriorCache {
+    pub index: openshard_client_render::interiors::Index,
+    pub buildings: BTreeMap<u32, InteriorBuilding>,
+}
+
+/// A complete, immutable room/floor graph for one label in the facet artifact.
+#[derive(Debug)]
+pub struct InteriorBuilding {
+    pub rooms: openshard_client_render::interiors::StitchedRooms,
+    pub buildings: openshard_client_render::interiors::Buildings,
 }
 
 impl StaticGeometryCache {
@@ -943,6 +964,7 @@ mod tests {
             cutaway_at: at,
             cutaway_fades: openshard_client_render::cutaway::Fades::default(),
             static_geometry_cache: None,
+            interior_cache: RefCell::default(),
             others: Vec::new(),
             corpses: Vec::new(),
             items: Vec::new(),

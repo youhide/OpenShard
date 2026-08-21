@@ -463,9 +463,25 @@ pub fn collect(
     equip_conv: &EquipConv,
     highlight: Option<MobileIndex>,
 ) -> Vec<SpriteQuad> {
+    collect_with_interior(mobiles, camera, atlas, cutaway, equip_conv, highlight, None)
+}
+
+/// [`collect`] with the resolved building-cell gate from the same frame.
+pub fn collect_with_interior(
+    mobiles: &[Mobile],
+    camera: &Camera,
+    atlas: &AnimAtlas,
+    cutaway: &Cutaway,
+    equip_conv: &EquipConv,
+    highlight: Option<MobileIndex>,
+    interior: Option<&crate::interiors::InteriorFrame>,
+) -> Vec<SpriteQuad> {
     let mut quads: Vec<(depth::Order, SpriteQuad)> = Vec::new();
 
     for (index, mobile) in mobiles.iter().enumerate() {
+        if !interior.is_none_or(|frame| frame.shows_at(mobile.at)) {
+            continue;
+        }
         // The highlight replaces the creature's own hue rather than combining
         // with it, exactly as an item's does — the shader has one hue per
         // sprite and a ramp *replaces* the art's colour.
@@ -624,7 +640,7 @@ pub fn pick(
     equip_conv: &EquipConv,
     cursor: RealPixel,
 ) -> Option<MobileIndex> {
-    pick_iter(mobiles.iter(), camera, atlas, cutaway, equip_conv, cursor)
+    pick_iter_with_interior(mobiles.iter(), camera, atlas, cutaway, equip_conv, cursor, None)
 }
 
 /// Pick from borrowed mobile views without materialising a second owned list.
@@ -642,10 +658,24 @@ pub fn pick_iter<'a>(
     equip_conv: &EquipConv,
     cursor: RealPixel,
 ) -> Option<MobileIndex> {
+    pick_iter_with_interior(mobiles, camera, atlas, cutaway, equip_conv, cursor, None)
+}
+
+/// [`pick_iter`] under the same building policy as mobile collection.
+#[must_use]
+pub fn pick_iter_with_interior<'a>(
+    mobiles: impl Iterator<Item = &'a Mobile>,
+    camera: &Camera,
+    atlas: &AnimAtlas,
+    cutaway: &Cutaway,
+    equip_conv: &EquipConv,
+    cursor: RealPixel,
+    interior: Option<&crate::interiors::InteriorFrame>,
+) -> Option<MobileIndex> {
     let in_view = camera.to_view(camera.pick(cursor));
     let mut hit: Option<(depth::Order, MobileIndex)> = None;
     for (index, mobile) in mobiles.enumerate() {
-        if !cutaway.shows_mobile(mobile.at.z) {
+        if !cutaway.shows_mobile(mobile.at.z) || !interior.is_none_or(|frame| frame.shows_at(mobile.at)) {
             continue;
         }
         // The body first, then what it wears: any one of them is the creature.

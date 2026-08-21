@@ -196,6 +196,7 @@ pub(crate) fn assemble_geometry(
     window: &Screen,
     camera: Camera,
     cutaway: &Cutaway,
+    interior: Option<&openshard_client_render::interiors::InteriorFrame>,
     tuning: &light::Tuning,
     lit_item: Option<openshard_client_render::items::ItemIndex>,
     lit_mobile: Option<openshard_client_render::mobiles::MobileIndex>,
@@ -283,9 +284,11 @@ pub(crate) fn assemble_geometry(
     // leave the collector live whenever any are present. The cache is therefore
     // an exact reuse of a static-only, unchanged view — never an approximation.
     let has_occlusion = sky.is_some();
+    let interior_fingerprint = interior.map(openshard_client_render::interiors::InteriorFrame::fingerprint);
     let static_geometry_key = world::StaticGeometryCacheKey::new(
         camera,
         *cutaway,
+        interior_fingerprint,
         static_atlas_revision,
         player_mask_fingerprint,
         has_occlusion,
@@ -322,6 +325,7 @@ pub(crate) fn assemble_geometry(
         tiledata: &resources.tiledata,
         animations: &world.presentation.tile_animations,
         cutaway,
+        interior,
         land: &window.atlases.land,
         texmaps: &window.atlases.texmaps,
         // The pictures, which is where an occluder's *facing* comes from: a
@@ -450,7 +454,10 @@ pub(crate) fn assemble_geometry(
         &world.presentation.tile_animations,
         &window.atlases.statics,
         cutaway,
-        picking.selected.and_then(SelectedIdentity::as_static),
+        picking
+            .selected
+            .and_then(SelectedIdentity::as_static)
+            .filter(|picked| interior.is_none_or(|frame| frame.shows_at(picked.at))),
     );
     // The same quads as the picture's, so the ring lands on the sprite
     // rather than beside it — see `items::outlined`.
@@ -461,7 +468,13 @@ pub(crate) fn assemble_geometry(
         &world.presentation.tile_animations,
         &window.atlases.statics,
         cutaway,
-        ringed,
+        ringed.filter(|index| {
+            world
+                .presentation
+                .items
+                .get(index.position())
+                .is_some_and(|item| interior.is_none_or(|frame| frame.shows_at(item.at)))
+        }),
     );
     // The held item's own silhouette, through the same function and for
     // the same reason — a second call rather than folding `selected_item` into
@@ -475,7 +488,13 @@ pub(crate) fn assemble_geometry(
         &world.presentation.tile_animations,
         &window.atlases.statics,
         cutaway,
-        selected_item,
+        selected_item.filter(|index| {
+            world
+                .presentation
+                .items
+                .get(index.position())
+                .is_some_and(|item| interior.is_none_or(|frame| frame.shows_at(item.at)))
+        }),
     );
     // The same two effects for a creature, off the same style switch and
     // the same one-pick-a-frame rule: `lit_mobile` and `lit_item` are never
@@ -489,7 +508,11 @@ pub(crate) fn assemble_geometry(
         &window.atlases.mobiles,
         cutaway,
         &resources.equip_conv,
-        mobile_ringed,
+        mobile_ringed.filter(|index| {
+            drawn
+                .get(index.position())
+                .is_some_and(|mobile| interior.is_none_or(|frame| frame.shows_at(mobile.at)))
+        }),
     );
     // The held mobile's own silhouette — see `selected_item_outline` above for
     // why this is a second call and not `mobile_ringed` itself.
@@ -499,15 +522,20 @@ pub(crate) fn assemble_geometry(
         &window.atlases.mobiles,
         cutaway,
         &resources.equip_conv,
-        held_mobile,
+        held_mobile.filter(|index| {
+            drawn
+                .get(index.position())
+                .is_some_and(|mobile| interior.is_none_or(|frame| frame.shows_at(mobile.at)))
+        }),
     );
-    let mobile_quads = mobiles::collect(
+    let mobile_quads = mobiles::collect_with_interior(
         drawn,
         &camera,
         &window.atlases.mobiles,
         cutaway,
         &resources.equip_conv,
         mobile_hued,
+        interior,
     );
     costs.overlays = overlays_started.elapsed();
     FrameGeometry {
@@ -540,6 +568,8 @@ pub(crate) struct FrameFacts {
     pub(crate) watched: bool,
     /// The roof cutaway this frame's picks and picture are both drawn under.
     pub(crate) cutaway: Cutaway,
+    /// The separate building picture policy, resolved once beside the picks.
+    pub(crate) interior: Option<openshard_client_render::interiors::InteriorFrame>,
     /// What the cursor is over and what it lit — see [`Pick`].
     pub(crate) pick: Pick,
     /// The crowd as the mobile pass's own atlas already has it packed — the

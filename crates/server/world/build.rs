@@ -847,6 +847,9 @@ struct Townsperson {
     /// Whether double-clicking it opens a shop.
     #[serde(default)]
     vendor: bool,
+    /// Whether it can offer a ghost a free resurrection.
+    #[serde(default)]
+    healer: bool,
     /// Where it sleeps, for the optional daily routine.
     #[serde(default)]
     night_home: Option<(u16, u16, i8)>,
@@ -1068,7 +1071,7 @@ fn townsfolk(text: &str) -> String {
         writeln!(out, "                night_home: {night_home},").unwrap();
         writeln!(out, "                banker: {},", person.banker).unwrap();
         writeln!(out, "                vendor: {},", person.vendor).unwrap();
-        out.push_str("                healer: false,\n");
+        writeln!(out, "                healer: {},", person.healer).unwrap();
         writeln!(out, "                equipment: {equipment},").unwrap();
         out.push_str("                skills: Vec::new(),\n");
         writeln!(out, "                stock: {stock},").unwrap();

@@ -90,6 +90,14 @@ pub struct Request {
     /// Switch the R1 interior-index overlay on or off. It is deliberately a
     /// diagnostic request: no normal world geometry consults this setting.
     pub show_interiors: Option<bool>,
+    /// Enable the R2 building picture policy.
+    pub buildings: Option<bool>,
+    /// Replace the building policy with the diagnostic height-only band.
+    pub z_slice: Option<bool>,
+    /// Bounds for the diagnostic height-only band.
+    pub z_slice_view: Option<openshard_client_render::interiors::ZSliceView>,
+    /// The non-persistent structural floor selection.
+    pub floor_view: Option<openshard_client_render::interiors::FloorView>,
     /// Which of the world's producers to draw from now on, on the frame a box
     /// was ticked — see [`openshard_client_render::frame::Draw`].
     ///
@@ -1257,6 +1265,111 @@ fn world_panel(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut R
                 .small()
                 .weak(),
         );
+    }
+    ui.separator();
+    let mut buildings = hud.buildings;
+    if ui
+        .checkbox(&mut buildings, "Buildings — rooms and floors")
+        .changed()
+    {
+        request.buildings = Some(buildings);
+    }
+    let mut z_slice = hud.z_slice;
+    if ui
+        .checkbox(&mut z_slice, "Z band — black outside (diagnostic)")
+        .changed()
+    {
+        request.z_slice = Some(z_slice);
+    }
+    if z_slice {
+        let mut z_slice_view = hud.z_slice_view;
+        ui.horizontal(|ui| {
+            ui.label("Z range:");
+            ui.radio_value(
+                &mut z_slice_view,
+                openshard_client_render::interiors::ZSliceView::Auto,
+                "Auto",
+            );
+            let (mut lower, mut upper) = match z_slice_view {
+                openshard_client_render::interiors::ZSliceView::Auto => (0, 20),
+                openshard_client_render::interiors::ZSliceView::Manual { lower, upper } => (lower, upper),
+            };
+            if ui
+                .radio(
+                    matches!(
+                        z_slice_view,
+                        openshard_client_render::interiors::ZSliceView::Manual { .. }
+                    ),
+                    "Manual",
+                )
+                .clicked()
+            {
+                z_slice_view = openshard_client_render::interiors::ZSliceView::Manual { lower, upper };
+            }
+            if matches!(
+                z_slice_view,
+                openshard_client_render::interiors::ZSliceView::Manual { .. }
+            ) {
+                let lower_changed = ui
+                    .add(
+                        egui::DragValue::new(&mut lower)
+                            .range(i8::MIN..=i8::MAX)
+                            .prefix("low "),
+                    )
+                    .changed();
+                let upper_changed = ui
+                    .add(
+                        egui::DragValue::new(&mut upper)
+                            .range(i8::MIN..=i8::MAX)
+                            .prefix("high "),
+                    )
+                    .changed();
+                if lower_changed || upper_changed {
+                    z_slice_view = openshard_client_render::interiors::ZSliceView::Manual { lower, upper };
+                }
+            }
+        });
+        if z_slice_view != hud.z_slice_view {
+            request.z_slice_view = Some(z_slice_view);
+        }
+    } else {
+        let mut floor_view = hud.floor_view;
+        ui.horizontal(|ui| {
+            ui.label("floor:");
+            ui.radio_value(
+                &mut floor_view,
+                openshard_client_render::interiors::FloorView::Auto,
+                "Auto",
+            );
+            let mut relative = match floor_view {
+                openshard_client_render::interiors::FloorView::Auto => 0,
+                openshard_client_render::interiors::FloorView::Manual { relative } => relative,
+            };
+            if ui
+                .radio(
+                    matches!(
+                        floor_view,
+                        openshard_client_render::interiors::FloorView::Manual { .. }
+                    ),
+                    "Manual",
+                )
+                .clicked()
+            {
+                floor_view = openshard_client_render::interiors::FloorView::Manual { relative };
+            }
+            if matches!(
+                floor_view,
+                openshard_client_render::interiors::FloorView::Manual { .. }
+            ) && ui
+                .add(egui::DragValue::new(&mut relative).range(-127..=127))
+                .changed()
+            {
+                floor_view = openshard_client_render::interiors::FloorView::Manual { relative };
+            }
+        });
+        if floor_view != hud.floor_view {
+            request.floor_view = Some(floor_view);
+        }
     }
 
     ui.separator();

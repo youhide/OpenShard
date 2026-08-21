@@ -20,7 +20,7 @@ use crate::{LoadError, load};
 const MAGIC: &[u8; 8] = b"OSINT\0\r\n";
 const FORMAT: u32 = 1;
 /// Bump when exterior/door/wall semantics change.
-pub const TOPOLOGY_VERSION: u32 = 1;
+pub const TOPOLOGY_VERSION: u32 = 3;
 const FNV_OFFSET: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000001b3;
 

@@ -42,6 +42,20 @@
 
 use winit::keyboard::KeyCode;
 
+/// One pressed-key gesture, including the modifier R2 needs to keep camera pan
+/// distinct from structural-floor selection.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Gesture {
+    code: KeyCode,
+    ctrl: bool,
+}
+
+impl Gesture {
+    pub(crate) const fn new(code: KeyCode, ctrl: bool) -> Self {
+        Self { code, ctrl }
+    }
+}
+
 /// Who a keystroke belongs to.
 ///
 /// Ordered by precedence, and the order is the whole content of the type:
@@ -216,6 +230,10 @@ pub(crate) enum Hotkey {
     PanUp,
     /// The same, downward.
     PanDown,
+    /// Open the next structural floor of the current building picture.
+    FloorUp,
+    /// Open the structural floor below it.
+    FloorDown,
     /// A fixed mixed-case ASCII line, said without ever going through the
     /// keyboard — no xkb group, no input method, no text field.
     ///
@@ -269,7 +287,7 @@ impl Hotkey {
     /// The list exists so that "no two actions share a key" is a test rather
     /// than a thing somebody notices — see [`Self::key`], which is also the
     /// question a bindings window asks.
-    pub(crate) const ALL: [Self; 19] = [
+    pub(crate) const ALL: [Self; 21] = [
         Self::Speak,
         Self::DevWindow,
         Self::Relock,
@@ -278,6 +296,8 @@ impl Hotkey {
         Self::Minimap,
         Self::PanUp,
         Self::PanDown,
+        Self::FloorUp,
+        Self::FloorDown,
         Self::SpeechProbe,
         Self::Night,
         Self::Sunlight,
@@ -305,6 +325,8 @@ impl Hotkey {
             Self::Minimap => KeyCode::KeyM,
             Self::PanUp => KeyCode::PageUp,
             Self::PanDown => KeyCode::PageDown,
+            Self::FloorUp => KeyCode::PageUp,
+            Self::FloorDown => KeyCode::PageDown,
             Self::SpeechProbe => KeyCode::F9,
             Self::Night => KeyCode::F10,
             Self::Sunlight => KeyCode::F8,
@@ -317,6 +339,12 @@ impl Hotkey {
             Self::Fringe => KeyCode::F2,
             Self::FrameDump => KeyCode::F12,
         }
+    }
+
+    /// The full key-plus-modifier binding. Page Up/Down are intentionally the
+    /// only chords today: plain selects floors; Ctrl keeps the camera pan.
+    pub(crate) const fn gesture(self) -> Gesture {
+        Gesture::new(self.key(), matches!(self, Self::PanUp | Self::PanDown))
     }
 
     /// What a pressed key does in the world, or `None` for one that does
@@ -332,11 +360,11 @@ impl Hotkey {
     /// before the table rather than given a variant of its own: it is the same
     /// action on the same keyboard, and [`Self::key`] answers with the one a
     /// legend would print.
-    pub(crate) fn of(code: KeyCode) -> Option<Self> {
-        if matches!(code, KeyCode::NumpadEnter) {
+    pub(crate) fn of(gesture: Gesture) -> Option<Self> {
+        if matches!(gesture.code, KeyCode::NumpadEnter) && !gesture.ctrl {
             return Some(Self::Speak);
         }
-        Self::ALL.into_iter().find(|hotkey| hotkey.key() == code)
+        Self::ALL.into_iter().find(|hotkey| hotkey.gesture() == gesture)
     }
 }
 
@@ -358,7 +386,7 @@ pub(crate) const fn egui_may_see(code: KeyCode) -> bool {
 mod tests {
     use winit::keyboard::KeyCode;
 
-    use super::{Edit, Hotkey, Owner, egui_may_see};
+    use super::{Edit, Gesture, Hotkey, Owner, egui_may_see};
 
     #[test]
     fn something_being_typed_into_outranks_the_body() {
@@ -403,9 +431,9 @@ mod tests {
     /// bindings were arms of a `match` inside the event loop.
     #[test]
     fn every_hotkey_owns_exactly_one_key_and_no_key_is_owned_twice() {
-        let mut keys: Vec<KeyCode> = Vec::new();
+        let mut keys: Vec<Gesture> = Vec::new();
         for hotkey in Hotkey::ALL {
-            let key = hotkey.key();
+            let key = hotkey.gesture();
             assert_eq!(
                 Hotkey::of(key),
                 Some(hotkey),
@@ -420,15 +448,47 @@ mod tests {
         assert_eq!(keys.len(), Hotkey::ALL.len());
     }
 
+    #[test]
+    fn page_keys_select_floors_and_ctrl_keeps_camera_pan() {
+        assert_eq!(
+            Hotkey::of(Gesture::new(KeyCode::PageUp, false)),
+            Some(Hotkey::FloorUp)
+        );
+        assert_eq!(
+            Hotkey::of(Gesture::new(KeyCode::PageDown, false)),
+            Some(Hotkey::FloorDown)
+        );
+        assert_eq!(
+            Hotkey::of(Gesture::new(KeyCode::PageUp, true)),
+            Some(Hotkey::PanUp)
+        );
+        assert_eq!(
+            Hotkey::of(Gesture::new(KeyCode::PageDown, true)),
+            Some(Hotkey::PanDown)
+        );
+    }
+
     /// The three keys the world reads and this table deliberately does not hold
     /// — see [`Hotkey`]'s own doc for why each is answered earlier. A binding
     /// that appeared here for one of them would be a second answer, and the
     /// first one is the one that runs.
     #[test]
     fn the_held_keys_and_the_window_key_are_not_bindings_here() {
-        assert_eq!(Hotkey::of(KeyCode::Tab), None, "war mode is held, not pressed");
-        assert_eq!(Hotkey::of(KeyCode::ArrowUp), None, "an arrow is a step, held");
-        assert_eq!(Hotkey::of(KeyCode::Escape), None, "the topmost window's");
+        assert_eq!(
+            Hotkey::of(Gesture::new(KeyCode::Tab, false)),
+            None,
+            "war mode is held, not pressed"
+        );
+        assert_eq!(
+            Hotkey::of(Gesture::new(KeyCode::ArrowUp, false)),
+            None,
+            "an arrow is a step, held"
+        );
+        assert_eq!(
+            Hotkey::of(Gesture::new(KeyCode::Escape, false)),
+            None,
+            "the topmost window's"
+        );
     }
 
     /// A letter the body walks on is not a hotkey, and a letter that opens a
@@ -436,13 +496,16 @@ mod tests {
     /// means the speech line does not have the keyboard (see [`Owner`]).
     #[test]
     fn a_letter_is_a_hotkey_only_where_the_world_owns_the_keyboard() {
-        assert_eq!(Hotkey::of(KeyCode::KeyP), Some(Hotkey::Paperdoll));
+        assert_eq!(
+            Hotkey::of(Gesture::new(KeyCode::KeyP, false)),
+            Some(Hotkey::Paperdoll)
+        );
         assert_eq!(
             Edit::of(KeyCode::KeyP, false, false),
             None,
             "the same key, typed, is text"
         );
-        assert_eq!(Hotkey::of(KeyCode::KeyZ), None);
+        assert_eq!(Hotkey::of(Gesture::new(KeyCode::KeyZ, false)), None);
     }
 
     /// An arrow means the caret or the popup here — never a step. The body is a

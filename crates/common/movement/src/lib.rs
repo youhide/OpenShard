@@ -51,6 +51,7 @@
 pub mod bake;
 mod cache;
 mod detour;
+pub mod door_frames;
 mod navigation;
 mod pace;
 mod path;

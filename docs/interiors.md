@@ -27,6 +27,16 @@ street beside it.
 sealed room is already hidden by the roof. Once the building renderer opens the
 view to a floor, the room rule prevents that action from becoming x-ray vision.
 
+**Outside means no house contents.** Before a player is in any indexed
+building, the renderer must not expose the contents of *any* indexed building
+in the camera view. The facet's positive-space labels are enough for this cheap
+exterior policy: labelled tiles contribute no land, static, item or mobile
+geometry and therefore remain black; contour-wall tiles stay on the ordinary
+path. Entering a labelled building switches back to that building's floor and
+room policy. This exterior guard is deliberately independent of the door
+reachability rule below: a front door is not permission for a person standing
+outside to see an entire house.
+
 ## The order
 
 **R0 first — the refactor, on its own, with no feature in it.** Then the map
@@ -206,8 +216,8 @@ the all-outdoor component as a bridge. Tests pin a walkable stair and the
 separate stacked-floor evidence.
 
 **Now inspectable, still deliberately not connected to geometry:** F1 → World
-has `interiors — structural floors; sealed rooms are black`. Its source is now
-a facet-wide offline artifact, `openshard-interiors-<facet>.bin`, rather than a
+has `interiors — baked wall topology; whole buildings`. Its source is now a
+facet-wide offline artifact, `openshard-interiors-<facet>.bin`, rather than a
 camera block cache. The bake starts at every map boundary and floods through the
 open world until a wall or a door stops it: that is the **negative space**.
 Every unvisited tile is positive building space. Internal doors then join only
@@ -221,6 +231,12 @@ only slices the already baked labels to the camera, so panning and zooming
 cannot change topology or colours. Missing or stale output disables this
 diagnostic with the exact bake command; it never rebuilds during a frame:
 
+Some shard doors are generated as live ground items, rather than stored in the
+map static list. Their one- and two-tile openings are inferred offline from the
+opposed catalogued wall frames, so they stop the exterior flood even before a
+player has received the item. The F1 marker then reads the item's current door
+graphic: green is open and red is shut.
+
 ```sh
 OPENSHARD_CLIENT=/path/to/client \
   cargo run --release -p openshard-client-artscan --bin openshard-interiors-bake -- --facet 0
@@ -232,14 +248,29 @@ renderer gate, geometry-cache fingerprint, picking input, Auto/Manual state, or
 keyboard binding. Therefore the normal picture is unchanged and floors do not
 yet switch.
 
-**Resume at:** inspect representative shop/cellar, courtyard and closed-door
-frames with the F1 overlay, then make its cell, floor, room and portal readings
-separately selectable for R1d. `cargo run --release -p
-openshard-client-render --example interior_census` remains the repeatable
-measurement against `OPENSHARD_CLIENT`; it samples central Britain and Wrong by
-default, and accepts `name:x,y,width,height` regions for specific buildings.
-Only after the debug views are verified should R2 claim Page Up/Page Down and
-gate geometry.
+### Handoff — whole-building topology complete
+
+- The R1e artifact is current for facet 0. It is a whole-house diagnostic only:
+  every painted tile has `floor = 0`, and the stair list is intentionally empty.
+- The exterior flood uses catalogued walls only. Furniture, tabletop height,
+  roofs and runtime walkability do not alter its topology.
+- `0x00AD` west / `0x00AB` east at Britain `1434` / `1437`, `1599` are the
+  two static frames for the server-generated double door. The shared
+  `movement::door_frames` table, equal-z match, and `can_fit` guard make
+  `1435–1436,1599` virtual closed door anchors; consequently `1433,1596` is
+  labelled as building `874` in the rebuilt artifact. The item's live graphic
+  controls only the F1 marker (green open, red shut), never the baked contour.
+- The debug inspector is
+  `openshard-interiors-inspect -- --facet 0 --at X,Y --radius N`; use it before
+  changing an exceptional building rule.
+
+**Next work — do it as one render phase, not as more R1 overlay:** derive and
+persist `FloorId`s, then stair edges; introduce selected Auto/Manual floor state
+and feed it to frame assembly as the sole gate for floors, statics, server
+items, and mobiles. That phase owns geometry cutaway and Page Up/Page Down.
+Do not expose second-storey labels or stairs separately beforehand: they have no
+user-visible meaning until the renderer can show the selected storey and hide
+the rest.
 
 - **R1a — cells and floors.** A cell is one tile, one floor band and one ceiling
   band: the space a body could stand in. Build its floors from land and static

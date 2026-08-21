@@ -44,6 +44,7 @@ use openshard_client_render::text::{self, Label};
 use openshard_client_render::{ground, light, statics};
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
+use openshard_protocol::world::Point;
 use openshard_uofiles::map::Map;
 
 use crate::app::App;
@@ -1481,6 +1482,7 @@ impl App {
         // the item pick below needs it, and the pick has to be answered before
         // the HUD is built — see the next paragraph.
         let cutaway = self.cutaway();
+        let interior = self.interior_frame();
         // The ground tile under the cursor, and its ring — asked here beside
         // the picks below rather than a second time when the HUD is built:
         // this used to be `App::hud`'s own call to `Self::pick_tile`, a second
@@ -1488,7 +1490,19 @@ impl App {
         // spirit even when it happened to be the same value in practice. One
         // frame's worth of picks belongs in one place — this function — same
         // as `on_mobile`/`on_item`/`on_static` below.
-        let hover = owns_pointer.then(|| self.pick_tile(camera)).flatten();
+        let hover = owns_pointer
+            .then(|| self.pick_tile(camera))
+            .flatten()
+            .filter(|tile| {
+                interior.as_ref().is_none_or(|frame| {
+                    let z = self
+                        .resources
+                        .map
+                        .land(tile.at.x, tile.at.y)
+                        .map_or(0, |land| land.z);
+                    frame.shows_at(Point::new(tile.at.x, tile.at.y, z))
+                })
+            });
         let neighbours = hover.as_ref().map_or_else(Vec::new, |tile| self.tile_ring(tile));
         // What the cursor is over, asked here rather than remembered from the
         // last click: the picture moves under a still mouse — the body walks,
@@ -1533,19 +1547,20 @@ impl App {
             .as_ref()
             .map(|window| self.drawn_now(&window.atlases.mobiles));
         let on_mobile = match (owns_pointer, self.window.as_ref(), &drawn_mobiles) {
-            (true, Some(window), Some(drawn)) => mobiles::pick_iter(
+            (true, Some(window), Some(drawn)) => mobiles::pick_iter_with_interior(
                 drawn.iter().map(|(_, mobile)| mobile),
                 &camera,
                 &window.atlases.mobiles,
                 &cutaway,
                 &self.resources.equip_conv,
                 cursor,
+                interior.as_ref(),
             ),
             _ => None,
         };
         let on_item = match owns_pointer && on_mobile.is_none() {
             true => self.window.as_ref().and_then(|window| {
-                items::pick(
+                items::pick_with_interior(
                     &self.world.presentation.items,
                     &camera,
                     &self.resources.tiledata,
@@ -1553,6 +1568,7 @@ impl App {
                     &window.atlases.statics,
                     &cutaway,
                     cursor,
+                    interior.as_ref(),
                 )
             }),
             false => None,
@@ -1571,7 +1587,7 @@ impl App {
         // shows.
         let on_static = match owns_pointer && on_mobile.is_none() && on_item.is_none() {
             true => self.window.as_ref().and_then(|window| {
-                statics::pick(
+                statics::pick_with_interior(
                     &self.resources.map,
                     &camera,
                     &self.resources.tiledata,
@@ -1579,6 +1595,7 @@ impl App {
                     &window.atlases.statics,
                     &cutaway,
                     cursor,
+                    interior.as_ref(),
                 )
             }),
             false => None,
@@ -1647,6 +1664,7 @@ impl App {
         FrameFacts {
             watched,
             cutaway,
+            interior,
             pick: Pick {
                 tile: hover,
                 neighbours,
@@ -1721,6 +1739,7 @@ impl App {
         let FrameFacts {
             watched,
             cutaway,
+            interior,
             pick,
             drawn_mobiles,
             on_mobile: _,
@@ -1805,7 +1824,14 @@ impl App {
         // far enough camera may request LOD1, while the selector continues to
         // retain its LOD2 hysteresis state for that tier's later validation.
         let selected_composite_lod = self.composite_lod.update_camera(&camera);
-        let composite_lod = visible_composite_lod(selected_composite_lod);
+        // A cached composite is final immutable map pixels. Until it carries an
+        // interior-frame fingerprint it cannot stand in for a room that has
+        // deliberately become transparent, so the active building picture
+        // keeps this frame on its detailed LOD0 path.
+        let composite_lod = interior
+            .is_some()
+            .then_some(openshard_client_render::lod::BlockLod::Lod0)
+            .unwrap_or_else(|| visible_composite_lod(selected_composite_lod));
         // A composite stores final map pixels and deferred facts, not atlas
         // UVs. Static-atlas pages are append-only, so packing art for a newly
         // entered block cannot alter a completed block composite. In
@@ -2200,6 +2226,7 @@ impl App {
             window,
             camera,
             &cutaway,
+            interior.as_ref(),
             &tuning,
             pick.item,
             pick.mobile,

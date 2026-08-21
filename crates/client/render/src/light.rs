@@ -946,12 +946,39 @@ pub fn collect(
     atlas: Option<&dyn crate::atlas::StaticArt>,
     bake: Option<&mut crate::occlusion::bake::Bake>,
 ) -> Lighting {
+    collect_with_interior(
+        map, items, camera, tiledata, cutaway, ambient, tuning, time, atlas, bake, None,
+    )
+}
+
+/// [`collect`] with the same room visibility as the geometry passes.
+///
+/// The cached occlusion bake is intentionally bypassed while this is active:
+/// its blocks are complete-map facts and cannot represent a door or floor
+/// choice that changes every frame.
+#[allow(clippy::too_many_arguments)]
+pub fn collect_with_interior(
+    map: &Map,
+    items: &[GroundItem],
+    camera: &Camera,
+    tiledata: &TileData,
+    cutaway: &Cutaway,
+    ambient: Ambient,
+    tuning: &Tuning,
+    time: f32,
+    atlas: Option<&dyn crate::atlas::StaticArt>,
+    bake: Option<&mut crate::occlusion::bake::Bake>,
+    interior: Option<&crate::interiors::InteriorFrame>,
+) -> Lighting {
     let bounds = lit_tiles(camera, tuning);
     let mut lights = Vec::new();
 
     crate::statics::for_each_static_in(map, bounds, |item| {
         let tile = tiledata.static_tile(item.tile.0);
-        if !burns(item.tile, tile) || !cutaway::shows(cutaway, item.z, tile) {
+        if !burns(item.tile, tile)
+            || !cutaway::shows(cutaway, item.z, tile)
+            || !interior.is_none_or(|frame| frame.shows_static_at(Point::new(item.x, item.y, item.z), tile))
+        {
             return;
         }
         lights.push(tuning.applied(place(Point::new(item.x, item.y, item.z), flame(item.tile), time)));
@@ -959,7 +986,10 @@ pub fn collect(
 
     for item in items {
         let tile = tiledata.static_tile(item.graphic.0);
-        if !burns(item.graphic, tile) || !cutaway::shows(cutaway, item.at.z, tile) {
+        if !burns(item.graphic, tile)
+            || !cutaway::shows(cutaway, item.at.z, tile)
+            || !interior.is_none_or(|frame| frame.shows_at(item.at))
+        {
             continue;
         }
         lights.push(tuning.applied(place(item.at, flame(item.graphic), time)));
@@ -967,9 +997,14 @@ pub fn collect(
 
     // The grid before the flames are placed, because where a mounted flame burns
     // is a fact about what it is mounted *on* — see `mounted_at`.
-    let occlusion = match bake {
-        Some(bake) => crate::occlusion::bake::collect(bake, map, items, bounds, tiledata, cutaway, atlas),
-        None => crate::occlusion::collect(map, items, bounds, tiledata, cutaway, atlas),
+    let occlusion = match interior {
+        Some(_) => {
+            crate::occlusion::collect_with_interior(map, items, bounds, tiledata, cutaway, atlas, interior)
+        }
+        None => match bake {
+            Some(bake) => crate::occlusion::bake::collect(bake, map, items, bounds, tiledata, cutaway, atlas),
+            None => crate::occlusion::collect(map, items, bounds, tiledata, cutaway, atlas),
+        },
     };
     for light in &mut lights {
         light.at = mounted_at(light.at, &occlusion);

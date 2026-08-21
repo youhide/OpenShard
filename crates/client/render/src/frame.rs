@@ -153,6 +153,9 @@ pub struct Inputs<'a> {
     /// must not darken the street, and a brazier on a hidden storey must not
     /// light the floor.
     pub cutaway: &'a Cutaway,
+    /// The separate, building-local picture policy. `None` leaves the ordinary
+    /// open-world frame untouched; it is never folded into [`Cutaway`].
+    pub interior: Option<&'a crate::interiors::InteriorFrame>,
     /// The land art.
     pub land: &'a LandAtlas,
     /// The land textures.
@@ -305,6 +308,24 @@ impl Inputs<'_> {
         line("tiledata", "the client's own table (not summarised)".to_owned());
         line("animations", format!("{} cycles", self.animations.len()));
         line("cutaway", format!("{:?}", self.cutaway));
+        line(
+            "interior",
+            self.interior.map_or_else(
+                || "not applicable".to_owned(),
+                |frame| {
+                    frame.z_range().map_or_else(
+                        || {
+                            format!(
+                                "building {:?}, fingerprint {:016x}",
+                                frame.building(),
+                                frame.fingerprint()
+                            )
+                        },
+                        |(min, max)| format!("z={min}..={max}, fingerprint {:016x}", frame.fingerprint()),
+                    )
+                },
+            ),
+        );
         line("land", format!("{} graphics", self.land.len()));
         line("texmaps", format!("{} textures", self.texmaps.len()));
         line(
@@ -490,6 +511,7 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
         tiledata,
         animations,
         cutaway,
+        interior,
         land,
         texmaps,
         statics,
@@ -511,7 +533,7 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
 
     let lighting_started = Instant::now();
     let mut lighting = match sky {
-        Some(ambient) => light::collect(
+        Some(ambient) => light::collect_with_interior(
             map,
             items,
             camera,
@@ -527,6 +549,7 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
             // picture cannot be about two different sets of sprites.
             Some(statics),
             bake,
+            interior,
         ),
         // No sky, no grid, no walk. The identity — see [`Lighting::NONE`].
         None => Lighting::NONE,
@@ -549,7 +572,7 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
     // the wall a person is trying to look at.
     let ground_started = Instant::now();
     let ground = match draw.land {
-        true => crate::ground::collect(map, camera, land, texmaps, cutaway),
+        true => crate::ground::collect_with_interior(map, camera, land, texmaps, cutaway, interior),
         false => Vec::new(),
     };
     let ground_cost = ground_started.elapsed();
@@ -573,7 +596,7 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
     // different world, lit differently, and the summary would not say so.
     let statics_started = Instant::now();
     let (map_statics, static_costs) = match draw.statics {
-        true => crate::statics::collect_with_fades_profiled(
+        true => crate::statics::collect_with_fades_profiled_with_interior(
             map,
             camera,
             tiledata,
@@ -584,6 +607,7 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
             player_rect,
             player_mask,
             fades,
+            interior,
         ),
         false => (StaticGeometry::default(), crate::statics::CollectCosts::default()),
     };
@@ -592,7 +616,7 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
     // these carry rather than the order they are appended in.
     let items_started = Instant::now();
     let items = if draw.items {
-        crate::items::collect_with_fades(
+        crate::items::collect_with_fades_with_interior(
             items,
             camera,
             tiledata,
@@ -603,6 +627,7 @@ pub fn assemble_split_profiled(inputs: Inputs<'_>) -> (SplitFrame, AssemblyCosts
             met,
             player_mask,
             fades,
+            interior,
         )
     } else {
         StaticGeometry::default()

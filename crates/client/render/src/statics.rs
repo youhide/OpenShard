@@ -417,6 +417,7 @@ pub fn collect_in_with_fades(
 /// [`collect_with_fades`], with the expensive map-static phases measured for
 /// the app's jank log.
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 pub(crate) fn collect_with_fades_profiled(
     map: &Map,
     camera: &Camera,
@@ -429,7 +430,39 @@ pub(crate) fn collect_with_fades_profiled(
     player_mask: Option<&crate::mobiles::OpaqueMask>,
     fades: &mut crate::cutaway::Fades,
 ) -> (StaticGeometry, CollectCosts) {
-    collect_in_with_fades_profiled(
+    collect_with_fades_profiled_with_interior(
+        map,
+        camera,
+        tiledata,
+        animations,
+        atlas,
+        cutaway,
+        occlusion,
+        player_rect,
+        player_mask,
+        fades,
+        None,
+    )
+}
+
+/// [`collect_with_fades_profiled`] with the building picture gate for this
+/// frame. Kept separate so the tools' ordinary assembly retains its exact
+/// historical inputs.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn collect_with_fades_profiled_with_interior(
+    map: &Map,
+    camera: &Camera,
+    tiledata: &TileData,
+    animations: &StaticAnimations,
+    atlas: &dyn StaticArt,
+    cutaway: &Cutaway,
+    occlusion: &crate::occlusion::Occlusion,
+    player_rect: Option<Rect>,
+    player_mask: Option<&crate::mobiles::OpaqueMask>,
+    fades: &mut crate::cutaway::Fades,
+    interior: Option<&crate::interiors::InteriorFrame>,
+) -> (StaticGeometry, CollectCosts) {
+    collect_in_with_fades_profiled_with_interior(
         map,
         camera,
         camera.visible_tiles(),
@@ -441,6 +474,7 @@ pub(crate) fn collect_with_fades_profiled(
         player_rect,
         player_mask,
         fades,
+        interior,
     )
 }
 
@@ -458,6 +492,37 @@ pub(crate) fn collect_in_with_fades_profiled(
     player_rect: Option<Rect>,
     player_mask: Option<&crate::mobiles::OpaqueMask>,
     fades: &mut crate::cutaway::Fades,
+) -> (StaticGeometry, CollectCosts) {
+    collect_in_with_fades_profiled_with_interior(
+        map,
+        camera,
+        bounds,
+        tiledata,
+        animations,
+        atlas,
+        cutaway,
+        occlusion,
+        player_rect,
+        player_mask,
+        fades,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_in_with_fades_profiled_with_interior(
+    map: &Map,
+    camera: &Camera,
+    bounds: TileBounds,
+    tiledata: &TileData,
+    animations: &StaticAnimations,
+    atlas: &dyn StaticArt,
+    cutaway: &Cutaway,
+    occlusion: &crate::occlusion::Occlusion,
+    player_rect: Option<Rect>,
+    player_mask: Option<&crate::mobiles::OpaqueMask>,
+    fades: &mut crate::cutaway::Fades,
+    interior: Option<&crate::interiors::InteriorFrame>,
 ) -> (StaticGeometry, CollectCosts) {
     let (eye_x, eye_y) = camera.eye_tile();
     let base = depth::base_for(eye_x, eye_y);
@@ -482,7 +547,11 @@ pub(crate) fn collect_in_with_fades_profiled(
     for_each_static_in(map, bounds, |item| {
         animated |= animations.is_animated(item.tile);
         let at = Point::new(item.x, item.y, item.z);
-        let is_foliage = tiledata.static_tile(item.tile.0).flags.is_foliage();
+        let tile = tiledata.static_tile(item.tile.0);
+        if !interior.is_none_or(|frame| frame.shows_static_at(at, tile)) {
+            return;
+        }
+        let is_foliage = tile.flags.is_foliage();
         let Some(placed) = place(
             at,
             item.tile,
@@ -948,10 +1017,29 @@ pub fn pick(
     cutaway: &Cutaway,
     cursor: RealPixel,
 ) -> Option<PickedStatic> {
+    pick_with_interior(map, camera, tiledata, animations, atlas, cutaway, cursor, None)
+}
+
+/// [`pick`] with the same building-cell gate as the static collector.
+#[must_use]
+pub fn pick_with_interior(
+    map: &Map,
+    camera: &Camera,
+    tiledata: &TileData,
+    animations: &StaticAnimations,
+    atlas: &dyn StaticArt,
+    cutaway: &Cutaway,
+    cursor: RealPixel,
+    interior: Option<&crate::interiors::InteriorFrame>,
+) -> Option<PickedStatic> {
     let in_view = camera.to_view(camera.pick(cursor));
     let mut hit: Option<(depth::Order, PickedStatic)> = None;
     for_each_static_in(map, pick_bounds(camera, atlas, cursor), |item| {
         let at = Point::new(item.x, item.y, item.z);
+        let tile = tiledata.static_tile(item.tile.0);
+        if !interior.is_none_or(|frame| frame.shows_static_at(at, tile)) {
+            return;
+        }
         let graphic = item.tile;
         // Never hides a foliage tile from a click: it is still there to point
         // at, matching what the reference does with a faded rather than

@@ -304,6 +304,68 @@ impl App {
         }
     }
 
+    /// Resolve the separate building picture once for this frame.
+    ///
+    /// The facet artifact selects every block of the player's *whole* building,
+    /// never only the camera rectangle. The mutable cache then bakes those map
+    /// blocks once and retains their stitched rooms/floors; this call performs
+    /// only the small live walk through the doors as they stand now.
+    pub(crate) fn interior_frame(&self) -> Option<openshard_client_render::interiors::InteriorFrame> {
+        let player = self.world.presentation.cutaway_at;
+        let z_slice = self.graphics.z_slice.then_some(self.graphics.z_slice_view);
+        if !self.graphics.buildings {
+            return z_slice
+                .map(|view| openshard_client_render::interiors::InteriorFrame::z_slice(player, view));
+        }
+        let interiors = self.resources.interiors.as_ref()?;
+        let Some(label) = interiors.building_at(player.x, player.y) else {
+            let frame = openshard_client_render::interiors::InteriorFrame::outside(interiors.clone());
+            return Some(z_slice.map_or(frame.clone(), |view| frame.with_z_slice(player, view)));
+        };
+        let map = &self.resources.map;
+        let tiledata = &self.resources.tiledata;
+        let surfaces = &self.resources.surfaces;
+        let shape_of = |graphic| {
+            surfaces
+                .as_ref()
+                .map_or(openshard_client_render::occlusion::Shape::UNREAD, |table| {
+                    table.shape(graphic)
+                })
+        };
+        let mut cache = self.world.presentation.interior_cache.borrow_mut();
+        if !cache.buildings.contains_key(&label) {
+            let blocks = self.resources.interiors.as_ref()?.blocks_for(label);
+            let rooms = cache
+                .index
+                .stitched_with_shapes(map, tiledata, blocks, &shape_of)?;
+            let buildings = openshard_client_render::interiors::Buildings::bake(map, tiledata, &rooms);
+            cache
+                .buildings
+                .insert(label, world::InteriorBuilding { rooms, buildings });
+        }
+        let building = cache.buildings.get(&label)?;
+        let player_cell = building.rooms.cell_at(player);
+        let items = &self.world.presentation.items;
+        let frame = openshard_client_render::interiors::InteriorFrame::at(
+            &building.buildings,
+            &building.rooms,
+            player_cell,
+            self.graphics.floor_view,
+            |door| {
+                items
+                    .iter()
+                    .find(|item| {
+                        item.at == door.at && openshard_client_render::doors::is_door(item.displayed())
+                    })
+                    .map_or_else(
+                        || openshard_client_render::doors::is_open(door.graphic),
+                        |item| openshard_client_render::doors::is_open(item.displayed()),
+                    )
+            },
+        )?;
+        Some(z_slice.map_or(frame.clone(), |view| frame.with_z_slice(player, view)))
+    }
+
     /// Arm one ordinary rendered frame for a GPU dump. Both the visible HUD
     /// button and F12 call this so neither path can drift in naming or capture
     /// timing.

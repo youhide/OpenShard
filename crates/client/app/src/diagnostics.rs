@@ -133,11 +133,11 @@ pub struct InteriorCell {
     pub shown: bool,
 }
 
-/// One closed-door portal in the interior-index diagnostic overlay.
+/// One door leaf in the interior-index diagnostic overlay.
 #[derive(Clone, Copy)]
 pub struct InteriorDoor {
     pub at: openshard_protocol::world::Point,
-    /// Whether both rooms at the portal are visible in this frame.
+    /// The live leaf state: `true` after it has swung open, `false` while shut.
     pub shown: bool,
 }
 
@@ -251,6 +251,10 @@ pub struct Hud {
     pub terrain: Option<Arc<TerrainOverlay>>,
     pub show_interiors: bool,
     pub interiors: Option<Arc<InteriorOverlay>>,
+    pub buildings: bool,
+    pub z_slice: bool,
+    pub z_slice_view: openshard_client_render::interiors::ZSliceView,
+    pub floor_view: openshard_client_render::interiors::FloorView,
     pub route: Option<Arc<Route>>,
     pub show_occluders: bool,
     pub show_solids: bool,

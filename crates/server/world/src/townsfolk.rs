@@ -91,4 +91,17 @@ mod tests {
             "someone carries stock without being a vendor"
         );
     }
+
+    #[test]
+    fn the_shipped_healers_keep_their_resurrection_service() {
+        // The town data, rather than a spelling rule in the generator, owns
+        // which people are healers. Losing this bit leaves every town healer
+        // looking right while unable to raise a ghost.
+        let healers = shipped()[0]
+            .townsfolk
+            .iter()
+            .filter(|command| matches!(command, Command::SpawnMobile { healer: true, .. }))
+            .count();
+        assert_eq!(healers, 56, "the healer placements lost their service");
+    }
 }

@@ -5,12 +5,13 @@
 //! those cells later; ordinary frame assembly does not consult this module yet.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque, btree_map::Entry};
+use std::sync::Arc;
 
 use openshard_movement::{MapTerrain, PLAYER_HEIGHT, Terrain};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_uofiles::map::{BLOCK_SIZE, Map};
-use openshard_uofiles::tiledata::{TileData, TileFlags};
+use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
 /// The stable address of one eight-by-eight map block.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -716,6 +717,19 @@ impl StitchedRooms {
         self.cells.get(&id).copied()
     }
 
+    /// The indexed cell containing this world point.
+    ///
+    /// A stitched frame is one building-sized immutable value, so this small
+    /// linear scan is paid once while its policy is resolved, never per drawn
+    /// object. The render path uses [`InteriorFrame::shows_at`] afterwards.
+    pub fn cell_at(&self, point: Point) -> Option<CellId> {
+        self.cells
+            .values()
+            .copied()
+            .find(|cell| cell.contains(point))
+            .map(|cell| cell.id)
+    }
+
     /// The stitched room containing this cell, if it is not occupied by a wall.
     pub fn room_at(&self, cell: CellId) -> Option<StitchedRoomId> {
         self.room_of.get(&cell).copied()
@@ -809,7 +823,7 @@ pub struct Buildings {
 pub struct BuildingMap {
     width: u32,
     height: u32,
-    labels: Vec<u32>,
+    labels: Arc<[u32]>,
 }
 
 impl BuildingMap {
@@ -833,27 +847,10 @@ impl BuildingMap {
             .expect("map dimensions fit address space");
         let at = |x: u32, y: u32| usize::try_from(y * width + x).expect("map index fits usize");
 
-        // One byte names the wall panels around a tile.  Doors are separate:
-        // they stop the exterior flood now, then reconnect only two positive
-        // sides after the flood has told us that both sides belong to a house.
-        let mut walls = vec![0_u8; cells];
-        let mut wall_tiles = vec![false; cells];
-        let mut doors = vec![false; cells];
-        for y in 0..height {
-            for x in 0..width {
-                let x16 = u16::try_from(x).expect("facet fits UO coordinates");
-                let y16 = u16::try_from(y).expect("facet fits UO coordinates");
-                let index = at(x, y);
-                for item in map.statics_at(x16, y16) {
-                    let tile = tiledata.static_tile(item.tile.0);
-                    if tile.flags.has(TileFlags::DOOR) {
-                        doors[index] = true;
-                    }
-                    walls[index] |= planar_wall_edges(tile, shape_of(item.tile));
-                    wall_tiles[index] = walls[index] != 0;
-                }
-            }
-        }
+        let topology = PlanarTopology::bake(map, tiledata, shape_of);
+        let walls = topology.walls;
+        let wall_tiles = topology.wall_tiles;
+        let doors = topology.doors;
 
         let mut labels = vec![0_u32; cells];
         let mut exterior = vec![false; cells];
@@ -960,10 +957,29 @@ impl BuildingMap {
             let ordinal = u32::try_from(compact.len() + 1).expect("facet has fewer than u32::MAX buildings");
             *label = *compact.entry(root).or_insert(ordinal);
         }
+        // The leaf is a barrier while the exterior flood runs, but it is still
+        // part of the house picture.  Colour it from an adjacent positive tile
+        // after all connectivity decisions are complete.  This fixes the
+        // otherwise conspicuous unpainted square at an open or closed doorway
+        // without ever allowing a front door to leak the outside label inside.
+        for door in 0..cells {
+            if !doors[door] {
+                continue;
+            }
+            let x = door % width as usize;
+            let y = door / width as usize;
+            if let Some(label) = planar_neighbours(x, y, width as usize, height as usize)
+                .map(|(other, _, _)| labels[other])
+                .filter(|&label| label != 0)
+                .min()
+            {
+                labels[door] = label;
+            }
+        }
         Self {
             width,
             height,
-            labels,
+            labels: labels.into(),
         }
     }
 
@@ -976,7 +992,7 @@ impl BuildingMap {
         (labels.len() == cells).then_some(Self {
             width,
             height,
-            labels,
+            labels: labels.into(),
         })
     }
 
@@ -1000,6 +1016,239 @@ impl BuildingMap {
     /// Number of positive-space buildings in this facet.
     pub fn building_count(&self) -> usize {
         self.labels.iter().copied().max().unwrap_or(0) as usize
+    }
+
+    /// Map blocks touched by one immutable positive-space building label.
+    ///
+    /// The facet artifact is read only once per building by the app's interior
+    /// cache. Returning blocks rather than a camera rectangle is crucial: a
+    /// doorway at the far side of a house must not change room reachability
+    /// merely because the camera panned away from it.
+    pub fn blocks_for(&self, building: u32) -> BTreeSet<BlockId> {
+        if building == 0 {
+            return BTreeSet::new();
+        }
+        let width = usize::try_from(self.width).expect("facet width fits usize");
+        self.labels
+            .iter()
+            .enumerate()
+            .filter_map(|(at, &label)| (label == building).then_some(at))
+            .map(|at| BlockId {
+                x: u32::try_from(at % width).expect("facet x fits u32") / BLOCK_SIZE,
+                y: u32::try_from(at / width).expect("facet y fits u32") / BLOCK_SIZE,
+            })
+            .collect()
+    }
+
+    /// One cardinal route from a tile the bake calls exterior to the actual
+    /// map boundary.  This is an offline inspection aid: it exposes the wall
+    /// or doorway the positive-space rule failed to cross, without making a
+    /// camera frame reconstruct topology.
+    pub fn exterior_path(
+        map: &Map,
+        tiledata: &TileData,
+        shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
+        start: (u16, u16),
+    ) -> Option<Vec<(u16, u16)>> {
+        let (width, height) = (map.width() as usize, map.height() as usize);
+        let index = |x: usize, y: usize| y * width + x;
+        let start = index(usize::from(start.0), usize::from(start.1));
+        let topology = PlanarTopology::bake(map, tiledata, shape_of);
+        if topology.wall_tiles[start] || topology.doors[start] {
+            return None;
+        }
+        // A byte per tile is enough to reconstruct the route and avoids a
+        // whole-facet usize parent table merely for a diagnostic.
+        const UNSEEN: i8 = -1;
+        const ROOT: i8 = 4;
+        let mut previous = vec![UNSEEN; topology.walls.len()];
+        let mut pending = VecDeque::from([start]);
+        previous[start] = ROOT;
+        let boundary = loop {
+            let here = pending.pop_front()?;
+            let x = here % width;
+            let y = here / width;
+            if x == 0 || y == 0 || x + 1 == width || y + 1 == height {
+                break here;
+            }
+            for (other, side, opposite) in planar_neighbours(x, y, width, height) {
+                if previous[other] != UNSEEN
+                    || topology.doors[other]
+                    || topology.wall_tiles[other]
+                    || topology.walls[here] & side != 0
+                    || topology.walls[other] & opposite != 0
+                {
+                    continue;
+                }
+                // Direction from `other` back to `here`.
+                previous[other] = match other as isize - here as isize {
+                    delta if delta == -(width as isize) => 2,
+                    delta if delta == 1 => 3,
+                    delta if delta == width as isize => 0,
+                    delta if delta == -1 => 1,
+                    _ => unreachable!("cardinal neighbour"),
+                };
+                pending.push_back(other);
+            }
+        };
+        let mut path = Vec::new();
+        let mut here = boundary;
+        loop {
+            path.push((
+                u16::try_from(here % width).expect("UO coordinate"),
+                u16::try_from(here / width).expect("UO coordinate"),
+            ));
+            match previous[here] {
+                ROOT => break,
+                0 => here -= width,
+                1 => here += 1,
+                2 => here += width,
+                3 => here -= 1,
+                _ => unreachable!("visited tile has a predecessor"),
+            }
+        }
+        path.reverse();
+        Some(path)
+    }
+}
+
+/// Planar wall and door facts shared by the bake and its offline inspector.
+struct PlanarTopology {
+    walls: Vec<u8>,
+    wall_tiles: Vec<bool>,
+    doors: Vec<bool>,
+}
+
+impl PlanarTopology {
+    fn bake(map: &Map, tiledata: &TileData, shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape) -> Self {
+        let (width, height) = (map.width() as usize, map.height() as usize);
+        let cells = width
+            .checked_mul(height)
+            .expect("map dimensions fit address space");
+        let mut walls = vec![0_u8; cells];
+        let mut wall_tiles = vec![false; cells];
+        let mut doors = vec![false; cells];
+        for y in 0..height {
+            for x in 0..width {
+                let index = y * width + x;
+                for item in map.statics_at(
+                    u16::try_from(x).expect("facet fits UO coordinates"),
+                    u16::try_from(y).expect("facet fits UO coordinates"),
+                ) {
+                    let tile = tiledata.static_tile(item.tile.0);
+                    doors[index] |= tile.flags.has(TileFlags::DOOR);
+                    walls[index] |= planar_wall_edges(tile, shape_of(item.tile));
+                }
+                wall_tiles[index] = walls[index] != 0;
+            }
+        }
+        // Functional doors are server ground items, but the map encodes their
+        // *places* as pairs of specific DoorGenerator frame art around a one-
+        // or two-tile gap.  The first interior bake only read map statics, so a
+        // real wooden double door at Britain 1435–1436,1599 was an unbounded
+        // hole in the wall contour.  Recover that immutable anchor with the
+        // server's exact frame tables and equal-height guard; the leaf's
+        // open/closed graphic remains a live item-layer fact.
+        let terrain = MapTerrain::new(map, tiledata);
+        for y in 0..height {
+            for x in 0..width {
+                let x16 = u16::try_from(x).expect("facet fits UO coordinates");
+                let y16 = u16::try_from(y).expect("facet fits UO coordinates");
+                for frame in map.statics_at(x16, y16) {
+                    if openshard_movement::door_frames::is_west_frame(frame.tile.0) {
+                        if x + 2 < width
+                            && generated_frame_at(
+                                map,
+                                x + 2,
+                                y,
+                                frame.z,
+                                openshard_movement::door_frames::is_east_frame,
+                            )
+                        {
+                            generated_door_anchor(&terrain, &wall_tiles, &mut doors, x + 1, y, frame.z);
+                        } else if x + 3 < width
+                            && generated_frame_at(
+                                map,
+                                x + 3,
+                                y,
+                                frame.z,
+                                openshard_movement::door_frames::is_east_frame,
+                            )
+                        {
+                            generated_door_anchor(&terrain, &wall_tiles, &mut doors, x + 1, y, frame.z);
+                            generated_door_anchor(&terrain, &wall_tiles, &mut doors, x + 2, y, frame.z);
+                        }
+                    } else if openshard_movement::door_frames::is_north_frame(frame.tile.0) {
+                        if y + 2 < height
+                            && generated_frame_at(
+                                map,
+                                x,
+                                y + 2,
+                                frame.z,
+                                openshard_movement::door_frames::is_south_frame,
+                            )
+                        {
+                            generated_door_anchor(&terrain, &wall_tiles, &mut doors, x, y + 1, frame.z);
+                        } else if y + 3 < height
+                            && generated_frame_at(
+                                map,
+                                x,
+                                y + 3,
+                                frame.z,
+                                openshard_movement::door_frames::is_south_frame,
+                            )
+                        {
+                            generated_door_anchor(&terrain, &wall_tiles, &mut doors, x, y + 1, frame.z);
+                            generated_door_anchor(&terrain, &wall_tiles, &mut doors, x, y + 2, frame.z);
+                        }
+                    }
+                }
+            }
+        }
+        Self {
+            walls,
+            wall_tiles,
+            doors,
+        }
+    }
+}
+
+/// A matching, same-height `DoorGenerator` frame at this map tile.
+fn generated_frame_at(map: &Map, x: usize, y: usize, z: i8, side: fn(u16) -> bool) -> bool {
+    map.statics_at(
+        u16::try_from(x).expect("facet fits UO coordinates"),
+        u16::try_from(y).expect("facet fits UO coordinates"),
+    )
+    .any(|item| item.z == z && side(item.tile.0))
+}
+
+/// Mark one server-generated door position, using the same stand-height test as
+/// the server's placement pass.
+fn generated_door_anchor<M, T>(
+    terrain: &MapTerrain<M, T>,
+    wall_tiles: &[bool],
+    doors: &mut [bool],
+    x: usize,
+    y: usize,
+    z: i8,
+) where
+    M: AsRef<Map>,
+    T: AsRef<TileData>,
+{
+    let width = terrain.map().width() as usize;
+    let index = y * width + x;
+    if wall_tiles[index] || doors[index] {
+        return;
+    }
+    if terrain.can_fit(
+        openshard_movement::Tile::new(
+            u16::try_from(x).expect("facet fits UO coordinates"),
+            u16::try_from(y).expect("facet fits UO coordinates"),
+        ),
+        i32::from(z),
+        PLAYER_HEIGHT,
+    ) {
+        doors[index] = true;
     }
 }
 
@@ -1244,6 +1493,301 @@ impl Buildings {
     }
 }
 
+/// Which structural floor an interior picture is opened to.
+///
+/// `Manual` is deliberately relative to the floor containing the player, not
+/// to a world height. The diagnostic z-slice reuses this relative value only
+/// as a convenient control, not as its building-rendering definition.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum FloorView {
+    /// Follow the structural floor containing the player.
+    #[default]
+    Auto,
+    /// Select a floor relative to the player's structural floor.
+    Manual { relative: i8 },
+}
+
+/// The independent controls for the diagnostic height-only picture.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ZSliceView {
+    /// Begin at the player's current height and span one ordinary storey band.
+    #[default]
+    Auto,
+    /// Draw only the inclusive range explicitly entered by the person.
+    Manual { lower: i8, upper: i8 },
+}
+
+/// The immutable visibility policy for one frame.
+///
+/// This is intentionally separate from [`crate::cutaway::Cutaway`].  The
+/// latter remains the global height-and-roof predicate. Normally this answers
+/// which indexed cells of one building may contribute geometry. A separate
+/// diagnostic constructor supplies an aggressive global z band instead.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct InteriorFrame {
+    building: BuildingId,
+    selected_floors: BTreeSet<FloorId>,
+    shown_rooms: BTreeSet<StitchedRoomId>,
+    building_cells: BTreeSet<CellId>,
+    shown_cells: BTreeSet<CellId>,
+    /// The app and the render collectors meet at a world point, whereas the
+    /// policy itself names cells.  Keep this private translation table in the
+    /// resolved frame so no collector has to reconstruct room topology.
+    cells_by_tile: BTreeMap<(u16, u16), Vec<Cell>>,
+    z_range: Option<(i8, i8)>,
+    /// The outside view does not need a room bake: the offline positive-space
+    /// map already says every tile whose contents belong to a house.
+    outside_map: Option<BuildingMap>,
+}
+
+impl InteriorFrame {
+    /// Resolve one frame's building picture from immutable topology and the
+    /// live state of its door leaves.
+    ///
+    /// `None` is the important outside answer: the player is not in an indexed
+    /// building, so no caller has an interior policy to compose with its usual
+    /// draw predicate.  A manual selection beyond the lowest cellar or highest
+    /// storey clamps to that real structural endpoint.
+    pub fn at(
+        buildings: &Buildings,
+        rooms: &StitchedRooms,
+        player: Option<CellId>,
+        view: FloorView,
+        mut door_open: impl FnMut(Door) -> bool,
+    ) -> Option<Self> {
+        let player = player?;
+        let building = buildings.building_at(player)?;
+        let player_floor = buildings.floor_at(player)?;
+        let floors = buildings
+            .buildings()
+            .iter()
+            .find(|candidate| candidate.id == building)?
+            .floors();
+        let highest = i32::try_from(floors.len().checked_sub(1)?).ok()?;
+        let player_slot = i32::try_from(player_floor.slot()).ok()?;
+        let selected_slot = match view {
+            FloorView::Auto => player_slot,
+            FloorView::Manual { relative } => (player_slot + i32::from(relative)).clamp(0, highest),
+        };
+        let selected_floors: BTreeSet<_> = floors
+            .iter()
+            .filter(|floor| i32::try_from(floor.id.slot()).is_ok_and(|slot| slot <= selected_slot))
+            .map(|floor| floor.id)
+            .collect();
+        let shown_rooms = rooms.shown_rooms(Some(player), &mut door_open);
+        let mut building_cells = BTreeSet::new();
+        let mut shown_cells = BTreeSet::new();
+        let mut cells_by_tile: BTreeMap<(u16, u16), Vec<Cell>> = BTreeMap::new();
+        for cell in rooms.cells() {
+            if buildings.building_at(cell.id) != Some(building) {
+                continue;
+            }
+            building_cells.insert(cell.id);
+            cells_by_tile.entry(cell.tile).or_default().push(cell);
+            if buildings
+                .floor_at(cell.id)
+                .is_some_and(|floor| selected_floors.contains(&floor))
+                && rooms
+                    .room_at(cell.id)
+                    .is_some_and(|room| shown_rooms.contains(&room))
+            {
+                shown_cells.insert(cell.id);
+            }
+        }
+        Some(Self {
+            building,
+            selected_floors,
+            shown_rooms,
+            building_cells,
+            shown_cells,
+            cells_by_tile,
+            z_range: None,
+            outside_map: None,
+        })
+    }
+
+    /// A view from ordinary exterior space. Every tile the facet index names
+    /// as building-positive is withheld; wall tiles remain because the index
+    /// intentionally labels only the space *inside* their contour.
+    pub fn outside(buildings: BuildingMap) -> Self {
+        let root = CellId {
+            block: BlockId { x: 0, y: 0 },
+            slot: 0,
+        };
+        Self {
+            building: BuildingId { root },
+            selected_floors: BTreeSet::new(),
+            shown_rooms: BTreeSet::new(),
+            building_cells: BTreeSet::new(),
+            shown_cells: BTreeSet::new(),
+            cells_by_tile: BTreeMap::new(),
+            z_range: None,
+            outside_map: Some(buildings),
+        }
+    }
+
+    /// The height covered by one deliberately coarse displayed band.
+    pub const Z_BAND: i8 = 20;
+
+    /// Resolve the simple runtime picture: every producer in this inclusive
+    /// z range is drawn, and everything outside it leaves the cleared black
+    /// frame visible. No artifact, room graph, door state or building
+    /// membership participates.
+    pub fn z_slice(player: Point, view: ZSliceView) -> Self {
+        let root = CellId {
+            block: BlockId { x: 0, y: 0 },
+            slot: 0,
+        };
+        Self {
+            building: BuildingId { root },
+            selected_floors: BTreeSet::new(),
+            shown_rooms: BTreeSet::new(),
+            building_cells: BTreeSet::new(),
+            shown_cells: BTreeSet::new(),
+            cells_by_tile: BTreeMap::new(),
+            z_range: None,
+            outside_map: None,
+        }
+        .with_z_slice(player, view)
+    }
+
+    /// Add a height band to either the outside guard or a room/floor frame.
+    /// The two tests compose by intersection, never by one mode replacing the
+    /// other.
+    pub fn with_z_slice(mut self, player: Point, view: ZSliceView) -> Self {
+        self.z_range = Some(match view {
+            ZSliceView::Auto => (player.z, player.z.saturating_add(Self::Z_BAND)),
+            ZSliceView::Manual { lower, upper } => (lower.min(upper), lower.max(upper)),
+        });
+        self
+    }
+
+    /// The active inclusive z band, if this is the simplified runtime policy.
+    pub const fn z_range(&self) -> Option<(i8, i8)> {
+        self.z_range
+    }
+
+    /// The building this frame is a policy for.
+    pub const fn building(&self) -> BuildingId {
+        self.building
+    }
+
+    /// Structural floors included in this picture, from the bottom through
+    /// the selected floor.
+    pub fn selected_floors(&self) -> &BTreeSet<FloorId> {
+        &self.selected_floors
+    }
+
+    /// Rooms reachable from the sky or the player's room through open doors.
+    pub fn shown_rooms(&self) -> &BTreeSet<StitchedRoomId> {
+        &self.shown_rooms
+    }
+
+    /// Whether this cell belongs to the building this frame governs.
+    ///
+    /// Walls do not have a room cell and thus normally answer false here.  A
+    /// geometry caller must leave such an object on the ordinary path, which
+    /// is how outer walls stay drawable around a black sealed room.
+    pub fn applies_to(&self, cell: CellId) -> bool {
+        self.building_cells.contains(&cell)
+    }
+
+    /// Whether an applicable cell contributes to this frame's picture.
+    pub fn shows_cell(&self, cell: CellId) -> bool {
+        self.shown_cells.contains(&cell)
+    }
+
+    /// Whether geometry standing at this world point belongs in the picture.
+    ///
+    /// A point outside this frame's building, including a wall tile with no
+    /// inhabitable cell, remains on the ordinary render path.  That is what
+    /// keeps an outer wall visible around a room deliberately left clear.
+    pub fn shows_at(&self, point: Point) -> bool {
+        if let Some((min, max)) = self.z_range {
+            if !(min..=max).contains(&point.z) {
+                return false;
+            }
+        }
+        if let Some(buildings) = &self.outside_map {
+            return buildings.building_at(point.x, point.y).is_none();
+        }
+        self.cells_by_tile
+            .get(&(point.x, point.y))
+            .and_then(|cells| {
+                cells
+                    .iter()
+                    .copied()
+                    .find(|cell| cell.contains(point))
+                    // Roof/lid art stands exactly on the ceiling boundary,
+                    // which is outside the half-open body band below it. It
+                    // nevertheless belongs to that room's picture: otherwise
+                    // a sealed room would lose its floor and furniture while
+                    // retaining the roof that covers the resulting clear area.
+                    .or_else(|| {
+                        cells
+                            .iter()
+                            .copied()
+                            .find(|cell| cell.ceiling == Some(i32::from(point.z)))
+                    })
+            })
+            .is_none_or(|cell| self.shows_cell(cell.id))
+    }
+
+    /// [`shows_at`](Self::shows_at), preserving roof and window statics in an
+    /// exterior view. They form the visible skin of a house, rather than its
+    /// contents; the z band still applies.
+    pub fn shows_static_at(&self, point: Point, tile: &StaticTile) -> bool {
+        if let Some((min, max)) = self.z_range {
+            if !(min..=max).contains(&point.z) {
+                return false;
+            }
+        }
+        if self.outside_map.is_some() && (tile.flags.is_roof() || tile.flags.has(TileFlags::WINDOW)) {
+            return true;
+        }
+        self.shows_at(point)
+    }
+
+    /// A stable, compact summary of every cell visibility decision.
+    ///
+    /// The geometry cache stores this value alongside its other inputs.  It is
+    /// intentionally based on resolved cells rather than the relative UI
+    /// number: two requests that draw the same building picture reuse exactly
+    /// the same cache entry.
+    pub fn fingerprint(&self) -> u64 {
+        const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+        const PRIME: u64 = 0x0000_0100_0000_01b3;
+        fn mix(mut hash: u64, value: u64) -> u64 {
+            for byte in value.to_le_bytes() {
+                hash ^= u64::from(byte);
+                hash = hash.wrapping_mul(PRIME);
+            }
+            hash
+        }
+        let mut hash = OFFSET;
+        if let Some((min, max)) = self.z_range {
+            hash = mix(hash, 1);
+            hash = mix(hash, min as u8 as u64);
+            hash = mix(hash, max as u8 as u64);
+            return hash;
+        }
+        if self.outside_map.is_some() {
+            return mix(hash, 2);
+        }
+        hash = mix(hash, 0);
+        hash = mix(
+            hash,
+            u64::try_from(self.shown_cells.len()).expect("cell count fits u64"),
+        );
+        for cell in &self.shown_cells {
+            hash = mix(hash, u64::from(cell.block.x));
+            hash = mix(hash, u64::from(cell.block.y));
+            hash = mix(hash, u64::from(cell.slot));
+        }
+        hash
+    }
+}
+
 /// A tiny union-find, used only while a stitched graph is constructed.
 #[derive(Debug)]
 struct Components {
@@ -1371,10 +1915,20 @@ fn planar_wall_edges(tile: &openshard_uofiles::tiledata::StaticTile, shape: crat
     if !flags.has(WALLISH) || flags.is_roof() || flags.is_platform() || flags.has(TileFlags::DOOR) {
         return 0;
     }
-    if shape.facing.is_some() || flags.has(TileFlags::WALL) {
-        crate::occlusion::named_edges(tile, &shape).raw()
+    if !shape.facing.is_some() && !flags.has(TileFlags::WALL) {
+        return 0;
+    }
+    let edges = crate::occlusion::named_edges(tile, &shape);
+    // `named_edges` correctly makes an ordinary BACKGROUND tile a horizontal
+    // lid.  Some legacy wall rows, however, carry BACKGROUND as well as WALL;
+    // letting that render-only classification erase their boundary opened an
+    // entire roofed shop at Britain 1433,1596 to the exterior flood.  The wall
+    // bit is the stronger architectural statement here.  A measured face still
+    // wins; a zero result is the conservative full-tile wall fallback.
+    if edges.raw() != 0 {
+        edges.raw()
     } else {
-        0
+        crate::occlusion::Edges::ANY.raw()
     }
 }
 
@@ -1956,6 +2510,121 @@ mod tests {
     }
 
     #[test]
+    fn a_background_tag_cannot_turn_a_wall_into_open_world() {
+        let wall = StaticTile {
+            flags: TileFlags::new(TileFlags::WALL | TileFlags::FLOOR | TileFlags::NO_SHOOT),
+            height: 20,
+            ..StaticTile::default()
+        };
+
+        assert_eq!(
+            planar_wall_edges(&wall, crate::occlusion::Shape::UNREAD),
+            crate::occlusion::Edges::ANY.raw(),
+            "WALL outranks BACKGROUND for the exterior flood"
+        );
+    }
+
+    #[test]
+    fn a_doorway_is_coloured_as_part_of_its_positive_building() {
+        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+            tile: LandTile(0),
+            z: 0,
+        });
+        let mut tiledata = TileData::empty();
+        tiledata.set_static_tile(
+            1,
+            StaticTile {
+                flags: TileFlags::new(TileFlags::WALL | TileFlags::NO_SHOOT),
+                height: 20,
+                ..StaticTile::default()
+            },
+        );
+        tiledata.set_static_tile(
+            2,
+            StaticTile {
+                flags: TileFlags::new(TileFlags::WALL | TileFlags::DOOR),
+                height: 20,
+                ..StaticTile::default()
+            },
+        );
+        for y in 1..=5 {
+            for x in 1..=5 {
+                if x != 1 && x != 5 && y != 1 && y != 5 {
+                    continue;
+                }
+                map.place_static(StaticItem {
+                    tile: Graphic(if (x, y) == (3, 1) { 2 } else { 1 }),
+                    x,
+                    y,
+                    z: 0,
+                    hue: Hue(0),
+                });
+            }
+        }
+
+        let graph = BuildingMap::bake(&map, &tiledata, &|_| crate::occlusion::Shape::UNREAD);
+
+        assert_eq!(graph.building_at(3, 1), graph.building_at(3, 3));
+        assert!(graph.building_at(3, 1).is_some());
+    }
+
+    #[test]
+    fn a_double_gap_between_wall_frames_is_a_door_anchor() {
+        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+            tile: LandTile(0),
+            z: 0,
+        });
+        let mut tiledata = TileData::empty();
+        tiledata.set_static_tile(
+            1,
+            StaticTile {
+                flags: TileFlags::new(TileFlags::WALL | TileFlags::NO_SHOOT),
+                height: 20,
+                ..StaticTile::default()
+            },
+        );
+        tiledata.set_static_tile(
+            0x00AD,
+            StaticTile {
+                flags: TileFlags::new(TileFlags::WALL | TileFlags::NO_SHOOT),
+                height: 20,
+                ..StaticTile::default()
+            },
+        );
+        tiledata.set_static_tile(
+            0x00AB,
+            StaticTile {
+                flags: TileFlags::new(TileFlags::WALL | TileFlags::NO_SHOOT),
+                height: 20,
+                ..StaticTile::default()
+            },
+        );
+        for y in 1..=5 {
+            for x in 1..=5 {
+                if x != 1 && x != 5 && y != 1 && y != 5 || (y, x) == (1, 3) || (y, x) == (1, 4) {
+                    continue;
+                }
+                map.place_static(StaticItem {
+                    tile: Graphic(match (x, y) {
+                        (2, 1) => 0x00AD,
+                        (5, 1) => 0x00AB,
+                        _ => 1,
+                    }),
+                    x,
+                    y,
+                    z: 0,
+                    hue: Hue(0),
+                });
+            }
+        }
+
+        let graph = BuildingMap::bake(&map, &tiledata, &|_| crate::occlusion::Shape::UNREAD);
+
+        assert_eq!(graph.building_at(3, 1), graph.building_at(3, 3));
+        assert_eq!(graph.building_at(4, 1), graph.building_at(3, 3));
+    }
+
+    #[test]
     fn blocking_furniture_does_not_split_a_room() {
         let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
             tile: LandTile(0),
@@ -2286,5 +2955,208 @@ mod tests {
             open.contains(&left),
             "opening the seam door reveals the left room"
         );
+    }
+
+    /// A deliberately small completed index used to pin R2's frame policy
+    /// independently of the expensive map bake. `outside` stands at the
+    /// building's open entrance; `sealed` is behind its portal; `upper` is the
+    /// next structural floor of that sealed room.
+    fn indexed_picture() -> (Buildings, StitchedRooms, CellId, CellId, CellId) {
+        let block = BlockId { x: 0, y: 0 };
+        let outside = CellId { block, slot: 0 };
+        let sealed = CellId { block, slot: 1 };
+        let upper = CellId { block, slot: 2 };
+        let outside_room = StitchedRoomId {
+            root: RoomId { block, slot: 0 },
+        };
+        let sealed_room = StitchedRoomId {
+            root: RoomId { block, slot: 1 },
+        };
+        let door = Door {
+            id: DoorId { block, slot: 0 },
+            at: Point::new(1, 0, 0),
+            graphic: Graphic(1),
+        };
+        let rooms = StitchedRooms {
+            cells: BTreeMap::from([
+                (
+                    outside,
+                    Cell {
+                        id: outside,
+                        tile: (0, 0),
+                        floor_z: 0,
+                        ceiling: None,
+                    },
+                ),
+                (
+                    sealed,
+                    Cell {
+                        id: sealed,
+                        tile: (2, 0),
+                        floor_z: 0,
+                        ceiling: Some(20),
+                    },
+                ),
+                (
+                    upper,
+                    Cell {
+                        id: upper,
+                        tile: (2, 0),
+                        floor_z: 20,
+                        ceiling: None,
+                    },
+                ),
+            ]),
+            rooms: vec![
+                StitchedRoom {
+                    id: outside_room,
+                    cells: vec![outside],
+                    outdoors: true,
+                },
+                StitchedRoom {
+                    id: sealed_room,
+                    cells: vec![sealed, upper],
+                    outdoors: false,
+                },
+            ],
+            room_of: BTreeMap::from([
+                (outside, outside_room),
+                (sealed, sealed_room),
+                (upper, sealed_room),
+            ]),
+            doors: BTreeMap::from([(door.id, door)]),
+            portals: vec![StitchedPortal {
+                door: door.id,
+                rooms: [outside_room, sealed_room],
+            }],
+        };
+        let building = BuildingId { root: outside };
+        let ground = FloorId { building, slot: 0 };
+        let first = FloorId { building, slot: 1 };
+        let buildings = Buildings {
+            buildings: vec![Building {
+                id: building,
+                floors: vec![
+                    Floor {
+                        id: ground,
+                        cells: vec![outside, sealed],
+                        min_z: 0,
+                        max_z: 0,
+                    },
+                    Floor {
+                        id: first,
+                        cells: vec![upper],
+                        min_z: 20,
+                        max_z: 20,
+                    },
+                ],
+            }],
+            building_of: BTreeMap::from([(outside, building), (sealed, building), (upper, building)]),
+            floor_of: BTreeMap::from([(outside, ground), (sealed, ground), (upper, first)]),
+            stairs: Vec::new(),
+        };
+        (buildings, rooms, outside, sealed, upper)
+    }
+
+    #[test]
+    fn an_interior_frame_blacks_a_sealed_room_until_its_door_opens() {
+        let (buildings, rooms, outside, sealed, upper) = indexed_picture();
+        let shut = InteriorFrame::at(&buildings, &rooms, Some(outside), FloorView::Auto, |_| false)
+            .expect("player is in an indexed building");
+        assert!(shut.applies_to(sealed));
+        assert!(shut.shows_cell(outside));
+        assert!(!shut.shows_cell(sealed), "the sealed ground room is black");
+        assert!(!shut.shows_cell(upper), "Auto stops at the player's floor");
+
+        let open = InteriorFrame::at(&buildings, &rooms, Some(outside), FloorView::Auto, |_| true)
+            .expect("player is in an indexed building");
+        assert!(open.shows_cell(sealed), "the open portal reaches the sealed room");
+        assert_ne!(
+            shut.fingerprint(),
+            open.fingerprint(),
+            "a cache must not reuse the shut picture"
+        );
+    }
+
+    #[test]
+    fn a_z_slice_draws_exactly_its_selected_band() {
+        let auto = InteriorFrame::z_slice(Point::new(100, 100, 20), ZSliceView::Auto);
+        assert_eq!(auto.z_range(), Some((20, 40)));
+        assert!(!auto.shows_at(Point::new(100, 100, 19)));
+        assert!(auto.shows_at(Point::new(100, 100, 20)));
+        assert!(auto.shows_at(Point::new(100, 100, 40)));
+        assert!(!auto.shows_at(Point::new(100, 100, 41)));
+
+        let below = InteriorFrame::z_slice(
+            Point::new(100, 100, 20),
+            ZSliceView::Manual { lower: -20, upper: 0 },
+        );
+        assert_eq!(below.z_range(), Some((-20, 0)));
+        assert_ne!(auto.fingerprint(), below.fingerprint());
+    }
+
+    #[test]
+    fn an_outside_frame_blacks_positive_building_space_but_keeps_the_street() {
+        let buildings = BuildingMap::from_labels(2, 1, vec![0, 1]).expect("one label per tile");
+        let outside = InteriorFrame::outside(buildings);
+        assert!(outside.shows_at(Point::new(0, 0, 0)), "street remains visible");
+        assert!(
+            !outside.shows_at(Point::new(1, 0, 0)),
+            "the building's interior is absent from an exterior picture"
+        );
+    }
+
+    #[test]
+    fn an_exterior_guard_and_z_band_intersect_but_keep_house_skin() {
+        let buildings = BuildingMap::from_labels(2, 1, vec![0, 1]).expect("one label per tile");
+        let frame = InteriorFrame::outside(buildings)
+            .with_z_slice(Point::new(0, 0, 0), ZSliceView::Manual { lower: 0, upper: 20 });
+        assert!(
+            !frame.shows_at(Point::new(1, 0, 10)),
+            "the band does not reveal interior contents"
+        );
+        assert!(
+            !frame.shows_at(Point::new(0, 0, 21)),
+            "outside the z band is black too"
+        );
+
+        let roof = StaticTile {
+            flags: TileFlags::new(TileFlags::ROOF),
+            ..StaticTile::default()
+        };
+        let window = StaticTile {
+            flags: TileFlags::new(TileFlags::WINDOW),
+            ..StaticTile::default()
+        };
+        assert!(frame.shows_static_at(Point::new(1, 0, 10), &roof));
+        assert!(frame.shows_static_at(Point::new(1, 0, 10), &window));
+        assert!(!frame.shows_static_at(Point::new(1, 0, 21), &roof));
+    }
+
+    #[test]
+    fn an_interior_frame_never_blacks_the_players_room_and_selects_real_floors() {
+        let (buildings, rooms, _outside, sealed, upper) = indexed_picture();
+        let inside = InteriorFrame::at(&buildings, &rooms, Some(sealed), FloorView::Auto, |_| false)
+            .expect("player is in an indexed building");
+        assert!(
+            inside.shows_cell(sealed),
+            "the player is a second reachability source"
+        );
+        assert!(!inside.shows_cell(upper), "Auto leaves the storey above closed");
+
+        let raised = InteriorFrame::at(
+            &buildings,
+            &rooms,
+            Some(sealed),
+            FloorView::Manual { relative: 99 },
+            |_| false,
+        )
+        .expect("player is in an indexed building");
+        assert!(raised.shows_cell(sealed));
+        assert!(
+            raised.shows_cell(upper),
+            "the manual level resolves to the actual upper FloorId"
+        );
+        assert_eq!(raised.selected_floors().len(), 2, "floors below stay visible");
     }
 }

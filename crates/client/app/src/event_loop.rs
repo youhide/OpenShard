@@ -301,7 +301,8 @@ impl ApplicationHandler<()> for App {
                 //
                 // A key with no binding asks for nothing, which is what the
                 // `match` this replaced said with a `_ => false` arm.
-                let Some(hotkey) = keyboard::Hotkey::of(code) else {
+                let Some(hotkey) = keyboard::Hotkey::of(keyboard::Gesture::new(code, self.input.ctrl_held))
+                else {
                     return;
                 };
                 let changed = match hotkey {
@@ -356,6 +357,64 @@ impl ApplicationHandler<()> for App {
                     }
                     keyboard::Hotkey::PanUp => self.control.pan(0, PAGE_PIXELS),
                     keyboard::Hotkey::PanDown => self.control.pan(0, -PAGE_PIXELS),
+                    keyboard::Hotkey::FloorUp => {
+                        if self.graphics.z_slice {
+                            let (lower, upper) = match self.graphics.z_slice_view {
+                                openshard_client_render::interiors::ZSliceView::Auto => {
+                                    let lower = self.world.presentation.cutaway_at.z;
+                                    (lower, lower.saturating_add(20))
+                                }
+                                openshard_client_render::interiors::ZSliceView::Manual { lower, upper } => {
+                                    (lower, upper)
+                                }
+                            };
+                            self.graphics.z_slice_view =
+                                openshard_client_render::interiors::ZSliceView::Manual {
+                                    lower: lower.saturating_add(20),
+                                    upper: upper.saturating_add(20),
+                                };
+                            true
+                        } else {
+                            let relative = match self.graphics.floor_view {
+                                openshard_client_render::interiors::FloorView::Auto => 1,
+                                openshard_client_render::interiors::FloorView::Manual { relative } => {
+                                    relative.saturating_add(1)
+                                }
+                            };
+                            self.graphics.floor_view =
+                                openshard_client_render::interiors::FloorView::Manual { relative };
+                            true
+                        }
+                    }
+                    keyboard::Hotkey::FloorDown => {
+                        if self.graphics.z_slice {
+                            let (lower, upper) = match self.graphics.z_slice_view {
+                                openshard_client_render::interiors::ZSliceView::Auto => {
+                                    let lower = self.world.presentation.cutaway_at.z;
+                                    (lower, lower.saturating_add(20))
+                                }
+                                openshard_client_render::interiors::ZSliceView::Manual { lower, upper } => {
+                                    (lower, upper)
+                                }
+                            };
+                            self.graphics.z_slice_view =
+                                openshard_client_render::interiors::ZSliceView::Manual {
+                                    lower: lower.saturating_sub(20),
+                                    upper: upper.saturating_sub(20),
+                                };
+                            true
+                        } else {
+                            let relative = match self.graphics.floor_view {
+                                openshard_client_render::interiors::FloorView::Auto => -1,
+                                openshard_client_render::interiors::FloorView::Manual { relative } => {
+                                    relative.saturating_sub(1)
+                                }
+                            };
+                            self.graphics.floor_view =
+                                openshard_client_render::interiors::FloorView::Manual { relative };
+                            true
+                        }
+                    }
                     keyboard::Hotkey::SpeechProbe => {
                         self.say("AbCdEfGh The Quick Brown Fox 123".to_owned());
                         false

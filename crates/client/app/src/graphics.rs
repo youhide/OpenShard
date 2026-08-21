@@ -13,6 +13,7 @@ use openshard_client_render::camera::TileBounds;
 use openshard_client_render::debug::View;
 use openshard_client_render::frame;
 use openshard_client_render::impostor::Fringe;
+use openshard_client_render::interiors::{FloorView, ZSliceView};
 use openshard_client_render::occlusion;
 
 /// What the cursor is allowed to light up.
@@ -156,6 +157,17 @@ pub struct GraphicsSettings {
     /// Whether the development overlay draws the R1 interior index. It does
     /// not gate ordinary geometry until R2 explicitly makes it an input.
     pub show_interiors: bool,
+    /// Whether the R2 building picture gate is active. It is deliberately
+    /// independent of the R1 topology overlay above, so the two pictures can
+    /// be compared directly.
+    pub buildings: bool,
+    /// Diagnostic height-only replacement for the building picture. It keeps
+    /// only one twenty-z band and leaves all other geometry black.
+    pub z_slice: bool,
+    /// Bounds for the diagnostic height-only picture.
+    pub z_slice_view: ZSliceView,
+    /// The person's non-persistent Auto/Manual floor choice.
+    pub floor_view: FloorView,
     /// Whether the HUD is drawing the lighting's occlusion grid as boxes — see
     /// `shell::draw_occluders` and `docs/lighting.md`, step 14.
     ///
