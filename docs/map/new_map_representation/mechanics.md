@@ -1,9 +1,9 @@
 # How a changeable map works
 
-The mechanics behind [`world_map.md`](world_map.md). This document says what
+The mechanics behind [`overview.md`](overview.md). This document says what
 has to be true and what the real choices are; where a decision is not made yet
-it says so and names what would settle it. [`world_map_plan.md`](world_map_plan.md)
-is the work itself.
+it says so and names what would settle it. [`plan.md`](plan.md) is the work
+itself.
 
 ## Three words, kept apart
 
@@ -32,7 +32,7 @@ The map is cut into fixed blocks because nobody reloads a facet to move a rock:
 a chunk is the unit of loading, caching, invalidation and transfer.
 
 We already store the world close to this shape.
-[`Map`](../crates/common/uofiles/src/map.rs#L180) holds land block-ordered and
+[`Map`](../../../crates/common/uofiles/src/map.rs#L180) holds land block-ordered and
 statics per block, each block sorted by the tile its items stand on. A chunk is
 that, with an identity and a revision on it.
 
@@ -47,8 +47,8 @@ Two things a chunk must settle, both with a right answer we do not have yet:
   the obvious rule, and it forces the second half: a reader that needs an area
   pins every chunk the area touches and reads owners. Copying a static into the
   neighbour would make removal and hashing ambiguous, which is the argument
-  against it — see [`occluders.md`](occluders.md) and
-  [`footprints.md`](footprints.md), which already reason about art footprints
+  against it — see [`occluders.md`](../../occluders.md) and
+  [`footprints.md`](../../footprints.md), which already reason about art footprints
   that cross tiles.
 
 ## Patches
@@ -69,7 +69,7 @@ Two constraints that are not stylistic:
   tile at one height. Addressing a static by coordinates and graphic cannot
   tell them apart, so "remove *that* rock" is not expressible. Today a static
   is a position in a block's vector
-  ([`StaticItem`](../crates/common/uofiles/src/map.rs#L70)), which is not an
+  ([`StaticItem`](../../../crates/common/uofiles/src/map.rs#L70)), which is not an
   identity that survives an edit.
 - **A patch applies to a parent, and conflicts are refused.** If the world
   moved under an unpublished edit, the editor gets a conflict and makes a new
@@ -89,7 +89,7 @@ crossed into them. A patch touching a thousand chunks costs a thousand chunks
 of rebuild, never a facet. A full rebuild is an explicit operation — a new
 base, a squash, an import — and never a side effect of publishing an edit.
 
-[`minimap_lod_plan.md`](minimap_lod_plan.md) already states this contract from
+[`minimap_lod_plan.md`](../minimap_lod_plan.md) already states this contract from
 the consumer's side: one cache key of facet, chunk, LOD and source revision.
 
 ## Getting it to the client
@@ -104,11 +104,11 @@ Which pipe carries it is deliberately a late decision, and the format must not
 know:
 
 - **Inside the classic protocol.** The `0xBF` extended envelope already exists
-  on both sides ([`extended.rs:27`](../crates/common/protocol/src/extended.rs#L27))
+  on both sides ([`extended.rs:27`](../../../crates/common/protocol/src/extended.rs#L27))
   and would carry our own encoding as an opaque body.
 - **Beside it.** A second connection for our own traffic, which our client's
   transport already abstracts over
-  ([`Dial`](../crates/client/net/src/transport.rs#L100)), so a second stream
+  ([`Dial`](../../../crates/client/net/src/transport.rs#L100)), so a second stream
   costs no protocol violence.
 
 The criterion to pick: whether a chunk fits an envelope the classic stream can
@@ -125,7 +125,7 @@ whatever graphic the player's own install has under that number.
 | Question | What settles it |
 |---|---|
 | Chunk size | Measurement on Felucca: base set size, per-chunk statics, screen working set, brush blast radius |
-| Whether the address needs a `map_id` above [`Facet`](../crates/common/protocol/src/world.rs#L1252) | Whether we ever run two worlds whose facet numbers collide |
+| Whether the address needs a `map_id` above [`Facet`](../../../crates/common/protocol/src/world.rs#L1252) | Whether we ever run two worlds whose facet numbers collide |
 | Land height per tile (UO's model) or per corner | Whichever keeps movement and rendering identical to today until we *mean* to change the geometry |
 | Our own material/asset ids vs UO graphic numbers | Whether the first importer is the only importer |
 | Where a per-shard asset pack comes from and what may be redistributed | A licensing answer, not a technical one |

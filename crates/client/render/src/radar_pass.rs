@@ -1016,7 +1016,7 @@ fn window_scissor(frame: Frame<'_>, at: Placement) -> Option<(u32, u32, u32, u32
 ///
 /// Deliberately *not* part of a [`RadarChunk`]. A marker moves every step and a
 /// terrain product does not, so stamping one into a cached raster would make a
-/// step invalidate terrain — the one thing `docs/minimap_lod_plan.md` exists to
+/// step invalidate terrain — the one thing `docs/map/minimap_lod_plan.md` exists to
 /// prevent. It is drawn after the chunks, from per-frame data that costs an
 /// instance rather than an upload.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -1255,7 +1255,7 @@ impl RadarOverlayRenderer {
     /// Fill the whole window with one colour, **before** its terrain.
     ///
     /// A minimap with no ready chunk under part of it would otherwise show the
-    /// world through that part — a hole, which `docs/minimap_lod_plan.md`'s
+    /// world through that part — a hole, which `docs/map/minimap_lod_plan.md`'s
     /// contract rules out as firmly as it rules out stale pixels. Painting
     /// [`radar::UNKNOWN`](crate::radar::UNKNOWN) under everything says the same
     /// thing there that it says inside a chunk: this ground is not mapped yet.

@@ -958,7 +958,7 @@ the way the gump pass does it, and the whole window is one draw.
 The player's marker is an overlay drawn after the terrain, not a pixel stamped
 into a cached chunk: a chunk is immutable and a marker moves every step, so
 stamping it would make walking invalidate terrain — the one thing
-`docs/minimap_lod_plan.md` exists to prevent. A cross and not a dot, in both
+`docs/map/minimap_lod_plan.md` exists to prevent. A cross and not a dot, in both
 drawings (`radar::MARKER_ARMS`): at one pixel a tile a dot is indistinguishable
 from a lamp post.
 

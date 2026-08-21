@@ -231,7 +231,7 @@ measured reason.**
    shrinks in actual screen pixels as the window zooms out — backwards from
    what a fixed *visual* seam needs.
 3. **`margin_fraction * content_extent / zoom`** —
-   [`TANGENT_MARGIN_FRACTION`](../crates/client/app/src/panes/minimap.rs), now
+   [`TANGENT_MARGIN_FRACTION`](../../crates/client/app/src/panes/minimap.rs), now
    the margin's *physical* size, converted to a tile count only at the end,
    the same way the main fetch already was. This is the shape that survived:
    it scales with the window (fixes report 1) and with `zoom` (fixes report

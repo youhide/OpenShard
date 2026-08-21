@@ -6,28 +6,28 @@ see it — with nobody editing files on their own machine.
 
 Everything else is a consequence of that map being large. Nothing is a
 consequence of anything else, and keeping that true is the point of splitting
-this into three documents: the want is here, the mechanics are in
-[`world_map_mechanics.md`](world_map_mechanics.md), the work and the code it
-touches are in [`world_map_plan.md`](world_map_plan.md).
+this track into three documents: the want is here, the mechanics are in
+[`mechanics.md`](mechanics.md), and the work with the code it touches is in
+[`plan.md`](plan.md).
 
 ## What is wrong now
 
 The world is the player's UO install, and only that:
 
 - **Both ends read the files separately and agree by luck.** The shard loads a
-  facet at boot ([`boot.rs:618`](../crates/server/server/src/boot.rs#L618)) and
+  facet at boot ([`boot.rs:618`](../../../crates/server/server/src/boot.rs#L618)) and
   our client loads one for itself
-  ([`lib.rs:461`](../crates/client/app/src/lib.rs#L461)). They match because
+  ([`lib.rs:461`](../../../crates/client/app/src/lib.rs#L461)). They match because
   they opened the same install, not because either was told what the world is.
 - **Nothing in the engine can change the ground.**
-  [`Map::set_land`](../crates/common/uofiles/src/map.rs#L518) and
-  [`Map::place_static`](../crates/common/uofiles/src/map.rs#L549) exist, and
+  [`Map::set_land`](../../../crates/common/uofiles/src/map.rs#L518) and
+  [`Map::place_static`](../../../crates/common/uofiles/src/map.rs#L549) exist, and
   every caller is a test fixture or a bake. There is no path from "an operator
   changed the world" to "a player sees it", because a change would have to end
   up in the client's own `map0.mul`.
 - **Everything derived is keyed to the files, not to the world.** The
   navigation bake stamps input file names, sizes and mtimes
-  ([`bake.rs:22`](../crates/common/movement/src/bake.rs#L22)); the building
+  ([`bake.rs:22`](../../../crates/common/movement/src/bake.rs#L22)); the building
   flood, the occluder measurements and the minimap cache are baked off the same
   install. Change the ground and none of them would know they had gone stale.
 - **A change has no identity.** No author, no revision, no order, nothing to
