@@ -41,7 +41,13 @@ Two things a chunk must settle, both with a right answer we do not have yet:
 - **Size.** UO's own block is 8×8; the first draft guessed 64×64. This is a
   measurement, not an opinion: size of a full base set for Felucca, average
   chunk with its statics, the working set around one screen, and how many
-  chunks one editor brush touches.
+  chunks one editor brush touches. **A house is the sharpest input to it.**
+  The shipped castle is 3,667 components over 31×32 tiles and puts **339 into
+  a single 8×8 block** — nineteen times Felucca's median block of 18, and near
+  its worst natural block of 467. At 8×8 that castle is sixteen chunks and
+  moving one wall touches one small chunk; at 64×64 it sits inside one, and
+  moving that wall rewrites and retransmits all 4,096 tiles around it. The
+  numbers are in [`client_today.md`](client_today.md).
 - **Who owns a static that overhangs a border.** A wall anchored in one chunk
   is drawn, walked and lit from the neighbour too. Ownership by anchor tile is
   the obvious rule, and it forces the second half: a reader that needs an area
@@ -124,7 +130,8 @@ whatever graphic the player's own install has under that number.
 
 | Question | What settles it |
 |---|---|
-| Chunk size | Measurement on Felucca: base set size, per-chunk statics, screen working set, brush blast radius |
+| Chunk size | Measurement on Felucca: base set size, per-chunk statics, screen working set, brush blast radius — with a castle's 339-per-block as the density case |
+| Whether a house is a patch to the world or stays an entity overlay | The densest case is decided by this and nothing else: a castle is 3,667 statics, so if a house is a patch, placing one is a bulk insert into the base. An overlay read alongside the base keeps the base immutable, which is what a flat per-chunk layout wants. See [`housing.md`](../../housing.md) and [`customisation.md`](../../customisation.md) |
 | Whether the address needs a `map_id` above [`Facet`](../../../crates/common/protocol/src/world.rs#L1252) | Whether we ever run two worlds whose facet numbers collide |
 | Land height per tile (UO's model) or per corner | Whichever keeps movement and rendering identical to today until we *mean* to change the geometry |
 | Our own material/asset ids vs UO graphic numbers | Whether the first importer is the only importer |

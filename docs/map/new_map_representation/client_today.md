@@ -84,6 +84,35 @@ Ranked by what a person would notice first.
     should separate the two deliberately — store draw order as a field and sort
     by z — which turns every one of those scans into a suffix lookup.
 
+## What a house weighs
+
+Houses do **not** enter `statics` today: one arrives as a single item whose
+graphic is `0x4000 | id` and is expanded at draw time through
+[`Multis`](../../../crates/common/uofiles/src/multi.rs#L270). They are entities,
+not terrain. But they are the density case any future layout has to survive,
+so measured off the shipped `multi.mul` (800 multis, 62,177 components):
+
+| Multi | Components | Tiles | Densest 8×8 block |
+|---|---|---|---|
+| Castle (126/127) | **3,667** | 31×32 | **339** |
+| id 5000 | 3,016 | 52×29 | 225 |
+| Keep (124/125) | 2,251 | 24×24 | 271 |
+| Mean of all 800 | 77.7 | | |
+
+Against Felucca's terrain — median 18 per block, p99 122, max 467 — a castle
+puts nineteen times the median into one block, and a *customised* house has a
+per-house component list bounded by nothing that ships. Two consequences:
+
+- It is an argument about chunk size, recorded in
+  [`mechanics.md`](mechanics.md#chunks): at 8×8 a castle is sixteen chunks and
+  a moved wall touches one of them; at 64×64 it is inside one, and that wall
+  rewrites 4,096 tiles' worth of chunk.
+- It is the argument that a flat base array must never be inserted into.
+  Placing a castle into a CSR base would memmove about 11 MiB. That is not a
+  reason against the flat layout — it is the flat layout refusing to let a
+  house be anything but an overlay, which is the model direction C already
+  chose.
+
 ## The access pattern, and where it actually hurts
 
 Worth stating because the intuition "a 150 MiB array read through a camera must
