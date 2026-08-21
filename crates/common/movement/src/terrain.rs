@@ -11,6 +11,7 @@
 //! entity registry a client does not have.
 
 use crate::{Terrain, Tile};
+use openshard_map::MapSnapshot;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_uofiles::map::{LandTile, Map};
@@ -72,9 +73,33 @@ pub struct MapTerrain<M = Map, T = TileData> {
     multis: Option<std::sync::Arc<openshard_uofiles::multi::Multis>>,
 }
 
+/// A holder from which movement may borrow the immutable map.
+pub trait MapSource {
+    /// Borrow the decoded map.
+    fn map_ref(&self) -> &Map;
+}
+
+impl MapSource for Map {
+    fn map_ref(&self) -> &Map {
+        self
+    }
+}
+
+impl MapSource for &Map {
+    fn map_ref(&self) -> &Map {
+        self
+    }
+}
+
+impl MapSource for MapSnapshot {
+    fn map_ref(&self) -> &Map {
+        self.map()
+    }
+}
+
 impl<M, T> MapTerrain<M, T>
 where
-    M: AsRef<Map>,
+    M: MapSource,
     T: AsRef<TileData>,
 {
     /// Wrap a loaded map, owned or borrowed.
@@ -103,7 +128,7 @@ where
 
     /// The map.
     pub fn map(&self) -> &Map {
-        self.map.as_ref()
+        self.map.map_ref()
     }
 
     /// The tile definitions.
@@ -522,7 +547,7 @@ where
 
 impl<M, T> Terrain for MapTerrain<M, T>
 where
-    M: AsRef<Map>,
+    M: MapSource,
     T: AsRef<TileData>,
 {
     // `.0` throughout: `tiledata.mul` is indexed by a bare `u16`, and the ids in

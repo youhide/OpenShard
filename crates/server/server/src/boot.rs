@@ -615,7 +615,7 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
             "world load +{:.3}s: navigation for facet {facet} loaded; reading map",
             started.elapsed().as_secs_f64()
         );
-        let map = Map::load_facet(dir, facet.0)?;
+        let map = openshard_map::MapSnapshot::new(facet, Map::load_facet(dir, facet.0)?);
         if coarse.dimensions() != (map.width(), map.height()) {
             return Err(format!(
                 "navigation artifact {} has dimensions {}x{}, but facet {facet} is {}x{}\n\

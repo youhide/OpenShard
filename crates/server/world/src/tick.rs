@@ -86,6 +86,7 @@ use crate::events::{
 };
 use crate::gm;
 use crate::terrain::MapTerrain;
+use openshard_movement::MapSource;
 
 mod ambient;
 mod command;
@@ -379,18 +380,26 @@ impl World {
     }
 
     /// Give the default facet a map.
-    pub fn with_terrain(self, terrain: MapTerrain) -> Self {
+    pub fn with_terrain<M, T>(self, terrain: MapTerrain<M, T>) -> Self
+    where
+        M: MapSource + Send + Sync + 'static,
+        T: AsRef<openshard_uofiles::tiledata::TileData> + Send + Sync + 'static,
+    {
         let facet = self.state.default_facet;
         self.with_facet(facet, terrain, None)
     }
 
     /// Load `terrain` and its already-baked coarse router as facet `facet`.
-    pub fn with_facet(
+    pub fn with_facet<M, T>(
         mut self,
         facet: Facet,
-        terrain: MapTerrain,
+        terrain: MapTerrain<M, T>,
         coarse: Option<openshard_movement::NavigationGraph>,
-    ) -> Self {
+    ) -> Self
+    where
+        M: MapSource + Send + Sync + 'static,
+        T: AsRef<openshard_uofiles::tiledata::TileData> + Send + Sync + 'static,
+    {
         let (width, height) = (terrain.map().width(), terrain.map().height());
         debug_assert!(
             coarse

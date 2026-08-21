@@ -2569,6 +2569,7 @@ dependencies = [
  "openshard-client-net",
  "openshard-client-render",
  "openshard-commands",
+ "openshard-map",
  "openshard-movement",
  "openshard-protocol",
  "openshard-uofiles",
@@ -2785,6 +2786,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "openshard-map"
+version = "0.0.1"
+dependencies = [
+ "openshard-protocol",
+ "openshard-uofiles",
+]
+
+[[package]]
 name = "openshard-metrics"
 version = "0.0.1"
 
@@ -2793,6 +2802,7 @@ name = "openshard-movement"
 version = "0.0.1"
 dependencies = [
  "clap",
+ "openshard-map",
  "openshard-protocol",
  "openshard-uofiles",
  "proptest",
@@ -2888,6 +2898,7 @@ dependencies = [
  "openshard-events",
  "openshard-gateway",
  "openshard-login",
+ "openshard-map",
  "openshard-movement",
  "openshard-persistence",
  "openshard-protocol",

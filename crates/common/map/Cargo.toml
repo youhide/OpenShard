@@ -1,6 +1,6 @@
 [package]
-name = "openshard-movement"
-description = "Movement, pathfinding, line of sight, and fastwalk prevention."
+name = "openshard-map"
+description = "Immutable, revisioned snapshots of one world facet."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,11 +12,5 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
-clap.workspace = true
 openshard-protocol.workspace = true
-openshard-map.workspace = true
 openshard-uofiles.workspace = true
-rustc-hash.workspace = true
-
-[dev-dependencies]
-proptest.workspace = true

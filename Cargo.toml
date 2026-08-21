@@ -110,6 +110,7 @@ openshard-housing = { path = "crates/server/housing", version = "0.0.1" }
 openshard-items = { path = "crates/server/items", version = "0.0.1" }
 openshard-login = { path = "crates/server/login", version = "0.0.1" }
 openshard-magic = { path = "crates/server/magic", version = "0.0.1" }
+openshard-map = { path = "crates/common/map", version = "0.0.1" }
 openshard-metrics = { path = "crates/common/metrics", version = "0.0.1" }
 openshard-movement = { path = "crates/common/movement", version = "0.0.1" }
 openshard-npc = { path = "crates/server/npc", version = "0.0.1" }

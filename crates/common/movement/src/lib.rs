@@ -70,7 +70,7 @@ pub use pace::{
 pub use path::{find_path, find_path_toward};
 pub(crate) use path::{find_path_toward_until, find_path_until};
 pub use sequence::{OutOfSequence, StepCounter, WalkSequence};
-pub use terrain::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
+pub use terrain::{MAX_STEP_UP, MapSource, MapTerrain, PLAYER_HEIGHT};
 pub use walk::{
     Heading, Intent, Lean, OpenWorld, Terrain, Tile, Walk, Walker, direction_toward, heading_toward, intend,
     line_tiles, step_allowed, step_from,

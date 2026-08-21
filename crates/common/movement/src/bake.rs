@@ -6,13 +6,14 @@ use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use openshard_map::MapRevision;
 use openshard_protocol::world::{Facet, Point};
 
 use crate::NavigationGraph;
 use crate::navigation::{Node, Region};
 
 const MAGIC: &[u8; 8] = b"OSNAV\0\r\n";
-const FORMAT_VERSION: u32 = 4;
+const FORMAT_VERSION: u32 = 5;
 /// Increment whenever graph construction or static movement semantics change.
 pub const ROUTING_VERSION: u32 = 3;
 const MAX_COLLECTION: usize = 100_000_000;
@@ -29,6 +30,8 @@ pub struct InputStamp {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Stamp {
     pub facet: Facet,
+    /// The immutable world revision the graph was built from.
+    pub revision: MapRevision,
     pub routing_version: u32,
     pub inputs: Vec<InputStamp>,
 }
@@ -111,6 +114,7 @@ pub fn stamp_of(client_dir: &Path, facet: Facet) -> Result<Stamp, Error> {
     }
     Ok(Stamp {
         facet,
+        revision: MapRevision::INITIAL,
         routing_version: ROUTING_VERSION,
         inputs,
     })
@@ -236,6 +240,7 @@ fn encode(mut w: impl Write, g: &NavigationGraph, stamp: &Stamp) -> io::Result<(
     put_u32(&mut w, FORMAT_VERSION)?;
     put_u32(&mut w, ROUTING_VERSION)?;
     w.write_all(&[stamp.facet.0, 0, 0, 0])?;
+    put_u64(&mut w, stamp.revision.get())?;
     put_u32(&mut w, g.width)?;
     put_u32(&mut w, g.height)?;
     put_u64(&mut w, stamp.inputs.len() as u64)?;
@@ -302,6 +307,7 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<NavigationGraph
         ));
     }
     let facet = Facet(r.take(4)?[0]);
+    let revision = MapRevision::from(r.u64()?);
     let width = r.u32()?;
     let height = r.u32()?;
     if facet != expected.facet {
@@ -335,6 +341,7 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<NavigationGraph
     }
     let actual = Stamp {
         facet,
+        revision,
         routing_version: routing,
         inputs,
     };
@@ -588,6 +595,7 @@ mod tests {
     fn stamp() -> Stamp {
         Stamp {
             facet: Facet(0),
+            revision: MapRevision::INITIAL,
             routing_version: ROUTING_VERSION,
             inputs: vec![InputStamp {
                 name: "map0.mul".into(),
@@ -671,7 +679,7 @@ mod tests {
         fs::write(&path, &data).unwrap();
         assert!(matches!(load(&path, &s), Err(Error::Incompatible { .. })));
         data = original.clone();
-        data[20..24].copy_from_slice(&0u32.to_le_bytes());
+        data[28..32].copy_from_slice(&0u32.to_le_bytes());
         resign(&mut data);
         fs::write(&path, &data).unwrap();
         assert!(matches!(load(&path, &s), Err(Error::Incompatible { .. })));

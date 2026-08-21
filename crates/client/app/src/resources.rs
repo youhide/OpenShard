@@ -11,13 +11,13 @@ use std::sync::Arc;
 use openshard_client_render::atlas::FontAtlas;
 use openshard_client_render::gump::GumpAtlas;
 use openshard_client_render::hue::HueRamp;
+use openshard_map::MapSnapshot;
 use openshard_movement::NavigationGraph;
 use openshard_uofiles::anim::Anim;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::cliloc::Cliloc;
 use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::gumpart::Gumps;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::radarcol::RadarColors;
 use openshard_uofiles::skillgrp::SkillGroups;
 use openshard_uofiles::skills::Skills as SkillNames;
@@ -34,7 +34,7 @@ use openshard_uofiles::ttf_font::TtfFont;
 /// on this struct rather than a getter that hands the field out raw.
 pub struct Resources {
     /// The facet, shared with the shard thread — see [`crate::link::connect`].
-    pub map: Arc<Map>,
+    pub map: MapSnapshot,
     /// Static long-distance connectivity over [`Resources::map`]. It is built
     /// once, before the event loop starts, and only proposes a corridor; the
     /// live route still reads the map with the shard's clutter laid over it.

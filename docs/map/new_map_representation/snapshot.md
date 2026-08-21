@@ -142,13 +142,16 @@ things.
 
 ```rust
 /// One immutable version of one facet.
-pub struct Snapshot { /* facet, revision, map */ }
+pub struct MapSnapshot { /* facet, revision, map */ }
 
 /// Which version of a facet this is. Bumped by whoever publishes a change.
-pub struct Revision(u64);
+pub struct MapRevision(u64);
 ```
 
-A handle is an `Arc<Snapshot>`. Readers hold that; nobody holds a `Map`.
+`MapSnapshot` has one owner — `Resources` on the client, the facet terrain on
+the server. It owns the decoded map and is not itself reference counted.
+Leaf code keeps borrowing `&Map` through `MapSnapshot::map()`; no ordinary
+reader owns a `Map`.
 
 ### Decisions, taken here
 
@@ -156,10 +159,10 @@ A handle is an `Arc<Snapshot>`. Readers hold that; nobody holds a `Map`.
 [`client_today.md`](client_today.md)'s finding 8 — `Map` today names only a
 *size*, `describe_size` cannot tell Malas from Ter Mur, and the facet number
 that resolved the ambiguity at load time is then thrown away. It also stops the
-client's single-`Arc<Map>`, `FACET: u8 = 0` shape from being baked in: a second
-facet is a second snapshot, looked up by `Facet`, rather than a reopening.
+client's single-map, `FACET: u8 = 0` shape from being baked in: a second facet
+is a second snapshot, looked up by `Facet`, rather than a reopening.
 
-**This phase changes owners, not signatures.** `Snapshot::map() -> &Map`
+**This phase changes owners, not signatures.** `MapSnapshot::map() -> &Map`
 exists, and a leaf function that needs the land keeps taking `&Map` — the
 *caller* passes `snapshot.map()`. There are **78 `&Map`/`Arc<Map>` signature
 sites across 16 files**; converting them all would be churn with no reader
@@ -168,14 +171,20 @@ every place that **owns or loads** one:
 
 | Where | Today |
 |---|---|
-| [`Resources::map`](../../../crates/client/app/src/resources.rs#L37) | `Arc<Map>` loaded by [`lib.rs:461`](../../../crates/client/app/src/lib.rs#L461) |
+| [`Resources::map`](../../../crates/client/app/src/resources.rs#L37) | `Map` loaded by [`lib.rs:461`](../../../crates/client/app/src/lib.rs#L461) |
 | [`FacetState`](../../../crates/server/state/src/runtime.rs#L377) | its `terrain`, from [`boot.rs:618`](../../../crates/server/server/src/boot.rs#L618) |
-| [`link::connect`](../../../crates/client/app/src/link.rs#L535) | takes `Arc<Map>` across the thread |
+| [`link::connect`](../../../crates/client/app/src/link.rs#L535) | reads the map to predict a step across the thread |
 | the three bakes | navigation, the building flood, the occluder table |
 
 The invariant that makes it real: **`Map::load_facet` is called in exactly one
-place per process, and that place produces a `Snapshot`.** Everything else asks
-for the handle.
+place per process, and that place produces a `MapSnapshot`.** Everything else
+borrows its map from that owner.
+
+**The network thread is transport, not a map reader.** It emits decoded packet
+mutations; the event-loop owner applies them to its `WorldView` and its `Walk`.
+It also receives an already encoded step packet to send. Consequently the
+prediction, including the terrain lookup and the step sequence, stays beside
+`MapSnapshot`; no `Arc<Map>` crosses into `link::connect`.
 
 **Both ends stop agreeing by luck.** The opening handoff names this: the client
 and the server load the same install independently. This phase does not merge
@@ -191,15 +200,17 @@ and the art table each key on input file name, size and mtime. This phase adds
 [direction D](plan.md#d--derived-data-keyed-by-revision), and a session that
 does it here has taken on D as well.
 
-**Revision starts at 1 and never moves in this phase.** Nothing publishes yet.
+**MapRevision starts at 1 and never moves in this phase.** Nothing publishes yet.
 A revision that cannot change is still worth having: it is what a bake records,
 and it is the field C later makes mean something.
 
 ### Done when
 
 - No production code outside `openshard-map` calls `Map::load_facet`.
-- The client and the server each hold `Arc<Snapshot>`, and `Resources::map` and
-  `FacetState`'s terrain are reached through it.
+- The client `Resources` and the server facet terrain each own a `MapSnapshot`,
+  and reach their terrain through it.
+- `link::connect` receives neither a `MapSnapshot` nor a map handle: it sends
+  prepared packets and returns decoded mutations for the owner to apply.
 - Every one of the three bakes records the revision it was built from, and
   refuses a snapshot whose revision does not match — alongside, not instead of,
   its existing staleness check.

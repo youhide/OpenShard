@@ -31,6 +31,7 @@ openshard-commands.workspace = true
 # body that stopped hearing steps stops walking. Shared with the server rather
 # than guessed at again here.
 openshard-movement.workspace = true
+openshard-map.workspace = true
 openshard-uofiles.workspace = true
 # The binary's command line, and the `.env` its options fall back to. Only
 # `main.rs` uses them: the library takes an install and a plan, so a caller with

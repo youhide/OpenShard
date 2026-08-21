@@ -53,6 +53,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Instant;
 
+use openshard_map::MapSnapshot;
+
 mod app;
 mod audio;
 mod chat;
@@ -712,7 +714,7 @@ pub fn run<D: Dial + Send + 'static>(
     // the offline placeholder at `START` while those round trips happen.
     // Shared with the shard thread, which predicts the height of every step
     // from it: plain data, read by both and written by neither.
-    let map = Arc::new(map);
+    let map = MapSnapshot::new(openshard_protocol::world::Facet(FACET), map);
     let tiledata = Arc::new(tiledata);
     let update_proxy = event_loop.create_proxy();
     let updates = link::Updates::new();
@@ -724,7 +726,7 @@ pub fn run<D: Dial + Send + 'static>(
             dial,
             plan,
             VERSION,
-            Arc::clone(&map),
+            map.shared_map(),
             Arc::clone(&tiledata),
             move |update| {
                 if reports.publish(update) {

@@ -1459,7 +1459,7 @@ fn generated_door_anchor<M, T>(
     y: usize,
     z: i8,
 ) where
-    M: AsRef<Map>,
+    M: openshard_movement::MapSource,
     T: AsRef<TileData>,
 {
     let width = terrain.map().width() as usize;
