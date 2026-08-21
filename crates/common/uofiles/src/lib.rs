@@ -29,6 +29,7 @@ pub mod cliloc;
 pub mod color;
 pub mod equipconv;
 pub mod font;
+pub mod grid;
 pub mod gumpart;
 pub mod hues;
 pub mod image;

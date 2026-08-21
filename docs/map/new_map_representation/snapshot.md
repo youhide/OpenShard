@@ -14,7 +14,7 @@ Two changes that together make the world a thing with an owner.
 
 1. **A0** — the block order stops being arithmetic written out five times and
    becomes one type whose whole job is that arithmetic. Internal to
-   `openshard-uofiles`; no reader outside it changes.
+   `openshard-uofiles`; no reader outside it changes. **Built.**
 2. **A** — the map stops being something a caller loads for itself and becomes
    a revisioned snapshot every reader takes a handle to.
 
@@ -22,7 +22,11 @@ Neither adds a feature. That is the point: everything after them in the track
 is cheap only if they land first, and if the rest of the track slipped these
 would still have been worth doing.
 
-## Phase 1 — `LandGrid`
+## Phase 1 — `LandGrid` — **built**
+
+Landed as [`crates/common/uofiles/src/grid.rs`](../../../crates/common/uofiles/src/grid.rs).
+What it turned out to owe beyond this section is under
+[What phase 1 left behind](#what-phase-1-left-behind).
 
 ### The problem, stated
 
@@ -203,6 +207,45 @@ and it is the field C later makes mean something.
   the same block count — produce snapshots that disagree about which they are.
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets` and
   `cargo fmt --all` are silent.
+
+## What phase 1 left behind
+
+Written down as it was found, and none of it blocks phase 2.
+
+- **The `BlockCoord` collapse is decided, not done.** Phase 1's decision stands
+  — [`interiors::BlockId`](../../../crates/client/render/src/interiors.rs#L18)
+  and [`composite::MapBlock`](../../../crates/client/render/src/composite.rs#L45)
+  are the same value under two names and become
+  [`BlockCoord`](../../../crates/common/uofiles/src/grid.rs) — but converting
+  them is a reader change, and [`plan.md`'s A0](plan.md#a0--the-cell-array-becomes-a-type-that-owns-the-order)
+  says in as many words that nothing outside `uofiles` changes there. They are
+  still two types, still `u32` and `u16` respectively. Whoever collapses them
+  should take `RadarChunkCoord` off the table in the same breath, because the
+  reason it stays separate is the one thing a reader of that diff will ask.
+- **The land and the statics share an index that is still two arrays.**
+  `Map::statics` is now documented as being addressed by the same `BlockIndex`
+  as the cells, and every subscript of it goes through
+  `LandGrid::index_of` — which is as close to enforcement as two parallel
+  `Vec`s get. A type that cannot express the mismatch is
+  [direction B](plan.md#b--our-own-chunk-format-and-a-uo-importer)'s to build.
+- **The transitions have no caller yet.** `east_of`, `south_of` and
+  `cells_in_row` are tested against a fresh `cell_index` per tile, and nothing
+  walks them: every rectangle walk in the workspace is `client/render`'s, which
+  is outside A0's reach. The first caller is what turns the walk order into a
+  property of one iterator — which is the half of the point that
+  [`depth::Order`](../../../crates/client/render/src/depth.rs#L55)'s
+  anti-diagonal tie is waiting on.
+- **A block column is an eight-wide strip, and that is now written down.** The
+  two orders compose: `block_y * 64 + y_local * 8 + x_local == y * 8 + x_local`,
+  so a whole block column is one row-major image eight tiles wide. It is why
+  stepping south is `+8` on *every* tile rather than only inside a block, and it
+  is the whole of the `CellIndex → (x, y)` inverse. `grid.rs`'s module header
+  derives it and `the_two_orders_compose_into_a_strip` holds it against the
+  plain spelling; direction B should know it before choosing a chunk layout,
+  because it is the property that would be lost.
+- **`Map::from_blocks` still takes two bare `u32`s.** A facet's extent in blocks
+  has no type, where a block's *position* now does. Small, and it is the kind of
+  thing B will want anyway.
 
 ## Out of scope, named
 

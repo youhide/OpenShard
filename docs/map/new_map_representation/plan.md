@@ -26,7 +26,9 @@ whatever those files said.
 
 ## A0 — the cell array becomes a type that owns the order
 
-> Being executed first, on its own: [`snapshot.md`](snapshot.md).
+> **Built** — `crates/common/uofiles/src/grid.rs`. Executed on its own, as
+> [`snapshot.md`](snapshot.md)'s phase 1; what it left behind is that
+> document's [backlog](snapshot.md#what-phase-1-left-behind).
 
 **Goal.** The block order stops being arithmetic five functions each write out,
 and becomes one newtype whose whole job is that arithmetic.
