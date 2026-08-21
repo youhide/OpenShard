@@ -190,6 +190,37 @@ It also receives an already encoded step packet to send. Consequently the
 prediction, including the terrain lookup and the step sequence, stays beside
 `MapSnapshot`; no `Arc<Map>` crosses into `link::connect`.
 
+*The reason is [direction C](plan.md#c--patches-and-the-resolved-snapshot), and
+it is worth stating in full because the shape it was in was not wrong today.*
+The shard thread held an `Arc<Map>` — immutable, uncontended, no lock anywhere —
+and read it for exactly one thing: `predict_step`, the **height** of the tile a
+`0x02` is asking for. Not walkability; `predict_step` cannot refuse. That is
+correct as long as nothing ever publishes.
+
+C publishes. Its mutability is "apply to the touched chunks, rehash, and publish
+a new snapshot atomically between ticks" — a new immutable version, not a `Map`
+written through a lock. So an `Arc<Map>` handed to a thread at login stays
+memory-safe forever and **silently keeps the revision it was handed**. That is
+worse than a race: it never crashes and never warns. A GM raises a hill, the
+owner takes revision 8, the socket thread predicts step heights on revision 7,
+and the body walks sunk into the hill until the player reconnects — this track's
+own "both ends agree by luck", reproduced inside one process.
+
+Keeping the prediction on the thread under C would cost one of three things: a
+second channel republishing the handle on every publish, ordered against the
+steps already in flight; an `ArcSwap` or `RwLock` that lets the socket thread
+block on a writer running between ticks; or a derived height grid rebuilt per
+revision, which is [direction D](plan.md#d--derived-data-keyed-by-revision)'s
+problem plus a second copy of the world. All three exist only because the
+prediction sits on the far side of a thread boundary. Moving it costs nothing
+now and takes all three off C's plate.
+
+There is a second reason, smaller and already true: the thread held the *bare*
+map, while [`steer.rs`](../../../crates/client/app/src/steer.rs) — which decides
+whether to step at all — reads `cluttered`, the map with the shard's own live
+items laid over it. Two halves of one step rule, on two different inputs. They
+are on one side now, which is what would let a later session make them one rule.
+
 **Both ends stop agreeing by luck.** The opening handoff names this: the client
 and the server load the same install independently. This phase does not merge
 the two processes' loads — they are two processes — but it makes each of them
