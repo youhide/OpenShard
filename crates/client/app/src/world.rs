@@ -388,6 +388,19 @@ pub struct AuthoritativeWorld {
     /// The last thing the server said, whole. Kept for the HUD and as the sole
     /// source from which this app rebuilds render projections.
     pub view: Option<Box<WorldView>>,
+    /// The walk handshake, beside the view it belongs to.
+    ///
+    /// This end's half of `0x02`/`0x22`/`0x21`: which steps are in flight, what
+    /// the server has confirmed, and the tile the body is *drawn* on ahead of
+    /// the confirmation. It lives here rather than on the shard thread because
+    /// a step's destination height comes out of the terrain, and the terrain
+    /// comes out of the one `MapSnapshot` this side owns — see
+    /// [`crate::link::connect`], which is handed no map at all.
+    ///
+    /// `None` until a world is entered, and that absence is the fact: an
+    /// offline viewer never has one, and there is no walk to answer with
+    /// before the shard has said where the body is.
+    pub walk: Option<openshard_client_net::walk::Walk>,
     /// Whether the shard's facet has been compared with the one loaded. See
     /// `App::entered`: once, because it cannot change without a `0xBF 0x08`
     /// nothing here reads yet.

@@ -195,6 +195,93 @@ impl App {
     /// Movement is clamped to the map rather than wrapped: walking off the north
     /// edge in UO is impossible, and a camera that wrapped would draw a seam
     /// between two sides of the world.
+    /// Ask the shard for one step, and draw it before it answers.
+    ///
+    /// The whole of the online walk, and it is here rather than on the shard
+    /// thread because of the height: a `0x02` names the tile a step is asking
+    /// for, the server lands the body wherever it actually stands and says
+    /// nothing about it (`0x22` carries no position), so this end has to
+    /// predict — and predicting needs the terrain, which comes out of the
+    /// process's one `MapSnapshot`. See [`crate::link::connect`], which is
+    /// handed no map at all.
+    ///
+    /// `MapTerrain::predict_step` is the shard's own step rule run on this end:
+    /// it weighs the land's *average* (the same number the shard's own
+    /// `ground_z` computes — on a slope the raw corner differs by most of the
+    /// tile's relief, and a body predicted at the corner is drawn sunk into the
+    /// hill and sorted behind it) against every platform static on the tile, a
+    /// pier's or a bridge's deck among them, reaching from the top of the
+    /// surface underfoot and standing on the highest surface within a step.
+    /// That last part is what climbs a staircase, and it is why this is not
+    /// `predict_z`: the nearest-height guess stays on the floor a stair tile
+    /// also carries, and the body walks *through* the stairs while the shard
+    /// has it half way up. Never a refusal — see `predict_step`'s own doc — so
+    /// it cannot desync from a server that disagrees; it can only draw the
+    /// wrong deck for one step, corrected by the next `0x20`.
+    fn step_online(&mut self, facing: Facing) {
+        // The presentation clocks first, before the step is folded in. This
+        // used to happen because a prediction reached the app as an `Update`
+        // and `App::on_update` advanced the clock for it; the prediction is
+        // made here now, and this is called from `about_to_wait` — where
+        // `Crowd`'s own `now` is as old as the last frame. A step recorded up
+        // to a frame in the past starts its crossing there, and `crowd::
+        // crossing` then measures the time it has left from the same stale
+        // instant. The offline arm below says the same thing, and it is the
+        // same defect.
+        advance_presentation_to(
+            &mut self.world.presentation,
+            &mut self.world.motion,
+            &mut self.last_advance,
+            Instant::now(),
+        );
+        self.project_player_motion();
+        let Some(walk) = self.world.authoritative.walk.as_mut() else {
+            // A link with no world entered yet: the shard has not said where
+            // the body is, so there is nothing to step from.
+            return;
+        };
+        let terrain = openshard_movement::MapTerrain::new(self.resources.map.map(), &self.resources.tiledata);
+        let stepped = walk.step(facing, |from, tile| {
+            i8::try_from(terrain.predict_step(from, tile.x, tile.y)).ok()
+        });
+        let bytes = match stepped {
+            Ok(bytes) => bytes,
+            // A step this end refused on its own: the edge of the map, which
+            // the server would refuse too, or a shard that has stopped
+            // answering and is five steps behind already. Neither is worth a
+            // round trip, and the body simply stays where it is.
+            Err(refusal) => {
+                tracing::debug!(%refusal, "not stepping");
+                return;
+            }
+        };
+        let body = crate::link::Body {
+            predicted: walk.predicted(),
+            corrected: false,
+        };
+        let sequence = walk
+            .newest_pending_sequence()
+            .expect("an accepted step is pending");
+        self.world
+            .shard
+            .link()
+            .expect("the link was there a moment ago")
+            .step(bytes);
+        // The body moves *now*, on this end's own prediction, rather than a
+        // round trip later when the `0x22` says it may. That is the whole of
+        // the lag compensation: the ack changes nothing on screen, and only a
+        // refusal does.
+        self.apply_prediction(body, sequence);
+        if let Some(trace) = self.movement_trace.as_mut() {
+            trace.record_detail(
+                "command_step",
+                &format!("facing={facing:?} goal={:?}", self.steer.goal()),
+                &self.world,
+                self.control.camera(),
+            );
+        }
+    }
+
     pub(crate) fn walk(&mut self, facing: Facing) -> bool {
         // A hand on the body outranks a scenario, the same way a hand on the
         // camera outranks the lock: the two would otherwise both write the
@@ -209,16 +296,8 @@ impl App {
         if self.world.shard.link().is_some() {
             self.open_door_ahead(facing);
         }
-        if let Some(link) = self.world.shard.link() {
-            link.step(facing);
-            if let Some(trace) = self.movement_trace.as_mut() {
-                trace.record_detail(
-                    "command_step",
-                    &format!("facing={facing:?} goal={:?}", self.steer.goal()),
-                    &self.world,
-                    self.control.camera(),
-                );
-            }
+        if self.world.shard.link().is_some() {
+            self.step_online(facing);
             return false;
         }
         // And a body whose shard is *gone* stands where the last packet left

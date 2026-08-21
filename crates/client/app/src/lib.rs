@@ -712,8 +712,10 @@ pub fn run<D: Dial + Send + 'static>(
     // exists: the login is several round trips. A connected window remains
     // blank until its first complete world view arrives, rather than showing
     // the offline placeholder at `START` while those round trips happen.
-    // Shared with the shard thread, which predicts the height of every step
-    // from it: plain data, read by both and written by neither.
+    //
+    // Neither the map nor the tile definitions go with it: the shard thread is
+    // transport, and the step it sends is predicted on this side, beside the
+    // snapshot that owns the terrain.
     let tiledata = Arc::new(tiledata);
     let update_proxy = event_loop.create_proxy();
     let updates = link::Updates::new();
@@ -721,18 +723,11 @@ pub fn run<D: Dial + Send + 'static>(
     let shard = shard.map(|(dial, plan)| {
         eprintln!("logging in as {}", plan.account.0);
         let reports = updates.clone();
-        link::connect(
-            dial,
-            plan,
-            VERSION,
-            map.shared_map(),
-            Arc::clone(&tiledata),
-            move |update| {
-                if reports.publish(update) {
-                    let _ = update_proxy.send_event(());
-                }
-            },
-        )
+        link::connect(dial, plan, VERSION, move |update| {
+            if reports.publish(update) {
+                let _ = update_proxy.send_event(());
+            }
+        })
     });
 
     // Live `MapTerrain` still authorizes every refined step. Without this cache
@@ -819,6 +814,7 @@ pub fn run<D: Dial + Send + 'static>(
             authoritative: world::AuthoritativeWorld {
                 designs: std::collections::HashMap::new(),
                 view: None,
+                walk: None,
                 facet_checked: false,
             },
             motion: world::PlayerMotion::new(start, Facing::walking(Direction::SouthEast)),

@@ -26,7 +26,6 @@ use openshard_client_net::session::Plan;
 use openshard_client_net::transport::{Dial, enter_world_with};
 use openshard_client_net::view::WorldView;
 use openshard_client_net::walk::{Moved, Walk};
-use openshard_protocol::direction::Facing;
 use openshard_protocol::feedback::{Animation, NewAnimation};
 use openshard_protocol::gump::GumpId;
 use openshard_protocol::gump::GumpPoint;
@@ -38,8 +37,6 @@ use openshard_protocol::version::ClientVersion;
 use openshard_protocol::world::Point;
 use openshard_protocol::world::ResyncRequest;
 use openshard_protocol::world::StepSequence;
-use openshard_uofiles::map::Map;
-use openshard_uofiles::tiledata::TileData;
 
 /// Where this client's own body is *drawn*, which is not where the
 /// [`WorldView`] says it is.
@@ -122,30 +119,21 @@ pub enum Update {
     /// not what moved.
     World {
         /// What the server has said, entire.
+        ///
+        /// No [`Body`] beside it: the body is the [`Walk`]'s answer, the walk
+        /// belongs to the event-loop owner, and a world entered is exactly
+        /// where that walk starts. The owner builds one from this view rather
+        /// than being handed a second opinion about it.
         view: Box<WorldView>,
-        /// Where our own body is drawn. See [`Body`].
-        body: Body,
     },
-    /// A decoded server packet that does not change the player's authoritative
-    /// movement state. The event-loop thread applies it to its sole `WorldView`
-    /// owner and then rebuilds the presentation projection.
+    /// A decoded server packet, for the event-loop owner to apply.
+    ///
+    /// Every packet the shard sent, undivided: this thread no longer knows
+    /// which of them move the player, because [`Walk`] is what decides that and
+    /// [`Walk`] is the owner's. See [`fold`], which the owner calls, and this
+    /// module's own docs for why the split moved.
     Mutation {
         packet: openshard_protocol::server_packet::ServerPacket,
-    },
-    /// A decoded packet that changed or confirmed the player's authoritative
-    /// movement state.
-    ///
-    /// Kept distinct from [`Update::Mutation`] so an ordinary packet cannot
-    /// reach the authoritative movement write path by accident.
-    Movement {
-        packet: openshard_protocol::server_packet::ServerPacket,
-        movement: Movement,
-    },
-    /// A locally accepted walk, before the server acknowledges it.
-    Prediction {
-        body: Body,
-        /// The protocol identity later named by `WalkAck`.
-        sequence: StepSequence,
     },
     /// The server asked one mobile to play a one-shot body animation.
     Animation(Animation),
@@ -312,9 +300,20 @@ pub use openshard_client_net::action::GumpReply;
 /// never touches the wire.
 #[derive(Clone, Debug)]
 pub enum Command {
-    /// Take one step, or turn.
-    Step(Facing),
+    /// Bytes to put on the wire exactly as given.
+    ///
+    /// The one command that arrives already encoded, and the reason is the map:
+    /// a `0x02` names the tile a step is asking for, which only a terrain
+    /// lookup can answer, and the terrain lives beside the owner's
+    /// `MapSnapshot`. A resync request rides the same variant — it is what the
+    /// owner sends when its [`Walk`] loses track, and it carries no fields at
+    /// all.
+    Send(Vec<u8>),
     /// An ordinary network action. Its packet mapping is owned by `client-net`.
+    ///
+    /// Still encoded on the thread: an action needs the player's serial and the
+    /// client version, both of which the login conversation produced here, and
+    /// none of them needs a map.
     Outgoing(Outgoing),
 }
 
@@ -369,13 +368,26 @@ impl Link {
         }
     }
 
-    /// Ask the shard for one step. Unanswered until an `Update` says otherwise.
+    /// Put one already-encoded step on the wire.
+    ///
+    /// The bytes come from the owner's own [`Walk`], which is where the
+    /// prediction and its terrain lookup live — see [`Command::Send`].
     ///
     /// A closed channel is ignored rather than reported: it means the shard
     /// thread has already ended, and it has already said why. The same holds
     /// for everything below.
-    pub fn step(&self, facing: Facing) {
-        self.send(Command::Step(facing));
+    pub fn step(&self, packet: Vec<u8>) {
+        self.send(Command::Send(packet));
+    }
+
+    /// Ask the shard where this character actually is.
+    ///
+    /// Sent when the owner's [`Walk`] has lost track of the handshake and
+    /// cannot repair it by guessing. `Walk` has already stopped sending steps
+    /// by then; this is the other half, and without it the walk never starts
+    /// again.
+    pub fn resync(&self) {
+        self.send(Command::Send(ResyncRequest.encode()));
     }
 
     /// Send one action the caller has already chosen.
@@ -519,23 +531,17 @@ impl Link {
 /// Returns as soon as the thread is spawned: the login conversation is several
 /// round trips and a window that waited for it would open blank and frozen.
 ///
-/// The map and the tile definitions come along because the walk predicts a
-/// height and the server does not send one — see [`Walk::step`], which needs
-/// both: `tiledata.mul` is what tells a pier or a bridge's deck apart from
-/// the water it stands over. Shared rather than loaded twice: plain data,
-/// read by both threads and written by neither.
+/// **No map and no tile definitions.** The walk predicts the height of a step
+/// and the server does not send one, but the terrain that answers it belongs to
+/// the process's one [`MapSnapshot`](openshard_map::MapSnapshot) — so the
+/// prediction happens beside it and this thread receives a `0x02` already
+/// encoded. What crosses in the other direction is decoded packets; the owner
+/// folds them into its own [`Walk`].
 ///
 /// `dial` is how the connection is opened and the only thing here that knows
 /// what a socket is: `Tcp` for a shard on a network, and something else for one
 /// in this process. It is moved onto the thread, so it is `Send`.
-pub fn connect<D, F>(
-    dial: D,
-    plan: Plan,
-    version: ClientVersion,
-    map: Arc<Map>,
-    tiles: Arc<TileData>,
-    report: F,
-) -> Link
+pub fn connect<D, F>(dial: D, plan: Plan, version: ClientVersion, report: F) -> Link
 where
     D: Dial + Send + 'static,
     F: Fn(Update) + Send + 'static,
@@ -543,7 +549,7 @@ where
     let (sender, commands) = tokio::sync::mpsc::channel(COMMAND_CAPACITY);
     std::thread::Builder::new()
         .name("shard".to_owned())
-        .spawn(move || run(dial, plan, version, &map, &tiles, &report, commands))
+        .spawn(move || run(dial, plan, version, &report, commands))
         // The thread is the connection; a client that could not spawn it has
         // nothing to fall back to, and the OS refusing a thread at startup is
         // not a condition worth a variant in `Update`.
@@ -557,8 +563,6 @@ fn run<D: Dial, F: Fn(Update) + Send>(
     dial: D,
     plan: Plan,
     version: ClientVersion,
-    map: &Map,
-    tiles: &TileData,
     report: &F,
     commands: tokio::sync::mpsc::Receiver<Command>,
 ) {
@@ -570,7 +574,7 @@ fn run<D: Dial, F: Fn(Update) + Send>(
         }
     };
     runtime.block_on(async move {
-        let reason = play(dial, plan, version, map, tiles, report, commands).await;
+        let reason = play(dial, plan, version, report, commands).await;
         report(Update::Lost(reason));
     });
 }
@@ -580,8 +584,6 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
     dial: D,
     plan: Plan,
     version: ClientVersion,
-    map: &Map,
-    tiles: &TileData,
     report: &F,
     mut commands: tokio::sync::mpsc::Receiver<Command>,
 ) -> String {
@@ -589,12 +591,10 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
         Ok(entered) => entered,
         Err(error) => return error.to_string(),
     };
-    // Where the server put us, which is where the next `0x02` is computed from.
-    let mut walk = Walk::new(view.player.position, view.player.facing);
     let player_serial = view.player.serial;
-    // Entering the world is not a step, so the body is placed rather than walked
-    // there — the same statement a rollback makes.
-    report(snapshot(view, &walk, true));
+    // Where the server put us. The owner starts its `Walk` from this view, and
+    // every `0x02` after it is computed there.
+    report(Update::World { view: Box::new(view) });
 
     loop {
         tokio::select! {
@@ -626,113 +626,28 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                 if matches!(packet, openshard_protocol::server_packet::ServerPacket::LogoutAck(_)) {
                     return "logged out".to_owned();
                 }
-                // Before folding, because folding is what sets it: asking twice
-                // for the same disagreement is the burst ClassicUO's
-                // `ResendPacketResync` guards against.
-                let was_out_of_step = walk.out_of_step();
-                let folded = match fold(&mut walk, &packet) {
-                    Ok(folded) => folded,
-                    // The two ends have lost track of each other over the walk,
-                    // and this end cannot repair it: the ack names a step it is
-                    // not holding, and guessing which one was meant would turn a
-                    // diagnosable desync into a silent one.
-                    //
-                    // What it is *not* is a reason to close the window. It used
-                    // to be, and the ordinary answers to steps a rollback had
-                    // voided reached here — so a wall and a slow link dropped the
-                    // player's own connection. Those are counted off in `Walk`
-                    // now, and what is left is a genuine disagreement, which has
-                    // an answer on the wire: ask where we are. `Walk` has already
-                    // stopped sending steps; this is the other half of that, and
-                    // it has to happen or the walk never starts again.
-                    Err(desync) => {
-                        if !was_out_of_step {
-                            tracing::warn!(%desync, "the walk is out of step: asking for a resync");
-                            if let Err(error) = socket.send(&ResyncRequest.encode()).await {
-                                return error.to_string();
-                            }
-                        }
-                        continue;
-                    }
-                };
                 if let openshard_protocol::server_packet::ServerPacket::Animation(animation) = packet {
                     report(Update::Animation(animation));
                 }
                 if let openshard_protocol::server_packet::ServerPacket::NewAnimation(animation) = packet {
                     report(Update::NewAnimation(animation));
                 }
-                // A correction is worth sending even when the view is unchanged:
-                // the view never held the prediction, so rolling one back moves
-                // the *drawn* body and nothing else.
-                report(match folded.movement {
-                    Some(movement) => Update::Movement { packet, movement },
-                    None => Update::Mutation { packet },
-                });
+                // Undivided: which packets move the player is [`Walk`]'s answer
+                // and `Walk` belongs to the owner. The desync a fold can find,
+                // and the resync it owes the shard, are the owner's too — see
+                // [`Link::resync`].
+                report(Update::Mutation { packet });
             }
             command = commands.recv() => {
                 // `None` is the window closing: the `Link` was dropped.
                 let Some(command) = command else {
                     return "the window closed".to_owned();
                 };
-                // Every command becomes bytes here and nowhere else: the window
-                // side asks for a step or a line, and what that is on the wire
-                // is this thread's business.
+                // An action becomes bytes here; a step already is bytes. What
+                // this thread will not do is decide *which* tile a step asks
+                // for — that needs the terrain, and the terrain is the owner's.
                 let bytes = match command {
-                    Command::Step(facing) => {
-                        // The surface under the target: without it every step predicts
-                        // the height it started at, and a body drawn below the terrain
-                        // is hidden by it — which looks exactly like one that failed to
-                        // draw. The server lands the step wherever a body actually
-                        // stands — the ground, or a platform static — and says
-                        // nothing, since a `0x22` carries no position.
-                        //
-                        // `MapTerrain::predict_step` is the shard's own step rule run
-                        // on this end: it weighs the land's *average* (the same number
-                        // the shard's own `ground_z` computes — on a slope the raw
-                        // corner differs by most of the tile's relief, and a body
-                        // predicted at the corner is drawn sunk into the hill and
-                        // sorted behind it) against every platform static on the tile,
-                        // a pier's or a bridge's deck among them, reaching from the top
-                        // of the surface underfoot and standing on the highest surface
-                        // within a step. That last part is what climbs a staircase, and
-                        // it is why this is not `predict_z`: the nearest-height guess
-                        // stays on the floor a stair tile also carries, and the body
-                        // walks *through* the stairs while the shard has it half way
-                        // up. Never a refusal — see `predict_step`'s own doc — so it
-                        // cannot desync from a server that disagrees; it can only draw
-                        // the wrong deck for one step, corrected by the next `0x20`.
-                        let terrain = openshard_movement::MapTerrain::new(map, tiles);
-                        match walk.step(facing, |from, tile| {
-                            i8::try_from(terrain.predict_step(from, tile.x, tile.y)).ok()
-                        }) {
-                            Ok(bytes) => {
-                                // The body moves *now*, on this end's own
-                                // prediction, rather than a round trip later
-                                // when the `0x22` says it may. That is the whole
-                                // of the lag compensation: the ack changes
-                                // nothing on screen, and only a refusal does.
-                                report(Update::Prediction {
-                                    body: Body {
-                                        predicted: walk.predicted(),
-                                        corrected: false,
-                                    },
-                                    sequence: walk
-                                        .newest_pending_sequence()
-                                        .expect("an accepted step is pending"),
-                                });
-                                bytes
-                            }
-                            // A step this end refused on its own: the edge of the
-                            // map, which the server would refuse too, or a shard
-                            // that has stopped answering and is five steps behind
-                            // already. Neither is worth a round trip, and the
-                            // body simply stays where it is.
-                            Err(refusal) => {
-                                tracing::debug!(%refusal, "not stepping");
-                                continue;
-                            }
-                        }
-                    }
+                    Command::Send(bytes) => bytes,
                     Command::Outgoing(action) => action.encode(player_serial, version),
                 };
                 if let Err(error) = socket.send(&bytes).await {
@@ -740,22 +655,6 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                 }
             }
         }
-    }
-}
-
-/// The world and the body to draw, together, at one instant.
-///
-/// One function so the two can never be published out of step: the view is
-/// cloned and the prediction read in the same breath, which is what "the
-/// renderer never sees a half-applied packet" means once the body is drawn
-/// ahead of the view.
-fn snapshot(view: WorldView, walk: &Walk, corrected: bool) -> Update {
-    Update::World {
-        view: Box::new(view),
-        body: Body {
-            predicted: walk.predicted(),
-            corrected,
-        },
     }
 }
 
@@ -768,6 +667,25 @@ fn snapshot(view: WorldView, walk: &Walk, corrected: bool) -> Update {
 pub(crate) struct Folded {
     /// The authoritative movement fact, if this packet contained one.
     pub(crate) movement: Option<Movement>,
+}
+
+/// Whether the walk handshake can answer this packet at all.
+///
+/// The four kinds [`Walk::on_packet`] has an arm for, and nothing else. It is a
+/// question about the *kind* and not about the walk's state, so it says "could
+/// move the player" rather than "did": an ack a rollback already voided is one
+/// of these and moves nothing. That is the honest answer for a diagnostic
+/// counting traffic before it is folded — see
+/// [`App::observe_stationary_soak_update`](crate::App::observe_stationary_soak_update).
+pub(crate) fn touches_the_walk(packet: &openshard_protocol::server_packet::ServerPacket) -> bool {
+    use openshard_protocol::server_packet::ServerPacket;
+    matches!(
+        packet,
+        ServerPacket::WalkAck(_)
+            | ServerPacket::WalkReject(_)
+            | ServerPacket::PlayerUpdate(_)
+            | ServerPacket::PlayerStart(_)
+    )
 }
 
 /// One packet into both records of where we are, answering whether anything
@@ -819,7 +737,7 @@ mod tests {
     use openshard_protocol::containers::{
         AddToContainer, ContainedItem, ContainerContents, GridSlot, OpenContainer,
     };
-    use openshard_protocol::direction::Direction;
+    use openshard_protocol::direction::{Direction, Facing};
     use openshard_protocol::gump::GumpPoint;
     use openshard_protocol::mobile::Notoriety;
     use openshard_protocol::serial::Serial;
@@ -843,28 +761,25 @@ mod tests {
         (view, walk)
     }
 
-    fn prediction(x: u16) -> Update {
-        Update::Prediction {
-            body: Body {
-                predicted: openshard_client_net::walk::Predicted {
-                    position: Point::new(x, 100, 0),
-                    facing: Facing::walking(Direction::East),
-                },
-                corrected: false,
-            },
-            sequence: StepSequence(x as u8),
+    /// One acknowledged step, as the mailbox sees it: an ordered fact whose
+    /// sequence is its identity. That identity is the whole point of the two
+    /// tests below — an ack that was merged with another, or delivered out of
+    /// order, retires the wrong step.
+    fn acked(sequence: u8) -> Update {
+        Update::Mutation {
+            packet: ServerPacket::WalkAck(WalkAck {
+                sequence: StepSequence(sequence),
+                notoriety: Notoriety::Innocent,
+            }),
         }
     }
 
     #[test]
-    fn a_busy_frame_keeps_each_numbered_prediction() {
+    fn a_busy_frame_keeps_each_numbered_step() {
         let updates = Updates::new();
+        assert!(updates.publish(acked(101)), "the idle mailbox needs one wake-up");
         assert!(
-            updates.publish(prediction(101)),
-            "the idle mailbox needs one wake-up"
-        );
-        assert!(
-            !updates.publish(prediction(102)),
+            !updates.publish(acked(102)),
             "the wake-up already covers this frame"
         );
 
@@ -872,29 +787,44 @@ mod tests {
         assert!(matches!(
             staged.as_slice(),
             [
-                Update::Prediction { body: first, sequence: StepSequence(101) },
-                Update::Prediction { body: second, sequence: StepSequence(102) },
-            ] if first.predicted.position == Point::new(101, 100, 0)
-                && second.predicted.position == Point::new(102, 100, 0)
+                Update::Mutation {
+                    packet: ServerPacket::WalkAck(WalkAck {
+                        sequence: StepSequence(101),
+                        ..
+                    })
+                },
+                Update::Mutation {
+                    packet: ServerPacket::WalkAck(WalkAck {
+                        sequence: StepSequence(102),
+                        ..
+                    })
+                },
+            ]
         ));
         assert!(
-            updates.publish(prediction(103)),
+            updates.publish(acked(103)),
             "a drained mailbox needs a new wake-up"
         );
     }
 
     #[test]
-    fn mutations_stay_ordered_on_both_sides_of_a_prediction() {
+    fn mutations_stay_ordered_on_both_sides_of_a_step() {
         let updates = Updates::new();
         updates.publish(Update::Lost("before".to_owned()));
-        updates.publish(prediction(101));
+        updates.publish(acked(101));
         updates.publish(Update::Lost("after".to_owned()));
 
         let staged = updates.take();
         assert!(matches!(&staged[0], Update::Lost(reason) if reason == "before"));
-        assert!(
-            matches!(&staged[1], Update::Prediction { body, .. } if body.predicted.position == Point::new(101, 100, 0))
-        );
+        assert!(matches!(
+            &staged[1],
+            Update::Mutation {
+                packet: ServerPacket::WalkAck(WalkAck {
+                    sequence: StepSequence(101),
+                    ..
+                })
+            }
+        ));
         assert!(matches!(&staged[2], Update::Lost(reason) if reason == "after"));
     }
 
@@ -981,12 +911,12 @@ mod tests {
     /// unbounded queue.  Numbered movement events retain their order and are
     /// consequently covered by the same backpressure as packets.
     #[test]
-    fn a_stalled_window_bounds_numbered_walk_predictions() {
+    fn a_stalled_window_bounds_numbered_walk_acknowledgements() {
         let updates = Updates::new();
         for packet in 0..MAX_ORDERED_UPDATES - 1 {
             updates.publish(Update::Lost(format!("packet {packet}")));
         }
-        updates.publish(prediction(101));
+        updates.publish(acked(101));
 
         let producer = updates.clone();
         let (started_by_producer, started) = std::sync::mpsc::channel();
@@ -1015,11 +945,13 @@ mod tests {
         for (packet, update) in staged.iter().take(MAX_ORDERED_UPDATES - 1).enumerate() {
             assert!(matches!(update, Update::Lost(reason) if reason == &format!("packet {packet}")));
         }
-        let Some(Update::Prediction { body, sequence }) = staged.last() else {
+        let Some(Update::Mutation {
+            packet: ServerPacket::WalkAck(ack),
+        }) = staged.last()
+        else {
             panic!("the numbered walk remains ordered with packets");
         };
-        assert_eq!(body.predicted.position, Point::new(101, 100, 0));
-        assert_eq!(*sequence, StepSequence(101));
+        assert_eq!(ack.sequence, StepSequence(101));
 
         assert!(
             finished
@@ -1157,18 +1089,15 @@ mod tests {
         let (view, mut walk) = entered();
         walk.step(Facing::walking(Direction::North), |_, _| None).unwrap();
 
-        let Update::World {
-            view: published,
-            body,
-        } = snapshot(view.clone(), &walk, false)
-        else {
-            panic!("a snapshot is a world");
-        };
         assert_eq!(
-            published.player.position,
+            view.player.position,
             Point::new(100, 100, 0),
             "the view is still what the server said"
         );
+        let body = Body {
+            predicted: walk.predicted(),
+            corrected: false,
+        };
         assert_eq!(
             body.predicted.position,
             Point::new(100, 99, 0),

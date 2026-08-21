@@ -552,18 +552,19 @@ impl App {
                 sweep.server_updates.worlds += 1;
                 true
             }
+            // Split by packet *kind*, because the freeze decision is made here
+            // and the fold that would answer "did it actually move" happens
+            // after it — a frozen packet is never folded. The four kinds below
+            // are exactly the ones `Walk::on_packet` can answer, so this counts
+            // packets that *could* move the player rather than ones that did:
+            // a swallowed ack or a reject a rollback already voided lands in
+            // `movements` here and moves nothing.
             crate::link::Update::Mutation { packet } => {
-                *sweep
-                    .server_updates
-                    .mutations
-                    .entry(crate::movement_trace::packet_kind(packet))
-                    .or_default() += 1;
-                true
-            }
-            crate::link::Update::Movement { packet, .. } => {
-                *sweep
-                    .server_updates
-                    .movements
+                let counter = match crate::link::touches_the_walk(packet) {
+                    true => &mut sweep.server_updates.movements,
+                    false => &mut sweep.server_updates.mutations,
+                };
+                *counter
                     .entry(crate::movement_trace::packet_kind(packet))
                     .or_default() += 1;
                 true
@@ -576,9 +577,7 @@ impl App {
                 sweep.server_updates.new_animations += 1;
                 true
             }
-            crate::link::Update::Prediction { .. }
-            | crate::link::Update::Design(_)
-            | crate::link::Update::Lost(_) => false,
+            crate::link::Update::Design(_) | crate::link::Update::Lost(_) => false,
         };
         let freeze = sweep.freeze_server && is_server_update;
         if freeze {

@@ -16,7 +16,7 @@ Two changes that together make the world a thing with an owner.
    becomes one type whose whole job is that arithmetic. Internal to
    `openshard-uofiles`; no reader outside it changes. **Built.**
 2. **A** — the map stops being something a caller loads for itself and becomes
-   a revisioned snapshot every reader takes a handle to.
+   a revisioned snapshot every reader takes a handle to. **Built.**
 
 Neither adds a feature. That is the point: everything after them in the track
 is cheap only if they land first, and if the rest of the track slipped these
@@ -130,7 +130,11 @@ reader.
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets` and
   `cargo fmt --all` are silent.
 
-## Phase 2 — the snapshot
+## Phase 2 — the snapshot — **built**
+
+Landed as [`crates/common/map`](../../../crates/common/map/src/lib.rs). What it
+turned out to owe beyond this section is under
+[What phase 2 left behind](#what-phase-2-left-behind).
 
 ### What to build
 
@@ -193,31 +197,93 @@ have *one* answer with a revision on it, which is the precondition for later
 saying they are the same answer.
 
 **A bake gains a revision field; it does not lose its mtime stamp.** Navigation
-([`bake.rs`](../../../crates/common/movement/src/bake.rs#L120)), the building
-flood ([`artscan/interiors.rs`](../../../crates/client/artscan/src/interiors.rs#L240))
-and the art table each key on input file name, size and mtime. This phase adds
-"which revision was this built from" beside that. Replacing the mtime key is
+([`bake.rs`](../../../crates/common/movement/src/bake.rs)) and the building
+flood ([`artscan/interiors.rs`](../../../crates/client/artscan/src/interiors.rs))
+key on input file name, size and mtime. This phase adds "which revision was
+this built from" beside that. Replacing the mtime key is
 [direction D](plan.md#d--derived-data-keyed-by-revision), and a session that
 does it here has taken on D as well.
+
+**Two of the three, and the third is named.** This section said "the three
+bakes" and the third — the art table
+([`artscan/lib.rs`](../../../crates/client/artscan/src/lib.rs)) — is
+deliberately left alone: it stamps `art.mul` and its detector version, and it
+never reads a map. A `MapRevision` on it would be a field that lies, and a
+guard reading it would be a guard that cannot fire for the right reason.
+Whoever adds a third *map-derived* artifact inherits this bullet; the art table
+does not.
+
+**The revision is asked for, never assumed.** `stamp_of` on both bakes takes
+the revision of the snapshot in hand rather than filling in `INITIAL` for
+itself. A stamp that supplied its own would compare a constant with a constant,
+which is the shape [`plan.md`](plan.md) already has a name for. `interiors::build`
+returns the revision it flooded for the same reason: it is the only caller that
+knows which world it ran over.
 
 **MapRevision starts at 1 and never moves in this phase.** Nothing publishes yet.
 A revision that cannot change is still worth having: it is what a bake records,
 and it is the field C later makes mean something.
 
-### Done when
+### Done when — all met
 
 - No production code outside `openshard-map` calls `Map::load_facet`.
 - The client `Resources` and the server facet terrain each own a `MapSnapshot`,
   and reach their terrain through it.
 - `link::connect` receives neither a `MapSnapshot` nor a map handle: it sends
   prepared packets and returns decoded mutations for the owner to apply.
-- Every one of the three bakes records the revision it was built from, and
-  refuses a snapshot whose revision does not match — alongside, not instead of,
-  its existing staleness check.
+- Every one of the *map-derived* bakes — navigation and the building flood —
+  records the revision it was built from, and refuses a snapshot whose revision
+  does not match, alongside rather than instead of its existing staleness
+  check. The art table is not one of them; see the carve-out above.
 - A test asserts a snapshot knows its own facet, and that Malas and Ter Mur —
   the same block count — produce snapshots that disagree about which they are.
-- `cargo test --workspace`, `cargo clippy --workspace --all-targets` and
-  `cargo fmt --all` are silent.
+- `cargo test --workspace` and `cargo fmt --all` are silent, and
+  `cargo clippy --workspace --all-targets` gains nothing from this phase.
+  It is **not** silent as the workspace stands: eleven warnings sit in
+  `client/render`'s interiors work and the two `client/app` call sites it
+  added, none of them touched here. Whoever finishes that track clears them.
+
+## What phase 2 left behind
+
+Written down as it was found. None of it blocks the track's next direction.
+
+- **`Deref` was tried and refused.** The first pass gave `MapSnapshot` a
+  `Deref<Target = Map>` so that `map.land(..)` kept resolving and no reader had
+  to change. It was removed: [`style.md`](../../style.md) refuses `Deref` on a
+  newtype, and here it also defeats the phase's own point — the seam a caller
+  crosses is invisible if the compiler crosses it for them. Every reader now
+  passes `snapshot.map()`, which is what this section said it would.
+  `AsRef<Map>` stays, for one reason only: `MapTerrain<M>` is generic over it,
+  so the server can parameterise a terrain over the snapshot itself.
+- **The revision cannot move, so the guard is tested and not exercised.** Both
+  bakes refuse an artifact whose recorded revision disagrees with the snapshot
+  in hand, and `bake.rs`'s test proves the refusal by handing `load` a stamp one
+  revision ahead. Nothing in a running shard can produce that disagreement yet:
+  `MapRevision::INITIAL` is the only revision anything mints. That is
+  [direction C](plan.md#c--edits-as-patches-and-a-revision-that-moves)'s to
+  change, and when it does, the guard is already there.
+- **The soak diagnostic now counts what *could* move the player, not what
+  did.** `App::observe_stationary_soak_update` split its per-packet tally into
+  `mutations` and `movements` by reading the channel variant, and the variant
+  is gone — the fold that answers "did this move the body" happens after the
+  freeze decision, and a frozen packet is never folded. It splits on packet
+  kind instead, which is exact for the four kinds `Walk::on_packet` answers and
+  over-counts a swallowed ack. Named here because it is a real, if small, loss
+  of resolution in a tool.
+- **`link::connect`'s `Command::Send` takes bytes, and nothing stops a caller
+  sending the wrong ones.** The step is encoded by the owner now, which is the
+  point; what the thread receives is a `Vec<u8>` with no type saying which
+  packet it is. `Link::step` and `Link::resync` are the only two constructors of
+  one, so the seam is narrow, but a newtype for "bytes already framed for the
+  wire" would say it.
+- **The `facet: u8` gate had been red since 2026-08-20.**
+  `crates/common/protocol/tests/facet_bare_fields.rs` compares an allowlist with
+  what is in the workspace, and the two interiors binaries added their `--facet`
+  argument without an entry — so `cargo test --workspace` failed for anyone who
+  ran it, on a file this plan never touched. Both are allowlisted now, following
+  `tile_probe`'s argv carve-out. The lesson is the gate's, not the bins': an
+  allowlist keyed by exact count is a gate that any new binary breaks by
+  existing.
 
 ## What phase 1 left behind
 

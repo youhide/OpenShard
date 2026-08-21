@@ -6,7 +6,6 @@
 //! revision that cannot yet change is still worth carrying.
 
 use std::path::Path;
-use std::sync::Arc;
 
 use openshard_protocol::world::Facet;
 use openshard_uofiles::map::{Map, MapError};
@@ -51,7 +50,11 @@ impl MapRevision {
 pub struct MapSnapshot {
     facet: Facet,
     revision: MapRevision,
-    map: Arc<Map>,
+    /// Owned outright, not shared: nothing hands a `Map` out any more. The
+    /// shard thread was the last caller that wanted one, and it does not read
+    /// the map at all now — see [`crate::MapSnapshot::map`] and the client's
+    /// `link::connect`.
+    map: Map,
 }
 
 impl MapSnapshot {
@@ -76,7 +79,7 @@ impl MapSnapshot {
         Self {
             facet,
             revision: MapRevision::INITIAL,
-            map: Arc::new(map),
+            map,
         }
     }
 
@@ -100,17 +103,6 @@ impl MapSnapshot {
     #[must_use]
     pub fn map(&self) -> &Map {
         &self.map
-    }
-
-    /// Share the immutable map with a thread that outlives this borrow.
-    ///
-    /// The one remaining hole in "no ordinary reader owns a `Map`", and it has
-    /// exactly one caller: the client's shard thread, which still predicts a
-    /// step for itself. Moving that prediction back beside the snapshot is the
-    /// third bullet of the phase's `Done when`, and this method goes with it.
-    #[must_use]
-    pub fn shared_map(&self) -> Arc<Map> {
-        Arc::clone(&self.map)
     }
 }
 

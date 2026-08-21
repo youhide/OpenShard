@@ -49,6 +49,16 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "follows uofiles::map's own carve-out: the same raw number, read from argv",
     ),
     (
+        "crates/client/artscan/src/bin/openshard-interiors-bake.rs",
+        1,
+        "follows tile_probe's carve-out: `--facet` as argv, widened to Facet at its first use",
+    ),
+    (
+        "crates/client/artscan/src/bin/openshard-interiors-inspect.rs",
+        1,
+        "the same `--facet` argument on the inspector beside it",
+    ),
+    (
         "crates/client/render/examples/shard/mod.rs",
         1,
         "a standalone diagnostic tool reading a SQL column directly, the record.rs shape, in a crate with no protocol dependency",

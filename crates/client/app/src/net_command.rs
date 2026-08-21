@@ -110,32 +110,13 @@ impl App {
         );
         self.project_player_motion();
         let (trace_event, trace_detail) = match &update {
-            link::Update::World { body, .. } => (
+            link::Update::World { view } => (
                 "world",
-                format!(
-                    "predicted={} corrected={}",
-                    crate::movement_trace::point(body.predicted.position),
-                    body.corrected
-                ),
+                format!("entered={}", crate::movement_trace::point(view.player.position)),
             ),
             link::Update::Mutation { packet } => (
                 "mutation",
                 format!("packet={}", crate::movement_trace::packet_kind(packet)),
-            ),
-            link::Update::Movement { packet, movement } => (
-                "movement",
-                format!(
-                    "packet={} movement={movement:?}",
-                    crate::movement_trace::packet_kind(packet),
-                ),
-            ),
-            link::Update::Prediction { body, sequence } => (
-                "prediction",
-                format!(
-                    "sequence={sequence:?} predicted={} corrected={}",
-                    crate::movement_trace::point(body.predicted.position),
-                    body.corrected
-                ),
             ),
             link::Update::Animation(_) => ("animation", String::new()),
             link::Update::NewAnimation(_) => ("new animation", String::new()),
@@ -143,8 +124,17 @@ impl App {
             link::Update::Lost(_) => ("lost", String::new()),
         };
         match update {
-            link::Update::World { view, body } => {
-                self.world.motion.reset(body);
+            link::Update::World { view } => {
+                // The walk restarts with the world. A `0x1B` is a fresh
+                // session, so the steps the old one had in flight are answers
+                // nobody will ever send, and the body is *placed* here rather
+                // than walked — the same statement a rollback makes.
+                let walk = openshard_client_net::walk::Walk::new(view.player.position, view.player.facing);
+                self.world.motion.reset(link::Body {
+                    predicted: walk.predicted(),
+                    corrected: true,
+                });
+                self.world.authoritative.walk = Some(walk);
                 // A whole fresh view is a `0x1B`, and a `0x1B` restarts the
                 // session: the tooltips it carries are a new table, so the
                 // questions outstanding against the old one would never be
@@ -153,9 +143,7 @@ impl App {
                 self.tooltips.reset();
                 self.entered(*view, None);
             }
-            link::Update::Mutation { packet } => self.apply_mutation(&packet),
-            link::Update::Movement { packet, movement } => self.apply_movement(&packet, movement),
-            link::Update::Prediction { body, sequence } => self.apply_prediction(body, sequence),
+            link::Update::Mutation { packet } => self.fold_incoming(&packet),
             link::Update::Animation(animation) => self.world.presentation.crowd.play(animation),
             link::Update::NewAnimation(animation) => self.world.presentation.crowd.play_new(animation),
             // The connection ended, for any of the reasons the shard thread
@@ -236,6 +224,59 @@ impl App {
     /// Ordinary world packets have no value that can call this method.
     pub(crate) fn apply_movement(&mut self, packet: &ServerPacket, movement: link::Movement) {
         self.apply_packet(packet, Some(movement));
+    }
+
+    /// Fold one decoded packet into this end's [`Walk`], then apply it.
+    ///
+    /// The only place a [`link::Movement`] is made, which is what keeps an
+    /// ordinary world packet off the authoritative movement write path: the
+    /// distinction used to be two channel variants, and it is now one function
+    /// — the fold and the dispatch cannot come apart, because the same call
+    /// does both.
+    ///
+    /// [`Walk`]: openshard_client_net::walk::Walk
+    pub(crate) fn fold_incoming(&mut self, packet: &ServerPacket) {
+        // A packet arrives only after `Update::World` has entered a world, and
+        // that is what makes the walk exist. An offline viewer has no link and
+        // so receives none of these.
+        let walk = self
+            .world
+            .authoritative
+            .walk
+            .as_mut()
+            .expect("a shard packet arrives only after the world was entered");
+        // Read before folding, because folding is what sets it: asking twice
+        // for the same disagreement is the burst ClassicUO's
+        // `ResendPacketResync` guards against.
+        let was_out_of_step = walk.out_of_step();
+        match link::fold(walk, packet) {
+            Ok(folded) => match folded.movement {
+                // A correction is worth applying even when the view is
+                // unchanged: the view never held the prediction, so rolling one
+                // back moves the *drawn* body and nothing else.
+                Some(movement) => self.apply_movement(packet, movement),
+                None => self.apply_mutation(packet),
+            },
+            // The two ends have lost track of each other over the walk, and
+            // this end cannot repair it: the ack names a step it is not
+            // holding, and guessing which one was meant would turn a
+            // diagnosable desync into a silent one.
+            //
+            // What it is *not* is a reason to close the window. It used to be,
+            // and the ordinary answers to steps a rollback had voided reached
+            // here — so a wall and a slow link dropped the player's own
+            // connection. Those are counted off in `Walk` now, and what is left
+            // is a genuine disagreement, which has an answer on the wire: ask
+            // where we are.
+            Err(desync) => {
+                if !was_out_of_step {
+                    tracing::warn!(%desync, "the walk is out of step: asking for a resync");
+                    if let Some(link) = self.world.shard.link() {
+                        link.resync();
+                    }
+                }
+            }
+        }
     }
 
     fn apply_packet(&mut self, packet: &ServerPacket, movement: Option<link::Movement>) {
