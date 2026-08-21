@@ -1,597 +1,84 @@
-# Карта мира: чанки, патчи и собранное представление
+# A map we can change
 
-## Зачем это нужно
+We want a world we can edit. Today the map is read from an installed UO
+client's files, so a shard can put a house or an item *on* the world but cannot
+move the coastline, raise the ground, or knock down a wall — not without every
+player editing their own install. So the map becomes our data: land (one
+material and a height per tile) and statics (the fixed things above it),
+addressed as `(map_id, facet, x, y, z)`. UO's own files stay an **importer** —
+one way to create a starting world, not the runtime source.
 
-Сейчас карта читается из файлов установленного UO-клиента. Это годится как
-импортный источник, но делает и сервер, и клиент зависимыми от чужого формата
-и не даёт честно менять сам мир. Положить поверх карты дом или предмет сервер
-уже умеет; изменить берег, высоту земли или статические стены так, чтобы это
-увидел клиент без локального изменения его файлов, — нет.
+Everything below is a consequence of that map being large. Nothing below is a
+consequence of anything else, and that is the point of keeping this document
+short.
 
-Нужна собственная карта мира. Она разбита на чанки, может быть запечена из
-стандартной карты и служит единственным runtime-источником terrain и статиков
-для OpenShard-клиента и shard-а. Оригинальные UO-файлы остаются одним из
-способов создать исходный мир; клиенту они не нужны.
+## What size buys us, and all it buys
 
-Это не план для миникарты. [`minimap_lod_plan.md`](minimap_lod_plan.md)
-производит и кеширует растровое представление уже имеющегося terrain. Здесь
-terrain и statics сами становятся версионируемыми данными мира; миникарта —
-один из их потребителей.
+A facet is millions of tiles, so two mechanics, and no more than two:
 
-## Что такое карта
+- **Chunks.** The map loads, caches and invalidates in fixed blocks — 64×64
+  tiles is the current guess, to be measured on Felucca, not argued about here.
+  Nobody reloads a facet to move a rock.
+- **Patches.** An edit is a small ordered record against an immutable base, not
+  a rewritten facet. What we read is `resolved = base + published patches`,
+  which is what makes an edit attributable, revertible and conflict-checkable.
 
-Карта — это не одно изображение и не перечень именованных мест. Это
-трёхмерная игровая поверхность, индексируемая двумерной сеткой: у каждой
-существующей клетки есть координаты `(x, y)`, а высота и объекты на ней живут
-по оси `z`. Рендерер рисует эту геометрию, сервер по ней проверяет движение,
-видимость и размещение объектов.
-
-Адрес точки мира всегда полный:
+That is the whole shape:
 
 ```text
-(map_id, facet, x, y, z)
+importers (UO map, editor, generator)
+    -> base chunks (immutable)
+    -> ordered durable patches
+    -> resolved chunks  ->  server (authority) + client (drawing, local planning)
 ```
 
-- **`map_id`** — стабильный идентификатор карты shard-а или региона. Он
-  выбирает map pack (base map, patches и assets), а не выводится из
-  координат. Две карты могут обе иметь facet `0` и клетку `(100, 100, 0)`:
-  без `map_id` это всё равно два разных места.
-- **`facet`** — номер отдельного листа мира (`Facet(u8)` в протоколе). Это
-  лист *внутри конкретной карты*. Это обязательно часть адреса: `(1336,
-  1997, 5)` на facet `0` и на facet `1` одной карты — разные места. Для
-  импорта классических UO-данных обычно это `0` Felucca, `1` Trammel, `2`
-  Ilshenar, `3` Malas, `4` Tokuno и `5` Ter Mur.
-- **`x`, `y`** — целочисленная клетка (tile), соответственно восток—запад и
-  север—юг. Они имеют смысл только внутри прямоугольных границ выбранного
-  facet; координаты за его границей не обозначают пустую землю.
-- **`z`** — высота поверхности или объекта в этой клетке. В текущем
-  протоколе это знаковый `i8`, поэтому она ограничена диапазоном, который
-  может выразить UO-клиент.
-
-Здесь **shard/регион** означает владельца своей карты, а не обязательно
-отдельный сетевой процесс. Поэтому вход в другой shard или регион — это
-обычная смена `map_id`, а не продолжение координат за краем старой карты.
-Переход хранится явно, например:
-
-```text
-MapTransition { from, destination: (map_id, facet, x, y, z) }
-```
-
-Его вызывает дверь, портал, граница региона или игровой сценарий. Сервер
-проверяет право и точку назначения, меняет карту и позицию персонажа; клиент
-выгружает чанки старой карты, получает `MapChange` для destination facet и
-новую позицию, а по OpenShard map-stream — идентификатор и чанки целевого
-`map_id`. `MapChange` сам несёт только facet, поэтому не может быть
-идентификатором произвольной карты. Соединение при этом не обязано
-разрываться: если обе карты обслуживает один сервер, это один атомарный
-внутримировой переход.
-
-Если в будущем карты окажутся на разных сетевых процессах, тот же
-`MapTransition` останется моделью мира, а поверх него понадобится отдельный
-handoff с одноразовым transfer ticket. Сетевая миграция не должна менять
-формат адреса карты или заставлять карту знать адрес сервера.
-
-Именованная местность не вводит ещё одну систему координат. Город, лес, море
-или данж — это область и/или смысл, назначенный множеству адресов `(map_id,
-facet, x, y, z)`. Регион может хранить имя и игровые правила (например,
-запрет Recall), а если у него своя карта — ссылку на её `map_id`; он не
-заменяет геометрию карты.
-
-### Слои одной клетки
-
-У каждой клетки `(map_id, facet, x, y)` есть два постоянных слоя.
-
-1. **Land / земля** — ровно одна базовая поверхность: её material (или
-   исходный land tile) и высота `z`. Земля бывает травой, песком, скалой,
-   дорогой или водой. Вода не является отдельным «водным объектом»: это land
-   material с семантическим признаком `water`; лодки, рыбалка и правила
-   плавания спрашивают этот признак у terrain.
-2. **Statics / статика** — ноль или более неподвижных компонентов карты над
-   этой клеткой: деревья, кусты, камни, стены, полы, декорации, мосты и
-   архитектура. У каждого есть asset/material, anchor `(x, y)`, `z`, hue и
-   flags (проходимость, поверхность, блокирование и т. п.). Лес поэтому не
-   отдельный тип карты: обычно это участок land с травой и множество static
-   деревьев и растительности поверх него.
-
-Данж также не является третьим слоем. Он может быть подземной областью в том
-же facet — со своим рельефом, стенами и полами на иных `z` — либо отдельной
-областью/экземпляром со своим `map_id`. Во втором случае переход задаёт полную
-целевую точку, а не угадывается по названию, координатам или graphic стены.
-
-Динамический мир лежит поверх карты и в неё не записывается: персонажи,
-предметы, двери, лодки и обычные player houses имеют собственные serial и
-runtime/persistence-модель. Они адресуются serial-ом, а их положение —
-`(map_id, facet, x, y, z)`. Постоянные, опубликованные элементы города могут
-быть статикой карты, но это явное решение редактора, а не следствие того, что
-объект стоит на данном месте.
-
-### Адресация данных карты
-
-Для загрузки и изменения карта делится на чанки; это техническое разбиение
-той же сетки, а не новый вид местности. При размере чанка 64×64 клеток:
-
-```text
-world tile (map_id, facet, x, y)
-    -> ChunkKey(map_id, map format identity, facet, x / 64, y / 64)
-       + local tile (x % 64, y % 64)
-```
-
-Деление здесь евклидово. Последний чанк может быть неполным, но клеток за
-границей facet в нём нет. Земля адресуется своим tile-адресом; статик —
-стабильным `static_id` для операций изменения и своим anchor-адресом для
-пространственных запросов. Одних координат или graphic недостаточно, потому
-что на одной клетке могут стоять несколько одинаковых объектов.
-
-## Результат
-
-Для каждого facet есть три разных представления, и их нельзя смешивать:
-
-```text
-  importers (UO map, editor, generator)
-                    |
-                    v
-          base chunk set (immutable)
-                    |
-          ordered, durable map patches
-                    |
-                    v
-  resolved chunk set (base + patches, cached/materialized)
-            |                         |
-            v                         v
-     authoritative server       streamed client cache
-```
-
-- **Base map** — набор неизменяемых chunk records, созданный bake/import.
-  Он даёт каждой карте стартовую ревизию, пригодную для воспроизведения.
-- **Map patch** — именованное и упорядоченное долговременное изменение base
-  map или результата предыдущих patches. Это данные редактора и истории мира,
-  а не замена бинарного файла чанка.
-- **Resolved map** — детерминированный итог `base + enabled patches`.
-  Сервер принимает движение и рассчитывает LoS по нему; клиент рисует его.
-  Он может быть материализован и закеширован, но не становится новым
-  первоисточником, который стирает происхождение изменения.
-
-Один и тот же декодер формата и одна модель `ResolvedChunk` должны работать на
-обеих сторонах. Сервер остаётся авторитетом: совпадающий клиентский chunk
-ускоряет рендер и локальное планирование, но не разрешает шаг.
-
-## Границы
-
-### Входит
-
-- земля: material/tile и её высота для каждой клетки;
-- статические компоненты карты: graphic/material, локальная позиция, `z`, hue
-  и семантические flags;
-- bake из UO `map`, `statics` и `tiledata` как первый importer;
-- потоковая загрузка resolved chunks, disk cache и инвалидация по revision;
-- редакторская preview-ветка, публикация и откат map patches;
-- локальная инвалидация производных данных: navigation, minimap, occluders и
-  прочих читателей terrain.
-
-### Не входит
-
-- мобили, предметы, двери, контейнеры, лодки и прочие runtime-сущности. Они
-  имеют serial, владельца, поведение и отдельную persistence-модель; это
-  live-world overlay, а не map patch.
-- пересылка изображений вместе с каждым map chunk. Карта ссылается на asset
-  IDs; сами арт-ресурсы приезжают отдельным content-addressed asset pack и
-  долговременно кешируются.
-- поддержка неизменённого классического UO-клиента для terrain patches.
-  Такой клиент умеет читать только свои локальные map/static files. Новый
-  runtime-контракт предназначен для нашего клиента.
-
-Дом может существовать в обоих мирах: обычный player house остаётся runtime
-entity, а утверждённая архитектура города может быть опубликована как статик
-map patch. Нельзя неявно превращать одно в другое: публикация — явная операция
-с понятным owner/rollback.
-
-## Координаты и чанки
-
-Размер базового чанка — константа формата, а не настройка одного клиента.
-Первый кандидат: **64×64 tile**. Он достаточно мал для стриминга, локального
-редактирования и invalidation, но не создаёт чрезмерно много записей на facet.
-Перед фиксацией значения нужна проверка на Felucca: размер полного base set,
-средний размер чанка со statics, рабочий набор у экрана и число чанков от
-одной типичной кисти редактора.
-
-`ChunkKey` всегда содержит:
-
-```text
-(map_id, map format identity, facet, chunk_x, chunk_y)
-```
-
-`map_id` отделяет одинаковые локальные координаты разных карт. `chunk_x` и
-`chunk_y` — координаты прямоугольной сетки, полученные только евклидовым
-делением world tile. Граница facet может обрезать последний chunk; пустые
-клетки за границей не являются землёй и не сериализуются как нулевой tile.
-Одна общая функция преобразования `world tile <-> ChunkKey + local tile`
-обслуживает importer, сервер, клиент, редактор и derived-data builders.
-
-## Контракт формата
-
-Формат — библиотека ниже `server` и `client`, например отдельный crate
-`openshard-map`. Она владеет типами, канонической кодировкой, проверкой границ
-и применением patch operations. Она не знает сокетов, ECS, renderer или UO
-файлов.
-
-Каждый serialised chunk содержит:
-
-- magic, format version и schema version;
-- `ChunkKey`, реальный extent на краю facet и `base revision`;
-- land grid: material ID и высота каждой существующей клетки;
-- статический слой, в каноническом порядке;
-- content hash канонических полезных данных;
-- явные длины всех коллекций и строгие лимиты на них.
-
-Статика хранится локальными координатами относительно чанка. Компонент на
-границе принадлежит чанку своего anchor tile; запрос соседнего чанка обязан
-получать достаточный border/overlap для рендера, collision и picking. Правило
-принадлежности и правило выдачи видимой границы — часть формата, а не частная
-оптимизация renderer-а.
-
-Формат карты не обязан копировать UO graphic IDs. Первый importer может
-составить таблицу соответствий, но в сохранённых chunks должны быть наши
-стабильные `TerrainMaterialId` и `StaticAssetId`. Их значения — контракт map
-pack + asset pack, с версиями и hash-ами обоих наборов. Это позволяет в будущем
-импортировать или создавать контент без UO-нумерации.
-
-## Патчи
-
-Патч — это immutable commit после публикации. У него есть:
-
-- UUID/монотонный map revision, author, время и сообщение;
-- родительская карта или parent patch revision;
-- список затронутых `ChunkKey`;
-- упорядоченный набор операций;
-- состояние `draft`, `published`, `disabled` или `reverted`;
-- hash содержимого и версия patch schema.
-
-Минимальный набор операций первого релиза:
-
-- `SetLand { tile, material, z }`;
-- `AddStatic { anchor, asset, z, hue, flags }`;
-- `RemoveStatic { static_id }`;
-- `ReplaceStatic { static_id, ... }`.
-
-Кисти редактора (`raise`, `flatten`, `smooth`, stamp/clipboard) — команды
-редактора, которые компилируются в эти канонические операции до публикации.
-Так diff остаётся объяснимым, отмена — точной, а сервер не обязан хранить
-исполняемый алгоритм кисти как часть истории.
-
-Патч обязан применяться к конкретной родительской revision. Если карта с тех
-пор изменилась, редактор получает conflict, а не молча накладывает изменения
-на другой рельеф. Разрешение конфликта создаёт новый patch с новым parent;
-автоматическое last-write-wins запрещено для terrain.
-
-`RemoveStatic` ссылается на стабильный `static_id`, присвоенный importer-ом или
-публикацией. Адресовать static только координатами/graphic нельзя: два
-одинаковых камня на одной точке должны быть различимы, иначе patch не сможет
-надёжно удалить именно свой объект.
-
-## Сборка и materialization
-
-`ResolvedChunk` строится только так:
-
-1. прочитать base chunk;
-2. выбрать published patches, применимые к этому facet и chunk;
-3. применить их в порядке map revision;
-4. проверить все инварианты;
-5. канонически сериализовать и вычислить hash/revision результата.
-
-Для чтения на hot path сервер и клиент могут получать уже материализованный
-resolved chunk. Материализация является кешем с ключом как минимум из
-`ChunkKey`, base hash и набора применённых patch revisions. После публикации
-патча сервер инвалидирует только затронутые chunks и зависимые border chunks,
-пересобирает их до публикации и затем атомарно делает новую resolved revision
-видимой читателям. Никто не видит частично применённую карту.
-
-История patches не удаляется при squash. Администратор может создать новый base
-snapshot для ускорения, но он обязан ссылаться на набор commits, который в него
-вошёл, и давать тот же resolved hash. Это делает rollback и аудит возможными.
-
-## Сеть и client cache
-
-Клиент объявляет facet и `(ChunkKey, resolved revision/hash)`, которые уже
-лежат в его disk cache. Сервер отвечает только отсутствующими или устаревшими
-resolved chunks. Полный chunk доставляется как независимый, проверяемый blob:
-не последовательность операций, от которой клиент может остаться на половине
-патча из-за потери соединения.
-
-Когда published patch меняет область, сервер:
-
-1. materializes новые chunks;
-2. публикует новую map revision;
-3. отправляет наблюдателям `ChunkInvalidated { key, revision, hash }`;
-4. принимает движение по новой карте только после публикации;
-5. клиент запрашивает и атомарно заменяет свой cache entry.
-
-Пока новый chunk загружается, клиент может рисовать старую ревизию как
-временный stale cache, но обязан помечать её так и не считать локальную
-проходимость окончательной. При reconnect сервер снова сверяет hashes, поэтому
-потерянная invalidation не создаёт постоянного рассинхрона.
-
-Asset pack передаётся отдельно по content hash. Map chunk не считается готовым
-к красивому рендеру, пока не доступны нужные assets, но его terrain и metadata
-уже могут быть проверены. Недоступный asset рисуется явной заглушкой, а не
-подменяется произвольным UO resource из диска пользователя.
-
-## Редактор и preview
-
-Редактор никогда не пишет resolved chunks напрямую. Он открывает draft patch
-над выбранной parent revision, хранит операции локально или на сервере и строит
-preview тем же `apply(base, patches)` кодом, что и runtime.
-
-Публикация делает следующее как одну транзакцию:
-
-1. проверить права, parent revisions, границы и лимиты;
-2. построить все затронутые resolved chunks;
-3. проверить collision/terrain-инварианты и derived-data preconditions;
-4. сохранить patch и materialized chunks;
-5. переключить active map revision;
-6. разослать invalidation.
-
-Неуспех любого шага не меняет видимую карту. Revert — новый published patch,
-логически отменяющий commit; история не переписывается.
-
-## Инварианты и проверки
-
-- Одинаковые base map, набор published patches и версии формата всегда дают
-  одинаковый resolved bytes/hash на сервере и клиенте.
-- Декодер отвергает неверный magic/version, переполнение длин, недопустимые
-  local coordinates, duplicate static IDs и hash mismatch до публикации данных.
-- Patch не может изменить tile вне заявленного и вычисленного touched chunk set.
-- Статик не может быть удалён или заменён без существующего stable ID.
-- Все ограничения представимы до commit: допустимый диапазон `z`, лимит статиков
-  на chunk, допустимые asset IDs, правила border ownership.
-- Смена карты инвалидирует navigation, radar/minimap, occluder/lighting cache и
-  любой иной derived output по ключу source revision. Старый derived output не
-  используется для новой resolved revision.
-- Сервер никогда не доверяет клиентскому hash без проверки: hash — подсказка
-  cache negotiation, не доказательство разрешённого действия.
-
-## Одна пространственная модель, несколько вопросов
-
-Обход домов, pathfinding и streamed map не являются тремя параллельными
-системами. Они читают одну и ту же геометрию, но задают ей разные вопросы. Если
-каждая система заведёт свой importer, chunk cache или список стен, изменение
-берега будет видно на миникарте, но не в пути; опубликованный дом будет
-препятствием для NPC, но не стеной комнаты. Это недопустимое состояние.
-
-Нижняя граница должна быть общей:
-
-```text
-ResolvedMap (revisioned static geometry)
-        +
-LiveWorldOverlay (houses, doors, boats, items, mobiles)
-        |
-        v
-WorldGeometry view
-   |             |                |
-   v             v                v
-movement/LoS   pathfinding   buildings / interiors / renderer
-```
-
-`ResolvedMap` отвечает только за постоянную геометрию: землю и статические
-компоненты. `LiveWorldOverlay` отвечает за то, что существует сейчас и может
-измениться в следующем tick. Их объединяет один read-only `WorldGeometry` view,
-а не копирование overlay в chunks и не отдельная карта для каждого потребителя.
-`Terrain` может стать movement-лицом этого view; renderer и interior index
-читают более богатые surface/static queries из той же основы.
-
-### Дома и интерьеры
-
-[`interiors.md`](interiors.md) определяет building index как производную от
-land, статиков, их высот и дверных порталов. Значит, его source key — не имя
-UO-файла, а `(facet, resolved chunk revisions, relevant border revisions)`.
-Изменение terrain/static patch инвалидирует building/room index только для
-затронутой области и соседей, чьи комнаты или стены пересекают границу чанка.
-Индекс строится поверх `ResolvedMap`, поэтому город, запечённый importer-ом, и
-город, опубликованный patch-ем, дают одинаковые клетки, этажи и порталы.
-
-Player house не превращается из-за этого в static map. Пока это entity, её
-стены и двери поставляет `LiveWorldOverlay`; interior/renderer получает их тем
-же запросом `WorldGeometry`. Если дом публикуется в карту, commit переносит
-геометрию в static patch и удаляет/архивирует runtime entity одной явной
-транзакцией. Нельзя оставлять оба слоя активными: иначе одна стена дважды
-рисуется и дважды блокирует путь.
-
-Открытая дверь — runtime состояние. Она не перестраивает resolved chunk и не
-меняет сам building index; индекс содержит portal, а видимость комнаты и
-проходимость читают состояние двери из overlay. Это сохраняет важную границу:
-публикация стены меняет топологию карты, поворот дверной створки — нет.
-
-### Pathfinding, движение и LoS
-
-Статическая navigation topology — derived data от `ResolvedMap`, также с ключом
-из revision исходных chunks. Она может быть baked/materialized по chunks и
-собрана в coarse graph; после terrain patch нельзя использовать graph старой
-revision. Это заменяет текущую привязку navigation bake к UO install files.
-
-Но navigation graph только предлагает маршрут. Каждый конкретный шаг остаётся
-проверкой `WorldGeometry`: resolved ground/statics дают постоянную поверхность,
-а overlay добавляет дом, закрытую дверь, лодку, предмет или mobile. Поэтому
-pathfinder может локально перепланировать путь при движении мобиля или двери,
-не создавая map patch и не инвалидируя static graph. Та же геометрия должна
-лежать под LoS: опубликованная стена одновременно рисуется, закрывает комнату,
-отсекает луч и не даёт пройти сквозь неё.
-
-У этого правила есть два тестовых следствия:
-
-1. Применение `SetLand`/`AddStatic` меняет walk, LoS, navigation и room index
-   на одной resolved revision.
-2. Открытие/закрытие двери меняет live movement/LoS и показ связанных комнат,
-   но не изменяет map chunk hash и не запускает static bake.
-
-## Runtime data model: `ResolvedMap` не равен `WorldGeometry`
-
-`ResolvedMap` — формат и хранилище постоянной геометрии. `WorldGeometry` —
-лёгкое, read-only query face для одного согласованного момента мира. Оно не
-содержит целую вторую карту, не аллоцирует ответ на каждый шаг и не заставляет
-movement/pathfinding знать о patch journal.
-
-```text
-Persistent storage                 Runtime, one active map snapshot
-------------------                 --------------------------------
-base chunks                         MapSnapshot { manifest }
-patch journal                               |
-materialized resolved chunks                v
-                                    ChunkCache<ChunkKey, Arc<ResolvedChunk>>
-                                              +
-                                    LiveChunkIndex<entity references>
-                                              |
-                                              v
-                                      WorldGeometry<'snapshot>
-```
-
-`MapSnapshot` — immutable manifest: map revision и отображение каждого
-`ChunkKey` в конкретный resolved chunk hash/revision. Tick захватывает один
-`Arc<MapSnapshot>` в начале. Все шаги, LoS и route queries этого tick видят
-одну версию границы между чанками, даже если редактор уже готовит следующую.
-Публикация меняет active snapshot только между ticks.
-
-### `ResolvedChunk`: данные для частых запросов, а не формат журнала
-
-После decode chunk хранится в форме, подходящей для query:
-
-- **land — плотный массив без хеш-таблиц.** Отдельные массивы material IDs и
-  высот, индексируемые `local_y * width + local_x`. SoA сохраняет горячий путь
-  `ground_at` одной-двумя линейными загрузками и позволяет компактно кодировать
-  одинаковые поля на диске.
-- **statics — один плоский массив, сгруппированный по anchor tile.** Соседний
-  `static_offsets[tile_count + 1]` даёт срез статиков клетки за O(1), без
-  `Vec`/map на каждую из 4096 клеток. Записи в срезе канонически отсортированы
-  по `z`, draw/order key и stable `static_id`.
-- **asset metadata не дублируется в каждом chunk.** Высота, blocking, surface,
-  art footprint и прочие свойства лежат в versioned `AssetCatalog`, разделяемом
-  всеми chunks. Chunk хранит только `StaticAssetId` и собственные placement
-  fields.
-- **необходимые ускорители immutable и ленивы.** Например, список blocking
-  surfaces для tile, collider/occluder primitives или building cells создаются
-  из конкретной resolved revision и живут в bounded cache рядом с chunk. Они
-  никогда не меняют canonical content hash.
-
-У статического объекта один владелец — chunk его anchor tile. Геометрический
-запрос, которому нужна область (footprint, луч, room boundary), сначала
-вычисляет все пересекаемые `ChunkKey`, pin-ит их и читает записи владельцев. Мы
-не копируем стену в соседние chunks ради удобства: копия сделала бы patch,
-remove и hash двусмысленными. Небольшой `ChunkWindow` скрывает это от caller-а
-и держит все нужные `Arc<ResolvedChunk>` до конца запроса.
-
-### `LiveWorldOverlay`: отдельный индекс, не дифф чанка
-
-`LiveChunkIndex` индексирует entity references по тем же `ChunkKey` и, при
-нужде, по local tile/vertical range. Он возвращает только кандидатов; авторитет
-о двери, доме, лодке или мобиле остаётся в ECS. Переезд мобиля меняет две
-короткие записи индекса, а не пересериализует chunk. Большой дом добавляет
-ссылки во все пересечённые chunks, но всё ещё остаётся одной entity.
-
-Так static и live данные соединяются только в запросе:
-
-```text
-WorldGeometry::column_at(tile)       -> land + static candidates + overlay candidates
-WorldGeometry::can_step(from, to)    -> authoritative surface/blocker answer
-WorldGeometry::sight_clear(a, b)     -> static and live ray candidates
-WorldGeometry::chunk_window(area)    -> pinned immutable geometry for renderer/indexes
-```
-
-Методы не возвращают временные `Vec` на hot path: caller передаёт scratch
-buffer либо получает iterator/slice, чей срок жизни связан с `ChunkWindow`.
-Movement спрашивает 1–2 колонки; локальный A* держит окно своих чанков;
-renderer, building index и ray marcher обходят окно более широким запросом.
-Именно это одно API должны употреблять `movement`, server-side `LiveTerrain`,
-клиентский planner, interior builder и renderer. Частный reader UO map или
-собственный grid в одном из них запрещён.
-
-### Что пересчитывается после patch
-
-Патч **никогда не пересобирает facet с нуля**. До публикации сервер берёт
-текущий `MapSnapshot` и работает только с `touched ChunkKey`:
-
-1. операции группируются по owning chunk;
-2. каждый затронутый resolved chunk копируется и изменяется локально
-   (`land` cell или статический срез), затем канонически пересобираются его
-   offsets/hash;
-3. создаются/обновляются только derived fragments этих chunks и их dependency
-   border: navigation portals, room/building seams, occluder bounds, minimap;
-4. новый manifest структурно разделяет все незатронутые chunk handles со
-   старым snapshot и заменяет только новые;
-5. готовый snapshot атомарно становится active на границе tick.
-
-Для patch, затрагивающего тысячу chunks, работа линейна в этой тысяче, а не в
-размере facet. Единственная допустимая полная пересборка — явная операция
-создания нового base snapshot/squash или импорт новой карты; она не является
-побочным эффектом обычной публикации редактора.
-
-Это также отвечает на вопрос о цепочке patches: runtime не replay-ит весь
-journal для каждого чтения. Публикация materializes затронутые chunks от
-текущего resolved snapshot; journal нужен для истории, diff и восстановления.
-При cold start loader открывает последний materialized snapshot, валидирует его
-manifest/hash и проигрывает только commits после него. Полный replay остаётся
-проверочным/repair путём, но не обычным startup или query path.
-
-## Влияние на существующую архитектуру
-
-`MapTerrain` и парсеры UO-файлов не должны постепенно обрастать patch-логикой.
-Импорт UO находится на краю системы и записывает base map; runtime terrain
-читает `ResolvedMap`. `Terrain` остаётся абстракцией для movement, но её
-production implementation получает данные из нового формата.
-
-Навигационный graph bake становится derived data от resolved map revision, а не
-от metadata файлов UO install. В первой версии можно пересобирать граф для
-затронутой facet явно; архитектура chunk keys/revisions должна позволить затем
-заменить это локальным rebuild без смены формата карты. Итоговая проверка шага
-всё равно остаётся в `LiveTerrain` на сервере и учитывает runtime overlay.
-
-Классический протокол UO не получает новый способ передать terrain chunks. Это
-новый канал/протокол между нашим сервером и нашим клиентом. Совместимый режим
-со старым UO-клиентом может продолжать требовать его локальные файлы, но не
-должен выдавать себя за режим, который видит published terrain patches.
-
-## Порядок работ
-
-1. **Core format.** Новый crate, координаты/extent, канонический codec,
-   `BaseChunk`, `ResolvedChunk`, hashes и synthetic round-trip tests. Без сети
-   и без UO importer-а.
-2. **UO importer.** CLI запекает facet в base map + asset mapping; импорт
-   воспроизводим, а decoded result сравнивается с текущим `MapTerrain` на land
-   и statics fixtures.
-3. **Runtime reader.** Сервер начинает читать resolved base map вместо UO
-   файлов; движения, LoS, harvesting и existing статические тесты проходят по
-   новому источнику. На этом этапе materialized map локальна и immutable.
-4. **Client reader.** Наш клиент читает тот же format из локального map pack и
-   рисует без UO map/static files. Asset streaming может прийти после локального
-   asset pack, но IDs и hashes закладываются сразу.
-5. **Patch engine.** `SetLand` и static operations, resolved materialization,
-   persistence, rollback и invalidation derived data. Сначала административный
-   CLI/API, не UI-редактор.
-6. **Streaming.** Interest-driven network transfer, disk cache, reconnect
-   negotiation и live invalidations.
-7. **Editor.** Draft/preview, conflict UI, publish/revert и bulk tools.
-8. **Incremental derived data.** Локальные navigation/occluder/minimap rebuilds
-   по affected chunk revisions.
-
-Каждый этап заканчивается работающей картой; нельзя сперва заменить весь
-runtime на сетевой streaming и только потом делать format/reader проверяемыми.
-
-## Критерии готовности первого вертикального среза
-
-Первый полезный срез готов, когда shard и наш клиент запускаются с base map,
-полученной из facet 0, при отсутствии UO map/static files на клиентской машине;
-они согласны по sampled terrain/statics; один `SetLand` и один `AddStatic`
-патч публикуются, переживают restart, меняют server-authoritative walkability и
-видны подключённому клиенту после chunk invalidation. Повторное применение
-одинаковых base + patches даёт byte-identical resolved chunks.
-
-## Открытые решения, которые нельзя прятать в коде
-
-1. Точный размер base chunk после замеров на реальной Felucca.
-2. Нужны ли высоты только в вершинах land tiles или сохраняем текущую UO-модель
-   cell height на первом импорте; решение должно сохранять movement/render
-   parity до намеренной смены геометрии.
-3. Формат asset pack и его лицензирование: importer может читать UO art, но
-   распространяемый pack требует отдельного решения о праве и источнике.
-4. Какой transport несёт chunks и authz editor-а: отдельный OpenShard channel
-   или расширение существующего соединения. Это не должно влиять на map codec.
-5. Какая проверка редакторского terrain является blocking в первом релизе:
-   техническая валидность обязательна, дизайнерские правила (доступность,
-   плавность, биомы) должны быть названы отдельно.
+## What size does *not* buy: saving bytes
+
+The classic format, and most of the cleverness this document used to contain,
+was designed when bandwidth was scarce. It isn't any more. So we spend bytes
+freely and keep the mechanism dumb:
+
+- a resolved chunk travels as a whole self-contained blob, never as a stream of
+  operations the client could end up half-way through;
+- the client keeps a disk cache and re-fetches on a hash mismatch; a cache that
+  re-downloads too much beats a delta scheme that can silently desync;
+- baking the map into the client is *pleasant*, not required. With an honest
+  cache and background download the player sees the same thing. If shipping a
+  baked pack turns out to be easier, we ship one; it is not a design pillar.
+
+## Transport: leave the classic protocol alone
+
+None of this has to ride the classic UO protocol. If our own encoding
+(protobuf, say) fits inside it, good; if it doesn't, we open a second socket
+alongside for our own system traffic. This is deliberately not load-bearing —
+the map format must not know how it travels, and the choice can be made late.
+
+An unmodified 2D client keeps reading its own files and simply will not see
+terrain patches. Accepted; the patched world is for our client.
+
+## What holds regardless of any later decision
+
+- **The server is the authority.** A matching client chunk speeds up drawing
+  and local path planning. It never authorises a step.
+- **One geometry underneath.** Movement, LoS, pathfinding, interiors and the
+  renderer ask the same resolved map plus a live overlay of entities. A private
+  map reader inside one consumer is how the minimap ends up disagreeing with
+  the pathfinder.
+- **Live entities are not map data.** Mobiles, items, doors, boats and player
+  houses have serials and their own persistence. Publishing one into the map is
+  an explicit operation, not a drift.
+
+## Order of work
+
+Format and importer → the server reads it instead of UO files → our client
+reads it → patches and materialisation → streaming and an editor on top.
+Each step ends with a world that runs.
+
+## Decided while building, not here
+
+Chunk size, the codec, our own material/asset ids and how assets are packed,
+the exact patch operations, which socket carries chunks, what the editor
+validates, how derived data (navigation, minimap, occluders) rebuilds
+incrementally. These are real questions with real trade-offs, and settling them
+on paper before the code exists is what made the previous draft of this
+document seven hundred lines long.
