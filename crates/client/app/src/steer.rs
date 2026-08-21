@@ -590,6 +590,12 @@ impl Steering {
         self.keys.set_running(running);
     }
 
+    /// Choose whether an unmodified movement key runs. Shift temporarily
+    /// reverses this preference, as it does in ClassicUO.
+    pub fn set_always_running(&mut self, always_running: bool) {
+        self.keys.set_always_running(always_running);
+    }
+
     /// How far a body may be turned off the way it was pointed, to keep it
     /// moving past something in the way: an eighth of the compass
     /// ([`Leeway::Eighth`], the default — round a corner, stop at a wall) or a

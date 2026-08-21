@@ -807,6 +807,7 @@ pub fn run<D: Dial + Send + 'static>(
         }
     };
     desk.audio = desk.audio.clamped();
+    let movement = desk.movement;
     let mut app = App {
         audio: audio::Audio::open(dir, desk.audio.effects, desk.audio.music),
         // Built before `resources` moves `tiledata` and `map` into it: this
@@ -953,6 +954,7 @@ pub fn run<D: Dial + Send + 'static>(
             // that only ever goes where it was pointed is the one that
             // surprises nobody. Sliding is what a player opts into.
             let mut steer = steer::Steering::default();
+            steer.set_always_running(movement.always_run);
             steer.set_leeway(Leeway::Eighth);
             // The other one, and here for the same reason: what a turn costs
             // the step behind it. The reference client charges its own
@@ -980,6 +982,8 @@ pub fn run<D: Dial + Send + 'static>(
             });
             steer
         },
+        auto_open_doors: movement.auto_open_doors,
+        auto_opened_door: None,
         route_cache: None,
         terrain_cache: None,
         occluder_cache: None,

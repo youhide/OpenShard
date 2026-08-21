@@ -31,6 +31,9 @@ pub struct Held {
     down: Vec<Direction>,
     /// Whether either shift is down. The whole of "run" on this keyboard.
     running: bool,
+    /// Run unless shift is held. This is the player's "always run" preference;
+    /// shift reverses it, so walking deliberately remains possible.
+    always_running: bool,
 }
 
 impl Held {
@@ -75,10 +78,15 @@ impl Held {
         self.running = running;
     }
 
+    /// Make running the default pace. Shift remains the temporary inverse.
+    pub fn set_always_running(&mut self, always_running: bool) {
+        self.always_running = always_running;
+    }
+
     /// Whether shift is down, which is what the mouse's own steps read to decide
     /// their pace as well.
     pub const fn running(&self) -> bool {
-        self.running
+        self.running != self.always_running
     }
 
     /// Everything is up.
@@ -93,7 +101,7 @@ impl Held {
     /// Which way the keyboard is asking to walk, if it is asking at all.
     pub fn asking(&self) -> Option<Facing> {
         let direction = *self.down.last()?;
-        Some(match self.running {
+        Some(match self.running() {
             true => Facing::running(direction),
             false => Facing::walking(direction),
         })
@@ -136,6 +144,16 @@ mod tests {
         held.press(Direction::SouthEast);
         held.set_running(true);
         assert_eq!(held.asking(), Some(Facing::running(Direction::SouthEast)));
+    }
+
+    #[test]
+    fn always_run_makes_shift_walk_instead() {
+        let mut held = Held::default();
+        held.press(Direction::SouthEast);
+        held.set_always_running(true);
+        assert_eq!(held.asking(), Some(Facing::running(Direction::SouthEast)));
+        held.set_running(true);
+        assert_eq!(held.asking(), Some(Facing::walking(Direction::SouthEast)));
     }
 
     #[test]

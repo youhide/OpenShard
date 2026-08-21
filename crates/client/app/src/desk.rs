@@ -647,6 +647,27 @@ pub struct Desk {
     pub fonts: FontSizes,
     /// What the audio mixer has been turned to — [`Audio`].
     pub audio: Audio,
+    /// Movement preferences, saved beside the rest of the client UI state.
+    pub movement: Movement,
+}
+
+/// The two everyday movement conveniences.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Movement {
+    /// Move at running pace unless shift is held.
+    pub always_run: bool,
+    /// Use a closed door when the next movement step meets it.
+    pub auto_open_doors: bool,
+}
+
+impl Default for Movement {
+    fn default() -> Self {
+        Self {
+            always_run: true,
+            auto_open_doors: true,
+        }
+    }
 }
 
 impl Default for Desk {
@@ -664,6 +685,7 @@ impl Default for Desk {
             window: None,
             chat: Chat::default(),
             audio: Audio::default(),
+            movement: Movement::default(),
         }
     }
 }
@@ -748,6 +770,8 @@ mod tests {
         assert_eq!(desk.tab, Tab::Camera);
         assert!(desk.open);
         assert!(desk.window.is_none());
+        assert!(desk.movement.always_run);
+        assert!(desk.movement.auto_open_doors);
     }
 
     #[test]
@@ -802,6 +826,10 @@ mod tests {
                 effects: 0.25,
                 music: 0.75,
             },
+            movement: Movement {
+                always_run: false,
+                auto_open_doors: true,
+            },
         };
         desk.save(&path).unwrap();
         let back = Desk::load(&path).unwrap();
@@ -814,6 +842,8 @@ mod tests {
         assert_eq!(back.light, desk.light);
         assert_eq!(back.chat, desk.chat);
         assert_eq!(back.audio, desk.audio);
+        assert_eq!(back.movement.always_run, desk.movement.always_run);
+        assert_eq!(back.movement.auto_open_doors, desk.movement.auto_open_doors);
         std::fs::remove_file(&path).unwrap();
     }
 

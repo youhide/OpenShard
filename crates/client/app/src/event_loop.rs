@@ -257,7 +257,10 @@ impl ApplicationHandler<()> for App {
                                 Instant::now(),
                                 motion.facing.direction,
                                 steer::Ground {
-                                    real: &cluttered,
+                                    // An enabled auto-door mode turns a shut
+                                    // leaf into a usable next step; `walk`
+                                    // sends its use before this step.
+                                    real: if self.auto_open_doors { &opened } else { &cluttered },
                                     through_doors: &opened,
                                     guide: &guide,
                                     coarse: self.resources.coarse.as_ref(),
@@ -779,7 +782,7 @@ impl ApplicationHandler<()> for App {
             let opened = cluttered_with_doors_open(&self.world, &self.resources);
             let cluttered = cluttered(&self.world, &self.resources);
             let ground = steer::Ground {
-                real: &cluttered,
+                real: if self.auto_open_doors { &opened } else { &cluttered },
                 through_doors: &opened,
                 guide: &guide,
                 coarse: self.resources.coarse.as_ref(),

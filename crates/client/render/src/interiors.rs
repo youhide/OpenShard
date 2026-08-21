@@ -126,6 +126,207 @@ pub struct Building {
     floors: Vec<Floor>,
 }
 
+/// A node in the recursive interior-space tree.
+///
+/// The building is the root room. Ordinary stitched rooms are its children,
+/// unless a low supported surface (a dais or stair tread) is contained by a
+/// room below it.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum RoomNodeId {
+    /// The root room that represents a whole building.
+    Building(BuildingId),
+    /// A closed-door room from the stitched room graph.
+    Room(StitchedRoomId),
+}
+
+/// One node of a building's recursive room tree.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct RoomNode {
+    id: RoomNodeId,
+    parent: Option<RoomNodeId>,
+    children: Vec<RoomNodeId>,
+    floor: Option<FloorId>,
+}
+
+impl RoomNode {
+    /// Stable identity of this node.
+    pub const fn id(&self) -> RoomNodeId {
+        self.id
+    }
+
+    /// The enclosing room, or `None` for the building root.
+    pub const fn parent(&self) -> Option<RoomNodeId> {
+        self.parent
+    }
+
+    /// Directly contained rooms, in deterministic order.
+    pub fn children(&self) -> &[RoomNodeId] {
+        &self.children
+    }
+
+    /// The structural floor that anchors this room, when it has one.
+    pub const fn floor(&self) -> Option<FloorId> {
+        self.floor
+    }
+}
+
+/// Recursive ownership of stitched rooms by their building root rooms.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct RoomTree {
+    nodes: BTreeMap<RoomNodeId, RoomNode>,
+}
+
+impl RoomTree {
+    fn bake(
+        rooms: &StitchedRooms,
+        building_of: &BTreeMap<CellId, BuildingId>,
+        floor_of: &BTreeMap<CellId, FloorId>,
+    ) -> Self {
+        let mut nodes = BTreeMap::new();
+        for &building in building_of.values() {
+            nodes.entry(RoomNodeId::Building(building)).or_insert(RoomNode {
+                id: RoomNodeId::Building(building),
+                parent: None,
+                children: Vec::new(),
+                floor: None,
+            });
+        }
+
+        let mut building_for_room = BTreeMap::new();
+        for room in rooms.rooms().iter().filter(|room| !room.outdoors()) {
+            let owners: BTreeSet<_> = room
+                .cells()
+                .iter()
+                .filter_map(|cell| building_of.get(cell).copied())
+                .collect();
+            let Some(building) = (owners.len() == 1).then(|| *owners.first().expect("one owner")) else {
+                continue;
+            };
+            let floor = room
+                .cells()
+                .iter()
+                .filter_map(|cell| floor_of.get(cell).copied())
+                .min_by_key(|floor| floor.slot());
+            let id = RoomNodeId::Room(room.id);
+            nodes.insert(
+                id,
+                RoomNode {
+                    id,
+                    parent: Some(RoomNodeId::Building(building)),
+                    children: Vec::new(),
+                    floor,
+                },
+            );
+            building_for_room.insert(room.id, building);
+        }
+
+        let mut cells_by_tile: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for cell in rooms.cells() {
+            cells_by_tile.entry(cell.tile).or_default().push(cell);
+        }
+        for room in rooms
+            .rooms()
+            .iter()
+            .filter(|room| building_for_room.contains_key(&room.id))
+        {
+            let building = building_for_room[&room.id];
+            let mut supports: BTreeMap<StitchedRoomId, usize> = BTreeMap::new();
+            for &cell_id in room.cells() {
+                let cell = rooms.cell(cell_id).expect("room cell is stitched");
+                for lower in cells_by_tile.get(&cell.tile).into_iter().flatten() {
+                    let Some(lower_room) = rooms.room_at(lower.id) else {
+                        continue;
+                    };
+                    if lower_room == room.id
+                        || building_for_room.get(&lower_room) != Some(&building)
+                        || lower.floor_z >= cell.floor_z
+                        || cell.floor_z - lower.floor_z >= i32::from(PLAYER_HEIGHT)
+                        || lower.ceiling != Some(cell.floor_z)
+                    {
+                        continue;
+                    }
+                    *supports.entry(lower_room).or_default() += 1;
+                }
+            }
+            let parent = supports
+                .into_iter()
+                .filter(|(_, supported)| *supported == room.cells().len())
+                .map(|(parent, _)| parent)
+                .min();
+            if let Some(parent) = parent {
+                nodes
+                    .get_mut(&RoomNodeId::Room(room.id))
+                    .expect("indexed room has a node")
+                    .parent = Some(RoomNodeId::Room(parent));
+            }
+        }
+
+        let relations: Vec<_> = nodes
+            .values()
+            .filter_map(|node| node.parent.map(|parent| (parent, node.id)))
+            .collect();
+        for (parent, child) in relations {
+            nodes
+                .get_mut(&parent)
+                .expect("room parent exists")
+                .children
+                .push(child);
+        }
+        for node in nodes.values_mut() {
+            node.children.sort_unstable();
+        }
+        Self { nodes }
+    }
+
+    /// The root node for this building.
+    pub const fn building(building: BuildingId) -> RoomNodeId {
+        RoomNodeId::Building(building)
+    }
+
+    /// A node by its stable identity.
+    pub fn node(&self, id: RoomNodeId) -> Option<&RoomNode> {
+        self.nodes.get(&id)
+    }
+
+    /// The outermost stitched room that contains `room`.
+    pub fn enclosing_room(&self, room: StitchedRoomId) -> StitchedRoomId {
+        let mut current = RoomNodeId::Room(room);
+        while let Some(RoomNodeId::Room(parent)) = self.node(current).and_then(RoomNode::parent) {
+            current = RoomNodeId::Room(parent);
+        }
+        match current {
+            RoomNodeId::Room(room) => room,
+            RoomNodeId::Building(_) => room,
+        }
+    }
+
+    /// Add every ancestor and descendant of the supplied rooms.
+    pub fn expand_visible(&self, rooms: &mut BTreeSet<StitchedRoomId>) {
+        let mut pending: Vec<_> = rooms.iter().copied().map(RoomNodeId::Room).collect();
+        while let Some(id) = pending.pop() {
+            let Some(node) = self.node(id) else {
+                continue;
+            };
+            if let Some(parent @ RoomNodeId::Room(room)) = node.parent() {
+                if rooms.insert(room) {
+                    pending.push(parent);
+                }
+            }
+            for &child in node.children() {
+                if let RoomNodeId::Room(room) = child {
+                    if rooms.insert(room) {
+                        pending.push(child);
+                    }
+                }
+            }
+        }
+    }
+
+    fn floor_of_room(&self, room: StitchedRoomId) -> Option<FloorId> {
+        self.node(RoomNodeId::Room(self.enclosing_room(room)))?.floor()
+    }
+}
+
 /// One cardinal, height-changing edge in a building's walk graph.
 ///
 /// It is a diagnostic of the same `MapTerrain::can_step` relation that joins
@@ -802,6 +1003,7 @@ pub struct Buildings {
     building_of: BTreeMap<CellId, BuildingId>,
     floor_of: BTreeMap<CellId, FloorId>,
     stairs: Vec<Stair>,
+    rooms: RoomTree,
 }
 
 /// A facet-wide, baked answer to the first interior question: which ground
@@ -1008,6 +1210,30 @@ impl BuildingMap {
             .filter(|&label| label != 0)
     }
 
+    /// Whether this tile touches the positive space of a different building.
+    ///
+    /// The planar bake intentionally leaves wall tiles unlabelled: a wall is a
+    /// barrier *on an edge*, not a floor cell. Roof and wall art may be
+    /// anchored up to two tiles beyond the enclosed floor, so the renderer
+    /// assigns that visible shell by its nearby positive space without turning
+    /// ordinary open terrain into building space.
+    pub fn touches_other_building(&self, x: u16, y: u16, label: u32) -> bool {
+        if self.building_at(x, y) == Some(label) {
+            return false;
+        }
+        const SHELL_REACH: u16 = 2;
+        let min_x = x.saturating_sub(SHELL_REACH);
+        let max_x = x.saturating_add(SHELL_REACH);
+        let min_y = y.saturating_sub(SHELL_REACH);
+        let max_y = y.saturating_add(SHELL_REACH);
+        (min_y..=max_y).any(|near_y| {
+            (min_x..=max_x).any(|near_x| {
+                self.building_at(near_x, near_y)
+                    .is_some_and(|other| other != label)
+            })
+        })
+    }
+
     /// Raw deterministic labels for the offline format only.
     pub fn labels(&self) -> &[u32] {
         &self.labels
@@ -1131,13 +1357,14 @@ impl PlanarTopology {
         for y in 0..height {
             for x in 0..width {
                 let index = y * width + x;
-                for item in map.statics_at(
-                    u16::try_from(x).expect("facet fits UO coordinates"),
-                    u16::try_from(y).expect("facet fits UO coordinates"),
-                ) {
+                let x = u16::try_from(x).expect("facet fits UO coordinates");
+                let y = u16::try_from(y).expect("facet fits UO coordinates");
+                for item in map.statics_at(x, y) {
                     let tile = tiledata.static_tile(item.tile.0);
                     doors[index] |= tile.flags.has(TileFlags::DOOR);
-                    walls[index] |= planar_wall_edges(tile, shape_of(item.tile));
+                    if !wall_supports_low_platform(map, tiledata, x, y, item.z, tile) {
+                        walls[index] |= planar_wall_edges(tile, shape_of(item.tile));
+                    }
                 }
                 wall_tiles[index] = walls[index] != 0;
             }
@@ -1464,11 +1691,13 @@ impl Buildings {
             })
             .collect();
         stairs.sort_unstable();
+        let room_tree = RoomTree::bake(rooms, &building_of, &floor_of);
         Self {
             buildings,
             building_of,
             floor_of,
             stairs,
+            rooms: room_tree,
         }
     }
 
@@ -1485,6 +1714,11 @@ impl Buildings {
     /// The structural floor containing this cell, if it is in an indexed building.
     pub fn floor_at(&self, cell: CellId) -> Option<FloorId> {
         self.floor_of.get(&cell).copied()
+    }
+
+    /// Recursive room ownership for all indexed buildings.
+    pub fn rooms(&self) -> &RoomTree {
+        &self.rooms
     }
 
     /// Height-changing walk transitions in indexed buildings.
@@ -1535,9 +1769,12 @@ pub struct InteriorFrame {
     /// resolved frame so no collector has to reconstruct room topology.
     cells_by_tile: BTreeMap<(u16, u16), Vec<Cell>>,
     z_range: Option<(i8, i8)>,
-    /// The outside view does not need a room bake: the offline positive-space
-    /// map already says every tile whose contents belong to a house.
-    outside_map: Option<BuildingMap>,
+    /// The facet-wide positive-space map. Outside, every labelled tile is
+    /// hidden; inside, only labels other than `visible_label` are hidden.
+    building_map: Option<BuildingMap>,
+    /// The positive-space label of the building whose room/floor picture this
+    /// frame shows. `None` denotes an exterior frame.
+    visible_label: Option<u32>,
 }
 
 impl InteriorFrame {
@@ -1557,7 +1794,11 @@ impl InteriorFrame {
     ) -> Option<Self> {
         let player = player?;
         let building = buildings.building_at(player)?;
-        let player_floor = buildings.floor_at(player)?;
+        let player_room = rooms.room_at(player)?;
+        let player_floor = buildings
+            .rooms()
+            .floor_of_room(player_room)
+            .or_else(|| buildings.floor_at(player))?;
         let floors = buildings
             .buildings()
             .iter()
@@ -1574,7 +1815,8 @@ impl InteriorFrame {
             .filter(|floor| i32::try_from(floor.id.slot()).is_ok_and(|slot| slot <= selected_slot))
             .map(|floor| floor.id)
             .collect();
-        let shown_rooms = rooms.shown_rooms(Some(player), &mut door_open);
+        let mut shown_rooms = rooms.shown_rooms(Some(player), &mut door_open);
+        buildings.rooms().expand_visible(&mut shown_rooms);
         let mut building_cells = BTreeSet::new();
         let mut shown_cells = BTreeSet::new();
         let mut cells_by_tile: BTreeMap<(u16, u16), Vec<Cell>> = BTreeMap::new();
@@ -1584,13 +1826,19 @@ impl InteriorFrame {
             }
             building_cells.insert(cell.id);
             cells_by_tile.entry(cell.tile).or_default().push(cell);
-            if buildings
+            let room_is_shown = rooms
+                .room_at(cell.id)
+                .is_some_and(|room| shown_rooms.contains(&room));
+            let floor_is_selected = buildings
                 .floor_at(cell.id)
                 .is_some_and(|floor| selected_floors.contains(&floor))
-                && rooms
-                    .room_at(cell.id)
-                    .is_some_and(|room| shown_rooms.contains(&room))
-            {
+                || rooms.room_at(cell.id).is_some_and(|room| {
+                    buildings
+                        .rooms()
+                        .floor_of_room(room)
+                        .is_some_and(|floor| selected_floors.contains(&floor))
+                });
+            if floor_is_selected && room_is_shown {
                 shown_cells.insert(cell.id);
             }
         }
@@ -1602,8 +1850,23 @@ impl InteriorFrame {
             shown_cells,
             cells_by_tile,
             z_range: None,
-            outside_map: None,
+            building_map: None,
+            visible_label: None,
         })
+    }
+
+    /// Hide the positive space of every building except the one this frame
+    /// already describes.
+    ///
+    /// The room graph is deliberately baked for one building at a time. The
+    /// facet map supplies the complementary, cheap test for all the other
+    /// buildings in view, without making their room topology camera-local.
+    #[must_use]
+    pub fn with_other_buildings_hidden(mut self, buildings: BuildingMap, visible_label: u32) -> Self {
+        debug_assert_ne!(visible_label, 0, "a visible building must have a positive label");
+        self.building_map = Some(buildings);
+        self.visible_label = Some(visible_label);
+        self
     }
 
     /// A view from ordinary exterior space. Every tile the facet index names
@@ -1622,7 +1885,8 @@ impl InteriorFrame {
             shown_cells: BTreeSet::new(),
             cells_by_tile: BTreeMap::new(),
             z_range: None,
-            outside_map: Some(buildings),
+            building_map: Some(buildings),
+            visible_label: None,
         }
     }
 
@@ -1646,7 +1910,8 @@ impl InteriorFrame {
             shown_cells: BTreeSet::new(),
             cells_by_tile: BTreeMap::new(),
             z_range: None,
-            outside_map: None,
+            building_map: None,
+            visible_label: None,
         }
         .with_z_slice(player, view)
     }
@@ -1700,16 +1965,27 @@ impl InteriorFrame {
     /// Whether geometry standing at this world point belongs in the picture.
     ///
     /// A point outside this frame's building, including a wall tile with no
-    /// inhabitable cell, remains on the ordinary render path.  That is what
-    /// keeps an outer wall visible around a room deliberately left clear.
+    /// inhabitable cell, remains on the ordinary render path. A positive-space
+    /// tile belonging to another building is the exception when the app has
+    /// supplied the facet-wide building map.
     pub fn shows_at(&self, point: Point) -> bool {
         if let Some((min, max)) = self.z_range {
             if !(min..=max).contains(&point.z) {
                 return false;
             }
         }
-        if let Some(buildings) = &self.outside_map {
-            return buildings.building_at(point.x, point.y).is_none();
+        if let Some(buildings) = &self.building_map {
+            match self.visible_label {
+                None => return buildings.building_at(point.x, point.y).is_none(),
+                Some(label)
+                    if buildings
+                        .building_at(point.x, point.y)
+                        .is_some_and(|other| other != label) =>
+                {
+                    return false;
+                }
+                Some(_) => {}
+            }
         }
         self.cells_by_tile
             .get(&(point.x, point.y))
@@ -1742,8 +2018,19 @@ impl InteriorFrame {
                 return false;
             }
         }
-        if self.outside_map.is_some() && (tile.flags.is_roof() || tile.flags.has(TileFlags::WINDOW)) {
+        if self.visible_label.is_none()
+            && self.building_map.is_some()
+            && (tile.flags.is_roof() || tile.flags.has(TileFlags::WINDOW))
+        {
             return true;
+        }
+        if let (Some(buildings), Some(label)) = (&self.building_map, self.visible_label) {
+            const BUILDING_SHELL: u64 = TileFlags::WALL | TileFlags::NO_SHOOT | TileFlags::WINDOW;
+            if (tile.flags.is_roof() || tile.flags.has(BUILDING_SHELL))
+                && buildings.touches_other_building(point.x, point.y, label)
+            {
+                return false;
+            }
         }
         self.shows_at(point)
     }
@@ -1769,12 +2056,15 @@ impl InteriorFrame {
             hash = mix(hash, 1);
             hash = mix(hash, min as u8 as u64);
             hash = mix(hash, max as u8 as u64);
-            return hash;
+        } else {
+            hash = mix(hash, 0);
         }
-        if self.outside_map.is_some() {
-            return mix(hash, 2);
+        if let Some(label) = self.visible_label {
+            hash = mix(hash, 2);
+            hash = mix(hash, u64::from(label));
+        } else if self.building_map.is_some() {
+            hash = mix(hash, 3);
         }
-        hash = mix(hash, 0);
         hash = mix(
             hash,
             u64::try_from(self.shown_cells.len()).expect("cell count fits u64"),
@@ -1883,9 +2173,7 @@ fn wall_edges(
             if !flags.has(WALLISH) || flags.is_roof() || flags.is_platform() || flags.has(TileFlags::DOOR) {
                 return edges;
             }
-            let bottom = i32::from(item.z);
-            let top = bottom + i32::from(tile.height.max(PLAYER_HEIGHT as u8));
-            if bottom < cell.floor_z + PLAYER_HEIGHT && cell.floor_z < top {
+            if !wall_supports_low_platform(map, tiledata, cell.tile.0, cell.tile.1, item.z, tile) {
                 let shape = shape_of(item.tile);
                 // `BLOCK` is a movement fact — a table, a bed or a crate — and
                 // cannot become a room boundary.  A measured facing is the wall
@@ -1902,13 +2190,46 @@ fn wall_edges(
         })
 }
 
-/// The same wall catalogue as [`wall_edges`], without a vertical floor band.
+/// Whether a low wall is the vertical face below a platform.
+///
+/// Such a course has no inhabitable volume below its upper edge: it is the
+/// riser of a stage, stair, or deck. It must not become a wall in either the
+/// room graph or the facet-wide house contour. A normal wall made of short art
+/// courses remains structural unless it directly supports that platform.
+fn wall_supports_low_platform(
+    map: &Map,
+    tiledata: &TileData,
+    x: u16,
+    y: u16,
+    wall_z: i8,
+    wall: &StaticTile,
+) -> bool {
+    let Some(floor_z) = map.average_land_z(x, y).map(i32::from) else {
+        return false;
+    };
+    let top = i32::from(wall_z) + i32::from(wall.height);
+    top - floor_z < i32::from(PLAYER_HEIGHT)
+        && map.statics_at(x, y).any(|item| {
+            let tile = tiledata.static_tile(item.tile.0);
+            tile.flags.is_platform()
+                && tile.flags.is_background()
+                && i32::from(item.z)
+                    + if tile.flags.is_climbable() {
+                        i32::from(tile.height) / 2
+                    } else {
+                        i32::from(tile.height)
+                    }
+                    == top
+        })
+}
+
+/// The same wall catalogue as [`wall_edges`], at the terrain floor band.
 ///
 /// `BuildingMap` is deliberately a footprint bake: every storey of a house
 /// shares the same exterior boundary, while storeys themselves are derived by a
-/// later graph.  A wall anywhere in this tile's static column therefore names a
-/// planar barrier.  In particular, furniture carrying `BLOCK` alone is not
-/// considered here.
+/// later graph. A wall normally names a planar barrier; a low wall directly
+/// supporting a platform is the riser of a stage and does not. In particular,
+/// furniture carrying `BLOCK` alone is not considered here.
 fn planar_wall_edges(tile: &openshard_uofiles::tiledata::StaticTile, shape: crate::occlusion::Shape) -> u8 {
     const WALLISH: u64 = TileFlags::WALL | TileFlags::NO_SHOOT;
     let flags = tile.flags;
@@ -2170,61 +2491,6 @@ mod tests {
         }
         (map, tiledata)
     }
-
-    #[test]
-    fn a_walkable_stair_joins_two_floors_of_one_building() {
-        let (mut map, mut tiledata) = walled_block(&[(1, 1), (2, 1), (3, 1)]);
-        tiledata.set_static_tile(
-            2,
-            StaticTile {
-                flags: TileFlags::new(TileFlags::FLOOR | TileFlags::PLATFORM),
-                height: 16,
-                ..StaticTile::default()
-            },
-        );
-        tiledata.set_static_tile(
-            3,
-            StaticTile {
-                flags: TileFlags::new(TileFlags::FLOOR | TileFlags::PLATFORM | TileFlags::CLIMBABLE),
-                height: 2,
-                ..StaticTile::default()
-            },
-        );
-        tiledata.set_static_tile(
-            4,
-            StaticTile {
-                flags: TileFlags::new(TileFlags::FLOOR | TileFlags::PLATFORM),
-                height: 2,
-                ..StaticTile::default()
-            },
-        );
-        for (x, graphic) in [(1, 2), (2, 3), (3, 4)] {
-            map.place_static(StaticItem {
-                tile: Graphic(graphic),
-                x,
-                y: 1,
-                z: 0,
-                hue: Hue(0),
-            });
-        }
-
-        let block = BlockRooms::bake(&map, &tiledata, BlockId { x: 0, y: 0 }).expect("map block");
-        let rooms = StitchedRooms::bake([block]);
-        let lower = rooms
-            .cells()
-            .find(|cell| cell.tile == (1, 1) && cell.floor_z == 0)
-            .expect("lower room cell");
-        let upper = rooms
-            .cells()
-            .find(|cell| cell.tile == (3, 1) && cell.floor_z == 2)
-            .expect("upper room cell");
-
-        let buildings = Buildings::bake(&map, &tiledata, &rooms);
-
-        assert_eq!(buildings.building_at(lower.id), buildings.building_at(upper.id));
-        assert_ne!(buildings.floor_at(lower.id), buildings.floor_at(upper.id));
-    }
-
     #[test]
     fn stacked_cells_are_structural_evidence_but_not_an_invented_walk() {
         let (mut map, mut tiledata) = walled_block(&[(1, 1)]);
@@ -2521,6 +2787,62 @@ mod tests {
             planar_wall_edges(&wall, crate::occlusion::Shape::UNREAD),
             crate::occlusion::Edges::ANY.raw(),
             "WALL outranks BACKGROUND for the exterior flood"
+        );
+    }
+
+    #[test]
+    fn a_short_wall_on_a_stage_is_not_a_room_or_building_boundary() {
+        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+            tile: LandTile(0),
+            z: 20,
+        });
+        let mut tiledata = TileData::empty();
+        tiledata.set_static_tile(
+            0x003E,
+            StaticTile {
+                flags: TileFlags::new(TileFlags::WALL | TileFlags::NO_SHOOT),
+                height: 10,
+                ..StaticTile::default()
+            },
+        );
+        tiledata.set_static_tile(
+            1240,
+            StaticTile {
+                flags: TileFlags::new(TileFlags::FLOOR | TileFlags::NO_SHOOT | TileFlags::PLATFORM),
+                height: 0,
+                ..StaticTile::default()
+            },
+        );
+        map.place_static(StaticItem {
+            tile: Graphic(0x003E),
+            x: 1,
+            y: 1,
+            z: 20,
+            hue: Hue(0),
+        });
+        map.place_static(StaticItem {
+            tile: Graphic(1240),
+            x: 1,
+            y: 1,
+            z: 30,
+            hue: Hue(0),
+        });
+
+        let topology = PlanarTopology::bake(&map, &tiledata, &|_| crate::occlusion::Shape::UNREAD);
+        assert!(!topology.wall_tiles[9], "a stage riser is not a house contour");
+        let cell = Cell {
+            id: CellId {
+                block: BlockId { x: 0, y: 0 },
+                slot: 9,
+            },
+            tile: (1, 1),
+            floor_z: 20,
+            ceiling: Some(56),
+        };
+        assert_eq!(
+            wall_edges(&map, &tiledata, &|_| crate::occlusion::Shape::UNREAD, cell),
+            crate::occlusion::Edges::NONE,
+            "the stage wall does not divide the room either"
         );
     }
 
@@ -2957,6 +3279,105 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_low_supported_platform_is_a_child_of_its_surrounding_room() {
+        let block = BlockId { x: 0, y: 0 };
+        let base = CellId { block, slot: 0 };
+        let platform = CellId { block, slot: 1 };
+        let base_room = StitchedRoomId {
+            root: RoomId { block, slot: 0 },
+        };
+        let platform_room = StitchedRoomId {
+            root: RoomId { block, slot: 1 },
+        };
+        let building = BuildingId { root: base };
+        let ground = FloorId { building, slot: 0 };
+        let raised = FloorId { building, slot: 1 };
+        let rooms = StitchedRooms {
+            cells: BTreeMap::from([
+                (
+                    base,
+                    Cell {
+                        id: base,
+                        tile: (2, 3),
+                        floor_z: 20,
+                        ceiling: Some(30),
+                    },
+                ),
+                (
+                    platform,
+                    Cell {
+                        id: platform,
+                        tile: (2, 3),
+                        floor_z: 30,
+                        ceiling: Some(65),
+                    },
+                ),
+            ]),
+            rooms: vec![
+                StitchedRoom {
+                    id: base_room,
+                    cells: vec![base],
+                    outdoors: false,
+                },
+                StitchedRoom {
+                    id: platform_room,
+                    cells: vec![platform],
+                    outdoors: false,
+                },
+            ],
+            room_of: BTreeMap::from([(base, base_room), (platform, platform_room)]),
+            doors: BTreeMap::new(),
+            portals: Vec::new(),
+        };
+        let tree = RoomTree::bake(
+            &rooms,
+            &BTreeMap::from([(base, building), (platform, building)]),
+            &BTreeMap::from([(base, ground), (platform, raised)]),
+        );
+
+        assert_eq!(
+            tree.node(RoomNodeId::Room(platform_room))
+                .expect("the platform room is indexed")
+                .parent(),
+            Some(RoomNodeId::Room(base_room))
+        );
+        assert_eq!(tree.enclosing_room(platform_room), base_room);
+        assert_eq!(tree.floor_of_room(platform_room), Some(ground));
+        let mut visible = BTreeSet::from([platform_room]);
+        tree.expand_visible(&mut visible);
+        assert_eq!(visible, BTreeSet::from([base_room, platform_room]));
+
+        let buildings = Buildings {
+            buildings: vec![Building {
+                id: building,
+                floors: vec![
+                    Floor {
+                        id: ground,
+                        cells: vec![base],
+                        min_z: 20,
+                        max_z: 20,
+                    },
+                    Floor {
+                        id: raised,
+                        cells: vec![platform],
+                        min_z: 30,
+                        max_z: 30,
+                    },
+                ],
+            }],
+            building_of: BTreeMap::from([(base, building), (platform, building)]),
+            floor_of: BTreeMap::from([(base, ground), (platform, raised)]),
+            stairs: Vec::new(),
+            rooms: tree,
+        };
+        let frame = InteriorFrame::at(&buildings, &rooms, Some(platform), FloorView::Auto, |_| false)
+            .expect("the platform is inside the indexed building");
+        assert_eq!(frame.selected_floors(), &BTreeSet::from([ground]));
+        assert!(frame.shows_cell(base));
+        assert!(frame.shows_cell(platform));
+    }
+
     /// A deliberately small completed index used to pin R2's frame policy
     /// independently of the expensive map bake. `outside` stands at the
     /// building's open entrance; `sealed` is behind its portal; `upper` is the
@@ -3054,6 +3475,7 @@ mod tests {
             building_of: BTreeMap::from([(outside, building), (sealed, building), (upper, building)]),
             floor_of: BTreeMap::from([(outside, ground), (sealed, ground), (upper, first)]),
             stairs: Vec::new(),
+            rooms: RoomTree::default(),
         };
         (buildings, rooms, outside, sealed, upper)
     }
@@ -3075,6 +3497,55 @@ mod tests {
             shut.fingerprint(),
             open.fingerprint(),
             "a cache must not reuse the shut picture"
+        );
+    }
+
+    #[test]
+    fn an_interior_frame_hides_other_buildings_but_keeps_its_own() {
+        let (buildings, rooms, outside, _sealed, _upper) = indexed_picture();
+        let frame = InteriorFrame::at(&buildings, &rooms, Some(outside), FloorView::Auto, |_| true)
+            .expect("player is in an indexed building")
+            .with_other_buildings_hidden(
+                BuildingMap::from_labels(5, 1, vec![1, 0, 1, 0, 2]).expect("one label per tile"),
+                1,
+            );
+
+        assert!(
+            frame.shows_at(Point::new(0, 0, 0)),
+            "the current building remains visible"
+        );
+        assert!(frame.shows_at(Point::new(1, 0, 0)), "the street remains visible");
+        assert!(
+            frame.shows_at(Point::new(2, 0, 0)),
+            "every cell of the current building remains visible"
+        );
+        assert!(
+            !frame.shows_at(Point::new(4, 0, 0)),
+            "the positive space of another building is hidden"
+        );
+
+        let wall = StaticTile {
+            flags: TileFlags::new(TileFlags::WALL),
+            ..StaticTile::default()
+        };
+        assert!(
+            frame.shows_static_at(Point::new(1, 0, 0), &wall),
+            "the current building's wall remains visible"
+        );
+        assert!(
+            !frame.shows_static_at(Point::new(3, 0, 0), &wall),
+            "the unlabelled wall contour of another building is hidden"
+        );
+
+        let overhang = InteriorFrame::at(&buildings, &rooms, Some(outside), FloorView::Auto, |_| true)
+            .expect("player is in an indexed building")
+            .with_other_buildings_hidden(
+                BuildingMap::from_labels(5, 1, vec![1, 0, 0, 0, 2]).expect("one label per tile"),
+                1,
+            );
+        assert!(
+            !overhang.shows_static_at(Point::new(2, 0, 0), &wall),
+            "a roof or wall anchored two tiles beyond another building's floor is hidden"
         );
     }
 

@@ -150,6 +150,10 @@ pub struct Request {
     pub authored_prism: Option<(Graphic, Prism)>,
     /// New effect and music gains from the Audio tab.
     pub audio: Option<crate::desk::Audio>,
+    /// Run without holding shift.
+    pub always_run: Option<bool>,
+    /// Use a shut door when a movement step reaches it.
+    pub auto_open_doors: Option<bool>,
 }
 
 /// What the script picker asked for.
@@ -753,7 +757,7 @@ fn layout(root: &mut egui::Ui, hud: &Hud, camera: Camera, world: &WorldState, de
         egui::ScrollArea::vertical()
             .id_salt(desk.tab.title())
             .show(ui, |ui| match desk.tab {
-                Tab::Camera => camera_panel(ui, hud, camera, &mut request),
+                Tab::Camera => camera_panel(ui, hud, camera, &mut desk.movement, &mut request),
                 Tab::Rig => rig_panel(ui, hud, world, &mut request),
                 Tab::Frames => frames_panel(ui, hud),
                 Tab::World => world_panel(ui, hud, world, &mut request),
@@ -1149,7 +1153,13 @@ fn windows_panel(ui: &mut egui::Ui, scale: &mut crate::desk::WindowScale) {
 }
 
 /// Where the eye is, what it is looking at, and whether it is following.
-fn camera_panel(ui: &mut egui::Ui, hud: &Hud, camera: Camera, request: &mut Request) {
+fn camera_panel(
+    ui: &mut egui::Ui,
+    hud: &Hud,
+    camera: Camera,
+    movement: &mut crate::desk::Movement,
+    request: &mut Request,
+) {
     let eye = camera.eye();
     egui::Grid::new("camera").num_columns(2).show(ui, |ui| {
         ui.label("zoom");
@@ -1185,6 +1195,17 @@ fn camera_panel(ui: &mut egui::Ui, hud: &Hud, camera: Camera, request: &mut Requ
             request.unlock = false;
         }
     });
+    ui.separator();
+    ui.label("Movement");
+    if ui.checkbox(&mut movement.always_run, "always run").changed() {
+        request.always_run = Some(movement.always_run);
+    }
+    if ui
+        .checkbox(&mut movement.auto_open_doors, "auto open doors")
+        .changed()
+    {
+        request.auto_open_doors = Some(movement.auto_open_doors);
+    }
 }
 
 /// What the view has decoded, with the serials the renderer drops.

@@ -31,6 +31,7 @@ use openshard_client_render::mobiles;
 use openshard_client_render::radar::{RadarCache, RadarWorkQueue};
 use openshard_movement::Tile;
 use openshard_protocol::direction::Facing;
+use openshard_protocol::serial::Serial;
 use openshard_protocol::world::Point;
 
 use crate::chat::Chat;
@@ -138,6 +139,12 @@ pub(crate) struct App {
     /// speedhack, and a mouse held over the ground reports a move a pixel. One
     /// clock paces all of them. See `steer.rs`.
     pub(crate) steer: steer::Steering,
+    /// Persisted movement preferences, applied at the point a step is sent.
+    pub(crate) auto_open_doors: bool,
+    /// The shut leaf already asked to open. A server update clears this when it
+    /// swings, while keeping a locked door from receiving a use packet each
+    /// walking beat.
+    pub(crate) auto_opened_door: Option<Serial>,
     /// The last route assembled for the development HUD.
     ///
     /// A path search is considerably more expensive than drawing its line,
@@ -363,6 +370,7 @@ impl App {
                     )
             },
         )?;
+        let frame = frame.with_other_buildings_hidden(interiors.clone(), label);
         Some(z_slice.map_or(frame.clone(), |view| frame.with_z_slice(player, view)))
     }
 

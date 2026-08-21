@@ -16,7 +16,7 @@
 use std::time::Instant;
 
 use openshard_client_render::camera::{self, Camera};
-use openshard_client_render::{items, mobiles};
+use openshard_client_render::{doors, items, mobiles};
 use openshard_movement::{Heading, Lean};
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::target::{TargetKind, TargetResponse};
@@ -206,6 +206,9 @@ impl App {
         // handshake — a client that stepped locally and corrected later would
         // be predicting, and the prediction lives in `Walk` where it can be
         // rolled back.
+        if self.world.shard.link().is_some() {
+            self.open_door_ahead(facing);
+        }
         if let Some(link) = self.world.shard.link() {
             link.step(facing);
             if let Some(trace) = self.movement_trace.as_mut() {
@@ -309,6 +312,43 @@ impl App {
         true
     }
 
+    /// Use the closed door in the next cell before asking the shard to step
+    /// into it. The shard remains authoritative: it may reject a locked door,
+    /// and only its following item update makes this client regard the way as
+    /// open.
+    fn open_door_ahead(&mut self, facing: Facing) {
+        if !self.auto_open_doors {
+            self.auto_opened_door = None;
+            return;
+        }
+        let motion = self.world.motion.planning_state();
+        let openshard_movement::Intent::Stepped { target, .. } =
+            openshard_movement::intend(motion.position, motion.facing, facing)
+        else {
+            return;
+        };
+        let door = self
+            .world
+            .presentation
+            .items
+            .iter()
+            .zip(&self.world.presentation.item_serials)
+            .find(|(item, _)| {
+                item.at.x == target.x
+                    && item.at.y == target.y
+                    && doors::is_door(item.displayed())
+                    && !doors::is_open(item.displayed())
+            })
+            .map(|(_, serial)| *serial);
+        if door == self.auto_opened_door {
+            return;
+        }
+        self.auto_opened_door = door;
+        if let (Some(serial), Some(link)) = (door, self.world.shard.link()) {
+            link.use_object(serial);
+        }
+    }
+
     /// Send the body to whatever tile the cursor is over, answering whether
     /// anything on screen changed.
     ///
@@ -333,7 +373,7 @@ impl App {
         let opened = cluttered_with_doors_open(&self.world, &self.resources);
         let cluttered = cluttered(&self.world, &self.resources);
         let ground = steer::Ground {
-            real: &cluttered,
+            real: if self.auto_open_doors { &opened } else { &cluttered },
             through_doors: &opened,
             guide: &guide,
             coarse: self.resources.coarse.as_ref(),

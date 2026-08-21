@@ -29,6 +29,8 @@ checks.
 > Gameplay is Rust, and its content is data in this repository. See
 > [`docs/roadmap.md`](docs/roadmap.md).
 
+See [release notes](docs/release_notes.md) for player-facing changes.
+
 ## Design
 
 - **Everything is an entity.** No inheritance trees. Players, NPCs, items,

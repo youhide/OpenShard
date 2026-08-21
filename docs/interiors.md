@@ -26,6 +26,10 @@ street beside it.
 **The floor view and black rooms are one building picture.** With a roof on, a
 sealed room is already hidden by the roof. Once the building renderer opens the
 view to a floor, the room rule prevents that action from becoming x-ray vision.
+While that picture is active, the facet-wide positive-space map also withholds
+every *other* building in view, including its unlabelled wall and roof contour;
+the player's own labelled building is the only one admitted to the
+rooms-and-floors policy.
 
 **Outside means no house contents.** Before a player is in any indexed
 building, the renderer must not expose the contents of *any* indexed building
@@ -283,6 +287,12 @@ the rest.
   before it becomes an implementation constant.
 - **R1b — rooms and portals.** Adjacent cells join when their bands overlap by a
   body height and their **shared edge** has no catalogued wall panel.
+  The finished building is a root room (no parent); stitched rooms are nodes
+  below it. A low surface wholly supported by another room's ceiling is a child
+  room, so a dais or short stair remains visible with its enclosing room rather
+  than becoming a separately selected storey.
+  A short wall whose top is exactly the supporting platform of a too-low
+  under-deck volume is that platform's riser, not a room or house boundary.
   Which edge a wall occupies comes from the art-table facing measurement, not
   from `tiledata.mul` (which has no direction); unread art is the conservative
   all-edges fallback. `BLOCK` furniture — tables, beds, crates — is deliberately

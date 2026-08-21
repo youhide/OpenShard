@@ -35,7 +35,7 @@ use crate::diagnostics::{
 };
 use crate::graphics::HighlightTarget;
 use crate::picking::SelectedIdentity;
-use crate::world::{cluttered, cluttered_with_doors_open, terrain};
+use crate::world::{InteriorCache, cluttered, cluttered_with_doors_open, terrain};
 use crate::{desk, frames, shell, steer, tooltips};
 
 /// The expensive sub-queries performed while assembling the development HUD.
@@ -753,6 +753,12 @@ impl App {
         if let Some(audio) = request.audio {
             self.audio.set_volumes(audio.effects, audio.music);
         }
+        if let Some(always_run) = request.always_run {
+            self.steer.set_always_running(always_run);
+        }
+        if let Some(auto_open_doors) = request.auto_open_doors {
+            self.auto_open_doors = auto_open_doors;
+        }
         if let Some(draw) = request.draw {
             self.graphics.drawing = draw;
         }
@@ -769,6 +775,12 @@ impl App {
             self.graphics.show_interiors = show;
         }
         if let Some(buildings) = request.buildings {
+            if self.graphics.buildings != buildings {
+                // The cache owns the baked cell/room/floor graph, not merely
+                // the visible frame. Re-entering this mode must rebuild it
+                // under the current topology rules.
+                *self.world.presentation.interior_cache.get_mut() = InteriorCache::default();
+            }
             self.graphics.buildings = buildings;
         }
         if let Some(z_slice) = request.z_slice {
