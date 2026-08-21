@@ -206,17 +206,17 @@ const VIRTUE: Graphic = Graphic(0x0071);
 /// Its corner.
 const VIRTUE_AT: GumpPixel = GumpPixel::new(80, 4);
 
-/// Where the name is written, in the frame's own pixels — the `X = 39, Y = 262`
+/// Where the name and title are written, in the frame's own pixels — the `X = 39, Y = 262`
 /// of `PaperDollGump`'s title label.
 pub const NAME_AT: GumpPixel = GumpPixel::new(39, 262);
 
-/// The hue the name is written in — the reference's `0x0386`, and a **wire**
+/// The hue the name and title are written in — the reference's `0x0386`, and a **wire**
 /// hue already: `Label`'s constructor takes it as one, unlike a layout's own
 /// text hue, which is one less than the row it means (see
 /// [`crate::text::GumpLabel::hue`]).
 pub const NAME_HUE: Hue = Hue(0x0386);
 
-/// How wide the plate is before the name is cropped — `Label(..., 185, ...)`.
+/// How wide the plate is before the title is cropped — `Label(..., 185, ...)`.
 const NAME_WIDTH: i32 = 185;
 
 /// How tall one line of it is. Not a number the reference states: its label
@@ -230,7 +230,10 @@ const NAME_HEIGHT: i32 = 20;
 /// reference states outright.
 pub const NAME_FONT: Font = Font(1);
 
-/// The mobile's name, placed on the plate at the bottom of the frame.
+/// The character name and title, placed on the plate at the bottom of the
+/// frame. The `0x88` protocol field is one display string — exactly what
+/// ClassicUO assigns to `Mobile.Title` — so it must not be guessed apart from
+/// a name observed elsewhere.
 ///
 /// `at` is the window's own origin, the same one [`window`] is given: the plate
 /// is part of the frame, so its coordinate is the frame's and not the doll's.
@@ -239,7 +242,7 @@ pub const NAME_FONT: Font = Font(1);
 /// `0x88` carries it and this crate has never heard of a `WorldView` — and
 /// because it is drawn through the other atlas: text and art are two draw calls
 /// (see [`crate::text::collect_gump`]).
-pub fn name(text: &str, at: GumpPixel) -> GumpLabel<'_> {
+pub fn title(text: &str, at: GumpPixel) -> GumpLabel<'_> {
     GumpLabel {
         at: at.offset(NAME_AT),
         hue: NAME_HUE,
@@ -255,7 +258,7 @@ pub fn name(text: &str, at: GumpPixel) -> GumpLabel<'_> {
 /// all, and the same shape for the same reason: [`crate::gump::pick`] answers
 /// an index into `pictures`, and `hits` is what turns one into a meaning.
 ///
-/// The name is not in it — see [`name`].
+/// The name and title are not in it — see [`title`].
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct Doll {
     /// The art, in painter's order: the frame, its furniture, then the doll.

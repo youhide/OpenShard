@@ -454,6 +454,9 @@ impl App {
             if let Drawn::Minimap(minimap) = drawn {
                 return minimap.contains(local).then_some(window.subject);
             }
+            if let Drawn::WorldMap(map) = drawn {
+                return map.contains(local).then_some(window.subject);
+            }
             gump_art::pick(drawn.pictures(), local, &self.resources.gump_atlas).map(|_| window.subject)
         })
     }
@@ -718,7 +721,10 @@ impl App {
             // The status arm used to be `self.windows.status = false`, which is
             // the same close said twice: once here and once in a field. Step 3
             // deleted the field.
-            WindowSubject::Skills | WindowSubject::Status | WindowSubject::Minimap => {}
+            WindowSubject::Skills
+            | WindowSubject::Status
+            | WindowSubject::Minimap
+            | WindowSubject::WorldMap => {}
             // Both are answered above, each by the one act that is its close:
             // a dialog sends button zero, and the picker dismisses the press it
             // was standing over.

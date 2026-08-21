@@ -306,6 +306,10 @@ impl App {
             Effect::Open(local) => {
                 crate::windows::open_local_window(&mut self.windows.own_windows, local.subject());
             }
+            Effect::Reopen(subject) => {
+                self.windows.locally_closed.remove(&subject);
+                crate::windows::open_local_window(&mut self.windows.own_windows, subject);
+            }
             // The wire's half and this end's, which are one act — see
             // [`Effect::Answer`]. The `retain` and not `close_window`: that door
             // asks a dialog for its *dismissal* answer, and a window that has

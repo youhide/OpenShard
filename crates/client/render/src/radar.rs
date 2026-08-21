@@ -1042,12 +1042,12 @@ pub fn child_keys(key: RadarChunkKey) -> Option<[RadarChunkKey; 4]> {
 
 /// How many coarser levels the fallback ladder is built to.
 ///
-/// Two, because a level-two product covers 256 world tiles across — already
-/// more than the whole minimap window shows — so a third would never be the
-/// level a fallback selected. It is the ladder's depth rather than a property
-/// of the map: a minimap that could be zoomed out would raise this, and that is
-/// the change to make, not a second cache keyed by zoom.
-pub const MAX_LOD: RadarLod = RadarLod::new(2);
+/// Four, because a level-four product covers 1,024 world tiles across: enough
+/// for the facet map to fall back to a few products while it fills, while the
+/// minimap still selects an exact or nearby product as before. It is the
+/// ladder's depth rather than a property of the map; a larger facet only needs
+/// a deeper ladder, not a second cache keyed by zoom.
+pub const MAX_LOD: RadarLod = RadarLod::new(4);
 
 /// Build every ancestor that publishing one chunk has just completed, and
 /// publish them too.  Returns how many were built.

@@ -358,6 +358,13 @@ impl ApplicationHandler<()> for App {
                         }
                         true
                     }
+                    keyboard::Hotkey::WorldMap => {
+                        crate::windows::open_local_window(
+                            &mut self.windows.own_windows,
+                            crate::panes::LocalWindow::WorldMap.subject(),
+                        );
+                        true
+                    }
                     keyboard::Hotkey::PanUp => self.control.pan(0, PAGE_PIXELS),
                     keyboard::Hotkey::PanDown => self.control.pan(0, -PAGE_PIXELS),
                     keyboard::Hotkey::FloorUp => {

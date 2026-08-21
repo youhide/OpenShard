@@ -13,8 +13,6 @@ const CORPSE_DECAY_TICKS: u64 = 7 * 60 * TICKS_PER_SECOND;
 const OUTER_TORSO_LAYER: Layer = Layer(0x16);
 /// The outer-torso robe issued to a player brought back to life.
 const RESURRECTION_ROBE_GRAPHIC: Graphic = Graphic(0x1F03);
-/// The dagger carried in the one-handed weapon slot after resurrection.
-const RESURRECTION_DAGGER_GRAPHIC: Graphic = Graphic(0x0F52);
 /// The axe carried in the two-handed weapon slot after resurrection.
 const RESURRECTION_AXE_GRAPHIC: Graphic = Graphic(0x0F49);
 
@@ -349,8 +347,9 @@ impl World {
 
     /// Give a resurrected player the shard's minimal fighting kit. Their former
     /// equipment remains on the corpse, so these fresh items are intentionally
-    /// separate from it: a robe plus a dagger and axe are immediately usable and
-    /// occupy the paperdoll's outer-torso, one-handed and two-handed layers.
+    /// separate from it: a robe plus one axe are immediately usable. A weapon
+    /// in the two-handed layer excludes the main hand, so issuing a dagger as
+    /// well would create an impossible outfit.
     fn equip_resurrection_kit(&mut self, mobile: Serial) {
         let hue = Hue(0);
         let _ = items::equip_worn_item(
@@ -359,13 +358,6 @@ impl World {
             RESURRECTION_ROBE_GRAPHIC,
             hue,
             OUTER_TORSO_LAYER,
-        );
-        let _ = items::equip_worn_item(
-            &mut self.state,
-            mobile,
-            RESURRECTION_DAGGER_GRAPHIC,
-            hue,
-            openshard_state::weapon::LAYER_ONE_HANDED,
         );
         let _ = items::equip_worn_item(
             &mut self.state,

@@ -111,6 +111,8 @@ pub(crate) fn draw_gump_windows(
     window: &mut Screen,
     encoder: &mut wgpu::CommandEncoder,
     view: &wgpu::TextureView,
+    bitmap_quads: &mut Vec<SpriteQuad>,
+    ttf_quads: &mut Vec<SpriteQuad>,
 ) {
     // Read once for the whole pass: every window on this frame is placed with
     // it, and a pane's own cursor was divided by it a moment ago.
@@ -241,6 +243,9 @@ pub(crate) fn draw_gump_windows(
                     // terrain is drawn from the second loop below, keyed by
                     // `Drawn::Minimap` rather than reached from here.
                     WindowSubject::Minimap => {}
+                    // Like the minimap, its generated terrain is recorded in
+                    // the specialised window pass below rather than as gump art.
+                    WindowSubject::WorldMap => {}
                     // Laid out by `panes::split::SplitPane` above, and
                     // **unreachable**: it is the one kind that draws nothing out
                     // of the view at all — the frame, the bar and the number are
@@ -581,6 +586,95 @@ pub(crate) fn draw_gump_windows(
                         pass.render_layer(&window.device, &window.queue, encoder, frame, &rim);
                     }
                 }
+                (WindowSubject::WorldMap, Drawn::WorldMap(bounds)) => {
+                    let (Ok(width), Ok(height)) = (
+                        u16::try_from(resources.map.width()),
+                        u16::try_from(resources.map.height()),
+                    ) else {
+                        continue;
+                    };
+                    let region = radar::RadarRegion::new(
+                        openshard_protocol::world::Facet(crate::FACET),
+                        radar::RadarTile::new(0, 0),
+                        radar::RadarExtent::new(width, height).expect("a map has an extent"),
+                    );
+                    let (content_at, content_extent) = bounds.content();
+                    let clip = Placement {
+                        origin: (
+                            at.x as f32 + content_at.x as f32 * magnify,
+                            at.y as f32 + content_at.y as f32 * magnify,
+                        ),
+                        extent: (
+                            content_extent.0 as f32 * magnify,
+                            content_extent.1 as f32 * magnify,
+                        ),
+                        circle: false,
+                        rotation: 0.0,
+                    };
+                    // Fit the whole facet at zoom 1.0.  A canvas drag offsets
+                    // the enlarged picture; the clip remains the window's
+                    // rectangle, so it can never paint over another gump.
+                    let fit = (clip.extent.0 / f32::from(width)).min(clip.extent.1 / f32::from(height));
+                    let map_extent = (
+                        f32::from(width) * fit * bounds.zoom(),
+                        f32::from(height) * fit * bounds.zoom(),
+                    );
+                    let map = Placement {
+                        origin: (
+                            clip.origin.0
+                                + (clip.extent.0 - map_extent.0) / 2.0
+                                + bounds.pan.0 as f32 * magnify,
+                            clip.origin.1
+                                + (clip.extent.1 - map_extent.1) / 2.0
+                                + bounds.pan.1 as f32 * magnify,
+                        ),
+                        extent: map_extent,
+                        ..clip
+                    };
+                    let ready: Vec<_> = region_base_chunks(region)
+                        .filter_map(|chunk| {
+                            radar_cache.select_ready(radar_cache.key(
+                                region.facet(),
+                                radar::RadarLod::BASE,
+                                chunk,
+                            ))
+                        })
+                        .map(|ready| ready.chunk())
+                        .collect();
+                    window.radar_overlay.render_backdrop(
+                        &window.device,
+                        &window.queue,
+                        encoder,
+                        frame,
+                        clip,
+                        radar::UNKNOWN,
+                    );
+                    window.radar_chunks.render_region(
+                        &window.device,
+                        &window.queue,
+                        encoder,
+                        frame,
+                        region,
+                        map,
+                        clip,
+                        ready,
+                    );
+                    if let Some(player) = world.authoritative.view.as_ref().map(|view| view.player.position) {
+                        window.radar_overlay.render_markers(
+                            &window.device,
+                            &window.queue,
+                            encoder,
+                            frame,
+                            region,
+                            map,
+                            clip,
+                            &[RadarMarker {
+                                tile: radar::RadarTile::new(u32::from(player.x), u32::from(player.y)),
+                                color: radar::PLAYER_MARKER,
+                            }],
+                        );
+                    }
+                }
                 _ => {}
             }
             window_text(
@@ -593,16 +687,9 @@ pub(crate) fn draw_gump_windows(
                 },
                 resources.ttf_font.as_ref(),
                 &resources.font_atlas,
-                TextTarget {
-                    device: &window.device,
-                    queue: &window.queue,
-                    width: window.config.width,
-                    height: window.config.height,
-                    bitmap: &mut window.gump_text_pass,
-                    truetype: window.ttf_atlas.as_mut().zip(window.ttf_gump_pass.as_mut()),
-                },
-                encoder,
-                view,
+                window.ttf_atlas.as_mut(),
+                bitmap_quads,
+                ttf_quads,
             );
         }
         let mut dragged = gump_art::collect(&pictures, &resources.gump_atlas);
@@ -658,16 +745,9 @@ pub(crate) fn draw_gump_windows(
                     },
                     resources.ttf_font.as_ref(),
                     &resources.font_atlas,
-                    TextTarget {
-                        device: &window.device,
-                        queue: &window.queue,
-                        width: window.config.width,
-                        height: window.config.height,
-                        bitmap: &mut window.gump_text_pass,
-                        truetype: window.ttf_atlas.as_mut().zip(window.ttf_gump_pass.as_mut()),
-                    },
-                    encoder,
-                    view,
+                    window.ttf_atlas.as_mut(),
+                    bitmap_quads,
+                    ttf_quads,
                 );
             }
         }
@@ -718,16 +798,9 @@ pub(crate) fn draw_gump_windows(
                 },
                 resources.ttf_font.as_ref(),
                 &resources.font_atlas,
-                TextTarget {
-                    device: &window.device,
-                    queue: &window.queue,
-                    width: window.config.width,
-                    height: window.config.height,
-                    bitmap: &mut window.gump_text_pass,
-                    truetype: window.ttf_atlas.as_mut().zip(window.ttf_gump_pass.as_mut()),
-                },
-                encoder,
-                view,
+                window.ttf_atlas.as_mut(),
+                bitmap_quads,
+                ttf_quads,
             );
         }
     } else {
@@ -759,27 +832,6 @@ struct WindowText<'a> {
     size: openshard_client_render::atlas::TextSize,
 }
 
-/// Where a window's captions go: the two passes and the device behind them.
-///
-/// Disjoint borrows of [`Screen`]'s own fields rather than the whole of it,
-/// because the caller is already holding one of its passes — a window's art
-/// is being drawn through `gump_pass` while this draws that window's text, and
-/// that is the ordering the whole loop exists for.
-struct TextTarget<'a> {
-    device: &'a wgpu::Device,
-    queue: &'a wgpu::Queue,
-    width: u32,
-    height: u32,
-    /// The `fonts.mul` pass, always present.
-    bitmap: &'a mut openshard_client_render::gump::GumpRenderer,
-    /// The TrueType atlas and the pass bound to its texture, present exactly
-    /// when a face was loaded.
-    truetype: Option<(
-        &'a mut openshard_client_render::atlas::TtfAtlas,
-        &'a mut openshard_client_render::gump::GumpRenderer,
-    )>,
-}
-
 /// Draw one window's captions, through whichever face this client is running.
 ///
 /// **The two faces are placed differently on purpose**, and that is the whole
@@ -803,20 +855,14 @@ fn window_text(
     text: WindowText<'_>,
     font: Option<&openshard_uofiles::ttf_font::TtfFont>,
     font_atlas: &openshard_client_render::atlas::FontAtlas,
-    target: TextTarget<'_>,
-    encoder: &mut wgpu::CommandEncoder,
-    view: &wgpu::TextureView,
+    ttf_atlas: Option<&mut openshard_client_render::atlas::TtfAtlas>,
+    bitmap_quads: &mut Vec<SpriteQuad>,
+    ttf_quads: &mut Vec<SpriteQuad>,
 ) {
     if text.labels.is_empty() {
         return;
     }
-    let frame = |scale: f32| gump_art::Frame {
-        target: view,
-        width: target.width,
-        height: target.height,
-        scale,
-    };
-    let (Some(font), Some((atlas, pass))) = (font, target.truetype) else {
+    let (Some(font), Some(atlas)) = (font, ttf_atlas) else {
         let mut quads = Vec::new();
         for (label, scissor) in text.labels {
             let mut line =
@@ -831,9 +877,7 @@ fn window_text(
             quads.extend(line);
         }
         gump_art::place(&mut quads, text.at, text.magnify);
-        target
-            .bitmap
-            .render_layer(target.device, target.queue, encoder, frame(text.density), &quads);
+        bitmap_quads.extend(quads);
         return;
     };
     let size = text.size.scaled(text.magnify * text.density);
@@ -876,12 +920,7 @@ fn window_text(
         }
         quads.extend(line);
     }
-    if let Some(rows) = atlas.take_dirty() {
-        pass.upload_rows(target.queue, atlas.pixels(), rows);
-    }
-    // Not `density`: these quads are already in real pixels, so the shader's
-    // own multiply would apply it twice.
-    pass.render_layer(target.device, target.queue, encoder, frame(1.0), &quads);
+    ttf_quads.extend(quads);
 }
 
 /// The face a tooltip is drawn in — `fonts.mul`'s face 1, the same one every

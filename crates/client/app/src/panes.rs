@@ -59,6 +59,7 @@ mod skills;
 pub(crate) mod split;
 mod status;
 mod vendor;
+pub(crate) mod world_map;
 
 /// Which mouse button an input is about.
 ///
@@ -552,6 +553,10 @@ pub enum Effect {
     ReleaseKeyboard,
     /// Make one of the two windows the shard does not know about exist.
     Open(LocalWindow),
+    /// Restore a view-owned window the player previously closed. Unlike
+    /// [`Open`](Self::Open), its contents are authoritative view state, so the
+    /// manager first removes the local close overlay.
+    Reopen(WindowSubject),
     /// The client's own modal has been answered, and this is the answer.
     ///
     /// [`Effect::Prompt`]'s other end, and asked for by the *prompt's* window
@@ -605,6 +610,8 @@ pub enum LocalWindow {
     Status,
     #[allow(dead_code)] // Opening affordance arrives with the minimap command/hotkey.
     Minimap,
+    /// A zoomable, pannable view of the whole facet.
+    WorldMap,
 }
 
 impl LocalWindow {
@@ -620,6 +627,7 @@ impl LocalWindow {
             Self::Skills => WindowSubject::Skills,
             Self::Status => WindowSubject::Status,
             Self::Minimap => WindowSubject::Minimap,
+            Self::WorldMap => WindowSubject::WorldMap,
         }
     }
 }
@@ -731,6 +739,7 @@ pub enum AnyPane {
     /// The generated-terrain minimap. Its pixels are recorded by the radar
     /// content pass; the pane supplies lifecycle and hit bounds.
     Minimap(minimap::MinimapPane),
+    WorldMap(world_map::WorldMapPane),
 }
 
 impl AnyPane {
@@ -752,6 +761,7 @@ impl AnyPane {
             WindowSubject::Confirm(question) => Self::Confirm(confirm::ConfirmPane::new(question)),
             WindowSubject::Party => Self::Party(party::PartyPane::default()),
             WindowSubject::Minimap => Self::Minimap(minimap::MinimapPane::default()),
+            WindowSubject::WorldMap => Self::WorldMap(world_map::WorldMapPane::default()),
             // The one subject that carries what its pane is built with rather
             // than what the pane looks up. Everything else here names something
             // in the view — a bag, a body, a gump — and the pane reads it every
@@ -778,6 +788,7 @@ impl Pane for AnyPane {
             Self::Confirm(pane) => pane.art(frame),
             Self::Party(pane) => pane.art(frame),
             Self::Minimap(pane) => pane.art(frame),
+            Self::WorldMap(pane) => pane.art(frame),
         }
     }
 
@@ -793,6 +804,7 @@ impl Pane for AnyPane {
             Self::Confirm(pane) => pane.layout(frame),
             Self::Party(pane) => pane.layout(frame),
             Self::Minimap(pane) => pane.layout(frame),
+            Self::WorldMap(pane) => pane.layout(frame),
         }
     }
 
@@ -808,6 +820,7 @@ impl Pane for AnyPane {
             Self::Confirm(pane) => pane.handle(input, ctx),
             Self::Party(pane) => pane.handle(input, ctx),
             Self::Minimap(pane) => pane.handle(input, ctx),
+            Self::WorldMap(pane) => pane.handle(input, ctx),
         }
     }
 }
@@ -883,5 +896,9 @@ mod tests {
         assert!(matches!(AnyPane::of(WindowSubject::Skills), AnyPane::Skills(_)));
         assert!(matches!(AnyPane::of(WindowSubject::Status), AnyPane::Status(_)));
         assert!(matches!(AnyPane::of(WindowSubject::Minimap), AnyPane::Minimap(_)));
+        assert!(matches!(
+            AnyPane::of(WindowSubject::WorldMap),
+            AnyPane::WorldMap(_)
+        ));
     }
 }

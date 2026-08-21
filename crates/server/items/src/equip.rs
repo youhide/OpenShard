@@ -1,5 +1,6 @@
 use super::*;
 use openshard_protocol::wire::{Graphic, Hue};
+use openshard_state::weapon::{LAYER_ONE_HANDED, LAYER_TWO_HANDED, weapon_data, weapon_layer};
 
 /// The highest layer an item can be worn on: 1–25 are the body; higher numbers
 /// are the backpack and bank, not "worn".
@@ -91,6 +92,14 @@ pub fn equip_item(
         bounce(state, connection, held, DragCancelReason::Other);
         return;
     }
+    let Some(drawn) = state.registry.get::<Drawn>(held.entity).copied() else {
+        bounce(state, connection, held, DragCancelReason::Other);
+        return;
+    };
+    if hands_conflict(state, wearer_serial, wearer, drawn.id, layer) {
+        bounce(state, connection, held, DragCancelReason::Other);
+        return;
+    }
 
     state.take_held(connection);
     state.registry.insert(
@@ -102,6 +111,51 @@ pub fn equip_item(
     );
     broadcast_equip(state, held.entity, wearer);
     debug!(item = item.0, layer = layer.0, "equipped");
+}
+
+/// The two protocol hand layers are not two independent weapon slots. A
+/// one-handed weapon may share `TwoHanded` with a shield, but a weapon in that
+/// layer is two-handed and therefore excludes anything in `OneHanded`.
+fn hands_conflict(
+    state: &WorldState,
+    mobile: Serial,
+    wearer: EntityId,
+    graphic: Graphic,
+    layer: Layer,
+) -> bool {
+    let Some(weapon) = weapon_data(graphic) else {
+        return false;
+    };
+    // The client proposes a layer, but tiledata (and the handful of weapon
+    // class overrides) decides where the weapon actually belongs.
+    let tile_layer = state
+        .facets
+        .get(&state.facet_of(wearer))
+        .and_then(|facet| facet.terrain.as_deref())
+        .map_or(Layer(0), |terrain| Layer(terrain.item_layer(graphic)));
+    let expected = weapon_layer(weapon, tile_layer);
+    if expected != Layer(0) && expected != layer {
+        return true;
+    }
+    let one_hand = layer == LAYER_ONE_HANDED;
+    let two_hands = layer == LAYER_TWO_HANDED;
+    if !one_hand && !two_hands {
+        return false;
+    }
+    if two_hands && layer_taken(state, mobile, LAYER_ONE_HANDED) {
+        return true;
+    }
+    if !one_hand {
+        return false;
+    }
+    state.registry.query::<Equipped>().any(|(item, worn)| {
+        worn.mobile == mobile
+            && worn.layer == LAYER_TWO_HANDED
+            && state
+                .registry
+                .get::<Drawn>(item)
+                .is_some_and(|existing| weapon_data(existing.id).is_some())
+    })
 }
 
 /// Despawn everything a mobile carries — its worn items and whatever those hold.

@@ -170,7 +170,7 @@ pub enum Hit {
 
 /// A line of text the window writes, already placed.
 ///
-/// Owned rather than borrowed, unlike `paperdoll::name`: a value is *formatted*
+/// Owned rather than borrowed, unlike `paperdoll::title`: a value is *formatted*
 /// — 755 becomes "75.5" — so there is no string in the view to point at.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Line {

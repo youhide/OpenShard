@@ -536,10 +536,10 @@ impl Tooltip {
 /// can hold a paperdoll for a mobile other than the one it is filed under.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Paperdoll {
-    /// The title across the top: the name, plus any honorific the shard chose to
-    /// put in front of it. Not the mobile's name as anything else knows it — the
-    /// wire's `0x88` is the only place this string exists.
-    pub name: String,
+    /// The title on the paperdoll's name plate: the character name plus any
+    /// honorific the shard chose to include.  It is deliberately not called a
+    /// mobile name: `0x88` is the sole authority for this display string.
+    pub title: String,
     /// Whether this client may lift what is worn on this doll. The shard's
     /// answer and not a guess: it is set for your own paperdoll and for a pet's,
     /// and clear for a stranger's.
@@ -1225,7 +1225,7 @@ impl WorldView {
             // body, which is honest, where nothing at all is not.
             ServerPacket::OpenPaperdoll(paperdoll) => {
                 let fresh = Paperdoll {
-                    name: paperdoll.text.clone(),
+                    title: paperdoll.text.clone(),
                     can_lift: paperdoll.flags.has(PaperdollFlags::CAN_LIFT),
                 };
                 let mut changed = self.paperdolls.get(&paperdoll.serial) != Some(&fresh);
@@ -2033,7 +2033,7 @@ mod tests {
 
         assert!(view.apply(&paperdoll_of(other())));
         let open = view.paperdolls.get(&other()).expect("the window was recorded");
-        assert_eq!(open.name, "Lord British");
+        assert_eq!(open.title, "Lord British");
         assert!(open.can_lift);
         assert_eq!(
             view.mobiles.get(&other()).unwrap().equipment,

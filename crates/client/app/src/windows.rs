@@ -213,6 +213,9 @@ pub enum WindowSubject {
     /// Generated terrain around the player. Its existence is local, like the
     /// skill sheet; terrain products themselves remain in `App::radar_cache`.
     Minimap,
+    /// The facet-wide map.  Its terrain is the same generated radar product
+    /// as the minimap, only shown through a rectangular, pannable viewport.
+    WorldMap,
 }
 
 impl WindowSubject {
@@ -233,7 +236,7 @@ impl WindowSubject {
     pub const fn is_local(self) -> bool {
         matches!(
             self,
-            Self::Skills | Self::Status | Self::Minimap | Self::Split { .. }
+            Self::Skills | Self::Status | Self::Minimap | Self::WorldMap | Self::Split { .. }
         )
     }
 }
@@ -275,6 +278,8 @@ pub enum Drawn {
     Party(openshard_client_render::party::Window),
     /// The radar content bounds; it has no gump pictures to pick.
     Minimap(crate::panes::minimap::Window),
+    /// The rectangular facet-map bounds; it intentionally has no gump art.
+    WorldMap(crate::panes::world_map::Window),
 }
 
 /// Whose press the client's own modal is standing over.
@@ -319,6 +324,7 @@ impl Drawn {
             Self::Confirm(question) => &question.pictures,
             Self::Party(manifest) => &manifest.pictures,
             Self::Minimap(minimap) => std::slice::from_ref(&minimap.frame),
+            Self::WorldMap(_) => &[],
         }
     }
 }
@@ -567,6 +573,7 @@ pub fn reconcile_own_windows(
         WindowSubject::Skills => false,
         WindowSubject::Status => false,
         WindowSubject::Minimap => false,
+        WindowSubject::WorldMap => false,
         // Nothing in the view holds the picker open, so there is nothing for an
         // overlay entry to be ahead *of* — the same as the two kinds above.
         WindowSubject::Split { .. } => false,
@@ -601,6 +608,7 @@ pub fn reconcile_own_windows(
             WindowSubject::Skills
             | WindowSubject::Status
             | WindowSubject::Minimap
+            | WindowSubject::WorldMap
             | WindowSubject::Split { .. } => true,
             // And a question stands for as long as what it is about does. This
             // is the arm that takes an invitation off the screen when the shard

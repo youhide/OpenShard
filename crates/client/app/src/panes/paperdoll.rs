@@ -31,7 +31,7 @@ use openshard_client_render::mobiles::EquipmentLayer;
 use openshard_client_render::paperdoll;
 use openshard_protocol::containers::{ContainedItem, GridSlot};
 use openshard_protocol::gump::GumpPoint;
-use openshard_protocol::items::ItemAmount;
+use openshard_protocol::items::{ItemAmount, is_classic_weapon};
 use openshard_protocol::mobile::Equipment;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::Font;
@@ -77,6 +77,11 @@ pub struct PaperdollPane {
     /// because the state is this window's own now, so two clicks on two dolls
     /// cannot pair **by construction** rather than by a comparison.
     last_scroll: Option<(Instant, paperdoll::DollButton)>,
+    /// The last worn item clicked on this doll. A second click on the same
+    /// item is a normal UO `Use`, just as it is for an icon in a container;
+    /// it must be keyed by serial because a dagger and an axe may occupy the
+    /// two hand layers at once.
+    last_item_click: Option<(Instant, Serial)>,
     /// The worn layer under the pointer, tinted on the next frame.
     ///
     /// Remembered so that the *move* that changes it can say
@@ -175,6 +180,11 @@ fn button_effects(
             .with(Effect::Net(Outgoing::Skills(mobile)))
             .with(Effect::Open(LocalWindow::Skills)),
         paperdoll::DollButton::Virtue if paired => answer.with(Effect::Net(Outgoing::Virtue(mobile))),
+        // The roster is already in the view; the scroll's job is to restore
+        // its window when the player closed it, or bring the existing one up.
+        paperdoll::DollButton::Party if paired => {
+            answer.with(Effect::Reopen(crate::windows::WindowSubject::Party))
+        }
         // Opening the backpack is a use of the worn bag, which needs its
         // serial — a body wearing none has nothing to open.
         paperdoll::DollButton::Backpack if paired => match backpack {
@@ -195,6 +205,7 @@ impl PaperdollPane {
             mobile,
             held: None,
             last_scroll: None,
+            last_item_click: None,
             hovered: None,
             hand_over: false,
             pressed: None,
@@ -204,6 +215,19 @@ impl PaperdollPane {
     /// Whether this doll is the player's own body.
     fn own(&self, frame: &PaneFrame<'_>) -> bool {
         frame.view.player.serial == self.mobile
+    }
+
+    /// The `0x88` permission is authoritative. It is normally set for our
+    /// own body, but shards may set it for a pet too; ClassicUO permits both.
+    /// Our own body remains liftable while an older shard has not sent its
+    /// `0x88` yet — identity is the protocol's baseline permission.
+    fn can_lift(&self, frame: &PaneFrame<'_>) -> bool {
+        self.own(frame)
+            || frame
+                .view
+                .paperdolls
+                .get(&self.mobile)
+                .is_some_and(|doll| doll.can_lift)
     }
 
     /// What the mobile is wearing, as the wire said it — the serials and wire
@@ -220,12 +244,46 @@ impl PaperdollPane {
         }
     }
 
+    /// Match the shard's hand constraint for the classic weapon catalogue.
+    /// A shield is not a weapon, so it remains valid beside a one-handed
+    /// weapon; a weapon in the two-handed layer is not.
+    fn hands_conflict(
+        &self,
+        frame: &PaneFrame<'_>,
+        graphic: openshard_protocol::wire::Graphic,
+        layer: Layer,
+    ) -> bool {
+        if !is_classic_weapon(graphic) {
+            return false;
+        }
+        let equipment = self.equipment(frame);
+        match layer {
+            Layer::TWO_HANDED => equipment.iter().any(|item| item.layer == Layer::ONE_HANDED),
+            Layer::ONE_HANDED => equipment
+                .iter()
+                .any(|item| item.layer == Layer::TWO_HANDED && is_classic_weapon(item.graphic)),
+            _ => false,
+        }
+    }
+
     /// Whether this was the second click on the same scroll, and the
     /// bookkeeping either way: a completed pair arms nothing, a first click
     /// arms the next.
     fn scroll_paired(&mut self, button: paperdoll::DollButton, now: Instant) -> bool {
         let paired = pairs(self.last_scroll, now, button);
         self.last_scroll = (!paired).then_some((now, button));
+        paired
+    }
+
+    /// Whether this is the second click on this exact worn item. The pane is
+    /// one paperdoll, leaving its item serial as the only identity that must
+    /// be compared: clicking the axe and then the dagger starts two gestures,
+    /// never a use of whichever one was clicked first.
+    fn item_paired(&mut self, item: Serial, now: Instant) -> bool {
+        let paired = self
+            .last_item_click
+            .is_some_and(|(at, previous)| previous == item && now.duration_since(at) <= DOUBLE_CLICK);
+        self.last_item_click = (!paired).then_some((now, item));
         paired
     }
 
@@ -252,13 +310,19 @@ impl PaperdollPane {
             // transfer. A stranger's is not this client's to lift and falls
             // through to the grab below, as it always has.
             if let Some(layer) = window.doll.equipment_hits.get(&index).copied() {
-                if self.own(&ctx.frame) {
+                if self.can_lift(&ctx.frame) {
                     if let Some(item) = self
                         .equipment(&ctx.frame)
                         .iter()
                         .find(|item| item.layer == layer)
                         .copied()
                     {
+                        // A worn tool is still an ordinary object. Its second
+                        // click must reach the shard, otherwise axes cannot
+                        // chop and daggers cannot cut while equipped.
+                        if self.item_paired(item.serial, ctx.now) {
+                            return raised.with(Effect::Net(Outgoing::Use(item.serial)));
+                        }
                         self.pressed = Some(ItemPress {
                             item: ContainedItem {
                                 serial: item.serial,
@@ -321,6 +385,9 @@ impl PaperdollPane {
                     .static_tile(hand.drag().item.graphic.0)
                     .layer,
             );
+            if self.hands_conflict(&ctx.frame, hand.drag().item.graphic, layer) {
+                return Response::consumed();
+            }
             return Response::changed().with(Effect::Drop(PendingDrop::Equipment {
                 mobile: self.mobile,
                 layer,
@@ -430,7 +497,7 @@ impl PaperdollPane {
         let mut lines = Vec::new();
         if let Some(doll) = frame.view.paperdolls.get(&self.mobile) {
             // Window-local — see `PaneFrame::cursor`'s doc.
-            let name = paperdoll::name(&doll.name, GumpPixel::new(0, 0));
+            let name = paperdoll::title(&doll.title, GumpPixel::new(0, 0));
             lines.push(Line {
                 at: name.at,
                 font: name.font,
@@ -523,12 +590,15 @@ impl Pane for PaperdollPane {
                 let drag = hand.drag();
                 let tile = frame.files.tiledata.static_tile(drag.item.graphic.0);
                 let layer = Layer(tile.layer);
-                (own && layer.0 > 0 && layer.0 <= 25 && !equipment.iter().any(|worn| worn.layer == layer))
-                    .then_some(EquipmentLayer {
-                        graphic: tile.anim_id,
-                        hue: drag.item.hue,
-                        layer,
-                    })
+                (own && layer.0 > 0
+                    && layer.0 <= 25
+                    && !equipment.iter().any(|worn| worn.layer == layer)
+                    && !self.hands_conflict(frame, drag.item.graphic, layer))
+                .then_some(EquipmentLayer {
+                    graphic: tile.anim_id,
+                    hue: drag.item.hue,
+                    layer,
+                })
             }),
             false => None,
         };
@@ -640,6 +710,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_worn_item_uses_only_its_own_double_click_pair() {
+        let mut pane = PaperdollPane::new(serial(0x2A));
+        let axe = serial(0x4000_0001);
+        let dagger = serial(0x4000_0002);
+        let first = Instant::now();
+        let step = DOUBLE_CLICK / 4;
+
+        assert!(!pane.item_paired(axe, first));
+        assert!(pane.item_paired(axe, first + step));
+        assert!(!pane.item_paired(dagger, first + step * 2));
+        assert!(pane.item_paired(dagger, first + step * 3));
+    }
+
     /// The buttons, as the packets and windows they ask for. WarMode toggles
     /// the stance it was drawn in, and the two window buttons ask the shard
     /// for fresh numbers *and* open the local window, in that order.
@@ -719,6 +803,12 @@ mod tests {
         assert!(matches!(
             answer.out.as_slice(),
             [Effect::Net(Outgoing::Use(bag))] if *bag == pack
+        ));
+
+        let answer = button_effects(paperdoll::DollButton::Party, me, true, false, None, true);
+        assert!(matches!(
+            answer.out.as_slice(),
+            [Effect::Reopen(crate::windows::WindowSubject::Party)]
         ));
         let answer = button_effects(paperdoll::DollButton::Backpack, me, true, false, None, true);
         assert!(answer.out.is_empty(), "no worn backpack, nothing to use");
@@ -801,5 +891,16 @@ mod tests {
             pane.pressed.is_none(),
             "the press is spent once it becomes a lift"
         );
+
+        // The next click on the same equipped item is its ordinary `Use`, not
+        // another drag. This is the path an equipped axe or dagger uses.
+        let mut second = files.ctx(&view, Some(&drawn), cursor, true);
+        second.now = ctx.now + DOUBLE_CLICK / 4;
+        let used = pane.handle(Input::Press(Button::Left), &second);
+        assert!(matches!(
+            used.out.as_slice(),
+            [Effect::Raise, Effect::Net(Outgoing::Use(item))]
+                if *item == serial(0x4000_0001)
+        ));
     }
 }

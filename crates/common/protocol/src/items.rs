@@ -18,6 +18,55 @@ use crate::version::ClientVersion;
 use crate::wire::{Graphic, Hue, Layer, RawLayer};
 use crate::world::Point;
 
+/// Whether `graphic` is one of the classic weapon graphics whose hand use is
+/// known to both the shard and the client.  This small shared catalogue keeps
+/// paperdoll preview from advertising a weapon combination the shard rejects;
+/// custom graphics remain server-authoritative.
+#[must_use]
+pub const fn is_classic_weapon(graphic: Graphic) -> bool {
+    matches!(
+        graphic.0,
+        0x0E81
+            | 0x0E86
+            | 0x0E87
+            | 0x0E89
+            | 0x0EC3
+            | 0x0EC4
+            | 0x0F43
+            | 0x0F45
+            | 0x0F47
+            | 0x0F49
+            | 0x0F4B
+            | 0x0F4D
+            | 0x0F50
+            | 0x0F52
+            | 0x0F5C
+            | 0x0F5E
+            | 0x0F61
+            | 0x0F62
+            | 0x13B0
+            | 0x13B2
+            | 0x13B4
+            | 0x13B6
+            | 0x13B9
+            | 0x13F6
+            | 0x13F8
+            | 0x13FB
+            | 0x13FD
+            | 0x13FF
+            | 0x1401
+            | 0x1403
+            | 0x1405
+            | 0x1407
+            | 0x1439
+            | 0x143B
+            | 0x143D
+            | 0x143E
+            | 0x1441
+            | 0x1443
+    )
+}
+
 /// How many units an item stack contains.
 ///
 /// This is distinct from other `u16` quantities on the wire: a stack size can

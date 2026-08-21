@@ -186,7 +186,7 @@ fn paperdolls(client: &Client, out: &Path) {
         shoot(
             client,
             &doll.pictures,
-            &[(paperdoll::name(who, at), None)],
+            &[(paperdoll::title(who, at), None)],
             out,
             name,
         );

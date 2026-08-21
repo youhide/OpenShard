@@ -94,7 +94,7 @@ fn a_closed_paperdoll_does_not_reopen_on_an_unrelated_world_change() {
     view.paperdolls.insert(
         serial,
         openshard_client_net::view::Paperdoll {
-            name: "Someone".to_string(),
+            title: "Someone".to_string(),
             can_lift: false,
         },
     );
@@ -169,7 +169,7 @@ fn a_window_carries_a_pane_of_its_own_kind_and_loses_it_with_the_window() {
     view.paperdolls.insert(
         serial,
         openshard_client_net::view::Paperdoll {
-            name: "Someone".to_string(),
+            title: "Someone".to_string(),
             can_lift: false,
         },
     );
@@ -281,6 +281,7 @@ fn a_window_is_local_exactly_when_nothing_in_the_view_holds_it_open() {
     assert!(WindowSubject::Skills.is_local());
     assert!(WindowSubject::Status.is_local());
     assert!(WindowSubject::Minimap.is_local());
+    assert!(WindowSubject::WorldMap.is_local());
     assert!(
         WindowSubject::Split {
             item: serial,
@@ -315,6 +316,21 @@ fn a_minimap_is_a_local_idempotent_window() {
     assert!(own_windows.is_empty(), "closing it is local too");
 }
 
+#[test]
+fn a_world_map_is_a_local_idempotent_window() {
+    let view = bare_view();
+    let mut own_windows = Vec::new();
+    let mut locally_closed = HashSet::new();
+
+    crate::windows::open_local_window(&mut own_windows, WindowSubject::WorldMap);
+    crate::windows::open_local_window(&mut own_windows, WindowSubject::WorldMap);
+    assert_eq!(own_windows.len(), 1);
+    assert!(matches!(own_windows[0].pane, crate::panes::AnyPane::WorldMap(_)));
+
+    reconcile_own_windows(&view, &mut own_windows, &mut locally_closed);
+    assert_eq!(own_windows.len(), 1, "the view does not own map openness");
+}
+
 /// A vendor's buy window is an `OpenContainer` on the vendor serial, whereas
 /// the character sheet is an `OpenPaperdoll` on the player serial.  They are
 /// independent overlay subjects: opening the first must not make the second
@@ -328,7 +344,7 @@ fn a_trade_gump_and_own_paperdoll_stay_open_together() {
     view.paperdolls.insert(
         player,
         openshard_client_net::view::Paperdoll {
-            name: "Someone".to_owned(),
+            title: "Someone".to_owned(),
             can_lift: true,
         },
     );

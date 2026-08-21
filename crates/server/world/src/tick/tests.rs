@@ -3118,7 +3118,6 @@ fn resurrection_brings_a_ghost_back() {
     let equipment = world.state.equipment_of(serial);
     for (graphic, layer) in [
         (Graphic(0x1F03), Layer(0x16)),
-        (Graphic(0x0F52), openshard_state::weapon::LAYER_ONE_HANDED),
         (Graphic(0x0F49), openshard_state::weapon::LAYER_TWO_HANDED),
     ] {
         assert!(
@@ -3132,8 +3131,8 @@ fn resurrection_brings_a_ghost_back() {
     }
     assert_eq!(
         openshard_combat::weapons::equipped_weapon(&world.state, player_entity).map(|weapon| weapon.graphic),
-        Some(Graphic(0x0F52)),
-        "the one-handed resurrection dagger is the active weapon"
+        Some(Graphic(0x0F49)),
+        "the resurrection axe is the active weapon"
     );
     let packets = packets_for(&mut world, player);
     assert!(

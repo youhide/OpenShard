@@ -108,13 +108,12 @@ pub const fn displayed_graphic(graphic: Graphic, amount: ItemAmount) -> Graphic 
 
 /// The face a stack's count is written in.
 ///
-/// `fonts.mul`'s small face, which is what every caption this client writes
-/// over a window already uses — a count in the corner of a 30-pixel icon has
-/// less room than any of them, so nothing larger was ever a candidate. One
-/// constant for all three places a count is drawn, for [`stack_label`]'s
+/// `fonts.mul`'s narrow sans-serif face. It stays legible in an icon corner
+/// without the serifs that make the ordinary caption face blur into the art.
+/// One constant for all three places a count is drawn, for [`stack_label`]'s
 /// reason: a pile counted in one face in a bag and another on the floor is
 /// the same pile drawn twice.
-pub const STACK_COUNT_FONT: Font = Font(1);
+pub const STACK_COUNT_FONT: Font = Font(9);
 
 /// The digits written on a pile, or `None` for a thing that is drawn without a
 /// count.

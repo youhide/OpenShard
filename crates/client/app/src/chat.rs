@@ -746,6 +746,7 @@ pub(crate) fn draw_chat_and_speech(
     screen_speech: &[text::ScreenLabel<'_>],
     screen_counts: &[text::ScreenLabel<'_>],
     text_quads: &mut Vec<SpriteQuad>,
+    ttf_quads: &mut Vec<SpriteQuad>,
 ) {
     let scale = shell.map(|shell| shell.pixels_per_point()).unwrap_or(1.0);
     // The two roles this function draws through a TrueType face, each at its
@@ -956,7 +957,7 @@ pub(crate) fn draw_chat_and_speech(
         // depth and painter's order is the only order there is. In real pixels
         // like everything else in this branch, which is why the row's height is
         // multiplied here and not in the branch below.
-        let mut hud_quads = Vec::new();
+        let mut hud_quads = std::mem::take(ttf_quads);
         hud_quads.push(plate_of(button, scale));
         if let Some(index) = highlighted {
             let widest = rows[..popup_rows]

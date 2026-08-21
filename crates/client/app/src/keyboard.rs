@@ -225,6 +225,8 @@ pub(crate) enum Hotkey {
     /// Provisional — the minimap's own opening affordance is still an open
     /// product decision (`docs/minimap_lod_plan.md` phase 4).
     Minimap,
+    /// The full, pannable facet map. Ctrl+M leaves plain M for the radar.
+    WorldMap,
     /// Lift the eye rather than the body, which is a pan: the map has no
     /// vertical axis to walk along, only a projection that folds `z` into `y`.
     PanUp,
@@ -287,13 +289,14 @@ impl Hotkey {
     /// The list exists so that "no two actions share a key" is a test rather
     /// than a thing somebody notices — see [`Self::key`], which is also the
     /// question a bindings window asks.
-    pub(crate) const ALL: [Self; 21] = [
+    pub(crate) const ALL: [Self; 22] = [
         Self::Speak,
         Self::DevWindow,
         Self::Relock,
         Self::Paperdoll,
         Self::Inventory,
         Self::Minimap,
+        Self::WorldMap,
         Self::PanUp,
         Self::PanDown,
         Self::FloorUp,
@@ -323,6 +326,7 @@ impl Hotkey {
             Self::Paperdoll => KeyCode::KeyP,
             Self::Inventory => KeyCode::KeyI,
             Self::Minimap => KeyCode::KeyM,
+            Self::WorldMap => KeyCode::KeyM,
             Self::PanUp => KeyCode::PageUp,
             Self::PanDown => KeyCode::PageDown,
             Self::FloorUp => KeyCode::PageUp,
@@ -344,7 +348,10 @@ impl Hotkey {
     /// The full key-plus-modifier binding. Page Up/Down are intentionally the
     /// only chords today: plain selects floors; Ctrl keeps the camera pan.
     pub(crate) const fn gesture(self) -> Gesture {
-        Gesture::new(self.key(), matches!(self, Self::PanUp | Self::PanDown))
+        Gesture::new(
+            self.key(),
+            matches!(self, Self::PanUp | Self::PanDown | Self::WorldMap),
+        )
     }
 
     /// What a pressed key does in the world, or `None` for one that does

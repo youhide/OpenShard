@@ -1878,6 +1878,15 @@ impl App {
                 })
                 .flatten()
         });
+        let world_map_open = self.windows.drawn_windows.iter().any(|(subject, drawn)| {
+            matches!(
+                (subject, drawn),
+                (
+                    crate::windows::WindowSubject::WorldMap,
+                    crate::windows::Drawn::WorldMap(_),
+                )
+            )
+        });
         let Some(window) = self.window.as_mut() else {
             return;
         };
@@ -1967,14 +1976,27 @@ impl App {
             // what left a black moat around the ready centre. `radar_native_extent`
             // is the one source of truth for this arithmetic — the draw path
             // reads the same function rather than carrying its own copy.
-            let (logical_extent, zoom) = minimap_extent.unwrap_or((crate::panes::minimap::LARGE_EXTENT, 1.0));
-            let native_extent = crate::panes::minimap::radar_native_extent(
-                logical_extent,
-                window_scale.factor(),
-                gump_scale,
-                zoom,
-            );
-            let region = radar_region_for(player, native_extent);
+            let region = if world_map_open {
+                let width =
+                    u16::try_from(self.resources.map.width()).expect("UO map width fits radar coordinates");
+                let height =
+                    u16::try_from(self.resources.map.height()).expect("UO map height fits radar coordinates");
+                radar::RadarRegion::new(
+                    openshard_protocol::world::Facet(crate::FACET),
+                    radar::RadarTile::new(0, 0),
+                    radar::RadarExtent::new(width, height).expect("a map has an extent"),
+                )
+            } else {
+                let (logical_extent, zoom) =
+                    minimap_extent.unwrap_or((crate::panes::minimap::LARGE_EXTENT, 1.0));
+                let native_extent = crate::panes::minimap::radar_native_extent(
+                    logical_extent,
+                    window_scale.factor(),
+                    gump_scale,
+                    zoom,
+                );
+                radar_region_for(player, native_extent)
+            };
             let (player_chunk, _) = radar::world_tile_to_base_chunk(radar::RadarTile::new(
                 u32::from(player.x),
                 u32::from(player.y),
@@ -2408,6 +2430,8 @@ impl App {
         // neighbours above: `resources.gump_atlas` and `windows.drawn_windows`
         // are the two things on `self` it really writes, and both are named
         // in its signature rather than reached through `&mut self`.
+        let mut text_quads: Vec<SpriteQuad> = Vec::new();
+        let mut ttf_quads: Vec<SpriteQuad> = Vec::new();
         draw_gump_windows(
             &mut self.resources,
             &self.world,
@@ -2421,6 +2445,8 @@ impl App {
             window,
             &mut encoder,
             &view,
+            &mut text_quads,
+            &mut ttf_quads,
         );
         // Every line of gump-space text this frame, from both the blocks below.
         //
@@ -2431,7 +2457,6 @@ impl App {
         // is what happened to every window's text for as long as there was a
         // line in the journal to overwrite it with: a paperdoll's name plate
         // was written, cut, submitted, and then quietly replaced by the chat.
-        let mut text_quads: Vec<SpriteQuad> = Vec::new();
         // A second walk over `drawn_windows` used to stand here, matching the
         // same `(WindowSubject, Drawn)` pairs `draw_gump_windows` matches, to
         // turn each window's text into labels. **It has iterated
@@ -2463,6 +2488,7 @@ impl App {
             &screen_speech,
             &screen_counts,
             &mut text_quads,
+            &mut ttf_quads,
         );
         let encode_cost = encode_started.elapsed();
         // The UI over it, with no depth attachment: the world's depth buffer
