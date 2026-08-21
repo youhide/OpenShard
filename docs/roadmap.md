@@ -3692,6 +3692,38 @@ whether or not the terrain overlay is switched on (`App::route_shown`,
   against (body tile, goal, view generation) — not to give the picture a cheaper
   rule of its own, which is how the two would start disagreeing.
 
+### Backlog: the cache guard at a house never fires on the packet path
+
+`App::entered` (`client/app/src/net_command.rs:452`) decides whether to throw
+away the route, plan, terrain and occluder caches by comparing the incoming view
+against the one it already holds:
+
+```rust
+let items_changed = self.world.authoritative.view
+    .as_ref()
+    .is_none_or(|old| old.items != view.items);
+```
+
+Its comment says why it exists — "invalidating it unconditionally made the same
+expensive plan run on every update (and therefore effectively every frame) at a
+house" — and on the path it was written for it cannot work. `apply_packet`
+(`:327`) does `self.world.authoritative.view.take()`, mutates the view it now
+owns, and calls `entered(*view, …)` at `:394`. Inside, the field is `None`, so
+`is_none_or` answers **true** unconditionally; the view is only put back at
+`:727`, after the check. Every ordinary packet — a stranger's `0x77`, a line of
+speech — therefore clears `terrain_cache`, `occluder_cache`, `route_cache`,
+`steer.clear_plan_cache()` and `steer.clear_route()`.
+
+Of the three callers only `reproject_item_drag` (`:71`, which clones rather than
+takes) and the `0x1B` path (`:154`) compare against anything.
+
+The comparison is also `O(n)` over the item map, which at a castle's roughly
+four thousand locked-down items is not free even when it does run — and it
+cannot see an item that moved and came back to the same place. Both go away
+together if `items_changed` is derived from **what the packet was** rather than
+from a map diff: the mutation path already knows it applied a `WorldItem`,
+a `Remove` or an `AddToContainer`, and that answer is O(1) and exact.
+
 ### Backlog from the frame-cost instrumentation
 
 The `frames` panel measured a frame with a clock on the event-loop thread, which

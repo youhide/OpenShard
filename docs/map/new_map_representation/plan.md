@@ -214,6 +214,41 @@ a free optimisation, until `Order` is made total across distinct tiles.
   transaction — validate, build the touched chunks, store, switch revision,
   invalidate.
 - Authority and the conflict path are editor concerns, not map format ones.
+- **Committing a house into the base is an editor operation, and only that.**
+  A designer builds with the house tool and then publishes the result as
+  terrain: the entity's components become base statics in the touched chunks
+  and **the entity ceases to exist**. It is one-way, it happens at publish, and
+  it is the only path by which a house ever becomes terrain. It is not a
+  contradiction of the rule that a *live* house is never baked — that rule
+  exists because a live house must be removable in one operation, and a
+  committed one is no longer a house. What it needs from this direction: the
+  same validate-build-store-switch transaction every other publish uses, and an
+  answer to what happens to anything locked down inside it.
+
+## G — residency and size, deferred on purpose
+
+**Not scheduled, and not researched.** Recorded so that A0's newtype and B's
+chunk format are shaped without closing the door on it. Today's format is the
+one we want; this is about what it must not prevent.
+
+- **The whole facet is resident.** `Map` is about 150 MiB and every reader
+  assumes it is all there. A world of chunks held lazily — fetched on approach,
+  dropped behind — is the eventual shape, and the thing that makes it cheap
+  later is that it stays **behind the same API**: A0's newtype and `Terrain` are
+  the two doors, and neither should ever hand out a `&[LandCell]` spanning more
+  than one chunk. *What would settle it:* the working set a real session
+  touches, against the cost of a miss on the hot path.
+- **`cells` should compress well, and nobody has checked.** A facet is largely
+  ocean — one land id at one height over enormous runs — so the land layer is
+  the obvious candidate for whole-chunk compression at rest, decompressed on
+  residency rather than on access. *What would settle it:* the ratio on real
+  Felucca chunks, and the decompression cost against the residency budget above.
+  It is a *storage* question, not an access one: nothing should ever read a
+  compressed cell.
+
+Neither belongs in the first slice, and the reason to write them down now is
+the same one this whole track has: a format chosen without knowing they are
+coming is a format that will have to be reopened to get them.
 
 ## Order
 
@@ -221,7 +256,8 @@ A0, then A, then B, then C, with D following C closely because a stale bake is
 how a changed world lies to a player. A0 is internal to `uofiles` and touches
 no reader, so it can land at any time and everything after it is written
 against one spelling of the order rather than five. E and F come last and can be reordered against
-each other. Every step ends with a world that runs; none of them is "replace
+each other. G is not in the order at all — it is a constraint on A0 and B, not
+a step after F. Every step ends with a world that runs; none of them is "replace
 the runtime with streaming first and make it correct afterwards".
 
 ## First useful slice
