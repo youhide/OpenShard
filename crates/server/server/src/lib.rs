@@ -65,7 +65,6 @@ use openshard_protocol::trade::SecureTradeAction;
 use openshard_protocol::wire::ClilocId;
 use openshard_protocol::world::{Facet, Point};
 use openshard_protocol::{access::AccessLevel, huffman};
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 use openshard_world::tick::screen::CharacterScreen;
 use openshard_world::{

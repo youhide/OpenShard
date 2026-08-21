@@ -180,7 +180,6 @@ use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::font::AsciiFonts;
 use openshard_uofiles::gumpart::Gumps;
 use openshard_uofiles::hues::Hues;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::radarcol::RadarColors;
 use openshard_uofiles::skillgrp::SkillGroups;
 use openshard_uofiles::skills::Skills as SkillNames;
@@ -460,7 +459,7 @@ pub fn run<D: Dial + Send + 'static>(
     // Reading the whole facet takes a moment and a few hundred megabytes. That
     // is the shape `uofiles` has today — see the backlog in docs/client.md — and
     // it is honest to do it up front rather than to stall on the first frame.
-    let map = match Map::load_facet(dir, FACET) {
+    let map = match MapSnapshot::load_facet(dir, openshard_protocol::world::Facet(FACET)) {
         Ok(map) => map,
         Err(error) => {
             eprintln!("loading facet {FACET}: {error}");
@@ -635,9 +634,9 @@ pub fn run<D: Dial + Send + 'static>(
     };
     eprintln!(
         "{} loaded: {}x{} tiles",
-        map.facet_name(),
-        map.width(),
-        map.height()
+        map.map().facet_name(),
+        map.map().width(),
+        map.map().height()
     );
 
     // User events are wake-ups only. The shard thread puts updates in the
@@ -704,7 +703,8 @@ pub fn run<D: Dial + Send + 'static>(
     let start = Point::new(
         start_tile.x,
         start_tile.y,
-        map.land(start_tile.x, start_tile.y)
+        map.map()
+            .land(start_tile.x, start_tile.y)
             .map_or(START.z, |cell| cell.z),
     );
 
@@ -714,7 +714,6 @@ pub fn run<D: Dial + Send + 'static>(
     // the offline placeholder at `START` while those round trips happen.
     // Shared with the shard thread, which predicts the height of every step
     // from it: plain data, read by both and written by neither.
-    let map = MapSnapshot::new(openshard_protocol::world::Facet(FACET), map);
     let tiledata = Arc::new(tiledata);
     let update_proxy = event_loop.create_proxy();
     let updates = link::Updates::new();
@@ -738,12 +737,14 @@ pub fn run<D: Dial + Send + 'static>(
 
     // Live `MapTerrain` still authorizes every refined step. Without this cache
     // the viewer remains useful, but long routes are disabled.
-    let facet = openshard_protocol::world::Facet(FACET);
+    // The facet comes from the snapshot rather than from `FACET` again: one
+    // answer per process is the whole point of the snapshot owning it.
+    let facet = map.facet();
     let navigation_path = openshard_movement::bake::artifact_path(dir, facet);
-    let coarse = openshard_movement::bake::stamp_of(dir, facet)
+    let coarse = openshard_movement::bake::stamp_of(dir, facet, map.revision())
         .and_then(|stamp| openshard_movement::bake::load(&navigation_path, &stamp))
         .and_then(|graph| {
-            if graph.dimensions() == (map.width(), map.height()) {
+            if graph.dimensions() == (map.map().width(), map.map().height()) {
                 Ok(graph)
             } else {
                 Err(openshard_movement::bake::Error::Incompatible {
@@ -752,8 +753,8 @@ pub fn run<D: Dial + Send + 'static>(
                         "dimensions {}x{}, expected {}x{}",
                         graph.dimensions().0,
                         graph.dimensions().1,
-                        map.width(),
-                        map.height()
+                        map.map().width(),
+                        map.map().height()
                     ),
                 })
             }
@@ -770,10 +771,10 @@ pub fn run<D: Dial + Send + 'static>(
     checkpoint("navigation graph loaded");
 
     let interior_path = openshard_client_artscan::interiors::artifact_path(dir, facet);
-    let interiors = openshard_client_artscan::interiors::stamp_of(dir, facet)
+    let interiors = openshard_client_artscan::interiors::stamp_of(dir, facet, map.revision())
         .and_then(|stamp| openshard_client_artscan::interiors::load_baked(&interior_path, &stamp))
         .and_then(|graph| {
-            if graph.dimensions() == (map.width(), map.height()) {
+            if graph.dimensions() == (map.map().width(), map.map().height()) {
                 Ok(graph)
             } else {
                 Err(openshard_client_artscan::interiors::Error::Incompatible {
@@ -782,8 +783,8 @@ pub fn run<D: Dial + Send + 'static>(
                         "dimensions {}x{}, expected {}x{}",
                         graph.dimensions().0,
                         graph.dimensions().1,
-                        map.width(),
-                        map.height(),
+                        map.map().width(),
+                        map.map().height(),
                     ),
                 })
             }

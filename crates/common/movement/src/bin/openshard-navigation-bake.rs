@@ -3,9 +3,9 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use clap::Parser;
+use openshard_map::MapSnapshot;
 use openshard_movement::{MapTerrain, NavigationGraph, bake};
 use openshard_protocol::world::Facet;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 #[derive(Debug, Parser)]
@@ -61,15 +61,16 @@ fn bake_one(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     eprintln!("navigation bake: loading facet {facet}");
-    let stamp = bake::stamp_of(client, facet)?;
-    let map = Map::load_facet(client, facet.0)?;
+    // The map first, then the stamp: the revision recorded in the artifact is
+    // the revision the graph is about to be built from.
+    let map = MapSnapshot::load_facet(client, facet)?;
+    let stamp = bake::stamp_of(client, facet, map.revision())?;
+    let (width, height) = (map.map().width(), map.map().height());
     eprintln!(
-        "navigation bake +{:.3}s: building facet {facet} ({}x{})",
+        "navigation bake +{:.3}s: building facet {facet} ({width}x{height})",
         started.elapsed().as_secs_f64(),
-        map.width(),
-        map.height()
     );
-    let graph = NavigationGraph::build(&MapTerrain::new(&map, tiles), map.width(), map.height())
+    let graph = NavigationGraph::build(&MapTerrain::new(map.map(), tiles), width, height)
         .ok_or("facet dimensions cannot be represented")?;
     let (regions, nodes, edges) = graph.counts();
     let path = out

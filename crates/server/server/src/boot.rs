@@ -602,7 +602,15 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
     let mut world = configured_world(config);
     for &facet in &config.world.facets {
         let facet = openshard_protocol::world::Facet(facet);
-        let stamp = openshard_movement::bake::stamp_of(dir, facet)?;
+        // The map before the navigation artifact, because the artifact is now
+        // checked against the snapshot's revision as well as its input files:
+        // there is nothing to check it against until the world is loaded.
+        eprintln!(
+            "world load +{:.3}s: reading facet {facet}",
+            started.elapsed().as_secs_f64()
+        );
+        let map = openshard_map::MapSnapshot::load_facet(dir, facet)?;
+        let stamp = openshard_movement::bake::stamp_of(dir, facet, map.revision())?;
         let navigation_path = openshard_movement::bake::artifact_path(dir, facet);
         let coarse = openshard_movement::bake::load(&navigation_path, &stamp).map_err(|error| {
             format!(
@@ -611,12 +619,7 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
                 dir
             )
         })?;
-        eprintln!(
-            "world load +{:.3}s: navigation for facet {facet} loaded; reading map",
-            started.elapsed().as_secs_f64()
-        );
-        let map = openshard_map::MapSnapshot::new(facet, Map::load_facet(dir, facet.0)?);
-        if coarse.dimensions() != (map.width(), map.height()) {
+        if coarse.dimensions() != (map.map().width(), map.map().height()) {
             return Err(format!(
                 "navigation artifact {} has dimensions {}x{}, but facet {facet} is {}x{}\n\
                  recreate it with: OPENSHARD_CLIENT={:?} cargo run --release -p openshard-movement \
@@ -624,8 +627,8 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
                 navigation_path.display(),
                 coarse.dimensions().0,
                 coarse.dimensions().1,
-                map.width(),
-                map.height(),
+                map.map().width(),
+                map.map().height(),
                 dir,
             )
             .into());
@@ -638,7 +641,7 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
         // A start off the map, or in the sea, is worth saying out loud: the shard
         // still runs and every player spawns somewhere useless.
         if facet.0 == 0 {
-            match map.land(start.0, start.1) {
+            match map.map().land(start.0, start.1) {
                 Some(cell) => info!(x = start.0, y = start.1, z = cell.z, "start position"),
                 None => warn!(
                     x = start.0,
@@ -649,9 +652,9 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
         }
         info!(
             facet = facet.0,
-            name = map.facet_name(),
-            size = format!("{}x{}", map.width(), map.height()),
-            statics = map.static_count(),
+            name = map.map().facet_name(),
+            size = format!("{}x{}", map.map().width(), map.map().height()),
+            statics = map.map().static_count(),
             "facet loaded"
         );
         let mut terrain = MapTerrain::new(map, tiles.clone());

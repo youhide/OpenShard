@@ -1498,6 +1498,7 @@ impl App {
                     let z = self
                         .resources
                         .map
+                        .map()
                         .land(tile.at.x, tile.at.y)
                         .map_or(0, |land| land.z);
                     frame.shows_at(Point::new(tile.at.x, tile.at.y, z))
@@ -1588,7 +1589,7 @@ impl App {
         let on_static = match owns_pointer && on_mobile.is_none() && on_item.is_none() {
             true => self.window.as_ref().and_then(|window| {
                 statics::pick_with_interior(
-                    &self.resources.map,
+                    self.resources.map.map(),
                     &camera,
                     &self.resources.tiledata,
                     &self.world.presentation.tile_animations,
@@ -1810,8 +1811,8 @@ impl App {
         // representation until an idle producer has completed its composite.
         // The completed image enters `Screen::composites` through this queue;
         // Work 4 owns drawing that ready texture in the depth-aware world pass.
-        let map_width = self.resources.map.width();
-        let map_height = self.resources.map.height();
+        let map_width = self.resources.map.map().width();
+        let map_height = self.resources.map.map().height();
         let map_tiles = openshard_client_render::camera::TileBounds {
             min_x: 0,
             max_x: map_width.saturating_sub(1) as i32,
@@ -1977,10 +1978,10 @@ impl App {
             // is the one source of truth for this arithmetic — the draw path
             // reads the same function rather than carrying its own copy.
             let region = if world_map_open {
-                let width =
-                    u16::try_from(self.resources.map.width()).expect("UO map width fits radar coordinates");
-                let height =
-                    u16::try_from(self.resources.map.height()).expect("UO map height fits radar coordinates");
+                let width = u16::try_from(self.resources.map.map().width())
+                    .expect("UO map width fits radar coordinates");
+                let height = u16::try_from(self.resources.map.map().height())
+                    .expect("UO map height fits radar coordinates");
                 radar::RadarRegion::new(
                     openshard_protocol::world::Facet(crate::FACET),
                     radar::RadarTile::new(0, 0),
@@ -2025,7 +2026,7 @@ impl App {
                 let built = key
                     .lod()
                     .is_base()
-                    .then(|| build_base_chunk(&self.resources.map, colors, key))
+                    .then(|| build_base_chunk(self.resources.map.map(), colors, key))
                     .flatten();
                 let Some(chunk) = built else {
                     // The slot goes back rather than being lost — see
@@ -2522,7 +2523,7 @@ impl App {
             audit_static_atlas_pages(window);
             audit_scene_instance_buffers(window);
             if manual_frame_diagnostic || std::env::var_os("OPENSHARD_LOD_SCREEN_AUDIT").is_some() {
-                audit_visible_ground_centres(window, &self.resources.map, camera);
+                audit_visible_ground_centres(window, self.resources.map.map(), camera);
             }
             let oracle_report = if manual_frame_diagnostic
                 || live_oracle_sample.is_some()

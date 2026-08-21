@@ -2594,6 +2594,7 @@ version = "0.0.1"
 dependencies = [
  "clap",
  "openshard-client-render",
+ "openshard-map",
  "openshard-protocol",
  "openshard-uofiles",
 ]

@@ -84,7 +84,12 @@ pub fn artifact_path(client_dir: &Path, facet: Facet) -> PathBuf {
 }
 
 /// Inspect exactly the files `Map::load_facet` selects, plus tile data.
-pub fn stamp_of(client_dir: &Path, facet: Facet) -> Result<Stamp, Error> {
+///
+/// `revision` is the revision of the snapshot this graph is built from, or the
+/// one a caller is about to check a stored artifact against. It is asked for
+/// rather than assumed: a stamp that filled the field in for itself would
+/// compare a constant with a constant, and the guard would never fire.
+pub fn stamp_of(client_dir: &Path, facet: Facet, revision: MapRevision) -> Result<Stamp, Error> {
     let uop_name = format!("map{}LegacyMUL.uop", facet.0);
     let map_name = if client_dir.join(&uop_name).exists() {
         uop_name
@@ -114,7 +119,7 @@ pub fn stamp_of(client_dir: &Path, facet: Facet) -> Result<Stamp, Error> {
     }
     Ok(Stamp {
         facet,
-        revision: MapRevision::INITIAL,
+        revision,
         routing_version: ROUTING_VERSION,
         inputs,
     })
@@ -307,13 +312,27 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<NavigationGraph
         ));
     }
     let facet = Facet(r.take(4)?[0]);
-    let revision = MapRevision::from(r.u64()?);
+    let revision = MapRevision::decoded(r.u64()?);
     let width = r.u32()?;
     let height = r.u32()?;
     if facet != expected.facet {
         return Err(incompatible(
             path,
             format!("facet {}, expected {}", facet.0, expected.facet.0),
+        ));
+    }
+    // Alongside the file-metadata check below, not instead of it: mtime and
+    // length answer "are these the same client files", and the revision answers
+    // "is this the same world we published". A world edited in place would keep
+    // every input file's stamp and change only this number.
+    if revision != expected.revision {
+        return Err(stale(
+            path,
+            format!(
+                "built from map revision {}, expected {}",
+                revision.get(),
+                expected.revision.get()
+            ),
         ));
     }
     if width == 0 || height == 0 || width > u16::MAX as u32 || height > u16::MAX as u32 {
@@ -657,6 +676,17 @@ mod tests {
         let mut wrong = s.clone();
         wrong.inputs[0].bytes += 1;
         assert!(matches!(load(&path, &wrong), Err(Error::Stale { .. })));
+
+        // The guard the revision field exists for, and the one that would never
+        // fire if a stamp filled the field in for itself: every input file is
+        // byte-for-byte what it was, and only the world's revision moved.
+        let mut republished = s.clone();
+        republished.revision = MapRevision::decoded(s.revision.get() + 1);
+        let refusal = load(&path, &republished);
+        assert!(
+            matches!(&refusal, Err(Error::Stale { reason, .. }) if reason.contains("map revision")),
+            "a graph built from another revision is stale, and says so: {refusal:?}"
+        );
 
         let mut data = original.clone();
         data[0] ^= 1;

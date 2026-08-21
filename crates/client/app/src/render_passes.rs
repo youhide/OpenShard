@@ -588,8 +588,8 @@ pub(crate) fn draw_gump_windows(
                 }
                 (WindowSubject::WorldMap, Drawn::WorldMap(bounds)) => {
                     let (Ok(width), Ok(height)) = (
-                        u16::try_from(resources.map.width()),
-                        u16::try_from(resources.map.height()),
+                        u16::try_from(resources.map.map().width()),
+                        u16::try_from(resources.map.map().height()),
                     ) else {
                         continue;
                     };

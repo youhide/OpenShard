@@ -250,8 +250,10 @@ impl App {
             true => (motion.position.x, motion.position.y),
             false => {
                 let (dx, dy) = facing.direction.step();
-                let x = (i32::from(motion.position.x) + dx).clamp(0, self.resources.map.width() as i32 - 1);
-                let y = (i32::from(motion.position.y) + dy).clamp(0, self.resources.map.height() as i32 - 1);
+                let x =
+                    (i32::from(motion.position.x) + dx).clamp(0, self.resources.map.map().width() as i32 - 1);
+                let y = (i32::from(motion.position.y) + dy)
+                    .clamp(0, self.resources.map.map().height() as i32 - 1);
                 (x as u16, y as u16)
             }
         };

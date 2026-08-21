@@ -906,7 +906,7 @@ impl WorldState {
 /// a method call, which is opaque to it. Passing `&self.resources` here is
 /// the same projection the field access always was, just wrapped.
 pub(crate) fn terrain(resources: &resources::Resources) -> openshard_movement::MapTerrain<&Map, &TileData> {
-    openshard_movement::MapTerrain::new(resources.map.as_ref(), &resources.tiledata)
+    openshard_movement::MapTerrain::new(resources.map.map(), &resources.tiledata)
 }
 
 /// [`terrain`] with the shard's own items laid over it — what every step
@@ -920,7 +920,7 @@ pub(crate) fn cluttered<'a>(
     world
         .presentation
         .clutter
-        .over(&resources.map, &resources.tiledata)
+        .over(resources.map.map(), &resources.tiledata)
 }
 
 /// The same, read as though every shut door on it stood open: what a route
@@ -933,7 +933,7 @@ pub(crate) fn cluttered_with_doors_open<'a>(
     world
         .presentation
         .clutter
-        .over_with_doors_open(&resources.map, &resources.tiledata)
+        .over_with_doors_open(resources.map.map(), &resources.tiledata)
 }
 
 #[cfg(test)]

@@ -11,14 +11,14 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use openshard_client_render::interiors::BuildingMap;
+use openshard_map::{MapRevision, MapSnapshot};
 use openshard_protocol::world::Facet;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 use crate::{LoadError, load};
 
 const MAGIC: &[u8; 8] = b"OSINT\0\r\n";
-const FORMAT: u32 = 1;
+const FORMAT: u32 = 2;
 /// Bump when exterior/door/wall semantics change.
 pub const TOPOLOGY_VERSION: u32 = 4;
 const FNV_OFFSET: u64 = 0xcbf29ce484222325;
@@ -34,6 +34,8 @@ pub struct InputStamp {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Stamp {
     facet: Facet,
+    /// The immutable world revision the flood was run over.
+    revision: MapRevision,
     topology_version: u32,
     inputs: Vec<InputStamp>,
 }
@@ -111,7 +113,7 @@ pub fn artifact_path(client_dir: &Path, facet: Facet) -> PathBuf {
 /// Files whose contents determine the map labels, including the authored wall
 /// catalogue.  Metadata stamps deliberately match the navigation artifact's
 /// policy: inexpensive at startup and enough to distinguish client installs.
-pub fn stamp_of(client_dir: &Path, facet: Facet) -> Result<Stamp, Error> {
+pub fn stamp_of(client_dir: &Path, facet: Facet, revision: MapRevision) -> Result<Stamp, Error> {
     let uop_name = format!("map{}LegacyMUL.uop", facet.0);
     let map_name = if client_dir.join(&uop_name).exists() {
         uop_name
@@ -148,15 +150,21 @@ pub fn stamp_of(client_dir: &Path, facet: Facet) -> Result<Stamp, Error> {
     }
     Ok(Stamp {
         facet,
+        revision,
         topology_version: TOPOLOGY_VERSION,
         inputs,
     })
 }
 
 /// Read the wall catalogue, map and tile data, then calculate a whole facet.
-pub fn build(client_dir: &Path, facet: Facet) -> Result<BuildingMap, Error> {
+///
+/// The revision comes back with the graph rather than being asked of the caller
+/// afterwards: this function is what decides which world the flood ran over, so
+/// it is the only place that can answer honestly. The caller stamps the
+/// artifact with what it is handed here.
+pub fn build(client_dir: &Path, facet: Facet) -> Result<(BuildingMap, MapRevision), Error> {
     let table = load(client_dir).map_err(Error::Art)?;
-    let map = Map::load_facet(client_dir, facet.0).map_err(|source| Error::Read {
+    let map = MapSnapshot::load_facet(client_dir, facet).map_err(|source| Error::Read {
         path: client_dir.to_path_buf(),
         source: Box::new(source),
     })?;
@@ -164,7 +172,8 @@ pub fn build(client_dir: &Path, facet: Facet) -> Result<BuildingMap, Error> {
         path: client_dir.join("tiledata.mul"),
         source: Box::new(source),
     })?;
-    Ok(BuildingMap::bake(&map, &tiles, &|graphic| table.shape(graphic)))
+    let graph = BuildingMap::bake(map.map(), &tiles, &|graphic| table.shape(graphic));
+    Ok((graph, map.revision()))
 }
 
 /// Atomically write a fully-built map and its validating stamp.
@@ -247,6 +256,7 @@ fn write_graph(mut out: impl Write, graph: &BuildingMap, stamp: &Stamp, hash: &m
     write(&FORMAT.to_le_bytes())?;
     write(&TOPOLOGY_VERSION.to_le_bytes())?;
     write(&[stamp.facet.0, 0, 0, 0])?;
+    write(&stamp.revision.get().to_le_bytes())?;
     let (width, height) = graph.dimensions();
     write(&width.to_le_bytes())?;
     write(&height.to_le_bytes())?;
@@ -279,6 +289,19 @@ fn read_graph(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<BuildingMap
     let facet = take(bytes, &mut at, 4).ok_or_else(|| corrupt(path, "truncated facet"))?[0];
     if facet != expected.facet.0 {
         return Err(incompatible(path, "wrong facet"));
+    }
+    // Alongside the input-file check below, not instead of it: the file stamps
+    // say "the same client install", and this says "the same published world".
+    let revision = MapRevision::decoded(u64_at(path, bytes, &mut at)?);
+    if revision != expected.revision {
+        return Err(stale(
+            path,
+            format!(
+                "built from map revision {}, expected {}",
+                revision.get(),
+                expected.revision.get()
+            ),
+        ));
     }
     let width = u32_at(path, bytes, &mut at)?;
     let height = u32_at(path, bytes, &mut at)?;
@@ -409,6 +432,7 @@ mod tests {
         let graph = BuildingMap::from_labels(3, 2, vec![0, 4, 4, 0, 4, 0]).expect("matching labels");
         let stamp = Stamp {
             facet: Facet(0),
+            revision: MapRevision::INITIAL,
             topology_version: TOPOLOGY_VERSION,
             inputs: vec![InputStamp {
                 name: "map0.mul".into(),

@@ -38,9 +38,11 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let facet = Facet(cli.facet);
-    let stamp = interiors::stamp_of(&cli.client, facet)?;
     eprintln!("interiors bake: reading wall catalogue and facet {facet}");
-    let graph = interiors::build(&cli.client, facet)?;
+    // The stamp is taken after the build, not before: the revision it records
+    // is the one the flood actually ran over.
+    let (graph, revision) = interiors::build(&cli.client, facet)?;
+    let stamp = interiors::stamp_of(&cli.client, facet, revision)?;
     let (width, height) = graph.dimensions();
     let buildings = graph.building_count();
     let path = cli

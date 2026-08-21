@@ -6,8 +6,8 @@ use std::process::ExitCode;
 use clap::Parser;
 use openshard_client_artscan::interiors;
 use openshard_client_render::doors;
+use openshard_map::MapSnapshot;
 use openshard_protocol::world::Facet;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 #[derive(Debug, Parser)]
@@ -47,20 +47,20 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let facet = Facet(cli.facet);
-    let stamp = interiors::stamp_of(&cli.client, facet)?;
+    let map = MapSnapshot::load_facet(&cli.client, facet)?;
+    let stamp = interiors::stamp_of(&cli.client, facet, map.revision())?;
     let graph = interiors::load_baked(&interiors::artifact_path(&cli.client, facet), &stamp)?;
-    let map = Map::load_facet(&cli.client, facet.0)?;
     let tiles = TileData::load(cli.client.join("tiledata.mul"))?;
     let table = openshard_client_artscan::load(&cli.client)?;
     for (x, y) in cli.points {
         println!(
             "{x},{y}: building {:?}, land {:?}",
             graph.building_at(x, y),
-            map.land(x, y)
+            map.map().land(x, y)
         );
         if graph.building_at(x, y).is_none() {
             if let Some(path) = openshard_client_render::interiors::BuildingMap::exterior_path(
-                &map,
+                map.map(),
                 &tiles,
                 &|graphic| table.shape(graphic),
                 (x, y),
@@ -89,7 +89,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 println!();
             }
         }
-        for item in map.statics_at(x, y) {
+        for item in map.map().statics_at(x, y) {
             let tile = tiles.static_tile(item.tile.0);
             println!(
                 "  static {:?} z={} flags={:?} height={}{}",

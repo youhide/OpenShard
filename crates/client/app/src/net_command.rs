@@ -493,16 +493,16 @@ impl App {
         // misconfiguration and not an event.
         if !self.world.authoritative.facet_checked {
             self.world.authoritative.facet_checked = true;
-            if u32::from(view.map.width) != self.resources.map.width()
-                || u32::from(view.map.height) != self.resources.map.height()
+            if u32::from(view.map.width) != self.resources.map.map().width()
+                || u32::from(view.map.height) != self.resources.map.map().height()
             {
                 eprintln!(
                     "the shard's facet is {}x{} and {} is {}x{}: the ground drawn is not the ground you are standing on",
                     view.map.width,
                     view.map.height,
-                    self.resources.map.facet_name(),
-                    self.resources.map.width(),
-                    self.resources.map.height(),
+                    self.resources.map.map().facet_name(),
+                    self.resources.map.map().width(),
+                    self.resources.map.map().height(),
                 );
             }
         }

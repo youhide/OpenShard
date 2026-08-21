@@ -17,6 +17,7 @@ description = "Measures a client's art once, off the clock, and writes the table
 [dependencies]
 openshard-client-render.workspace = true
 openshard-uofiles.workspace = true
+openshard-map.workspace = true
 openshard-protocol.workspace = true
 clap.workspace = true
 

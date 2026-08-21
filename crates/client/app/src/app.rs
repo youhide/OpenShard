@@ -303,7 +303,7 @@ impl App {
             Cutaway::OPEN
         } else {
             Cutaway::at(
-                &self.resources.map,
+                self.resources.map.map(),
                 &self.resources.tiledata,
                 self.world.presentation.cutaway_at,
                 true,
@@ -329,7 +329,7 @@ impl App {
             let frame = openshard_client_render::interiors::InteriorFrame::outside(interiors.clone());
             return Some(z_slice.map_or(frame.clone(), |view| frame.with_z_slice(player, view)));
         };
-        let map = &self.resources.map;
+        let map = self.resources.map.map();
         let tiledata = &self.resources.tiledata;
         let surfaces = &self.resources.surfaces;
         let shape_of = |graphic| {
@@ -725,9 +725,9 @@ impl App {
                 Self::in_bounds(
                     i32::from(knot.from.x),
                     i32::from(knot.from.y),
-                    &self.resources.map,
+                    self.resources.map.map(),
                 )
-                .and_then(|tile| self.resources.map.land(tile.x, tile.y))
+                .and_then(|tile| self.resources.map.map().land(tile.x, tile.y))
                 .map_or(self.world.motion.planning_state().position.z, |cell| cell.z)
             });
         let replay = replay::Replay::new(script, ground);

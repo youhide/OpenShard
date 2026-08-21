@@ -288,12 +288,12 @@ pub(crate) fn prepare_composite_job(
     window: &mut Screen,
     key: CompositeKey,
 ) -> Option<FlatGroundBlock> {
-    let map_width = resources.map.width() as i32;
-    let map_height = resources.map.height() as i32;
+    let map_width = resources.map.map().width() as i32;
+    let map_height = resources.map.map().height() as i32;
     if map_width <= 0 || map_height <= 0 {
         return None;
     }
-    let Some(ground) = FlatGroundBlock::inspect(&resources.map, key.block) else {
+    let Some(ground) = FlatGroundBlock::inspect(resources.map.map(), key.block) else {
         // This is a stable property of the immutable map, so treat it as a
         // completed LOD0 answer rather than retrying this producer request on
         // every camera frame.
@@ -320,7 +320,7 @@ pub(crate) fn prepare_composite_job(
     // LOD work cannot grow or mutate the static atlas and cannot bake a roof
     // outside its 8×8 source.
     let mut wanted = Wanted::default();
-    ground::graphics_in(&resources.map, owner, &mut wanted.land);
+    ground::graphics_in(resources.map.map(), owner, &mut wanted.land);
     if window
         .atlases
         .grow(
@@ -486,7 +486,7 @@ pub(crate) fn ready_atlases(
             &resources.tiledata,
             &mut resources.anim,
             &wanted_in(
-                &resources.map,
+                resources.map.map(),
                 [want],
                 &world.presentation.items,
                 &drawn.iter().map(|(_, mobile)| mobile.clone()).collect::<Vec<_>>(),
@@ -1339,7 +1339,7 @@ impl App {
             .map(|(_, mobile)| mobile)
             .collect();
         wanted_in(
-            &self.resources.map,
+            self.resources.map.map(),
             bands,
             &self.world.presentation.items,
             &drawn,
