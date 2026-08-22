@@ -89,12 +89,7 @@ impl World {
         // The live terrain, not the bare map: a closed door blocks a walk the
         // statics would allow.
         let before = walker;
-        let outcome = walker.request(
-            request,
-            &self.state.facet_state(facet).live_terrain(),
-            now,
-            mounted,
-        );
+        let outcome = walker.request(request, &self.state.live_terrain(facet), now, mounted);
         // `Walker::request` commits an accepted position to its private copy.
         // A body on that tile is another kind of obstruction, so restore the
         // whole walker before replying with the ordinary refusal. This keeps the
@@ -135,6 +130,7 @@ impl World {
                 self.state
                     .step_while_hidden(entity, request.facing.running, mounted);
                 self.state.registry.insert(entity, Position(position));
+                items::occupy_chair(&mut self.state, entity);
                 self.state.registry.insert(entity, Heading(facing));
                 if !mounted {
                     combat::record_wrestling_step(&mut self.state, entity);
@@ -262,11 +258,7 @@ impl World {
             });
             return;
         };
-        let landed = self
-            .state
-            .facet_state(facet)
-            .live_terrain()
-            .can_step(walker.position, target);
+        let landed = self.state.live_terrain(facet).can_step(walker.position, target);
         let Some(landed) = landed else {
             self.state.bus.send(StepRefused {
                 entity,

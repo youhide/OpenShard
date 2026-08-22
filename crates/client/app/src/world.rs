@@ -21,12 +21,10 @@ use openshard_client_render::follow::Gaze;
 use openshard_client_render::items::GroundItem;
 use openshard_client_render::mobiles::Mobile;
 use openshard_client_render::statics::StaticGeometry;
-use openshard_map::map::WorldMap;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Hue;
 use openshard_protocol::world::Point;
-use openshard_uofiles::tiledata::TileData;
 
 use crate::crowd::{Crowd, Who};
 use crate::{clutter, link, resources};
@@ -918,9 +916,7 @@ impl WorldState {
 /// sees disjoint *fields* through a chain of `.` projections but not through
 /// a method call, which is opaque to it. Passing `&self.resources` here is
 /// the same projection the field access always was, just wrapped.
-pub(crate) fn terrain(
-    resources: &resources::Resources,
-) -> openshard_movement::MapTerrain<&WorldMap, &TileData> {
+pub(crate) fn terrain(resources: &resources::Resources) -> openshard_movement::MapTerrain<'_> {
     openshard_movement::MapTerrain::new(resources.map.map(), &resources.tiledata)
 }
 
@@ -931,7 +927,7 @@ pub(crate) fn terrain(
 pub(crate) fn cluttered<'a>(
     world: &'a WorldState,
     resources: &'a resources::Resources,
-) -> clutter::Cluttered<'a, openshard_movement::MapTerrain<&'a WorldMap, &'a TileData>> {
+) -> clutter::Cluttered<'a, openshard_movement::MapTerrain<'a>> {
     world
         .presentation
         .clutter
@@ -944,7 +940,7 @@ pub(crate) fn cluttered<'a>(
 pub(crate) fn cluttered_with_doors_open<'a>(
     world: &'a WorldState,
     resources: &'a resources::Resources,
-) -> clutter::Cluttered<'a, openshard_movement::MapTerrain<&'a WorldMap, &'a TileData>> {
+) -> clutter::Cluttered<'a, openshard_movement::MapTerrain<'a>> {
     world
         .presentation
         .clutter

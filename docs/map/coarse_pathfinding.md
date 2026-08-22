@@ -109,9 +109,10 @@ not which library builds it:
 
 - **Server.** `crates/server/state/src/obstruct.rs`'s own doc: "the doorway it stands in is an
   open gap in the statics by construction". A door is a live entity, registered only in
-  `Obstructions`, never in `FacetState.terrain` (the static `MapTerrain`) — confirmed by search,
-  every production write to `terrain` happens exactly once, at facet load. Build the coarse
-  graph from `terrain` alone and every doorway is simply open ground to it, no special case.
+  `Obstructions`, never in `FacetState.terrain` (the static `MapTerrain`; the field is
+  `FacetState.map`, a `MapSnapshot`, since [`terrain_seam.md`](terrain_seam.md)'s D) — confirmed
+  by search, every production write to it happens exactly once, at facet load. Build the coarse
+  graph from the map alone and every doorway is simply open ground to it, no special case.
 - **Client.** `crates/client/app/src/clutter.rs` + its call sites in `lib.rs` (e.g. line 2076)
   confirm the same split: `App` holds `self.map`/`self.tiledata` — the bare client files —
   entirely separately from `Clutter`, which is what lays the shard's placed items (doors
@@ -214,7 +215,7 @@ assumption about our own game:
 - `ai::step_toward`/creature chase — untouched, doesn't need this.
 - `npc`/`quests` — zero current callers of any long-distance path; nothing to wire.
 - Live invalidation — not needed given the static-only design; if housing later mutates
-  `FacetState.terrain` directly (it doesn't today — stub crate), this assumption needs
+  the facet's map directly (it doesn't today — stub crate), this assumption needs
   revisiting then, not now.
 
 ## Verification

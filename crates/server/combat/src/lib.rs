@@ -714,7 +714,7 @@ pub fn volleys(state: &mut WorldState) {
         {
             continue; // melee's beat, or out of reach — the brain closes in
         }
-        if !state.facet_state(facet).live_terrain().sight_clear(from, to) {
+        if !state.live_terrain(facet).sight_clear(from, to) {
             continue; // no shooting through walls
         }
         let by = state.registry.serial_of(attacker);
@@ -788,7 +788,7 @@ pub fn swings(state: &mut WorldState) {
             // Adjacent tiles can still be separated by a closed door or wall.
             // Melee follows the same live-terrain sight rule as a volley and an
             // interaction: range alone must not allow a blow through an obstacle.
-            || !state.facet_state(facet).live_terrain().sight_clear(attacker_pos, target_pos)
+            || !state.live_terrain(facet).sight_clear(attacker_pos, target_pos)
         {
             continue;
         }

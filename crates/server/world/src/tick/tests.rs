@@ -59,9 +59,7 @@ pub(super) const WALL_FLAGS: u64 =
 /// agreed with itself about a question the shard asks `tiledata.mul`. One `.mul`
 /// row written here is the same indirection the real file has, so a fixture
 /// cannot test a shortcut the shard does not take.
-pub(super) fn tiles_with(
-    entries: &[(u16, u64, u8)],
-) -> std::sync::Arc<openshard_uofiles::tiledata::TileData> {
+pub(super) fn tiles_with(entries: &[(u16, u64, u8)]) -> openshard_uofiles::tiledata::TileData {
     let mut tiles = openshard_uofiles::tiledata::TileData::empty();
     for &(graphic, flags, height) in entries {
         tiles.set_static_tile(
@@ -73,7 +71,7 @@ pub(super) fn tiles_with(
             },
         );
     }
-    std::sync::Arc::new(tiles)
+    tiles
 }
 
 /// A multi table holding one shape under one id — what a fixture house or ship
@@ -99,29 +97,33 @@ pub(super) fn multis_with(
 fn a_facet_keeps_the_coarse_router_it_was_given_and_no_other() {
     use openshard_map::grid::BlockExtent;
     use openshard_map::map::{LandCell, WorldMap};
+    use openshard_map::snapshot::MapSnapshot;
     use openshard_movement::{LandTile, MapTerrain, NavigationGraph};
     use openshard_protocol::world::Facet;
     use openshard_uofiles::tiledata::TileData;
 
     let flat = || {
-        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
-        });
-        MapTerrain::new(map, TileData::empty())
+        })
     };
+    let snapshot = || MapSnapshot::new(Facet(0), flat());
 
-    // Terrain alone: no graph was baked, so the facet reports none.
-    let unbaked = World::new(START).with_terrain(flat());
+    // A map alone: no graph was baked, so the facet reports none.
+    let unbaked = World::new(START).with_map(snapshot());
     assert_eq!(
         unbaked.state.facet_state(Facet(0)).coarse_router().map(|_| ()),
         None,
         "a facet loaded without a baked graph must not appear to have one"
     );
 
-    // The same terrain with its graph: kept, and over the map's own extent.
-    let baked = NavigationGraph::build(&flat(), 8, 8).expect("an 8x8 facet has a graph");
-    let loaded = World::new(START).with_facet(Facet(0), flat(), Some(baked));
+    // The same map with its graph: kept, and over the map's own extent.
+    let empty = TileData::empty();
+    let map = flat();
+    let baked =
+        NavigationGraph::build(&MapTerrain::new(&map, &empty), 8, 8).expect("an 8x8 facet has a graph");
+    let loaded = World::new(START).with_facet(Facet(0), snapshot(), Some(baked));
     assert_eq!(
         loaded
             .state
@@ -1019,11 +1021,11 @@ fn double_clicking_a_container_opens_it() {
 const WOODEN_CHAIR: Graphic = Graphic(0x0B57);
 
 #[test]
-fn double_clicking_a_chair_seats_one_player_and_the_next_step_leaves_it() {
+fn walking_onto_a_chair_seats_one_player_and_the_next_step_leaves_it() {
     let now = Instant::now();
     let mut world = world();
     let player = enter(&mut world, now);
-    let chair_at = Point::new(START.0, START.1, 0);
+    let chair_at = Point::new(START.0, START.1 - 1, 0);
     world.queue(Command::SpawnItem {
         graphic: WOODEN_CHAIR,
         hue: Hue::NONE,
@@ -1033,28 +1035,16 @@ fn double_clicking_a_chair_seats_one_player_and_the_next_step_leaves_it() {
         facet: Facet(0),
     });
     world.tick(now);
-    let chair = loose_item_serial(&world);
     let player_entity = entity(&world, serial_of(&world, player));
+    let mut walker = world
+        .state
+        .registry
+        .get::<Movement>(player_entity)
+        .copied()
+        .expect("a player can walk");
+    walker.0.facing = Facing::walking(Direction::North);
+    world.state.registry.insert(player_entity, walker);
     let _ = packets_for(&mut world, player);
-
-    world.queue(Command::DoubleClick {
-        connection: player,
-        request: UseRequest::Use(RawSerial(chair.raw())),
-    });
-    world.tick(now);
-
-    assert_eq!(
-        world.state.registry.get::<Position>(player_entity),
-        Some(&Position(chair_at)),
-        "the player lands at the chair's own z, which is the client's seating predicate"
-    );
-    assert!(world.registry().has::<openshard_state::Seated>(player_entity));
-    assert!(
-        packets_for(&mut world, player)
-            .iter()
-            .any(|packet| packet[0] == 0x20),
-        "the seated player's own client is snapped to the chair"
-    );
 
     world.queue(Command::Walk {
         connection: player,
@@ -1062,10 +1052,29 @@ fn double_clicking_a_chair_seats_one_player_and_the_next_step_leaves_it() {
     });
     world.tick(now + WALK_INTERVAL);
 
+    assert_eq!(
+        world.state.registry.get::<Position>(player_entity),
+        Some(&Position(chair_at)),
+        "the player walks onto the chair's own z, which is the client's seating predicate"
+    );
+    assert!(world.registry().has::<openshard_state::Seated>(player_entity));
+    assert!(
+        packets_for(&mut world, player)
+            .iter()
+            .any(|packet| packet[0] == 0x22),
+        "walking onto a chair remains an ordinary accepted movement"
+    );
+
+    world.queue(Command::Walk {
+        connection: player,
+        request: walk(0, Direction::North),
+    });
+    world.tick(now + WALK_INTERVAL + WALK_INTERVAL);
+
     assert!(!world.registry().has::<openshard_state::Seated>(player_entity));
     assert_eq!(
         world.state.registry.get::<Position>(player_entity),
-        Some(&Position(Point::new(START.0, START.1 - 1, 0))),
+        Some(&Position(Point::new(START.0, START.1 - 2, 0))),
         "the first directional request walks out of the seat instead of merely turning"
     );
 }
@@ -1076,8 +1085,8 @@ fn an_occupied_chair_does_not_move_a_second_player() {
     let mut world = world();
     let first = enter(&mut world, now);
     let second = enter(&mut world, now + WALK_INTERVAL);
-    let chair_at = Point::new(START.0, START.1, 0);
-    teleport(&mut world, second, Point::new(START.0 + 1, START.1, 0));
+    let chair_at = Point::new(START.0 + 1, START.1, 0);
+    teleport(&mut world, second, Point::new(START.0 + 2, START.1, 0));
     world.queue(Command::SpawnItem {
         graphic: WOODEN_CHAIR,
         hue: Hue::NONE,
@@ -1087,20 +1096,44 @@ fn an_occupied_chair_does_not_move_a_second_player() {
         facet: Facet(0),
     });
     world.tick(now + WALK_INTERVAL);
-    let chair = loose_item_serial(&world);
-
-    for connection in [first, second] {
-        world.queue(Command::DoubleClick {
-            connection,
-            request: UseRequest::Use(RawSerial(chair.raw())),
-        });
-        world.tick(now + WALK_INTERVAL);
-    }
+    let first_entity = entity(&world, serial_of(&world, first));
+    let mut walker = world
+        .state
+        .registry
+        .get::<Movement>(first_entity)
+        .copied()
+        .expect("a player can walk");
+    walker.0.facing = Facing::walking(Direction::East);
+    world.state.registry.insert(first_entity, walker);
 
     let second_entity = entity(&world, serial_of(&world, second));
+    let mut walker = world
+        .state
+        .registry
+        .get::<Movement>(second_entity)
+        .copied()
+        .expect("a player can walk");
+    walker.0.facing = Facing::walking(Direction::West);
+    world.state.registry.insert(second_entity, walker);
+    world.queue(Command::Walk {
+        connection: first,
+        request: walk(0, Direction::East),
+    });
+    world.tick(now + WALK_INTERVAL + WALK_INTERVAL);
+    assert!(
+        world.registry().has::<openshard_state::Seated>(first_entity),
+        "the first player reached the chair before the second tried to enter it"
+    );
+
+    world.queue(Command::Walk {
+        connection: second,
+        request: walk(0, Direction::West),
+    });
+    world.tick(now + WALK_INTERVAL + WALK_INTERVAL + WALK_INTERVAL);
+
     assert_eq!(
         world.state.registry.get::<Position>(second_entity),
-        Some(&Position(Point::new(START.0 + 1, START.1, 0))),
+        Some(&Position(Point::new(START.0 + 2, START.1, 0))),
         "a second character cannot overwrite the seat occupant"
     );
     assert!(!world.registry().has::<openshard_state::Seated>(second_entity));
@@ -9426,8 +9459,8 @@ fn door_frames(walled: bool) -> Scene {
 
 /// Give the default facet a scene, and the shard the table that scene reads.
 fn stand_on(world: &mut World, scene: Scene) {
-    let (terrain, tiles) = scene.into_shard();
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(terrain));
+    let (map, tiles) = scene.into_shard(Facet(0));
+    world.state.facet_state_mut(Facet(0)).map = Some(map);
     world.state.tiles = tiles;
 }
 
@@ -12240,7 +12273,7 @@ fn single_clicking_a_named_mobile_draws_its_name() {
 /// A real `TileData` and not a hand-written `Terrain`: the name is a row in
 /// `tiledata.mul`, placeholders and all, and the reader that decides `"NoName"`
 /// means *no name* is the one under test.
-fn named(graphic: u16, name: &str) -> std::sync::Arc<openshard_uofiles::tiledata::TileData> {
+fn named(graphic: u16, name: &str) -> openshard_uofiles::tiledata::TileData {
     let mut tiles = openshard_uofiles::tiledata::TileData::empty();
     tiles.set_static_tile(
         graphic,
@@ -12249,7 +12282,7 @@ fn named(graphic: u16, name: &str) -> std::sync::Arc<openshard_uofiles::tiledata
             ..openshard_uofiles::tiledata::StaticTile::default()
         },
     );
-    std::sync::Arc::new(tiles)
+    tiles
 }
 
 #[test]
@@ -12934,7 +12967,7 @@ pub(super) fn add_empty_facet_sized(world: &mut World, facet: Facet, width: u32,
     world.state.facets.insert(
         facet,
         FacetState {
-            terrain: None,
+            map: None,
             coarse: None,
             width,
             height,

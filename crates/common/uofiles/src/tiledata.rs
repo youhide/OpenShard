@@ -407,12 +407,6 @@ impl fmt::Debug for TileData {
     }
 }
 
-impl AsRef<TileData> for TileData {
-    fn as_ref(&self) -> &TileData {
-        self
-    }
-}
-
 impl TileData {
     /// Read `tiledata.mul`, working out its layout from its size.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, TileDataError> {

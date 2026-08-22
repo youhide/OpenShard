@@ -18,14 +18,28 @@ mod tests {
     /// `openshard_movement::terrain`'s own tests for the rest of the coverage —
     /// this one is here only because it needs `openshard-state`'s layer
     /// constants, which `openshard-movement` may not depend on.
-    fn real_terrain() -> Option<MapTerrain> {
+    ///
+    /// Only the table is read here, but it is read *through a terrain*, because
+    /// what this pins is what a shard's own ground would answer.
+    struct Install {
+        map: openshard_map::map::WorldMap,
+        tiles: TileData,
+    }
+
+    impl Install {
+        fn terrain(&self) -> MapTerrain<'_> {
+            MapTerrain::new(&self.map, &self.tiles)
+        }
+    }
+
+    fn real_install() -> Option<Install> {
         let dir = std::path::PathBuf::from(std::env::var_os("OPENSHARD_CLIENT")?);
         if !dir.join("tiledata.mul").exists() {
             return None;
         }
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("the client's map0 should load");
         let tiles = TileData::load(dir.join("tiledata.mul")).expect("tiledata should load");
-        Some(MapTerrain::new(map, tiles))
+        Some(Install { map, tiles })
     }
 
     #[test]
@@ -36,9 +50,10 @@ mod tests {
         // bardiche, quarter staff and spear take both hands, a katana and a dagger
         // one. The file is *wrong* about the bow (it files it one-handed), which is
         // the reason `weapon::weapon_layer` lets six classes override it.
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
         assert_eq!(
             Layer(terrain.tiles().static_tile(0x13B2).layer),
             openshard_state::weapon::LAYER_ONE_HANDED,

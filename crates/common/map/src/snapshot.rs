@@ -181,18 +181,6 @@ impl MapSnapshot {
     }
 }
 
-/// So a `MapTerrain` can be parameterised over the snapshot itself.
-///
-/// Not `Deref`: a snapshot is not a map with extra fields, and letting
-/// `snapshot.land(..)` resolve would hide the very seam this phase adds. This
-/// impl exists because `MapTerrain<M>` is already generic over `M: AsRef<WorldMap>`,
-/// and a holder is what that bound was always asking for.
-impl AsRef<WorldMap> for MapSnapshot {
-    fn as_ref(&self) -> &WorldMap {
-        self.map()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

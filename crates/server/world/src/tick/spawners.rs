@@ -74,9 +74,7 @@ impl World {
             // where there is no map.
             let z = self
                 .state
-                .facet_state(facet)
-                .terrain
-                .as_ref()
+                .map_terrain(facet)
                 .and_then(|terrain| terrain.ground_z(Tile::new(x, y)))
                 .unwrap_or(0);
 

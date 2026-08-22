@@ -24,7 +24,6 @@
 
 use std::path::PathBuf;
 
-use openshard_map::map::WorldMap;
 use openshard_movement::{MapTerrain, Terrain, Tile};
 use openshard_protocol::world::{Facet, Point};
 use openshard_uofiles::tiledata::TileData;
@@ -79,8 +78,8 @@ fn a_base_set_walks_and_sees_exactly_as_the_install_does() {
     // and giving the two sides different tables would make this a test of the
     // table instead of a test of the map.
     let tiles = TileData::load(dir.join("tiledata.mul")).expect("tiledata should load");
-    let was: MapTerrain<&WorldMap, &TileData> = MapTerrain::new(installed.map(), &tiles);
-    let is: MapTerrain<&WorldMap, &TileData> = MapTerrain::new(restored.map(), &tiles);
+    let was: MapTerrain<'_> = MapTerrain::new(installed.map(), &tiles);
+    let is: MapTerrain<'_> = MapTerrain::new(restored.map(), &tiles);
 
     let (width, height) = (restored.map().width() as u16, restored.map().height() as u16);
     assert_eq!(

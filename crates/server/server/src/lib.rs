@@ -68,7 +68,7 @@ use openshard_protocol::{access::AccessLevel, huffman};
 use openshard_uofiles::tiledata::TileData;
 use openshard_world::tick::screen::CharacterScreen;
 use openshard_world::{
-    AdminMenuAction, Command, Gameplay, MapTerrain, PlayerEntered, PlayerLeaving, PlayerLeft, PlayerRefused,
+    AdminMenuAction, Command, Gameplay, PlayerEntered, PlayerLeaving, PlayerLeft, PlayerRefused,
     RestoredCharacters, RestoredItems, StatLock, TICK_INTERVAL, World,
 };
 use tokio::sync::{Semaphore, mpsc};

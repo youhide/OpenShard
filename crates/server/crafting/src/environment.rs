@@ -16,7 +16,7 @@
 //! and the z band below already throws out the forge on the floor above.
 
 use openshard_entities::EntityId;
-use openshard_movement::Tile;
+use openshard_movement::{Terrain, Tile};
 use openshard_state::WorldState;
 use openshard_state::components::{Drawn, Position};
 
@@ -104,7 +104,7 @@ pub fn around(state: &WorldState, crafter: EntityId) -> Facilities {
     // And the map's own. A great many of Britannia's forges are static tiles that
     // no entity stands for, so this half is not an optimisation — without it a
     // smith cannot work in most of the shops that have a forge drawn in them.
-    let Some(terrain) = state.facets.get(&facet).and_then(|f| f.terrain.as_deref()) else {
+    let Some(terrain) = state.map_terrain(facet) else {
         return found;
     };
     let mut statics = Vec::new();

@@ -75,7 +75,7 @@ pub fn step_toward(
     // The live terrain, not the bare map: a route must not thread a placed
     // crate the step would then refuse. A door-opener plans through doors and
     // opens them on arrival.
-    let planner = state.facet_state(facet).planning_terrain(through_doors);
+    let planner = state.planning_terrain(facet, through_doors);
     if let Some(path) = find_path(&planner, from, to, PATH_BUDGET) {
         return path.first().copied();
     }
@@ -128,10 +128,7 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction
                     state.registry.remove::<ChasePath>(creature);
                     return kite_step(state, facet, pos, target_pos);
                 }
-                let clear = state
-                    .facet_state(facet)
-                    .live_terrain()
-                    .sight_clear(pos, target_pos);
+                let clear = state.live_terrain(facet).sight_clear(pos, target_pos);
                 if gap <= u32::from(range.get()) && clear {
                     return None; // in reach, sight line clear: stand and loose
                 }
@@ -224,7 +221,7 @@ fn probe(state: &WorldState, facet: Facet, from: Point, dir: Direction) -> (bool
     let Some(target) = step_from(from, dir) else {
         return (false, None);
     };
-    let live = state.facet_state(facet).live_terrain();
+    let live = state.live_terrain(facet);
     if live.can_step(from, target).is_some() {
         return (true, None);
     }
@@ -294,7 +291,7 @@ fn chase_step(
     // Blocked: plan a route around. A door-opener plans through doors and
     // opens them on arrival.
     let planned = {
-        let planner = state.facet_state(facet).planning_terrain(brain.opens_doors);
+        let planner = state.planning_terrain(facet, brain.opens_doors);
         find_path(&planner, from, to, PATH_BUDGET)
     };
     match planned {
@@ -359,7 +356,7 @@ fn nearest_player_in_sight(
     sight: Sight,
 ) -> Option<Serial> {
     let facet_state = state.facet_state(facet);
-    let live = facet_state.live_terrain();
+    let live = state.live_terrain(facet);
     let sectors = &facet_state.sectors;
     let mut best: Option<(u32, Serial)> = None;
     for (id, pos) in sectors.nearby(from, u32::from(sight.0)) {

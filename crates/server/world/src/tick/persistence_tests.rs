@@ -1204,9 +1204,9 @@ fn a_boat_survives_a_restart_with_its_deck() {
         scene
     }
 
-    let (terrain, tiles) = sea().into_shard();
+    let (map, tiles) = sea().into_shard(Facet(0));
     let mut world = World::new(START).with_save_every(0);
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(terrain));
+    world.state.facet_state_mut(Facet(0)).map = Some(map);
     world.state.tiles = tiles;
     world.state.multis = super::tests::multis_with(SLOOP, sloop());
     let now = Instant::now();
@@ -1240,8 +1240,8 @@ fn a_boat_survives_a_restart_with_its_deck() {
 
     // The shard comes back up on that save, with the same sea.
     let mut restored = World::new(START);
-    let (terrain, tiles) = sea().into_shard();
-    restored.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(terrain));
+    let (map, tiles) = sea().into_shard(Facet(0));
+    restored.state.facet_state_mut(Facet(0)).map = Some(map);
     restored.state.tiles = tiles;
     restored.state.multis = super::tests::multis_with(SLOOP, sloop());
     restored.restore_boats(boats);

@@ -37,7 +37,7 @@ pub mod storage;
 mod tests;
 
 use openshard_entities::EntityId;
-use openshard_movement::Tile;
+use openshard_movement::{Terrain, Tile};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
@@ -819,7 +819,7 @@ fn check_region(state: &WorldState, facet: Facet, at: Point, covered: &[Tile]) -
 /// has a wall, and the remaining case needs a terrain question this seam does not
 /// have; see `docs/map/terrain_seam.md`.
 fn check_ground(state: &WorldState, facet: Facet, at: Point, footprint: &[Footprint]) -> Result<(), Refusal> {
-    let Some(terrain) = state.facet_state(facet).terrain.as_deref() else {
+    let Some(terrain) = state.map_terrain(facet) else {
         return Ok(()); // no map, no opinion — every other check here says the same
     };
     for spot in footprint {

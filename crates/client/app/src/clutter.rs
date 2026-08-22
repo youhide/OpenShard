@@ -219,11 +219,7 @@ impl Clutter {
 
     /// The map with this clutter laid over it — what every step decision on this
     /// end should actually ask.
-    pub const fn over<'a>(
-        &'a self,
-        map: &'a WorldMap,
-        tiles: &'a TileData,
-    ) -> Cluttered<'a, MapTerrain<&'a WorldMap, &'a TileData>> {
+    pub const fn over<'a>(&'a self, map: &'a WorldMap, tiles: &'a TileData) -> Cluttered<'a, MapTerrain<'a>> {
         self.over_terrain(MapTerrain::new(map, tiles))
     }
 
@@ -240,7 +236,7 @@ impl Clutter {
         &'a self,
         map: &'a WorldMap,
         tiles: &'a TileData,
-    ) -> Cluttered<'a, MapTerrain<&'a WorldMap, &'a TileData>> {
+    ) -> Cluttered<'a, MapTerrain<'a>> {
         Cluttered {
             map: MapTerrain::new(map, tiles),
             clutter: self,

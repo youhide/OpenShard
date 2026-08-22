@@ -1454,17 +1454,14 @@ fn generated_frame_at(map: &WorldMap, x: usize, y: usize, z: i8, side: fn(u16) -
 
 /// Mark one server-generated door position, using the same stand-height test as
 /// the server's placement pass.
-fn generated_door_anchor<M, T>(
-    terrain: &MapTerrain<M, T>,
+fn generated_door_anchor(
+    terrain: &MapTerrain<'_>,
     wall_tiles: &[bool],
     doors: &mut [bool],
     x: usize,
     y: usize,
     z: i8,
-) where
-    M: AsRef<WorldMap>,
-    T: AsRef<TileData>,
-{
+) {
     let width = terrain.map().width() as usize;
     let index = y * width + x;
     if wall_tiles[index] || doors[index] {

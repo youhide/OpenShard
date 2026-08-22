@@ -214,15 +214,16 @@ impl World {
 
     /// Whether a mobile could stand on this tile — the arrival test.
     fn can_stand_at(&self, facet: Facet, at: Point) -> bool {
-        let state = self.state.facet_state(facet);
         // A facet with no map is development mode, where every tile is allowed;
-        // the same convention the step check uses.
-        if state.terrain.is_none() {
+        // the same convention the step check uses. Asked of the map itself now:
+        // what this wanted to know was never whether some abstraction was
+        // present, only whether there is ground to have an opinion about.
+        if self.state.map_terrain(facet).is_none() {
             return true;
         }
         // The live floor, so a wall the world put there since the rune was
         // marked counts as much as one the map has always had.
-        let live = state.live_terrain();
+        let live = self.state.live_terrain(facet);
         // Reached from its own height, which is what asking "is this tile
         // standable" means when nobody is walking onto it from anywhere.
         openshard_movement::Terrain::stand_z(&live, Tile::new(at.x, at.y), i32::from(at.z)).is_some()

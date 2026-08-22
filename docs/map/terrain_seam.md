@@ -30,18 +30,21 @@ The routing it feeds:
 
 Read off the workspace, not remembered. `impl Terrain for` appeared at **37
 sites under 27 distinct names** when this was written; 31 of those sites were
-test doubles. B and C between them took it to **17 sites under 16 names**, and
-every one of the eleven left in a test is now local to the crate whose own rule
-it exercises — none is handed to a `FacetState`. These six are the rest:
+test doubles. B and C between them took it to **17 sites under 16 names**, and D
+to **15 under 14** — the last two doubles were `openshard-state`'s own, and
+`LiveTerrain` taking a named map is what stopped them compiling. Every one left
+in a test is local to the crate whose own rule it exercises, and none is handed
+to a `FacetState`, which no longer has anywhere to put one. These six are the
+rest:
 
 | | | |
 |---|---|---|
-| [`MapTerrain`](../../crates/common/movement/src/terrain.rs#L61) | the map and `tiledata.mul` | **a terrain** |
-| [`Cluttered`](../../crates/client/app/src/clutter.rs#L306) | the client's live items over it | a **mask** |
-| [`LiveTerrain`](../../crates/server/state/src/obstruct.rs#L199) | the server's live items over it | the **same mask** |
+| [`MapTerrain`](../../crates/common/movement/src/terrain.rs#L64) | the map and `tiledata.mul` | **a terrain** |
+| [`Cluttered`](../../crates/client/app/src/clutter.rs#L285) | the client's live items over it | a **mask** |
+| [`LiveTerrain`](../../crates/server/state/src/obstruct.rs#L140) | the server's live items over it | the **same mask** |
 | [`CachedTerrain`](../../crates/common/movement/src/cache.rs#L30) | memoises `can_step` for one query | a **memo table** |
-| [`InRegion`](../../crates/common/movement/src/navigation.rs#L80) | three lines: refuse a step leaving a rectangle | a **parameter** |
-| [`OpenWorld`](../../crates/common/movement/src/walk.rs#L270) | `can_step` returns `Some(to)` | the **absence** of a map |
+| [`InRegion`](../../crates/common/movement/src/navigation.rs#L81) | three lines: refuse a step leaving a rectangle | a **parameter** |
+| [`OpenWorld`](../../crates/common/movement/src/walk.rs#L211) | `can_step` returns `Some(to)` | the **absence** of a map |
 
 `InRegion` is the clearest case, because it is short enough to quote whole:
 
@@ -155,7 +158,8 @@ Seven files out of sixteen had never wanted a floor. One wanted a boolean.
 **B settled the first row and half the third.** Those callers read
 `WorldState::tiles` and `WorldState::multi_components` now, and nine of them
 stopped taking a `facet` or a `near: EntityId` they only ever used to walk to
-the table. What is left on `FacetState.terrain` is the map, which is D's.
+the table. What was left on `FacetState.terrain` was the map, and D made the
+field say so: it is `FacetState.map`, a `MapSnapshot`.
 
 ### The dependency argument for the seam is already spent
 
@@ -217,51 +221,58 @@ Both types named and imported. What happens to the other five:
 | `Doors` | an argument to the search — the client's enum, not the server's bool |
 | `InRegion` | an `Option<Region>` bound the search is told once |
 | `CachedTerrain` | moves *inside* `search`, which already owns per-query maps for `came_from`; its lifetime was already exactly one query |
-| `OpenWorld` | an empty overlay over no map — `Option<&MapTerrain>`, which `LiveTerrain` already carries |
+| `OpenWorld` | an empty overlay over no map — `Option<MapTerrain<'_>>`, which `LiveTerrain` carries since D |
 
-### `MapTerrain` is three borrows, and both ends already hold them
+### `MapTerrain` is three borrows, and both ends already hold them ✅
 
-`MapTerrain` is generic over ownership — `M: AsRef<WorldMap>, T:
-AsRef<TileData>` — so the server can own its map and the client borrow one. That
-parameterisation buys one thing: a terrain with no lifetime, so it can sit in a
-`Box` in a struct field. Nothing else asks for it.
+**Done in D**, and one field smaller than this section predicted — B had already
+taken `multis` off the terrain, so what landed is two borrows and a flag.
 
-And both ends already own precisely its three fields:
+`MapTerrain` used to be generic over ownership — `M: AsRef<WorldMap>, T:
+AsRef<TileData>` — so the server could own its map and the client borrow one.
+That parameterisation bought one thing: a terrain with no lifetime, so it could
+sit in a `Box` in a struct field. Nothing else asked for it.
+
+And both ends already owned precisely its fields:
 
 | | server | client |
 |---|---|---|
 | map | `MapSnapshot`, [`boot.rs:660`](../../crates/server/server/src/boot.rs#L660) | `Resources.map: MapSnapshot` |
 | tiledata | `Arc<TileData>` | `Resources.tiledata: Arc<TileData>` |
-| multis | `Option<Arc<Multis>>` | `Resources.multis: Option<Arc<Multis>>` |
+| ~~multis~~ | ~~`Option<Arc<Multis>>`~~ — B removed the question | ~~`Resources.multis`~~ |
 
-So `MapTerrain<'a> { map: &'a WorldMap, tiles: &'a TileData, multis: Option<&'a
-Multis> }` is buildable on either end from fields that already exist, costs
-three pointers to construct per query, and makes the type **one name that can be
-imported** rather than two unrelated instantiations. That is the collapse; the
-`AsRef` bound does not survive it, and does not need to.
+So `MapTerrain<'a> { map: &'a WorldMap, tiles: &'a TileData, swimming: bool }`
+is buildable on either end from fields that already exist, costs two pointers to
+construct per query, and makes the type **one name that can be imported** rather
+than two unrelated instantiations. The `AsRef` bound did not survive it, and
+neither did the three `AsRef` impls that existed only to satisfy it.
 
-### `swimming` is a property of a body, parked on a world
+### `swimming` is a property of a body, parked on a world ✅
 
-[`MapTerrain::swimming`](../../crates/common/movement/src/terrain.rs#L99) is
-set **nowhere in production** — the only caller is `load_client(true)` in
+**Resolved in D by moving what it sits on**, not by moving the field. See
+[D's own section](#swimming-is-an-argument-now-because-the-thing-it-sits-on-is-the-query).
+
+The finding was that [`MapTerrain::swimming`](../../crates/common/movement/src/terrain.rs)
+is set **nowhere in production** — the only caller was `load_client(true)` in
 terrain.rs's own tests. It is a per-creature fact (*a boat or a fish says yes*)
-living as a field on the per-facet world, which is why no shipping caller can
-turn it on: there is one terrain per facet and it would be turned on for
-everyone.
+that was living as a field on the per-facet world, which is why no shipping
+caller could turn it on: there was one terrain per facet, and turning it on
+turned it on for everyone standing there.
 
-Deciding it is part of deciding `MapTerrain`'s shape, so it is decided in the
-same node: either it becomes an argument of the query beside `Doors`, or it
-goes until there is a swimmer. What it must not do is stay a field.
+A `MapTerrain` is built per question now, so the field is on the query and
+`.swimming(true)` scopes to the one asker — which is what "an argument beside
+`Doors`" was asking for. Still unused in production, because the shard has no
+swimmer yet; no longer unusable, which was the defect.
 
 ## What has no incoming edge
 
-The collapse is a graph, not a sequence. A, B and C are done, and **D is the
-only node left with everything it needs**:
+The collapse is a graph, not a sequence. A, B, C and D are done, and **E is the
+only node left with an unmet edge — the oracle**:
 
 ```
  A. Scene grows what the doubles need ✅ ─┐
                                           ├─> C. the doubles become Scenes ✅ ─┐
- B. the table leaves the trait ✅ ────────┴────────────────────────────────────┼─> D. FacetState holds data
+ B. the table leaves the trait ✅ ────────┴────────────────────────────────────┼─> D. FacetState holds data ✅
                                                                                │      MapTerrain is borrows
  0. the facet-0 oracle ────────────────────────────────────────────────────────┴─> E. Overlay, and the search
                                                                                       takes explicit types
@@ -273,16 +284,19 @@ production: fifteen `= Some(Box::new(...))` substitutions across four files when
 this was written, against exactly one production construction at
 [`boot.rs:664`](../../crates/server/server/src/boot.rs#L664). That was the edge
 `A → C → D`, and it is why D could not be the first commit however mechanical it
-looked. B deleted four of the doubles and C converted the other eight, so what is
-in the box now is a `MapTerrain` at every site — the box itself is all D has left
-to remove.
+looked. B deleted four of the doubles and C converted the other eight, so by the
+time D ran there was a `MapTerrain` at every site and the box was all that was
+left to take away.
 
 ### Following the compiler works for B and D, and not for E
 
 Deleting a method from a trait and letting `cargo check` enumerate the wreckage
 is the right tool for the table (B) and for `FacetState` (D): every site there
 is a one-line substitution with a mechanically obvious replacement, and there
-are 26 of them.
+are 26 of them. D bore this out — the whole node was compiler-led, and the two
+things it turned up that the plan had not predicted (`can_fit`'s two shapes, and
+`openshard-state`'s own last two doubles) were both *found by the compiler*
+rather than by reading.
 
 It is the wrong tool for `Overlay` (E). Removing `can_step` from a trait points
 at 38 impl sites and says nothing about the four decisions listed under [the
@@ -394,23 +408,28 @@ the same ten places it warned in before.
 
 ### One `Arc` is gone and one is not, and the difference is the box
 
-`multis` is owned outright: after `MapTerrain` lost its copy, `WorldState` is the
-only thing on the shard holding a multi table, so there is nothing to share it
-with and the `Arc` was vestigial the moment it was written.
+**Both are gone now — D took the second one.** Kept here because the *reason*
+the second one existed is the clearest single statement of what the box was
+costing, and it was written before the box came out.
 
-`tiles` keeps one, and it has **exactly one other holder**: the
+`multis` was owned outright from B: after `MapTerrain` lost its copy,
+`WorldState` was the only thing on the shard holding a multi table, so there was
+nothing to share it with and the `Arc` was vestigial the moment it was written.
+
+`tiles` kept one, and it had **exactly one other holder**: the
 `MapTerrain<MapSnapshot, Arc<TileData>>` boxed inside every `FacetState`. That
-box is the whole reason. `MapTerrain`'s `AsRef` parameters exist so it can own
-its inputs and therefore have no lifetime and therefore fit in a `Box` in a
-struct field — and the `Arc` is what stops that ownership from being a copy of
-the table per facet.
+box was the whole reason. `MapTerrain`'s `AsRef` parameters existed so it could
+own its inputs and therefore have no lifetime and therefore fit in a `Box` in a
+struct field — and the `Arc` was what stopped that ownership from being a copy
+of the table per facet.
 
-So the `Arc` is not a decision anyone took about tiledata. **It is D's price,
-paid in advance.** When `FacetState` holds a `MapSnapshot` and `WorldState` owns
-the `TileData`, a `MapTerrain<'_>` built per query borrows both out of the same
+So the `Arc` was not a decision anyone took about tiledata. **It was D's price,
+paid in advance.** `FacetState` holds a `MapSnapshot`, `WorldState` owns the
+`TileData`, and a `MapTerrain<'_>` built per query borrows both out of the same
 `&WorldState` — no self-reference, no sharing, no `Arc`, and no `AsRef` bound
-either. That is one more thing D buys, and it is worth naming because "why is
-there an `Arc` here" has a better answer than "because two things hold it".
+either. Worth naming, because "why is there an `Arc` here" had a better answer
+than "because two things hold it", and the better answer is what predicted
+which line to delete.
 
 ### What it was, for the record
 
@@ -528,25 +547,97 @@ gate above live. It needs the endpoints' own columns examined, which is a change
 to what a sight line *is* rather than to who asks for one — so it is filed here
 rather than fixed in passing.
 
-## D — `FacetState` holds data, `MapTerrain` holds borrows
+## D — `FacetState` holds data, `MapTerrain` holds borrows ✅
 
-Needs B and C.
+**Done.** `grep -rn "dyn Terrain" crates/server` is empty, and no facet holds a
+terrain at all: [`FacetState`](../../crates/server/state/src/runtime.rs#L386) is
+`map: Option<MapSnapshot>`, the shard owns the tile table outright, and a
+`MapTerrain<'_>` is three words built at the question and dropped after it.
 
-[`FacetState::terrain`](../../crates/server/state/src/runtime.rs#L379) is a
-`Box<dyn Terrain + Send + Sync>` whose doc comment says the crate *"sits below
-the client-file parsers"* — which has not been true since `openshard-state`
-gained its `openshard-uofiles` dependency for
-[`customisation.md`](../customisation.md)'s C1. It becomes the three things it
-already contains: a `MapSnapshot`, an `Arc<TileData>`, an `Option<Arc<Multis>>`
-— and an accessor that hands out a `MapTerrain<'_>`.
+The field used to be a `Box<dyn Terrain + Send + Sync>` whose doc said the crate
+*"sits below the client-file parsers"* — untrue since `openshard-state` gained
+its `openshard-uofiles` dependency for
+[`customisation.md`](../customisation.md)'s C1. What the box was really buying is
+in [the `Arc` section](#one-arc-is-gone-and-one-is-not-and-the-difference-is-the-box):
+a type with no lifetime, at the price of an `AsRef` bound, an `Arc`, and a
+trait object in the middle of every step.
 
-`MapTerrain` loses its `AsRef` parameters and takes a lifetime. `swimming` is
-decided here. `travel.rs`'s `terrain.is_none()` becomes a question about the
-map, which is what it was asking.
+What landed, in the order the field's three parts came apart:
 
-**Done when:** `grep -rn "dyn Terrain" crates/server` is empty, every one of the
-remaining sites names what it takes, and the `Arc` around the tile table is
-gone with the box that needed it.
+- **`MapTerrain<'a>` is `{ map: &'a WorldMap, tiles: &'a TileData, swimming }`,
+  `Copy`,** and its `AsRef` parameters are gone. **Three `AsRef` impls went with
+  them** — `WorldMap for WorldMap`, `TileData for TileData`, and
+  `MapSnapshot`'s, whose own doc said it existed *"because `MapTerrain<M>` is
+  already generic over `M: AsRef<WorldMap>`"*. Nothing else in the workspace was
+  using any of the three: the bound was their only consumer, so the bound going
+  took the impls with it.
+- **The accessors moved from `FacetState` to `WorldState`**, because that is
+  where the other half is. `state.facet_state(facet).live_terrain()` is
+  `state.live_terrain(facet)`, and the new
+  [`WorldState::map_terrain(facet)`](../../crates/server/state/src/runtime.rs)
+  is what "the bare map, if this facet has one" now spells — nine call sites
+  that used to write `.terrain.as_deref()` or an `and_then` chain over the
+  option.
+- **`WorldState.tiles` is a `TileData`.** The `Arc` had exactly one other
+  holder, the box, and went with it. `boot.rs` reads the file once and moves it
+  in; the log line that reported the format reads it before the move rather
+  than after.
+- **`LiveTerrain` holds an `Option<MapTerrain<'_>>`** instead of an
+  `Option<&dyn Terrain>` — the same nine hand-written forwards, over a named
+  type.
+- **`travel.rs`'s `terrain.is_none()` is `map_terrain(facet).is_none()`.** It
+  was asking whether there is ground to have an opinion about, and now says so.
+- **`Scene::into_shard(facet)` hands out `(MapSnapshot, TileData)`** — what a
+  shard actually holds. `Scene::into_terrain` is deleted: its only caller was
+  `into_shard` itself, and a scene has nothing to own a terrain *for* any more.
+- **`World::with_terrain` is `World::with_map`**, and `with_facet` takes a
+  snapshot with a `debug_assert` that it is the facet it is being filed under.
+
+### `swimming` is an argument now, because the thing it sits on is the query
+
+The [section above](#swimming-is-a-property-of-a-body-parked-on-a-world) asked
+for one of two outcomes: an argument of the query, or deletion. It is the first,
+and the change that made it so is `MapTerrain` no longer being stored anywhere.
+
+The complaint was never the field — it was *whose* field it was: one terrain per
+facet meant turning swimming on turned it on for everyone on that facet. A
+`MapTerrain` is now built per question out of a `&WorldState`, so `.swimming(true)`
+on it is scoped to exactly the one asker, which is what "an argument beside
+`Doors`" was asking for. `WorldState::map_terrain` hands out the walker's view;
+a caller with a fish asks the fish's.
+
+It is still dead in production — nothing on the shard has a swimmer to ask for
+yet — but it is no longer *unusable*, which is what the original finding was
+about. `terrain.rs`'s fixture now hands out both views of one install
+(`Install::terrain` and `Install::swimming`), and the water test asks the same
+map twice rather than loading it twice.
+
+### Two things fell out that were not in the plan
+
+**`MapTerrain::can_fit` had two shapes, and the inherent one shadowed the
+trait's.** The inherent took `(x, y, z, height)` and the trait `(tile, z,
+height)`, same name, different arity — so a caller with a concrete `MapTerrain`
+silently reached a *different function* than the same line reached through the
+trait. Two callers had already worked around it without naming it:
+`picking_query.rs` writes `openshard_movement::Terrain::can_fit(..)` in full,
+and `terrain.rs` wrote `MapTerrain::can_fit(self, tile.x, tile.y, ..)` inside
+its own trait impl. Both now have one shape, and D made this urgent rather than
+tidy: every caller that used to hold a `&dyn Terrain` now holds a `MapTerrain`,
+which is exactly the switch that changes which one they get.
+
+**`openshard-state`'s last two test doubles became scenes.** `LiveTerrain` takes
+a named map, so `Charted` and `Sea` could not stay — and `Sea` was the last
+`can_step` that answered from an integer comparison rather than from a map. The
+`boat_step_cost` measurement recorded in that file was taken *over that double*,
+and its own doc says so: *"`Sea::can_step` below is a single integer comparison,
+so the boat lookup is very nearly the whole of the measured work."* That caveat
+is now obsolete and the recorded 15ns/55ns numbers are stale — the baseline is a
+real `MapTerrain::can_step` reading a real map. **The re-run is owed**, and it is
+one `--ignored` test.
+
+**Done when:** ~~`grep -rn "dyn Terrain" crates/server` is empty, every one of
+the remaining sites names what it takes, and the `Arc` around the tile table is
+gone with the box that needed it~~ — all three.
 
 ## E — one `Overlay`, and a search that takes explicit types
 
@@ -651,12 +742,21 @@ seam to mint and no layering rule to weigh.
 sites four modules apart cannot read a `bool` — and this plan does not reopen
 it. The server's `through_doors: bool` is what changes.
 
-**`MapTerrain` becomes three borrows.** Its `AsRef` parameters exist to let one
-caller box it with no lifetime, and that caller is `FacetState`, which stops
-boxing in D. Both ends already hold the three fields.
+**`MapTerrain` becomes three borrows.** Its `AsRef` parameters existed to let
+one caller box it with no lifetime, and that caller was `FacetState`, which
+stopped boxing in D. Both ends already held the fields. Landed as two borrows
+and a flag, because B had already taken `multis` off it.
+
+**The accessor lives where both halves do.** `live_terrain` and its siblings are
+`WorldState` methods rather than `FacetState` ones, and that follows from the
+map and the table being owned by different things: a facet cannot hand out a
+terrain it only has half of. This is the one place D changed a call shape rather
+than a type — `state.facet_state(f).live_terrain()` became
+`state.live_terrain(f)` at fifteen sites.
 
 **There is always a table.** `WorldState.tiles` and `.multis` are total:
-`Arc<TileData>` and `Multis`, never `Option`. A shard with no client files holds
+`TileData` and `Multis`, never `Option` and — since D — never behind an `Arc`
+either. A shard with no client files holds
 `TileData::empty()` and `Multis::default()` — which is not a stand-in for the
 file but *the file saying nothing*, and it gives every caller back exactly the
 answer it used to compute for itself: weight nothing, layer zero, no name, no
@@ -673,6 +773,15 @@ what a table saying nothing says about heights.
 **The order is the graph, not the phase number.** A and B have nothing before
 them; C needs A; D needs B and C; E needs D and the oracle; F needs nothing.
 
+**A method that shadows a trait method must not change shape.** `MapTerrain`
+carried an inherent `can_fit(x, y, z, height)` beside the trait's
+`can_fit(tile, z, height)`; inherent wins, so which function a call reached
+depended on whether the caller's variable was concrete or a trait object. Two
+sites had already routed around it by hand. Both are now `(tile, z, height)`.
+D is what made this load-bearing rather than cosmetic: it converted every
+`&dyn Terrain` on the server into a `MapTerrain`, which is exactly the switch
+that flips which one a caller gets.
+
 **No flag day.** An earlier draft proposed migrating through
 `&T where T: Terrain + ?Sized`, which `dyn Terrain` satisfies and so breaks no
 caller. That was scaffolding for keeping the trait. The nodes are ordered so
@@ -682,8 +791,10 @@ each one removes implementors rather than re-typing callers.
 
 Small things this document is the only current record of:
 
-- `WorldState.tiles` is behind an `Arc` only because a facet's terrain is boxed;
-  see [above](#one-arc-is-gone-and-one-is-not-and-the-difference-is-the-box).
+- ~~`WorldState.tiles` is behind an `Arc` only because a facet's terrain is
+  boxed~~ — D removed the box and the `Arc` with it; the reasoning is kept
+  [above](#one-arc-is-gone-and-one-is-not-and-the-difference-is-the-box) because
+  it is what predicted the deletion.
 - ~~`Cluttered` does not forward `multi_components` or `land_is_water`~~ — B
   removed the first by removing the question; `land_is_water` is now forwarded
   by nobody on that end, because `Cluttered` never wrote it and the map answers
@@ -691,8 +802,23 @@ Small things this document is the only current record of:
 - ~~No client `MapTerrain` is ever given `with_multis`~~ — `with_multis` is
   gone. The client reads `Resources::multis` directly, which is what it did
   anyway everywhere except through the terrain.
-- `MapTerrain::swimming` is dead in production and is a body's property on a
-  world's object.
+- ~~`MapTerrain::swimming` is dead in production and is a body's property on a
+  world's object~~ — still dead, no longer parked on the world: a `MapTerrain`
+  is per-query now, so the flag is scoped to one asker. See
+  [D](#swimming-is-an-argument-now-because-the-thing-it-sits-on-is-the-query).
+- **`boat_step_cost`'s recorded numbers are stale.** `obstruct.rs`'s
+  measurement (15ns/55ns a step, 2026-08-16) was taken with a `Sea` double whose
+  `can_step` was one integer comparison; D replaced it with a real `Scene`, so
+  the baseline is now a real `MapTerrain::can_step`. Its own doc predicted the
+  direction — *"against that baseline the same absolute 40ns is a small fraction
+  rather than a multiple"* — and the re-run is owed:
+  `cargo test --release -p openshard-state boat_step_cost -- --nocapture --ignored`.
+- **`server/world/src/terrain.rs` is a `pub use` and a single test.** Its whole
+  body is `pub use openshard_movement::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT}`
+  plus one test that needs `openshard-state`'s layer constants. The re-export is
+  against [`style.md`](../style.md) — the same finding as `movement/lib.rs`'s
+  below — and its callers can name `openshard-movement`, which every one of them
+  already depends on.
 - `obstruct.rs`'s `MOBILE_HEIGHT: i32 = 16` duplicates
   `openshard_movement::PLAYER_HEIGHT`, which the client imports in the same
   place for the same purpose.
@@ -725,40 +851,63 @@ Small things this document is the only current record of:
 
 ## Where a session starts
 
-**D.** A, B and C are done, so D is the only node left with everything it needs,
-and it is now the narrowest it will ever be: every `FacetState::terrain` in the
-tree already holds a `MapTerrain`, so the change is the *field's type* rather
-than a hunt for what is in it.
+**Phase 0, the oracle — because it is the only thing E is waiting for.**
 
-**It is also the map track's C2.** `new_map_representation/`'s live publish —
-an edit taking effect in a running shard between two ticks — is blocked on
-exactly this box: `with_facet` boxes `MapTerrain<MapSnapshot, _>` as
-`Box<dyn Terrain + Send + Sync>` at
-[`tick.rs:447`](../../crates/server/world/src/tick.rs#L447), so the shard holds
-the snapshot inside a trait object and has nothing to call `publish` on. Two
-tracks, one field.
+A, B, C and D are done. E is the last node of the seam and the only one that
+touches the A\* edge, which is why it is the only one gated on a measurement:
+[phase 0](#phase-0--the-oracle-which-gates-e-and-nothing-else) wants a committed
+facet-0 run of
+[`map_path_probe`](../../crates/common/movement/examples/map_path_probe.rs) and
+[`coarse_bench`](../../crates/common/movement/examples/coarse_bench.rs), with
+p50/p95/worst per route class, node counts and `TransitionCacheStats` hit rates
+written into this document. Neither has a recorded run on a real install, and
+the only routing number on record is a synthetic one in which the hierarchy is
+*slower* than flat A\*. It needs `OPENSHARD_CLIENT` pointed at an install, so it
+is a person's to run.
 
-Take it in the order the field's three parts come apart:
+**A second, smaller run is owed beside it**, and for the same reason — a
+baseline that changed under a measurement:
+[`boat_step_cost`](#found-in-the-reading-filed-here)'s 15ns/55ns was measured
+against a double D deleted.
 
-1. **The `Box` goes first**, because it is what forces the other two. `FacetState`
-   holds a `MapSnapshot` and an accessor hands out a `MapTerrain<'_>`; the
-   `AsRef` parameters and their `'static` bounds go with it, since they exist
-   only so the type can own its inputs and therefore fit in a box.
-2. **Then the `Arc<TileData>`**, which had exactly one other holder — that box.
-   `WorldState` owns the table outright and a `MapTerrain<'_>` built per query
-   borrows both out of the same `&WorldState`. See [one `Arc` is gone and one is
-   not](#one-arc-is-gone-and-one-is-not-and-the-difference-is-the-box).
-3. **Then `travel.rs`'s `terrain.is_none()`** becomes a question about the map,
-   which is what it was asking, and `swimming` is decided here.
+**Then E**, whose four decisions are answered by reading rather than by the
+compiler; the [section on it](#e--one-overlay-and-a-search-that-takes-explicit-types)
+lists them. **F needs nothing at all** and never did — the coarse graph the
+server loads, validates and never reads is independent of the seam, and is the
+one node a session with no client install can take.
 
-Two of B's findings carry into D:
+### What D left behind for E
 
-- A scene hands out `into_shard`'s pair — the terrain and the `Arc<TileData>`
-  the shard holds — so every converted test already sets `state.tiles` from the
-  same table its ground reads. C did that eight times, which is why D changes a
-  type rather than hunting for disagreements.
+- `LiveTerrain` and `Cluttered` are still two hand-written decorators over the
+  same nine methods, and `Cluttered` still skips `land_is_water`. D gave them a
+  named map to forward *to*; only E stops them forwarding.
+- `housing::check_ground` still needs *"is anything in this body"* without
+  *"and is there a surface"* — [C's leftover](#c--the-doubles-become-scenes-).
+  `MapTerrain::is_obstructed` is that question and is private to the map; E is
+  where `check_ground` stops going through a trait and can be handed one.
+- `CachedTerrain`, `InRegion` and `OpenWorld` are untouched: all three are on
+  the search side, which D did not open.
+
+### And what it carried in from B
+
+- A scene hands out [`into_shard`](#a--scene-grows-what-the-doubles-need-)'s
+  pair — since D, a `MapSnapshot` and a `TileData` — so every converted test
+  sets `state.tiles` from the same table its ground reads. C did that eight
+  times, which is why D changed a type rather than hunting for disagreements.
 - ~~`WorldState.tiles` being `Option` is load-bearing and should stay one~~ —
   reversed and done. Both tables are total; see [There is always a
   table](#decisions-taken-here). A shard with no client files is still a real
   configuration, and it is now spelled the same way everywhere: empty tables,
   not absent ones.
+
+### The map track's C2 went with it
+
+`new_map_representation/`'s live publish — an edit taking effect in a running
+shard between two ticks — was blocked on exactly this field: `with_facet` used
+to box a `MapTerrain<MapSnapshot, _>` as a trait object, so the shard held its
+snapshot *inside* one and had nothing to call `publish` on. `FacetState.map` is
+a `MapSnapshot` now and `facet_state_mut` reaches it, so the `&mut` that
+[`MapSnapshot::publish`](../../crates/common/map/src/snapshot.rs) needs — the
+one that makes a publish atomic by construction — is available on the shard.
+That is the precondition, not the feature: **who** calls it, and where in the
+tick, is C2's own.

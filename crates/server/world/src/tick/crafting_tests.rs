@@ -53,8 +53,8 @@ fn shop(world: &mut World, statics: &[(u16, i8)]) {
     for &(graphic, z) in statics {
         scene.put(START.0, START.1, z, graphic);
     }
-    let (terrain, tiles) = scene.into_shard();
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(terrain));
+    let (map, tiles) = scene.into_shard(Facet(0));
+    world.state.facet_state_mut(Facet(0)).map = Some(map);
     world.state.tiles = tiles;
 }
 

@@ -102,12 +102,12 @@ fn a_sea() -> WorldState {
     // The pair the shard holds: the ground, and the table that ground reads. They
     // come from one scene so a hull's height cannot disagree with the tiledata
     // the terrain is looking at.
-    let (terrain, tiles) = sea().into_shard();
+    let (map, tiles) = sea().into_shard(Facet(0));
     let mut facets = BTreeMap::new();
     facets.insert(
         Facet(0),
         FacetState {
-            terrain: Some(Box::new(terrain)),
+            map: Some(map),
             coarse: None,
             width: SIZE,
             height: SIZE,
@@ -376,7 +376,7 @@ fn a_shard_with_no_client_files_launches_nothing() {
 #[test]
 fn a_facet_with_no_map_moors_nothing() {
     let mut state = a_sea();
-    state.facet_state_mut(Facet(0)).terrain = None;
+    state.facet_state_mut(Facet(0)).map = None;
     let (actor, owner) = a_captain(&mut state);
 
     assert_eq!(
@@ -665,7 +665,7 @@ fn a_body_walks_from_the_shore_onto_the_deck_and_not_through_the_hull() {
     // Bow against the shore: the deck at (20, 1), hulls at (19, 1) and (21, 1).
     place(&mut state, actor, Point::new(20, 1, 0), Facet(0), SLOOP, owner).expect("staff-free water");
 
-    let live = state.facet_state(Facet(0)).live_terrain();
+    let live = state.live_terrain(Facet(0));
     assert_eq!(
         live.can_step(Point::new(20, 0, 0), Point::new(20, 1, 0)),
         Some(Point::new(20, 1, 3)),

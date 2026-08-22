@@ -120,12 +120,6 @@ impl fmt::Debug for WorldMap {
     }
 }
 
-impl AsRef<WorldMap> for WorldMap {
-    fn as_ref(&self) -> &WorldMap {
-        self
-    }
-}
-
 impl WorldMap {
     /// Build a facet from cells already in memory, with no file anywhere.
     ///

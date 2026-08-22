@@ -42,13 +42,13 @@
 //! being read out of the wrong byte.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use openshard_map::grid::BlockExtent;
 use openshard_map::map::{LandCell, LandTile, StaticItem, WorldMap};
+use openshard_map::snapshot::MapSnapshot;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::{Graphic, Hue};
-use openshard_protocol::world::Point;
+use openshard_protocol::world::{Facet, Point};
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
 use crate::terrain::MapTerrain;
@@ -287,33 +287,26 @@ impl Scene {
 
     /// The terrain to ask, borrowing this scene.
     #[must_use]
-    pub fn terrain(&self) -> MapTerrain<&WorldMap, &TileData> {
+    pub const fn terrain(&self) -> MapTerrain<'_> {
         MapTerrain::new(&self.map, &self.tiles)
     }
 
-    /// The terrain to ask, owning it: a scene consumed into something that has
-    /// no lifetime and can therefore live in a struct field.
+    /// Everything a shard needs from a scene: `facet`'s ground as a published
+    /// snapshot, and the tile table that says what is on it.
     ///
-    /// [`Scene::terrain`] borrows, which is what a test in this crate wants and
-    /// what a shard cannot use — `FacetState::terrain` is boxed and outlives
-    /// every local. See [`Scene::into_shard`] for the shard's whole answer.
-    #[must_use]
-    pub fn into_terrain(self) -> MapTerrain<WorldMap, Arc<TileData>> {
-        self.into_shard().0
-    }
-
-    /// Everything a shard needs from a scene: the facet's ground, and the tile
-    /// table.
+    /// **One table, and now only one holder.** The two used to be a terrain and
+    /// an `Arc` of the same tiledata, because the facet's terrain was boxed and
+    /// had to own a copy; a fixture that built them separately could put a house
+    /// on a wall the ground had never heard of. The shard holds the map and the
+    /// table in two fields of one state now, and a `MapTerrain` borrows both at
+    /// the query — so there is nothing left to disagree.
     ///
-    /// **One table, held twice.** The shard's `WorldState.tiles` and the terrain
-    /// under it both answer for what a graphic is — how tall a wall stands, what
-    /// a component weighs — and a fixture that built them separately could put a
-    /// house on a wall the ground had never heard of. Sharing the `Arc` makes
-    /// that disagreement unrepresentable rather than merely unlikely.
+    /// The facet is an argument rather than a default because a snapshot names
+    /// the facet it is: a `WorldMap` carries only a size, and two facets can
+    /// share one.
     #[must_use]
-    pub fn into_shard(self) -> (MapTerrain<WorldMap, Arc<TileData>>, Arc<TileData>) {
-        let tiles = Arc::new(self.tiles);
-        (MapTerrain::new(self.map, Arc::clone(&tiles)), tiles)
+    pub fn into_shard(self, facet: Facet) -> (MapSnapshot, TileData) {
+        (MapSnapshot::new(facet, self.map), self.tiles)
     }
 
     /// The map, for a test that wants to read the scene back rather than ask the
@@ -556,9 +549,12 @@ mod tests {
         scene.art(WALL, TileFlags::WALL | TileFlags::BLOCK, 20);
         scene.put(1, 1, 0, WALL);
 
-        let (terrain, tiles) = scene.into_shard();
+        let (map, tiles) = scene.into_shard(Facet(0));
+        assert_eq!(map.facet(), Facet(0), "a snapshot names the facet it is");
         assert_eq!(tiles.static_tile(WALL).height, 20);
-        assert_eq!(terrain.tiles().static_tile(WALL).height, 20);
+        // The pair as the shard holds it: the snapshot in a facet, the table
+        // beside it, and a terrain that borrows both at the question.
+        let terrain = MapTerrain::new(map.map(), &tiles);
         assert!(
             !terrain.can_fit(Tile::new(1, 1), 0, PLAYER_HEIGHT),
             "the wall the shard knows about is the wall standing on the ground"

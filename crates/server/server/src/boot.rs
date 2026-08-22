@@ -696,12 +696,14 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
 
     let dir = Path::new(dir);
     let started = Instant::now();
-    // One tile table for the shard: `tiledata.mul` describes tiles, not a map, so
-    // it is read once and shared. It used to be *cloned* into each facet's
-    // terrain, which copied the whole table per facet to answer questions that
-    // never depended on the facet.
+    // One tile table for the shard, owned by it: `tiledata.mul` describes tiles,
+    // not a map, so it is read once and never copied. It used to be *cloned* into
+    // each facet's terrain, then shared behind an `Arc` with those terrains; the
+    // facets hold only maps now, so the world is the single holder.
     eprintln!("world load: reading tiledata.mul from {}", dir.display());
-    let tiles = std::sync::Arc::new(TileData::load(dir.join("tiledata.mul"))?);
+    let tiles = TileData::load(dir.join("tiledata.mul"))?;
+    // Read before the table is handed over, because that is a move now.
+    let tiledata_format = tiles.format();
     eprintln!(
         "world load +{:.3}s: tile data ready; loading {} facet(s)",
         started.elapsed().as_secs_f64(),
@@ -729,7 +731,7 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
         }
     };
 
-    let mut world = configured_world(config).with_tiles(tiles.clone(), multis);
+    let mut world = configured_world(config).with_tiles(tiles, multis);
     for &facet in &config.world.facets {
         let facet = openshard_protocol::world::Facet(facet);
         // The map before the navigation artifact, because the artifact is now
@@ -789,11 +791,11 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
             ),
             "facet loaded"
         );
-        world = world.with_facet(facet, MapTerrain::new(map, tiles.clone()), Some(coarse));
+        world = world.with_facet(facet, map, Some(coarse));
     }
     info!(
         facets = config.world.facets.len(),
-        tiledata = ?tiles.format(),
+        tiledata = ?tiledata_format,
         took = ?started.elapsed(),
         "world loaded"
     );

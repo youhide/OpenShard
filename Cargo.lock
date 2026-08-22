@@ -2947,6 +2947,7 @@ dependencies = [
  "openshard-entities",
  "openshard-events",
  "openshard-gateway",
+ "openshard-map",
  "openshard-movement",
  "openshard-protocol",
  "openshard-uofiles",

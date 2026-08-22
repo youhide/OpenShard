@@ -70,8 +70,8 @@ fn ground(world: &mut World, land: u16, static_at: Option<(u16, i8)>) {
         scene.art(graphic, WALL_FLAGS, 20);
         scene.put(START.0 + 1, START.1, z, graphic);
     }
-    let (terrain, tiles) = scene.into_shard();
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(terrain));
+    let (map, tiles) = scene.into_shard(Facet(0));
+    world.state.facet_state_mut(Facet(0)).map = Some(map);
     world.state.tiles = tiles;
 }
 

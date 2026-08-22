@@ -50,28 +50,33 @@ const fn platform_surface(base: i32, height: i32, climbable: bool) -> (i32, i32)
 
 /// The real world: ground heights, walls, water.
 ///
-/// Generic over how the map and tile data are held: `MapTerrain` (its default,
-/// `M = WorldMap, T = TileData`) owns both, so the thing handed to `Walker::request`
-/// has no lifetime and can live in a struct field — what the server wants,
-/// building one once at boot. `MapTerrain<&WorldMap, &TileData>` borrows instead, for
-/// a caller that already owns the map for other reasons (drawing it) and would
-/// rather not clone tens of megabytes of it per click — the client's
-/// click-to-walk planner.
-#[derive(Debug)]
-pub struct MapTerrain<M = WorldMap, T = TileData> {
-    map: M,
-    tiles: T,
+/// **Three borrows and a flag, built where it is asked.** Both ends already own
+/// the two tables it reads — the server as `FacetState`'s snapshot and
+/// `WorldState::tiles`, the client as `Resources` — so this is a view over what
+/// the caller already has rather than a thing anybody stores. It used to be
+/// generic over how the map and the tile data were *held*, which bought exactly
+/// one property: a terrain with no lifetime, so it could be boxed in a struct
+/// field. Nothing is boxed any more; see `docs/map/terrain_seam.md`'s node D.
+///
+/// `Copy`, because it is two pointers and a bool: an overlay that wants to keep
+/// one beside its own data copies it rather than borrowing the borrow.
+#[derive(Clone, Copy, Debug)]
+pub struct MapTerrain<'a> {
+    map: &'a WorldMap,
+    tiles: &'a TileData,
     /// Whether water counts as ground. A boat or a fish says yes.
+    ///
+    /// A property of the *body* asking, which is why it is set on the view and
+    /// not on the world: one facet has one map and many creatures over it, and a
+    /// field on the map would turn the swimming on for all of them. Built as
+    /// `false` and turned on by the query that is asking for a swimmer — see
+    /// [`swimming`](Self::swimming).
     swimming: bool,
 }
 
-impl<M, T> MapTerrain<M, T>
-where
-    M: AsRef<WorldMap>,
-    T: AsRef<TileData>,
-{
-    /// Wrap a loaded map, owned or borrowed.
-    pub const fn new(map: M, tiles: T) -> Self {
+impl<'a> MapTerrain<'a> {
+    /// Read a loaded map through the table that says what its graphics are.
+    pub const fn new(map: &'a WorldMap, tiles: &'a TileData) -> Self {
         Self {
             map,
             tiles,
@@ -79,20 +84,20 @@ where
         }
     }
 
-    /// Let this terrain treat water as standable.
+    /// Ask as something that swims: water becomes ground.
     pub const fn swimming(mut self, swimming: bool) -> Self {
         self.swimming = swimming;
         self
     }
 
     /// The map.
-    pub fn map(&self) -> &WorldMap {
-        self.map.as_ref()
+    pub const fn map(&self) -> &'a WorldMap {
+        self.map
     }
 
     /// The tile definitions.
-    pub fn tiles(&self) -> &TileData {
-        self.tiles.as_ref()
+    pub const fn tiles(&self) -> &'a TileData {
+        self.tiles
     }
 
     /// The height a mobile would stand at on `(x, y)`, reachable from `from_z`.
@@ -460,7 +465,14 @@ where
         })
     }
 
-    /// Whether an object `height` tall fits at `(x, y, z)` with a surface under it.
+    /// Whether an object `height` tall fits at `at` and `z` with a surface under it.
+    ///
+    /// The same shape as [`Terrain::can_fit`](crate::Terrain::can_fit) on
+    /// purpose: an inherent method that shadows a trait one of the *same* name
+    /// and a *different* arity is a trap, and it caught two callers — one wrote
+    /// `Terrain::can_fit(..)` in full to get past it, and this file wrote
+    /// `MapTerrain::can_fit(self, tile.x, tile.y, ..)`. With one shape, whichever
+    /// a caller reaches is the same answer.
     ///
     /// ServUO's `Map.CanFit` for a static-only world (`checkBlocksFit` and
     /// `checkMobiles` off, `requireSurface` on): a **surface or impassable** tile
@@ -470,11 +482,11 @@ where
     /// This is stricter than [`is_obstructed`](Self::is_obstructed), which only asks
     /// about walls in the way; door generation needs both halves, or it drops doors
     /// into wooden walls that read as frames but have no doorway.
-    fn can_fit(&self, x: u16, y: u16, z: i32, height: i32) -> bool {
-        let (low_z, avg_z, _top) = self.land_heights(x, y);
+    pub fn can_fit(&self, at: Tile, z: i32, height: i32) -> bool {
+        let (low_z, avg_z, _top) = self.land_heights(at.x, at.y);
         let land_flags = self
             .map()
-            .land(x, y)
+            .land(at.x, at.y)
             .map(|cell| self.tiles().land(cell.tile.0).flags);
         let land_impassable = land_flags.is_some_and(|f| f.is_blocking());
         // Impassable land (water, a mountain) in the object's body blocks it.
@@ -484,7 +496,7 @@ where
         // Passable land you sit exactly on is a surface to stand on.
         let mut has_surface = land_flags.is_some() && !land_impassable && z == avg_z;
 
-        for item in self.map().statics_at(x, y) {
+        for item in self.map().statics_at(at.x, at.y) {
             let tile = self.tiles().static_tile(item.tile.0);
             let surface = tile.flags.is_platform();
             let impassable = tile.flags.is_blocking();
@@ -504,11 +516,7 @@ where
     }
 }
 
-impl<M, T> Terrain for MapTerrain<M, T>
-where
-    M: AsRef<WorldMap>,
-    T: AsRef<TileData>,
-{
+impl Terrain for MapTerrain<'_> {
     fn land_is_water(&self, tile: Tile) -> bool {
         self.map()
             .land(tile.x, tile.y)
@@ -575,12 +583,12 @@ where
         // the one nearest the requested height.
         self.surfaces(tile.x, tile.y)
             .into_iter()
-            .filter(|&z| MapTerrain::can_fit(self, tile.x, tile.y, z, PLAYER_HEIGHT))
+            .filter(|&z| MapTerrain::can_fit(self, tile, z, PLAYER_HEIGHT))
             .min_by_key(|&z| (z - near_z).abs())
     }
 
     fn can_fit(&self, tile: Tile, z: i32, height: i32) -> bool {
-        MapTerrain::can_fit(self, tile.x, tile.y, z, height)
+        MapTerrain::can_fit(self, tile, z, height)
     }
 
     fn sight_clear(&self, from: Point, to: Point) -> bool {
@@ -647,9 +655,10 @@ mod tests {
 
     #[test]
     fn predict_z_answers_near_z_off_the_map_or_with_nothing_on_the_tile() {
-        let Some(t) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let t = install.terrain();
         assert_eq!(t.predict_z(7168, 0, 42), 42, "past the map edge");
     }
 
@@ -661,9 +670,10 @@ mod tests {
         // asking from the static's own height must not silently fall back to the
         // land under it, or a client predicting a walk onto a pier lands its body
         // at the water instead of the deck.
-        let Some(t) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let t = install.terrain();
 
         let mut checked = 0;
         for y in 1580..1610u16 {
@@ -723,15 +733,34 @@ mod tests {
         dir.join("tiledata.mul").exists().then_some(dir)
     }
 
-    fn load_client(swimming: bool) -> Option<MapTerrain> {
+    /// What an install owns, so a test can hold it and hand out views of it.
+    ///
+    /// A `MapTerrain` borrows both tables now, so something has to own them for
+    /// longer than one expression. On the shard that is `FacetState` and
+    /// `WorldState`; here it is this, which is the same arrangement written
+    /// small — the fixture owning the tables and the rule reading them.
+    struct Install {
+        map: WorldMap,
+        tiles: TileData,
+    }
+
+    impl Install {
+        /// A walker's view of the install.
+        fn terrain(&self) -> MapTerrain<'_> {
+            MapTerrain::new(&self.map, &self.tiles)
+        }
+
+        /// A swimmer's view of the same install: one map, two bodies asking.
+        fn swimming(&self) -> MapTerrain<'_> {
+            self.terrain().swimming(true)
+        }
+    }
+
+    fn real_install() -> Option<Install> {
         let dir = client_dir()?;
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("the client's map0 should load");
         let tiles = TileData::load(dir.join("tiledata.mul")).expect("tiledata should load");
-        Some(MapTerrain::new(map, tiles).swimming(swimming))
-    }
-
-    fn real_terrain() -> Option<MapTerrain> {
-        load_client(false)
+        Some(Install { map, tiles })
     }
 
     #[test]
@@ -747,9 +776,10 @@ mod tests {
         // above, and stepping onto it must land on the step, not the floor. Find
         // real tiles with two platform surfaces both within a generous reach and
         // assert `check` returns the higher one — Sphere's `GetFixPoint`.
-        let Some(t) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let t = install.terrain();
 
         let mut checked = 0;
         for y in 1580..1610u16 {
@@ -802,9 +832,10 @@ mod tests {
     /// a prediction outside the list is a body drawn at a height nothing offers.
     #[test]
     fn a_predicted_height_is_one_of_the_tile_s_own_surfaces() {
-        let Some(t) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let t = install.terrain();
         let mut checked = 0;
         let mut roofed = 0;
         for y in 1580..1610u16 {
@@ -865,9 +896,10 @@ mod tests {
     /// because the two rules happen to answer the same everywhere.
     #[test]
     fn a_client_predicting_a_step_climbs_the_stairs_the_shard_climbs() {
-        let Some(t) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let t = install.terrain();
 
         let mut checked = 0;
         let mut disagreed = 0;
@@ -927,9 +959,10 @@ mod tests {
     /// walk *into* a staircase from the side and stand in the floor beneath it.
     #[test]
     fn the_ground_under_a_surface_is_not_somewhere_to_stand() {
-        let Some(t) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let t = install.terrain();
 
         let mut checked = 0;
         for y in 1500..1900u16 {
@@ -977,9 +1010,10 @@ mod tests {
     /// units up — stepped east and *fell* into the masonry.
     #[test]
     fn a_step_into_a_stack_of_stone_is_refused_rather_than_fallen_into() {
-        let Some(t) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let t = install.terrain();
         let (x, y) = (1410u16, 1713u16);
 
         // The premise, from the map rather than from the code under test: the
@@ -1046,9 +1080,10 @@ mod tests {
     /// stairs, from the tile above it.
     #[test]
     fn a_wall_at_your_own_height_is_a_wall_however_deep_the_pit_behind_it() {
-        let Some(t) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let t = install.terrain();
 
         // The terrace, and that it is a terrace: paved, flat, walkable.
         for x in 1411..=1412u16 {
@@ -1106,9 +1141,10 @@ mod tests {
         // The property that actually holds for any Britannia: a city is mostly
         // ground you can stand on. Neither an all-blocking map (a bad tiledata
         // read) nor an all-open one (an `OpenWorld` in disguise) passes this.
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
 
         let mut walkable = 0;
         let mut total = 0;
@@ -1144,9 +1180,10 @@ mod tests {
         // Only pure land is a fair test: where statics stack (a stair), the height
         // you land at genuinely depends on the height you came from — the client
         // does the same — so reversibility there is not an invariant at all.
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
         let bare = |x: u16, y: u16| terrain.map().statics_at(x, y).next().is_none();
 
         let mut checked = 0;
@@ -1193,9 +1230,10 @@ mod tests {
         // The z you ask from matters: `surface_at(x, y, 0)` on ground at z=10 is
         // correctly None, because ten is more than a two-unit step up. Asking
         // from the ground's own height is the question that should always work.
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
 
         let mut checked = 0;
         for y in (1600..1900u16).step_by(7) {
@@ -1227,9 +1265,10 @@ mod tests {
 
     #[test]
     fn the_map_is_the_facet_the_arithmetic_predicted() {
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
         assert_eq!((terrain.map().width(), terrain.map().height()), (7168, 4096));
         assert_eq!(terrain.map().facet_name(), "Felucca/Trammel (post-ML)");
     }
@@ -1242,9 +1281,10 @@ mod tests {
     /// is what made a pier tile impossible to point at with the mouse.
     #[test]
     fn a_pier_stands_on_its_planks_and_not_on_the_water_beneath() {
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
         // Britain's docks. The land block here is water at -15; the `wooden
         // plank` static sits at -3 and is a platform one unit tall, so a body
         // stands at -2.
@@ -1265,9 +1305,10 @@ mod tests {
 
     #[test]
     fn a_walking_human_cannot_stand_on_the_ocean() {
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
         // Deep ocean west of Britannia. Water is BLOCK|WATER in tiledata, so a
         // walker gets nothing and a swimmer gets a surface.
         let mut wet = 0;
@@ -1293,10 +1334,11 @@ mod tests {
 
     #[test]
     fn a_swimmer_can_stand_where_a_walker_cannot() {
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
-        let swimming = load_client(true).unwrap();
+        let terrain = install.terrain();
+        let swimming = install.swimming();
 
         let mut found = false;
         for x in 60..160u16 {
@@ -1322,9 +1364,10 @@ mod tests {
         //
         // Any statistical check on real data needs a companion that says the data
         // is real. This is that companion.
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
 
         let mut tiles = std::collections::HashSet::new();
         let mut heights = std::collections::HashSet::new();
@@ -1357,9 +1400,10 @@ mod tests {
         //
         // Only meaningful alongside `the_map_is_not_degenerate`: a flat map is
         // smooth no matter how you index it.
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
 
         let mut steps = 0u32;
         let mut jumps = 0u32;
@@ -1389,9 +1433,10 @@ mod tests {
         // Not a fixed coordinate: statics move between client versions. Sweep
         // the city and assert that *something* blocks, which is the property
         // that matters — an OpenWorld would find nothing.
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
 
         let mut blocked = 0;
         for y in 1700..1850u16 {
@@ -1417,9 +1462,10 @@ mod tests {
         // through; treating the flag as "walk thru it" (Sphere's comment says so,
         // Sphere's movement code never once agrees) let every server-driven mobile
         // stroll out of a building through the window.
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
 
         let mut tested = 0;
         for y in 1550..1900u16 {
@@ -1458,9 +1504,10 @@ mod tests {
 
     #[test]
     fn britain_has_statics_at_all() {
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
         assert!(
             terrain.map().static_count() > 1_000_000,
             "Felucca should hold millions of statics, found {}",
@@ -1476,9 +1523,10 @@ mod tests {
 
     #[test]
     fn a_step_up_is_limited_to_two_units() {
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
         // Find a tile whose ground is well above its neighbour, and prove the
         // walker cannot climb it from below.
         for y in 1500..1700u16 {
@@ -1499,9 +1547,10 @@ mod tests {
 
     #[test]
     fn off_the_map_is_not_standable() {
-        let Some(terrain) = real_terrain() else {
+        let Some(install) = real_install() else {
             return;
         };
+        let terrain = install.terrain();
         assert_eq!(terrain.surface_at(7168, 0, 0), None, "past the east edge");
         assert_eq!(terrain.surface_at(0, 4096, 0), None, "past the south edge");
         assert_eq!(terrain.surface_at(u16::MAX, u16::MAX, 0), None);

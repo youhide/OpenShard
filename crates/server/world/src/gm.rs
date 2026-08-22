@@ -14,7 +14,7 @@
 
 use openshard_commands::StaffCommand;
 use openshard_entities::EntityId;
-use openshard_movement::Tile;
+use openshard_movement::{Terrain, Tile};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::speech::{Font, SpokenMessage, TalkMode};
@@ -775,9 +775,7 @@ pub(crate) fn notify(state: &mut WorldState, actor: EntityId, text: &str) {
 /// The ground height at `(x, y)` on `facet`, if the facet has a map loaded.
 fn ground_z(state: &WorldState, facet: Facet, x: u16, y: u16) -> Option<i8> {
     state
-        .facet_state(facet)
-        .terrain
-        .as_ref()
+        .map_terrain(facet)
         .and_then(|terrain| terrain.ground_z(Tile::new(x, y)))
 }
 

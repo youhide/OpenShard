@@ -124,7 +124,7 @@ pub fn dismount(state: &mut WorldState, player: EntityId) {
     for dir in 0..8u8 {
         let dir = openshard_protocol::direction::Direction::from_bits(dir);
         if let Some(tile) = step_from(rider_at, dir) {
-            if let Some(landed) = state.facet_state(facet).live_terrain().can_step(rider_at, tile) {
+            if let Some(landed) = state.live_terrain(facet).can_step(rider_at, tile) {
                 landing = landed;
                 break;
             }

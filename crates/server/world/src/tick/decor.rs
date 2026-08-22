@@ -208,7 +208,7 @@ impl World {
         // (closed, open, offset_x, offset_y, where-it-sits-closed).
         let mut placements: Vec<(Graphic, Graphic, i16, i16, Point)> = Vec::new();
         {
-            let Some(terrain) = self.state.facet_state(facet).terrain.as_ref() else {
+            let Some(terrain) = self.state.map_terrain(facet) else {
                 warn!(facet = %facet, "no map on this facet; no doors to generate");
                 return;
             };

@@ -33,7 +33,7 @@
 //! crew.
 
 use openshard_entities::EntityId;
-use openshard_movement::Tile;
+use openshard_movement::{Terrain, Tile};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
@@ -200,7 +200,7 @@ pub fn place(
 /// the *place* and a game master is allowed to put a ship in a fountain.
 fn check_berth(state: &WorldState, facet: Facet, berth: &[((u16, u16), Plank)]) -> Result<(), Refusal> {
     let facet_state = state.facet_state(facet);
-    let Some(terrain) = facet_state.terrain.as_deref() else {
+    let Some(terrain) = state.map_terrain(facet) else {
         return Err(Refusal::NoSuchMulti);
     };
     for &((x, y), _) in berth {
@@ -335,7 +335,7 @@ fn redraw(state: &mut WorldState, boat: EntityId) {
 /// comparison and it is the whole of why a ship can sail forward.
 fn check_course(state: &WorldState, facet: Facet, boat: EntityId, berth: &[Berth]) -> Result<(), Refusal> {
     let facet_state = state.facet_state(facet);
-    let Some(terrain) = facet_state.terrain.as_deref() else {
+    let Some(terrain) = state.map_terrain(facet) else {
         return Err(Refusal::NoSuchMulti);
     };
     for &((x, y), _) in berth {

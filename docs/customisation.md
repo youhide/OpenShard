@@ -90,7 +90,9 @@ four are structural; the fifth is the one that decides it.
 (`movement/src/cache.rs`) and `LiveTerrain` (`state/src/obstruct.rs`) both wrap a
 `Terrain` and forward its methods, and **neither forwarded `multi_components`**,
 so both silently answered `&[]`. Housing got away with it because its three
-readers reach `state.facet_state(facet).terrain` directly; the first caller to
+readers reach the facet's own ground directly — `state.facet_state(facet).terrain`
+then, `WorldState::map_terrain` since
+[`map/terrain_seam.md`](map/terrain_seam.md)'s D; the first caller to
 ask a *wrapped* terrain about a house's shape would have got an empty list and no
 error.
 

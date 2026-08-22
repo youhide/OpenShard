@@ -16,12 +16,10 @@
 //! An oracle that asked the code what the answer should be would agree with it
 //! always, including when it is wrong.
 
-use openshard_map::map::WorldMap;
 use openshard_movement::scene::{SIDE, Scene};
 use openshard_movement::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT, Terrain};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
-use openshard_uofiles::tiledata::TileData;
 
 // ---------------------------------------------------------------- regressions
 
@@ -289,7 +287,7 @@ fn random_scene(seed: u64) -> Scene {
 /// of every platform — filtered to the ones the rule agrees are standing
 /// positions. The filter is the rule's own answer on purpose: a body that is
 /// somewhere it could not be is not a step this test has anything to say about.
-fn stands(terrain: &MapTerrain<&WorldMap, &TileData>, scene: &Scene, x: u16, y: u16) -> Vec<i32> {
+fn stands(terrain: &MapTerrain<'_>, scene: &Scene, x: u16, y: u16) -> Vec<i32> {
     let mut candidates = vec![];
     if let Some(corners) = scene.map().land_corners(x, y) {
         candidates.push(i32::from(openshard_map::map::average_corner_z(corners)));

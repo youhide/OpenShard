@@ -13,14 +13,14 @@
 //! nothing about when it changes or how it is saved.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
 
 use openshard_commands::StaffCommand;
 use openshard_config::CombatEra;
 use openshard_entities::{EntityId, Registry};
 use openshard_events::EventBus;
 use openshard_gateway::ConnectionId;
-use openshard_movement::{NavigationGraph, Terrain, Tile};
+use openshard_map::snapshot::MapSnapshot;
+use openshard_movement::{MapTerrain, NavigationGraph, Terrain, Tile};
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::combat::HealthBar;
 use openshard_protocol::feedback::{Animation, NewAnimation, PlaySound};
@@ -371,16 +371,24 @@ pub struct Outbound {
 /// block each other — the isolation is a property of the data structure, not a
 /// check anyone has to remember to write.
 ///
-/// The ground is a [`Terrain`] trait object, not a concrete map: this crate sits
-/// below the client-file parsers, so it holds the *abstraction* of terrain and
-/// the world hands it the real thing (a `MapTerrain`) boxed. A facet with no map
-/// carries `None` and every step is allowed.
+/// The ground is the map itself — a [`MapSnapshot`], which is a published
+/// revision of a facet and the thing an edit republishes. It used to be a boxed
+/// [`Terrain`] trait object, on the argument that this crate sits below the
+/// client-file parsers; that stopped being true when `openshard-uofiles` became
+/// a dependency, and the box bought nothing but a second name for one concrete
+/// type. A facet with no map carries `None` and every step is allowed.
+///
+/// **Nothing here reads the tile table.** What a graphic *is* belongs to the
+/// shard, not to a facet ([`WorldState::tiles`]), so the pair is put back
+/// together for the length of one question by
+/// [`WorldState::map_terrain`](WorldState::map_terrain) — see
+/// `docs/map/terrain_seam.md`'s node D.
 pub struct FacetState {
     /// The floor, if this facet has a map loaded.
-    pub terrain: Option<Box<dyn Terrain + Send + Sync>>,
+    pub map: Option<MapSnapshot>,
     /// Static long-distance connectivity, built with the terrain at facet load.
     /// It deliberately has no live doors or placed items in it; a caller still
-    /// refines every hop through [`FacetState::live_terrain`] or its
+    /// refines every hop through [`WorldState::live_terrain`] or its
     /// doors-open sibling.
     pub coarse: Option<NavigationGraph>,
     /// How wide this facet's map is, in tiles.
@@ -423,26 +431,6 @@ impl FacetState {
     pub const fn coarse_router(&self) -> Option<&NavigationGraph> {
         self.coarse.as_ref()
     }
-
-    /// The terrain every movement decision actually checks: the map with the
-    /// live obstacles laid over it. Works with no map too — an open world with
-    /// doors in it still has doors.
-    #[must_use]
-    pub fn live_terrain(&self) -> LiveTerrain<'_> {
-        LiveTerrain::new(self.terrain.as_deref(), &self.obstructions, &self.boats, false)
-    }
-
-    /// The same terrain as a door-opener plans over: closed doors do not block,
-    /// because the mobile walking the route opens them on arrival.
-    #[must_use]
-    pub fn planning_terrain(&self, through_doors: bool) -> LiveTerrain<'_> {
-        LiveTerrain::new(
-            self.terrain.as_deref(),
-            &self.obstructions,
-            &self.boats,
-            through_doors,
-        )
-    }
 }
 
 /// An item on a cursor: the entity, and where it was lifted from.
@@ -462,7 +450,7 @@ pub struct HeldItem {
 impl std::fmt::Debug for FacetState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FacetState")
-            .field("has_terrain", &self.terrain.is_some())
+            .field("has_map", &self.map.is_some())
             .field("sectors", &self.sectors.len())
             .finish()
     }
@@ -589,7 +577,13 @@ pub struct WorldState {
     /// instead of a dozen times at the lookups — and it makes "no client files"
     /// one state rather than one per reader, which is exactly the defect that
     /// two different ways of blanking a shard turned out to be.
-    pub tiles: Arc<openshard_uofiles::tiledata::TileData>,
+    ///
+    /// **Owned outright.** It sat behind an `Arc` for exactly one reason: every
+    /// facet's terrain was boxed, so it had to own its own copy of the table and
+    /// the `Arc` was what stopped that from being a copy per facet. Nothing is
+    /// boxed now — a `MapTerrain` borrows this and the facet's map together at
+    /// the question — so there is one holder and nothing to share it with.
+    pub tiles: openshard_uofiles::tiledata::TileData,
     /// Every multi the client knows: what a house or a ship is made of.
     ///
     /// Beside [`tiles`](Self::tiles) and for the same reason — a multi's
@@ -597,10 +591,8 @@ pub struct WorldState {
     /// the same reason too: an empty table knows about no houses, which is what a
     /// shard whose install has no `multi.mul` in fact knows.
     ///
-    /// Owned outright, where [`tiles`](Self::tiles) is behind an `Arc`: this is
-    /// the only thing on the shard that holds a multi table, so there is nothing
-    /// to share it with. The tile table has a second holder — every facet's boxed
-    /// terrain — and that box is what the `Arc` is paying for.
+    /// Owned outright, like [`tiles`](Self::tiles) beside it: one holder each,
+    /// and nothing on the shard to share either with.
     pub multis: openshard_uofiles::multi::Multis,
     /// Which entity a connection is driving.
     pub players: HashMap<ConnectionId, EntityId>,
@@ -1032,12 +1024,55 @@ impl WorldState {
     pub fn start_position(&self, facet: Facet) -> Point {
         let (x, y) = self.start;
         let z = self
-            .facets
-            .get(&facet)
-            .and_then(|state| state.terrain.as_ref())
+            .map_terrain(facet)
             .and_then(|terrain| terrain.ground_z(Tile::new(x, y)))
             .unwrap_or(Z_WITHOUT_A_MAP);
         Point::new(x, y, z)
+    }
+
+    /// What the map alone says about `facet`, and `None` where it has no map.
+    ///
+    /// **Two borrows out of one `&self`.** The facet owns the ground and the
+    /// shard owns the table that says what is on it; a `MapTerrain` is the pair
+    /// read together, built here and living exactly as long as the question
+    /// being asked. Nothing stores one — that is the whole of node D.
+    ///
+    /// This is the *bare* map: no doors, no placed crates, no decks. Anything
+    /// deciding a step wants [`live_terrain`](Self::live_terrain) instead.
+    #[must_use]
+    pub fn map_terrain(&self, facet: Facet) -> Option<MapTerrain<'_>> {
+        let map = self.facets.get(&facet)?.map.as_ref()?;
+        Some(MapTerrain::new(map.map(), &self.tiles))
+    }
+
+    /// The terrain every movement decision actually checks: the map with the
+    /// live obstacles laid over it. Works with no map too — an open world with
+    /// doors in it still has doors.
+    ///
+    /// # Panics
+    ///
+    /// On a facet that is not loaded, like [`facet_state`](Self::facet_state)
+    /// and for the same reason: every live entity is on a loaded facet.
+    #[must_use]
+    pub fn live_terrain(&self, facet: Facet) -> LiveTerrain<'_> {
+        self.planning_terrain(facet, false)
+    }
+
+    /// The same terrain as a door-opener plans over: closed doors do not block,
+    /// because the mobile walking the route opens them on arrival.
+    ///
+    /// # Panics
+    ///
+    /// See [`live_terrain`](Self::live_terrain).
+    #[must_use]
+    pub fn planning_terrain(&self, facet: Facet, through_doors: bool) -> LiveTerrain<'_> {
+        let state = self.facet_state(facet);
+        LiveTerrain::new(
+            self.map_terrain(facet),
+            &state.obstructions,
+            &state.boats,
+            through_doors,
+        )
     }
 
     /// Is any connected player within `range` tiles (Chebyshev) of `centre` on

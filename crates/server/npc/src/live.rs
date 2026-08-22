@@ -275,8 +275,7 @@ fn walk_home(state: &mut WorldState, npc: EntityId, at: Point, post: Point) -> O
     let dir = openshard_ai::step_toward(state, facet, at, post, true)?;
     if let Some(tile) = openshard_movement::step_from(at, dir) {
         let door = state
-            .facet_state(facet)
-            .live_terrain()
+            .live_terrain(facet)
             .blocker_at(tile.x, tile.y)
             .filter(|o| o.door)
             .map(|o| o.entity);

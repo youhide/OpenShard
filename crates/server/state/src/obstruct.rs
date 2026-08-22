@@ -24,7 +24,7 @@
 use std::collections::HashMap;
 
 use openshard_entities::EntityId;
-use openshard_movement::{LandTile, OpenWorld, Terrain, Tile};
+use openshard_movement::{LandTile, MapTerrain, OpenWorld, Terrain, Tile};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 
@@ -134,11 +134,15 @@ impl Obstructions {
 /// The map's terrain with the live world's obstacles laid over it.
 ///
 /// What every movement decision — a player's walk, an NPC's step, a chase's
-/// A* — actually checks. Built fresh from a [`FacetState`](crate::FacetState)
-/// each time; a borrow, not a copy.
+/// A* — actually checks. Built fresh from a
+/// [`WorldState`](crate::WorldState) each time; a borrow, not a copy.
 #[derive(Clone, Copy)]
 pub struct LiveTerrain<'a> {
-    map: Option<&'a (dyn Terrain + Send + Sync)>,
+    /// The bare map, named rather than abstracted: this decorator forwards nine
+    /// methods to it by hand, and every one of them used to be a chance to
+    /// forget one and silently inherit a trait default instead. See
+    /// `docs/map/terrain_seam.md`.
+    map: Option<MapTerrain<'a>>,
     obstructions: &'a Obstructions,
     /// The ships. A third source beside the map and the obstruction index, and
     /// the only one that can *add* somewhere to stand — see [`crate::boat`].
@@ -160,7 +164,7 @@ impl std::fmt::Debug for LiveTerrain<'_> {
 
 impl<'a> LiveTerrain<'a> {
     pub(crate) fn new(
-        map: Option<&'a (dyn Terrain + Send + Sync)>,
+        map: Option<MapTerrain<'a>>,
         obstructions: &'a Obstructions,
         boats: &'a crate::boat::Boats,
         through_doors: bool,
@@ -355,6 +359,17 @@ mod tests {
     use super::*;
     use crate::boat::{Boats, Plank};
     use openshard_entities::Registry;
+    use openshard_movement::scene::Scene;
+    use openshard_uofiles::tiledata::TileFlags;
+
+    /// The land id a scene paves with, which these fixtures declare to be water.
+    ///
+    /// `Scene::flat_holding` lays id `0` over every cell, so making *that* the
+    /// sea costs no pass at all and only the shore has to be written.
+    const OPEN_WATER: u16 = 0;
+
+    /// The land id of the strip a body can actually stand on.
+    const SHORE: u16 = 0x0003;
 
     /// A harbour with no ships in it. Most of these tests predate boats and want
     /// exactly that; the ones that do not build their own.
@@ -475,18 +490,23 @@ mod tests {
         );
     }
 
-    /// A terrain that answers a map question with something distinguishable from
-    /// the trait's default, so a forward that is missing reads as the default
-    /// rather than as a plausible answer.
-    struct Charted;
-
-    impl Terrain for Charted {
-        fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-            Some(to)
+    /// A map with a coastline down `x = 100`, so `land_is_water` has a real
+    /// answer to give and a missing forward reads as the trait's default rather
+    /// than as a plausible answer.
+    ///
+    /// Water is a *flag on a land row*, which is why this is a scene and not a
+    /// double: a fixture that overrode `land_is_water` would be agreeing with
+    /// itself about the one thing the test is checking gets through.
+    fn charted() -> Scene {
+        let mut scene = Scene::flat_holding(110, 8, 0);
+        scene.land_art(OPEN_WATER, TileFlags::WATER);
+        scene.land_art(SHORE, 0);
+        for y in 0..scene.height() {
+            for x in 0..100 {
+                scene.land(x, y, SHORE);
+            }
         }
-        fn land_is_water(&self, tile: Tile) -> bool {
-            tile.x >= 100
-        }
+        scene
     }
 
     /// **The forward, because a missing one is silent.**
@@ -502,8 +522,8 @@ mod tests {
     #[test]
     fn the_live_terrain_answers_the_map_and_not_the_trait_default() {
         let obstructions = Obstructions::default();
-        let charted = Charted;
-        let live = LiveTerrain::new(Some(&charted), &obstructions, &NO_BOATS, false);
+        let charted = charted();
+        let live = LiveTerrain::new(Some(charted.terrain()), &obstructions, &NO_BOATS, false);
 
         assert!(live.land_is_water(Tile::new(100, 5)), "the sea");
         assert!(!live.land_is_water(Tile::new(99, 5)), "and the shore");
@@ -518,21 +538,20 @@ mod tests {
         assert!(!live.land_is_water(Tile::new(100, 5)));
     }
 
-    /// A sea with a rock in it: nothing is walkable except one strip of shore.
-    struct Sea;
-
-    impl Terrain for Sea {
-        fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-            // The shore runs along y = 0. Everything else is open water, which
-            // the map correctly says is nowhere to stand.
-            (to.y == 0).then_some(to)
+    /// A sea with one strip of shore along `y = 0`, and nothing else to stand on.
+    ///
+    /// Wide enough for [`boat_step_cost`] to walk a thousand tiles of it. Every
+    /// refusal here is the map's own rule about water rather than a fixture's
+    /// opinion, which is the point: what these tests check is that a moored ship
+    /// overturns a refusal the *real* rule made.
+    fn sea() -> Scene {
+        let mut scene = Scene::flat_holding(1001, 4, 0);
+        scene.land_art(OPEN_WATER, TileFlags::WATER);
+        scene.land_art(SHORE, 0);
+        for x in 0..scene.width() {
+            scene.land(x, 0, SHORE);
         }
-        fn land_is_water(&self, tile: Tile) -> bool {
-            tile.y != 0
-        }
-        fn can_fit(&self, tile: Tile, _z: i32, _height: i32) -> bool {
-            tile.y == 0
-        }
+        scene
     }
 
     fn a_ship_at(boat: EntityId, x: u16, y: u16) -> Boats {
@@ -582,7 +601,8 @@ mod tests {
     fn a_deck_makes_a_step_onto_open_water_legal() {
         let obstructions = Obstructions::default();
         let boats = a_ship_at(an_entity(), 10, 1);
-        let live = LiveTerrain::new(Some(&Sea), &obstructions, &boats, false);
+        let sea = sea();
+        let live = LiveTerrain::new(Some(sea.terrain()), &obstructions, &boats, false);
 
         assert!(
             live.can_step(Point::new(20, 0, 0), Point::new(20, 1, 0))
@@ -608,7 +628,8 @@ mod tests {
     fn a_hull_refuses_the_step_a_deck_would_have_allowed() {
         let obstructions = Obstructions::default();
         let boats = a_ship_at(an_entity(), 10, 1);
-        let live = LiveTerrain::new(Some(&Sea), &obstructions, &boats, false);
+        let sea = sea();
+        let live = LiveTerrain::new(Some(sea.terrain()), &obstructions, &boats, false);
 
         assert!(
             live.can_step(Point::new(10, 1, 5), Point::new(11, 1, 5))
@@ -623,7 +644,8 @@ mod tests {
     #[test]
     fn an_empty_harbour_changes_no_answer() {
         let obstructions = Obstructions::default();
-        let live = LiveTerrain::new(Some(&Sea), &obstructions, &NO_BOATS, false);
+        let sea = sea();
+        let live = LiveTerrain::new(Some(sea.terrain()), &obstructions, &NO_BOATS, false);
 
         assert!(
             live.can_step(Point::new(10, 0, 0), Point::new(10, 1, 0))
@@ -680,9 +702,10 @@ mod tests {
         const STEPS: u32 = 100_000;
         let obstructions = Obstructions::default();
         let busy = a_ship_at(an_entity(), 500, 1);
+        let sea = sea();
 
         let walk = |boats: &Boats| {
-            let live = LiveTerrain::new(Some(&Sea), &obstructions, boats, false);
+            let live = LiveTerrain::new(Some(sea.terrain()), &obstructions, boats, false);
             let start = std::time::Instant::now();
             let mut allowed = 0u32;
             for step in 0..STEPS {

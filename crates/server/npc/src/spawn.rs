@@ -2,7 +2,7 @@
 //! living mobile, and the event that announces it.
 
 use openshard_entities::EntityId;
-use openshard_movement::{Tile, Walker};
+use openshard_movement::{Terrain, Tile, Walker};
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::{Serial, SerialKind};
@@ -156,9 +156,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
     // map's to say. Without this a banker sinks to the given z and reads as
     // "inside a wall".
     let position = match state
-        .facet_state(facet)
-        .terrain
-        .as_ref()
+        .map_terrain(facet)
         .and_then(|t| t.spawn_z(Tile::new(position.x, position.y), i32::from(position.z)))
         .and_then(|z| i8::try_from(z).ok())
     {

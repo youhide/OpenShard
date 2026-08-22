@@ -134,12 +134,12 @@ fn britannia_with(components: Vec<Component>) -> WorldState {
 fn ground_of(components: Vec<Component>, land: u16, fits: bool) -> WorldState {
     // The ground and the table it reads, from one scene: a wall's height cannot
     // disagree with the tiledata the terrain is looking at.
-    let (terrain, tiles) = ground_scene(land, fits).into_shard();
+    let (map, tiles) = ground_scene(land, fits).into_shard(Facet(0));
     let mut facets = BTreeMap::new();
     facets.insert(
         Facet(0),
         FacetState {
-            terrain: Some(Box::new(terrain)),
+            map: Some(map),
             coarse: None,
             width: SIZE,
             height: SIZE,
@@ -1867,7 +1867,7 @@ fn a_foundation_blocks_where_its_design_says_and_not_where_its_platform_does() {
 fn a_shard_with_no_client_files_still_refuses_a_foundation() {
     let mut state = world_with(cottage());
     state.multis = Multis::default();
-    state.tiles = std::sync::Arc::new(TileData::empty());
+    state.tiles = TileData::empty();
     let (actor, owner) = an_actor(&mut state);
 
     assert_eq!(

@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 use openshard_entities::{EntityId, Registry};
 use openshard_events::{Cursor, EventBus};
 use openshard_gateway::ConnectionId;
+use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::{Terrain, Tile, Walk, Walker, step_from};
 use openshard_persistence::{
     CharacterRecord, DecorationRecord, DoorState, Inventory, ItemLocation, ItemRecord, Journal, MobileRecord,
@@ -85,7 +86,6 @@ use crate::events::{
     PlayerRefused, RefusedEntry, RefusedReason, RegionChanged, StepRefused,
 };
 use crate::gm;
-use crate::terrain::MapTerrain;
 
 mod ambient;
 mod command;
@@ -242,7 +242,7 @@ impl World {
         facets.insert(
             Facet(DEFAULT_FACET),
             FacetState {
-                terrain: None,
+                map: None,
                 coarse: None,
                 width: FACET_WITHOUT_A_MAP.0,
                 height: FACET_WITHOUT_A_MAP.1,
@@ -266,7 +266,7 @@ impl World {
                 // files is one whose tiledata says nothing about every graphic,
                 // and saying it once here is what keeps every reader from having
                 // to decide what "no table" means. `with_tiles` replaces both.
-                tiles: std::sync::Arc::new(openshard_uofiles::tiledata::TileData::empty()),
+                tiles: openshard_uofiles::tiledata::TileData::empty(),
                 multis: openshard_uofiles::multi::Multis::default(),
                 players: HashMap::new(),
                 connections: HashMap::new(),
@@ -403,7 +403,7 @@ impl World {
     #[must_use]
     pub fn with_tiles(
         mut self,
-        tiles: std::sync::Arc<openshard_uofiles::tiledata::TileData>,
+        tiles: openshard_uofiles::tiledata::TileData,
         multis: openshard_uofiles::multi::Multis,
     ) -> Self {
         self.state.tiles = tiles;
@@ -412,39 +412,34 @@ impl World {
     }
 
     /// Give the default facet a map.
-    pub fn with_terrain<M, T>(self, terrain: MapTerrain<M, T>) -> Self
-    where
-        M: AsRef<openshard_map::map::WorldMap> + Send + Sync + 'static,
-        T: AsRef<openshard_uofiles::tiledata::TileData> + Send + Sync + 'static,
-    {
+    pub fn with_map(self, map: MapSnapshot) -> Self {
         let facet = self.state.default_facet;
-        self.with_facet(facet, terrain, None)
+        self.with_facet(facet, map, None)
     }
 
-    /// Load `terrain` and its already-baked coarse router as facet `facet`.
-    pub fn with_facet<M, T>(
+    /// Load `map` and its already-baked coarse router as facet `facet`.
+    ///
+    /// The facet is named here as well as carried by the snapshot, because this
+    /// is the key the world files it under and a caller loading Malas into slot
+    /// three should say so once, out loud.
+    pub fn with_facet(
         mut self,
         facet: Facet,
-        terrain: MapTerrain<M, T>,
+        map: MapSnapshot,
         coarse: Option<openshard_movement::NavigationGraph>,
-    ) -> Self
-    where
-        M: AsRef<openshard_map::map::WorldMap> + Send + Sync + 'static,
-        T: AsRef<openshard_uofiles::tiledata::TileData> + Send + Sync + 'static,
-    {
-        let (width, height) = (terrain.map().width(), terrain.map().height());
+    ) -> Self {
+        debug_assert_eq!(map.facet(), facet, "a snapshot loaded into another facet's slot");
+        let (width, height) = (map.map().width(), map.map().height());
         debug_assert!(
             coarse
                 .as_ref()
                 .is_none_or(|graph| graph.dimensions() == (width, height))
         );
         let sectors = Sectors::new(width, height);
-        // Boxed as `dyn Terrain`: the state crate holds the abstraction, and the
-        // world supplies the concrete map here.
         self.state.facets.insert(
             facet,
             FacetState {
-                terrain: Some(Box::new(terrain) as Box<dyn Terrain + Send + Sync>),
+                map: Some(map),
                 coarse,
                 width,
                 height,

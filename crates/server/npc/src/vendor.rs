@@ -92,7 +92,7 @@ fn in_trade_range(state: &WorldState, player: EntityId, vendor: EntityId) -> boo
     // A wall between the shopper and the counter is a wall: the same line-of-sight
     // ServUO and Sphere gate a vendor on, so there is no buying through it. The
     // ray is the one aggro uses (`Terrain::sight_clear`).
-    state.facet_state(facet).live_terrain().sight_clear(at, vendor_at)
+    state.live_terrain(facet).sight_clear(at, vendor_at)
 }
 
 /// How long a bought-out shelf takes to refill, in ticks. ServUO's

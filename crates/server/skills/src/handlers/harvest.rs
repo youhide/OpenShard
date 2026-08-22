@@ -556,7 +556,11 @@ pub fn resolve_harvest_target(
     at: Point,
     graphic: Graphic,
 ) -> Option<HarvestTarget> {
-    let terrain = state.facets.get(&facet)?.live_terrain();
+    // The panicking accessor, like every other reader of a facet's ground: a
+    // facet reached through `facet_of` is always loaded, and the `get(..)?` this
+    // replaced was the one caller that quietly answered "no such target" for a
+    // facet that cannot happen.
+    let terrain = state.live_terrain(facet);
     if graphic.0 == 0 {
         return Some(HarvestTarget {
             at,
