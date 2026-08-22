@@ -98,3 +98,31 @@ the walk order into a property of one iterator and is the half of A0's point
 [`depth::Order`](../../../../crates/client/render/src/depth.rs)'s anti-diagonal
 tie is waiting on; give `Map::from_blocks` a typed extent; and give
 `Command::Send` a newtype saying its bytes are already framed for the wire.
+
+## Found while collapsing the two block types
+
+The grids in this workspace share arithmetic and share no code. Four of them
+now: the 8×8 map block (`BLOCK_SIZE`, and `BlockCoord` owns its conversions),
+the 64-tile radar chunk (`BASE_CHUNK_TILES`, with `RadarChunkCoord` beside it),
+the 64-tile server sector (`SECTOR_SIZE`), and the block *bounds* rectangle in
+`client/render`.
+
+- **A sector has no coordinate type at all.**
+  [`Sectors::sector_of`](../../../../crates/server/state/src/sectors.rs) answers
+  in a bare `usize`, and its buckets are indexed `sector_x * down + sector_y` by
+  hand — the same column-major linear index `LandGrid::index_of` owns, written
+  out again. Its own comment says it copied the map's order deliberately so that
+  two orders would not sit in one crate; the copy is the part worth removing.
+- **Sector and radar chunk are both 64 tiles for unrelated reasons** — the radar
+  from `BLOCK_TILES * 8`, the sector from Sphere's `SECTORSIZE_DEFAULT`, pinned
+  by `VIEW_RANGE`. Two grids that agree by coincidence are exactly what
+  [`pixels.md`](../../../pixels.md) is about, and a shared *number* would be the
+  wrong way to unify them.
+- **`radar.rs` still open-codes tile → block** (`origin_x / BLOCK_TILES`) where
+  `BlockCoord::containing` is the same arithmetic.
+
+The shape that would settle it is shared arithmetic behind *distinct* types — a
+grid parameterised by its tile side, from which `BlockCoord`, `RadarChunkCoord`
+and a future `SectorCoord` come out non-interchangeable. One coordinate type for
+all three is the thing this track has already refused twice, and for the same
+reason both times.
