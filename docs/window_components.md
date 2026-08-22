@@ -1195,6 +1195,23 @@ settle:
   so it is the art's distance and is magnified with the art — the same
   distinction `SPLIT_OFFSET` is on the other side of the cascade constants for.
 
+- **Two gestures are let go of in the same three places, and nothing makes them
+  stay in step.** Found while closing the entry above. A gesture that freezes
+  something on the button going down has to be released wherever the button is
+  known to be up, and this client has three such places rather than one: the
+  ordinary release, a release egui claims before `panes::route` hears it
+  (`event_loop.rs`'s consumed branch), and `Focused(false)` for an alt-tab
+  whose release lands in another application. There are now **two** such
+  gestures — `Windows::grip` and `Input::left_press` — and each of the three
+  places clears both, by two adjacent statements that are correct only because
+  somebody wrote them next to each other. A third frozen-at-the-press gesture
+  is three more lines in three files, and the failure mode of forgetting one is
+  the one both of these were written to fix: a hold that outlives its button.
+  The honest shape is probably one `left_button_up()` on `App` that every
+  release-shaped event calls, with the devices listed inside it — the router's
+  own argument (one door, not three callers agreeing) applied to the end of a
+  gesture rather than to its start.
+
 ## Status
 
 **S0 through S8 built** (2026-08-17) — **the plan is complete.**
