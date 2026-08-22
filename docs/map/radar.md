@@ -13,6 +13,16 @@ cache is built to, or [`minimap_lod_handoff.md`](minimap_lod_handoff.md),
 which is still the record of what landed. It is the layer those two never
 reached: **nothing chooses an LOD.**
 
+> **Status: R0–R6 are built; R7 is not.** A window now picks its own level from
+> its own pixels, both windows are one `RadarView`, the queue and the byte
+> budget are one implementation under both subsystems, the pyramid is swept, the
+> CPU cache evicts, and the facet map wears a plate with a close button.
+> Sections 1–3 below are therefore **the record of what was wrong**, not a
+> description of the code — read them for the reasoning, not for the current
+> shape. What the build left open is section 9, and that is where the next
+> session starts. `MAX_LOD` no longer exists (it is `max_lod(extent)`), and the
+> line numbers in section 3 are pre-build.
+
 ---
 
 ## 1. The inventory: there are two LOD systems, and they are not the same one
@@ -380,7 +390,7 @@ Seven phases. R0 is independent of every other and can land first; R1 through
 R6 are ordered by what each one's successor needs. Each names the micro-
 decisions it settles, so a later session does not get to re-open them.
 
-### R0 — the four fixes with no design in them
+### R0 — the four fixes with no design in them ✅
 
 Independent of the rest, safe to land alone, and each one repairs something
 measurable today.
@@ -414,7 +424,7 @@ every key in a covering sample; a pointer moved across the screen with no
 button held leaves `WorldMapPane::pan` untouched, as an
 `openshard-client-app` test; and no radar draw allocates a buffer per frame.
 
-### R1 — the shared chunk machinery
+### R1 — the shared chunk machinery ✅
 
 A new module in `client/render` — `chunk_cache` — holding exactly the two
 pieces that are genuinely the same code twice, and nothing else.
@@ -453,7 +463,7 @@ expectations.
 `cargo test -p openshard-client-render` and `-p openshard-client-app` pass with
 no test's *expectations* edited, only its imports.
 
-### R2 — the ladder becomes something you can ask for
+### R2 — the ladder becomes something you can ask for ✅
 
 1. **`max_lod` is a property of the facet, not a constant.** `MAX_LOD = 4`
    becomes `max_lod(extent) = ceil(log2(max(w, h) / BASE_CHUNK_TILES))` — 7 for
@@ -482,7 +492,7 @@ to `build_lod_parent` climbed from its `4^n` level-zero children, for `n` up to
 rather than two pictures that resemble each other. And `max_lod` for
 7168×4096 is 7, with a test.
 
-### R3 — one view, two windows
+### R3 — one view, two windows ✅ (with one seam left, see 9.1)
 
 The type both windows already are an instance of:
 
@@ -523,7 +533,7 @@ not one of the minimap's requested keys; and a test shows a view over a region
 a hundred times larger requesting **the same number of chunks** — which is the
 invariant this whole document exists for.
 
-### R4 — the sweep
+### R4 — the sweep ✅ (with one hazard left, see 9.3)
 
 On the **first** open of a facet map, enqueue that facet's chunks at
 `SWEEP_LOD` and coarser, at a priority below every open view's own demand.
@@ -546,7 +556,7 @@ minimap, walked onto ground it has never visited, now falls back to a coarse
 ancestor instead of the backdrop — which is the "known limit" the handoff
 records as unfixable under today's design.
 
-### R5 — the CPU cache gets a budget
+### R5 — the CPU cache gets a budget ✅
 
 `RadarCache` takes an `LruBudget` from R1 and finally increments
 `RadarCacheCounters::evicted`. Two pinning rules:
@@ -563,7 +573,7 @@ candidates, ahead of any current-revision one, whatever the use clock says.
 **Done when** a scripted walk across a facet leaves the unpinned tail at or
 under its budget with `evicted` non-zero, and every level ≥ 2 still resident.
 
-### R6 — the facet map becomes a window
+### R6 — the facet map becomes a window ✅ (tests short of its own bar, see 9.7)
 
 1. **The plate.** `gump::resize(atlas, Graphic(0x0A28), at, width, height)`,
    the same nine-slice the party manifest uses, with the `0x00F3`/`0x00F2`
@@ -585,7 +595,7 @@ local window under `Windows`, with interaction tests for each; the canvas
 cannot be dragged out of its own frame at any zoom; and `Drawn::WorldMap` no
 longer answers `pictures()` with an empty slice.
 
-### R7 — measure, and then soak
+### R7 — measure, and then soak — **not built**
 
 `RadarCacheCounters` and `RadarWorkCounters` exist and nobody reads them; R0
 adds a third on the page cache. Putting them in the frame report **is a UI
@@ -609,3 +619,126 @@ a level it cannot display — and their three fixes (`region_base_chunks_near`,
 `cap_draws_by_distance`, the `sqrt(2)` removal) all stay, as the backstops they
 were written to be. None of them is undone here. They simply stop being
 reachable in ordinary play.
+
+---
+
+## 9. What the build left open
+
+R0–R6 landed together. Everything below was found by reading that work against
+this plan; each entry names the file, what the code does, and what the plan said
+it would do instead. Nothing here is a redesign — the design of sections 4 and 6
+held. `cargo test -p openshard-client-render -p openshard-client-app` is green
+and neither crate's clippy output grew.
+
+### 9.1 The view is built twice, and only the level crosses between them
+
+This is the one item that matters, because it is the defect this whole document
+was written against, one layer up.
+
+`App::draw_from` builds a `RadarView` per open window to compute *demand* and to
+drive that window's `RadarLodSelector`
+([`presentation.rs`](../../crates/client/app/src/presentation.rs), the
+`radar_views` vector). `draw_gump_windows` then builds **a second `RadarView`**
+per window, from the same `Drawn` bounds, to compute the *draw*
+([`render_passes.rs`](../../crates/client/app/src/render_passes.rs)). What
+crosses the seam is a `&[(WindowSubject, RadarLod)]` slice — the level only.
+
+The two constructions agree today by arithmetic coincidence, not by
+construction: one reads `window_scale.factor()` and `App::gump_scale()`, the
+other reads `magnify` and `frame.scale`, and `gump_scale()` and `frame.scale`
+are separately-written spellings of `shell.pixels_per_point()`. Let either
+drift and the requested region stops being the drawn region — a chunk built and
+never shown, or shown and never built, which is exactly
+[`parity.md`](../parity.md)'s hazard.
+
+R3 said the two arms become one taking a `RadarView`. Half of that happened:
+`draw_radar_view` is one function, but its argument is re-derived rather than
+handed over. **Widen the slice already being threaded** to
+`&[(WindowSubject, RadarView, RadarLod)]` and delete the second construction.
+
+### 9.2 `radar_native_extent` and `radar_region_for` are now `#[cfg(test)]`
+
+R3 said `radar_native_extent`'s hard-won arithmetic "becomes `region()`'s body,
+unchanged and still the one copy". It was instead *copied* into
+`RadarView::region` and `with_tangent_margin_fraction`, and the original pair in
+[`minimap.rs`](../../crates/client/app/src/panes/minimap.rs) was marked
+`#[cfg(test)]` so its tests would keep compiling.
+
+So there are two copies, production reads one, and the five tests recording the
+three measured margin reports — flat count, no-`zoom` fraction, no HiDPI scaling
+— now assert about the copy no frame calls. Retarget them at
+`RadarView::region()` and delete the pair. Until that happens the margin rule is
+documented and tested in a place where breaking it costs nothing.
+
+### 9.3 The sweep can drop chunks and still call itself done
+
+`RadarCache::begin_sweep` flips a per-facet flag the first time a facet map
+opens, and the enqueue loop then calls `request_sweep` once per chunk.
+`request_sweep` returns `false` when the queue is at `max_queued`, and a refused
+key is never offered again — the flag already says the sweep ran.
+
+Today 599 sweep chunks plus both windows' view demand fit under 1024, so it
+works by arithmetic rather than by construction, and the failure is silent:
+a hole in the fallback floor that only shows up as a patch of backdrop at some
+zoom, weeks later. The plan's own words for the flag were "guarded by a flag on
+the cache, not by *is the queue empty*" — the flag is right, its granularity is
+not. Make it a remaining-set (or a cursor) the requester drains across frames
+until every sweep key is ready or queued.
+
+### 9.4 The demand loop cannot be tested, so R3's own acceptance test is missing
+
+R3's "done when" asks for a test that an open facet map changes not one of the
+minimap's requested keys — defect 3.3, the one that starved the minimap. It does
+not exist, because the requester lives inside `App::draw_from`, which needs a
+window, a device and a shell.
+
+The loop is a pure function of `(&[RadarView], &RadarCache, &mut RadarWorkQueue)`
+returning the protected key list. Lift it out and the missing test is three
+lines. This is the precondition for 9.1 as well: one view list, computed once,
+is what both the requester and the draw would then take.
+
+### 9.5 `RadarLodSelector` remembers a level across a facet change
+
+`update` clamps upward only while `selected < max`, and the downward loop stops
+at zero. A selector carrying a level chosen for Britannia keeps it when the view
+moves to a smaller facet, and can then return a level above that facet's own
+`max_lod` — naming a grid that does not exist. Clamp `selected` to `max` on
+entry, or key the selector by facet the way the cache keys everything else.
+
+### 9.6 Two small hardening items in the same files
+
+- **`take_for_producer`/`take_for_producer_near` index `priorities[key]` inside
+  the sort comparator.** Every path that makes a key pending also inserts its
+  priority, so it is an invariant rather than a bug — but a panic sited inside
+  an `Ord` comparator, in a frame, is a bad place to spend one.
+  `.get().copied().unwrap_or(View)` costs nothing and cannot fire.
+- **`RadarCache::evict_to_budget` rebuilds its pinned set from every ready key,
+  every frame**, and `LruBudget::retained_bytes` sums every entry each call.
+  With the sweep resident that is ~600 entries walked twice per frame — fine
+  now, and worth naming before levels 0 and 1 make it thousands.
+
+### 9.7 What is built but not tested to its own bar
+
+- **R6's window furniture.** There are tests for the close button and for the
+  unpressed-move guard. There is none for the drag actually panning, none for
+  raise/z-order, and none for "the canvas cannot be dragged out of its own frame
+  at any zoom" — which is the phase's own headline claim and the one
+  `clamp_centre` exists for.
+- **R0's per-frame allocation.** `instance_capacity` grows on demand and is
+  reused; nothing asserts that two identical draws allocate once. The cheap
+  oracle is the capacity field itself.
+- **`RadarPageCounters::over_capacity_draws`.** R0 correctly replaced the
+  per-frame `eprintln!` with a counter — and nothing reads it, so a truncated
+  draw is now *completely* invisible until R7 lands. That is the right trade
+  (the `eprintln!` spammed at frame rate), but it means R7 is no longer only a
+  measurement phase: it is where a real symptom regains a voice.
+
+### 9.8 One behaviour change nothing records
+
+`RadarView::region()` clamps the fetched rectangle's origin against **both**
+facet edges; `radar_region_for` saturated only at zero. Standing at the map's
+east or south edge, the minimap therefore now shifts its region back inside the
+facet — terrain where there used to be a band of `UNKNOWN`, and a player marker
+that walks off the centre of the circle instead. It is the better behaviour and
+it matches the west/north edge, which always did this. No test says so, so
+nothing stops the next reader from "fixing" it back.
