@@ -427,21 +427,24 @@ forwarding method bodies** across `CachedTerrain`, `Cluttered` and
 **Done when:** no caller reaches a client-file table through `Terrain`, and the
 trait is nine methods.
 
-## C — the doubles become Scenes — **four of eight**
+## C — the doubles become Scenes ✅
 
-Needs A, which is done. Each double is replaced by a `Scene` that builds a real
-`MapTerrain` through [`Scene::into_shard`](#a--scene-grows-what-the-doubles-need-).
-This is worth doing on its own evidence and would be worth doing if the rest of
-this document were abandoned: a double that answers `can_step` with `Some(to)`
-is a test that proves the caller compiles.
+**Done.** All eight replaced by a `Scene` that builds a real `MapTerrain` through
+[`Scene::into_shard`](#a--scene-grows-what-the-doubles-need-) — `boats`' and
+`persistence_tests`' `Sea`, `harvest_tests`' and `housing`'s `Ground`,
+`crafting_tests`' `Shop`, and `tick/tests.rs`'s `FrameTerrain` and
+`RaisedFloorTerrain`. `BlindTerrain` has no replacement, because the rule it
+stood for cannot exist; see below.
 
-**Converted:** `boats`' `Sea`, `persistence_tests`' `Sea`, `harvest_tests`'
-`Ground`, `housing`' `Ground`. **Left:** `crafting_tests`' `Shop`, and
-`tick/tests.rs`'s `BlindTerrain`, `FrameTerrain` and `RaisedFloorTerrain`.
+`grep -rn "\.terrain = " crates` is six sites and every one of them is either a
+`MapTerrain` out of a scene or `None`. The `Box` around them is all that is left,
+and it is D's.
 
-**Done when:** `facet_state_mut().terrain` is assigned nothing hand-written.
+It was worth doing on its own evidence, which is the count: **one engine defect
+fixed, one test deleted as fiction, and three silent holes named.** A double that
+answers `can_step` with `Some(to)` is a test that proves the caller compiles.
 
-### What the first four cost, and what they were hiding
+### What they cost, and what they were hiding
 
 **A double answers questions its subject never asks, and being wrong there is
 free.** `boats`' `Sea` had four methods; `check_berth` reads one of them.
@@ -486,6 +489,41 @@ lays land id `0` everywhere, so `land_art(0, flags)` makes the whole facet water
 or void with no pass over its cells. `land_everywhere` costs a pass and is still
 cheap — thirteen harvest tests over a 1416×1656 scene run in 0.41 s — but the id
 trick is the one to reach for when the whole square is one kind of ground.
+
+### 🚩 `BlindTerrain` stood for a rule that cannot exist
+
+The last double had no replacement, and finding out why is the clearest single
+argument in this document for what a real fixture buys.
+
+[`line_tiles`](../../crates/common/movement/src/walk.rs#L175) returns the tiles
+strictly *between* two points. **Between neighbours there are none**, so no map
+can make a sight line between adjacent tiles anything but clear — a wall is a
+whole tile, and standing behind one puts you two tiles away.
+
+Two tests said otherwise, by holding a `sight_clear` that answered `false` from
+anywhere to anywhere:
+
+- `a_vendor_behind_a_wall_will_not_sell` is a real rule with the wrong geometry.
+  `TRADE_RANGE` is 4, so the vendor moves two tiles out with a wall on the tile
+  between, and the test now fails without that wall — which it did not before,
+  because before it was asserting that its own double returned `false`.
+- `no_melee_swing_through_an_adjacent_wall` is **deleted**. `MELEE_RANGE` is 1,
+  so there is no geometry that makes it true, and the gate it claimed to
+  exercise — [`combat/src/lib.rs:791`](../../crates/server/combat/src/lib.rs#L791),
+  under a comment reading *"Adjacent tiles can still be separated by a closed
+  door or wall"* — **cannot fire**. The check is left standing; the comment is
+  wrong about why.
+
+**And the hole underneath both: a sight line has no height.** `sight_clear`
+walks the tiles between and reads the statics on them, so two mobiles on the
+*same* tile at different z — one on a shop's ground floor and one on the storey
+above — see each other through the floor. Sphere reads the platform bit in its
+own LoS for exactly this case, and this port reads it only on the tiles it
+crosses. That is a real defect with a player-visible consequence (buy from the
+vendor upstairs, shoot the one downstairs), and it is what would make the melee
+gate above live. It needs the endpoints' own columns examined, which is a change
+to what a sight line *is* rather than to who asks for one — so it is filed here
+rather than fixed in passing.
 
 ## D — `FacetState` holds data, `MapTerrain` holds borrows
 

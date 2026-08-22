@@ -5,6 +5,7 @@ use openshard_config::CombatEra;
 use openshard_events::Cursor;
 use openshard_magic::SpellCast;
 use openshard_movement::WALK_INTERVAL;
+use openshard_movement::scene::Scene;
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
@@ -4180,27 +4181,20 @@ fn no_swing_out_of_reach() {
     );
 }
 
-#[test]
-fn no_melee_swing_through_an_adjacent_wall() {
-    let now = Instant::now();
-    let mut world = world();
-    let player = enter(&mut world, now);
-    // This is still melee range, but a wall occupies the line between the two
-    // tiles.  Melee must use the same live-terrain visibility gate as arrows.
-    let mob = spawn_mobile_at(&mut world, Point::new(START.0 + 1, START.1, 0), 50, now);
-    let mob_entity = entity(&world, mob);
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(BlindTerrain));
-    engage(&mut world, player, mob, now);
-    for _ in 0..(WRESTLING_SWING_TICKS + 1) {
-        world.tick(now);
-    }
-
-    assert_eq!(
-        world.state.registry.get::<Hitpoints>(mob_entity).unwrap().current,
-        50,
-        "an adjacent wall blocks a melee swing"
-    );
-}
+// `no_melee_swing_through_an_adjacent_wall` was here, and it was fiction.
+//
+// It put a mobile on the tile next to the player and a `sight_clear` that
+// answered `false` from anywhere to anywhere, then asserted the blow did not
+// land. No map can say that: `line_tiles` returns the tiles strictly between two
+// points, and between neighbours there are none — a wall is a whole tile, so
+// standing behind one puts you two tiles away and out of `MELEE_RANGE`.
+//
+// The gate it claimed to exercise (`combat/src/lib.rs`'s melee `sight_clear`,
+// under a comment reading *"Adjacent tiles can still be separated by a closed
+// door or wall"*) therefore cannot fire at all. The check is left in place —
+// it becomes live the moment a sight line learns about height — and the finding
+// is filed in `docs/map/terrain_seam.md`. What is deleted is a test that only
+// ever proved its own double answered `false`.
 
 #[test]
 fn a_forced_critical_multiplies_a_landed_melee_blow_before_defences() {
@@ -9316,25 +9310,33 @@ fn an_open_door_swings_shut_on_its_own() {
     assert_eq!(world.registry().get::<Position>(door).unwrap().0, at);
 }
 
-/// A terrain whose only statics are one west door frame at (100, 100) and one
-/// east frame at (102, 100) — a single-door gap for the generator to fill. The
-/// gap has a surface (a door fits) unless `walled`, which stands in for a solid
-/// wall where nothing fits.
-struct FrameTerrain {
-    walled: bool,
+/// One west door frame at (100, 100) and one east frame at (102, 100) — a
+/// single-door gap for the generator to fill. `walled` bricks the gap up.
+///
+/// **A real map.** The frames are statics on a [`Scene`]'s
+/// [`WorldMap`](openshard_map::map::WorldMap) under their own id, and the bricked
+/// gap is a wall standing in it — so `can_fit` refuses the doorway through the
+/// shard's own rule rather than by a fixture matching a coordinate. The double
+/// this replaced answered `can_fit` false at exactly (101, 100) and true
+/// everywhere else, including inside its own frames, which is not a building.
+fn door_frames(walled: bool) -> Scene {
+    // 0x0007 is both a west and an east frame.
+    const FRAME: u16 = 0x0007;
+    let mut scene = Scene::flat_holding(102, 100, 0);
+    scene.art(FRAME, WALL_FLAGS, 20);
+    scene.put(100, 100, 0, FRAME);
+    scene.put(102, 100, 0, FRAME);
+    if walled {
+        scene.wall(101, 100, 0, 20);
+    }
+    scene
 }
-impl Terrain for FrameTerrain {
-    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-        Some(to)
-    }
-    fn statics_at(&self, tile: Tile, out: &mut Vec<(Graphic, i8)>) {
-        if tile.y == 100 && (tile.x == 100 || tile.x == 102) {
-            out.push((Graphic(0x0007), 0)); // 0x0007 is both a west and an east frame
-        }
-    }
-    fn can_fit(&self, tile: Tile, _z: i32, _height: i32) -> bool {
-        !(self.walled && (tile.x, tile.y) == (101, 100))
-    }
+
+/// Give the default facet a scene, and the shard the table that scene reads.
+fn stand_on(world: &mut World, scene: Scene) {
+    let (terrain, tiles) = scene.into_shard();
+    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(terrain));
+    world.state.tiles = tiles;
 }
 
 fn generate_britain_doors(world: &mut World, now: Instant) {
@@ -9352,7 +9354,7 @@ fn generate_britain_doors(world: &mut World, now: Instant) {
 fn doors_are_generated_between_static_frames() {
     let now = Instant::now();
     let mut world = world();
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(FrameTerrain { walled: false }));
+    stand_on(&mut world, door_frames(false));
 
     generate_britain_doors(&mut world, now);
 
@@ -9388,7 +9390,7 @@ fn doors_are_generated_between_static_frames() {
 fn no_door_is_generated_into_a_wall() {
     let now = Instant::now();
     let mut world = world();
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(FrameTerrain { walled: true }));
+    stand_on(&mut world, door_frames(true));
 
     generate_britain_doors(&mut world, now);
 
@@ -12238,27 +12240,29 @@ fn tooltips_off_sends_no_revision() {
     );
 }
 
-/// A terrain whose only walkable surface is a raised floor out of one step's
-/// reach — a shop floor above the ground. `stand_z` (a step) cannot reach it;
-/// `spawn_z` (a placement) can.
-struct RaisedFloorTerrain;
-impl Terrain for RaisedFloorTerrain {
-    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-        Some(to)
-    }
-    fn stand_z(&self, _tile: Tile, _near_z: i32) -> Option<i32> {
-        None
-    }
-    fn spawn_z(&self, _tile: Tile, _near_z: i32) -> Option<i32> {
-        Some(7)
-    }
+/// A shop floor seven units above ground nobody stands on — the only walkable
+/// surface, and out of one step's reach.
+///
+/// **A real map, and the two answers come out of one shape.** The double asserted
+/// `stand_z: None` and `spawn_z: Some(7)` side by side, which is two claims that
+/// could disagree; here they are consequences of a floor at 7 over impassable
+/// land, which is what a shop built on a rock face actually is. Seven is more
+/// than [`MAX_STEP_UP`](openshard_movement::MAX_STEP_UP), so a step cannot reach
+/// it and a placement can.
+fn a_raised_floor() -> Scene {
+    // Land id `0` is what a flat scene is paved with, so flagging the id makes
+    // the whole square ground nobody stands on — no pass over its cells.
+    let mut scene = Scene::flat_holding(START.0 + 4, START.1 + 4, 0);
+    scene.land_art(0, openshard_uofiles::tiledata::TileFlags::BLOCK);
+    scene.floor(START.0, START.1, 0, 7);
+    scene
 }
 
 #[test]
 fn a_spawn_stands_on_the_floor_not_under_it() {
     let now = Instant::now();
     let mut world = world();
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(RaisedFloorTerrain));
+    stand_on(&mut world, a_raised_floor());
     // Placed at z=0 (as the pack does), the shop floor is at z=7.
     world.queue(Command::SpawnMobile {
         body: openshard_protocol::wire::Graphic(0x0190),
@@ -12483,15 +12487,20 @@ fn context_menus_off_sends_no_popup() {
     );
 }
 
-/// A terrain where the line of sight is never clear — every ray hits a wall.
-struct BlindTerrain;
-impl Terrain for BlindTerrain {
-    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-        Some(to)
-    }
-    fn sight_clear(&self, _from: Point, _to: Point) -> bool {
-        false
-    }
+/// Flat ground with one wall standing at `(START.0 + 1, START.1)` — the tile
+/// between somebody at [`START`] and somebody two east of it.
+///
+/// **A wall is a tile, so it takes a tile to be behind one.** `line_tiles`
+/// returns the tiles strictly *between* two points, which for neighbours is
+/// none: no map can make a sight line between adjacent tiles anything but clear.
+/// The double this replaced said sight was never clear from anywhere to
+/// anywhere, which let a test claim a wall stood between two tiles that touch.
+/// See `docs/map/terrain_seam.md` — the gate it was standing in for cannot fire
+/// at melee range at all.
+fn a_wall_two_tiles_across() -> Scene {
+    let mut scene = Scene::flat_holding(START.0 + 4, START.1 + 4, 0);
+    scene.wall(START.0 + 1, START.1, 0, 20);
+    scene
 }
 
 /// Spawn a stocked vendor at `point` and return its serial.
@@ -12575,9 +12584,11 @@ fn a_vendor_behind_a_wall_will_not_sell() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
-    // Adjacent, but with a wall between: line of sight is never clear.
-    let vendor = spawn_stocked_vendor(&mut world, Point::new(START.0 + 1, START.1, 0), now);
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(BlindTerrain));
+    // Well inside the four-tile trade range, with a wall on the one tile the
+    // sight line crosses. Two apart rather than adjacent because that is what it
+    // takes for anything to be *between* them: a wall is a whole tile.
+    let vendor = spawn_stocked_vendor(&mut world, Point::new(START.0 + 2, START.1, 0), now);
+    stand_on(&mut world, a_wall_two_tiles_across());
     let _ = packets_for(&mut world, connection);
 
     world.queue(Command::DoubleClick {

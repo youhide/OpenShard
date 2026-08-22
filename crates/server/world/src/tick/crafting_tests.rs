@@ -13,7 +13,7 @@
 use super::tests::{START, enter, packets_for, world};
 use super::*;
 use openshard_crafting::SystemId;
-use openshard_movement::{Terrain, Tile};
+use openshard_movement::scene::Scene;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::RawSerial;
@@ -35,26 +35,27 @@ const INGOT: Graphic = openshard_crafting::INGOT_GRAPHIC;
 /// Valorite's hue — the top of the metal axis.
 const VALORITE: Hue = Hue(0x08AB);
 
-/// A terrain that lays the same statics on every tile.
+/// Stand the player in a shop with these statics under foot.
 ///
 /// A forge and an anvil are *static* tiles in most of Britannia's shops, which is
 /// the half of the scan that is easy to leave out — so the workshop tests use
 /// statics and the "no workshop" one uses bare ground.
-struct Shop(Vec<(u16, i8)>);
-
-impl Terrain for Shop {
-    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-        Some(to)
-    }
-
-    fn statics_at(&self, _tile: Tile, out: &mut Vec<(Graphic, i8)>) {
-        out.extend(self.0.iter().map(|&(graphic, z)| (Graphic(graphic), z)));
-    }
-}
-
-/// Stand the player in a shop with these statics under foot.
+///
+/// **A real map.** The statics come out of a [`Scene`]'s
+/// [`WorldMap`](openshard_map::map::WorldMap) and the scan reads them through the
+/// shard's own `statics_at`. They stand on the player's own tile rather than on
+/// every tile of the facet, which is what the double did and what no shop looks
+/// like; the scan reaches two tiles, so one tile is the whole of what it needs.
+/// They are declared with no tiledata row on purpose — drawn, in the way of
+/// nothing — because what `find_facilities` matches is the graphic id.
 fn shop(world: &mut World, statics: &[(u16, i8)]) {
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Shop(statics.to_vec())));
+    let mut scene = Scene::flat_holding(START.0 + 4, START.1 + 4, 0);
+    for &(graphic, z) in statics {
+        scene.put(START.0, START.1, z, graphic);
+    }
+    let (terrain, tiles) = scene.into_shard();
+    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(terrain));
+    world.state.tiles = tiles;
 }
 
 /// Put an item in the player's pack, through the door a vendor's shelf uses.
