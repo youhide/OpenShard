@@ -11,20 +11,20 @@ behind" backlogs and its out-of-scope list.
 `LandGrid` with `BlockCoord`, `BlockIndex` and `CellIndex` beside it. `map.rs`
 no longer spells the order anywhere — not the four `block_x * blocks_down`, not
 the two verbatim copies in `cell_index` and `block_index`, and not the inverse
-`load_statics` had backwards. `Map`'s public API is unchanged, which is what
-made it land without touching a reader.
+`load_statics` had backwards. `WorldMap`'s public API is unchanged, which is
+what made it land without touching a reader.
 
 **A — the map got one owner with a revision on it.** `f4e563ea` and `6944e9d2`,
 with `71d4589d` writing down why the second was necessary.
 [`crates/common/map`](../../../../crates/common/map/src/lib.rs) holds
 `MapSnapshot` and `MapRevision`; `Resources` on the client and `FacetState` on
-the server each own one; `Map::load_facet` has one production caller and it is
-inside `openshard-map`. Both *map-derived* bakes — navigation and the building
-flood — record the revision they were built from and refuse a snapshot that
-disagrees, alongside their existing mtime staleness check rather than instead of
-it. `link::connect` is transport: it takes bytes already framed for the wire and
-returns decoded mutations for the event-loop owner to apply, and the step
-prediction moved back beside the snapshot.
+the server each own one; `WorldMap::load_facet` has one production caller and it
+is inside `openshard-map`. Both *map-derived* bakes — navigation and the
+building flood — record the revision they were built from and refuse a snapshot
+that disagrees, alongside their existing mtime staleness check rather than
+instead of it. `link::connect` is transport: it takes bytes already framed for
+the wire and returns decoded mutations for the event-loop owner to apply, and
+the step prediction moved back beside the snapshot.
 
 Gates, as run at the end of this session on a tree that also carries another
 session's uncommitted `client/app` edits: `cargo check --workspace
@@ -43,8 +43,8 @@ Only the decisions a later session could reopen by accident; the rest are in
   against three alternatives that all exist only because it was across a thread
   boundary: a second channel republishing the handle on every publish, an
   `ArcSwap`/`RwLock` the socket thread can block on, or a height grid rebuilt
-  per revision. An `Arc<Map>` handed over at login stays memory-safe forever and
-  silently keeps the revision it was handed, which under
+  per revision. An `Arc<WorldMap>` handed over at login stays memory-safe
+  forever and silently keeps the revision it was handed, which under
   [direction C](../plan.md#c--patches-and-the-resolved-snapshot) is worse than a
   race: it never crashes and never warns.
 - **A stamp asks for the revision in hand, never supplies `INITIAL` itself.** A
@@ -58,8 +58,8 @@ Only the decisions a later session could reopen by accident; the rest are in
   not.
 - **`MapSnapshot` has no `Deref`.** It was tried, and removed: it defeats the
   phase's own point, because a seam the compiler crosses for the caller is a
-  seam that is not there. `AsRef<Map>` stays for one reason — `MapTerrain<M>` is
-  generic over it.
+  seam that is not there. `AsRef<WorldMap>` stays for one reason —
+  `MapTerrain<M>` is generic over it.
 - **`BlockCoord` is one type and `RadarChunkCoord` is not it.** A radar chunk is
   64 tiles square; collapsing the two is the confusion
   [`pixels.md`](../../../pixels.md) exists to prevent.
@@ -96,7 +96,7 @@ What is left of that list, each landable alone and each already decided
 in [`snapshot.md`](../snapshot.md)'s left-behind lists: give `LandGrid`'s transitions their first caller, which is what turns
 the walk order into a property of one iterator and is the half of A0's point
 [`depth::Order`](../../../../crates/client/render/src/depth.rs)'s anti-diagonal
-tie is waiting on; give `Map::from_blocks` a typed extent; and give
+tie is waiting on; give `WorldMap::from_blocks` a typed extent; and give
 `Command::Send` a newtype saying its bytes are already framed for the wire.
 
 ## Found while collapsing the two block types

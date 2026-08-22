@@ -1,9 +1,9 @@
 //! The unit the world is stored, cached, invalidated and transferred in.
 //!
 //! A [`Chunk`] is a square of the facet with an identity and a revision on it.
-//! It is not a second representation of the world: it is cut out of a [`Map`]
-//! and it goes back in through [`assemble`], which builds the same `Map` the
-//! `.mul` importer does, through the same [`Map::from_parts`]. That is what
+//! It is not a second representation of the world: it is cut out of a [`WorldMap`]
+//! and it goes back in through [`assemble`], which builds the same `WorldMap` the
+//! `.mul` importer does, through the same [`WorldMap::from_parts`]. That is what
 //! makes a round trip an assertion about *bytes* rather than about two parallel
 //! worlds that agree by inspection.
 //!
@@ -61,7 +61,7 @@
 use openshard_protocol::world::Facet;
 
 use crate::grid::{BlockCoord, BlockExtent, BlockIndex, LandGrid};
-use crate::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell, Map, StaticItem};
+use crate::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell, StaticItem, WorldMap};
 use crate::snapshot::{MapRevision, MapSnapshot};
 
 /// Tiles along each side of a chunk.
@@ -136,9 +136,9 @@ pub struct ChunkKey {
 ///
 /// Statics are held **CSR over the chunk's blocks** — one flat run and a count
 /// per block — rather than a vector per block. That is the layout
-/// `client_today.md`'s finding 6 measured `Map` against: 120,744 allocations
+/// `client_today.md`'s finding 6 measured `WorldMap` against: 120,744 allocations
 /// facet-wide become one per chunk, and a block's items stay contiguous, which
-/// is what [`Map::statics_in_row`] needs them to be.
+/// is what [`WorldMap::statics_in_row`] needs them to be.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Chunk {
     key: ChunkKey,
@@ -155,15 +155,15 @@ pub struct Chunk {
     ///
     /// The *encoding* carries a count per block instead, with no redundant
     /// leading zero, and this prefix sum is built from it on the way in. Which
-    /// is the same division of labour as [`Map::from_parts`]' sort: the decoder
+    /// is the same division of labour as [`WorldMap::from_parts`]' sort: the decoder
     /// says what is there, the type says what shape it is in.
     offsets: Vec<u32>,
     /// Every static in the chunk, its blocks in order and each block's items in
-    /// the `(y, x)` stable order [`Map::from_parts`] imposes.
+    /// the `(y, x)` stable order [`WorldMap::from_parts`] imposes.
     ///
     /// **Carrying absolute world coordinates, as [`StaticItem`] always does.**
     /// Packing them against the block is the encoding's business and happens at
-    /// that boundary — a decoded chunk hands `Map` exactly what the `.mul`
+    /// that boundary — a decoded chunk hands `WorldMap` exactly what the `.mul`
     /// importer hands it.
     items: Vec<StaticItem>,
 }
@@ -213,7 +213,7 @@ impl Chunk {
     /// of public fields: the three arrays have to agree about how many blocks
     /// there are, and a decoder that got that wrong would produce a chunk whose
     /// every later lookup silently addressed the wrong block. The prefix sum
-    /// over `counts` is this type's, for the same reason [`Map::from_parts`]
+    /// over `counts` is this type's, for the same reason [`WorldMap::from_parts`]
     /// owns the sort — a second decoder cannot accumulate it differently from
     /// the first.
     ///
@@ -305,7 +305,7 @@ impl Chunk {
         &self.land[from..from + CELLS_PER_BLOCK]
     }
 
-    /// One block's statics, in the `(y, x)` order [`Map::statics_in_block`]
+    /// One block's statics, in the `(y, x)` order [`WorldMap::statics_in_block`]
     /// hands them out in.
     ///
     /// # Panics
@@ -475,7 +475,7 @@ impl std::error::Error for AssemblyError {}
 /// Build a facet out of a complete set of chunks.
 ///
 /// **The second importer, and deliberately not a second world.** It ends in
-/// [`Map::from_parts`] — the same call `openshard_uofiles::map` ends in — so the
+/// [`WorldMap::from_parts`] — the same call `openshard_uofiles::map` ends in — so the
 /// per-block sort that every later lookup binary-searches over is imposed by
 /// the type either way, and a chunk decoder cannot get it wrong *differently*
 /// from the `.mul` decoder.
@@ -492,7 +492,11 @@ impl std::error::Error for AssemblyError {}
 /// # Errors
 ///
 /// [`AssemblyError`], one variant per way a set of chunks fails to be one world.
-pub fn assemble(facet: Facet, facet_extent: BlockExtent, chunks: &[Chunk]) -> Result<Map, AssemblyError> {
+pub fn assemble(
+    facet: Facet,
+    facet_extent: BlockExtent,
+    chunks: &[Chunk],
+) -> Result<WorldMap, AssemblyError> {
     let blocks = facet_extent.count() as usize;
     let mut cells = vec![LandCell::default(); blocks * CELLS_PER_BLOCK];
     let mut statics: Vec<Vec<StaticItem>> = vec![Vec::new(); blocks];
@@ -558,7 +562,7 @@ pub fn assemble(facet: Facet, facet_extent: BlockExtent, chunks: &[Chunk]) -> Re
     // `from_parts`, and not a pair of fields: the sort is the map's invariant,
     // so this importer cannot forget it and cannot get it wrong differently
     // from the `.mul` one.
-    Ok(Map::from_parts(land, statics))
+    Ok(WorldMap::from_parts(land, statics))
 }
 
 #[cfg(test)]
@@ -566,7 +570,7 @@ pub(crate) mod fixture {
     use openshard_protocol::wire::{Graphic, Hue};
 
     use crate::grid::BlockExtent;
-    use crate::map::{LandCell, LandTile, Map, StaticItem};
+    use crate::map::{LandCell, LandTile, StaticItem, WorldMap};
 
     /// A facet that is **not** a whole number of chunks on either axis.
     ///
@@ -591,8 +595,8 @@ pub(crate) mod fixture {
     /// A facet with land that names itself and statics in the places worth
     /// getting wrong: a chunk's corners, both sides of both chunk seams, the
     /// facet's far corner, and two items on one tile.
-    pub fn map() -> Map {
-        let mut map = Map::from_blocks(
+    pub fn map() -> WorldMap {
+        let mut map = WorldMap::from_blocks(
             BlockExtent {
                 wide: BLOCKS,
                 down: BLOCKS,
@@ -670,7 +674,7 @@ mod tests {
     /// The order half is not decoration: `client/render` breaks a tie between
     /// two statics on one tile by taking the last, so a rebuild that returned
     /// them the other way round would draw a different item on top.
-    fn assert_same_world(original: &Map, rebuilt: &Map) {
+    fn assert_same_world(original: &WorldMap, rebuilt: &WorldMap) {
         assert_eq!(
             (original.width(), original.height()),
             (rebuilt.width(), rebuilt.height())
@@ -827,7 +831,7 @@ mod tests {
         ));
     }
 
-    /// The statics of a block come out of a chunk in the order `Map` holds
+    /// The statics of a block come out of a chunk in the order `WorldMap` holds
     /// them, which is the order the picture depends on.
     #[test]
     fn a_blocks_statics_keep_the_maps_order() {

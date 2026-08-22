@@ -18,9 +18,9 @@ that is not a file.
    `openshard-uofiles`; no reader outside it changes. **Built.**
 2. **A** — the map stops being something a caller loads for itself and becomes
    a revisioned snapshot every reader takes a handle to. **Built.**
-3. **A2** — the world moves out of the file-reader crate. `Map` becomes **the**
-   representation of the world, in `openshard-map` beside its snapshot, and what
-   stays in `uofiles` is an importer. **Built.**
+3. **A2** — the world moves out of the file-reader crate. `WorldMap` becomes
+   **the** representation of the world, in `openshard-map` beside its snapshot,
+   and what stays in `uofiles` is an importer. **Built.**
 
 None of them adds a feature. That is the point: everything after them in the
 track is cheap only if they land first, and if the rest of the track slipped
@@ -29,7 +29,7 @@ these would still have been worth doing.
 ## Phase 1 — `LandGrid` — **built**
 
 Landed as [`crates/common/map/src/grid.rs`](../../../crates/common/map/src/grid.rs) —
-in `uofiles` at the time, and moved with `Map` by phase 3.
+in `uofiles` at the time, and moved with `WorldMap` by phase 3.
 What it turned out to owe beyond this section is under
 [What phase 1 left behind](#what-phase-1-left-behind).
 
@@ -120,24 +120,24 @@ checked in `from_file_order` only, and `from_blocks` was trusted. Private to
 `grid.rs`: no signature outside it names a cell array, so a public wrapper would
 be a type nobody could obtain.
 
-**Statics do not move in this phase.** `Map::statics` stays
+**Statics do not move in this phase.** `WorldMap::statics` stays
 `Vec<Vec<StaticItem>>`; changing it is
 [direction B](plan.md#what-felucca-measures-before-the-layout-is-chosen). What
 this phase *does* owe it is stating the coupling that is load-bearing and
 implicit today: **`statics` is indexed by the same `BlockIndex` as the cells.**
 Nothing enforces that now.
 
-**`Map`'s public API does not change.** `land`, `statics_at`, `statics_in_row`,
-`statics_in_block`, `land_corners`, `average_land_z` keep their signatures and
-their behaviour. That is what makes this phase landable without touching a
-reader.
+**`WorldMap`'s public API does not change.** `land`, `statics_at`,
+`statics_in_row`, `statics_in_block`, `land_corners`, `average_land_z` keep
+their signatures and their behaviour. That is what makes this phase landable
+without touching a reader.
 
 ### Done when
 
 - `blocks_down`, `* blocks_down +` and `% BLOCK_SIZE` appear nowhere in
   `map.rs` outside `LandGrid`.
 - `block_order_is_column_major` and `cells_within_a_block_are_row_major` are
-  tests of `LandGrid` rather than of `Map`.
+  tests of `LandGrid` rather than of `WorldMap`.
 - A test asserts the round trip `origin_of(index_of(block_of(x, y)))` lands on
   the block's north-west tile — the inverse `load_statics` gets wrong silently.
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets` and
@@ -167,57 +167,58 @@ pub struct MapRevision(u64);
 
 `MapSnapshot` has one owner — `Resources` on the client, the facet terrain on
 the server. It owns the decoded map and is not itself reference counted.
-Leaf code keeps borrowing `&Map` through `MapSnapshot::map()`; no ordinary
-reader owns a `Map`.
+Leaf code keeps borrowing `&WorldMap` through `MapSnapshot::map()`; no ordinary
+reader owns a `WorldMap`.
 
 ### Decisions, taken here
 
 **A snapshot holds one facet, and knows which.** This closes
-[`client_today.md`](client_today.md)'s finding 8 — `Map` today names only a
+[`client_today.md`](client_today.md)'s finding 8 — `WorldMap` today names only a
 *size*, `describe_size` cannot tell Malas from Ter Mur, and the facet number
 that resolved the ambiguity at load time is then thrown away. It also stops the
 client's single-map, `FACET: u8 = 0` shape from being baked in: a second facet
 is a second snapshot, looked up by `Facet`, rather than a reopening.
 
-**This phase changes owners, not signatures.** `MapSnapshot::map() -> &Map`
-exists, and a leaf function that needs the land keeps taking `&Map` — the
-*caller* passes `snapshot.map()`. There are **78 `&Map`/`Arc<Map>` signature
-sites across 16 files**; converting them all would be churn with no reader
-better off, and would turn a landable phase into a sweep. What must change is
-every place that **owns or loads** one:
+**This phase changes owners, not signatures.** `MapSnapshot::map() -> &WorldMap`
+exists, and a leaf function that needs the land keeps taking `&WorldMap` — the
+*caller* passes `snapshot.map()`. There are **78 `&WorldMap`/`Arc<WorldMap>`
+signature sites across 16 files**; converting them all would be churn with no
+reader better off, and would turn a landable phase into a sweep. What must
+change is every place that **owns or loads** one:
 
 | Where | Today |
 |---|---|
-| [`Resources::map`](../../../crates/client/app/src/resources.rs#L37) | `Map` loaded by [`lib.rs:461`](../../../crates/client/app/src/lib.rs#L461) |
+| [`Resources::map`](../../../crates/client/app/src/resources.rs#L37) | `WorldMap` loaded by [`lib.rs:461`](../../../crates/client/app/src/lib.rs#L461) |
 | [`FacetState`](../../../crates/server/state/src/runtime.rs#L377) | its `terrain`, from [`boot.rs:618`](../../../crates/server/server/src/boot.rs#L618) |
 | [`link::connect`](../../../crates/client/app/src/link.rs#L535) | reads the map to predict a step across the thread |
 | the three bakes | navigation, the building flood, the occluder table |
 
-The invariant that makes it real: **`Map::load_facet` is called in exactly one
-place per process, and that place produces a `MapSnapshot`.** Everything else
-borrows its map from that owner.
+The invariant that makes it real: **`WorldMap::load_facet` is called in exactly
+one place per process, and that place produces a `MapSnapshot`.** Everything
+else borrows its map from that owner.
 
 **The network thread is transport, not a map reader.** It emits decoded packet
 mutations; the event-loop owner applies them to its `WorldView` and its `Walk`.
 It also receives an already encoded step packet to send. Consequently the
 prediction, including the terrain lookup and the step sequence, stays beside
-`MapSnapshot`; no `Arc<Map>` crosses into `link::connect`.
+`MapSnapshot`; no `Arc<WorldMap>` crosses into `link::connect`.
 
 *The reason is [direction C](plan.md#c--patches-and-the-resolved-snapshot), and
 it is worth stating in full because the shape it was in was not wrong today.*
-The shard thread held an `Arc<Map>` — immutable, uncontended, no lock anywhere —
-and read it for exactly one thing: `predict_step`, the **height** of the tile a
-`0x02` is asking for. Not walkability; `predict_step` cannot refuse. That is
-correct as long as nothing ever publishes.
+The shard thread held an `Arc<WorldMap>` — immutable, uncontended, no lock
+anywhere — and read it for exactly one thing: `predict_step`, the **height** of
+the tile a `0x02` is asking for. Not walkability; `predict_step` cannot refuse.
+That is correct as long as nothing ever publishes.
 
 C publishes. Its mutability is "apply to the touched chunks, rehash, and publish
-a new snapshot atomically between ticks" — a new immutable version, not a `Map`
-written through a lock. So an `Arc<Map>` handed to a thread at login stays
-memory-safe forever and **silently keeps the revision it was handed**. That is
-worse than a race: it never crashes and never warns. A GM raises a hill, the
-owner takes revision 8, the socket thread predicts step heights on revision 7,
-and the body walks sunk into the hill until the player reconnects — this track's
-own "both ends agree by luck", reproduced inside one process.
+a new snapshot atomically between ticks" — a new immutable version, not a
+`WorldMap` written through a lock. So an `Arc<WorldMap>` handed to a thread at
+login stays memory-safe forever and **silently keeps the revision it was
+handed**. That is worse than a race: it never crashes and never warns. A GM
+raises a hill, the owner takes revision 8, the socket thread predicts step
+heights on revision 7, and the body walks sunk into the hill until the player
+reconnects — this track's own "both ends agree by luck", reproduced inside one
+process.
 
 Keeping the prediction on the thread under C would cost one of three things: a
 second channel republishing the handle on every publish, ordered against the
@@ -290,11 +291,11 @@ and it is the field C later makes mean something.
 ## Phase 3 — the world is a crate, the files are an importer — **built**
 
 Phases 1 and 2 gave the world an order and an owner, and left it in the wrong
-place. `Map` was the workspace's single representation of the world and lived in
-`openshard-uofiles` — the crate whose stated job is "readers for the client's
-own files". So every reader of the world reached it through a file reader, and
-`openshard-map` depended on `uofiles` to say what a snapshot was a snapshot
-*of*.
+place. `WorldMap` was the workspace's single representation of the world and
+lived in `openshard-uofiles` — the crate whose stated job is "readers for the
+client's own files". So every reader of the world reached it through a file
+reader, and `openshard-map` depended on `uofiles` to say what a snapshot was a
+snapshot *of*.
 
 That is backwards against the thing [`overview.md`](overview.md) asks for in its
 first line: **the map is our data, and UO's files become one importer.** A shard
@@ -303,7 +304,7 @@ declared inside the `.mul` reader.
 
 ### What was built
 
-`Map`, `LandGrid` and the cell types moved to `openshard-map`, beside
+`WorldMap`, `LandGrid` and the cell types moved to `openshard-map`, beside
 `MapSnapshot`. The crate now depends on `openshard-protocol` and nothing else,
 and reads no files at all. Three modules:
 
@@ -330,8 +331,8 @@ many bytes a thing is on disk has no business in a crate that will one day hold
 a world nobody serialised that way.
 
 **The importer reads, the type sorts.**
-[`Map::from_parts`](../../../crates/common/map/src/map.rs#L191) is the door an
-importer comes through, and it takes the per-block sort by tile away from the
+[`WorldMap::from_parts`](../../../crates/common/map/src/map.rs#L191) is the door
+an importer comes through, and it takes the per-block sort by tile away from the
 decoder. `statics_at` and `statics_in_row` are binary searches over `(y, x)`
 order, so a decoder that handed over an unsorted block would not fail — it would
 make every later lookup quietly find nothing. The invariant now belongs to the
@@ -348,8 +349,8 @@ mints revision 1. `MapSnapshot::new` is now the *only* constructor in
 `openshard-map`, so "a facet was loaded" and "a facet has an identity and a
 revision" cannot come apart. The bare-map read is
 [`read_facet`](../../../crates/common/uofiles/src/map.rs#L185), and every caller
-of it is a test, an example or a diagnostic — which is what `Map::load_facet`'s
-callers already were.
+of it is a test, an example or a diagnostic — which is what
+`WorldMap::load_facet`'s callers already were.
 
 **The tree was left broken on purpose, for one commit.** The move landed first,
 naming nothing outside the two crates, and the ~50 files that named the old
@@ -361,8 +362,8 @@ mechanical.
 
 - `openshard-map` depends on `openshard-protocol` and nothing else, and no
   function in it takes a path.
-- No type named `Map`, `LandGrid`, `LandCell`, `LandTile` or `StaticItem` is
-  declared outside `openshard-map`.
+- No type named `WorldMap`, `LandGrid`, `LandCell`, `LandTile` or `StaticItem`
+  is declared outside `openshard-map`.
 - `uofiles::map` exposes the importer only, and `uofiles` depends on
   `openshard-map` rather than the reverse.
 - `cargo check --workspace --all-targets`, `cargo test --workspace` and
@@ -374,13 +375,13 @@ mechanical.
 Written down as it was found. None of it blocks the track's next direction.
 
 - **`Deref` was tried and refused.** The first pass gave `MapSnapshot` a
-  `Deref<Target = Map>` so that `map.land(..)` kept resolving and no reader had
-  to change. It was removed: [`style.md`](../../style.md) refuses `Deref` on a
-  newtype, and here it also defeats the phase's own point — the seam a caller
+  `Deref<Target = WorldMap>` so that `map.land(..)` kept resolving and no reader
+  had to change. It was removed: [`style.md`](../../style.md) refuses `Deref` on
+  a newtype, and here it also defeats the phase's own point — the seam a caller
   crosses is invisible if the compiler crosses it for them. Every reader now
   passes `snapshot.map()`, which is what this section said it would.
-  `AsRef<Map>` stays, for one reason only: `MapTerrain<M>` is generic over it,
-  so the server can parameterise a terrain over the snapshot itself.
+  `AsRef<WorldMap>` stays, for one reason only: `MapTerrain<M>` is generic over
+  it, so the server can parameterise a terrain over the snapshot itself.
 - **The revision cannot move, so the guard is tested and not exercised.** Both
   bakes refuse an artifact whose recorded revision disagrees with the snapshot
   in hand, and `bake.rs`'s test proves the refusal by handing `load` a stamp one
@@ -446,12 +447,12 @@ Written down as it was found, and none of it blocks phase 2.
   one a composite exists for" — and `FlatGroundBlock::inspect`, the function
   that decides that, narrows it itself and returns `None`.
 - **The land and the statics share an index that is still two arrays.**
-  `Map::statics` is now documented as being addressed by the same `BlockIndex`
-  as the cells, and every subscript of it goes through
+  `WorldMap::statics` is now documented as being addressed by the same
+  `BlockIndex` as the cells, and every subscript of it goes through
   `LandGrid::index_of` — which is as close to enforcement as two parallel
   `Vec`s get. A type that cannot express the mismatch is
   [direction B](plan.md#b--our-own-chunk-format-and-a-uo-importer)'s to build.
-- **The transitions have their first callers.** `Map::land_in_row` reads
+- **The transitions have their first callers.** `WorldMap::land_in_row` reads
   through `LandGrid::cells_in_row`; [`radar::fill`](../../../crates/client/render/src/radar.rs),
   [`LandWindow::gather`](../../../crates/client/render/src/ground.rs), and
   `for_each_cell_in` use it for their rectangle walks. The iterator ends at the
@@ -468,10 +469,11 @@ Written down as it was found, and none of it blocks phase 2.
   derives it and `the_two_orders_compose_into_a_strip` holds it against the
   plain spelling; direction B should know it before choosing a chunk layout,
   because it is the property that would be lost.
-- **`Map::from_blocks` takes a typed extent.** [`BlockExtent`](../../../crates/common/map/src/grid.rs)
-  names a facet's `wide` and `down` dimensions in blocks, alongside
-  [`BlockCoord`](../../../crates/common/map/src/grid.rs)'s position. Its
-  public named fields make a swapped width and height visible at every caller.
+- **`WorldMap::from_blocks` takes a typed extent.**
+  [`BlockExtent`](../../../crates/common/map/src/grid.rs) names a facet's `wide`
+  and `down` dimensions in blocks, alongside
+  [`BlockCoord`](../../../crates/common/map/src/grid.rs)'s position. Its public
+  named fields make a swapped width and height visible at every caller.
 
 ## Out of scope, named
 

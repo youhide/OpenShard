@@ -7,7 +7,7 @@
 //! `frame.rs`'s parity test — and a failure prints the room.
 //!
 //! No GPU and no client files: everything here runs everywhere, which is the
-//! point of a scene that is a `Map` with three items on it.
+//! point of a scene that is a `WorldMap` with three items on it.
 
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::debug;
@@ -1781,7 +1781,7 @@ fn a_merged_run_answers_every_ray_the_way_its_own_pieces_did() {
 ///
 /// The grid is built by hand rather than out of a scene, and deliberately: a
 /// scene is a map, and what this is about is two statics on one tile, which is
-/// the thing a `Map` makes fiddly to say and a `Builder` makes one line. What it
+/// the thing a `WorldMap` makes fiddly to say and a `Builder` makes one line. What it
 /// costs is that the flame is placed here rather than collected, and the
 /// assertion is written to survive that — it compares the gap against the wall
 /// beside it rather than against a constant.
@@ -1996,7 +1996,7 @@ fn a_segment_through_two_panes_on_one_tile_is_dimmed_by_both_of_them() {
 ///
 /// Built by hand rather than out of a scene, for the reason the gap test above
 /// is: what these are about is one surface with a stated hole in it, which a
-/// `Builder` says in a line and a `Map` makes fiddly. The panel stands on the
+/// `Builder` says in a line and a `WorldMap` makes fiddly. The panel stands on the
 /// **south** side of `HOLED_WALL`, so it lies in the plane `y = HOLED_WALL.1 + 1`
 /// and what runs along it is `x` — which is the coordinate a hole's `near` and
 /// `far` are measured in. See `facing::Hole`, which is what the art measures and

@@ -9,7 +9,7 @@
 //! # Why the block, and why there is no band
 //!
 //! The map's own unit is the 8×8 block: the statics of one are a contiguous slice
-//! ([`Map::statics_in_block`]) and a static never stands outside the block it is
+//! ([`WorldMap::statics_in_block`]) and a static never stands outside the block it is
 //! stored in, so a block's solids and its sky are entirely its own. Decision
 //! 30.4 as written also wanted a *storey band* in the key, because the cutaway
 //! used to be applied at the map walk and a builder was therefore one frame's;
@@ -51,7 +51,7 @@ use std::collections::hash_map::Entry;
 
 use rustc_hash::FxHashMap;
 
-use openshard_map::map::{BLOCK_SIZE, Map};
+use openshard_map::map::{BLOCK_SIZE, WorldMap};
 use openshard_uofiles::tiledata::TileData;
 
 use super::{Builder, Link, Occlusion, SKY_OPEN, Solid};
@@ -116,7 +116,13 @@ impl Baked {
     /// The builder used is over the block's eight-by-eight rectangle and nothing
     /// wider, so its row-major index *is* the cell index, which is what makes the
     /// read-out below a copy rather than an arithmetic.
-    fn of(map: &Map, tiledata: &TileData, atlas: Option<&dyn StaticArt>, block_x: u32, block_y: u32) -> Self {
+    fn of(
+        map: &WorldMap,
+        tiledata: &TileData,
+        atlas: Option<&dyn StaticArt>,
+        block_x: u32,
+        block_y: u32,
+    ) -> Self {
         let (origin_x, origin_y) = origin(block_x, block_y);
         let mut grid = Builder::new(TileBounds {
             min_x: origin_x,
@@ -342,7 +348,7 @@ impl Bake {
     /// One block, built if this is the first frame to want it.
     fn block(
         &mut self,
-        map: &Map,
+        map: &WorldMap,
         tiledata: &TileData,
         atlas: Option<&dyn StaticArt>,
         block_x: u32,
@@ -399,7 +405,7 @@ impl Bake {
 #[allow(clippy::too_many_arguments)]
 pub fn collect(
     bake: &mut Bake,
-    map: &Map,
+    map: &WorldMap,
     items: &[GroundItem],
     bounds: TileBounds,
     tiledata: &TileData,
@@ -442,7 +448,7 @@ fn ring_radius(_atlas: Option<&dyn StaticArt>) -> u32 {
 #[allow(clippy::too_many_arguments)]
 fn collect_ring(
     bake: &mut Bake,
-    map: &Map,
+    map: &WorldMap,
     items: &[GroundItem],
     bounds: TileBounds,
     tiledata: &TileData,
@@ -464,7 +470,7 @@ fn collect_ring(
         // Widened by the ring on every side, and clamped to zero rather than
         // wrapping: `block_x`/`block_y` are unsigned, and a frame in the
         // facet's corner has no block to its west. `Baked::of` (through
-        // `Map::statics_in_block`) answers empty for a block past the far
+        // `WorldMap::statics_in_block`) answers empty for a block past the far
         // edge, so there is nothing to clamp there.
         let columns = core_columns.start().saturating_sub(radius)..=(core_columns.end() + radius);
         let rows = core_rows.start().saturating_sub(radius)..=(core_rows.end() + radius);
@@ -509,8 +515,8 @@ mod tests {
     /// Built rather than loaded — `docs/lighting.md`'s decision 10 — so that a
     /// disagreement between the two builds names a tile rather than a
     /// coordinate in Britain.
-    fn town() -> (Map, TileData) {
-        let mut map = Map::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
+    fn town() -> (WorldMap, TileData) {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
             tile: LandTile(3),
             z: 0,
         });
@@ -782,7 +788,7 @@ mod tests {
     /// closed some other way.
     #[test]
     fn a_solid_anchored_outside_the_frame_still_occludes_through_the_ring() {
-        let map = Map::from_blocks(BlockExtent { wide: 3, down: 1 }, |_, _| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 1 }, |_, _| LandCell {
             tile: LandTile(3),
             z: 0,
         });
@@ -831,7 +837,7 @@ mod tests {
     /// radius rather than choosing it.
     #[test]
     fn a_wider_reach_needs_a_wider_ring() {
-        let map = Map::from_blocks(BlockExtent { wide: 3, down: 1 }, |_, _| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 1 }, |_, _| LandCell {
             tile: LandTile(3),
             z: 0,
         });

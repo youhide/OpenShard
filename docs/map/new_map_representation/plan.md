@@ -14,11 +14,11 @@ Nothing here is wrong; it is simply six readers with no common owner.
 
 | Reader | Where | What it holds |
 |---|---|---|
-| Step check, LoS, spawn heights | [`Terrain`](../../../crates/common/movement/src/walk.rs#L43), implemented by [`MapTerrain`](../../../crates/common/movement/src/terrain.rs#L61) | A `Map` and a `TileData`, owned or borrowed |
+| Step check, LoS, spawn heights | [`Terrain`](../../../crates/common/movement/src/walk.rs#L43), implemented by [`MapTerrain`](../../../crates/common/movement/src/terrain.rs#L61) | A `WorldMap` and a `TileData`, owned or borrowed |
 | The live step | [`LiveTerrain`](../../../crates/server/state/src/obstruct.rs#L140) over [`Obstructions`](../../../crates/server/state/src/obstruct.rs#L58) | Static terrain plus doors, items, boats |
 | Long routes | [`NavigationGraph`](../../../crates/common/movement/src/navigation.rs#L28), baked by [`bake.rs`](../../../crates/common/movement/src/bake.rs#L120) | 32×32 regions over one facet, stamped by input files |
-| The renderer, cutaway, the building flood | [`BuildingMap`](../../../crates/client/render/src/interiors.rs#L1025), [`occlusion/bake.rs`](../../../crates/client/render/src/occlusion/bake.rs#L400) | Its own walk of the same `Map` |
-| The client, everything | [`Resources`](../../../crates/client/app/src/resources.rs#L35), `map: Arc<Map>` | The facet it loaded itself at startup |
+| The renderer, cutaway, the building flood | [`BuildingMap`](../../../crates/client/render/src/interiors.rs#L1025), [`occlusion/bake.rs`](../../../crates/client/render/src/occlusion/bake.rs#L400) | Its own walk of the same `WorldMap` |
+| The client, everything | [`Resources`](../../../crates/client/app/src/resources.rs#L35), `map: Arc<WorldMap>` | The facet it loaded itself at startup |
 | The shard, per facet | [`FacetState`](../../../crates/server/state/src/runtime.rs#L377) | `terrain`, `coarse`, `obstructions`, `boats`, `regions`, `banks` |
 
 Both ends load the same install separately —
@@ -72,7 +72,8 @@ in five places inside one file:
   is indexed by **the same** `BlockIndex` as `cells`. Nothing enforces it now.
 - **Done when** `blocks_down`, `* blocks_down +` and `% BLOCK_SIZE` appear
   nowhere in `map.rs` outside the newtype, and
-  `block_order_is_column_major` is a test of the newtype rather than of `Map`.
+  `block_order_is_column_major` is a test of the newtype rather than of
+  `WorldMap`.
 
 Nothing outside `uofiles` changes: the linear formula never escaped this
 module — readers elsewhere only ever divide or multiply a coordinate by
@@ -89,14 +90,15 @@ to, so that later "the world changed" is one event with one meaning.
 - Introduce the snapshot as the thing a tick and a frame pin, alongside
   [`FacetState`](../../../crates/server/state/src/runtime.rs#L377) on the server and
   [`Resources::map`](../../../crates/client/app/src/resources.rs#L35) on the client.
-  It starts as a wrapper over today's `Map` with a revision on it and no patch
-  machinery at all.
+  It starts as a wrapper over today's `WorldMap` with a revision on it and no
+  patch machinery at all.
 - Keep [`Terrain`](../../../crates/common/movement/src/walk.rs#L43) as the query face
   for movement. It already is one, and it already has the two implementations
   that matter. Nothing about a step should learn what a patch is.
-- The readers that walk the `Map` directly rather than through `Terrain` —
+- The readers that walk the `WorldMap` directly rather than through `Terrain` —
   the renderer, [`BuildingMap`](../../../crates/client/render/src/interiors.rs#L1025),
-  the occluder bake, the minimap — take the snapshot instead of a bare `Map`.
+  the occluder bake, the minimap — take the snapshot instead of a bare
+  `WorldMap`.
 - **Done when** the map can only be reached through a snapshot handle, and
   every bake records which revision it was built from.
 
@@ -116,7 +118,7 @@ its own even if everything below slipped.
   question in the mechanics table answers yes), `Chunk` (dense land arrays,
   statics grouped by tile), `StaticId`, `Revision`.
 - **A chunk reader is a second importer, not a second world.** It builds the
-  same [`Map`](../../../crates/common/map/src/map.rs#L75) the `.mul` reader
+  same [`WorldMap`](../../../crates/common/map/src/map.rs#L75) the `.mul` reader
   does, through the same
   [`from_parts`](../../../crates/common/map/src/map.rs#L191) — which is what
   makes the round-trip below an assertion about *bytes* rather than about two
@@ -125,9 +127,9 @@ its own even if everything below slipped.
   [`read_facet`](../../../crates/common/uofiles/src/map.rs#L185) as the reader.
 - **Done when** an imported facet round-trips byte-identically, and a decoded
   chunk answers the same land and statics as
-  [`Map::land`](../../../crates/common/map/src/map.rs#L224) and
-  [`Map::statics_at`](../../../crates/common/map/src/map.rs#L305) for sampled
-  tiles across Felucca.
+  [`WorldMap::land`](../../../crates/common/map/src/map.rs#L224) and
+  [`WorldMap::statics_at`](../../../crates/common/map/src/map.rs#L305) for
+  sampled tiles across Felucca.
 
 Then the server reads the base set instead of the install, and existing
 movement, LoS and harvesting tests pass unchanged over the new source. That is
@@ -248,7 +250,7 @@ a free optimisation, until `Order` is made total across distinct tiles.
 chunk format are shaped without closing the door on it. Today's format is the
 one we want; this is about what it must not prevent.
 
-- **The whole facet is resident.** `Map` is about 150 MiB and every reader
+- **The whole facet is resident.** `WorldMap` is about 150 MiB and every reader
   assumes it is all there. A world of chunks held lazily — fetched on approach,
   dropped behind — is the eventual shape, and the thing that makes it cheap
   later is that it stays **behind the same API**: A0's newtype and `Terrain` are

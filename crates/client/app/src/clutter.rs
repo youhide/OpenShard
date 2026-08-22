@@ -66,7 +66,7 @@ use std::collections::HashMap;
 use openshard_client_net::view::Mobile;
 use openshard_client_render::doors;
 use openshard_client_render::items::GroundItem;
-use openshard_map::map::Map;
+use openshard_map::map::WorldMap;
 use openshard_movement::{MapTerrain, Terrain, Tile};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
@@ -221,9 +221,9 @@ impl Clutter {
     /// end should actually ask.
     pub const fn over<'a>(
         &'a self,
-        map: &'a Map,
+        map: &'a WorldMap,
         tiles: &'a TileData,
-    ) -> Cluttered<'a, MapTerrain<&'a Map, &'a TileData>> {
+    ) -> Cluttered<'a, MapTerrain<&'a WorldMap, &'a TileData>> {
         self.over_terrain(MapTerrain::new(map, tiles))
     }
 
@@ -238,9 +238,9 @@ impl Clutter {
     /// the creature that plans a route it intends to open its way along.
     pub const fn over_with_doors_open<'a>(
         &'a self,
-        map: &'a Map,
+        map: &'a WorldMap,
         tiles: &'a TileData,
-    ) -> Cluttered<'a, MapTerrain<&'a Map, &'a TileData>> {
+    ) -> Cluttered<'a, MapTerrain<&'a WorldMap, &'a TileData>> {
         Cluttered {
             map: MapTerrain::new(map, tiles),
             clutter: self,

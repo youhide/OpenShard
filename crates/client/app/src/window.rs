@@ -36,7 +36,7 @@ use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, 
 use openshard_client_render::select::Select;
 use openshard_client_render::solids::SolidsRenderer;
 use openshard_client_render::{ground, light, statics};
-use openshard_map::map::Map;
+use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::anim::Anim;
 use openshard_uofiles::art::Art;
@@ -254,7 +254,7 @@ impl Atlases {
 /// called — and threading the pieces explicitly is cheaper than splitting the
 /// struct to please the borrow checker.
 pub(crate) fn wanted_in(
-    map: &Map,
+    map: &WorldMap,
     bands: impl IntoIterator<Item = TileBounds>,
     items: &[GroundItem],
     drawn: &[Mobile],

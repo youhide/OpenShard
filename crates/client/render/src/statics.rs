@@ -18,7 +18,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
-use openshard_map::map::Map;
+use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_uofiles::tiledata::TileData;
@@ -81,7 +81,7 @@ pub fn on_screen(camera: &Camera, at: ViewPoint, sprite: &Sprite) -> bool {
 /// Called before building the atlas, for the same reason
 /// [`ground::visible_graphics`](crate::ground::visible_graphics) is: a quad
 /// cannot be given a region until the atlas holding it exists.
-pub fn visible_graphics(map: &Map, camera: &Camera, animations: &StaticAnimations) -> BTreeSet<Graphic> {
+pub fn visible_graphics(map: &WorldMap, camera: &Camera, animations: &StaticAnimations) -> BTreeSet<Graphic> {
     let mut seen = BTreeSet::new();
     graphics_in(map, camera.visible_tiles(), animations, &mut seen);
     seen
@@ -97,7 +97,7 @@ pub fn visible_graphics(map: &Map, camera: &Camera, animations: &StaticAnimation
 /// packs less and grows the atlas every time a fire ticks over, which is a band
 /// of rows uploaded to the GPU on whichever frame that happened to be.
 pub fn graphics_in(
-    map: &Map,
+    map: &WorldMap,
     bounds: TileBounds,
     animations: &StaticAnimations,
     out: &mut BTreeSet<Graphic>,
@@ -295,7 +295,7 @@ impl StaticGeometry {
 /// statics first would be stamping numbers from the frame before it.
 #[allow(clippy::too_many_arguments)]
 pub fn collect(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
@@ -328,7 +328,7 @@ pub fn collect(
 /// this result.
 #[allow(clippy::too_many_arguments)]
 pub fn collect_in(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     bounds: TileBounds,
     tiledata: &TileData,
@@ -357,7 +357,7 @@ pub fn collect_in(
 /// [`collect`] with opacity state retained across frames by the caller.
 #[allow(clippy::too_many_arguments)]
 pub fn collect_with_fades(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
@@ -386,7 +386,7 @@ pub fn collect_with_fades(
 /// [`collect_in`] retaining the caller's cutaway fade state.
 #[allow(clippy::too_many_arguments)]
 pub fn collect_in_with_fades(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     bounds: TileBounds,
     tiledata: &TileData,
@@ -419,7 +419,7 @@ pub fn collect_in_with_fades(
 #[allow(clippy::too_many_arguments)]
 #[allow(dead_code)]
 pub(crate) fn collect_with_fades_profiled(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
@@ -450,7 +450,7 @@ pub(crate) fn collect_with_fades_profiled(
 /// historical inputs.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn collect_with_fades_profiled_with_interior(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
@@ -481,7 +481,7 @@ pub(crate) fn collect_with_fades_profiled_with_interior(
 /// [`collect_in_with_fades`], with map-static costs kept for the jank log.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn collect_in_with_fades_profiled(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     bounds: TileBounds,
     tiledata: &TileData,
@@ -511,7 +511,7 @@ pub(crate) fn collect_in_with_fades_profiled(
 
 #[allow(clippy::too_many_arguments)]
 fn collect_in_with_fades_profiled_with_interior(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     bounds: TileBounds,
     tiledata: &TileData,
@@ -1009,7 +1009,7 @@ pub(crate) fn quad_of(
 /// takes; the zoom is undone here, once.
 #[must_use]
 pub fn pick(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
@@ -1023,7 +1023,7 @@ pub fn pick(
 /// [`pick`] with the same building-cell gate as the static collector.
 #[must_use]
 pub fn pick_with_interior(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
@@ -1182,7 +1182,7 @@ pub fn selected(
 /// is this frame about", and the lights would drift from the sprites making
 /// them.
 pub fn for_each_static_in(
-    map: &Map,
+    map: &WorldMap,
     bounds: TileBounds,
     mut each: impl FnMut(&openshard_map::map::StaticItem),
 ) {
@@ -1194,7 +1194,7 @@ pub fn for_each_static_in(
     // and the saving is that a row of a block is one binary search rather than
     // eight: **this walk was 0.98ms of the 2.30ms a widest-zoom frame spent
     // building its occlusion grid**, and 35,000 of its 35,000 tile lookups were
-    // asked of a map that is mostly open ground. See `Map::statics_in_row`.
+    // asked of a map that is mostly open ground. See `WorldMap::statics_in_row`.
     let (from_x, to_x) = (*xs.start(), *xs.end());
     for y in ys {
         for item in map.statics_in_row(y, from_x, to_x) {
@@ -1217,8 +1217,8 @@ mod tests {
 
     /// A map big enough for a camera at (100, 100), with flat ground and nothing
     /// standing on it. Statics are placed by the tests that want them.
-    fn field() -> Map {
-        Map::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
+    fn field() -> WorldMap {
+        WorldMap::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
             tile: LandTile(3),
             z: 0,
         })
@@ -1854,7 +1854,7 @@ mod tests {
         assert_eq!(lifted, 300 + 22 - 44 - 40);
     }
 
-    /// The same placement the collector does, without needing a `Map`.
+    /// The same placement the collector does, without needing a `WorldMap`.
     fn place(camera: &Camera, point: Point, width: u16, height: u16) -> (i32, i32) {
         let at = camera.to_screen(point);
         (

@@ -6,7 +6,7 @@
 
 use openshard_basemap::{BaseError, read, write};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, LandTile, Map, StaticItem};
+use openshard_map::map::{LandCell, LandTile, StaticItem, WorldMap};
 use openshard_map::snapshot::{MapRevision, MapSnapshot};
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Facet;
@@ -23,7 +23,7 @@ fn path(tag: &str) -> std::path::PathBuf {
 /// Land that names its own tile, so a transposed read comes back holding a cell
 /// that says where it should have been, and statics on the seams.
 fn snapshot() -> MapSnapshot {
-    let mut map = Map::from_blocks(
+    let mut map = WorldMap::from_blocks(
         BlockExtent {
             wide: BLOCKS,
             down: BLOCKS,
@@ -116,7 +116,7 @@ fn writing_the_same_facet_twice_writes_the_same_bytes() {
 #[test]
 fn a_recorded_revision_survives_the_round_trip() {
     let path = path("revision");
-    let map = Map::from_blocks(
+    let map = WorldMap::from_blocks(
         BlockExtent {
             wide: BLOCKS,
             down: BLOCKS,

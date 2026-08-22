@@ -70,7 +70,7 @@ saves. `tests/cost.rs`'s frame becomes a real one.
 
 **D4. The tool builds at real coordinates by default.** `OPENSHARD_SCENE_ANCHOR_REAL`
 exists and is off because the synthetic map near the origin is cheaper. Once the
-cost of a Britain-sized `Map::from_blocks` is measured and acceptable, the
+cost of a Britain-sized `WorldMap::from_blocks` is measured and acceptable, the
 default flips and the knob keeps the old behaviour for whoever wants it. An ulp
 at 1660 is sixteen times an ulp at 100, and every tie at a shared plane is
 decided in `f32`.
@@ -400,8 +400,8 @@ PNG step split off, so a comparison zips raw bytes instead of decoding files.
 origin, which is irrelevant to a byte comparison and worse than irrelevant: a
 G-buffer's position and place planes carry absolute world coordinates, so two
 frames anchored at different numbers differ everywhere before a single input
-is allowed to. The gate's own synthetic map is `Map::from_blocks` filled from
-the real map's own land, one for one, wide enough to hold every place it
+is allowed to. The gate's own synthetic map is `WorldMap::from_blocks` filled
+from the real map's own land, one for one, wide enough to hold every place it
 looks at — D4's own knob (`OPENSHARD_SCENE_ANCHOR_REAL`) with the cost it
 asked to have measured: 32ms in a debug build for a block covering all three
 places below. D4's backlog item is closed for the size this gate needs; the
@@ -1121,14 +1121,14 @@ a test red, and the test names which grid met which.
   states that it does not.
 - 🚩 **Map statics reach the tool's frame through `items::collect` and the
   client's through `statics::collect`.** `isolated_scene` builds a synthetic map
-  that carries no statics at all (`Map::from_blocks`) and pushes the real map's
-  statics into `Inputs::ground_items` as `GroundItem`s. Both paths call
+  that carries no statics at all (`WorldMap::from_blocks`) and pushes the real
+  map's statics into `Inputs::ground_items` as `GroundItem`s. Both paths call
   `statics::push_volumes` with the same `boxes_of`, so the *boxes* agree; what
   does not obviously agree is everything around them — the owner key, the sort
-  (`items::collect` sorts by `depth::Order` and ties by the caller's order, which
-  for the server is serial and here is a nested `x`/`y` loop), and `highlight`.
-  D1 gave the two a shared assembly; it did not give them a shared *route
-  through* it, and no gate compares the two routes on one place.
+  (`items::collect` sorts by `depth::Order` and ties by the caller's order,
+  which for the server is serial and here is a nested `x`/`y` loop), and
+  `highlight`. D1 gave the two a shared assembly; it did not give them a shared
+  *route through* it, and no gate compares the two routes on one place.
 - 🚩 **A dump is 156 MB and the pictures are uncompressed.** Thirteen planes of a
   `1919x2077` viewport is twelve megabytes apiece, because `png.rs` writes stored
   deflate blocks on the argument that a debug dump is a file nobody keeps — which
@@ -1173,7 +1173,7 @@ a test red, and the test names which grid met which.
   pixel both ends can be asked about, while an `OPENSHARD_SCENE_EXTRA` torch is
   one only the tool has.
 - 🚩 **The cost of a Britain-sized synthetic map is unmeasured** (D4). It is a
-  `Map::from_blocks` of roughly 200×210 blocks with a land lookup a cell —
+  `WorldMap::from_blocks` of roughly 200×210 blocks with a land lookup a cell —
   cheap in principle, unmeasured in fact.
 - 🚩 **`examples/two_cubes.rs`, `synthetic_stair.rs` and `boxes.rs` build meshes
   by hand** — four hand-built diagnostic scenes, each its own copy, called out in

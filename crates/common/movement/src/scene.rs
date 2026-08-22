@@ -45,7 +45,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, LandTile, Map, StaticItem};
+use openshard_map::map::{LandCell, LandTile, StaticItem, WorldMap};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
@@ -55,7 +55,7 @@ use crate::terrain::MapTerrain;
 
 /// The side of the square [`Scene::flat`] covers, in tiles.
 ///
-/// One map block, which is the smallest [`Map::from_blocks`] can build. Big
+/// One map block, which is the smallest [`WorldMap::from_blocks`] can build. Big
 /// enough for a staircase and the wall beside it, small enough that
 /// [`Scene::picture`] fits on a terminal. A scene that has to reach further asks
 /// for the size it needs — see [`Scene::flat_holding`].
@@ -70,7 +70,7 @@ pub const SIDE: u16 = 8;
 /// a shard with [`Scene::into_shard`].
 #[derive(Debug)]
 pub struct Scene {
-    map: Map,
+    map: WorldMap,
     tiles: TileData,
     /// The next graphic id to hand out. Each distinct kind-and-height of static
     /// gets its own entry in the tiledata, because that is where a static's
@@ -94,14 +94,14 @@ impl Scene {
 
     /// Flat ground at `z` across `extent` blocks.
     ///
-    /// The map is built in blocks because [`Map::from_blocks`] is — a facet is a
+    /// The map is built in blocks because [`WorldMap::from_blocks`] is — a facet is a
     /// whole number of them, and a scene that pretended otherwise would be a
     /// shape no map can have.
     #[must_use]
     pub fn flat_over(extent: BlockExtent, z: i8) -> Self {
         // Land tile 0 with the default (empty) tiledata: not water, not
         // blocking, so it is ordinary walkable ground.
-        let map = Map::from_blocks(extent, |_, _| LandCell { tile: LandTile(0), z });
+        let map = WorldMap::from_blocks(extent, |_, _| LandCell { tile: LandTile(0), z });
         Self {
             map,
             tiles: TileData::empty(),
@@ -287,7 +287,7 @@ impl Scene {
 
     /// The terrain to ask, borrowing this scene.
     #[must_use]
-    pub fn terrain(&self) -> MapTerrain<&Map, &TileData> {
+    pub fn terrain(&self) -> MapTerrain<&WorldMap, &TileData> {
         MapTerrain::new(&self.map, &self.tiles)
     }
 
@@ -298,7 +298,7 @@ impl Scene {
     /// what a shard cannot use — `FacetState::terrain` is boxed and outlives
     /// every local. See [`Scene::into_shard`] for the shard's whole answer.
     #[must_use]
-    pub fn into_terrain(self) -> MapTerrain<Map, Arc<TileData>> {
+    pub fn into_terrain(self) -> MapTerrain<WorldMap, Arc<TileData>> {
         self.into_shard().0
     }
 
@@ -311,7 +311,7 @@ impl Scene {
     /// house on a wall the ground had never heard of. Sharing the `Arc` makes
     /// that disagreement unrepresentable rather than merely unlikely.
     #[must_use]
-    pub fn into_shard(self) -> (MapTerrain<Map, Arc<TileData>>, Arc<TileData>) {
+    pub fn into_shard(self) -> (MapTerrain<WorldMap, Arc<TileData>>, Arc<TileData>) {
         let tiles = Arc::new(self.tiles);
         (MapTerrain::new(self.map, Arc::clone(&tiles)), tiles)
     }
@@ -319,7 +319,7 @@ impl Scene {
     /// The map, for a test that wants to read the scene back rather than ask the
     /// rule about it — which is what an independent oracle has to do.
     #[must_use]
-    pub const fn map(&self) -> &Map {
+    pub const fn map(&self) -> &WorldMap {
         &self.map
     }
 

@@ -55,7 +55,7 @@ pub struct FlatGroundBlock {
 impl FlatGroundBlock {
     /// Inspect the authoritative map and return the block only when one cached
     /// texture can own all of its ground pixels without a live overlap.
-    pub fn inspect(map: &openshard_map::map::Map, block: BlockCoord) -> Option<Self> {
+    pub fn inspect(map: &openshard_map::map::WorldMap, block: BlockCoord) -> Option<Self> {
         // This is the function that decides whether the map has the block at
         // all, so it narrows the origin itself rather than through
         // [`tile_origin`]: a block past a tile coordinate is one no facet has,
@@ -3886,9 +3886,9 @@ mod tests {
 
     #[test]
     fn flat_ground_block_accepts_only_one_common_surface_height() {
-        use openshard_map::map::{LandCell, LandTile, Map};
+        use openshard_map::map::{LandCell, LandTile, WorldMap};
 
-        let mut map = Map::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
             tile: LandTile(7),
             z: 20,
         });
@@ -3913,9 +3913,9 @@ mod tests {
 
     #[test]
     fn prepared_work_preserves_the_verified_plateau_for_producer_and_restore() {
-        use openshard_map::map::{LandCell, LandTile, Map};
+        use openshard_map::map::{LandCell, LandTile, WorldMap};
 
-        let map = Map::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
             tile: LandTile(7),
             z: 20,
         });

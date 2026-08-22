@@ -9,12 +9,13 @@ their own, and files a finding that belongs to another track.
 Directions A0 and A are built and unchanged. What moved is the half of A0 that
 had no caller.
 
-- **`Map::land_in_row(y, from_x, to_x)`** is the door, and it is
-  `Map::statics_in_row`'s other half — the same signature, for the same reason:
-  a rectangle is walked row by row, and a row is where the cost is. It reads
-  through `LandGrid::cells_in_row`, so each cell is one step east of the last
-  rather than a block index and an offset derived per tile. `LandGrid::cell`
-  is what a walk that stepped its way to an index reads through.
+- **`WorldMap::land_in_row(y, from_x, to_x)`** is the door, and it is
+  `WorldMap::statics_in_row`'s other half — the same signature, for the same
+  reason: a rectangle is walked row by row, and a row is where the cost is. It
+  reads through `LandGrid::cells_in_row`, so each cell is one step east of the
+  last rather than a block index and an offset derived per tile.
+  `LandGrid::cell` is what a walk that stepped its way to an index reads
+  through.
 - **Three walks use it.** `radar::fill` walked its rectangle twice — once for
   the colour and once for `best_z`, which is the same lookup asked the same
   question twice — and now walks it once. `ground.rs`'s `LandWindow::gather`
@@ -33,7 +34,7 @@ had no caller.
 caller walking a rectangle already knows where it is, so a row that runs off
 the eastern edge simply stops — and a caller must not assume it got one cell
 per tile it asked for. That is stated in the doc comment because it is the one
-way to misuse it: the tiles past the end are exactly the ones `Map::land`
+way to misuse it: the tiles past the end are exactly the ones `WorldMap::land`
 answers `None` for, and a `zip` that forgets them silently shortens a row.
 
 The alternative was an iterator of `(x, y, LandCell)`, which would have made
@@ -42,9 +43,9 @@ the misuse impossible and made every caller pay for a position it already had.
 against its own range and cannot be short; `gather` pads with `None` on both
 ends and is the only caller that has to think about it.
 
-**The typed extent for `Map::from_blocks` was deferred to direction B**, on the
-plan's own words — "small, and it is the kind of thing B will want anyway". It
-is ~40 call sites in ~20 files, almost all of them test scenes reading
+**The typed extent for `WorldMap::from_blocks` was deferred to direction B**, on
+the plan's own words — "small, and it is the kind of thing B will want anyway".
+It is ~40 call sites in ~20 files, almost all of them test scenes reading
 `from_blocks(1, 1, …)`, and each file would gain an import for a value used
 once. The benefit today is that a literal names which number is which; B picks
 a chunk layout and will have a real consumer for the type. Deferring is a

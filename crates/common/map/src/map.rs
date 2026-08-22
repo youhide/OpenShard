@@ -72,7 +72,7 @@ fn describe_size(width: u32, height: u32) -> &'static str {
 ///
 /// The whole thing is in memory. That is the design — the database is never
 /// touched inside a tick, and a facet is under 100MB.
-pub struct Map {
+pub struct WorldMap {
     /// The ground, and the only thing that knows the order it is in.
     land: LandGrid,
     /// Statics per block, indexed by **the same [`BlockIndex`]** the land is —
@@ -82,7 +82,7 @@ pub struct Map {
     /// cannot come apart without that call being wrong for both.
     ///
     /// **Each block is sorted by the tile its items stand on** — see
-    /// [`Map::statics_at`], which is what the order is for, and [`tile_key`],
+    /// [`WorldMap::statics_at`], which is what the order is for, and [`tile_key`],
     /// which is the order.
     ///
     /// The sort is stable, so two statics on one tile stay in the order the file
@@ -99,7 +99,7 @@ pub struct Map {
 /// function rather than a tuple written twice. A caller walking a rectangle
 /// walks it row by row — `client/render`'s `statics::for_each_static_in`, which
 /// is every walk of the map this workspace makes — so a row has to be
-/// *contiguous* for [`Map::statics_in_row`] to hand one back as a slice. Sorted
+/// *contiguous* for [`WorldMap::statics_in_row`] to hand one back as a slice. Sorted
 /// the other way it would be eight scattered runs.
 ///
 /// Only the low three bits of each coordinate matter within a block, but the
@@ -110,9 +110,9 @@ fn tile_key(item: &StaticItem) -> (u16, u16) {
     (item.y, item.x)
 }
 
-impl fmt::Debug for Map {
+impl fmt::Debug for WorldMap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Map")
+        f.debug_struct("WorldMap")
             .field("size", &format!("{}x{}", self.width(), self.height()))
             .field("facet", &self.facet_name())
             .field("statics", &self.statics.iter().map(Vec::len).sum::<usize>())
@@ -120,13 +120,13 @@ impl fmt::Debug for Map {
     }
 }
 
-impl AsRef<Map> for Map {
-    fn as_ref(&self) -> &Map {
+impl AsRef<WorldMap> for WorldMap {
+    fn as_ref(&self) -> &WorldMap {
         self
     }
 }
 
-impl Map {
+impl WorldMap {
     /// Build a facet from cells already in memory, with no file anywhere.
     ///
     /// `cell` is asked for every tile by world coordinate, and where that lands
@@ -140,13 +140,13 @@ impl Map {
     ///
     /// # What a map built this way does not have
     ///
-    /// No statics: [`Map::statics_at`] is empty everywhere and
-    /// [`Map::static_count`] is zero — until [`Map::place_static`] puts one
-    /// there. [`Map::from_parts`] is the other way in, and the one an importer
+    /// No statics: [`WorldMap::statics_at`] is empty everywhere and
+    /// [`WorldMap::static_count`] is zero — until [`WorldMap::place_static`] puts one
+    /// there. [`WorldMap::from_parts`] is the other way in, and the one an importer
     /// takes.
     ///
     /// And no facet identity. A size nobody ships is an ordinary thing to ask
-    /// for here, so [`Map::facet_name`] may honestly answer "unknown facet".
+    /// for here, so [`WorldMap::facet_name`] may honestly answer "unknown facet".
     /// This does not inherit an importer's Malas/Ter Mur ambiguity, and cannot:
     /// there is no block count to deduce a shape from, because the caller said
     /// what the shape is.
@@ -154,7 +154,7 @@ impl Map {
     /// # Panics
     ///
     /// If the facet would be wider or taller than a `u16` coordinate can reach.
-    /// Every tile past that is one [`Map::land`] could never be asked about, so
+    /// Every tile past that is one [`WorldMap::land`] could never be asked about, so
     /// such a map is memory that exists to be unreachable; the largest facet a
     /// client ships is 7,168 tiles across.
     pub fn from_blocks(extent: BlockExtent, cell: impl FnMut(u16, u16) -> LandCell) -> Self {
@@ -167,7 +167,7 @@ impl Map {
     ///
     /// The door every importer comes through, and the reason it exists rather
     /// than a pair of public fields: **the sort is this type's invariant, not
-    /// the decoder's.** [`Map::statics_at`] and [`Map::statics_in_row`] are
+    /// the decoder's.** [`WorldMap::statics_at`] and [`WorldMap::statics_in_row`] are
     /// binary searches over `(y, x)` order — see [`tile_key`] — so a decoder
     /// that handed over an unsorted block would not fail here, it would make
     /// every later lookup quietly find nothing. Sorting here means no importer
@@ -237,7 +237,7 @@ impl Map {
     /// The ground of one row of tiles, from `from_x` to `to_x` inclusive, in
     /// ascending `x`.
     ///
-    /// [`Map::statics_in_row`]'s other half, and it exists for the same reason:
+    /// [`WorldMap::statics_in_row`]'s other half, and it exists for the same reason:
     /// a rectangle is walked row by row, and a row is where the cost is. Each
     /// cell here is one step east of the last — see
     /// [`LandGrid::cells_in_row`] — rather than a fresh derivation of a block
@@ -248,7 +248,7 @@ impl Map {
     /// row that starts off the map is empty, a row that runs off its eastern
     /// edge stops there, and **a caller counting tiles must not assume it got
     /// one cell per tile it asked for** — the tiles past the end are the ones
-    /// [`Map::land`] answers `None` for.
+    /// [`WorldMap::land`] answers `None` for.
     ///
     /// A range that runs backwards is empty.
     pub fn land_in_row(&self, y: u16, from_x: u16, to_x: u16) -> impl Iterator<Item = LandCell> + '_ {
@@ -259,7 +259,7 @@ impl Map {
 
     /// Change the ground at one tile.
     ///
-    /// The other half of building a scene — see [`Map::place_static`] for what
+    /// The other half of building a scene — see [`WorldMap::place_static`] for what
     /// that is and why both of these are `pub`. Off the map it does nothing;
     /// [`crate::patch`] checks the tile is there before it calls, so that a
     /// change nobody could see is an error rather than a silent nothing.
@@ -288,8 +288,8 @@ impl Map {
     /// patch is a change to the world that both ends can be told about.
     ///
     /// A static outside the map is dropped: there is no block to keep it in, and
-    /// [`Map::statics_at`] could never return it. The patch applier checks
-    /// first, for the reason [`Map::set_land`] gives.
+    /// [`WorldMap::statics_at`] could never return it. The patch applier checks
+    /// first, for the reason [`WorldMap::set_land`] gives.
     ///
     /// It goes in after everything already standing on its own tile — where a
     /// push used to put it — which is what keeps the sort an invariant of the
@@ -306,8 +306,8 @@ impl Map {
 
     /// Take the `nth` static standing on a tile off the map, and hand it back.
     ///
-    /// [`Map::place_static`]'s inverse, and [`crate::patch`]'s alone: `nth`
-    /// counts in [`Map::statics_at`]'s order, which is what makes it the
+    /// [`WorldMap::place_static`]'s inverse, and [`crate::patch`]'s alone: `nth`
+    /// counts in [`WorldMap::statics_at`]'s order, which is what makes it the
     /// identity that module's header argues a static needs. `None` for a tile
     /// off the map or an `nth` past what stands there — and in both cases
     /// nothing was removed.
@@ -319,7 +319,7 @@ impl Map {
     pub fn remove_static(&mut self, x: u16, y: u16, nth: usize) -> Option<StaticItem> {
         let block = self.block_index(x, y)?;
         let slot = &mut self.statics[block.get() as usize];
-        // The same two searches [`Map::statics_at`] makes, over the same sorted
+        // The same two searches [`WorldMap::statics_at`] makes, over the same sorted
         // run: the first item of the tile, and how many of them there are.
         let from = slot.partition_point(|item| tile_key(item) < (y, x));
         let count = slot[from..].partition_point(|item| tile_key(item) == (y, x));
@@ -357,7 +357,7 @@ impl Map {
     /// four and a half thousand searches rather than thirty-five thousand, most
     /// of which found nothing because most of a map is open ground.
     ///
-    /// The order is exactly [`Map::statics_at`]'s, row by row: `client/render`
+    /// The order is exactly [`WorldMap::statics_at`]'s, row by row: `client/render`
     /// resolves a tie between two statics at one depth by taking the last one
     /// walked, so the order of this walk is a fact the picture depends on and not
     /// an implementation detail. See [`tile_key`].
@@ -386,11 +386,11 @@ impl Map {
 
     /// One block's sixty-four cells, row-major within the block.
     ///
-    /// [`Map::statics_in_block`]'s other half, and it exists for the same
+    /// [`WorldMap::statics_in_block`]'s other half, and it exists for the same
     /// caller: something that takes a whole block at a time rather than a
     /// rectangle — [`crate::chunk::Chunk::of`] is the one in this crate. A
     /// block the facet has not is empty, which is the same answer
-    /// [`Map::statics_in_block`] gives.
+    /// [`WorldMap::statics_in_block`] gives.
     pub fn land_in_block(&self, block: BlockCoord) -> &[LandCell] {
         self.land
             .index_of(block)
@@ -402,10 +402,10 @@ impl Map {
     /// The whole slice and no search at all, which is what a *per-block* reader
     /// wants: `client/render`'s occlusion bake derives one block's surfaces once
     /// and keeps them, so it asks about a block rather than about a rectangle,
-    /// and eight calls to [`Map::statics_in_row`] would be eight binary searches
+    /// and eight calls to [`WorldMap::statics_in_row`] would be eight binary searches
     /// for a run that is already contiguous.
     ///
-    /// The order is [`tile_key`]'s — `(y, x)` — which is [`Map::statics_in_row`]'s
+    /// The order is [`tile_key`]'s — `(y, x)` — which is [`WorldMap::statics_in_row`]'s
     /// own order restricted to the block, so a reader that walks a block sees one
     /// tile's statics in exactly the order a reader walking rows sees them. That
     /// is what lets the two build the same grid, and `client/render`'s
@@ -490,10 +490,10 @@ impl Map {
     }
 }
 
-/// [`Map::average_land_z`]'s arithmetic, for a caller that already has the four
+/// [`WorldMap::average_land_z`]'s arithmetic, for a caller that already has the four
 /// corners and would otherwise read them a second time.
 ///
-/// `corners` is [`Map::land_corners`] order: top, right, left, bottom.
+/// `corners` is [`WorldMap::land_corners`] order: top, right, left, bottom.
 pub fn average_corner_z(corners: [i8; 4]) -> i8 {
     let [top, right, left, bottom] = corners.map(i32::from);
     let average = if (top - bottom).abs() > (left - right).abs() {
@@ -530,12 +530,12 @@ mod tests {
     ///
     /// `block_order_is_column_major`, `cells_within_a_block_are_row_major` and
     /// `every_cell_is_reachable_exactly_once` are tests of [`LandGrid`], and
-    /// what is left here is what a `Map` adds to it: the statics, and the
+    /// what is left here is what a `WorldMap` adds to it: the statics, and the
     /// heights a body stands at. The byte format is the importer's, and is
     /// tested where it lives.
     #[test]
     fn off_the_map_is_none_not_a_panic() {
-        let map = Map::from_blocks(BlockExtent { wide: 2, down: 2 }, |x, y| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |x, y| LandCell {
             tile: LandTile(x + y),
             z: 0,
         });
@@ -557,7 +557,7 @@ mod tests {
     fn a_stepped_row_is_the_row_a_lookup_builds() {
         // Three blocks across, two down, and every tile carries its own
         // position — so a cell that came from the wrong tile says which.
-        let map = Map::from_blocks(BlockExtent { wide: 3, down: 2 }, |x, y| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 2 }, |x, y| LandCell {
             tile: LandTile(x),
             z: y as i8,
         });
@@ -582,7 +582,7 @@ mod tests {
     #[test]
     fn a_tiles_corners_are_its_neighbours_own_heights() {
         // A ramp running south-east: z is x + y.
-        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, y| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, y| LandCell {
             tile: LandTile(3),
             z: (x + y) as i8,
         });
@@ -620,7 +620,7 @@ mod tests {
     /// caller that has coordinates and a caller that has heights cannot drift.
     #[test]
     fn the_maps_average_is_the_average_of_its_corners() {
-        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, y| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, y| LandCell {
             tile: LandTile(3),
             z: ((x * 3) as i8).wrapping_sub((y * 2) as i8),
         });
@@ -640,10 +640,10 @@ mod tests {
     /// whether or not any facet is that shape.
     ///
     /// That every tile is asked for exactly once is [`LandGrid`]'s own test;
-    /// what is left here is the statics half a `Map` adds.
+    /// what is left here is the statics half a `WorldMap` adds.
     #[test]
     fn a_map_built_in_memory_is_bare_ground_of_the_size_asked_for() {
-        let map = Map::from_blocks(BlockExtent { wide: 3, down: 2 }, |_, _| LandCell::default());
+        let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 2 }, |_, _| LandCell::default());
         assert_eq!((map.width(), map.height()), (24, 16));
         assert_eq!(map.facet_name(), "unknown facet");
         assert_eq!(map.static_count(), 0);
@@ -653,7 +653,7 @@ mod tests {
     /// A block is kept sorted by tile, and two statics on one tile keep the
     /// order they arrived in.
     ///
-    /// [`Map::statics_at`] is a binary search over that order, so this is the
+    /// [`WorldMap::statics_at`] is a binary search over that order, so this is the
     /// invariant it rests on — and the second half is the one with a consequence
     /// a player can see. The client draws a tile's statics in file order and
     /// `client/render`'s `statics::pick` breaks a tie by taking the last, so a
@@ -666,7 +666,7 @@ mod tests {
     /// order, an unsorted list would pass.
     #[test]
     fn a_blocks_statics_are_sorted_by_tile_and_stable_within_one() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell::default());
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell::default());
         // Three tiles of one block, none of them in order, and two items on the
         // middle one. The `tile` is what identifies each below.
         for (tile, x, y) in [(10, 3, 5), (20, 1, 2), (30, 3, 5), (40, 0, 7), (50, 3, 4)] {
@@ -695,7 +695,7 @@ mod tests {
     /// A row hands back exactly what asking its tiles one at a time does, in
     /// exactly that order.
     ///
-    /// [`Map::statics_in_row`] is a faster spelling of the tile walk and nothing
+    /// [`WorldMap::statics_in_row`] is a faster spelling of the tile walk and nothing
     /// else, so the tile walk is its oracle — and the assertion is on the whole
     /// sequence rather than on a set, because the order is what a tie between two
     /// statics at one depth is broken by. It crosses three block columns and runs
@@ -704,7 +704,7 @@ mod tests {
     fn a_row_is_the_tile_walk_written_faster() {
         // Three blocks across, two down, and statics scattered over it in an
         // order that is neither the sort's nor the walk's.
-        let mut map = Map::from_blocks(BlockExtent { wide: 3, down: 2 }, |_, _| LandCell::default());
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 2 }, |_, _| LandCell::default());
         let mut tile = 0;
         for y in [5u16, 0, 12, 5, 5, 7] {
             for x in [23u16, 0, 8, 15, 7, 16, 9] {
@@ -748,7 +748,7 @@ mod tests {
     /// tile is on top without failing anything else here.
     #[test]
     fn a_block_is_its_own_rows_end_to_end() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 3, down: 2 }, |_, _| LandCell::default());
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 2 }, |_, _| LandCell::default());
         let mut tile = 0;
         for y in [5u16, 0, 12, 5, 7] {
             for x in [23u16, 0, 8, 15, 7, 9] {

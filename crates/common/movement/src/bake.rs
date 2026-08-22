@@ -83,7 +83,7 @@ pub fn artifact_path(client_dir: &Path, facet: Facet) -> PathBuf {
         .unwrap_or_else(|| client_dir.join(format!("openshard-navigation-{}.bin", facet.0)))
 }
 
-/// Inspect exactly the files `Map::load_facet` selects, plus tile data.
+/// Inspect exactly the files `WorldMap::load_facet` selects, plus tile data.
 ///
 /// For a facet loaded out of a UO install. A facet loaded out of a base set has
 /// different inputs and a different stamp — [`stamp_of_base_set`].

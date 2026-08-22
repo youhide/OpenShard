@@ -1,10 +1,10 @@
 //! The world: one facet of it, and which published version of it you hold.
 //!
 //! **This crate is the map.** Every reader in the workspace — the renderer, the
-//! step check, the pathfinder, the building flood, the minimap — reads a [`Map`]
+//! step check, the pathfinder, the building flood, the minimap — reads a [`WorldMap`]
 //! from here, and there is no second representation of the world anywhere else.
 //!
-//! [`Map`]: crate::map::Map
+//! [`WorldMap`]: crate::map::WorldMap
 //!
 //! It reads no files. UO's own `map*.mul` is *an* importer, not the source: it
 //! lives in `openshard_uofiles::map`, hands back one of these, and is the only
@@ -19,7 +19,7 @@
 //! - [`snapshot`] — which facet a map is, and which published revision. What an
 //!   owner holds, so that a reader can never be looking at half a change.
 //! - [`chunk`] — the square the world is stored, cached, invalidated and
-//!   transferred in, cut out of a [`Map`] and assembled back into one.
+//!   transferred in, cut out of a [`WorldMap`] and assembled back into one.
 //! - [`codec`] — that square as canonical bytes, and bytes back into one.
 //! - [`patch`] — one committed change to a facet, and what publishing it means.
 //!

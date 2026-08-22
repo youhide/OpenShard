@@ -5,7 +5,7 @@
 //! (`tests/cost.rs`) repoints the camera at a real place but still draws the
 //! whole neighbourhood around it, and a house standing beside the thing under
 //! test is a second variable in every picture. This draws a **synthetic**
-//! [`openshard_map::map::Map`] instead — `Map::from_blocks` never carries
+//! [`openshard_map::map::WorldMap`] instead — `WorldMap::from_blocks` never carries
 //! statics (see `crate::scene`'s own doc) — and puts back only what is asked
 //! for: the real map's statics within a stated radius of a stated point,
 //! optionally filtered to a list of tile IDs, the real ground under them or
@@ -194,7 +194,7 @@ use openshard_client_render::items::{self, GroundItem};
 use openshard_client_render::renderer::{GroundRenderer, MeshFaceRenderer, SpriteRenderer, Target};
 use openshard_client_render::{light, renderer};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, Map};
+use openshard_map::map::{LandCell, WorldMap};
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
@@ -636,7 +636,7 @@ fn main() {
     };
 
     // Land, borrowed live from the real facet at every synthetic cell's real
-    // coordinate — or nothing, `_GROUND=0`'s whole point. `Map::from_blocks`
+    // coordinate — or nothing, `_GROUND=0`'s whole point. `WorldMap::from_blocks`
     // never carries statics regardless, so a house never comes along by
     // accident; keeping this a live read rather than a stored blob is what
     // lets `_RADIUS` and `_AT` move the scene to any corner of Britain with no
@@ -647,7 +647,7 @@ fn main() {
     // tiles so a camera never runs off it. See [`syn_anchor`].
     let syn = syn_anchor(anchor);
     let blocks = |along: u16| u32::from(along / 8 + 9).max(16);
-    let synthetic = Map::from_blocks(
+    let synthetic = WorldMap::from_blocks(
         BlockExtent {
             wide: blocks(syn.0),
             down: blocks(syn.1),

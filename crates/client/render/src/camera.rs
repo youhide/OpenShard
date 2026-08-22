@@ -1049,7 +1049,7 @@ impl Camera {
     ///
     /// `corners` are absolute heights in the diamond's own order: top, right,
     /// bottom, left, which is `(x, y)`, `(x+1, y)`, `(x+1, y+1)`, `(x, y+1)`.
-    /// Note that this is **not** [`Map::land_corners`] order — that one reads
+    /// Note that this is **not** [`WorldMap::land_corners`] order — that one reads
     /// top, right, *left*, bottom — so a caller passing land heights straight
     /// through gets a bow tie. The reorder is the caller's because only the
     /// caller knows whether the surface it is describing is land at all: a

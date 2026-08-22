@@ -850,7 +850,7 @@ fn main() {
         vec![floor_pixel; usize::from(openshard_uofiles::art::LAND_TILE_SIZE).pow(2)],
     );
     let blocks = (bounds.max_x as u32).div_ceil(openshard_map::map::BLOCK_SIZE) + 1;
-    let synthetic_map = openshard_map::map::Map::from_blocks(
+    let synthetic_map = openshard_map::map::WorldMap::from_blocks(
         BlockExtent {
             wide: blocks,
             down: blocks,

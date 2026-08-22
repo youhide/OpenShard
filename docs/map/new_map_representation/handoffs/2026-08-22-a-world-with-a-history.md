@@ -55,7 +55,7 @@ touch — the same ten the last two handoffs counted.
 | `openshard_map::patch` | `Patch`, `PatchOp`'s three operations, `StaticId`, `PatchAuthor`, `PatchTime`, `PatchError`, and the applier. The module header is the decision record. |
 | `MapSnapshot::publish` | Apply a patch and move to the revision it produces. `&mut self`, which is the atomicity. |
 | `MapRevision::after` | The third way a revision comes into being, and the only one that is not a reading. |
-| `Map::remove_static` | `place_static`'s inverse, and the patch applier's alone. |
+| `WorldMap::remove_static` | `place_static`'s inverse, and the patch applier's alone. |
 | `codec::encode_patch` / `decode_patch` | The second record in that module: a patch as canonical bytes. |
 | `openshard_basemap::patches` | The `.ospatch` log — framed, checksummed, append-only. |
 | `openshard_basemap::load` | **The one door to a world of ours**: base set plus log, resolved. |
@@ -109,10 +109,10 @@ what `plan.md` asks of F's preview for the same reason.
 
 **`&mut self` is the whole of "a reader never sees half a change".**
 `mechanics.md` asks that a new revision become visible between ticks and never
-during one. Every reader borrows a `&Map` out of the snapshot, so a `&mut` on
-the publish cannot be taken while one is alive. It is the borrow checker rather
-than a rule about tick boundaries that somebody has to remember — and it is why
-`publish` is on `MapSnapshot` rather than on something beside it.
+during one. Every reader borrows a `&WorldMap` out of the snapshot, so a `&mut`
+on the publish cannot be taken while one is alive. It is the borrow checker
+rather than a rule about tick boundaries that somebody has to remember — and it
+is why `publish` is on `MapSnapshot` rather than on something beside it.
 
 **A publish changes only the tiles the ops name.** No chunk is re-cut, nothing
 is re-hashed, no facet is rebuilt: `plan.md`'s "a publish never rebuilds a

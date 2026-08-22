@@ -4,7 +4,7 @@
 //! this walk beside the file types means a floor that a body can stand on is
 //! not rediscovered with slightly different height arithmetic by each reader.
 
-use openshard_map::map::Map;
+use openshard_map::map::WorldMap;
 
 use crate::tiledata::TileData;
 
@@ -13,7 +13,7 @@ use crate::tiledata::TileData;
 /// This is deliberately a candidate list rather than a movement decision.
 /// Walls, doors and the space above the surface are the caller's additional
 /// questions. The order is the map file's own static order, with land first.
-pub fn stand_surfaces(map: &Map, tiledata: &TileData, x: u16, y: u16, swimming: bool) -> Vec<i32> {
+pub fn stand_surfaces(map: &WorldMap, tiledata: &TileData, x: u16, y: u16, swimming: bool) -> Vec<i32> {
     let mut surfaces = Vec::new();
     if let Some(land) = map.land(x, y) {
         let flags = tiledata.land(land.tile.0).flags;

@@ -42,8 +42,8 @@ not change as the work lands.
 1. Replace the ambiguous whole-bitmap radar model with explicit
    `RadarChunkKey { facet, lod, chunk, revision }`, `RadarChunk` and a
    `RadarRegion` draw request.
-2. Establish one fixed base chunk size, aligned to `Map::BLOCK_SIZE`; document
-   the border rule and conversion from world tile to chunk/local tile.
+2. Establish one fixed base chunk size, aligned to `WorldMap::BLOCK_SIZE`;
+   document the border rule and conversion from world tile to chunk/local tile.
 3. Move the existing colour walk into a chunk builder. `radar::bake` remains a
    convenience/reference builder and the chunk builder must produce the same
    pixels for the equivalent rectangle.

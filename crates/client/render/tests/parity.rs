@@ -15,7 +15,7 @@
 //! everywhere before a single input was allowed to. D4's own `_ANCHOR_REAL`
 //! knob is the one that removes the translation rather than the one that adds
 //! it, so this gate builds its synthetic map the same way that knob does:
-//! [`Map::from_blocks`] filled from the real map's own land, one for one, wide
+//! [`WorldMap::from_blocks`] filled from the real map's own land, one for one, wide
 //! enough to hold every place this test looks at. Measured at 32ms for a block
 //! covering the whole of the area these three places sit in — D4's own backlog
 //! item, closed for the size this gate needs.
@@ -52,7 +52,7 @@ use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, 
 use openshard_client_render::statics::StaticGeometry;
 use openshard_client_render::{dump, ground, statics};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, Map};
+use openshard_map::map::{LandCell, WorldMap};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::Graphic;
@@ -124,7 +124,7 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 /// the widest flame's own reach), and a synthetic map that stopped at the
 /// narrower bound would starve [`pull_map_statics`] at its own edge before this
 /// map's own edge was the reason.
-fn synthetic_map_covering(real: &Map, places: &[Point], tuning: &Tuning) -> Map {
+fn synthetic_map_covering(real: &WorldMap, places: &[Point], tuning: &Tuning) -> WorldMap {
     let mut furthest = (0i32, 0i32);
     for &at in places {
         for viewport in [VIEWPORT, ODD_VIEWPORT] {
@@ -137,7 +137,7 @@ fn synthetic_map_covering(real: &Map, places: &[Point], tuning: &Tuning) -> Map 
     // `isolated_scene`'s own `blocks` closure leaves.
     let blocks_wide = (furthest.0.max(0) as u32) / 8 + 4;
     let blocks_down = (furthest.1.max(0) as u32) / 8 + 4;
-    Map::from_blocks(
+    WorldMap::from_blocks(
         BlockExtent {
             wide: blocks_wide,
             down: blocks_down,
@@ -164,7 +164,7 @@ fn synthetic_map_covering(real: &Map, places: &[Point], tuning: &Tuning) -> Map 
 /// Found by this gate itself: the first run of it, over [`Camera::visible_tiles`]
 /// alone, put ~1.2% of several G-buffer planes in disagreement at every one of
 /// [`PLACES`], concentrated exactly there.
-fn pull_map_statics(real: &Map, camera: &Camera, tuning: &Tuning) -> Vec<GroundItem> {
+fn pull_map_statics(real: &WorldMap, camera: &Camera, tuning: &Tuning) -> Vec<GroundItem> {
     let bounds = light::lit_tiles(camera, tuning);
     let Some((xs, ys)) = bounds.clamp_to(real.width(), real.height()) else {
         return Vec::new();
@@ -218,7 +218,7 @@ fn assemble_and_draw(
     animations: &StaticAnimations,
     hue_ramp: &HueRamp,
     tuning: &Tuning,
-    map: &Map,
+    map: &WorldMap,
     items: &[GroundItem],
     camera: &Camera,
     cutaway: &Cutaway,
@@ -442,8 +442,8 @@ fn gate_at(
     animations: &StaticAnimations,
     hue_ramp: &HueRamp,
     tuning: &Tuning,
-    real_map: &Map,
-    synthetic_map: &Map,
+    real_map: &WorldMap,
+    synthetic_map: &WorldMap,
     at: Point,
     tool_items: &[GroundItem],
     viewport: (u32, u32),
@@ -527,8 +527,8 @@ struct Client {
     animations: StaticAnimations,
     hue_ramp: HueRamp,
     tuning: Tuning,
-    real_map: Map,
-    synthetic_map: Map,
+    real_map: WorldMap,
+    synthetic_map: WorldMap,
 }
 
 fn load(dir: PathBuf) -> Client {
@@ -553,7 +553,7 @@ fn load(dir: PathBuf) -> Client {
 }
 
 /// **Done when it is green at three places with a house on them** —
-/// `docs/parity.md` P3's own words. `map: &Map` reached through
+/// `docs/parity.md` P3's own words. `map: &WorldMap` reached through
 /// `statics::collect` and `items: &[GroundItem]` reached through
 /// `items::collect` are D1's two routes into one assembly; this is the gate
 /// that they draw the same thing, not only that they are called the same way.

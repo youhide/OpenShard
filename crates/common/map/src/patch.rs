@@ -61,15 +61,15 @@
 use openshard_protocol::world::Facet;
 
 use crate::chunk::ChunkCoord;
-use crate::map::{LandCell, Map, StaticItem};
+use crate::map::{LandCell, StaticItem, WorldMap};
 use crate::snapshot::MapRevision;
 
 /// Which static standing on a tile, counted in the order the world hands them
 /// out.
 ///
 /// Only meaningful together with a tile *and* a revision: it is the position in
-/// [`Map::statics_at`]'s sequence, which the `(y, x)` sort of
-/// [`Map::from_parts`] makes stable for as long as the world does not change.
+/// [`WorldMap::statics_at`]'s sequence, which the `(y, x)` sort of
+/// [`WorldMap::from_parts`] makes stable for as long as the world does not change.
 /// [`Patch::parent`] is what stops it from being read against a different one.
 ///
 /// A `u16` because a tile is not a block: the densest block of the shipped
@@ -115,7 +115,7 @@ pub enum PatchOp {
     /// Put a static on the map, at the coordinates the item carries.
     ///
     /// It goes in after everything already standing on its tile, which is
-    /// [`Map::place_static`]'s rule and is what makes the inverse's ordinal
+    /// [`WorldMap::place_static`]'s rule and is what makes the inverse's ordinal
     /// knowable: the added item is the last of its tile.
     AddStatic {
         /// What to add, coordinates included.
@@ -367,13 +367,13 @@ impl std::error::Error for PatchError {}
 /// Apply a patch's ops to a map, or leave the map exactly as it was.
 ///
 /// The revision and the facet are [`MapSnapshot::publish`]'s to check — this
-/// takes a bare `Map` because it is the half that touches cells, and keeping it
+/// takes a bare `WorldMap` because it is the half that touches cells, and keeping it
 /// separate is what lets the rollback below be about ops alone.
 ///
 /// # Errors
 ///
 /// The first op that cannot apply, after undoing the ones that already did.
-pub(crate) fn apply(map: &mut Map, ops: &[PatchOp]) -> Result<(), PatchError> {
+pub(crate) fn apply(map: &mut WorldMap, ops: &[PatchOp]) -> Result<(), PatchError> {
     let mut undo: Vec<PatchOp> = Vec::with_capacity(ops.len());
     for op in ops {
         match apply_op(map, op) {
@@ -399,7 +399,7 @@ pub(crate) fn apply(map: &mut Map, ops: &[PatchOp]) -> Result<(), PatchError> {
 /// call because [`PatchOp::AddStatic`]'s inverse names an ordinal, and the
 /// ordinal is only knowable once the item is in. That is the same reason a
 /// revert has to be built by replaying rather than by reading the patch.
-fn apply_op(map: &mut Map, op: &PatchOp) -> Result<PatchOp, PatchError> {
+fn apply_op(map: &mut WorldMap, op: &PatchOp) -> Result<PatchOp, PatchError> {
     match *op {
         PatchOp::SetLand { x, y, was, now } => {
             let found = map.land(x, y).ok_or(PatchError::OffMap { x, y })?;
@@ -474,7 +474,7 @@ mod tests {
     fn flat() -> MapSnapshot {
         MapSnapshot::new(
             Facet(0),
-            Map::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
+            WorldMap::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
                 tile: LandTile(3),
                 z: 0,
             }),

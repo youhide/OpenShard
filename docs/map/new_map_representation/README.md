@@ -12,7 +12,7 @@ chunk to an editor that commits.
 | [`mechanics.md`](mechanics.md) | How a changeable map works: base, patch, snapshot; chunks; what goes stale; how a chunk reaches the client. Where a decision is not made, it says so and names what would settle it. |
 | [`plan.md`](plan.md) | Seven directions with the code each one touches, in order, with what "done" means for each, plus one deferred on purpose. A0 and A are refactors with no feature in them. |
 | [`snapshot.md`](snapshot.md) | 🚩 **The plan being executed first.** Directions A0 and A on their own — the block order gets a type, and the map gets one revisioned owner. No format, no patches, no network. Start a session here. |
-| [`client_today.md`](client_today.md) | What direction A takes a handle to, measured: the layout `Map` actually has, what each bake costs in memory and on disk, and the ranked backlog found while inventorying the readers. |
+| [`client_today.md`](client_today.md) | What direction A takes a handle to, measured: the layout `WorldMap` actually has, what each bake costs in memory and on disk, and the ranked backlog found while inventorying the readers. |
 
 Read them in that order. `overview.md` is the only one that has to be read to
 argue about the idea; the others are for doing the work.

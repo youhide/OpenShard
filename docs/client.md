@@ -228,11 +228,11 @@ wants a client should call one rather than build one.
 Backlog it leaves behind:
 
 - **The facet is read twice in one process**, once by the shard and once by the
-  window, because `Map` is loaded from a path by each end and neither knows the
-  other is in the room. A few hundred megabytes, paid twice, and the same
+  window, because `WorldMap` is loaded from a path by each end and neither knows
+  the other is in the room. A few hundred megabytes, paid twice, and the same
   question the "a container is read whole into memory" item below is about. The
-  honest fix is a `Map` that can be handed over rather than opened again, and
-  M3b's `Arc<Map>` cache is where that belongs.
+  honest fix is a `WorldMap` that can be handed over rather than opened again,
+  and M3b's `Arc<WorldMap>` cache is where that belongs.
 - **Nothing tests that the playground boots.** `tests/in_process.rs` covers the
   transport and `e2e/shard`'s others cover the wire; what the binary adds — a
   config with `client_files` set, and a window — is covered by running it. An
@@ -828,12 +828,12 @@ of a few hundred megabytes plus `Art`, `TexMaps`, `TileData`, `HueRamp` and
 of those is not a client. So the client's own data is loaded once and shared, and
 everything that comes off a socket is per session and shared with nobody:
 
-- **Shared, immutable, `Arc`, and keyed by install.** `Map`, `Art`, `TexMaps`,
-  `TileData`, `HueRamp`. The precedent exists — the facet is already an
-  `Arc<Map>` handed to the shard thread so `Walk::step` can predict a height.
-  `Anim` is the exception and the awkward one: `Anim::frames` takes `&mut self`
-  because reading a frame seeks the file, so it is shared behind a lock or it is
-  read behind the atlas that already caches what it produced.
+- **Shared, immutable, `Arc`, and keyed by install.** `WorldMap`, `Art`,
+  `TexMaps`, `TileData`, `HueRamp`. The precedent exists — the facet is already
+  an `Arc<WorldMap>` handed to the shard thread so `Walk::step` can predict a
+  height. `Anim` is the exception and the awkward one: `Anim::frames` takes
+  `&mut self` because reading a frame seeks the file, so it is shared behind a
+  lock or it is read behind the atlas that already caches what it produced.
 
   *Keyed by install* is what multi-shard adds, and it is the reason
   `OPENSHARD_CLIENT` cannot stay a single environment variable. A 5.x shard and a
@@ -922,8 +922,8 @@ own client and been wrong to.
 
 **One pixel per tile** (`render/src/radar.rs`) is a pure function of the map and
 that table, which is what lets the player's radar and the facet map below share
-it. Three details are each a bug: `Map::statics_at` is keyed by `(y, x)` and
-**not** sorted by z, so the highest is compared for rather than taken; the
+it. Three details are each a bug: `WorldMap::statics_at` is keyed by `(y, x)`
+and **not** sorted by z, so the highest is compared for rather than taken; the
 comparison against the land is `>=` and not `>`, because a floor lies at the
 ground's own height and `>` draws grass through marble; and a tile with no
 colour is `UNKNOWN` rather than transparent, because zero spells *absent* in
@@ -1022,8 +1022,8 @@ for the slowest) is a layer above this and must not be built into the fan-out.
 ### Two things that stop being backlog and become blocking
 
 - **The facet is a startup constant.** Two sessions may stand on different
-  facets, so the single `Arc<Map>` becomes a cache keyed by facet, loaded on
-  demand and shared by whoever is on it. `0xBF 0x08` is what says a session
+  facets, so the single `Arc<WorldMap>` becomes a cache keyed by facet, loaded
+  on demand and shared by whoever is on it. `0xBF 0x08` is what says a session
   moved between them.
 - **A whole `WorldView` is cloned per changed packet.** One standing character
   makes this invisible; ten characters beside a bank multiply it by ten, and the
@@ -1869,12 +1869,12 @@ own understanding had written.
   which means the one consistency check that exists also passes. The result was a
   facet read at 256 blocks per column instead of 512: everything past the first
   column somewhere else, no error, no complaint. `facet_size` now takes the facet
-  number `load_facet` already had. `Map::load`, which has only a path, still
-  cannot tell them apart, and its doc now says so.
-- **`Map::load` is public and called only by its own tests.** It is also the one
-  entry point that cannot resolve the collision above. Either it grows a facet
-  argument or it stops being `pub` — but that is a decision about who is supposed
-  to call it, and nobody does yet.
+  number `load_facet` already had. `WorldMap::load`, which has only a path,
+  still cannot tell them apart, and its doc now says so.
+- **`WorldMap::load` is public and called only by its own tests.** It is also
+  the one entry point that cannot resolve the collision above. Either it grows a
+  facet argument or it stops being `pub` — but that is a decision about who is
+  supposed to call it, and nobody does yet.
 - **The land table's record 0 is written in the pre-High-Seas shape.** Its name
   sits six bytes into a 30-byte record, so read at the modern offsets tile 0 has
   flags `0x4E55_0000_0000_0000` and the name `"ED"` — the tail of `"UNUSED"`.
@@ -1954,16 +1954,16 @@ own understanding had written.
   what is there, and only the rows that changed are uploaded. The eviction this
   entry asked for exists too, as the answer to an atlas that has filled up
   rather than as the answer to a miss.
-- **`Map` cannot be built in memory, so the renderer has no offline tests.**
-  *(Planned: [`unenforced.md`](unenforced.md) S4.)*
+- **`WorldMap` cannot be built in memory, so the renderer has no offline
+  tests.** *(Planned: [`unenforced.md`](unenforced.md) S4.)*
   Every assertion about `ground::collect` lives in `tests/frame.rs` behind
-  `OPENSHARD_CLIENT` and a GPU, because the only way to get a `Map` is to load
-  one from a file. A constructor taking cells — or a small fixture facet — would
-  let the projection and the visible-set logic be tested with neither. Both
-  atlases now take pictures directly (`LandAtlas::pack`, `TexmapAtlas::pack`), so
-  the *art* half of that no longer needs an install: the test that a slope is
-  drawn from its texture and a level tile from its art is green with no client at
-  all. The map is what is left.
+  `OPENSHARD_CLIENT` and a GPU, because the only way to get a `WorldMap` is to
+  load one from a file. A constructor taking cells — or a small fixture facet —
+  would let the projection and the visible-set logic be tested with neither.
+  Both atlases now take pictures directly (`LandAtlas::pack`,
+  `TexmapAtlas::pack`), so the *art* half of that no longer needs an install:
+  the test that a slope is drawn from its texture and a level tile from its art
+  is green with no client at all. The map is what is left.
 - **Nothing reads `Feature` or the client version yet.** The renderer draws what
   the files hold. That is right for ground, and it stops being right at the
   first packet the client draws from.
@@ -2079,7 +2079,7 @@ own understanding had written.
   *And read it from the wrong place, which is the second half of the same
   entry.* A land cell stores **one** height and it is the diamond's northern
   vertex, not the height of the tile: a body stands at the average of the four
-  corners (`Map::average_land_z`, RunUO's `GetAverageZ`, ClassicUO's
+  corners (`WorldMap::average_land_z`, RunUO's `GetAverageZ`, ClassicUO's
   `Land.AverageZ`). `link.rs` predicted each step's `z` from the raw corner while
   `MapTerrain::ground_z` on the server had always used the average — the two ends
   each land their own step because a `0x22` carries no `z`, so the disagreement
@@ -2348,9 +2348,9 @@ own understanding had written.
 
   - **Where the check lives.** Lifted: `MapTerrain` and its `check` moved from
     `server/world/src/terrain.rs` into `common/movement/src/terrain.rs`, beside
-    `find_path`, generic over `M: AsRef<Map>, T: AsRef<TileData>` so the server
-    keeps building one owned at boot (`MapTerrain::new(map, tiles)`) and the
-    client builds one borrowing (`MapTerrain::new(self.map.as_ref(),
+    `find_path`, generic over `M: AsRef<WorldMap>, T: AsRef<TileData>` so the
+    server keeps building one owned at boot (`MapTerrain::new(map, tiles)`) and
+    the client builds one borrowing (`MapTerrain::new(self.map.as_ref(),
     &self.tiledata)`) fresh per click rather than cloning the facet. `world`'s
     own `terrain.rs` is now a two-line re-export plus the one test
     (`the_layer_byte_reads_the_hand_a_weapon_is_held_in`) that needs
@@ -2941,10 +2941,10 @@ own understanding had written.
   re-implements UO's walkability in the client and can therefore *disagree* with
   the shard, while `openshard_movement::Terrain` is one trait both ends already
   speak and `crates/server/world/src/terrain.rs`'s `MapTerrain` implements it out
-  of `Map` + `TileData` and nothing else — no world state, no server crate. Moving
-  it below `server/` (it is `common/*` material sitting in the wrong group, and
-  `crates/common/movement` already owns the trait) gives the client the shard's
-  own rules, byte for byte. Then, in order:
+  of `WorldMap` + `TileData` and nothing else — no world state, no server crate.
+  Moving it below `server/` (it is `common/*` material sitting in the wrong
+  group, and `crates/common/movement` already owns the trait) gives the client
+  the shard's own rules, byte for byte. Then, in order:
 
   1. `MapTerrain` moves to `common`, with the server importing it from its new
      home. No behaviour changes; the test suite that pins its Sphere and RunUO
@@ -3130,10 +3130,10 @@ own understanding had written.
 - **The facet is a startup constant and `0x1B` only carries a size.** The app
   loads Felucca and compares the shard's map size once, warning when they
   differ rather than following. Following means decoding `0xBF 0x08` and
-  reloading the facet, and the reload is the interesting half: `Map::load_facet`
-  reads a few hundred megabytes. **M3b makes this blocking**: two sessions may
-  stand on two facets, so the single shared `Arc<Map>` has to become a cache
-  keyed by facet.
+  reloading the facet, and the reload is the interesting half:
+  `WorldMap::load_facet` reads a few hundred megabytes. **M3b makes this
+  blocking**: two sessions may stand on two facets, so the single shared
+  `Arc<WorldMap>` has to become a cache keyed by facet.
 - **A whole `WorldView` is cloned per changed packet.** Fine for the handful a
   standing character receives, and not fine beside a crowded bank: the thread
   clones the map of every mobile to say that one of them turned. The answer is

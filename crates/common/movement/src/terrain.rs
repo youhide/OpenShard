@@ -3,7 +3,7 @@
 //! Lives beside [`find_path`](crate::find_path) rather than in `openshard-world`
 //! because both a server tick and a client's own click-to-walk planner need the
 //! same answer, and a client may not depend on `openshard-world` — that crate
-//! drags in the whole gameplay stack. `MapTerrain` reads nothing but a `Map` and
+//! drags in the whole gameplay stack. `MapTerrain` reads nothing but a `WorldMap` and
 //! a `TileData`, both of which the client already loads to draw the screen, so
 //! this is the one piece of `Terrain` two very different callers can share
 //! byte-for-byte. What stays server-side is `openshard-state::obstruct`'s
@@ -11,7 +11,7 @@
 //! entity registry a client does not have.
 
 use crate::{Terrain, Tile};
-use openshard_map::map::{LandTile, Map};
+use openshard_map::map::{LandTile, WorldMap};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_uofiles::tiledata::{TileData, TileFlags};
@@ -51,14 +51,14 @@ const fn platform_surface(base: i32, height: i32, climbable: bool) -> (i32, i32)
 /// The real world: ground heights, walls, water.
 ///
 /// Generic over how the map and tile data are held: `MapTerrain` (its default,
-/// `M = Map, T = TileData`) owns both, so the thing handed to `Walker::request`
+/// `M = WorldMap, T = TileData`) owns both, so the thing handed to `Walker::request`
 /// has no lifetime and can live in a struct field — what the server wants,
-/// building one once at boot. `MapTerrain<&Map, &TileData>` borrows instead, for
+/// building one once at boot. `MapTerrain<&WorldMap, &TileData>` borrows instead, for
 /// a caller that already owns the map for other reasons (drawing it) and would
 /// rather not clone tens of megabytes of it per click — the client's
 /// click-to-walk planner.
 #[derive(Debug)]
-pub struct MapTerrain<M = Map, T = TileData> {
+pub struct MapTerrain<M = WorldMap, T = TileData> {
     map: M,
     tiles: T,
     /// Whether water counts as ground. A boat or a fish says yes.
@@ -67,7 +67,7 @@ pub struct MapTerrain<M = Map, T = TileData> {
 
 impl<M, T> MapTerrain<M, T>
 where
-    M: AsRef<Map>,
+    M: AsRef<WorldMap>,
     T: AsRef<TileData>,
 {
     /// Wrap a loaded map, owned or borrowed.
@@ -86,7 +86,7 @@ where
     }
 
     /// The map.
-    pub fn map(&self) -> &Map {
+    pub fn map(&self) -> &WorldMap {
         self.map.as_ref()
     }
 
@@ -506,7 +506,7 @@ where
 
 impl<M, T> Terrain for MapTerrain<M, T>
 where
-    M: AsRef<Map>,
+    M: AsRef<WorldMap>,
     T: AsRef<TileData>,
 {
     fn land_is_water(&self, tile: Tile) -> bool {

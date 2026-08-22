@@ -31,9 +31,9 @@ terrain *is*.
 ## What is next
 
 Direction A in [`plan.md`](../plan.md): one revisioned snapshot that every
-reader takes a handle to, still over today's `Map`, with no format, network or
-patch machinery. It is a refactor with no feature in it, it is worth landing on
-its own, and everything after it is cheap only if it lands first.
+reader takes a handle to, still over today's `WorldMap`, with no format, network
+or patch machinery. It is a refactor with no feature in it, it is worth landing
+on its own, and everything after it is cheap only if it lands first.
 
 Two things to check while doing it, both found while inventorying the readers:
 

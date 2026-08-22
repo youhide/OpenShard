@@ -106,7 +106,7 @@ around it. It wraps `Facet`, not a bare `u8`, which is what
 
 **The acceptance test asks whether the world *behaves*, not whether it
 round-trips.** The importer's test already pins the same land cells, the same
-statics and the same bytes twice. Nothing between a `Map` and a step is an
+statics and the same bytes twice. Nothing between a `WorldMap` and a step is an
 identity, though: `MapTerrain` reads flags out of `tiledata.mul`, averages four
 corners for a slope, sorts statics per block and walks a Bresenham line for a
 look. So `base_set_terrain` builds two terrains over one tile table — one facet

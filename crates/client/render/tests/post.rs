@@ -42,7 +42,7 @@ use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, 
 use openshard_client_render::statics::StaticGeometry;
 use openshard_client_render::{dump, ground};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, Map};
+use openshard_map::map::{LandCell, WorldMap};
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
@@ -115,7 +115,7 @@ fn draw(
     at: Point,
     items: &[GroundItem],
 ) -> Drawn {
-    let map = Map::from_blocks(
+    let map = WorldMap::from_blocks(
         BlockExtent {
             wide: BLOCKS,
             down: BLOCKS,

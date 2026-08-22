@@ -97,13 +97,13 @@ pub(super) fn multis_with(
 #[test]
 fn a_facet_keeps_the_coarse_router_it_was_given_and_no_other() {
     use openshard_map::grid::BlockExtent;
-    use openshard_map::map::{LandCell, Map};
+    use openshard_map::map::{LandCell, WorldMap};
     use openshard_movement::{LandTile, MapTerrain, NavigationGraph};
     use openshard_protocol::world::Facet;
     use openshard_uofiles::tiledata::TileData;
 
     let flat = || {
-        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });

@@ -219,10 +219,10 @@ Both types named and imported. What happens to the other five:
 
 ### `MapTerrain` is three borrows, and both ends already hold them
 
-`MapTerrain` is generic over ownership — `M: AsRef<Map>, T: AsRef<TileData>` —
-so the server can own its map and the client borrow one. That parameterisation
-buys one thing: a terrain with no lifetime, so it can sit in a `Box` in a
-struct field. Nothing else asks for it.
+`MapTerrain` is generic over ownership — `M: AsRef<WorldMap>, T:
+AsRef<TileData>` — so the server can own its map and the client borrow one. That
+parameterisation buys one thing: a terrain with no lifetime, so it can sit in a
+`Box` in a struct field. Nothing else asks for it.
 
 And both ends already own precisely its three fields:
 
@@ -232,11 +232,11 @@ And both ends already own precisely its three fields:
 | tiledata | `Arc<TileData>` | `Resources.tiledata: Arc<TileData>` |
 | multis | `Option<Arc<Multis>>` | `Resources.multis: Option<Arc<Multis>>` |
 
-So `MapTerrain<'a> { map: &'a Map, tiles: &'a TileData, multis: Option<&'a Multis> }`
-is buildable on either end from fields that already exist, costs three pointers
-to construct per query, and makes the type **one name that can be imported**
-rather than two unrelated instantiations. That is the collapse; the `AsRef`
-bound does not survive it, and does not need to.
+So `MapTerrain<'a> { map: &'a WorldMap, tiles: &'a TileData, multis: Option<&'a
+Multis> }` is buildable on either end from fields that already exist, costs
+three pointers to construct per query, and makes the type **one name that can be
+imported** rather than two unrelated instantiations. That is the collapse; the
+`AsRef` bound does not survive it, and does not need to.
 
 ### `swimming` is a property of a body, parked on a world
 
@@ -317,11 +317,11 @@ What it grew, read off what the doubles actually do:
   instead — a fixture agreeing with itself, which is the thing this whole seam
   is against.
 - **An owned terrain.** `Scene::into_terrain` hands out a
-  `MapTerrain<Map, Arc<TileData>>`, which has no lifetime and therefore fits in
-  `FacetState`'s box; `Scene::into_shard` hands out that *and* the `Arc`, so the
-  shard's `WorldState.tiles` and the ground under it are one table. A fixture
-  that built them separately could stand a house on a wall the ground had never
-  heard of.
+  `MapTerrain<WorldMap, Arc<TileData>>`, which has no lifetime and therefore
+  fits in `FacetState`'s box; `Scene::into_shard` hands out that *and* the
+  `Arc`, so the shard's `WorldState.tiles` and the ground under it are one
+  table. A fixture that built them separately could stand a house on a wall the
+  ground had never heard of.
 
 The multi table stayed out, and B is why: a multi is no longer asked of the
 ground at all. A fixture that needs one writes `Multis::of` into `state.multis`,

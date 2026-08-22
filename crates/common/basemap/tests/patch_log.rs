@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use openshard_basemap::{BaseError, Loaded, load, patches, write};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, LandTile, Map, StaticItem};
+use openshard_map::map::{LandCell, LandTile, StaticItem, WorldMap};
 use openshard_map::patch::{Patch, PatchAuthor, PatchError, PatchOp, PatchTime, StaticId};
 use openshard_map::snapshot::{MapRevision, MapSnapshot};
 use openshard_protocol::wire::{Graphic, Hue};
@@ -45,7 +45,7 @@ fn world(tag: &str) -> (PathBuf, PathBuf) {
     std::fs::remove_file(&base_set).ok();
     std::fs::remove_file(&log).ok();
 
-    let map = Map::from_blocks(
+    let map = WorldMap::from_blocks(
         BlockExtent {
             wide: BLOCKS,
             down: BLOCKS,

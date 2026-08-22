@@ -2746,7 +2746,7 @@ this kind of ridiculous bug).
    anywhere, the same discipline `facing.rs`'s own `SEAM_OVERLAP`/
    `WIDTH_OVERLAP` exist to approximate for a single `Prism`'s tread/riser
    seam, done exactly instead.
-3. Added a synthetic floor (`Map::from_blocks` plus one hand-built flat
+3. Added a synthetic floor (`WorldMap::from_blocks` plus one hand-built flat
    `openshard_uofiles::image::Image` packed into a `LandAtlas`, drawn through
    the real `ground::collect`/`GroundRenderer`) so a shadow has something
    besides the boxes' own faces to fall on. It rendered, but every land pixel

@@ -57,7 +57,7 @@
 //! hand-built land tile (an `openshard_uofiles::image::Image` filled with a
 //! single colour, packed by `LandAtlas::pack` the same way
 //! `LandAtlas::build` packs real art) repeated over a synthetic
-//! `Map::from_blocks` covering the two boxes' own bounds, and drawn by the
+//! `WorldMap::from_blocks` covering the two boxes' own bounds, and drawn by the
 //! same `ground::collect`/`GroundRenderer` the real map uses. Two extra
 //! frames come out of this half: `<path>_lit.png` (`View::Lit`) and
 //! `<path>_shadow.png` (`View::Shadow`), both marked with the same lime
@@ -566,7 +566,7 @@ fn main() {
     // A floor for a shadow to fall on: one flat, hand-built land tile —
     // `openshard_uofiles::image::Image` is `LandAtlas::pack`'s own input and
     // needs no client file, the same way `Shape::UNREAD` let the cubes
-    // themselves skip real art. `Map::from_blocks` repeats it everywhere,
+    // themselves skip real art. `WorldMap::from_blocks` repeats it everywhere,
     // which costs nothing (`isolated_scene.rs`'s own doc: no statics, and
     // this scene never asks it for any) and is simpler than tracking which
     // blocks the bounds above actually touch.
@@ -578,7 +578,7 @@ fn main() {
         vec![floor_pixel; usize::from(openshard_uofiles::art::LAND_TILE_SIZE).pow(2)],
     );
     let blocks = (bounds.max_x as u32).div_ceil(openshard_map::map::BLOCK_SIZE) + 1;
-    let synthetic_map = openshard_map::map::Map::from_blocks(
+    let synthetic_map = openshard_map::map::WorldMap::from_blocks(
         BlockExtent {
             wide: blocks,
             down: blocks,

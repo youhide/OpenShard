@@ -66,9 +66,9 @@ reader cannot tell from real ocean. The test fixture is nine blocks square for
 exactly this reason — three of its four chunks are edge chunks.
 
 **The chunk reader is a second importer, not a second world.** `assemble` ends
-in `Map::from_parts`, the same call the `.mul` reader ends in, so the per-block
-sort every later lookup binary-searches over is imposed by the type either way.
-This is what makes the acceptance test an assertion about bytes.
+in `WorldMap::from_parts`, the same call the `.mul` reader ends in, so the
+per-block sort every later lookup binary-searches over is imposed by the type
+either way. This is what makes the acceptance test an assertion about bytes.
 
 **The encoding is canonical, and nothing in it sorts.** One world encodes to
 exactly one byte string, which rests entirely on the `(y, x)` sort being stable
@@ -123,13 +123,13 @@ After that, direction C, unchanged.
 `map0LegacyMUL.uop` + `statics0.mul` + `staidx0.mul` = 115.7 MB, with the land
 still at three bytes a cell and no compression anywhere. Direction G's
 whole-chunk compression is measured against that number, not against 150 MiB of
-resident `Map`.
+resident `WorldMap`.
 
-**`Map` could take the CSR layout from the chunk now, and did not.**
+**`WorldMap` could take the CSR layout from the chunk now, and did not.**
 `client_today.md`'s finding 6 — `Vec<Vec<StaticItem>>` is 120,744 allocations
 and 38.2 MiB where a CSR pair is two allocations and 13.5 — is now *implemented*
 in `Chunk`, which holds one flat run and a prefix sum. Nothing carries it into
-`Map`, because `from_parts` and all four static accessors are shaped around
+`WorldMap`, because `from_parts` and all four static accessors are shaped around
 per-block vectors and `place_static` inserts into one. It is a contained
 refactor of one type with a measured payoff, and it is the largest single item
 left in that backlog.

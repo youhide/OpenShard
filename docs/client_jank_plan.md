@@ -43,11 +43,12 @@ The per-tile CPU cost of assembling a far-zoom frame, which the counts now in
 the jank record give a denominator for: 26,732 ground quads and 7,288 static
 rows at the widest zoom.
 
-- `LandWindow` copies the visible rectangle out of `Map` once, in the order the
-  map stores it, before the ground walk reads it in the order the screen wants.
-  The map is 8×8 blocks laid out column-major and the walk is by anti-diagonal,
-  so every tile was missing the cache four times over — its own cell and the
-  three neighbours its corner heights read. Ground collect: 1.48 → 1.05 ms.
+- `LandWindow` copies the visible rectangle out of `WorldMap` once, in the order
+  the map stores it, before the ground walk reads it in the order the screen
+  wants. The map is 8×8 blocks laid out column-major and the walk is by
+  anti-diagonal, so every tile was missing the cache four times over — its own
+  cell and the three neighbours its corner heights read. Ground collect: 1.48 →
+  1.05 ms.
 - `LandAtlas`, `TexmapAtlas` and `StaticAtlasPages` answered their per-graphic
   lookups out of `BTreeMap`s, twice per visible tile and four times per drawn
   static, and derived the atlas rectangle with divisions each time. All three

@@ -58,7 +58,7 @@ use openshard_client_render::facing::{Block, Blocks, Footprint, Span, blocks_sil
 use openshard_client_render::impostor::{self, Volume};
 use openshard_client_render::light::WorldVec;
 use openshard_client_render::occlusion::{self, Shape};
-use openshard_map::map::Map;
+use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::image::Image;
@@ -118,7 +118,7 @@ fn volumes_of(
 /// A frame with a roof cut holds fewer solids and would merge differently, which
 /// is a second question and not this one.
 fn grid(
-    map: &Map,
+    map: &WorldMap,
     tiledata: &TileData,
     atlas: &StaticAtlas,
     at: (i32, i32),

@@ -149,7 +149,7 @@ pub struct BlockIndex(u32);
 
 impl BlockIndex {
     /// The linear position, for a caller indexing an array laid out block by
-    /// block — `Map`'s statics are the one in this crate.
+    /// block — `WorldMap`'s statics are the one in this crate.
     pub const fn get(self) -> u32 {
         self.0
     }

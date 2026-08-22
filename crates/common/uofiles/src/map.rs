@@ -1,7 +1,7 @@
-//! `map*.mul` and `statics*.mul`: reading a UO install into a [`Map`].
+//! `map*.mul` and `statics*.mul`: reading a UO install into a [`WorldMap`].
 //!
 //! **This module is an importer, not the world.** The world is
-//! [`openshard_map::map::Map`] and it has no idea a file exists; what is here is
+//! [`openshard_map::map::WorldMap`] and it has no idea a file exists; what is here is
 //! the one thing in the workspace that has heard of `.mul`, `.uop` and `staidx`,
 //! and its whole job is to turn those bytes into one of those. A shard that
 //! never had a client install is what that split is for — see
@@ -43,7 +43,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use openshard_map::grid::LandGrid;
-use openshard_map::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell, LandTile, Map, StaticItem};
+use openshard_map::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell, LandTile, StaticItem, WorldMap};
 use openshard_map::snapshot::MapSnapshot;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Facet;
@@ -152,7 +152,7 @@ impl std::error::Error for MapError {
 pub fn load(
     map_path: impl AsRef<Path>,
     statics_paths: Option<(impl AsRef<Path>, impl AsRef<Path>)>,
-) -> Result<Map, MapError> {
+) -> Result<WorldMap, MapError> {
     let map_path = map_path.as_ref();
     let bytes = read(map_path)?;
     from_bytes(map_path, bytes, statics_paths, None)
@@ -182,7 +182,7 @@ pub fn load_facet(client_dir: impl AsRef<Path>, facet: Facet) -> Result<MapSnaps
 ///
 /// So: if `<name>LegacyMUL.uop` exists next to `<name>.mul`, it wins. That is
 /// the file the client itself reads.
-pub fn read_facet(client_dir: impl AsRef<Path>, facet: u8) -> Result<Map, MapError> {
+pub fn read_facet(client_dir: impl AsRef<Path>, facet: u8) -> Result<WorldMap, MapError> {
     let dir = client_dir.as_ref();
     let uop = dir.join(format!("map{facet}LegacyMUL.uop"));
     let statics = Some((
@@ -214,7 +214,7 @@ fn from_bytes(
     mut bytes: Vec<u8>,
     statics_paths: Option<(impl AsRef<Path>, impl AsRef<Path>)>,
     facet: Option<u8>,
-) -> Result<Map, MapError> {
+) -> Result<WorldMap, MapError> {
     // A UOP container is allocated in fixed chunks and comes out a block or
     // two longer than the facet. Trim to the largest whole facet that fits
     // rather than refusing: the tail is padding, not data.
@@ -243,7 +243,7 @@ fn from_bytes(
     // `from_parts` and not a pair of fields: the per-block sort by tile is the
     // map's own invariant, so a decoder cannot forget it and a second importer
     // cannot get it wrong differently from this one.
-    Ok(Map::from_parts(land, statics))
+    Ok(WorldMap::from_parts(land, statics))
 }
 
 /// `land` is what says how many blocks there are and where each one starts
@@ -305,7 +305,7 @@ fn load_statics(
                 hue: Hue(u16::from_le_bytes([entry[5], entry[6]])),
             });
         }
-        // Handed over in file order. `Map::from_parts` is what sorts a block by
+        // Handed over in file order. `WorldMap::from_parts` is what sorts a block by
         // tile, **stably**, so two statics on one tile keep the order the file
         // has them in and the last of them stays the one on top.
         *slot = items;
@@ -413,7 +413,7 @@ mod tests {
 
     /// A directory of one test's own, removed when the test ends.
     ///
-    /// The fixtures below are written to disk because `Map::load` takes a path,
+    /// The fixtures below are written to disk because `WorldMap::load` takes a path,
     /// and a fixed name under `temp_dir()` is shared state: two runs of this
     /// suite at once — a second `cargo test`, or CI's — write and delete each
     /// other's file, and the loser fails on a file that was whole a moment ago.
@@ -459,7 +459,7 @@ mod tests {
         assert_eq!(facet_size(blocks, Some(0)), Some((7168, 4096)));
         assert_eq!(facet_size(blocks, None), Some((7168, 4096)));
         // That the shape is then *named* "Felucca/Trammel (post-ML)" is
-        // `Map::facet_name`'s, and is tested where that lives.
+        // `WorldMap::facet_name`'s, and is tested where that lives.
     }
 
     #[test]

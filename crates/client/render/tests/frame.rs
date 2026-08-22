@@ -5058,7 +5058,7 @@ fn a_mobile_is_drawn_over_the_ground_and_mirrors_with_its_facing() {
     let centre = Point::new(100, 100, 0);
     let camera = Camera::new(centre, 256, 256);
 
-    // The ground quad is built here rather than collected: `Map` cannot be
+    // The ground quad is built here rather than collected: `WorldMap` cannot be
     // constructed in memory — see the backlog in docs/client.md — and what this
     // test needs is one tile under the mobile's feet at the depth `depth` would
     // have given it.
@@ -5568,7 +5568,7 @@ fn dump_a_frame_of_britain() {
             // what the first run of this dump showed.
             //
             // The tile's average and not its stored corner, which is where a
-            // body actually stands (`Map::average_land_z`): the corner is the
+            // body actually stands (`WorldMap::average_land_z`): the corner is the
             // diamond's northern vertex, and on a slope standing at it is
             // standing under the floor — the ground sorts at that same average,
             // less two, so it is drawn over the body rather than beside it.

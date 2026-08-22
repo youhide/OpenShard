@@ -42,7 +42,7 @@
 
 use std::collections::BTreeMap;
 
-use openshard_map::map::Map;
+use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
@@ -215,7 +215,7 @@ impl Cutaway {
     /// Off the map the answer is [`Cutaway::OPEN`], the same as the client's
     /// null chunk.
     pub fn at(
-        map: &Map,
+        map: &WorldMap,
         tiledata: &TileData,
         player: openshard_protocol::world::Point,
         draw_roofs: bool,
@@ -378,7 +378,7 @@ fn cuts_from_above(tile: &StaticTile) -> bool {
 /// six bits of each coordinate. That is not a bug being carried over so much as
 /// the fill's only bound — a roof wider than 64 tiles folds onto itself and the
 /// walk stops — and it is what makes an unbounded recursion terminate.
-fn near_roof_z(map: &Map, tiledata: &TileData, default_z: i8, x: u16, y: u16, z: i8) -> i8 {
+fn near_roof_z(map: &WorldMap, tiledata: &TileData, default_z: i8, x: u16, y: u16, z: i8) -> i8 {
     let mut visited = vec![false; 64 * 64];
     fill(
         map,
@@ -392,7 +392,15 @@ fn near_roof_z(map: &Map, tiledata: &TileData, default_z: i8, x: u16, y: u16, z:
 }
 
 /// One step of [`near_roof_z`]'s fill.
-fn fill(map: &Map, tiledata: &TileData, default_z: i8, x: i32, y: i32, z: i8, visited: &mut [bool]) -> i8 {
+fn fill(
+    map: &WorldMap,
+    tiledata: &TileData,
+    default_z: i8,
+    x: i32,
+    y: i32,
+    z: i8,
+    visited: &mut [bool],
+) -> i8 {
     let slot = ((x & 0x3F) + ((y & 0x3F) << 6)) as usize;
     if visited[slot] {
         return default_z;
@@ -449,7 +457,7 @@ pub struct Piece<'a> {
 /// Mobiles and dynamic items are not here: this walks the *map*, and both rules
 /// that use it skip mobiles anyway (`UpdateMaxDrawZ` by `continue`, the fill by
 /// asking for statics).
-pub fn stack<'a>(map: &Map, tiledata: &'a TileData, x: u16, y: u16) -> Vec<Piece<'a>> {
+pub fn stack<'a>(map: &WorldMap, tiledata: &'a TileData, x: u16, y: u16) -> Vec<Piece<'a>> {
     let mut pieces = Vec::new();
     if let Some(cell) = map.land(x, y) {
         let corners = corner_heights(map, x, y, cell.z).map(|z| z as i32);

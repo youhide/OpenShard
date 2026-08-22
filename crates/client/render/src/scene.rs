@@ -25,7 +25,7 @@
 //! then none of these tests would run anywhere.
 
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, Map};
+use openshard_map::map::{LandCell, WorldMap};
 use openshard_movement::Tile;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
@@ -169,12 +169,12 @@ pub struct Scene {
     /// What it is, for the message a failing test prints.
     pub name: &'static str,
     /// Flat ground at `z = 0`, wide enough that no camera runs off it.
-    pub map: Map,
+    pub map: WorldMap,
     /// The flags of the graphics above, and nothing else: an unlisted graphic
     /// has no flags at all, so it neither burns nor occludes.
     pub tiledata: TileData,
     /// What stands in it. Statics come through the item list rather than the map
-    /// because a built [`Map`] has none — see [`Map::from_blocks`].
+    /// because a built [`WorldMap`] has none — see [`WorldMap::from_blocks`].
     pub items: Vec<GroundItem>,
     /// Looking at [`CENTRE`], at the zoom every other test uses.
     pub camera: Camera,
@@ -197,7 +197,7 @@ pub struct Scene {
     /// The pictures, where the scene is about which *edge* a wall stands on.
     ///
     /// `None` for almost every scene, and that is not a gap: these scenes have no
-    /// art at all — a `Map` of flat ground, a `TileData` where a few graphics
+    /// art at all — a `WorldMap` of flat ground, a `TileData` where a few graphics
     /// have flags, and a list of items — and without pictures every occluder is
     /// the whole tile decision 3 made it. Which is the answer those scenes were
     /// written against and still assert.
@@ -293,8 +293,8 @@ impl Scene {
 /// Wide enough to hold [`CENTRE`] with room for a camera's bounds on every side.
 /// The land graphic is `0`, which the scenes' `tiledata` gives no flags, so the
 /// ground itself neither burns nor stops anything.
-fn ground() -> Map {
-    Map::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
+fn ground() -> WorldMap {
+    WorldMap::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
         tile: openshard_map::map::LandTile(0),
         z: 0,
     })

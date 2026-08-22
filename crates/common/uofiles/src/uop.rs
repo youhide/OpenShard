@@ -126,12 +126,12 @@ impl std::error::Error for UopError {
 /// # The whole file is held in memory
 ///
 /// A map container is 90MB and the art container is 155MB, and both are read
-/// whole. That is the same bargain the rest of this crate makes — see [`Map`] —
+/// whole. That is the same bargain the rest of this crate makes — see [`WorldMap`] —
 /// and it is fine for a shard, which reads the map once and never opens the art.
 /// A renderer holding every sprite sheet resident is a different question, and
 /// the place to answer it is here, once something is actually drawing.
 ///
-/// [`Map`]: crate::map::Map
+/// [`WorldMap`]: crate::map::WorldMap
 pub struct Uop {
     path: PathBuf,
     bytes: Vec<u8>,

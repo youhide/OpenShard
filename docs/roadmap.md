@@ -3322,7 +3322,8 @@ riding along with this one.
   parser, `App::{in_bounds, tile_info, route_shown, hud}`, `app::dst`'s test
   walls, and `net::walk::Walk::step`'s height callback (`Fn(Point, Tile)`).
   `Point` still names tile-plus-height, and the new `.x`/`.y` reads sit at the
-  existing seams: `Map`/`MapTerrain` APIs, `Point::new`, and HUD presentation.
+  existing seams: `WorldMap`/`MapTerrain` APIs, `Point::new`, and HUD
+  presentation.
 
   `app::clutter` was the sharpest of them and is **fixed**: it *imported*
   `Tile` on line 41, used it in six trait methods, and then unpacked the `Tile`

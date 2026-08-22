@@ -454,8 +454,8 @@ keep their own entries and ask it what to drop.
   are opposite directions with opposite meanings.
 - **The quarantine.** `CompositeQuarantine` is the scene renderer's answer to a
   known-bad composite. The radar has no such failure mode.
-- **The builders.** `build_chunk` walks a `Map`; `composite_producer::produce`
-  records an encoder. Nothing shared.
+- **The builders.** `build_chunk` walks a `WorldMap`;
+  `composite_producer::produce` records an encoder. Nothing shared.
 
 **Micro-decisions.** No `Box<dyn>` and no trait objects on any path a frame
 touches — `WorkQueue` and `LruBudget` are generic over the key only, and the
@@ -488,7 +488,7 @@ no test's *expectations* edited, only its imports.
 reused across the turn's chunks, sized for the largest level the turn will
 build. A level-`n` build over `4^n · 4096` tiles is a single `fill` call over a
 `2^n · 64`-square region, so the block-major walk is unchanged and
-`Map::statics_in_block`'s one-fetch-per-block property still holds.
+`WorldMap::statics_in_block`'s one-fetch-per-block property still holds.
 
 **Done when** a test asserts `build_chunk(key at lod n)` is **bit-identical**
 to `build_lod_parent` climbed from its `4^n` level-zero children, for `n` up to

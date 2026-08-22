@@ -60,7 +60,7 @@ call `Terrain` or run pathfinding.
 The stamp covers exactly the static inputs that determine walkability:
 
 - the selected facet's map source (`map<facet>LegacyMUL.uop`, or the legacy map
-  and statics inputs selected by `Map::load_facet`);
+  and statics inputs selected by `WorldMap::load_facet`);
 - `tiledata.mul`;
 - map dimensions and selected facet;
 - routing-algorithm version.

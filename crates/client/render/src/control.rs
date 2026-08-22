@@ -4,7 +4,7 @@
 //! wheel notch's anchor, the device's refusal to allocate the image a zoom asks
 //! for, and whether the eye is the body's or the mouse's. All of it
 //! used to live in `client/app`, where it could not be reached from a test
-//! because the thing that owned it also owned a window, a GPU and a `Map`. None
+//! because the thing that owned it also owned a window, a GPU and a `WorldMap`. None
 //! of it needs any of the three.
 //!
 //! What is deliberately *not* here: any decision about what happens next. This

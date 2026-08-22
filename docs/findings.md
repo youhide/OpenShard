@@ -72,15 +72,16 @@ a minute and the alternative shipped a shard nobody could log into.
 
 **A tiledata flag means what the reference *reads* it for, not what its comment
 says.** Sphere's header calls `UFLAG2_WINDOW` "window/arch/door can walk thru it",
-and Sphere never once consults it in `CWorldMap`: the only three uses in the whole
-engine are line-of-sight tests in `CCharLOS.cpp`, gated on `LOS_NB_WINDOWS`.
-Honouring the comment in the *movement* check let anything the server moved walk
-out through every wall segment with a window in it. It never showed for a player,
-because the client refuses the step before it is ever sent — which is the general
-trap: a server-side movement hole is invisible from the only end normally tested,
-and surfaces as NPCs strolling through walls. (`NO_SHOOT` was mis-valued at `0x20`
-in the same file, which is `UFLAG1_DAMAGE`; there is no `UFLAG1_NOSHOOT` at all.
-Pin a flag's value in a test next to the constant.)
+and Sphere never once consults it in `CWorldMap`: the only three uses in the
+whole engine are line-of-sight tests in `CCharLOS.cpp`, gated on
+`LOS_NB_WINDOWS`. Honouring the comment in the *movement* check let anything the
+server moved walk out through every wall segment with a window in it. It never
+showed for a player, because the client refuses the step before it is ever sent
+— which is the general trap: a server-side movement hole is invisible from the
+only end normally tested, and surfaces as NPCs strolling through walls.
+(`NO_SHOOT` was mis-valued at `0x20` in the same file, which is `UFLAG1_DAMAGE`;
+there is no `UFLAG1_NOSHOOT` at all. Pin a flag's value in a test next to the
+constant.)
 
 ## How three other engines lit a flat world
 
@@ -323,7 +324,7 @@ with `TileData` to the bit, which is what turned "our reader is broken" into
 "the client says so" in one step.
 
 **The map is in the `.uop`, not the `.mul`.** Modern clients ship both and the
-`.mul` may be a stub full of zeroes. `Map::load_facet` prefers the UOP. See
+`.mul` may be a stub full of zeroes. `WorldMap::load_facet` prefers the UOP. See
 `world::uop`.
 
 **A zero pixel inside a land diamond is black, not transparent.** Statics carry

@@ -7,12 +7,12 @@
 //!
 //! # The walk is block-major, and that is not a micro-optimisation
 //!
-//! `Map::statics_at` binary-searches a block per call, and `map.rs:568`'s own
+//! `WorldMap::statics_at` binary-searches a block per call, and `map.rs:568`'s own
 //! doc records what that costs at scale: asked per tile over a frame it was
 //! *the largest single phase of the lighting pass*. A radar covering 256 tiles
 //! square would ask it sixty-five thousand times.
 //!
-//! [`Map::statics_in_block`] hands back the whole block as a slice with no
+//! [`WorldMap::statics_in_block`] hands back the whole block as a slice with no
 //! search at all, so the walk asks once per block and buckets what it finds —
 //! a thousand slice fetches instead of a hundred and thirty thousand searches,
 //! for the same answer.
@@ -22,7 +22,7 @@
 //! Its land tile, overridden by the **highest static standing on it**. Three
 //! details that are each a bug if got wrong:
 //!
-//! - **`Map::statics_at` is not sorted by z.** Its key is `(y, x)` and nothing
+//! - **`WorldMap::statics_at` is not sorted by z.** Its key is `(y, x)` and nothing
 //!   else, so "the last one" is not "the highest one" and the comparison is
 //!   explicit.
 //! - **The comparison against the land is `>=`, not `>`.** A floor tile lies at
@@ -36,7 +36,7 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use openshard_map::grid::BlockCoord;
-use openshard_map::map::{BLOCK_SIZE, Map};
+use openshard_map::map::{BLOCK_SIZE, WorldMap};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Facet;
 use openshard_uofiles::color::Color16;
@@ -1245,7 +1245,7 @@ impl RadarCache {
 
 /// A bounded hand-off from cache invalidation to a radar chunk producer.
 ///
-/// This queue deliberately owns scheduling only: it never walks a [`Map`],
+/// This queue deliberately owns scheduling only: it never walks a [`WorldMap`],
 /// allocates pixels, or uploads a texture.  A presentation frame may refresh
 /// its dirty view cheaply, while an idle worker takes at most
 /// a fixed cost in base-chunk units and returns complete [`RadarChunk`]s through
@@ -1502,14 +1502,14 @@ pub struct RadarBuildScratch {
 
 /// Build any LOD directly from the authoritative map and colour table.
 #[must_use]
-pub fn build_chunk(map: &Map, colors: &RadarColors, key: RadarChunkKey) -> Option<RadarChunk> {
+pub fn build_chunk(map: &WorldMap, colors: &RadarColors, key: RadarChunkKey) -> Option<RadarChunk> {
     build_chunk_reusing(map, colors, key, &mut RadarBuildScratch::default())
 }
 
 /// [`build_chunk`] with storage shared by all jobs in one producer turn.
 #[must_use]
 pub fn build_chunk_reusing(
-    map: &Map,
+    map: &WorldMap,
     colors: &RadarColors,
     key: RadarChunkKey,
     scratch: &mut RadarBuildScratch,
@@ -1545,7 +1545,7 @@ pub fn build_chunk_reusing(
 
 /// The level-zero compatibility spelling used by invalidation tests/callers.
 #[must_use]
-pub fn build_base_chunk(map: &Map, colors: &RadarColors, key: RadarChunkKey) -> Option<RadarChunk> {
+pub fn build_base_chunk(map: &WorldMap, colors: &RadarColors, key: RadarChunkKey) -> Option<RadarChunk> {
     key.lod.is_base().then(|| build_chunk(map, colors, key)).flatten()
 }
 
@@ -1735,7 +1735,7 @@ pub fn build_ready_ancestors(
 /// representable radar image and returns an empty vector rather than wrapping
 /// its dimensions into a different facet.
 #[must_use]
-pub fn bake(map: &Map, colors: &RadarColors) -> Vec<Color16> {
+pub fn bake(map: &WorldMap, colors: &RadarColors) -> Vec<Color16> {
     let (Ok(width), Ok(height)) = (u16::try_from(map.width()), u16::try_from(map.height())) else {
         return Vec::new();
     };
@@ -1752,7 +1752,7 @@ pub fn bake(map: &Map, colors: &RadarColors) -> Vec<Color16> {
 /// The whole rule in one place, so the block walk below and any caller asking
 /// about a single tile cannot come to disagree. Off the map is [`UNKNOWN`].
 #[must_use]
-pub fn tile_color(map: &Map, colors: &RadarColors, x: u16, y: u16) -> Color16 {
+pub fn tile_color(map: &WorldMap, colors: &RadarColors, x: u16, y: u16) -> Color16 {
     let Some(land) = map.land(x, y) else {
         return UNKNOWN;
     };
@@ -1786,7 +1786,7 @@ pub fn tile_color(map: &Map, colors: &RadarColors, x: u16, y: u16) -> Color16 {
 ///
 /// See the module header for why this walks blocks rather than tiles.
 pub fn fill(
-    map: &Map,
+    map: &WorldMap,
     colors: &RadarColors,
     origin: (u16, u16),
     width: u16,
@@ -1807,7 +1807,7 @@ pub fn fill(
     let last_column = origin_x.saturating_add(width.saturating_sub(1));
     for row in 0..height {
         // One row of land, each cell one step east of the last rather than a
-        // block index derived per tile — see [`Map::land_in_row`]. It ends
+        // block index derived per tile — see [`WorldMap::land_in_row`]. It ends
         // where the facet does, so a column with no cell is a column off the
         // map, and `None` for the whole row is a row past the coordinate space
         // — off the map in the same sense, and [`UNKNOWN`] the same way.
@@ -1975,14 +1975,14 @@ mod tests {
     }
 
     /// A one-block facet, every tile land id 1 at z 0.
-    fn a_field() -> Map {
-        Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+    fn a_field() -> WorldMap {
+        WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(1),
             z: 0,
         })
     }
 
-    fn put(map: &mut Map, graphic: u16, x: u16, y: u16, z: i8) {
+    fn put(map: &mut WorldMap, graphic: u16, x: u16, y: u16, z: i8) {
         map.place_static(StaticItem {
             tile: Graphic(graphic),
             x,
@@ -2842,7 +2842,7 @@ mod tests {
 
     #[test]
     fn a_bare_tile_is_its_land() {
-        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, _| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, _| LandCell {
             tile: LandTile(if x < 4 { 1 } else { 2 }),
             z: 0,
         });

@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque, btree_map::Entry};
 use std::sync::Arc;
 
 use openshard_map::grid::BlockCoord;
-use openshard_map::map::{BLOCK_SIZE, Map};
+use openshard_map::map::{BLOCK_SIZE, WorldMap};
 use openshard_movement::{MapTerrain, PLAYER_HEIGHT, Terrain};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
@@ -453,7 +453,7 @@ pub struct BlockCells {
 
 impl BlockCells {
     /// Bake one valid map block, or return `None` when the block is off-map.
-    pub fn bake(map: &Map, tiledata: &TileData, id: BlockCoord) -> Option<Self> {
+    pub fn bake(map: &WorldMap, tiledata: &TileData, id: BlockCoord) -> Option<Self> {
         let (origin_x, origin_y) = id.origin();
         // A block past the `u16` a tile coordinate is expressed in is a block
         // no facet has; `map.contains` below would refuse it anyway, and the
@@ -558,7 +558,7 @@ pub struct BlockRooms {
 
 impl BlockRooms {
     /// Bake the closed-door room graph of one valid map block.
-    pub fn bake(map: &Map, tiledata: &TileData, id: BlockCoord) -> Option<Self> {
+    pub fn bake(map: &WorldMap, tiledata: &TileData, id: BlockCoord) -> Option<Self> {
         Self::bake_with_shapes(map, tiledata, id, &|_| crate::occlusion::Shape::UNREAD)
     }
 
@@ -568,7 +568,7 @@ impl BlockRooms {
     /// consulted while the flood graph is made; an unread graphic conservatively
     /// occupies every edge of its tile, the established renderer fallback.
     pub fn bake_with_shapes(
-        map: &Map,
+        map: &WorldMap,
         tiledata: &TileData,
         id: BlockCoord,
         shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
@@ -766,7 +766,7 @@ impl StitchedRooms {
 
     /// Stitch with the same wall-edge predicate the block bakes used.
     pub fn bake_with_shapes(
-        map: &Map,
+        map: &WorldMap,
         tiledata: &TileData,
         blocks: impl IntoIterator<Item = BlockRooms>,
         shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
@@ -1035,7 +1035,7 @@ impl BuildingMap {
     /// load without opening a sprite archive.
     #[must_use]
     pub fn bake(
-        map: &Map,
+        map: &WorldMap,
         tiledata: &TileData,
         shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
     ) -> Self {
@@ -1270,7 +1270,7 @@ impl BuildingMap {
     /// or doorway the positive-space rule failed to cross, without making a
     /// camera frame reconstruct topology.
     pub fn exterior_path(
-        map: &Map,
+        map: &WorldMap,
         tiledata: &TileData,
         shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
         start: (u16, u16),
@@ -1345,7 +1345,11 @@ struct PlanarTopology {
 }
 
 impl PlanarTopology {
-    fn bake(map: &Map, tiledata: &TileData, shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape) -> Self {
+    fn bake(
+        map: &WorldMap,
+        tiledata: &TileData,
+        shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
+    ) -> Self {
         let (width, height) = (map.width() as usize, map.height() as usize);
         let cells = width
             .checked_mul(height)
@@ -1440,7 +1444,7 @@ impl PlanarTopology {
 }
 
 /// A matching, same-height `DoorGenerator` frame at this map tile.
-fn generated_frame_at(map: &Map, x: usize, y: usize, z: i8, side: fn(u16) -> bool) -> bool {
+fn generated_frame_at(map: &WorldMap, x: usize, y: usize, z: i8, side: fn(u16) -> bool) -> bool {
     map.statics_at(
         u16::try_from(x).expect("facet fits UO coordinates"),
         u16::try_from(y).expect("facet fits UO coordinates"),
@@ -1458,7 +1462,7 @@ fn generated_door_anchor<M, T>(
     y: usize,
     z: i8,
 ) where
-    M: AsRef<Map>,
+    M: AsRef<WorldMap>,
     T: AsRef<TileData>,
 {
     let width = terrain.map().width() as usize;
@@ -1480,7 +1484,7 @@ fn generated_door_anchor<M, T>(
 
 impl Buildings {
     /// Derive the structural buildings from an immutable stitched room graph.
-    pub fn bake(map: &Map, tiledata: &TileData, rooms: &StitchedRooms) -> Self {
+    pub fn bake(map: &WorldMap, tiledata: &TileData, rooms: &StitchedRooms) -> Self {
         let cells: Vec<_> = rooms.cells().collect();
         let mut by_tile: BTreeMap<(u16, u16), Vec<usize>> = BTreeMap::new();
         for (at, cell) in cells.iter().enumerate() {
@@ -2130,7 +2134,7 @@ fn bands_join(one: Cell, other: Cell) -> bool {
 /// art table's measured facing supplies the edge; an unread wall is the safe
 /// four-edge fallback in `named_edges`.
 fn cells_join(
-    map: &Map,
+    map: &WorldMap,
     tiledata: &TileData,
     shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
     one: Cell,
@@ -2156,7 +2160,7 @@ fn cells_join(
 
 /// The wall panels that occupy a cell at its floor band.
 fn wall_edges(
-    map: &Map,
+    map: &WorldMap,
     tiledata: &TileData,
     shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
     cell: Cell,
@@ -2196,7 +2200,7 @@ fn wall_edges(
 /// room graph or the facet-wide house contour. A normal wall made of short art
 /// courses remains structural unless it directly supports that platform.
 fn wall_supports_low_platform(
-    map: &Map,
+    map: &WorldMap,
     tiledata: &TileData,
     x: u16,
     y: u16,
@@ -2289,7 +2293,7 @@ fn planar_neighbours(
 
 /// A closed-door graph omits the floor cell occupied by its leaf; the portal
 /// below reconnects the two sides only when that leaf is open in the frame.
-fn door_occupies(map: &Map, tiledata: &TileData, cell: Cell) -> bool {
+fn door_occupies(map: &WorldMap, tiledata: &TileData, cell: Cell) -> bool {
     map.statics_at(cell.tile.0, cell.tile.1).any(|item| {
         let tile = tiledata.static_tile(item.tile.0);
         if !tile.flags.has(TileFlags::DOOR) {
@@ -2307,7 +2311,7 @@ fn door_occupies(map: &Map, tiledata: &TileData, cell: Cell) -> bool {
 /// A character may stand on a table or a chest; neither is a storey.  The
 /// interior index therefore takes land and static art explicitly marked FLOOR,
 /// while movement continues to use every PLATFORM in `stand_surfaces`.
-fn structural_surfaces(map: &Map, tiledata: &TileData, x: u16, y: u16) -> Vec<i32> {
+fn structural_surfaces(map: &WorldMap, tiledata: &TileData, x: u16, y: u16) -> Vec<i32> {
     let mut surfaces = Vec::new();
     if let Some(land) = map.land(x, y) {
         let flags = tiledata.land(land.tile.0).flags;
@@ -2359,7 +2363,7 @@ pub struct Index {
 impl Index {
     /// Return a cached cell block, baking its room graph from the read-only map
     /// on first use.
-    pub fn block(&mut self, map: &Map, tiledata: &TileData, id: BlockCoord) -> Option<&BlockCells> {
+    pub fn block(&mut self, map: &WorldMap, tiledata: &TileData, id: BlockCoord) -> Option<&BlockCells> {
         Some(self.rooms(map, tiledata, id)?.cells())
     }
 
@@ -2367,7 +2371,7 @@ impl Index {
     /// use. Cells and rooms deliberately share this one cache entry: a second
     /// bake would give the two phases two opportunities to disagree about a
     /// wall or a doorway in the same map block.
-    pub fn rooms(&mut self, map: &Map, tiledata: &TileData, id: BlockCoord) -> Option<&BlockRooms> {
+    pub fn rooms(&mut self, map: &WorldMap, tiledata: &TileData, id: BlockCoord) -> Option<&BlockRooms> {
         self.rooms_with_shapes(map, tiledata, id, &|_| crate::occlusion::Shape::UNREAD)
     }
 
@@ -2377,7 +2381,7 @@ impl Index {
     /// for one `Index`: changing it would make a cached map fact stale.
     pub fn rooms_with_shapes(
         &mut self,
-        map: &Map,
+        map: &WorldMap,
         tiledata: &TileData,
         id: BlockCoord,
         shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
@@ -2397,7 +2401,7 @@ impl Index {
     /// [`StitchedRooms::bake`] deliberately does not guess at an absent block.
     pub fn stitched(
         &mut self,
-        map: &Map,
+        map: &WorldMap,
         tiledata: &TileData,
         ids: impl IntoIterator<Item = BlockCoord>,
     ) -> Option<StitchedRooms> {
@@ -2407,7 +2411,7 @@ impl Index {
     /// Stitch blocks using the measured faces of the install's wall art.
     pub fn stitched_with_shapes(
         &mut self,
-        map: &Map,
+        map: &WorldMap,
         tiledata: &TileData,
         ids: impl IntoIterator<Item = BlockCoord>,
         shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
@@ -2426,7 +2430,7 @@ impl Index {
     /// seam composition for one debug frame or, later, one interior frame.
     pub fn buildings(
         &mut self,
-        map: &Map,
+        map: &WorldMap,
         tiledata: &TileData,
         ids: impl IntoIterator<Item = BlockCoord>,
     ) -> Option<Buildings> {
@@ -2438,7 +2442,7 @@ impl Index {
     }
 
     /// Look up the cell containing a point, baking only that point's block.
-    pub fn cell_at(&mut self, map: &Map, tiledata: &TileData, point: Point) -> Option<CellId> {
+    pub fn cell_at(&mut self, map: &WorldMap, tiledata: &TileData, point: Point) -> Option<CellId> {
         let id = BlockCoord::containing(point.x, point.y);
         self.block(map, tiledata, id)?.cell_at(point)
     }
@@ -2458,8 +2462,8 @@ mod tests {
 
     use super::*;
 
-    fn walled_block(open: &[(u16, u16)]) -> (Map, TileData) {
-        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+    fn walled_block(open: &[(u16, u16)]) -> (WorldMap, TileData) {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2526,7 +2530,7 @@ mod tests {
 
     #[test]
     fn an_upper_floor_makes_two_cells_in_one_column() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2566,7 +2570,7 @@ mod tests {
 
     #[test]
     fn a_roof_is_the_ceiling_of_the_house_cell_below_it() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2601,7 +2605,7 @@ mod tests {
 
     #[test]
     fn a_roofed_enclosure_is_an_indexed_building_area() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2684,7 +2688,7 @@ mod tests {
 
     #[test]
     fn a_measured_wall_blocks_only_its_named_shared_edge() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2732,7 +2736,7 @@ mod tests {
 
     #[test]
     fn facet_bake_marks_space_unreachable_from_the_world_as_a_building() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2789,7 +2793,7 @@ mod tests {
 
     #[test]
     fn a_short_wall_on_a_stage_is_not_a_room_or_building_boundary() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 20,
         });
@@ -2845,7 +2849,7 @@ mod tests {
 
     #[test]
     fn a_doorway_is_coloured_as_part_of_its_positive_building() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2889,7 +2893,7 @@ mod tests {
 
     #[test]
     fn a_double_gap_between_wall_frames_is_a_door_anchor() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2945,7 +2949,7 @@ mod tests {
 
     #[test]
     fn blocking_furniture_does_not_split_a_room() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2998,7 +3002,7 @@ mod tests {
 
     #[test]
     fn an_off_map_block_is_not_baked() {
-        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -3007,7 +3011,7 @@ mod tests {
 
     #[test]
     fn a_point_bakes_its_block_once() {
-        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -3021,7 +3025,7 @@ mod tests {
 
     #[test]
     fn an_open_block_is_not_indexed_as_a_building() {
-        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -3038,7 +3042,7 @@ mod tests {
 
     #[test]
     fn a_low_ceiling_is_not_a_cell() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -3074,7 +3078,7 @@ mod tests {
 
     #[test]
     fn a_door_is_a_closed_wall_and_a_portal_between_its_two_rooms() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -3175,7 +3179,7 @@ mod tests {
 
     #[test]
     fn a_door_and_its_rooms_cross_an_eight_tile_block_seam() {
-        let mut map = Map::from_blocks(BlockExtent { wide: 2, down: 1 }, |_, _| LandCell {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });

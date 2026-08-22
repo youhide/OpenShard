@@ -14,7 +14,7 @@
 //! nothing.
 //!
 //! Canonical rests on one property of the layer below: a chunk's statics are in
-//! the `(y, x)` stable order [`Map::from_parts`](crate::map::Map::from_parts) imposes, so re-cutting a chunk
+//! the `(y, x)` stable order [`WorldMap::from_parts`](crate::map::WorldMap::from_parts) imposes, so re-cutting a chunk
 //! out of an assembled facet reproduces the order it went in with. Nothing here
 //! sorts — if this module had its own sort there would be two of them.
 //!
@@ -377,7 +377,7 @@ pub fn decode(bytes: &[u8]) -> Result<Chunk, DecodeError> {
             items.push(StaticItem {
                 tile: Graphic(u16::from_le_bytes([entry[0], entry[1]])),
                 // Back to a world coordinate, which is what every reader
-                // downstream of `Map` has always been handed.
+                // downstream of `WorldMap` has always been handed.
                 x: (block_x + u32::from(x)) as u16,
                 y: (block_y + u32::from(y)) as u16,
                 z: entry[3] as i8,
@@ -391,7 +391,7 @@ pub fn decode(bytes: &[u8]) -> Result<Chunk, DecodeError> {
 
 /// A static's position inside its block, `y` in the high three bits.
 ///
-/// `y` first for the same reason [`Map::statics_in_block`](crate::map::Map::statics_in_block)'s order is: a row
+/// `y` first for the same reason [`WorldMap::statics_in_block`](crate::map::WorldMap::statics_in_block)'s order is: a row
 /// has to be contiguous, so the row is the more significant half of the key,
 /// and packing it the other way round would make the byte's numeric order
 /// disagree with the order the items are written in.

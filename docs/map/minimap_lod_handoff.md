@@ -7,9 +7,9 @@ score.
 
 **Phase 1 — immutable raster products.** `RadarChunkKey { facet, lod, chunk,
 revision }` is the complete identity of a terrain raster, constructible only by
-`RadarCache`. `BASE_CHUNK_TILES` is 64 (eight `Map::BLOCK_SIZE` blocks); base
-chunks are always complete, with cells beyond the facet `UNKNOWN`, which is what
-lets a parent be reduced from four children with no map-edge case.
+`RadarCache`. `BASE_CHUNK_TILES` is 64 (eight `WorldMap::BLOCK_SIZE` blocks);
+base chunks are always complete, with cells beyond the facet `UNKNOWN`, which is
+what lets a parent be reduced from four children with no map-edge case.
 `build_base_chunk` uses the block-major `fill` walk; `reduce_lod_pixel` votes on
 categorical colours and never averages RGB.
 

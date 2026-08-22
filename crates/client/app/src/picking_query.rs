@@ -17,7 +17,7 @@ use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::depth;
 use openshard_client_render::mobiles::{self, Mobile};
 use openshard_client_render::{light, occlusion};
-use openshard_map::map::Map;
+use openshard_map::map::WorldMap;
 use openshard_movement::{Terrain, Tile};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::Serial;
@@ -53,8 +53,8 @@ pub(crate) struct HudTimings {
 impl App {
     /// Common code for the two lookups in [`App::pick_tile`]: `unproject` hands
     /// back a signed pair that may be off the map in any direction, and a
-    /// negative one is not expressible as the `u16` [`Map::land`] wants.
-    pub(crate) fn in_bounds(x: i32, y: i32, map: &Map) -> Option<Tile> {
+    /// negative one is not expressible as the `u16` [`WorldMap::land`] wants.
+    pub(crate) fn in_bounds(x: i32, y: i32, map: &WorldMap) -> Option<Tile> {
         if x < 0 || y < 0 || x as u32 >= map.width() || y as u32 >= map.height() {
             return None;
         }
@@ -212,7 +212,7 @@ impl App {
     /// tread against its riser, a cliff edge one tile from level ground.
     ///
     /// Off the map is simply absent: `checked_add`/`checked_sub` at the world's
-    /// corner, and [`Map::land`](openshard_map::map::Map::land) answers
+    /// corner, and [`WorldMap::land`](openshard_map::map::WorldMap::land) answers
     /// nothing for a block that never loaded, which `tile_info` already reports
     /// as `land: None`.
     ///

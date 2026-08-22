@@ -46,7 +46,7 @@
 //! is not allowed to read a clock, so the time arrives as an argument and there
 //! is exactly one place it is used.
 
-use openshard_map::map::Map;
+use openshard_map::map::WorldMap;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
@@ -935,7 +935,7 @@ pub fn lit_tiles(camera: &Camera, tuning: &Tuning) -> crate::camera::TileBounds 
 // call sites for no fewer facts.
 #[allow(clippy::too_many_arguments)]
 pub fn collect(
-    map: &Map,
+    map: &WorldMap,
     items: &[GroundItem],
     camera: &Camera,
     tiledata: &TileData,
@@ -958,7 +958,7 @@ pub fn collect(
 /// choice that changes every frame.
 #[allow(clippy::too_many_arguments)]
 pub fn collect_with_interior(
-    map: &Map,
+    map: &WorldMap,
     items: &[GroundItem],
     camera: &Camera,
     tiledata: &TileData,
@@ -3705,8 +3705,8 @@ mod tests {
     /// A map with ground and nothing standing on it: the statics in these tests
     /// come from the item list, which is the half a test can build without a
     /// client install.
-    fn bare() -> Map {
-        Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+    fn bare() -> WorldMap {
+        WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: openshard_movement::LandTile(0),
             z: 0,
         })

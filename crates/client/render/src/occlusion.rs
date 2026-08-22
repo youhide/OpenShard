@@ -107,7 +107,7 @@ use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 
 use crate::facing::{Face, Facing, Hole};
-use openshard_map::map::Map;
+use openshard_map::map::WorldMap;
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
 use crate::camera::TileBounds;
@@ -2735,7 +2735,7 @@ impl Builder {
 /// draw ceiling, which is a fact about the static: a mountain top a hundred and
 /// fifty `z` up is not drawn in any frame from any tile, so no frame wants it.
 pub fn collect(
-    map: &Map,
+    map: &WorldMap,
     items: &[GroundItem],
     bounds: TileBounds,
     tiledata: &TileData,
@@ -2752,7 +2752,7 @@ pub fn collect(
 /// over the room that remains on screen.  This deliberately walks instead of
 /// using the immutable block bake, whose entries describe the complete map.
 pub fn collect_with_interior(
-    map: &Map,
+    map: &WorldMap,
     items: &[GroundItem],
     bounds: TileBounds,
     tiledata: &TileData,
@@ -2809,7 +2809,7 @@ pub fn collect_with_interior(
 #[allow(clippy::too_many_arguments)]
 fn place(
     grid: &mut Builder,
-    map: &Map,
+    map: &WorldMap,
     tiledata: &TileData,
     atlas: Option<&dyn crate::atlas::StaticArt>,
     x: u16,
@@ -2869,7 +2869,7 @@ pub fn shape_of(atlas: Option<&dyn crate::atlas::StaticArt>, graphic: Graphic) -
 /// items of a tile that also holds a wall must land behind that wall in both.
 fn put_items(
     grid: &mut Builder,
-    map: &Map,
+    map: &WorldMap,
     items: &[GroundItem],
     tiledata: &TileData,
     atlas: Option<&dyn crate::atlas::StaticArt>,
@@ -2895,7 +2895,7 @@ mod tests {
     const NOT_A_DOOR: Graphic = Graphic(0);
 
     use openshard_map::grid::BlockExtent;
-    use openshard_map::map::{LandCell, Map};
+    use openshard_map::map::{LandCell, WorldMap};
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_protocol::world::Point;
 
@@ -4808,7 +4808,7 @@ mod tests {
     /// daylight into every building they enter.
     #[test]
     fn the_cutaway_takes_a_roof_from_the_eye_and_not_from_the_sky() {
-        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: openshard_movement::LandTile(0),
             z: 0,
         });
@@ -4880,7 +4880,7 @@ mod tests {
     /// picture is worse than the light leaking.
     #[test]
     fn a_hidden_wall_occludes_nothing() {
-        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: openshard_movement::LandTile(0),
             z: 0,
         });

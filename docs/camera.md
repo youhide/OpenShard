@@ -186,7 +186,7 @@ fn advance(&mut self, gaze: Gaze, dt: Duration) -> WorldPixel
 
 What the pipeline is told is the gaze, the cursor's offset from the viewport
 centre, the image's half-extents, the zoom, `dt`, and any cut raised this frame.
-No `Instant`, no `Camera`, no window, no `Map`.
+No `Instant`, no `Camera`, no window, no `WorldMap`.
 
 **Two arguments and not a `Frame` struct, until there are more of them.** The
 plan said `advance(&Frame) -> Pose` and the code that came out of C0 says the

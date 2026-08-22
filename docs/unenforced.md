@@ -62,9 +62,9 @@ with a deadline is fine; a `sleep` that happens to be long enough is not — tha
 is a test that passes on this machine.
 
 **D4. The renderer's fixture is a map, not a mock.** S4 does not introduce a
-`trait Map`. The renderer reads a concrete `Map` and should keep reading one;
-what is missing is a way to *construct* one from cells in memory. A trait would
-make the tests pass against something that is not what ships.
+`trait WorldMap`. The renderer reads a concrete `WorldMap` and should keep
+reading one; what is missing is a way to *construct* one from cells in memory. A
+trait would make the tests pass against something that is not what ships.
 
 **D5. Nothing here touches a file another session is in.** This is a working
 constraint, not a design one, and it is written down because it has already
@@ -303,10 +303,10 @@ follows.
         `Plan` field that would choose it. It belongs with `docs/client.md`'s
         milestones rather than here.
 
-- [x] **S4. A `Map` can be built without a client install.**
+- [x] **S4. A `WorldMap` can be built without a client install.**
       Every assertion about `ground::collect` lives in `client/render/tests/
       frame.rs`, behind `OPENSHARD_CLIENT` and a GPU, because the only way to
-      obtain a `Map` is to load one from a file. So the projection and the
+      obtain a `WorldMap` is to load one from a file. So the projection and the
       visible-set logic — which are arithmetic, and wrong in ways a picture does
       not show — are untested on every machine that has neither, which includes
       CI.
@@ -320,15 +320,15 @@ follows.
       **DoD:** `ground::collect`'s visible set and the projection are asserted
       in a test that runs with neither `OPENSHARD_CLIENT` nor a GPU; the
       existing frame tests keep working against a real install; the constructor
-      is honest about what a hand-built `Map` does not have (`Map::load`'s facet
-      ambiguity, noted in `client.md`, is not made worse); all four gates
-      silent.
+      is honest about what a hand-built `WorldMap` does not have
+      (`WorldMap::load`'s facet ambiguity, noted in `client.md`, is not made
+      worse); all four gates silent.
 
-      **Done.** `Map::from_blocks(blocks_wide, blocks_down, |x, y| …)` asks a
-      closure for every tile by world coordinate and lays the cells out itself.
-      Seven tests in `ground.rs` now run with neither the client's files nor an
-      adapter: the visible set, the projection, the sort, the edge of the map,
-      and the two that were gated behind `OPENSHARD_CLIENT` before.
+      **Done.** `WorldMap::from_blocks(blocks_wide, blocks_down, |x, y| …)` asks
+      a closure for every tile by world coordinate and lays the cells out
+      itself. Seven tests in `ground.rs` now run with neither the client's files
+      nor an adapter: the visible set, the projection, the sort, the edge of the
+      map, and the two that were gated behind `OPENSHARD_CLIENT` before.
 
       Four things worth carrying forward:
 
@@ -356,11 +356,11 @@ follows.
         Folding `cell.z` into the projection — the bug the comment there warns
         about — fails four of the new tests.
 
-      Left behind: `Map::from_blocks` builds ground only, so `statics::collect`
-      is still install-gated. It is the same shape one step on — the constructor
-      would take an `IntoIterator<Item = StaticItem>` and file each into its
-      block — and it was left out because nothing needs it yet and an unused
-      parameter is a worse thing to carry than a missing one.
+      Left behind: `WorldMap::from_blocks` builds ground only, so
+      `statics::collect` is still install-gated. It is the same shape one step
+      on — the constructor would take an `IntoIterator<Item = StaticItem>` and
+      file each into its block — and it was left out because nothing needs it
+      yet and an unused parameter is a worse thing to carry than a missing one.
 
 - [x] **S5. The other half of the restore order.**
       S1 made `restore_characters` before `restore_items` a signature and left
@@ -552,6 +552,6 @@ here that ended by deleting a rule rather than enforcing one. It sits in
 | S1 — restore order in the types | done — `RestoredCharacters` is the signature |
 | S2 — craft tables fail the build | done — `build.rs` reads both halves |
 | S3 — teardown chain, end to end | done — and it found link 4 half-missing |
-| S4 — a `Map` without an install | done — `Map::from_blocks`, and the ground tests left the gate |
+| S4 — a `WorldMap` without an install | done — `WorldMap::from_blocks`, and the ground tests left the gate |
 | S5 — the items→mobiles link | done — `RestoredItems`, the same signature one link on |
 | S6 — the config seeding | done — the rule did not exist; the slot order it hid does |

@@ -11,7 +11,7 @@
 
 use openshard_protocol::world::Facet;
 
-use crate::map::Map;
+use crate::map::WorldMap;
 use crate::patch::{Patch, PatchError};
 
 /// Which published version of a facet a reader holds.
@@ -67,17 +67,17 @@ impl MapRevision {
 ///
 /// It has one owner per process — `Resources` on the client, the facet's
 /// terrain on the server — and is not itself reference counted. Leaf code keeps
-/// borrowing a `&Map`; the *caller* is what passes [`MapSnapshot::map`], so the
+/// borrowing a `&WorldMap`; the *caller* is what passes [`MapSnapshot::map`], so the
 /// ownership seam is visible at every crossing rather than coerced away.
 #[derive(Debug)]
 pub struct MapSnapshot {
     facet: Facet,
     revision: MapRevision,
-    /// Owned outright, not shared: nothing hands a `Map` out any more. The
+    /// Owned outright, not shared: nothing hands a `WorldMap` out any more. The
     /// shard thread was the last caller that wanted one, and it does not read
     /// the map at all now — see [`MapSnapshot::map`] and the client's
     /// `link::connect`.
-    map: Map,
+    map: WorldMap,
 }
 
 impl MapSnapshot {
@@ -93,7 +93,7 @@ impl MapSnapshot {
     /// [`MapSnapshot::restored`] instead, and between them they are the only
     /// two ways to make a snapshot at all.
     #[must_use]
-    pub fn new(facet: Facet, map: Map) -> Self {
+    pub fn new(facet: Facet, map: WorldMap) -> Self {
         Self {
             facet,
             revision: MapRevision::INITIAL,
@@ -116,13 +116,13 @@ impl MapSnapshot {
     /// against that revision stays valid across the round trip — which is the
     /// point of writing one.
     #[must_use]
-    pub fn restored(facet: Facet, revision: MapRevision, map: Map) -> Self {
+    pub fn restored(facet: Facet, revision: MapRevision, map: WorldMap) -> Self {
         Self { facet, revision, map }
     }
 
     /// The facet this snapshot describes.
     ///
-    /// A `Map` names only a *size*, and two facets can share one; the number
+    /// A `WorldMap` names only a *size*, and two facets can share one; the number
     /// that resolved the ambiguity at load time survives here instead of being
     /// thrown away.
     #[must_use]
@@ -136,9 +136,9 @@ impl MapSnapshot {
         self.revision
     }
 
-    /// The immutable decoded map. Leaf readers continue to borrow a `Map`.
+    /// The immutable decoded map. Leaf readers continue to borrow a `WorldMap`.
     #[must_use]
-    pub fn map(&self) -> &Map {
+    pub fn map(&self) -> &WorldMap {
         &self.map
     }
 
@@ -147,7 +147,7 @@ impl MapSnapshot {
     /// **The `&mut` is the atomicity.** `mechanics.md` asks that a new revision
     /// become visible between ticks and never during one, and that no reader
     /// ever see half a change. Both are the borrow checker's here: every reader
-    /// holds a `&Map` borrowed from this snapshot, and a `&mut self` cannot be
+    /// holds a `&WorldMap` borrowed from this snapshot, and a `&mut self` cannot be
     /// taken while one of them is alive. There is no window to publish into,
     /// rather than a rule to remember.
     ///
@@ -185,10 +185,10 @@ impl MapSnapshot {
 ///
 /// Not `Deref`: a snapshot is not a map with extra fields, and letting
 /// `snapshot.land(..)` resolve would hide the very seam this phase adds. This
-/// impl exists because `MapTerrain<M>` is already generic over `M: AsRef<Map>`,
+/// impl exists because `MapTerrain<M>` is already generic over `M: AsRef<WorldMap>`,
 /// and a holder is what that bound was always asking for.
-impl AsRef<Map> for MapSnapshot {
-    fn as_ref(&self) -> &Map {
+impl AsRef<WorldMap> for MapSnapshot {
+    fn as_ref(&self) -> &WorldMap {
         self.map()
     }
 }
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn snapshots_keep_the_facet_that_resolved_an_ambiguous_size() {
         let map = || {
-            Map::from_blocks(BlockExtent { wide: 320, down: 256 }, |_, _| LandCell {
+            WorldMap::from_blocks(BlockExtent { wide: 320, down: 256 }, |_, _| LandCell {
                 tile: LandTile(0),
                 z: 0,
             })

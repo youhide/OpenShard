@@ -30,7 +30,7 @@ use std::path::PathBuf;
 
 use openshard_client_render::interiors::{BlockRooms, Buildings, Cell, StitchedRooms};
 use openshard_map::grid::BlockCoord;
-use openshard_map::map::{BLOCK_SIZE, Map};
+use openshard_map::map::{BLOCK_SIZE, WorldMap};
 use openshard_movement::PLAYER_HEIGHT;
 use openshard_uofiles::tiledata::TileData;
 
@@ -106,7 +106,7 @@ fn main() {
     }
 }
 
-fn measure(map: &Map, tiledata: &TileData, region: &Region) {
+fn measure(map: &WorldMap, tiledata: &TileData, region: &Region) {
     let max_x = region
         .x
         .checked_add(region.width - 1)
@@ -223,7 +223,7 @@ fn measure(map: &Map, tiledata: &TileData, region: &Region) {
     );
 }
 
-fn roof_above(map: &Map, tiledata: &TileData, cell: Cell) -> bool {
+fn roof_above(map: &WorldMap, tiledata: &TileData, cell: Cell) -> bool {
     map.statics_at(cell.tile.0, cell.tile.1).any(|item| {
         tiledata.static_tile(item.tile.0).flags.is_roof() && i32::from(item.z) - cell.floor_z >= PLAYER_HEIGHT
     })

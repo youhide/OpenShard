@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use openshard_map::map::{LandCell, Map};
+use openshard_map::map::{LandCell, WorldMap};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 
@@ -123,7 +123,7 @@ impl GroundQuad {
 ///
 /// Called before building the atlas, which is why it is separate from
 /// [`collect`]: the atlas has to exist before a quad can be given a region.
-pub fn visible_graphics(map: &Map, camera: &Camera) -> BTreeSet<Graphic> {
+pub fn visible_graphics(map: &WorldMap, camera: &Camera) -> BTreeSet<Graphic> {
     let mut seen = BTreeSet::new();
     graphics_in(map, camera.visible_tiles(), &mut seen);
     seen
@@ -141,7 +141,7 @@ pub fn visible_graphics(map: &Map, camera: &Camera) -> BTreeSet<Graphic> {
 ///
 /// Accumulating into `out` rather than returning a set, because the caller has
 /// several bands and one atlas.
-pub fn graphics_in(map: &Map, bounds: TileBounds, out: &mut BTreeSet<Graphic>) {
+pub fn graphics_in(map: &WorldMap, bounds: TileBounds, out: &mut BTreeSet<Graphic>) {
     for_each_cell_in(map, bounds, |_, _, cell| {
         out.insert(Graphic(cell.tile.0));
     });
@@ -159,7 +159,7 @@ pub fn graphics_in(map: &Map, bounds: TileBounds, out: &mut BTreeSet<Graphic>) {
 /// floor with it — see [`crate::cutaway`], where that is the client's odd last
 /// line and not an omission here.
 pub fn collect(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     atlas: &LandAtlas,
     texmaps: &TexmapAtlas,
@@ -170,7 +170,7 @@ pub fn collect(
 
 /// [`collect`] with a resolved building frame layered over the global cutaway.
 pub fn collect_with_interior(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     atlas: &LandAtlas,
     texmaps: &TexmapAtlas,
@@ -196,7 +196,7 @@ pub fn collect_with_interior(
 /// rectangles have the same inclusive, map-clamped semantics as the camera's
 /// own bounds; only their source differs.
 pub fn collect_in(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     bounds: TileBounds,
     atlas: &LandAtlas,
@@ -208,7 +208,7 @@ pub fn collect_in(
 
 /// [`collect_in`] with an optional building-cell gate.
 pub fn collect_in_with_interior(
-    map: &Map,
+    map: &WorldMap,
     camera: &Camera,
     bounds: TileBounds,
     atlas: &LandAtlas,
@@ -294,8 +294,8 @@ pub fn collect_in_with_interior(
 
 /// The land of one tile rectangle, copied out of the map row-major.
 ///
-/// **A copy, and it is what the ground pass costs.** [`Map`] stores its cells in
-/// 8×8 blocks laid out column-major (see `Map::cell_index`), so two tiles that
+/// **A copy, and it is what the ground pass costs.** [`WorldMap`] stores its cells in
+/// 8×8 blocks laid out column-major (see `WorldMap::cell_index`), so two tiles that
 /// are neighbours on screen can be hundreds of kilobytes apart in memory — and
 /// the walk below is by *anti-diagonal*, which steps `(x + 1, y - 1)` and so
 /// leaves its block on almost every tile. Each of those is a cache miss, and a
@@ -307,8 +307,8 @@ pub fn collect_in_with_interior(
 /// ones, into a buffer small enough to stay in L2 for the walk that follows —
 /// 26,732 tiles at the widest zoom is about 160 KB here.
 ///
-/// It holds no policy: [`Self::at`] answers exactly what [`Map::land`] would and
-/// [`Self::corners`] exactly what [`Map::land_corners`] would, off-map edges
+/// It holds no policy: [`Self::at`] answers exactly what [`WorldMap::land`] would and
+/// [`Self::corners`] exactly what [`WorldMap::land_corners`] would, off-map edges
 /// included. Nothing about the picture changes.
 struct LandWindow {
     /// The north-west tile of the rectangle held.
@@ -331,7 +331,7 @@ impl LandWindow {
     /// The gather is row-major on purpose: within one 8×8 block a row of tiles
     /// is contiguous, and eight consecutive rows revisit the same handful of
     /// blocks, so the whole read stays in L1 as it sweeps.
-    fn gather(map: &Map, min_x: i32, min_y: i32, max_x: i32, max_y: i32) -> Self {
+    fn gather(map: &WorldMap, min_x: i32, min_y: i32, max_x: i32, max_y: i32) -> Self {
         let width = (max_x - min_x + 2).max(0) as usize;
         let height = (max_y - min_y + 2).max(0) as usize;
         let mut cells = Vec::with_capacity(width * height);
@@ -388,7 +388,7 @@ impl LandWindow {
 
     /// [`corner_heights`] out of the window instead of the map.
     ///
-    /// The fallback to `own` is [`Map::land_corners`]'s own, for its own
+    /// The fallback to `own` is [`WorldMap::land_corners`]'s own, for its own
     /// reason: a neighbour off the map has no height to average, so the tile
     /// stands level along that edge rather than falling to zero.
     fn corners(&self, x: i32, y: i32, own: i8) -> [f32; 4] {
@@ -399,7 +399,7 @@ impl LandWindow {
 
 /// The heights of a tile's four corners, in [`GroundQuad::corners`] order.
 ///
-/// [`Map::land_corners`] as floats, and the walk itself lives there because the
+/// [`WorldMap::land_corners`] as floats, and the walk itself lives there because the
 /// *server* reads the same four numbers: what a tile's corners are is a fact
 /// about the map, and the height a body stands at on it — the average — has to
 /// be one formula on both sides of the wire or every step up a slope
@@ -413,7 +413,7 @@ impl LandWindow {
 /// what say how high the tile *is*, and [`crate::cutaway`] has to ask that of
 /// the tile the player is standing on before it can decide what to stop
 /// drawing.
-pub fn corner_heights(map: &Map, x: u16, y: u16, own: i8) -> [f32; 4] {
+pub fn corner_heights(map: &WorldMap, x: u16, y: u16, own: i8) -> [f32; 4] {
     map.land_corners(x, y).unwrap_or([own; 4]).map(f32::from)
 }
 
@@ -423,7 +423,7 @@ pub fn corner_heights(map: &Map, x: u16, y: u16, own: i8) -> [f32; 4] {
 /// map's fact, not the camera's, and a camera that knew the map's size would
 /// have to be rebuilt whenever the facet changed.
 fn for_each_cell_in(
-    map: &Map,
+    map: &WorldMap,
     bounds: TileBounds,
     mut each: impl FnMut(u16, u16, openshard_map::map::LandCell),
 ) {
@@ -432,7 +432,7 @@ fn for_each_cell_in(
     };
 
     // The clamp already put both ranges inside the facet, so one stepped row
-    // hands back exactly one cell per column of `xs` — see [`Map::land_in_row`],
+    // hands back exactly one cell per column of `xs` — see [`WorldMap::land_in_row`],
     // which is where the walk order lives now.
     let (from_x, to_x) = (*xs.start(), *xs.end());
     for y in ys {
@@ -463,8 +463,8 @@ mod tests {
     /// Eight blocks each way, so 64x64 tiles. The heights are a fixed pattern
     /// rather than random: this whole file is arithmetic, and a fixture that
     /// changed between runs would make every count below a different number.
-    fn hillside() -> Map {
-        Map::from_blocks(BlockExtent { wide: 8, down: 8 }, |x, y| LandCell {
+    fn hillside() -> WorldMap {
+        WorldMap::from_blocks(BlockExtent { wide: 8, down: 8 }, |x, y| LandCell {
             tile: openshard_movement::LandTile(if (x + y).is_multiple_of(17) {
                 MISSING.0
             } else {
@@ -601,11 +601,11 @@ mod tests {
         let atlas = grass_atlas();
 
         let hilly = hillside();
-        let flat = Map::from_blocks(BlockExtent { wide: 8, down: 8 }, |x, y| LandCell {
+        let flat = WorldMap::from_blocks(BlockExtent { wide: 8, down: 8 }, |x, y| LandCell {
             tile: hilly.land(x, y).unwrap().tile,
             z: 0,
         });
-        let corners_by_position = |map: &Map| -> std::collections::BTreeMap<(i32, i32), [i32; 4]> {
+        let corners_by_position = |map: &WorldMap| -> std::collections::BTreeMap<(i32, i32), [i32; 4]> {
             collect(map, &camera, &atlas, &texmaps, &Cutaway::OPEN)
                 .iter()
                 .map(|quad| ((quad.x as i32, quad.y as i32), quad.corners.map(|z| z as i32)))
@@ -791,7 +791,7 @@ mod tests {
     fn neighbours_agree_on_the_corner_they_share() {
         // A patch where heights actually differ: a level one would satisfy any
         // permutation of the four. This ran against Britain's hillside in a real
-        // install until `Map::from_blocks` existed, and the fixture is rough for
+        // install until `WorldMap::from_blocks` existed, and the fixture is rough for
         // the same reason that patch was chosen.
         let map = hillside();
 

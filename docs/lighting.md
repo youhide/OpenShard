@@ -633,7 +633,7 @@ when the camera moves).
 **Scenes are built, not loaded.** `crates/client/render/src/scene.rs` holds
 a library of hand-built rooms (a closed room, a doorway, a window, a sconce
 on a wall, a cellar under a street, a staircase, and more) — each a
-synthetic `Map`, `TileData` and item list this workspace constructs from
+synthetic `WorldMap`, `TileData` and item list this workspace constructs from
 nothing, with no client files. This is not a concession to the
 no-client-files rule: it is more precise than a real house, since a test
 can say exactly *which* cell should have stopped a given ray, and a failing

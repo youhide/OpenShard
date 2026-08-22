@@ -113,7 +113,7 @@ struct Census {
 /// it as** — the round trip, over `items::collect`'s output.
 ///
 /// `items::collect` is the route a built scene's statics take: a scene has no map
-/// statics, since `Map::from_blocks` builds none, and it is the same `quad_of`
+/// statics, since `WorldMap::from_blocks` builds none, and it is the same `quad_of`
 /// and the same join `statics::collect` uses for the map's own.
 fn world_pass_census(scene: &scene::Scene, atlas: &openshard_client_render::atlas::StaticAtlas) -> Census {
     let lighting = scene.lighting(STILL);

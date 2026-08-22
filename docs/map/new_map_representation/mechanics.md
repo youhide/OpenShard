@@ -32,9 +32,9 @@ The map is cut into fixed blocks because nobody reloads a facet to move a rock:
 a chunk is the unit of loading, caching, invalidation and transfer.
 
 We already store the world close to this shape.
-[`Map`](../../../crates/common/map/src/map.rs#L75) holds land block-ordered and
-statics per block, each block sorted by the tile its items stand on. A chunk is
-that, with an identity and a revision on it.
+[`WorldMap`](../../../crates/common/map/src/map.rs#L75) holds land block-ordered
+and statics per block, each block sorted by the tile its items stand on. A chunk
+is that, with an identity and a revision on it.
 
 Two things a chunk had to settle, **both now settled and both built** — see
 [`chunk.rs`](../../../crates/common/map/src/chunk.rs), whose module header is the
@@ -101,7 +101,7 @@ Two constraints that are not stylistic, both now settled:
   operator's hillside quietly eat another's. **Closed, and it is the whole
   conflict model**: `MapSnapshot::publish` takes `&mut self` and refuses a
   parent that is not the revision it is holding. The `&mut` is also what makes
-  a publish atomic — a reader borrows a `&Map` out of the snapshot, so the
+  a publish atomic — a reader borrows a `&WorldMap` out of the snapshot, so the
   borrow checker is what stops one from ever seeing half a change, rather than
   a rule about ticks that somebody has to remember.
 

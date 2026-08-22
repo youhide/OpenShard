@@ -8,7 +8,7 @@ directions A–D can be argued against a measurement rather than an impression.
 
 ## The one owner, and its shape
 
-[`Map`](../../../crates/common/map/src/map.rs#L75) is flat, immutable, and
+[`WorldMap`](../../../crates/common/map/src/map.rs#L75) is flat, immutable, and
 whole in memory:
 
 | Field | Layout | Felucca |
@@ -39,8 +39,8 @@ Ranked by what a person would notice first.
    [`build_ready_ancestors`](../../../crates/client/render/src/radar.rs#L1064)
    builds that level and nothing reads it. The pyramid is *reduce-only*: a
    parent exists only once all four children do, so it cannot answer "show the
-   whole facet cheaply" at all. A coarse producer that samples `Map` directly
-   is the missing piece, not a different LOD request.
+   whole facet cheaply" at all. A coarse producer that samples `WorldMap`
+   directly is the missing piece, not a different LOD request.
 2. **An O(facet) scan every frame.** With the world map open,
    [`presentation.rs:2017`](../../../crates/client/app/src/presentation.rs#L2017)
    allocates and sorts a 7,168-element `Vec` of chunk coordinates and probes the
@@ -49,7 +49,7 @@ Ranked by what a person would notice first.
    (`"eviction is not implemented yet"`). One pass over the world map retains
    about 75 MiB of chunks for the rest of the run.
 4. **The revision dimension has no production writer.** `set_revision` and
-   `invalidate_tile` are called only from tests, because the client's `Map`
+   `invalidate_tile` are called only from tests, because the client's `WorldMap`
    cannot change at runtime. It is the right preparation for direction D and it
    must not be mistaken for working invalidation.
 5. **The building flood's artifact is 112 MiB of raw `u32`** — one label per
@@ -67,13 +67,13 @@ Ranked by what a person would notice first.
    `openshard-playground` that is one process holding ~300 MiB of facet twice.
    The handoff already names the correctness half of this; the memory half is
    the same fix.
-8. **`Map` does not know its own facet.** `describe_size` names a *size*;
+8. **`WorldMap` does not know its own facet.** `describe_size` names a *size*;
    `Facet` travels separately in every bake stamp and radar key, and the client
    pins [`FACET: u8 = 0`](../../../crates/client/app/src/lib.rs#L245) with a
-   single `Arc<Map>`. The Malas/Ter Mur ambiguity is closed at load time and
-   then the answer is thrown away. Direction A's snapshot should be keyed per
-   facet from the first commit rather than being one handle that later grows a
-   facet dimension.
+   single `Arc<WorldMap>`. The Malas/Ter Mur ambiguity is closed at load time
+   and then the answer is thrown away. Direction A's snapshot should be keyed
+   per facet from the first commit rather than being one handle that later grows
+   a facet dimension.
 9. **The navigation bake spikes 235 MiB transiently** — `vec![None; cells]` of
    `Option<Point>`, 8 bytes a tile. A walkable bitset plus an `i8` height array
    is 33 MiB for the same information.

@@ -113,7 +113,7 @@ pub(crate) struct App {
     /// The camera, who is allowed to move it, and what a drag has not yet spent.
     ///
     /// All of it arithmetic, and all of it in `client/render` where it can be
-    /// reached by a test: this crate owns a window, a GPU and a `Map`, and none
+    /// reached by a test: this crate owns a window, a GPU and a `WorldMap`, and none
     /// of the three has anything to say about a wheel notch.
     pub(crate) control: Control,
     /// Whether the device's refusal to hold a zoom's image has been said out

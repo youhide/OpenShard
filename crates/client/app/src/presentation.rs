@@ -44,7 +44,7 @@ use openshard_client_render::sprite::SpriteQuad;
 use openshard_client_render::text::{self, Label};
 use openshard_client_render::{ground, light, statics};
 use openshard_map::grid::BlockCoord;
-use openshard_map::map::Map;
+use openshard_map::map::WorldMap;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 use openshard_protocol::world::Point;
@@ -229,7 +229,7 @@ fn audit_texture_bytes(
 fn audit_captured_composite_ids(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    map: &Map,
+    map: &WorldMap,
     captured: &CompositeTexture,
     source_color: &wgpu::Texture,
     source_ids: &wgpu::Texture,
@@ -663,7 +663,7 @@ fn audit_scene_instance_buffers(window: &crate::window::Screen) {
 /// ready (therefore its LOD0 rows were omitted), but its restored deferred
 /// rectangle wrote `Kind::Nothing` at a tile it owns.  The check is opt-in
 /// because mapping a full screen attachment intentionally fences the device.
-fn audit_visible_ground_centres(window: &crate::window::Screen, map: &Map, camera: Camera) {
+fn audit_visible_ground_centres(window: &crate::window::Screen, map: &WorldMap, camera: Camera) {
     let ids = window.gbuffer.ids();
     let row = ids.width() * 4;
     let stride = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;

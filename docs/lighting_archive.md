@@ -530,7 +530,7 @@ needed no new variant: a staircase is faces at 90°, not a slope, and
 `Flat`/`FaceNorth`-family already name exactly that.
 
 The reproduction never exercised any of it. `isolated_scene`'s synthetic
-map carries no statics of its own (`Map::from_blocks` never does), so it
+map carries no statics of its own (`WorldMap::from_blocks` never does), so it
 re-plays every real map static it pulls as a `GroundItem`, through
 `items::collect` — and `items::collect` threw `Placed::prism` away and
 never called `push_mesh` or ran a mesh pass at all. Every picture this
@@ -1355,7 +1355,7 @@ wall or a roof that is not one. What decision 36 left as a fixed constant
 is the box's *normal*, taken from "which axis-aligned face did the ray
 land on" rather than computed from the box's own geometry — and that is
 the one thing a box does not have to be degenerate about. A **land tile
-already carries four corner heights** (`Map::land_corners`,
+already carries four corner heights** (`WorldMap::land_corners`,
 `crates/common/uofiles/src/map.rs:670`) and `light::Spot::flat`'s ground
 case flattens them to one (`average_corner_z`) for *position* and has
 never asked them for a *normal* at all — the slope a mountain's art draws
@@ -2204,7 +2204,7 @@ which a climb profile's always-touches-the-ground assumption cannot.
          walk itself passes a ray through the gap
          (`a_ray_through_the_gap_between_two_walls_on_one_tile_passes` —
          built by hand rather than out of a scene, because two statics on
-         one tile is the thing a `Map` makes fiddly and a `Builder` makes
+         one tile is the thing a `WorldMap` makes fiddly and a `Builder` makes
          one line). The union was put back for a run to check they were
          red, and they were.
 
@@ -3119,7 +3119,7 @@ which a climb profile's always-touches-the-ground assumption cannot.
   geometry itself is confirmed by direct read rather than by eye.
 - **A reusable tool for exactly this, so sampling code does not have to be
   disposable.** `examples/isolated_scene.rs` draws a **synthetic** map
-  (`Map::from_blocks`, which never carries statics) and puts back only
+  (`WorldMap::from_blocks`, which never carries statics) and puts back only
   what is asked for, all through environment variables: the real map's
   statics within a stated radius of a stated point (optionally filtered to
   a list of tile IDs), the real ground under them or none at all, and any
@@ -3141,7 +3141,7 @@ which a climb profile's always-touches-the-ground assumption cannot.
 
 - **`bake::collect_ring`'s widened range still bakes and caches an empty
   block for every ring tile past the facet's own edge.** `Baked::of`
-  answers correctly — `Map::statics_in_block` is empty out of range — but
+  answers correctly — `WorldMap::statics_in_block` is empty out of range — but
   a frame in a facet's corner, once a real reach exists, pays a `Bake`
   cache entry for blocks that can never hold anything. Not a bug at
   `radius: 0`, where the widened range is the core range; worth a clamp
@@ -3349,12 +3349,12 @@ about.
 
 - **A change that has to move the picture moved no test.** Every test in
   the crate stayed green through step 21.2, which is not reassurance — it
-  is the coverage report. A built scene is a `Map` with a handful of
+  is the coverage report. A built scene is a `WorldMap` with a handful of
   items on it and almost none of them puts *two* statics on one tile, so
   the whole suite had no opinion about the one thing this step is. The
   three tests that pin it were written for it, and the one that goes
   through the walk builds its grid with a `Builder` rather than with a
-  scene, because a `Map` makes "two statics on one tile" fiddly to say.
+  scene, because a `WorldMap` makes "two statics on one tile" fiddly to say.
   The same shape as "a scene has no art, so almost every scene tests the
   whole-tile occluder" (see "The shadow ray walk" backlog): the scenes are
   thin exactly where the format is.
@@ -3451,7 +3451,7 @@ about.
   into a flat grid (this step's `Solid::footprint`, in different clothes)
   is still a separate step afterwards either way. Block-based baking also
   happens to align with the file's own I/O chunking
-  (`Map::statics_in_block` is a contiguous slice per block for free),
+  (`WorldMap::statics_in_block` is a contiguous slice per block for free),
   which a tree built from the same statics would not give up for
   nothing, but would not obviously need either.
 
@@ -5553,7 +5553,7 @@ asserts the two agree per pixel. The parity test is the reason the
 second implementation is allowed to exist at all.
 
 **Decision 10. The scenes are built, not loaded.** A room with a torch
-in it is a `Map` of flat ground, a `TileData` where two graphics have
+in it is a `WorldMap` of flat ground, a `TileData` where two graphics have
 flags, and a list of items — every one of which this workspace can
 construct from nothing. That is not a concession to the no-client-files
 rule, it is better than a real house: the wall is at a stated tile with
@@ -5573,7 +5573,7 @@ a future benchmark are all outside the crate.
 - [x] **Step 8. `render/src/scene.rs`.** The rooms of decision 10 — a
       closed room, a doorway, a window, a sconce on a wall, a cellar
       under a street, and the diagonal gap the backlog names — each a
-      `Map`, a `TileData`, an item list and a camera, plus an ASCII
+      `WorldMap`, a `TileData`, an item list and a camera, plus an ASCII
       diagram of a scene's lighting for the message a failing test
       prints.
 - [x] **Step 9. The debug views.** `render/src/debug.rs`'s `View`, one

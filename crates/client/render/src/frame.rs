@@ -30,7 +30,7 @@
 //! folding them in would make the struct a bag of everything a caller might want
 //! rather than the inputs of one assembly.
 
-use openshard_map::map::Map;
+use openshard_map::map::WorldMap;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 use openshard_uofiles::tiledata::TileData;
@@ -134,7 +134,7 @@ impl Draw {
 #[derive(Debug)]
 pub struct Inputs<'a> {
     /// The world. Land and the statics built into it.
-    pub map: &'a Map,
+    pub map: &'a WorldMap,
     /// What the server has put in it: dropped items, decorations, and — for a
     /// tool that builds a place rather than loading one — the map's own statics
     /// translated onto a synthetic anchor.

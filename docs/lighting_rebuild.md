@@ -1513,15 +1513,16 @@ none of them is "somebody forgot a test".
    `statics::collect` call sites to build on, and `tests/cost.rs` a third.
 
    **The one item of the four still open, and its entry point is narrower than
-   it looks.** Both `frame.rs` call sites hand `collect` a real `Map` off
+   it looks.** Both `frame.rs` call sites hand `collect` a real `WorldMap` off
    `client_dir()` and an `Occlusion::EMPTY`, so neither is a fixture — they skip
    where the client files are absent, and they ask nothing about volumes. A
    *synthetic* map is available and was not when item 3 chose to restate
-   `push_volumes`'s eight lines instead: `openshard_map::map::Map::from_blocks` builds
-   the land and `Map::place_static` puts a static on it. What it still needs, and
-   what to cost before planning the rest: a `TileData` the fixture states itself,
-   and — the real constraint — **a picture a `Prism` fits**, since the fit reads
-   the art's silhouette and a rectangle is not a staircase. `tests/prism.rs` is
+   `push_volumes`'s eight lines instead:
+   `openshard_map::map::WorldMap::from_blocks` builds the land and
+   `WorldMap::place_static` puts a static on it. What it still needs, and what
+   to cost before planning the rest: a `TileData` the fixture states itself, and
+   — the real constraint — **a picture a `Prism` fits**, since the fit reads the
+   art's silhouette and a rectangle is not a staircase. `tests/prism.rs` is
    where such a picture would have to come from.
 
 2. **The one gate that states the invariant filters it out.** ✅ *Landed
@@ -1579,7 +1580,7 @@ none of them is "somebody forgot a test".
    generalises: it is the statement that a fragment is a point *of* something.
 
    Built rather than driven through `statics::collect`: that function needs a
-   real `Map`/`TileData`/`Cutaway` pipeline, and `push_volumes` — the thing
+   real `WorldMap`/`TileData`/`Cutaway` pipeline, and `push_volumes` — the thing
    under test — is `pub(crate)`, unreachable from a `tests/` binary at all. The
    fixture restates its eight lines instead, off the same two `pub` primitives
    `push_volumes` itself is built from — `occlusion::boxes_of` for the shape,

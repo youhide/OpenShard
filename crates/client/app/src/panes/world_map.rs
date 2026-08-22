@@ -13,6 +13,10 @@ pub const EXTENT: (i32, i32) = (640, 480);
 const BACKGROUND: Graphic = Graphic(0x0A28);
 const CLOSE: (Graphic, Graphic) = (Graphic(0x00F3), Graphic(0x00F2));
 const FALLBACK_INSET: (i32, i32, i32, i32) = (24, 38, 24, 24);
+/// Fit the entire facet at the widest view, and allow a close inspection of a
+/// small part of it without ever zooming farther out into empty space.
+const MIN_ZOOM_STEPS: i8 = 0;
+const MAX_ZOOM_STEPS: i8 = 20;
 
 pub fn art_of() -> impl Iterator<Item = GumpArt> {
     (0..9)
@@ -65,7 +69,11 @@ impl Window {
 pub struct WorldMapPane {
     centre: Option<RadarTile>,
     zoom_steps: i8,
+    /// The pointer and map centre at the start of a canvas drag.  Both stay
+    /// fixed for the gesture so cursor events between frames use one coherent
+    /// coordinate system.
     drag_from: Option<GumpPixel>,
+    drag_centre: Option<RadarTile>,
     close_held: bool,
 }
 
@@ -156,7 +164,7 @@ impl Pane for WorldMapPane {
             pictures,
             lines: vec![Line {
                 at: GumpPixel::new(left + 8, 12),
-                text: "World Map".to_owned(),
+                text: "World WorldMap".to_owned(),
                 font: Font(2),
                 clip: None,
             }],
@@ -182,7 +190,8 @@ impl Pane for WorldMapPane {
                     ctx.frame.cursor.x - window.content_at.x - window.content_extent.0 / 2,
                     ctx.frame.cursor.y - window.content_at.y - window.content_extent.1 / 2,
                 );
-                self.zoom_steps = (self.zoom_steps - notches.signum() as i8).clamp(-8, 12);
+                self.zoom_steps =
+                    (self.zoom_steps - notches.signum() as i8).clamp(MIN_ZOOM_STEPS, MAX_ZOOM_STEPS);
                 let new = tpp(ctx.frame.view.map, window.content_extent, self.zoom_steps);
                 let centre = RadarTile::new(
                     (window.centre.x() as f32 + offset.0 as f32 * (old - new))
@@ -210,20 +219,25 @@ impl Pane for WorldMapPane {
                 }
                 if window.content_contains(ctx.frame.cursor) {
                     self.drag_from = Some(ctx.frame.cursor);
+                    self.drag_centre = Some(self.centre.unwrap_or(window.centre));
                     return Response::changed().with(Effect::Raise);
                 }
                 Response::ignored()
             }
             Input::Move => {
-                let (Some(previous), Some(window)) = (self.drag_from, drawn) else {
+                let (Some(from), Some(centre), Some(window)) = (self.drag_from, self.drag_centre, drawn)
+                else {
                     return Response::ignored();
                 };
-                self.drag_from = Some(ctx.frame.cursor);
-                let dx = (ctx.frame.cursor.x - previous.x) as f32 * window.tiles_per_pixel;
-                let dy = (ctx.frame.cursor.y - previous.y) as f32 * window.tiles_per_pixel;
+                let dx = (ctx.frame.cursor.x - from.x) as f32 * window.tiles_per_pixel;
+                let dy = (ctx.frame.cursor.y - from.y) as f32 * window.tiles_per_pixel;
+                // `drawn` describes the last rendered frame. Several cursor
+                // moves can arrive before there is another frame, so derive
+                // every result from the pointer and centre at the start of the
+                // drag, rather than a stale frame or rounded intermediate.
                 let moved = RadarTile::new(
-                    (window.centre.x() as f32 - dx).round().max(0.0) as u32,
-                    (window.centre.y() as f32 - dy).round().max(0.0) as u32,
+                    (centre.x() as f32 - dx).round().max(0.0) as u32,
+                    (centre.y() as f32 - dy).round().max(0.0) as u32,
                 );
                 self.centre = Some(clamp_centre(
                     moved,
@@ -241,7 +255,10 @@ impl Pane for WorldMapPane {
                     Response::changed()
                 }
             }
-            Input::Release(Button::Left) if self.drag_from.take().is_some() => Response::consumed(),
+            Input::Release(Button::Left) if self.drag_from.take().is_some() => {
+                self.drag_centre = None;
+                Response::consumed()
+            }
             _ => Response::ignored(),
         }
     }
@@ -279,7 +296,7 @@ mod tests {
         };
         assert_eq!(window.centre, RadarTile::new(3072, 2048));
         assert!(!window.pictures.is_empty());
-        assert_eq!(window.lines[0].text, "World Map");
+        assert_eq!(window.lines[0].text, "World WorldMap");
     }
 
     /// The window this pane is: a press inside the canvas takes the drag and
@@ -340,7 +357,7 @@ mod tests {
     fn the_canvas_cannot_be_dragged_out_of_its_own_frame_at_any_zoom() {
         let install = fixture::Install::shipping([]);
         let view = fixture::world(Serial::new(1).unwrap());
-        for steps in -8..=12 {
+        for steps in MIN_ZOOM_STEPS..=MAX_ZOOM_STEPS {
             for pull in [-4000, 4000] {
                 let mut pane = WorldMapPane {
                     zoom_steps: steps,
@@ -392,6 +409,76 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn successive_moves_accumulate_from_the_current_map_centre() {
+        let install = fixture::Install::shipping([]);
+        let view = fixture::world(Serial::new(1).unwrap());
+        let mut pane = WorldMapPane {
+            zoom_steps: 6,
+            ..WorldMapPane::default()
+        };
+        let drawn = pane
+            .layout(&install.ctx(&view, None, GumpPixel::new(0, 0), true).frame)
+            .expect("the map lays out");
+        let Drawn::WorldMap(window) = &drawn else {
+            panic!("the map lays out");
+        };
+        let from = GumpPixel::new(
+            window.content_at.x + window.content_extent.0 / 2,
+            window.content_at.y + window.content_extent.1 / 2,
+        );
+        let _ = pane.handle(
+            Input::Press(Button::Left),
+            &install.ctx(&view, Some(&drawn), from, true),
+        );
+        let _ = pane.handle(
+            Input::Move,
+            &install.ctx(&view, Some(&drawn), from.offset(GumpPixel::new(-20, 0)), true),
+        );
+        let _ = pane.handle(
+            Input::Move,
+            &install.ctx(&view, Some(&drawn), from.offset(GumpPixel::new(-40, 0)), true),
+        );
+
+        assert_eq!(
+            pane.centre,
+            Some(RadarTile::new(
+                (window.centre.x() as f32 + 40.0 * window.tiles_per_pixel).round() as u32,
+                window.centre.y(),
+            )),
+        );
+    }
+
+    #[test]
+    fn zoom_stays_between_full_facet_and_close_inspection() {
+        let install = fixture::Install::shipping([]);
+        let view = fixture::world(Serial::new(1).unwrap());
+        let mut pane = WorldMapPane::default();
+        let drawn = pane
+            .layout(&install.ctx(&view, None, GumpPixel::new(0, 0), true).frame)
+            .expect("the map lays out");
+        let Drawn::WorldMap(window) = &drawn else {
+            panic!("the map lays out");
+        };
+        let cursor = GumpPixel::new(
+            window.content_at.x + window.content_extent.0 / 2,
+            window.content_at.y + window.content_extent.1 / 2,
+        );
+
+        for _ in 0..32 {
+            let _ = pane.handle(Input::Wheel(1.0), &install.ctx(&view, Some(&drawn), cursor, true));
+        }
+        assert_eq!(pane.zoom_steps, MIN_ZOOM_STEPS);
+
+        for _ in 0..32 {
+            let _ = pane.handle(
+                Input::Wheel(-1.0),
+                &install.ctx(&view, Some(&drawn), cursor, true),
+            );
+        }
+        assert_eq!(pane.zoom_steps, MAX_ZOOM_STEPS);
     }
 
     #[test]
