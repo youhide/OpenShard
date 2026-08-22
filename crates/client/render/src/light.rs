@@ -3463,6 +3463,7 @@ fn flicker(time: f32, phase: f32, depth: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use openshard_protocol::wire::Hue;
+    use openshard_uofiles::grid::BlockExtent;
     use openshard_uofiles::map::LandCell;
     use openshard_uofiles::tiledata::{StaticTile, TileFlags};
 
@@ -3705,7 +3706,7 @@ mod tests {
     /// come from the item list, which is the half a test can build without a
     /// client install.
     fn bare() -> Map {
-        Map::from_blocks(1, 1, |_, _| LandCell {
+        Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: openshard_movement::LandTile(0),
             z: 0,
         })

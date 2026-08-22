@@ -1209,6 +1209,7 @@ mod tests {
 
     use openshard_protocol::wire::Hue;
     use openshard_uofiles::color::Color16;
+    use openshard_uofiles::grid::BlockExtent;
     use openshard_uofiles::image::Image;
     use openshard_uofiles::map::{LandCell, LandTile, StaticItem};
 
@@ -1217,7 +1218,7 @@ mod tests {
     /// A map big enough for a camera at (100, 100), with flat ground and nothing
     /// standing on it. Statics are placed by the tests that want them.
     fn field() -> Map {
-        Map::from_blocks(16, 16, |_, _| LandCell {
+        Map::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
             tile: LandTile(3),
             z: 0,
         })

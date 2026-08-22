@@ -364,9 +364,10 @@ Written down as it was found, and none of it blocks phase 2.
   derives it and `the_two_orders_compose_into_a_strip` holds it against the
   plain spelling; direction B should know it before choosing a chunk layout,
   because it is the property that would be lost.
-- **`Map::from_blocks` still takes two bare `u32`s.** A facet's extent in blocks
-  has no type, where a block's *position* now does. Small, and it is the kind of
-  thing B will want anyway.
+- **`Map::from_blocks` takes a typed extent.** [`BlockExtent`](../../../crates/common/uofiles/src/grid.rs)
+  names a facet's `wide` and `down` dimensions in blocks, alongside
+  [`BlockCoord`](../../../crates/common/uofiles/src/grid.rs)'s position. Its
+  public named fields make a swapped width and height visible at every caller.
 
 ## Out of scope, named
 

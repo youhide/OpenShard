@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 
-use crate::grid::{BlockCoord, BlockIndex, LandGrid};
+use crate::grid::{BlockCoord, BlockExtent, BlockIndex, LandGrid};
 
 /// Tiles along each side of a map block.
 pub const BLOCK_SIZE: u32 = 8;
@@ -319,8 +319,8 @@ impl Map {
     /// Every tile past that is one [`Map::land`] could never be asked about, so
     /// such a map is memory that exists to be unreachable; the largest facet a
     /// client ships is 7,168 tiles across.
-    pub fn from_blocks(blocks_wide: u32, blocks_down: u32, cell: impl FnMut(u16, u16) -> LandCell) -> Self {
-        let land = LandGrid::from_blocks(blocks_wide, blocks_down, cell);
+    pub fn from_blocks(extent: BlockExtent, cell: impl FnMut(u16, u16) -> LandCell) -> Self {
+        let land = LandGrid::from_blocks(extent.wide, extent.down, cell);
         let statics = vec![Vec::new(); land.block_count() as usize];
         Self { land, statics }
     }
@@ -911,7 +911,7 @@ mod tests {
     /// the statics above it.
     #[test]
     fn off_the_map_is_none_not_a_panic() {
-        let map = Map::from_blocks(2, 2, |x, y| LandCell {
+        let map = Map::from_blocks(BlockExtent { wide: 2, down: 2 }, |x, y| LandCell {
             tile: LandTile(x + y),
             z: 0,
         });
@@ -995,7 +995,7 @@ mod tests {
     fn a_stepped_row_is_the_row_a_lookup_builds() {
         // Three blocks across, two down, and every tile carries its own
         // position — so a cell that came from the wrong tile says which.
-        let map = Map::from_blocks(3, 2, |x, y| LandCell {
+        let map = Map::from_blocks(BlockExtent { wide: 3, down: 2 }, |x, y| LandCell {
             tile: LandTile(x),
             z: y as i8,
         });
@@ -1020,7 +1020,7 @@ mod tests {
     #[test]
     fn a_tiles_corners_are_its_neighbours_own_heights() {
         // A ramp running south-east: z is x + y.
-        let map = Map::from_blocks(1, 1, |x, y| LandCell {
+        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, y| LandCell {
             tile: LandTile(3),
             z: (x + y) as i8,
         });
@@ -1058,7 +1058,7 @@ mod tests {
     /// caller that has coordinates and a caller that has heights cannot drift.
     #[test]
     fn the_maps_average_is_the_average_of_its_corners() {
-        let map = Map::from_blocks(1, 1, |x, y| LandCell {
+        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, y| LandCell {
             tile: LandTile(3),
             z: ((x * 3) as i8).wrapping_sub((y * 2) as i8),
         });
@@ -1081,7 +1081,7 @@ mod tests {
     /// what is left here is the statics half a `Map` adds.
     #[test]
     fn a_map_built_in_memory_is_bare_ground_of_the_size_asked_for() {
-        let map = Map::from_blocks(3, 2, |_, _| LandCell::default());
+        let map = Map::from_blocks(BlockExtent { wide: 3, down: 2 }, |_, _| LandCell::default());
         assert_eq!((map.width(), map.height()), (24, 16));
         assert_eq!(map.facet_name(), "unknown facet");
         assert_eq!(map.static_count(), 0);
@@ -1104,7 +1104,7 @@ mod tests {
     /// order, an unsorted list would pass.
     #[test]
     fn a_blocks_statics_are_sorted_by_tile_and_stable_within_one() {
-        let mut map = Map::from_blocks(1, 1, |_, _| LandCell::default());
+        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell::default());
         // Three tiles of one block, none of them in order, and two items on the
         // middle one. The `tile` is what identifies each below.
         for (tile, x, y) in [(10, 3, 5), (20, 1, 2), (30, 3, 5), (40, 0, 7), (50, 3, 4)] {
@@ -1142,7 +1142,7 @@ mod tests {
     fn a_row_is_the_tile_walk_written_faster() {
         // Three blocks across, two down, and statics scattered over it in an
         // order that is neither the sort's nor the walk's.
-        let mut map = Map::from_blocks(3, 2, |_, _| LandCell::default());
+        let mut map = Map::from_blocks(BlockExtent { wide: 3, down: 2 }, |_, _| LandCell::default());
         let mut tile = 0;
         for y in [5u16, 0, 12, 5, 5, 7] {
             for x in [23u16, 0, 8, 15, 7, 16, 9] {
@@ -1186,7 +1186,7 @@ mod tests {
     /// tile is on top without failing anything else here.
     #[test]
     fn a_block_is_its_own_rows_end_to_end() {
-        let mut map = Map::from_blocks(3, 2, |_, _| LandCell::default());
+        let mut map = Map::from_blocks(BlockExtent { wide: 3, down: 2 }, |_, _| LandCell::default());
         let mut tile = 0;
         for y in [5u16, 0, 12, 5, 7] {
             for x in [23u16, 0, 8, 15, 7, 9] {

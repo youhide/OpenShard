@@ -2896,6 +2896,7 @@ mod tests {
 
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_protocol::world::Point;
+    use openshard_uofiles::grid::BlockExtent;
     use openshard_uofiles::map::{LandCell, Map};
 
     use super::*;
@@ -4807,7 +4808,7 @@ mod tests {
     /// daylight into every building they enter.
     #[test]
     fn the_cutaway_takes_a_roof_from_the_eye_and_not_from_the_sky() {
-        let map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: openshard_movement::LandTile(0),
             z: 0,
         });
@@ -4879,7 +4880,7 @@ mod tests {
     /// picture is worse than the light leaking.
     #[test]
     fn a_hidden_wall_occludes_nothing() {
-        let map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: openshard_movement::LandTile(0),
             z: 0,
         });

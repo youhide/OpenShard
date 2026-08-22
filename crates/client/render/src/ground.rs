@@ -445,6 +445,7 @@ fn for_each_cell_in(
 #[cfg(test)]
 mod tests {
     use openshard_uofiles::color::Color16;
+    use openshard_uofiles::grid::BlockExtent;
     use openshard_uofiles::image::Image;
     use openshard_uofiles::map::LandCell;
 
@@ -463,7 +464,7 @@ mod tests {
     /// rather than random: this whole file is arithmetic, and a fixture that
     /// changed between runs would make every count below a different number.
     fn hillside() -> Map {
-        Map::from_blocks(8, 8, |x, y| LandCell {
+        Map::from_blocks(BlockExtent { wide: 8, down: 8 }, |x, y| LandCell {
             tile: openshard_movement::LandTile(if (x + y).is_multiple_of(17) {
                 MISSING.0
             } else {
@@ -600,7 +601,7 @@ mod tests {
         let atlas = grass_atlas();
 
         let hilly = hillside();
-        let flat = Map::from_blocks(8, 8, |x, y| LandCell {
+        let flat = Map::from_blocks(BlockExtent { wide: 8, down: 8 }, |x, y| LandCell {
             tile: hilly.land(x, y).unwrap().tile,
             z: 0,
         });

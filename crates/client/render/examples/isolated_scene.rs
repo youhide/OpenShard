@@ -197,6 +197,7 @@ use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
+use openshard_uofiles::grid::BlockExtent;
 use openshard_uofiles::map::{LandCell, Map};
 use openshard_uofiles::texmaps::TexMaps;
 use openshard_uofiles::tiledata::TileData;
@@ -646,19 +647,25 @@ fn main() {
     // tiles so a camera never runs off it. See [`syn_anchor`].
     let syn = syn_anchor(anchor);
     let blocks = |along: u16| u32::from(along / 8 + 9).max(16);
-    let synthetic = Map::from_blocks(blocks(syn.0), blocks(syn.1), |sx, sy| {
-        if !want_ground {
-            return LandCell {
+    let synthetic = Map::from_blocks(
+        BlockExtent {
+            wide: blocks(syn.0),
+            down: blocks(syn.1),
+        },
+        |sx, sy| {
+            if !want_ground {
+                return LandCell {
+                    tile: openshard_uofiles::map::LandTile(0),
+                    z: at.z,
+                };
+            }
+            let (rx, ry) = unshift(anchor, (sx, sy));
+            real_map.land(rx, ry).unwrap_or(LandCell {
                 tile: openshard_uofiles::map::LandTile(0),
                 z: at.z,
-            };
-        }
-        let (rx, ry) = unshift(anchor, (sx, sy));
-        real_map.land(rx, ry).unwrap_or(LandCell {
-            tile: openshard_uofiles::map::LandTile(0),
-            z: at.z,
-        })
-    });
+            })
+        },
+    );
 
     // The real map's own statics within the radius, translated onto the
     // synthetic anchor and filtered to `_TILES` if it named any. This is what

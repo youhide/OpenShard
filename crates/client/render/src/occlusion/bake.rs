@@ -486,6 +486,7 @@ fn collect_ring(
 mod tests {
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_protocol::world::Point;
+    use openshard_uofiles::grid::BlockExtent;
     use openshard_uofiles::map::{LandCell, LandTile, StaticItem};
     use openshard_uofiles::tiledata::{StaticTile, TileFlags};
 
@@ -509,7 +510,7 @@ mod tests {
     /// disagreement between the two builds names a tile rather than a
     /// coordinate in Britain.
     fn town() -> (Map, TileData) {
-        let mut map = Map::from_blocks(2, 2, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
             tile: LandTile(3),
             z: 0,
         });
@@ -781,7 +782,7 @@ mod tests {
     /// closed some other way.
     #[test]
     fn a_solid_anchored_outside_the_frame_still_occludes_through_the_ring() {
-        let map = Map::from_blocks(3, 1, |_, _| LandCell {
+        let map = Map::from_blocks(BlockExtent { wide: 3, down: 1 }, |_, _| LandCell {
             tile: LandTile(3),
             z: 0,
         });
@@ -830,7 +831,7 @@ mod tests {
     /// radius rather than choosing it.
     #[test]
     fn a_wider_reach_needs_a_wider_ring() {
-        let map = Map::from_blocks(3, 1, |_, _| LandCell {
+        let map = Map::from_blocks(BlockExtent { wide: 3, down: 1 }, |_, _| LandCell {
             tile: LandTile(3),
             z: 0,
         });

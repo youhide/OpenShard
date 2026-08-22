@@ -46,6 +46,7 @@ use std::collections::BTreeMap;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
+use openshard_uofiles::grid::BlockExtent;
 use openshard_uofiles::map::{LandCell, LandTile, Map, StaticItem};
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
@@ -81,7 +82,10 @@ impl Scene {
     pub fn flat(z: i8) -> Self {
         // Land tile 0 with the default (empty) tiledata: not water, not
         // blocking, so it is ordinary walkable ground.
-        let map = Map::from_blocks(1, 1, |_, _| LandCell { tile: LandTile(0), z });
+        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
+            tile: LandTile(0),
+            z,
+        });
         Self {
             map,
             tiles: TileData::empty(),

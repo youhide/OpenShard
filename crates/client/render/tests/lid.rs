@@ -52,6 +52,7 @@ use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::animdata::AnimData;
 use openshard_uofiles::art::Art;
+use openshard_uofiles::grid::BlockExtent;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::map::{LandCell, Map};
 use openshard_uofiles::texmaps::TexMaps;
@@ -172,7 +173,7 @@ fn draw(
     at: Point,
     items: &[GroundItem],
 ) -> Drawn {
-    let map = Map::from_blocks(2, 2, |_, _| LandCell {
+    let map = Map::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
         tile: openshard_uofiles::map::LandTile(0),
         z: 27,
     });

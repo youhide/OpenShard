@@ -29,6 +29,7 @@ use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
+use openshard_uofiles::grid::BlockExtent;
 use openshard_uofiles::map::{LandCell, Map};
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
@@ -293,7 +294,7 @@ impl Scene {
 /// The land graphic is `0`, which the scenes' `tiledata` gives no flags, so the
 /// ground itself neither burns nor stops anything.
 fn ground() -> Map {
-    Map::from_blocks(16, 16, |_, _| LandCell {
+    Map::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
         tile: openshard_uofiles::map::LandTile(0),
         z: 0,
     })

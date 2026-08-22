@@ -121,12 +121,13 @@ impl AsRef<Map> for MapSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openshard_uofiles::grid::BlockExtent;
     use openshard_uofiles::map::{LandCell, LandTile};
 
     #[test]
     fn snapshots_keep_the_facet_that_resolved_an_ambiguous_size() {
         let map = || {
-            Map::from_blocks(320, 256, |_, _| LandCell {
+            Map::from_blocks(BlockExtent { wide: 320, down: 256 }, |_, _| LandCell {
                 tile: LandTile(0),
                 z: 0,
             })

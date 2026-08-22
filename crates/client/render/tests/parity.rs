@@ -57,6 +57,7 @@ use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_uofiles::animdata::AnimData;
 use openshard_uofiles::art::Art;
+use openshard_uofiles::grid::BlockExtent;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::map::{LandCell, Map};
 use openshard_uofiles::texmaps::TexMaps;
@@ -136,12 +137,18 @@ fn synthetic_map_covering(real: &Map, places: &[Point], tuning: &Tuning) -> Map 
     // `isolated_scene`'s own `blocks` closure leaves.
     let blocks_wide = (furthest.0.max(0) as u32) / 8 + 4;
     let blocks_down = (furthest.1.max(0) as u32) / 8 + 4;
-    Map::from_blocks(blocks_wide, blocks_down, |x, y| {
-        real.land(x, y).unwrap_or(LandCell {
-            tile: openshard_uofiles::map::LandTile(0),
-            z: 0,
-        })
-    })
+    Map::from_blocks(
+        BlockExtent {
+            wide: blocks_wide,
+            down: blocks_down,
+        },
+        |x, y| {
+            real.land(x, y).unwrap_or(LandCell {
+                tile: openshard_uofiles::map::LandTile(0),
+                z: 0,
+            })
+        },
+    )
 }
 
 /// The real map's own statics over the cells [`light::collect`] builds its

@@ -269,6 +269,7 @@ use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, 
 use openshard_client_pathtrace::light as pt_light;
 use openshard_client_pathtrace::trace as pt_trace;
 use openshard_protocol::wire::Graphic;
+use openshard_uofiles::grid::BlockExtent;
 use openshard_uofiles::tiledata::{StaticTile, TileFlags};
 use oracle::boxes::{BoxSpec, box_mesh, box_owner};
 use oracle::{Shade, dump, read_gbuffer, segment_clear_of_box};
@@ -849,11 +850,16 @@ fn main() {
         vec![floor_pixel; usize::from(openshard_uofiles::art::LAND_TILE_SIZE).pow(2)],
     );
     let blocks = (bounds.max_x as u32).div_ceil(openshard_uofiles::map::BLOCK_SIZE) + 1;
-    let synthetic_map =
-        openshard_uofiles::map::Map::from_blocks(blocks, blocks, |_x, _y| openshard_uofiles::map::LandCell {
+    let synthetic_map = openshard_uofiles::map::Map::from_blocks(
+        BlockExtent {
+            wide: blocks,
+            down: blocks,
+        },
+        |_x, _y| openshard_uofiles::map::LandCell {
             tile: openshard_uofiles::map::LandTile(FLOOR_GRAPHIC.0),
             z: 0,
-        });
+        },
+    );
     let land = LandAtlas::pack([(FLOOR_GRAPHIC, floor_image)]).expect("one flat tile always fits");
     let texmaps = TexmapAtlas::pack([]).expect("nothing always fits");
     let ground_quads =

@@ -2452,13 +2452,14 @@ impl Index {
 #[cfg(test)]
 mod tests {
     use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_uofiles::grid::BlockExtent;
     use openshard_uofiles::map::{LandCell, LandTile, StaticItem};
     use openshard_uofiles::tiledata::{StaticTile, TileFlags};
 
     use super::*;
 
     fn walled_block(open: &[(u16, u16)]) -> (Map, TileData) {
-        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2525,7 +2526,7 @@ mod tests {
 
     #[test]
     fn an_upper_floor_makes_two_cells_in_one_column() {
-        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2565,7 +2566,7 @@ mod tests {
 
     #[test]
     fn a_roof_is_the_ceiling_of_the_house_cell_below_it() {
-        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2600,7 +2601,7 @@ mod tests {
 
     #[test]
     fn a_roofed_enclosure_is_an_indexed_building_area() {
-        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2683,7 +2684,7 @@ mod tests {
 
     #[test]
     fn a_measured_wall_blocks_only_its_named_shared_edge() {
-        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2731,7 +2732,7 @@ mod tests {
 
     #[test]
     fn facet_bake_marks_space_unreachable_from_the_world_as_a_building() {
-        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2788,7 +2789,7 @@ mod tests {
 
     #[test]
     fn a_short_wall_on_a_stage_is_not_a_room_or_building_boundary() {
-        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 20,
         });
@@ -2844,7 +2845,7 @@ mod tests {
 
     #[test]
     fn a_doorway_is_coloured_as_part_of_its_positive_building() {
-        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2888,7 +2889,7 @@ mod tests {
 
     #[test]
     fn a_double_gap_between_wall_frames_is_a_door_anchor() {
-        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2944,7 +2945,7 @@ mod tests {
 
     #[test]
     fn blocking_furniture_does_not_split_a_room() {
-        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -2997,7 +2998,7 @@ mod tests {
 
     #[test]
     fn an_off_map_block_is_not_baked() {
-        let map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -3006,7 +3007,7 @@ mod tests {
 
     #[test]
     fn a_point_bakes_its_block_once() {
-        let map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -3020,7 +3021,7 @@ mod tests {
 
     #[test]
     fn an_open_block_is_not_indexed_as_a_building() {
-        let map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -3037,7 +3038,7 @@ mod tests {
 
     #[test]
     fn a_low_ceiling_is_not_a_cell() {
-        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -3073,7 +3074,7 @@ mod tests {
 
     #[test]
     fn a_door_is_a_closed_wall_and_a_portal_between_its_two_rooms() {
-        let mut map = Map::from_blocks(1, 1, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });
@@ -3174,7 +3175,7 @@ mod tests {
 
     #[test]
     fn a_door_and_its_rooms_cross_an_eight_tile_block_seam() {
-        let mut map = Map::from_blocks(2, 1, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 2, down: 1 }, |_, _| LandCell {
             tile: LandTile(0),
             z: 0,
         });

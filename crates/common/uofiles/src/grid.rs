@@ -56,6 +56,19 @@ pub struct BlockCoord {
     pub y: u32,
 }
 
+/// A facet's size in map blocks.
+///
+/// Unlike [`BlockCoord`], this is a size rather than a position: `wide` and
+/// `down` say how many eight-tile blocks the facet contains on each axis. The
+/// fields are named so a caller cannot silently swap the two bare numbers.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct BlockExtent {
+    /// Block columns across the facet.
+    pub wide: u32,
+    /// Block rows down the facet.
+    pub down: u32,
+}
+
 impl BlockCoord {
     /// The block a tile falls in.
     ///

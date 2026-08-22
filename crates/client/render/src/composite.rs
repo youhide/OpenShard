@@ -2782,6 +2782,8 @@ impl CompositeRenderer {
 
 #[cfg(test)]
 mod tests {
+    use openshard_uofiles::grid::BlockExtent;
+
     use super::*;
 
     /// A GPU suitable for the complete capture-and-restore oracle, or `None`
@@ -3900,7 +3902,7 @@ mod tests {
     fn flat_ground_block_accepts_only_one_common_surface_height() {
         use openshard_uofiles::map::{LandCell, LandTile, Map};
 
-        let mut map = Map::from_blocks(2, 2, |_, _| LandCell {
+        let mut map = Map::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
             tile: LandTile(7),
             z: 20,
         });
@@ -3927,7 +3929,7 @@ mod tests {
     fn prepared_work_preserves_the_verified_plateau_for_producer_and_restore() {
         use openshard_uofiles::map::{LandCell, LandTile, Map};
 
-        let map = Map::from_blocks(2, 2, |_, _| LandCell {
+        let map = Map::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
             tile: LandTile(7),
             z: 20,
         });

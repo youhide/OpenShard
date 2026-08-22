@@ -1313,6 +1313,7 @@ pub fn static_color(colors: &RadarColors, graphic: Graphic) -> Color16 {
 mod tests {
     use super::*;
     use openshard_protocol::wire::Hue;
+    use openshard_uofiles::grid::BlockExtent;
     use openshard_uofiles::map::{LandCell, LandTile, StaticItem};
     use openshard_uofiles::tiledata::LAND_TILE_COUNT;
 
@@ -1348,7 +1349,7 @@ mod tests {
 
     /// A one-block facet, every tile land id 1 at z 0.
     fn a_field() -> Map {
-        Map::from_blocks(1, 1, |_, _| LandCell {
+        Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
             tile: LandTile(1),
             z: 0,
         })
@@ -1754,7 +1755,7 @@ mod tests {
 
     #[test]
     fn a_bare_tile_is_its_land() {
-        let map = Map::from_blocks(1, 1, |x, _| LandCell {
+        let map = Map::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, _| LandCell {
             tile: LandTile(if x < 4 { 1 } else { 2 }),
             z: 0,
         });
