@@ -304,6 +304,73 @@ pathfinding regression, and because it fixes the shape of what the overlay owes:
 a house floor is the general case of what `aboard` does for one ship, and
 `CoverKind::Stands` is already the right type for it.
 
+## What a node is, and the z that is already gone
+
+Asked in a session and worth answering in the document, because the answer is
+half *already done* and half *a defect nobody had written down*: **does a search
+node need a z at all?**
+
+**It does not, and it already has none.** The flat search keys its three hash
+tables on [`PathTileKey(u32)`](../../crates/common/movement/src/path.rs#L399),
+which is `x << 16 | y` — a planar tile. The resolved landing point, z and all,
+travels as a *value* in `came_from`. So z is data on the edge rather than the
+identity of the node, and that is the right shape: without it there is no
+`MAX_STEP_UP`, no `PLAYER_HEIGHT` of headroom, and no
+[`check`](../../crates/common/movement/src/terrain.rs#L294) picking *the highest
+surface in reach*, which is how a staircase is climbed at all.
+
+**🚩 What nobody wrote down is what a planar key costs.** A column with two
+standing places gets **one** slot in `closed`: whichever surface is reached first
+wins, and the other is unreachable for the rest of that search. A bridge and the
+ground under it are one node. A moored deck and the water beside it are one node.
+After [`map_rebuild.md`](map_rebuild.md)'s R3 a house's ground floor and its
+first floor will be one node. The coarse graph's one-storey defect — the reason
+this plan exists — has a quieter twin in the fine search, and both are the same
+sentence: *a tile is assumed to be one place.*
+
+**The census says the repair is nearly free**, which is the whole argument of
+[the tiers](#what-the-census-decides) applied to the search instead of to
+storage:
+
+| surfaces in a column | columns | |
+|---:|---:|---:|
+| 0 or 1 | 29,184,252 | **99.40%** |
+| 2 | 128,067 | 0.44% |
+| 3–12 | 47,809 | 0.16% |
+
+So the node becomes **`(x, y)` plus a span index that is zero for 99.4% of the
+facet**, and it still fits the integer fast path the current key exists for:
+Felucca is 7,168×4,096 — 13 bits of x, 12 of y — and the deepest column on the
+facet holds twelve spans, which is 4 bits. Twenty-nine bits of a `u32`.
+
+**This lands in [N3](#n3--the-search-takes-spans)**, because that is where the
+search reads spans and the index becomes a thing it can name. It is recorded here
+rather than there because it is a statement about what a node *is*, and because
+the pre-span search has the defect today.
+
+### Down is not up, and the graph does not know
+
+The step rule is **already asymmetric**: a climb reaches `start_top + 2`, and a
+descent is unbounded — `check` accepts any platform whose top is within reach,
+including one far below, and the land branch does the same. Stepping off a
+platform you cannot step back onto is therefore ordinary behaviour, not a special
+case wanting a mechanism.
+
+The **coarse graph cannot represent it.**
+[`navigation_graph.md`](navigation_graph.md) makes a portal only where
+`step_allowed` succeeds *in both directions*, so a one-way drop is invisible to
+long-distance routing. That is the conservative side of the error — the graph
+refuses a route rather than promising one that does not exist — but it is a
+refusal, and refusals are what [F's measurement](terrain_seam.md#-and-the-artifact-is-wrong-before-anyone-reads-it)
+found the graph already handing out too many of.
+
+**[N4](#n4--regions-over-spans) builds directed edges**, then: a portal joins two
+spans in one direction, and the reverse is a separate edge that may or may not
+exist. What that leaves [N5](#n5--off-mesh-links) is what it always should have
+been — links geometry does not imply *at all*, a teleporter and whatever the
+flood says is still unreachable — rather than the place a drop would have been
+declared by hand.
+
 ## The nodes
 
 ```
@@ -311,7 +378,8 @@ a house floor is the general case of what `aboard` does for one ship, and
  (the signature)       (the map, in one type)   │
                                                 ▼
  N0. the census ✅ ──> N1. three tiers ──> N2. the step rule reads them ──┬─> N3. the search takes Spans
-                                                    (the agreement oracle) │
+                                                    (the agreement oracle) │        └─> N3b. the node stops
+                                                                           │              being a tile
                                                                            │
                                                                            └─> N4. regions over spans ──┬─> N5. off-mesh links
                                                                                         │               │
@@ -406,6 +474,24 @@ admits under `AllOpen` — over baked spans rather than over a scene built for t
 occasion. The overlay is consulted *after* the static answer and can overrule it
 in one direction only, which is the property this pins.
 
+### N3b — the node stops being a tile
+
+Needs N3, and it is deliberately **not** part of it: N3's oracle is that nothing
+about the routes changed, and this is the one change that must alter them.
+
+The key widens from a planar tile to `(x, y, span)` — twenty-nine bits of the
+`u32` it already uses, since the index is zero for 99.4% of the facet. What that
+buys is the thing [a node is](#what-a-node-is-and-the-z-that-is-already-gone)
+names: a column with two standing places stops collapsing into one slot in
+`closed`, so a route may pass over a bridge and later under it, and a body on a
+house's first floor is not the same node as one on the ground beneath.
+
+**Done when:** a search that must use both heights of one column arrives where it
+previously refused, and node counts change on **exactly** the searches that touch
+a multi-span column — enumerated, not asserted in bulk, because a count that
+moved anywhere else means the key change altered something it had no business
+altering.
+
 ### N4 — regions over spans
 
 Needs N2. This is the node that retires the one-storey defect, and it is where
@@ -416,6 +502,15 @@ per tile. It samples **spans** instead: a region's nodes are spans, its
 components are computed over spans, and a portal on a region border joins two
 spans rather than two tiles. A bridge crossing a border is then its own portal,
 and the castle plateau stops being an island.
+
+**And the edges become directed**, which is the second half of the same repair.
+Today a shared side becomes a portal only where `step_allowed` succeeds *in both
+directions* ([`navigation_graph.md`](navigation_graph.md)), and the step rule is
+asymmetric by design: a climb reaches `start_top + 2` while a descent is
+unbounded. So every ledge a body may step off but not back onto is currently
+invisible to long-distance routing — a refusal rather than a lie, which is the
+right side of the error and still a refusal. A portal joins two spans one way and
+the reverse is its own edge.
 
 **Done when:** `coarse_bench`'s `refused_but_walkable` is **0 in every band from
 every one of the five origins** recorded in
@@ -429,9 +524,11 @@ Needs N4. **Declared** edges between spans that geometry does not imply.
 
 A stair is not one of them and this is worth stating plainly, because it is the
 question that produced this plan: with spans, a staircase is already a chain of
-surfaces at rising heights and `MAX_STEP_UP` already climbs it. What needs
-declaring is what has no walkable geometry between its ends — a teleporter, and
-whatever N4's flood shows the spans still cannot connect.
+surfaces at rising heights and `MAX_STEP_UP` already climbs it. **Neither is a
+drop off a ledge** — the step rule already allows it and N4's directed edges
+already carry it, so a one-way link is inferred geometry rather than a declared
+one. What needs declaring is what has no walkable geometry between its ends — a
+teleporter, and whatever N4's flood shows the spans still cannot connect.
 
 **The content is deliberately empty until N4 says what is missing.** What N5
 owns is the format slot and the rule that a link is declared rather than

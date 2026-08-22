@@ -317,6 +317,15 @@ measurements and DoDs stand as written. Three things this consolidation adds:
   server plans with flat `find_path` at a budget of 400 while the graph that
   would route it across a town sits loaded and unread. Both stay gated on N2's
   oracles, as written.
+- **The search's node has no z, and that turned out to be half a defect.** Asked
+  in the session that wrote this document, answered in
+  [what a node is](navigation_spans.md#what-a-node-is-and-the-z-that-is-already-gone):
+  the flat A\* already keys on a planar tile and carries z as data, which is
+  right — and it means a column with two standing places has *one* slot in the
+  closed set, so a bridge and the ground under it are one node. The one-storey
+  defect has a twin in the fine search. It is N3b, and the census makes it nearly
+  free: the node becomes `(x, y, span)` with the index zero for 99.4% of the
+  facet, twenty-nine bits of the `u32` the key already is.
 
 [`navigation_graph_efficiency_plan.md`](navigation_graph_efficiency_plan.md)'s
 phases 1, 2 and 4 are built; its phase 3 — a second hierarchy level — stays shut
