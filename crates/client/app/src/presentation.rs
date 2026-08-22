@@ -2150,18 +2150,17 @@ impl App {
             let world_map_open = radar_views
                 .iter()
                 .any(|(subject, _, _)| *subject == crate::windows::WindowSubject::WorldMap);
-            if world_map_open && self.radar_cache.begin_sweep(facet) {
-                let whole_facet =
-                    radar::RadarRegion::new(facet, radar::RadarTile::new(0, 0), radar_facet_extent);
-                for lod in (radar::SWEEP_LOD.value()..=radar::max_lod(radar_facet_extent).value()).rev() {
-                    let lod = radar::RadarLod::new(lod);
-                    for coord in radar::region_chunks(whole_facet, lod) {
-                        let key = self.radar_cache.key(facet, lod, coord);
-                        if self.radar_cache.get(key).is_none() {
-                            self.radar_queue.request_sweep(key);
-                        }
-                    }
-                }
+            // The coarse floor, offered again every frame until it exists.
+            // Asking once was asking under a bound: `request_sweep` refuses
+            // when the queue is full, and the refused chunk was a hole in the
+            // fallback floor that nothing would ever fill. The cache owes the
+            // keys and strikes them off as they land — see
+            // `RadarCache::drain_sweep`.
+            if world_map_open {
+                self.radar_cache.begin_sweep(facet, radar_facet_extent);
+                let queue = &mut self.radar_queue;
+                self.radar_cache
+                    .drain_sweep(facet, |key| queue.request_sweep(key));
             }
             self.radar_queue.reconcile(&self.radar_cache);
             let producer_centre = player_tile

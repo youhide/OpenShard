@@ -770,7 +770,17 @@ pub struct RadarCache {
     evicted: u64,
     budget: LruBudget<RadarChunkKey>,
     tail_budget: u64,
-    swept_facets: BTreeSet<Facet>,
+    /// Every coarse key a facet's sweep still owes, per facet.
+    ///
+    /// A set and not a flag. The flag said *the sweep ran*, which is a
+    /// different claim from *the floor exists*: the enqueue loop it guarded
+    /// called [`RadarWorkQueue::request_sweep`] once per chunk, that call
+    /// returns `false` when the queue is at its bound, and a refused key was
+    /// never offered again. Nothing was lost loudly — the hole appears weeks
+    /// later as a patch of backdrop at some zoom, on ground no window has
+    /// ever drawn at level zero. An empty entry is a sweep that finished; a
+    /// missing one is a sweep that never started.
+    sweep_owed: BTreeMap<Facet, BTreeSet<RadarChunkKey>>,
     /// Current-source products which a terrain/static mutation made unsafe to
     /// reuse.  A producer consumes these keys in a later phase; keeping the
     /// work here makes the content owner, rather than a minimap window, the
@@ -789,7 +799,7 @@ impl Default for RadarCache {
             evicted: 0,
             budget: LruBudget::new(RADAR_CPU_TAIL_BUDGET).expect("the shipped radar CPU budget is non-zero"),
             tail_budget: RADAR_CPU_TAIL_BUDGET,
-            swept_facets: BTreeSet::new(),
+            sweep_owed: BTreeMap::new(),
             dirty: BTreeSet::new(),
         }
     }
@@ -1041,14 +1051,62 @@ impl RadarCache {
         self.ready.len()
     }
 
-    /// Mark the first facet-map open in this session.
-    pub fn begin_sweep(&mut self, facet: Facet) -> bool {
-        self.swept_facets.insert(facet)
+    /// Owe a facet its whole coarse floor, once per session.
+    ///
+    /// Answers `true` on the call that starts one. Every level from
+    /// [`SWEEP_LOD`] up to the facet's own [`max_lod`] is enumerated here, at
+    /// the revision current when the facet map first opened; keys are handed
+    /// out by [`Self::drain_sweep`] and struck off as they land.
+    pub fn begin_sweep(&mut self, facet: Facet, extent: RadarExtent) -> bool {
+        if self.sweep_owed.contains_key(&facet) {
+            return false;
+        }
+        let whole_facet = RadarRegion::new(facet, RadarTile::new(0, 0), extent);
+        let owed: BTreeSet<_> = (SWEEP_LOD.value()..=max_lod(extent).value())
+            .flat_map(|lod| {
+                let lod = RadarLod::new(lod);
+                region_chunks(whole_facet, lod).map(move |chunk| (lod, chunk))
+            })
+            .map(|(lod, chunk)| self.key(facet, lod, chunk))
+            .collect();
+        self.sweep_owed.insert(facet, owed);
+        true
     }
 
     #[must_use]
     pub fn sweep_started(&self, facet: Facet) -> bool {
-        self.swept_facets.contains(&facet)
+        self.sweep_owed.contains_key(&facet)
+    }
+
+    /// How many coarse chunks a facet's sweep still owes.
+    #[must_use]
+    pub fn sweep_owed_len(&self, facet: Facet) -> usize {
+        self.sweep_owed.get(&facet).map_or(0, BTreeSet::len)
+    }
+
+    /// Offer every key the sweep still owes, and strike off the ones it does
+    /// not owe any more. Answers what is left.
+    ///
+    /// Called every frame the facet map is open, which is what makes a refused
+    /// request harmless: `request` is a *try*, and a key the queue had no room
+    /// for this frame is offered again on the next one. A key is struck off
+    /// when its product is ready — or when a mutation has moved the facet's
+    /// revision past it, because from that moment the chunk is the dirty set's
+    /// to rebuild and not the sweep's.
+    pub fn drain_sweep(&mut self, facet: Facet, mut request: impl FnMut(RadarChunkKey) -> bool) -> usize {
+        let current = self.revisions.get(&facet).copied().unwrap_or(RadarRevision(0));
+        let Some(owed) = self.sweep_owed.get_mut(&facet) else {
+            return 0;
+        };
+        let ready = &self.ready;
+        owed.retain(|key| {
+            if key.revision != current || ready.contains_key(key) {
+                return false;
+            }
+            request(*key);
+            true
+        });
+        owed.len()
     }
 
     /// Bound the demand-driven tail while retaining the coarse fallback floor
@@ -2136,20 +2194,70 @@ mod tests {
     #[test]
     fn sweep_is_once_per_facet_and_never_outranks_view_work() {
         let facet = Facet(0);
+        let extent = RadarExtent::new(7168, 4096).expect("Britannia");
         let mut cache = RadarCache::default();
-        assert!(cache.begin_sweep(facet));
-        assert!(!cache.begin_sweep(facet));
+        assert!(cache.begin_sweep(facet, extent));
+        assert!(!cache.begin_sweep(facet, extent));
         assert!(cache.sweep_started(facet));
+        // Levels two through seven of the shipped facet: 448 + 112 + 28 + 8 +
+        // 2 + 1.
+        assert_eq!(cache.sweep_owed_len(facet), 599);
 
         let mut queue = RadarWorkQueue::new(8, 1).unwrap();
-        let sweep = cache.key(facet, RadarLod::new(7), RadarChunkCoord::new(0, 0));
         let visible = cache.key(facet, RadarLod::BASE, RadarChunkCoord::new(20, 20));
-        assert!(queue.request_sweep(sweep));
         assert!(queue.request(visible));
+        assert_eq!(
+            cache.drain_sweep(facet, |key| queue.request_sweep(key)),
+            599,
+            "the floor is owed until its products land, not until it was asked for",
+        );
         assert_eq!(
             queue.take_for_producer_near(RadarChunkCoord::new(0, 0)),
             vec![visible],
+            "an open window's own terrain still outranks the whole floor",
         );
+    }
+
+    /// The defect the flag had: `request_sweep` refuses at the queue's bound,
+    /// a refused key was never offered again, and the flag already said the
+    /// sweep had run. Today's arithmetic hides it — 599 keys against a bound
+    /// of 1024 — so this drives the sweep through a queue far too small for
+    /// it and asks for the floor afterwards.
+    #[test]
+    fn a_sweep_through_a_queue_it_does_not_fit_in_still_builds_the_whole_floor() {
+        let facet = Facet(0);
+        let extent = RadarExtent::new(7168, 4096).expect("Britannia");
+        let mut cache = RadarCache::default();
+        assert!(cache.begin_sweep(facet, extent));
+
+        // Eight slots for 599 chunks, one unit a turn: every frame refuses
+        // most of what it is offered.
+        let mut queue = RadarWorkQueue::new(8, 1).unwrap();
+        let mut turns = 0;
+        // One frame a turn: offer what is still owed, build what the queue
+        // had room for. A frame that is owed nothing is the sweep finished.
+        while cache.drain_sweep(facet, |key| queue.request_sweep(key)) != 0 {
+            let batch = queue.take_for_producer_near(RadarChunkCoord::new(0, 0));
+            assert!(!batch.is_empty(), "a turn always hands out at least one job");
+            for key in batch {
+                let chunk = RadarChunk::new(key, vec![GREEN; chunk_pixel_count()]).expect("a complete chunk");
+                assert!(queue.finish(&mut cache, chunk));
+            }
+            turns += 1;
+            assert!(turns < 5_000, "the sweep drains rather than spinning");
+        }
+
+        let whole_facet = RadarRegion::new(facet, RadarTile::new(0, 0), extent);
+        for lod in SWEEP_LOD.value()..=max_lod(extent).value() {
+            let lod = RadarLod::new(lod);
+            for chunk in region_chunks(whole_facet, lod) {
+                assert!(
+                    cache.get(cache.key(facet, lod, chunk)).is_some(),
+                    "level {} chunk {chunk:?} is part of the floor",
+                    lod.value(),
+                );
+            }
+        }
     }
 
     #[test]
