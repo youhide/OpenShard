@@ -10,7 +10,10 @@ use std::collections::{BTreeMap, HashMap};
 
 use openshard_entities::Registry;
 use openshard_events::EventBus;
-use openshard_movement::{LandTile, Terrain, Walker};
+use openshard_movement::scene::Scene;
+// `Terrain` is in scope for its *methods*: the tests below ask a `LiveTerrain`
+// whether a step is allowed. Nothing here implements it any more.
+use openshard_movement::{Terrain, Walker};
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::serial::SerialKind;
 use openshard_state::harvest::Banks;
@@ -18,7 +21,7 @@ use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
 use openshard_state::{Boats, Dialogue, FacetState, Gameplay, Obstructions, QuestDefs, Regions};
 use openshard_uofiles::multi::{Component, Multi, Multis};
-use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
+use openshard_uofiles::tiledata::TileFlags;
 
 use super::*;
 
@@ -33,52 +36,37 @@ const HULL: u16 = 0x3E4E;
 /// would be a solid block of wood.
 const DECK: u16 = 0x3E4A;
 
+/// The land id this sea is made of. Water is not a kind of tile the map knows —
+/// it is a flag on the tiledata row the tile points at, which is why the id and
+/// the flag are two statements below rather than one.
+const WATER: u16 = 0x00A8;
+/// The shore's land id: tile `0`, which [`Scene`] leaves unflagged, so it is
+/// ordinary walkable ground.
+const SHORE: u16 = 0;
+
 /// A sea with one strip of shore along y = 0.
 ///
-/// The ground only. What a sloop is made of and how tall a hull stands are the
-/// shard's tables — [`multis`] and [`tiledata`] below — because they are facts
+/// **Real ground, not a fixture that answers for it.** The water is a
+/// [`TileFlags::WATER`] row in the tiledata and the shard's own `land_is_water`
+/// reads it there, so a change to what water *means* reaches these tests
+/// instead of being agreed with by a double that had reimplemented the rule.
+/// What a sloop is made of stays a table — [`multis`] — because that is a fact
 /// about the install rather than about this water.
-struct Sea;
-
-impl Terrain for Sea {
-    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-        (to.y == 0).then_some(to)
-    }
-
-    fn land_tile(&self, _tile: Tile) -> Option<LandTile> {
-        Some(LandTile(0))
-    }
-
-    fn land_is_water(&self, tile: Tile) -> bool {
-        tile.y != 0
-    }
-
-    fn can_fit(&self, tile: Tile, _z: i32, _height: i32) -> bool {
-        tile.y == 0
-    }
-}
-
-/// A real tiledata: the hull is impassable and ten tall, the deck is walked on
-/// and three.
-fn tiledata() -> std::sync::Arc<TileData> {
-    let mut tiles = TileData::empty();
-    tiles.set_static_tile(
-        HULL,
-        StaticTile {
-            flags: TileFlags::new(TileFlags::WALL | TileFlags::BLOCK),
-            height: 10,
-            ..StaticTile::default()
-        },
+fn sea() -> Scene {
+    let mut scene = Scene::flat_holding(
+        u16::try_from(SIZE - 1).unwrap(),
+        u16::try_from(SIZE - 1).unwrap(),
+        0,
     );
-    tiles.set_static_tile(
-        DECK,
-        StaticTile {
-            flags: TileFlags::new(TileFlags::PLATFORM),
-            height: 3,
-            ..StaticTile::default()
-        },
-    );
-    std::sync::Arc::new(tiles)
+    scene.land_art(WATER, TileFlags::WATER);
+    scene.land_everywhere(WATER);
+    for x in 0..scene.width() {
+        scene.land(x, 0, SHORE);
+    }
+    // The hull is impassable and ten tall, the deck is walked on and three.
+    scene.art(HULL, TileFlags::WALL | TileFlags::BLOCK, 10);
+    scene.art(DECK, TileFlags::PLATFORM, 3);
+    scene
 }
 
 /// A real multi table holding the sloop under the one id these tests place.
@@ -111,11 +99,15 @@ fn sloop() -> Vec<Component> {
 }
 
 fn a_sea() -> WorldState {
+    // The pair the shard holds: the ground, and the table that ground reads. They
+    // come from one scene so a hull's height cannot disagree with the tiledata
+    // the terrain is looking at.
+    let (terrain, tiles) = sea().into_shard();
     let mut facets = BTreeMap::new();
     facets.insert(
         Facet(0),
         FacetState {
-            terrain: Some(Box::new(Sea)),
+            terrain: Some(Box::new(terrain)),
             coarse: None,
             width: SIZE,
             height: SIZE,
@@ -131,7 +123,7 @@ fn a_sea() -> WorldState {
         bus: EventBus::new(),
         facets,
         default_facet: Facet(0),
-        tiles: tiledata(),
+        tiles,
         multis: multis(),
         players: HashMap::new(),
         connections: HashMap::new(),
@@ -360,10 +352,29 @@ fn sinking_a_ship_clears_the_index_the_grid_and_the_registry() {
     assert!(state.registry.get::<Position>(boat).is_none());
 }
 
-/// A shard with no client files has no sea, so it has nowhere to moor — the
-/// same bargain every other client-file question on the terrain makes.
+/// A shard with no client files knows no ships, so there is nothing to launch.
+///
+/// **An empty table, not an absent one.** This test used to say it by clearing
+/// [`FacetState::terrain`], which is a different configuration wearing the same
+/// words — a facet with no *map*. What "no client files" means to a launch is
+/// that `multi.mul` said nothing, and `planks_of` is where that is refused.
 #[test]
 fn a_shard_with_no_client_files_launches_nothing() {
+    let mut state = a_sea();
+    state.multis = Multis::default();
+    let (actor, owner) = a_captain(&mut state);
+
+    assert_eq!(
+        place(&mut state, actor, Point::new(20, 20, 0), Facet(0), SLOOP, owner),
+        Err(Refusal::NoSuchMulti),
+    );
+}
+
+/// A facet with no map has no sea either, and `check_berth` is where that is
+/// caught — the other half of the pair above, and the one that is about the
+/// *ground* rather than about the tables.
+#[test]
+fn a_facet_with_no_map_moors_nothing() {
     let mut state = a_sea();
     state.facet_state_mut(Facet(0)).terrain = None;
     let (actor, owner) = a_captain(&mut state);

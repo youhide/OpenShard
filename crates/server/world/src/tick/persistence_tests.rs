@@ -1159,23 +1159,13 @@ fn a_classic_house_writes_no_design_rows() {
 /// ships you fall straight through.
 #[test]
 fn a_boat_survives_a_restart_with_its_deck() {
-    use openshard_movement::{Terrain, Tile};
+    use openshard_movement::scene::Scene;
     use openshard_uofiles::multi::Component;
+    use openshard_uofiles::tiledata::TileFlags;
 
-    /// Open water. What a sloop is made of is the shard's multi table.
-    struct Sea;
     const SLOOP: u16 = 0x0C;
     const HULL: u16 = 0x3E4E;
     const DECK: u16 = 0x3E4A;
-
-    impl Terrain for Sea {
-        fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-            Some(to)
-        }
-        fn land_is_water(&self, _tile: Tile) -> bool {
-            true
-        }
-    }
 
     /// A sloop: a hull plank and a deck plank. Which of the two is a wall and how
     /// tall each stands is the tiledata's answer, not this list's.
@@ -1192,16 +1182,32 @@ fn a_boat_survives_a_restart_with_its_deck() {
             .collect()
     }
 
-    fn sea_tiles() -> std::sync::Arc<openshard_uofiles::tiledata::TileData> {
-        super::tests::tiles_with(&[
-            (HULL, super::tests::WALL_FLAGS, 10),
-            (DECK, openshard_uofiles::tiledata::TileFlags::PLATFORM, 3),
-        ])
+    /// Open water with a jetty at [`START`], and the two planks a sloop is made
+    /// of in the same table the ground reads.
+    ///
+    /// **The shore is not decoration.** The double this replaced said every tile
+    /// was water *and* every step was allowed, which is not a world that can
+    /// exist: water is a surface only a swimmer stands on, so a shard that is
+    /// water everywhere has nowhere to put the character who launches the ship.
+    /// Real ground makes that contradiction a compile-and-run answer instead of
+    /// a fixture agreeing with itself.
+    fn sea() -> Scene {
+        // Land tile `0` is what a flat scene is paved with, so flagging the id is
+        // the whole sea — no per-tile pass over a facet-sized square.
+        const WATER: u16 = 0;
+        const JETTY: u16 = 1;
+        let mut scene = Scene::flat_holding(START.0 + 8, START.1 + 8, 0);
+        scene.land_art(WATER, TileFlags::WATER);
+        scene.land(START.0, START.1, JETTY);
+        scene.art(HULL, super::tests::WALL_FLAGS, 10);
+        scene.art(DECK, TileFlags::PLATFORM, 3);
+        scene
     }
 
+    let (terrain, tiles) = sea().into_shard();
     let mut world = World::new(START).with_save_every(0);
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Sea));
-    world.state.tiles = sea_tiles();
+    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(terrain));
+    world.state.tiles = tiles;
     world.state.multis = super::tests::multis_with(SLOOP, sloop());
     let now = Instant::now();
     let connection = enter(&mut world, now);
@@ -1234,8 +1240,9 @@ fn a_boat_survives_a_restart_with_its_deck() {
 
     // The shard comes back up on that save, with the same sea.
     let mut restored = World::new(START);
-    restored.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Sea));
-    restored.state.tiles = sea_tiles();
+    let (terrain, tiles) = sea().into_shard();
+    restored.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(terrain));
+    restored.state.tiles = tiles;
     restored.state.multis = super::tests::multis_with(SLOOP, sloop());
     restored.restore_boats(boats);
 
