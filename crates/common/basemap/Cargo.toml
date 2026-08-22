@@ -12,6 +12,9 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+# The patch binary's command line. See `openshard-movement`'s manifest for why
+# the `env` feature is the one that matters.
+clap.workspace = true
 # The world and its chunks. Nothing here knows what a UO install is: this crate
 # is where our own format meets a path, and `openshard-uofiles` is the separate
 # thing that turns a client's files into a facet in the first place.

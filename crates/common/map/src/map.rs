@@ -257,11 +257,12 @@ impl Map {
             .map(|at| self.land.cell(at))
     }
 
-    /// Change the ground at one tile, for a map built by [`Map::from_blocks`].
+    /// Change the ground at one tile.
     ///
     /// The other half of building a scene — see [`Map::place_static`] for what
-    /// that is, why both of these are `pub`, and why nothing in the engine may
-    /// call either. Off the map it does nothing, for the same reason.
+    /// that is and why both of these are `pub`. Off the map it does nothing;
+    /// [`crate::patch`] checks the tile is there before it calls, so that a
+    /// change nobody could see is an error rather than a silent nothing.
     pub fn set_land(&mut self, x: u16, y: u16, cell: LandCell) {
         self.land.set(x, y, cell);
     }
@@ -280,17 +281,20 @@ impl Map {
     /// are in other crates, and this repository ships no client files to build a
     /// fixture from.
     ///
-    /// Nothing in the engine calls it, and nothing should — what stands on the
-    /// ground is the client's own file talking, and a static written in at
-    /// runtime is one end of the wire disagreeing with the other about a tile
-    /// they both drew.
+    /// **The engine's one other caller is [`crate::patch`]**, and the
+    /// difference is the whole point of that module: a static written in at
+    /// runtime by a *system* is one end of the wire disagreeing with the other
+    /// about a tile they both drew, and a static written in by a published
+    /// patch is a change to the world that both ends can be told about.
     ///
     /// A static outside the map is dropped: there is no block to keep it in, and
-    /// [`Map::statics_at`] could never return it.
+    /// [`Map::statics_at`] could never return it. The patch applier checks
+    /// first, for the reason [`Map::set_land`] gives.
     ///
     /// It goes in after everything already standing on its own tile — where a
     /// push used to put it — which is what keeps the sort an invariant of the
-    /// type rather than of the loader.
+    /// type rather than of the loader, and what makes the ordinal of a
+    /// just-added static knowable without a search.
     pub fn place_static(&mut self, item: StaticItem) {
         let Some(block) = self.block_index(item.x, item.y) else {
             return;
@@ -298,6 +302,28 @@ impl Map {
         let slot = &mut self.statics[block.get() as usize];
         let at = slot.partition_point(|had| tile_key(had) <= tile_key(&item));
         slot.insert(at, item);
+    }
+
+    /// Take the `nth` static standing on a tile off the map, and hand it back.
+    ///
+    /// [`Map::place_static`]'s inverse, and [`crate::patch`]'s alone: `nth`
+    /// counts in [`Map::statics_at`]'s order, which is what makes it the
+    /// identity that module's header argues a static needs. `None` for a tile
+    /// off the map or an `nth` past what stands there — and in both cases
+    /// nothing was removed.
+    ///
+    /// A removal shifts the ordinals of everything after it on the tile. That
+    /// is not a defect to be designed away: an ordinal is only ever read
+    /// against a stated revision, and taking a static out is what produces the
+    /// next one.
+    pub fn remove_static(&mut self, x: u16, y: u16, nth: usize) -> Option<StaticItem> {
+        let block = self.block_index(x, y)?;
+        let slot = &mut self.statics[block.get() as usize];
+        // The same two searches [`Map::statics_at`] makes, over the same sorted
+        // run: the first item of the tile, and how many of them there are.
+        let from = slot.partition_point(|item| tile_key(item) < (y, x));
+        let count = slot[from..].partition_point(|item| tile_key(item) == (y, x));
+        (nth < count).then(|| slot.remove(from + nth))
     }
 
     /// Every static standing on a point.

@@ -2538,6 +2538,7 @@ dependencies = [
 name = "openshard-basemap"
 version = "0.0.1"
 dependencies = [
+ "clap",
  "openshard-map",
  "openshard-protocol",
 ]

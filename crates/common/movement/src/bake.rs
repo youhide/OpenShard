@@ -128,18 +128,28 @@ pub fn stamp_of(client_dir: &Path, facet: Facet, revision: MapRevision) -> Resul
 /// map, and what a tile *means* is `tiledata.mul`'s, so a graph built with one
 /// tile table is not valid under another.
 ///
+/// `patches` is the log beside the base set, when there is one — and it is an
+/// input in exactly the same sense the base set is. A world of ours is the base
+/// plus its log, so a graph built before an edit was committed is stale, and a
+/// stamp naming only the base set would say it was fine. The `revision` catches
+/// it too, and both are recorded for the reason the paragraph below gives.
+/// `None` is a world nobody has edited: an absent file is not a zero-length
+/// one, and stamping a file that is not there is not a thing this can do.
+///
 /// This is `docs/map/new_map_representation/plan.md`'s direction D arriving one
 /// caller early. D's answer is that the revision is the whole key and the file
 /// stamps go away; until then the revision is carried *and* the real inputs are
 /// stamped, which is strictly more than either alone.
 pub fn stamp_of_base_set(
     base_set: &Path,
+    patches: Option<&Path>,
     tiledata: &Path,
     facet: Facet,
     revision: MapRevision,
 ) -> Result<Stamp, Error> {
-    let paths = [base_set, tiledata]
+    let paths = [Some(base_set), patches, Some(tiledata)]
         .into_iter()
+        .flatten()
         .map(|path| (file_name_of(path), path.to_owned()))
         .collect::<Vec<_>>();
     stamp_over(facet, revision, paths)

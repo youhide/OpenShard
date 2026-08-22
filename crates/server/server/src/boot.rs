@@ -609,7 +609,15 @@ fn facet_source(
     };
 
     eprintln!("world load: reading facet {facet} from {}", base_set.display());
-    let map = openshard_basemap::read(base_set)?;
+    // The base set and the patch log beside it, in one call — the world is the
+    // pair, and `openshard-navigation-bake` resolves it through the same one so
+    // that the two cannot arrive at different revisions of it.
+    let openshard_basemap::Loaded {
+        snapshot: map,
+        log,
+        patches,
+        ..
+    } = openshard_basemap::load(base_set)?;
     // The file says which facet it is, and the config says which facet it was
     // named for. Two answers to one question is a config that loads Tokuno as
     // Felucca — every coordinate plausible, every place wrong.
@@ -625,8 +633,15 @@ fn facet_source(
     // holds the map, and what a tile *means* is the tile table's. The config
     // refuses a base set without client files for this reason, so the directory
     // here is a real one.
+    if patches != 0 {
+        eprintln!(
+            "world load: {patches} patch(es) applied to facet {facet}; it is at revision {}",
+            map.revision().get()
+        );
+    }
     let stamp = openshard_movement::bake::stamp_of_base_set(
         base_set,
+        log.as_deref(),
         &dir.join("tiledata.mul"),
         facet,
         map.revision(),

@@ -21,13 +21,15 @@
 //! - [`chunk`] — the square the world is stored, cached, invalidated and
 //!   transferred in, cut out of a [`Map`] and assembled back into one.
 //! - [`codec`] — that square as canonical bytes, and bytes back into one.
+//! - [`patch`] — one committed change to a facet, and what publishing it means.
 //!
-//! Bytes are not a file: nothing here opens one, and where a base set lives on
-//! disk is a caller's business. No patches and no publisher yet — see
-//! `docs/map/new_map_representation/plan.md`.
+//! Bytes are not a file: nothing here opens one, and where a base set or a
+//! patch log lives on disk is a caller's business — `openshard_basemap` is the
+//! crate that answers that. See `docs/map/new_map_representation/plan.md`.
 
 pub mod chunk;
 pub mod codec;
 pub mod grid;
 pub mod map;
+pub mod patch;
 pub mod snapshot;

@@ -86,7 +86,15 @@ fn source(
                 "navigation bake: loading facet {facet} from {}",
                 base_set.display()
             );
-            let map = openshard_basemap::read(base_set)?;
+            // The base set *and* the log beside it, through the one call the
+            // shard resolves a world with: a graph built over the base alone
+            // would be a graph of a world the shard is not running.
+            let openshard_basemap::Loaded {
+                snapshot: map,
+                log,
+                patches,
+                ..
+            } = openshard_basemap::load(base_set)?;
             if map.facet() != facet {
                 return Err(format!(
                     "{} is facet {}, and --facet says {facet}",
@@ -95,7 +103,13 @@ fn source(
                 )
                 .into());
             }
-            let stamp = bake::stamp_of_base_set(base_set, &tiledata, facet, map.revision())?;
+            if patches != 0 {
+                eprintln!(
+                    "navigation bake: {patches} patch(es) applied; facet {facet} is at revision {}",
+                    map.revision().get()
+                );
+            }
+            let stamp = bake::stamp_of_base_set(base_set, log.as_deref(), &tiledata, facet, map.revision())?;
             // Beside the base set: the world is what the graph is derived from,
             // and an artifact in the install directory would be found by a
             // shard reading the install and refused for reasons it cannot see.

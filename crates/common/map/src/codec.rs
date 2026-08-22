@@ -1,17 +1,24 @@
-//! One chunk as bytes, and bytes back into one chunk.
+//! The world as bytes: a square of it, and one change to it.
+//!
+//! Two records, and they are the two durable things the map has — a [`Chunk`],
+//! which is what a base set is made of, and a [`Patch`], which is what a log of
+//! edits is made of. They share this module because they share the property
+//! below, and nothing else: neither knows what a file is.
 //!
 //! **Canonical**: one world encodes to exactly one byte string, and a chunk
 //! decoded and re-encoded is the same bytes. That is what lets an import be
 //! checked by comparing blobs rather than by walking two worlds and asking
 //! whether they agree, and it is what makes a content hash mean anything at
-//! all.
+//! all. A patch is canonical for the second reason: a record in a log is
+//! checksummed, and a checksum over an encoding with slack in it checks
+//! nothing.
 //!
 //! Canonical rests on one property of the layer below: a chunk's statics are in
 //! the `(y, x)` stable order [`Map::from_parts`](crate::map::Map::from_parts) imposes, so re-cutting a chunk
 //! out of an assembled facet reproduces the order it went in with. Nothing here
 //! sorts — if this module had its own sort there would be two of them.
 //!
-//! # The record
+//! # The chunk record
 //!
 //! ```text
 //! header, 24 bytes
@@ -57,6 +64,40 @@
 //! - **A hash.** Direction E is what needs a blob verified against its name.
 //!   The header has a version byte, and a hash is a length-prefixed trailer
 //!   when there is something to check it against.
+//!
+//! # The patch record
+//!
+//! ```text
+//! header, 24 bytes plus the author
+//!   0  4  magic "OSMP"
+//!   4  1  version
+//!   5  1  facet
+//!   6  8  parent revision    u64
+//!  14  8  committed at       u64, seconds since the Unix epoch
+//!  22  2  author length      u16
+//!  24  .. author, UTF-8
+//!      4  operation count    u32
+//! operations, in the order they were committed, each tagged:
+//!   1 set land       x u16, y u16, was (tile u16, height i8), now (the same)
+//!   2 add static     graphic u16, x u16, y u16, height i8, hue u16
+//!   3 remove static  which u16, then a static as above
+//! ```
+//!
+//! **A patch has no length in its header, and a chunk does.** A chunk is one
+//! shape described by six fields, so its length is arithmetic; a patch is a
+//! list, so the only honest way to know where it ends is to read it. What
+//! bounds the read is a [`Cursor`] that refuses to run off the end, and what
+//! bounds it *before* the read is the length the log frames each record with —
+//! see `openshard_basemap`.
+//!
+//! **A static in a patch carries absolute coordinates** where one in a chunk
+//! carries three bits packed against its block. A chunk says which block an
+//! item is in by where the item lies in the file, and a patch has no such
+//! place to say it from.
+//!
+//! **The revision a patch produces is not in the record**: it is the parent's
+//! successor, and [`Patch::revision`] derives it. A record carrying both could
+//! disagree with itself.
 
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Facet;
@@ -64,6 +105,7 @@ use openshard_protocol::world::Facet;
 use crate::chunk::{BLOCKS_PER_CHUNK, Chunk, ChunkCoord, ChunkKey};
 use crate::grid::BlockExtent;
 use crate::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell, LandTile, StaticItem};
+use crate::patch::{Patch, PatchAuthor, PatchOp, PatchTime, StaticId};
 use crate::snapshot::MapRevision;
 
 /// What every chunk starts with, so a blob that is not one says so in four
@@ -367,6 +409,284 @@ const fn unpack_position(packed: u8) -> Option<(u8, u8)> {
     }
 }
 
+/// What every patch record starts with. One letter from the chunk's magic, so
+/// that a blob of the wrong kind is refused by the magic rather than by
+/// something further in that happens to disagree.
+const PATCH_MAGIC: [u8; 4] = *b"OSMP";
+
+/// The patch encoding this module writes and the only one it reads.
+const PATCH_VERSION: u8 = 1;
+
+/// Bytes a patch record takes before its ops, the author itself aside: magic,
+/// version, facet, parent, time, the author's length, and the op count after
+/// the author. So the first op begins at this plus the author's length.
+const PATCH_HEADER_BYTES: usize = 28;
+
+/// Bytes an encoded [`StaticItem`] takes: graphic, x, y, height, hue.
+const PATCH_STATIC_BYTES: usize = 9;
+
+/// What an op's leading byte says it is.
+///
+/// Written out rather than derived from the enum's order: the discriminants of
+/// a Rust enum are free to move when a variant is added in the middle, and
+/// these are on disk.
+const OP_SET_LAND: u8 = 1;
+const OP_ADD_STATIC: u8 = 2;
+const OP_REMOVE_STATIC: u8 = 3;
+
+/// A blob is not a patch.
+///
+/// As with [`DecodeError`], there is no variant for a patch that is *valid* and
+/// wrong: whether it applies to the world in hand is
+/// [`MapSnapshot::publish`](crate::snapshot::MapSnapshot::publish)'s question,
+/// and it is a different one.
+#[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PatchDecodeError {
+    /// The blob does not start with the magic.
+    NotAPatch,
+    /// The blob is a patch of an encoding this build does not read.
+    Version {
+        /// What it says it is.
+        found: u8,
+    },
+    /// The blob ends before something it describes does.
+    Truncated {
+        /// How many bytes were wanted by the time it ran out.
+        wanted: usize,
+        /// How many there are.
+        found: usize,
+    },
+    /// The blob is longer than the patch it describes.
+    ///
+    /// Refused rather than ignored, for [`DecodeError::Trailing`]'s reason: a
+    /// canonical encoding has exactly one byte string per patch, and a tail
+    /// nothing reads is a place to hide one.
+    Trailing {
+        /// How long the patch is.
+        wanted: usize,
+        /// How long the blob is.
+        found: usize,
+    },
+    /// The author's name is not UTF-8.
+    BadAuthor,
+    /// An op's leading byte is not an operation this build knows.
+    BadOp {
+        /// What it says.
+        tag: u8,
+    },
+}
+
+impl std::fmt::Display for PatchDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotAPatch => write!(f, "not a patch"),
+            Self::Version { found } => write!(
+                f,
+                "a patch of version {found}, and this build reads {PATCH_VERSION}"
+            ),
+            Self::Truncated { wanted, found } => {
+                write!(
+                    f,
+                    "a patch wanting at least {wanted} bytes, and there are {found}"
+                )
+            }
+            Self::Trailing { wanted, found } => {
+                write!(
+                    f,
+                    "a patch of {wanted} bytes with {} bytes after it",
+                    found - wanted
+                )
+            }
+            Self::BadAuthor => write!(f, "a patch whose author is not UTF-8"),
+            Self::BadOp { tag } => write!(f, "a patch with an operation of kind {tag}"),
+        }
+    }
+}
+
+impl std::error::Error for PatchDecodeError {}
+
+/// One patch as its canonical bytes.
+///
+/// The same properties the chunk encoding has, and for the same reasons: one
+/// patch encodes to exactly one byte string, so a log can be compared as bytes
+/// and a record can be checksummed. Ops keep the order they were committed in —
+/// [`crate::patch`]'s header is why that order is load-bearing.
+#[must_use]
+pub fn encode_patch(patch: &Patch) -> Vec<u8> {
+    let author = patch.author().0.as_bytes();
+    let mut out = Vec::with_capacity(PATCH_HEADER_BYTES + author.len() + patch.ops().len() * 12);
+
+    out.extend_from_slice(&PATCH_MAGIC);
+    out.push(PATCH_VERSION);
+    out.push(patch.facet().0);
+    out.extend_from_slice(&patch.parent().get().to_le_bytes());
+    out.extend_from_slice(&patch.at().0.to_le_bytes());
+    // A `u16` and no cap on top of it: an author is a name a person typed, and
+    // a length the encoder could not write is a patch that cannot be recorded.
+    out.extend_from_slice(&(author.len() as u16).to_le_bytes());
+    out.extend_from_slice(author);
+    out.extend_from_slice(&(patch.ops().len() as u32).to_le_bytes());
+
+    for op in patch.ops() {
+        match *op {
+            PatchOp::SetLand { x, y, was, now } => {
+                out.push(OP_SET_LAND);
+                out.extend_from_slice(&x.to_le_bytes());
+                out.extend_from_slice(&y.to_le_bytes());
+                encode_cell(&mut out, was);
+                encode_cell(&mut out, now);
+            }
+            PatchOp::AddStatic { item } => {
+                out.push(OP_ADD_STATIC);
+                encode_static(&mut out, item);
+            }
+            PatchOp::RemoveStatic { which, was } => {
+                out.push(OP_REMOVE_STATIC);
+                out.extend_from_slice(&which.0.to_le_bytes());
+                encode_static(&mut out, was);
+            }
+        }
+    }
+    out
+}
+
+/// A cell, as an op carries it: tile then height, the same two fields and the
+/// same order the land array uses.
+fn encode_cell(out: &mut Vec<u8>, cell: LandCell) {
+    out.extend_from_slice(&cell.tile.0.to_le_bytes());
+    out.push(cell.z as u8);
+}
+
+/// A static, as an op carries it.
+///
+/// **Absolute coordinates, unlike the chunk encoding's packed three bits.** A
+/// chunk says which block an item is in by where the item sits in the file; a
+/// patch has no block to be inside, so the tile has to be in the record.
+fn encode_static(out: &mut Vec<u8>, item: StaticItem) {
+    out.extend_from_slice(&item.tile.0.to_le_bytes());
+    out.extend_from_slice(&item.x.to_le_bytes());
+    out.extend_from_slice(&item.y.to_le_bytes());
+    out.push(item.z as u8);
+    out.extend_from_slice(&item.hue.0.to_le_bytes());
+}
+
+/// Bytes back into one patch.
+///
+/// # Errors
+///
+/// [`PatchDecodeError`], one variant per way a blob fails to be a patch.
+pub fn decode_patch(bytes: &[u8]) -> Result<Patch, PatchDecodeError> {
+    if bytes.len() < 6 || bytes[..4] != PATCH_MAGIC {
+        return Err(PatchDecodeError::NotAPatch);
+    }
+    if bytes[4] != PATCH_VERSION {
+        return Err(PatchDecodeError::Version { found: bytes[4] });
+    }
+
+    let mut at = Cursor::new(bytes, 5);
+    let facet = Facet(at.byte()?);
+    let parent = MapRevision::decoded(at.u64()?);
+    let committed = PatchTime(at.u64()?);
+    let named = at.u16()? as usize;
+    let author = at.take(named)?;
+    let author = PatchAuthor(
+        std::str::from_utf8(author)
+            .map_err(|_| PatchDecodeError::BadAuthor)?
+            .to_owned(),
+    );
+
+    let count = at.u32()? as usize;
+    let mut ops = Vec::with_capacity(count.min(1024));
+    for _ in 0..count {
+        ops.push(match at.byte()? {
+            OP_SET_LAND => PatchOp::SetLand {
+                x: at.u16()?,
+                y: at.u16()?,
+                was: at.cell()?,
+                now: at.cell()?,
+            },
+            OP_ADD_STATIC => PatchOp::AddStatic { item: at.item()? },
+            OP_REMOVE_STATIC => PatchOp::RemoveStatic {
+                which: StaticId(at.u16()?),
+                was: at.item()?,
+            },
+            tag => return Err(PatchDecodeError::BadOp { tag }),
+        });
+    }
+    if at.read != bytes.len() {
+        return Err(PatchDecodeError::Trailing {
+            wanted: at.read,
+            found: bytes.len(),
+        });
+    }
+    Ok(Patch::new(facet, parent, author, committed, ops))
+}
+
+/// A position in a blob, and the only place a patch record is sliced.
+///
+/// The chunk decoder can check its whole length up front, because a chunk's
+/// header says how big the chunk is. A patch record's length depends on its
+/// ops, so the check has to travel with the read — and one cursor that refuses
+/// to run off the end is that check written once instead of at every field.
+struct Cursor<'a> {
+    bytes: &'a [u8],
+    read: usize,
+}
+
+impl<'a> Cursor<'a> {
+    const fn new(bytes: &'a [u8], from: usize) -> Self {
+        Self { bytes, read: from }
+    }
+
+    fn take(&mut self, count: usize) -> Result<&'a [u8], PatchDecodeError> {
+        let wanted = self.read + count;
+        let taken = self
+            .bytes
+            .get(self.read..wanted)
+            .ok_or(PatchDecodeError::Truncated {
+                wanted,
+                found: self.bytes.len(),
+            })?;
+        self.read = wanted;
+        Ok(taken)
+    }
+
+    fn byte(&mut self) -> Result<u8, PatchDecodeError> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn u16(&mut self) -> Result<u16, PatchDecodeError> {
+        Ok(u16::from_le_bytes(self.take(2)?.try_into().expect("two bytes")))
+    }
+
+    fn u32(&mut self) -> Result<u32, PatchDecodeError> {
+        Ok(u32::from_le_bytes(self.take(4)?.try_into().expect("four bytes")))
+    }
+
+    fn u64(&mut self) -> Result<u64, PatchDecodeError> {
+        Ok(u64::from_le_bytes(self.take(8)?.try_into().expect("eight bytes")))
+    }
+
+    fn cell(&mut self) -> Result<LandCell, PatchDecodeError> {
+        Ok(LandCell {
+            tile: LandTile(self.u16()?),
+            z: self.byte()? as i8,
+        })
+    }
+
+    fn item(&mut self) -> Result<StaticItem, PatchDecodeError> {
+        let bytes = self.take(PATCH_STATIC_BYTES)?;
+        Ok(StaticItem {
+            tile: Graphic(u16::from_le_bytes([bytes[0], bytes[1]])),
+            x: u16::from_le_bytes([bytes[2], bytes[3]]),
+            y: u16::from_le_bytes([bytes[4], bytes[5]]),
+            z: bytes[6] as i8,
+            hue: Hue(u16::from_le_bytes([bytes[7], bytes[8]])),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -578,5 +898,100 @@ mod tests {
         }
         // And a world coordinate packs as its position within its own block.
         assert_eq!(pack_position(4095, 4094), pack_position(7, 6));
+    }
+
+    /// One patch of every kind of op, through its bytes and back.
+    fn a_patch_of_everything() -> Patch {
+        let cell = |tile, z| LandCell {
+            tile: LandTile(tile),
+            z,
+        };
+        let rock = StaticItem {
+            tile: Graphic(0x1234),
+            x: 4_321,
+            y: 60_000,
+            z: -17,
+            hue: Hue(0x0f0f),
+        };
+        Patch::new(
+            Facet(3),
+            MapRevision::decoded(9),
+            PatchAuthor("Лорд Бритиш".into()),
+            PatchTime(1_755_000_000),
+            vec![
+                PatchOp::SetLand {
+                    x: 1_000,
+                    y: 2_000,
+                    was: cell(3, -5),
+                    now: cell(0x8000, 127),
+                },
+                PatchOp::AddStatic { item: rock },
+                PatchOp::RemoveStatic {
+                    which: StaticId(700),
+                    was: rock,
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn a_patch_round_trips_through_its_bytes() {
+        let patch = a_patch_of_everything();
+        let blob = encode_patch(&patch);
+        let read = decode_patch(&blob).expect("a patch we just wrote");
+        assert_eq!(read, patch);
+        // Canonical: the same patch, and therefore the same bytes.
+        assert_eq!(encode_patch(&read), blob);
+        // And the derived revision survives, because the parent does.
+        assert_eq!(read.revision(), MapRevision::decoded(10));
+    }
+
+    /// Every prefix of a patch is refused, and none of them panics. The record
+    /// has no length in its header, so this is the whole of the bounds check.
+    #[test]
+    fn a_patch_cut_short_anywhere_is_refused() {
+        let blob = encode_patch(&a_patch_of_everything());
+        for cut in 0..blob.len() {
+            let short = &blob[..cut];
+            assert!(
+                decode_patch(short).is_err(),
+                "{cut} bytes of a patch decoded as a whole one"
+            );
+        }
+    }
+
+    /// A tail nothing reads is a place to hide a second patch, so it is refused
+    /// rather than ignored — [`DecodeError::Trailing`]'s argument, one record up.
+    #[test]
+    fn a_patch_with_a_tail_is_refused() {
+        let mut blob = encode_patch(&a_patch_of_everything());
+        let wanted = blob.len();
+        blob.push(0);
+        assert_eq!(
+            decode_patch(&blob),
+            Err(PatchDecodeError::Trailing {
+                wanted,
+                found: wanted + 1
+            })
+        );
+    }
+
+    #[test]
+    fn a_blob_that_is_not_a_patch_says_so_rather_than_guessing() {
+        assert_eq!(decode_patch(b"OSMC"), Err(PatchDecodeError::NotAPatch));
+        assert_eq!(decode_patch(&[]), Err(PatchDecodeError::NotAPatch));
+
+        let mut chunk_shaped = encode_patch(&a_patch_of_everything());
+        chunk_shaped[4] = 9;
+        assert_eq!(
+            decode_patch(&chunk_shaped),
+            Err(PatchDecodeError::Version { found: 9 })
+        );
+
+        let mut bad_op = encode_patch(&a_patch_of_everything());
+        // The first op's tag, straight after the header and the author.
+        let tag = PATCH_HEADER_BYTES + "Лорд Бритиш".len();
+        bad_op[tag] = 200;
+        assert_eq!(decode_patch(&bad_op), Err(PatchDecodeError::BadOp { tag: 200 }));
     }
 }

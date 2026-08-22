@@ -2,12 +2,17 @@
 //!
 //! One process loads a facet once — through an importer, which is the only kind
 //! of thing that can mint revision 1 — and everything downstream borrows what it
-//! loaded. See `docs/map/new_map_representation/snapshot.md` for why a revision
-//! that cannot yet change is still worth carrying.
+//! loaded. See `docs/map/new_map_representation/snapshot.md` for how this began
+//! as a revision that could not yet change.
+//!
+//! It can now: [`MapSnapshot::publish`] applies a [`Patch`] and moves the facet
+//! to the revision that patch produces. What keeps a reader from ever seeing
+//! half of one is the `&mut` on that call, and the doc there is the argument.
 
 use openshard_protocol::world::Facet;
 
 use crate::map::Map;
+use crate::patch::{Patch, PatchError};
 
 /// Which published version of a facet a reader holds.
 ///
@@ -30,6 +35,25 @@ impl MapRevision {
     #[must_use]
     pub const fn decoded(value: u64) -> Self {
         Self(value)
+    }
+
+    /// The revision that applying one patch to this one produces.
+    ///
+    /// The third way a revision comes into being, and the only one that is not
+    /// a *reading*: a change to the world is what mints a number here, which is
+    /// why [`crate::patch::Patch`] stores a parent and derives this rather than
+    /// carrying both and risking disagreeing with itself.
+    ///
+    /// # Panics
+    ///
+    /// After eighteen quintillion publishes.
+    #[must_use]
+    pub const fn after(self) -> Self {
+        Self(
+            self.0
+                .checked_add(1)
+                .expect("a facet published fewer than 2^64 times"),
+        )
     }
 
     /// The value to write into artifact metadata and diagnostics.
@@ -116,6 +140,44 @@ impl MapSnapshot {
     #[must_use]
     pub fn map(&self) -> &Map {
         &self.map
+    }
+
+    /// Apply a committed patch and move to the revision it produces.
+    ///
+    /// **The `&mut` is the atomicity.** `mechanics.md` asks that a new revision
+    /// become visible between ticks and never during one, and that no reader
+    /// ever see half a change. Both are the borrow checker's here: every reader
+    /// holds a `&Map` borrowed from this snapshot, and a `&mut self` cannot be
+    /// taken while one of them is alive. There is no window to publish into,
+    /// rather than a rule to remember.
+    ///
+    /// It changes only the tiles the ops name — no chunk is re-cut, nothing is
+    /// re-hashed and no facet is rebuilt, which is `plan.md`'s "a publish never
+    /// rebuilds a facet" taken literally. What *is* invalidated by it is every
+    /// bake over [`crate::patch::Patch::touched_chunks`], and that is direction
+    /// D's to notice.
+    ///
+    /// # Errors
+    ///
+    /// [`PatchError`] — the patch is for another facet, was made against a
+    /// revision this snapshot has left, or disagrees with the world about what
+    /// it is changing. On any of them the world is exactly as it was.
+    pub fn publish(&mut self, patch: &Patch) -> Result<MapRevision, PatchError> {
+        if patch.facet() != self.facet {
+            return Err(PatchError::WrongFacet {
+                wanted: self.facet,
+                found: patch.facet(),
+            });
+        }
+        if patch.parent() != self.revision {
+            return Err(PatchError::Conflict {
+                holding: self.revision,
+                parent: patch.parent(),
+            });
+        }
+        crate::patch::apply(&mut self.map, patch.ops())?;
+        self.revision = patch.revision();
+        Ok(self.revision)
     }
 }
 

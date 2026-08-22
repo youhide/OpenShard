@@ -13,9 +13,14 @@
 //! # Base, in `mechanics.md`'s sense
 //!
 //! The world as imported, immutable. One bake of a UO facet, or one generated
-//! world. It never changes, which is what makes a change describable — the
-//! patches that will lie over it are direction C's, and nothing in this file
-//! format has to move to make room for them.
+//! world. It never changes, which is what makes a change describable.
+//!
+//! The changes are in [`patches`], the append-only log beside it, and nothing
+//! in the base set's own format moved to make room for them. **[`load`] is the
+//! pair**: a base set plus its log, resolved to the revision the last patch
+//! produced. It is the one door to a world of ours, because a shard and an
+//! offline bake that resolved a facet differently would stamp a graph against a
+//! world nobody built.
 //!
 //! # The file
 //!
@@ -52,8 +57,11 @@ use std::path::{Path, PathBuf};
 use openshard_map::chunk::{self, AssemblyError, Chunk};
 use openshard_map::codec::{self, DecodeError};
 use openshard_map::grid::BlockExtent;
+use openshard_map::patch::PatchError;
 use openshard_map::snapshot::{MapRevision, MapSnapshot};
 use openshard_protocol::world::Facet;
+
+pub mod patches;
 
 /// What every base set starts with.
 const MAGIC: [u8; 4] = *b"OSBS";
@@ -152,6 +160,24 @@ pub enum BaseError {
         /// Why.
         source: AssemblyError,
     },
+    /// The patch log beside the base set could not be read.
+    Log {
+        /// Why.
+        source: patches::LogError,
+    },
+    /// A patch in the log does not apply to the world the ones before it made.
+    ///
+    /// The log is ordered, so this is a *chain* that does not hold: a record
+    /// out of order, a record made against a world that was never published, or
+    /// a log that belongs to some other base set the header check let through.
+    NotApplied {
+        /// Which log.
+        path: PathBuf,
+        /// Which record of it, counted from zero.
+        at: usize,
+        /// Why the patch was refused.
+        source: PatchError,
+    },
 }
 
 impl std::fmt::Display for BaseError {
@@ -190,6 +216,10 @@ impl std::fmt::Display for BaseError {
             Self::Assembly { path, source } => {
                 write!(f, "{}: {source}", path.display())
             }
+            Self::Log { source } => write!(f, "{source}"),
+            Self::NotApplied { path, at, source } => {
+                write!(f, "patch {at} of {} does not apply: {source}", path.display())
+            }
         }
     }
 }
@@ -200,6 +230,8 @@ impl std::error::Error for BaseError {
             Self::Read { source, .. } | Self::Write { source, .. } => Some(source),
             Self::Chunk { source, .. } => Some(source),
             Self::Assembly { source, .. } => Some(source),
+            Self::Log { source } => Some(source),
+            Self::NotApplied { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -369,4 +401,73 @@ pub fn read(path: impl AsRef<Path>) -> Result<MapSnapshot, BaseError> {
         source,
     })?;
     Ok(MapSnapshot::restored(facet, revision, map))
+}
+
+/// A facet as it stands: the base set, and every patch committed over it.
+///
+/// The three fields travel together because a caller that has one wants all
+/// three. `openshard-server`'s boot and `openshard-navigation-bake` both stamp
+/// what they built over, and a stamp that named the base set alone would
+/// validate a graph against a world that has been edited since — the same trap
+/// `openshard_movement::bake::stamp_of_base_set` exists to keep a base-set
+/// world out of.
+#[derive(Debug)]
+pub struct Loaded {
+    /// The facet, at the revision the last patch produced — or at the base
+    /// set's own, if nothing has been committed.
+    pub snapshot: MapSnapshot,
+    /// The revision the base set itself is at, before any patch.
+    ///
+    /// What the log's header says it lies over, and what a caller appending a
+    /// patch has to name. Carried rather than derived by counting the patches
+    /// back off the snapshot's revision: that arithmetic is only right while
+    /// one patch means one revision, and it is not a property worth depending
+    /// on from outside.
+    pub base: MapRevision,
+    /// The log the patches came out of, if there is one on disk. `None` is a
+    /// world nobody has edited, and it is not the same as an empty log: an
+    /// empty log is a file, and a file is an input to stamp.
+    pub log: Option<PathBuf>,
+    /// How many patches were applied.
+    pub patches: usize,
+}
+
+/// Read a base set and everything committed over it.
+///
+/// **The one door to a world of ours**, and the reason it is one: the shard and
+/// the navigation bake must resolve a facet identically, down to the revision,
+/// or a graph is stamped against a world it was not built from. Two call sites
+/// spelling out read-then-apply would be two chances to disagree.
+///
+/// The patch log is beside the base set — [`patches::log_path`] is the rule and
+/// its module header is the argument. A facet with no log comes back at the
+/// base set's own revision.
+///
+/// # Errors
+///
+/// [`BaseError`] — the base set is not one, the log is not one, or a patch in
+/// the log does not apply to the world the patches before it made.
+pub fn load(base_set: impl AsRef<Path>) -> Result<Loaded, BaseError> {
+    let base_set = base_set.as_ref();
+    let mut snapshot = read(base_set)?;
+    let base = snapshot.revision();
+
+    let path = patches::log_path(base_set);
+    let log = path.exists().then(|| path.clone());
+    let committed =
+        patches::read(&path, snapshot.facet(), base).map_err(|source| BaseError::Log { source })?;
+
+    for (at, patch) in committed.iter().enumerate() {
+        snapshot.publish(patch).map_err(|source| BaseError::NotApplied {
+            path: path.clone(),
+            at,
+            source,
+        })?;
+    }
+    Ok(Loaded {
+        snapshot,
+        base,
+        log,
+        patches: committed.len(),
+    })
 }
