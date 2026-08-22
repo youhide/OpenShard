@@ -220,7 +220,7 @@ Both types named and imported. What happens to the other five:
 | `Cluttered` / `LiveTerrain` | one `Overlay` in `common/movement`; both ends **build** it instead of implementing a trait |
 | `Doors` | an argument to the search — the client's enum, not the server's bool |
 | `InRegion` | an `Option<Region>` bound the search is told once |
-| `CachedTerrain` | moves *inside* `search`, which already owns per-query maps for `came_from`; its lifetime was already exactly one query |
+| `CachedTerrain` | **deleted.** An earlier draft moved it *inside* `search`, on the reasoning that its lifetime was already one query. [0 measured it](#-cachedterrain-costs-about-5-and-buys-nothing): 50.6% hit rate, ~5% slower than the calls it memoises |
 | `OpenWorld` | an empty overlay over no map — `Option<MapTerrain<'_>>`, which `LiveTerrain` carries since D |
 
 ### `MapTerrain` is three borrows, and both ends already hold them ✅
@@ -266,18 +266,23 @@ swimmer yet; no longer unusable, which was the defect.
 
 ## What has no incoming edge
 
-The collapse is a graph, not a sequence. A, B, C and D are done, and **E is the
-only node left with an unmet edge — the oracle**:
+The collapse is a graph, not a sequence. **0, A, B, C and D are done, and every
+edge into E is met** — it is the last node of the seam and nothing is waiting on
+anything:
 
 ```
  A. Scene grows what the doubles need ✅ ─┐
                                           ├─> C. the doubles become Scenes ✅ ─┐
  B. the table leaves the trait ✅ ────────┴────────────────────────────────────┼─> D. FacetState holds data ✅
                                                                                │      MapTerrain is borrows
- 0. the facet-0 oracle ────────────────────────────────────────────────────────┴─> E. Overlay, and the search
+ 0. the facet-0 oracle ✅ ─────────────────────────────────────────────────────┴─> E. Overlay, and the search
                                                                                       takes explicit types
- F. the coarse graph nobody reads — no edges at all, in or out
+ F. the coarse graph nobody reads ─── needs the one-storey defect 0 found
 ```
+
+F had no edges at all when this was written. It has one now, and 0 is what put
+it there: the graph the server would be wired to
+[disagrees with its own map on raised ground](#-the-coarse-graph-is-a-one-storey-model-of-a-two-storey-world).
 
 `Box<dyn Terrain>` **was** held up in `FacetState` by tests rather than by
 production: fifteen `= Some(Box::new(...))` substitutions across four files when
@@ -639,9 +644,215 @@ one `--ignored` test.
 the remaining sites names what it takes, and the `Arc` around the tile table is
 gone with the box that needed it~~ — all three.
 
+## 0 — the oracle ✅
+
+**Done.** Both probes have a committed facet-0 run, and the numbers are below.
+They were asked two questions — *what does a search cost* and *is the hierarchy
+worth it* — and answered a third nobody asked: **the coarse graph is a
+one-storey model of a two-storey world**, and from a raised place it refuses
+routes to ground a body can walk to.
+
+Neither probe could answer as it stood. `map_path_probe` reported a mean and a
+maximum over one pass, with no node counts and no classes; `coarse_bench` had no
+map in it at all — it was a 1024×1024 open plain, which is the one world where a
+coarse graph can only lose. What both became is [below](#what-the-probes-had-to-become).
+
+### What one search costs
+
+Three origins on Felucca, each a 193×193 square of destinations around it —
+37,248 per sweep, every tile in reach asked for as a destination, which is what
+click-to-walk actually does. Each search is repeated three times and the fastest
+kept, and the bare and cached readings of one destination are taken back to
+back. **Node counts came back bit-identical between runs; wall clock did not**,
+which is why the timings here are minima and why the nodes are the currency to
+argue in.
+
+| origin | | arrived @400 | arrived @600 | p50 @600 | p95 @600 | worst @600 |
+|---|---|---|---|---|---|---|
+| (1363, 1600, **30**) | Britain, the castle plateau | 4,036 (10.8%) | 4,436 (11.9%) | 0.793 ms | 1.011 ms | 4.790 ms |
+| (1434, 1699, 2) | Britain, the bank — a dense street | 6,138 (16.5%) | 7,389 (19.8%) | 0.851 ms | 1.111 ms | 6.374 ms |
+| (1500, 1900, 0) | open country south-east of it | 17,458 (46.9%) | 18,093 (48.6%) | 0.570 ms | 1.067 ms | 6.482 ms |
+
+**The budget is what says no, not the map.** Four destinations in five are
+refused from a town street and one in two from open ground, and every one of
+those refusals is a `Budget` exit — the open list still had somewhere to go.
+`Exhausted` — the map itself running out — does not appear once in 111,744
+destinations. And the budget buys badly: +50% nodes is **+9.9%** more arrivals
+at the castle, +20.4% at the bank, **+3.6%** in the country. Half again as much
+searching, for a twentieth more answers on open ground.
+
+Per class, at budget 600 from the bank (`n`, p50 ms, nodes p50/p95):
+
+| class | n | p50 | nodes p50 | nodes p95 |
+|---|---|---|---|---|
+| `goal/near` (≤8 tiles) | 271 | 0.006 ms | 7 | 22 |
+| `goal/region` (≤32) | 2,504 | 0.136 ms | 111 | 453 |
+| `goal/far` (>32) | 4,614 | 0.230 ms | 165 | 558 |
+| `budget/near` | 17 | 0.832 ms | 601 | 601 |
+| `budget/region` | 1,432 | 0.819 ms | 601 | 601 |
+| `budget/far` | 28,410 | 0.888 ms | 601 | 601 |
+
+**A route that arrives is cheap and a refusal is not.** The whole cost of
+pathfinding on this shard is the refusals: an arriving route within one
+navigation region costs 111 nodes and 0.14 ms, and every refusal costs the
+budget outright. `budget/near` is the click-on-a-wall case — a destination
+eight tiles away whose own tile nothing stands on — and it costs the same 601
+nodes as a route across the map, because A\* cannot know the goal is unstandable
+until it has looked everywhere else.
+
+**`find_path_toward` is free.** It is the same search read for the other
+question, so the `approach` column is filled for every refusal at no extra cost.
+The old probe re-ran its twenty slowest destinations through it and reported
+that as a separate measurement; it was measuring one search twice.
+
+### 🚩 `CachedTerrain` costs about 5% and buys nothing
+
+The memo table hits **50.6%** of its lookups and is *slower than not having it*,
+on every origin and in every class:
+
+| origin | budget | bare p50 | cached p50 | |
+|---|---|---|---|---|
+| castle | 400 | 0.509 ms | 0.534 ms | +4.9% |
+| castle | 600 | 0.793 ms | 0.821 ms | +3.5% |
+| bank | 400 | 0.541 ms | 0.548 ms | +1.3% |
+| bank | 600 | 0.851 ms | 0.847 ms | −0.5% |
+| country | 400 | 0.360 ms | 0.402 ms | +11.7% |
+| country | 600 | 0.570 ms | 0.677 ms | +18.8% |
+
+Half of every search's `can_step` calls are answered from the table, and the
+answer still arrives no sooner. What that measures is that
+`MapTerrain::can_step` is **cheaper than the `HashMap<Point, Directions>` probe
+that stands in for it** — a map block read and a walk over one tile's statics,
+against a hash of a three-field point and a `RefCell` borrow. The cache was
+written when the terrain behind it was a trait object; a direct call to a
+`Copy` struct is not the thing it was built to avoid.
+
+**This changes E.** [E](#e--one-overlay-and-a-search-that-takes-explicit-types)
+says `CachedTerrain` *moves inside* `search`, on the reasoning that its lifetime
+was already one query. Its lifetime is not the finding — its **cost** is. The
+measurement says delete it, and the only reason to keep the type at all is the
+`stats()` a probe reads. That is one decision E no longer has to take by
+reading, and it takes eight hand-written forwarding
+method bodies out of the workspace rather than moving them somewhere better.
+
+### 🚩 The coarse graph is a one-storey model of a two-storey world
+
+`coarse_bench` now loads the shard's own baked artifact — facet 0 is **28,672
+regions, 85,310 nodes, 567,412 edges** — samples eight destinations per distance
+band spread around a ring, and asks both routers for each. It also **floods the
+facet once from the origin** with the real walk (`step_allowed`, carrying the
+height each step resolves to), which is the ground truth every refusal is read
+against: 3,747,934 tiles, 12.8% of the facet. A refusal on a tile the flood
+never reached is the map's answer and the right one. A refusal on a tile the
+flood *did* reach is the router's own.
+
+From open country the router is right about everything:
+
+| band | flat routed | coarse routed | flat p50 | coarse p50 | refused but walkable |
+|---|---|---|---|---|---|
+| 32 | 8/8 | 8/8 | 0.095 ms | 0.634 ms | 0 |
+| 64 | 6/6 | 6/6 | 0.107 ms | 0.674 ms | 0 |
+| 128 | 2/6 | 6/6 | 0.709 ms | 1.117 ms | 0 |
+| 256 | 1/7 | 6/7 | 0.862 ms | 3.509 ms | 0 |
+| 512 | 0/8 | 7/8 | 0.794 ms | 3.102 ms | 0 |
+| 1024 | 0/7 | 5/7 | 0.926 ms | 6.119 ms | 0 |
+
+**That reverses the only routing verdict on record.** The synthetic run in
+[`navigation_graph_efficiency_plan.md`](navigation_graph_efficiency_plan.md) had
+the hierarchy *slower* than flat A\* — 0.974 ms p95 against 0.803 ms — and it was
+right about its own world and wrong about this one. On an open plain flat A\*
+walks a straight line and the corridor adds portals to a route that never needed
+them. On a facet, from 128 tiles out, **flat A\* answers 3 of 28 and the coarse
+router answers 24 of 28**, at three to seven times the cost of a refusal it
+would otherwise hand back. The comparison the old bench made was not a bad
+measurement; it was a measurement of the wrong world, and `--synthetic` keeps it
+so the pair can be read together.
+
+And from the castle plateau the router is wrong about nearly everything:
+
+| origin | z | sampled | walkable | **refused but walkable** |
+|---|---|---|---|---|
+| (1363, 1600) Britain castle | **30** | 45 | 44 | **37** |
+| (1434, 1699) Britain bank | 2 | 45 | 43 | 5 |
+| (1828, 2745) Trinsic | 0 | 42 | 36 | 1 |
+| (600, 2100) Skara Brae | 0 | 35 | 15 | 0 |
+| (1500, 1900) open country | 0 | 42 | 38 | 0 |
+
+From the castle, every destination past 128 tiles is refused and every one of
+them is walkable — 29 out of 29. It is not the town: the bank is a hundred tiles
+away,
+in denser statics, and disagrees with the flood five times out of 45. **It is
+the height**, and the mechanism is in the build rather than in the search:
+
+```rust
+let near = terrain.ground_z(tile).unwrap_or(0);      // navigation.rs, build
+let point = Point::new(x, y, near);
+points[…] = terrain.can_step(point, point);
+```
+
+One sampled height per tile, and that height is
+[`ground_z`](../../crates/common/movement/src/terrain.rs#L541) — which is
+`average_land_z`, **the land alone, with the statics on it ignored**. So the
+graph is a model of the terrain surface and of nothing standing on it: the
+castle's plateau is land at z=30, the city around it is land at z=0, and the
+stairs and bridges a body actually climbs between them are statics the sampler
+never saw. `can_step` refuses a thirty-unit cliff, the flood fill inside
+`component_labels` therefore never leaves the plateau, and the plateau becomes
+an island in a graph whose own map says otherwise.
+
+Every consequence of that follows: a building's upper floor, a bridge over a
+river, a walkway over a street, and any raised courtyard is either absent from
+the graph or — where the land under it happens to be standable too — fused with
+whatever is *underneath* it, which is the same fault pointing the other way.
+It is the same z-blindness [`sight_clear` has](#-blindterrain-stood-for-a-rule-that-cannot-exist),
+in the other subsystem, found the same way.
+
+**This is a precondition for [F](#f--the-graph-nobody-reads), and F is where it
+is filed.** Teaching `step_toward` to use the graph before this is fixed would
+give creatures a router that believes Britain's castle is unreachable.
+
+### What the probes had to become
+
+Six changes, each of which was load-bearing for a number above:
+
+- **[`search_path`](../../crates/common/movement/src/path.rs)** — one public
+  reading of the search `find_path` and `find_path_toward` already run, handing
+  back `explored` and a `SearchExit` alongside the route. The node budgets are
+  argued in nodes, and until this existed nothing outside the crate could count
+  one. The two entry points are unchanged and still drop it; `PathSearch`'s doc
+  says why a body should.
+- **A refusal has five names.** `find_long_path` answered every failure with one
+  string, `unreachable_or_live_refinement`, which is four repairs wearing one
+  word. It is now `OffGraph`, `NoJoin`, `NoCorridor`, `NoLocalRoute` and
+  `PortalsExhausted` — and the whole diagnosis above is one tally of them:
+  **38 `NoCorridor` out of 45**, which ruled out the deadline, live refinement
+  and the endpoint joins in a single run and left the graph itself.
+- **Min-of-three, interleaved.** Two consecutive runs of the same sweep measured
+  40.6 s and 65.5 s of wall clock, worst-case 43 ms against 15 ms, with every
+  node count bit-identical. This workstation cannot be asked for a tail. The
+  minimum of three repeats, with bare and cached taken back to back per
+  destination so drift moves both, brought the worst case to 3.7 ms and made the
+  5% cache result readable at all.
+- **The flood.** Without ground truth every `NoCorridor` is ambiguous, because
+  an island across a bay has no land route and refusing one is correct. 7 s of
+  breadth-first walking is what turns 38 refusals into 37 defects.
+- **A ring is sampled at eight anchors**, one per eighth, with the first
+  standable tile forward from each. Taking the first eight standable tiles
+  instead — which is what it did first — returned eight *adjacent* tiles on one
+  side of the ring: eight readings of very nearly one route, reported as a
+  distribution.
+- **An origin nothing stands on is an error.** (1300, 1624) is such a spot, and
+  the probe reported it as a tidy `arrived=0` over 4,224 destinations in 3 ms
+  rather than as a mistake.
+
+**Done when:** ~~both have a committed facet-0 run with the numbers in this
+document — p50/p95/worst per route class, node counts, `TransitionCacheStats`
+hit rates~~ — all four, above.
+
 ## E — one `Overlay`, and a search that takes explicit types
 
-Needs D, and needs the oracle below.
+**Both its edges are met**: D landed, and [the oracle](#0--the-oracle-) above is
+the measurement it was held behind. It is the last node of the seam.
 
 `Overlay` lands in `common/movement`: blockers by tile with their z-spans and
 their door flag, plus the surfaces a deck adds. `Obstructions` becomes the
@@ -649,7 +860,9 @@ server's *builder* for one, `Clutter` the client's. Neither implements
 anything. `find_path`, `find_path_toward`, `search`, `step_allowed`,
 `corner_open`, `Around::read` and the whole of `navigation.rs` take
 `&MapTerrain` and `&Overlay` by name; `InRegion` becomes a bound;
-`CachedTerrain` moves inside `search`; `OpenWorld` becomes `None`.
+**`CachedTerrain` is deleted rather than moved** — [the oracle measured
+it](#-cachedterrain-costs-about-5-and-buys-nothing) at a 50.6% hit rate and
+about 5% *slower* than the calls it memoises; `OpenWorld` becomes `None`.
 
 Three decisions this node takes, all of them from [the table
 above](#and-they-do-not-compute-the-same-set):
@@ -672,30 +885,10 @@ one test asserts the two ends produce the same blockers for the same items —
 which is the agreement `clutter.rs`'s header claims and nothing currently
 checks.
 
-### Phase 0 — the oracle, which gates E and nothing else
-
-**E is not landable without it, because "faster" is currently unmeasurable.**
-The only routing benchmark on record is synthetic: a 1024×1024 open world where
-the hierarchy is *slower* than flat A\* (0.974 ms p95 against 0.803 ms), in
-[`navigation_graph_efficiency_plan.md`](navigation_graph_efficiency_plan.md).
-No facet-0 measurement exists at all; that document has carried it as
-outstanding since 2026-08-13.
-
-Two probes already exist and neither has a recorded run on a real install:
-[`map_path_probe`](../../crates/common/movement/examples/map_path_probe.rs) and
-[`coarse_bench`](../../crates/common/movement/examples/coarse_bench.rs).
-
-It gates E because E is the only node that touches the A\* edge. A, B, C and D
-change no hot path and are not held behind a client install.
-
-**Done when:** both have a committed facet-0 run with the numbers in this
-document — p50/p95/worst per route class, node counts, `TransitionCacheStats`
-hit rates.
-
 ## F — the graph nobody reads
 
-No edges at all. Unrelated to the seam, found in the same reading, here so it
-is not lost.
+Unrelated to the seam, found in the same reading, here so it is not lost. It had
+no edges at all until [the oracle](#0--the-oracle-) gave it one.
 
 [`boot.rs:615`](../../crates/server/server/src/boot.rs#L615) loads the baked
 navigation graph, validates its dimensions, and stores it in
@@ -713,8 +906,34 @@ Either `step_toward` gains the same fall-back, or `boot.rs` stops paying for
 the load, the validation and the resident graph. What it must not stay is what
 it is: paid for, validated, unread.
 
+### 🚩 And the artifact is wrong before anyone reads it
+
+The oracle measured what wiring it up would buy, and the answer has two halves.
+
+**It is worth wiring up.** On open ground the coarse router answers 24 of 28
+destinations past 128 tiles where flat A\* at budget 600 answers 3 — which is
+exactly the "cannot route across a town" this node is about, in numbers.
+
+**And it must be fixed first.** From a raised origin it refuses 29 of 29
+walkable destinations past 128 tiles, because
+[`NavigationGraph::build` samples one height per tile and that height is the
+land alone](#-the-coarse-graph-is-a-one-storey-model-of-a-two-storey-world).
+Every floor, bridge and stair a static provides is invisible to it, so Britain's
+castle plateau is an island in a graph whose own map says it is not. Teaching
+`step_toward` to plan with that would give creatures a router that is confidently
+wrong about the middle of the largest city on the facet — which is worse than
+the flat search it replaces, because the flat search at least fails honestly.
+
+The fix is a change of sampled height, not of structure: `ground_z` is
+`average_land_z`, and [`stand_z`](../../crates/common/movement/src/terrain.rs#L562)
+is the same question asked of the surfaces. What it costs is that a tile stops
+having *one* answer — a gallery over a street is two places — which is a change
+to what a graph node **is**, and is why this is filed rather than done in
+passing.
+
 **Done when:** either a test walks a creature a distance flat A\* at budget 400
-cannot, or `FacetState.coarse` is gone.
+cannot — over ground the flood says is walkable, from a raised origin as well as
+a flat one — or `FacetState.coarse` is gone.
 
 ## Decisions, taken here
 
@@ -733,6 +952,23 @@ inverting anything: data crosses the boundary, not behaviour.
 **Behaviour becomes data, deliberately.** A mask, a flag, a rectangle and a
 memo table are values. They were types with a vtable because the seam invited
 it, and each one cost a virtual call on every A\* edge for the privilege.
+
+**The memo table is deleted rather than relocated, and a measurement is why.**
+Three drafts of this document moved `CachedTerrain` somewhere better on the
+strength of an argument about its *lifetime*. [0](#-cachedterrain-costs-about-5-and-buys-nothing)
+measured its *cost* instead and found it about 5% slower than the calls it
+stands in for, at a 50.6% hit rate — because a `HashMap<Point, Directions>`
+probe is dearer than `MapTerrain::can_step`, which reads one map block and walks
+one tile's statics. It was written against a trait object and outlived the
+reason for it. **A cache whose hit is slower than its miss is not a cache**, and
+no argument about where it should live was ever going to say so.
+
+**Nodes are the currency, not milliseconds.** Every node count in 0 came back
+bit-identical between runs on the same map; two consecutive runs of one sweep
+disagreed by 60% on wall clock and by 3× on the worst case. So a claim about
+cost is made in nodes and a claim about time is made from a minimum of repeats,
+and a probe that reports only a mean and a maximum — which is what
+`map_path_probe` did — reports mostly the machine.
 
 **The table half is an import, not a design.** Every crate that reaches
 `tiledata` through `Terrain` already compiles `openshard-uofiles`. There is no
@@ -806,13 +1042,30 @@ Small things this document is the only current record of:
   world's object~~ — still dead, no longer parked on the world: a `MapTerrain`
   is per-query now, so the flag is scoped to one asker. See
   [D](#swimming-is-an-argument-now-because-the-thing-it-sits-on-is-the-query).
-- **`boat_step_cost`'s recorded numbers are stale.** `obstruct.rs`'s
-  measurement (15ns/55ns a step, 2026-08-16) was taken with a `Sea` double whose
-  `can_step` was one integer comparison; D replaced it with a real `Scene`, so
-  the baseline is now a real `MapTerrain::can_step`. Its own doc predicted the
-  direction — *"against that baseline the same absolute 40ns is a small fraction
-  rather than a multiple"* — and the re-run is owed:
-  `cargo test --release -p openshard-state boat_step_cost -- --nocapture --ignored`.
+- ~~`boat_step_cost`'s recorded numbers are stale~~ — **re-run, 2026-08-22.**
+  The 15ns/55ns of 2026-08-16 was taken with a `Sea` double whose `can_step` was
+  one integer comparison, and D replaced it with a real `Scene`. Against a real
+  `MapTerrain::can_step` it reads **110ns with no boats and 123ns with one
+  moored** — the moored ship costs 13ns and **12%**, where the same probe over
+  the double said 267%. Its own doc predicted exactly that (*"a small fraction
+  rather than a multiple"*), and both readings are kept in `obstruct.rs` because
+  the pair is the point: one probe, two baselines, and only one of them a world.
+- 🚩 **A sight line has no height and neither does the navigation graph.**
+  [`sight_clear`](#-blindterrain-stood-for-a-rule-that-cannot-exist) reads the
+  statics on the tiles it crosses and not the endpoints' own columns, so two
+  mobiles on one tile at different z see each other through a floor.
+  [`NavigationGraph::build`](#-the-coarse-graph-is-a-one-storey-model-of-a-two-storey-world)
+  samples one height per tile and that height is the land alone, so a static
+  floor is not somewhere the graph can route. **These are one defect in two
+  subsystems** — the world is modelled as a height field by things that walk
+  over a world of stacked surfaces — and they were found independently, a
+  session apart, which is the argument for naming the class rather than the two
+  cases.
+- **A single `None` was hiding four repairs.** `find_long_path` answered
+  every failure with `unreachable_or_live_refinement`, which is a deadline, a
+  missing endpoint join, a missing corridor and exhausted refinement wearing one
+  word. Split into five named exits by 0, and a tally of them is the whole of
+  the diagnosis above — the wrong verdict was available and cheap without it.
 - **`server/world/src/terrain.rs` is a `pub use` and a single test.** Its whole
   body is `pub use openshard_movement::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT}`
   plus one test that needs `openshard-state`'s layer constants. The re-export is
@@ -851,30 +1104,28 @@ Small things this document is the only current record of:
 
 ## Where a session starts
 
-**Phase 0, the oracle — because it is the only thing E is waiting for.**
+**E — because it is the last node of the seam and nothing is in front of it any
+more.**
 
-A, B, C and D are done. E is the last node of the seam and the only one that
-touches the A\* edge, which is why it is the only one gated on a measurement:
-[phase 0](#phase-0--the-oracle-which-gates-e-and-nothing-else) wants a committed
-facet-0 run of
-[`map_path_probe`](../../crates/common/movement/examples/map_path_probe.rs) and
-[`coarse_bench`](../../crates/common/movement/examples/coarse_bench.rs), with
-p50/p95/worst per route class, node counts and `TransitionCacheStats` hit rates
-written into this document. Neither has a recorded run on a real install, and
-the only routing number on record is a synthetic one in which the hierarchy is
-*slower* than flat A\*. It needs `OPENSHARD_CLIENT` pointed at an install, so it
-is a person's to run.
+0, A, B, C and D are done. E's four decisions are answered by reading rather
+than by the compiler, and [the oracle](#0--the-oracle-) has since answered a
+fifth that the [section on E](#e--one-overlay-and-a-search-that-takes-explicit-types)
+used to carry as a move rather than a choice: `CachedTerrain` is deleted, not
+relocated. What is left to decide there is mobiles, identity, and whether
+blockers and surfaces are one type or two.
 
-**A second, smaller run is owed beside it**, and for the same reason — a
-baseline that changed under a measurement:
-[`boat_step_cost`](#found-in-the-reading-filed-here)'s 15ns/55ns was measured
-against a double D deleted.
+**F is the other node a session can take, and it is no longer the free one.**
+The coarse graph the server loads, validates and never reads is still
+independent of the seam — but 0 found that
+[the artifact is wrong before anyone reads it](#-and-the-artifact-is-wrong-before-anyone-reads-it),
+so the node now has a defect in front of its feature. Fixing what height the
+graph is built from is the first half of it; wiring `step_toward` to the result
+is the second.
 
-**Then E**, whose four decisions are answered by reading rather than by the
-compiler; the [section on it](#e--one-overlay-and-a-search-that-takes-explicit-types)
-lists them. **F needs nothing at all** and never did — the coarse graph the
-server loads, validates and never reads is independent of the seam, and is the
-one node a session with no client install can take.
+**Both measurements this section used to owe are paid.** The probes have their
+facet-0 runs, above; `boat_step_cost`'s 15ns/55ns — measured against a double D
+deleted — has been re-run against a real `MapTerrain` and reads **110ns/123ns**,
+which is the correction its own doc comment predicted.
 
 ### What D left behind for E
 

@@ -15,8 +15,12 @@ retain their existing behaviour.
 - [x] Phase 2: component-aware logical entrances with deterministic grouping.
 - [x] Phase 4: query-local live-transition cache, shared client planning, and
   opt-in path diagnostics.
-- [ ] Phase 3: second hierarchy level. The available synthetic open-world
-  probe does not justify level 2; the facet-0 route set remains outstanding.
+- [ ] Phase 3: second hierarchy level. **The facet-0 route set exists now** —
+  measured 2026-08-22, recorded in
+  [`terrain_seam.md`](terrain_seam.md#0--the-oracle-) — and it does not settle
+  level 2 either way, because it first found a defect that makes the level-1
+  graph wrong on raised ground (below). Level 2 over a one-storey model would
+  be a second level of the same mistake.
 - [ ] Real-install verification: facet-0 bake/load measurements require the
   client data files and the dedicated 2 GiB cgroup environment.
 
@@ -36,6 +40,19 @@ The repeatable `coarse_bench` probe also passed: on a 1024x1024 open world,
 385.7 ms. The flat comparison returned 1021 steps in 0.803 ms. This is not a
 facet-0 benchmark and is insufficient evidence for a second hierarchy level.
 
+**And on 2026-08-22 the facet-0 run reversed its verdict.** `coarse_bench` now
+loads the shard's own baked artifact and samples destinations off the map;
+against flat A\* at a 600-node budget, from open country on facet 0, the coarse
+router answers **24 of 28** destinations past 128 tiles where flat A\* answers
+**3**, at three to seven times the cost of the refusal flat would otherwise
+return. The synthetic number above was right about a 1024x1024 open plain and
+wrong about a facet: on an open plain flat A\* walks a straight line and a
+corridor can only add portals to a route that never needed them. It is kept
+under `--synthetic` so the two can be read together, and it is no longer
+evidence about this shard. Full numbers, and the ground-truth flood the
+refusals were read against, are in
+[`terrain_seam.md`](terrain_seam.md#0--the-oracle-).
+
 ## Backlog
 
 - 🚩 **Review finding (2026-08-13): cache invalidation is keyed only by the
@@ -45,6 +62,20 @@ facet-0 benchmark and is insufficient evidence for a second hierarchy level.
   integration test. Enumerate every production update that can alter the
   predicate, assert the invalidation boundary, and measure which remaining
   updates can safely retain the cache.
+
+- 🚩 **`NavigationGraph::build` samples one height per tile, and that height is
+  the land alone.** Found 2026-08-22 by the facet-0 run. `ground_z` is
+  `average_land_z`, so every floor, bridge, stair and raised courtyard a static
+  provides is invisible to the graph — and where the land beneath such a floor
+  is standable too, the two are fused into one node, which is the same fault
+  pointing the other way. Measured consequence: from an origin on Britain's
+  castle plateau (z=30) the router refuses **29 of 29** destinations past 128
+  tiles that a real walk reaches, while four origins at z ≤ 2 refuse between 0
+  and 5 of about 45. `stand_z` is the same question asked of the surfaces; the
+  cost of switching is that a tile stops having one answer, which is a change to
+  what a graph node *is*. This gates Phase 3 and gates wiring server AI to the
+  graph at all — see [`terrain_seam.md`](terrain_seam.md#f--the-graph-nobody-reads)'s
+  node F.
 
 - 🚩 **Real-install facet-0 measurements are still outstanding.** The current
   workspace has no verified run of the post-ML `7168x4096` bake/load procedure

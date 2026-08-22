@@ -30,7 +30,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::walk::{Terrain, Tile, step_allowed};
 
-const MAX_SEARCH_TIME: Duration = Duration::from_millis(50);
+/// How long one search may run before it gives up, whatever its budget says.
+///
+/// A bound on the *tick*, not on the answer: pathfinding runs on the client's
+/// render thread as well as inside the shard's beat, and neither can afford a
+/// search that walks a whole facet.
+pub const MAX_SEARCH_TIME: Duration = Duration::from_millis(50);
 
 /// One entry on the open list, ordered so [`BinaryHeap`] with [`Reverse`] pops
 /// the cheapest-and-straightest first. See the note where this is pushed for
@@ -104,27 +109,59 @@ pub fn find_path_toward(
     (search.arrived || !search.route.is_empty()).then_some(search.route)
 }
 
-/// What one search found, before either entry point above reads it.
-struct Search {
-    /// Whether [`Search::route`] ends on the goal tile itself.
-    arrived: bool,
+/// The same search as [`find_path`], reported rather than answered.
+///
+/// One search, both readings, and what it cost: `arrived` is what
+/// [`find_path`] gates its `Some` on, `route` is what [`find_path_toward`]
+/// hands back when it did not, and `explored` and `exit` are what neither of
+/// them can say. Nothing on the walking path calls this — a body is owed a
+/// route, and asking through here would only make it drop the same fields
+/// again. It exists for the measurement the node budgets are argued from.
+#[must_use]
+pub fn search_path(terrain: &dyn Terrain, from: Point, to: Point, budget: usize) -> PathSearch {
+    search(terrain, from, to, budget, Instant::now() + MAX_SEARCH_TIME)
+}
+
+/// What one search found, before either entry point above reads it — and what
+/// it cost to find out.
+///
+/// [`find_path`] and [`find_path_toward`] are this read two ways, and both
+/// throw the cost away: a body wants a route, not a node count. A *probe* wants
+/// the opposite, because the node budgets are set from it — 400 for server AI,
+/// 600 for a client plan — and until something reports `explored` those numbers
+/// can only be guessed at. [`search_path`] is that reading.
+#[derive(Clone, Debug)]
+pub struct PathSearch {
+    /// Whether [`Self::route`] ends on the goal tile itself.
+    pub arrived: bool,
     /// The steps to the goal, or — where it was never reached — to the tile that
     /// came closest to it. Empty when nothing the search reached bettered its own
     /// start: with `arrived`, that is a body already standing on the goal, and
     /// without it, a body with nowhere closer to go.
-    route: Vec<Direction>,
+    pub route: Vec<Direction>,
     /// Number of tiles removed from the open list and finalised.
-    explored: usize,
-    /// Why the search stopped.  This is diagnostic only; callers keep the
-    /// established `Option<Vec<Direction>>` contract.
-    exit: SearchExit,
+    pub explored: usize,
+    /// Why the search stopped.  This is diagnostic only; the two entry points
+    /// above keep the established `Option<Vec<Direction>>` contract.
+    pub exit: SearchExit,
 }
 
-#[derive(Clone, Copy, Debug)]
-enum SearchExit {
+/// Why a search stopped looking.
+///
+/// The three that are not [`Self::Goal`] are three different failures wearing
+/// one `None`: a walled-in start, a budget that ran out mid-route, and a search
+/// that outlived [`MAX_SEARCH_TIME`]. Which one it was is what decides whether
+/// a bigger budget would have helped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchExit {
+    /// The goal tile was popped: the route arrives.
     Goal,
+    /// The open list emptied. Nothing reachable is left to try, so no budget
+    /// would have changed the answer.
     Exhausted,
+    /// `budget` tiles were finalised and the goal was not among them.
     Budget,
+    /// [`MAX_SEARCH_TIME`] passed inside the search.
     Deadline,
 }
 
@@ -158,11 +195,11 @@ pub(crate) fn find_path_toward_until(
     (search.arrived || !search.route.is_empty()).then_some(search.route)
 }
 
-fn search(terrain: &dyn Terrain, from: Point, to: Point, budget: usize, deadline: Instant) -> Search {
+fn search(terrain: &dyn Terrain, from: Point, to: Point, budget: usize, deadline: Instant) -> PathSearch {
     let goal = Tile::new(to.x, to.y);
     let start = Tile::new(from.x, from.y);
     if start == goal {
-        return Search {
+        return PathSearch {
             arrived: true,
             route: Vec::new(),
             explored: 0,
@@ -215,7 +252,7 @@ fn search(terrain: &dyn Terrain, from: Point, to: Point, budget: usize, deadline
         }
         let explored = closed.len();
         if tile == goal {
-            return Search {
+            return PathSearch {
                 arrived: true,
                 route: reconstruct(&came_from, start, goal),
                 explored,
@@ -266,7 +303,7 @@ fn search(terrain: &dyn Terrain, from: Point, to: Point, budget: usize, deadline
         }
     }
     // The goal was never popped: what there is to say is how far the way got.
-    Search {
+    PathSearch {
         arrived: false,
         route: match closest.2 == start {
             true => Vec::new(),
@@ -286,7 +323,7 @@ fn debug_slow(
     to: Point,
     budget: usize,
     elapsed: std::time::Duration,
-    search: &Search,
+    search: &PathSearch,
 ) {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     if !*ENABLED.get_or_init(|| std::env::var_os("OPENSHARD_PATH_DEBUG").is_some()) {

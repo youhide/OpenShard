@@ -707,6 +707,40 @@ fn distance(from: Point, to: Point) -> u32 {
         .max(i32::from(from.y).abs_diff(i32::from(to.y)))
 }
 
+/// Why a long-path query ended, for diagnostics only.
+///
+/// The four refusals used to be one string — `unreachable_or_live_refinement`
+/// — which is four different repairs wearing one word. Telling them apart is
+/// what the facet-0 oracle needed to say *why* the router refuses a route past
+/// one region, rather than only that it does. See `docs/map/terrain_seam.md`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LongExit {
+    /// A route came back.
+    Route,
+    /// One or both endpoints are on a tile the static graph has no region for.
+    OffGraph,
+    /// The endpoint's own 32×32 region has no portal it can walk to. Nothing
+    /// about the rest of the facet was even consulted.
+    NoJoin,
+    /// Endpoints join the graph, and no corridor of portals connects them.
+    NoCorridor,
+    /// Both endpoints are in one region and no route inside it joins them —
+    /// the graph was never consulted.
+    NoLocalRoute,
+    /// A corridor existed and live refinement failed every hop it was given,
+    /// until [`LIVE_REROUTES`] retries ran out.
+    PortalsExhausted,
+    /// [`MAX_LONG_PATH_TIME`] passed.
+    Deadline,
+}
+
+/// How many corridors refinement may reject before the query gives up.
+///
+/// A constant, while the number of hops a corridor has grows with the distance
+/// asked for — so a long route has more chances to spend a retry than a short
+/// one has, on the same ground.
+const LIVE_REROUTES: usize = 8;
+
 /// Refine a route proposed by a static navigation graph through live terrain.
 #[must_use]
 pub fn find_long_path(
@@ -718,19 +752,15 @@ pub fn find_long_path(
     budget: usize,
 ) -> Option<Vec<Direction>> {
     let started = Instant::now();
-    let mut result = find_long_path_inner(guide, terrain, graph, from, to, budget);
+    let (mut result, mut exit) = find_long_path_inner(guide, terrain, graph, from, to, budget);
     let elapsed = started.elapsed();
     // The inner loops observe the same deadline, but an individual live A*
     // call can finish just after it.  Do not hand an interactive caller a
     // late route; the next terrain/frame snapshot may try again.
     if elapsed >= MAX_LONG_PATH_TIME {
         result = None;
+        exit = LongExit::Deadline;
     }
-    let exit = match (&result, elapsed >= MAX_LONG_PATH_TIME) {
-        (Some(_), _) => "route",
-        (None, true) => "deadline",
-        (None, false) => "unreachable_or_live_refinement",
-    };
     debug_long_path(from, to, budget, elapsed, result.as_ref().map(Vec::len), exit);
     result
 }
@@ -742,13 +772,18 @@ fn find_long_path_inner(
     from: Point,
     to: Point,
     budget: usize,
-) -> Option<Vec<Direction>> {
-    const LIVE_REROUTES: usize = 8;
+) -> (Option<Vec<Direction>>, LongExit) {
     let deadline = Instant::now() + MAX_LONG_PATH_TIME;
-    let from_region = graph.region_at(from)?;
-    let to_region = graph.region_at(to)?;
+    let (Some(from_region), Some(to_region)) = (graph.region_at(from), graph.region_at(to)) else {
+        return (None, LongExit::OffGraph);
+    };
     if from_region == to_region {
-        return region_route(terrain, graph.regions[from_region.0], from, to, budget, deadline);
+        let route = region_route(terrain, graph.regions[from_region.0], from, to, budget, deadline);
+        let exit = match route {
+            Some(_) => LongExit::Route,
+            None => LongExit::NoLocalRoute,
+        };
+        return (route, exit);
     }
     let mut forbidden = vec![false; graph.nodes.len()];
     // Refinement can forbid several portals and retry the abstract route, but
@@ -758,20 +793,25 @@ fn find_long_path_inner(
     let source = graph.local_costs(guide, from_region, from, &no_forbidden, false, deadline);
     let target = graph.local_costs(guide, to_region, to, &no_forbidden, true, deadline);
     if Instant::now() >= deadline {
-        return None;
+        return (None, LongExit::Deadline);
+    }
+    if source.is_empty() || target.is_empty() {
+        return (None, LongExit::NoJoin);
     }
     for _ in 0..=LIVE_REROUTES {
         if Instant::now() >= deadline {
-            return None;
+            return (None, LongExit::Deadline);
         }
-        let path = graph.abstract_path(from, to, &forbidden, &source, &target)?;
+        let Some(path) = graph.abstract_path(from, to, &forbidden, &source, &target) else {
+            return (None, LongExit::NoCorridor);
+        };
         match graph.refine(terrain, from, to, &path, budget, deadline) {
-            Ok(route) => return Some(route),
+            Ok(route) => return (Some(route), LongExit::Route),
             Err(node) if !forbidden[node.0] => graph.forbid_portal(node, &mut forbidden),
-            Err(_) => return None,
+            Err(_) => return (None, LongExit::PortalsExhausted),
         }
     }
-    None
+    (None, LongExit::PortalsExhausted)
 }
 
 fn debug_long_path(
@@ -780,7 +820,7 @@ fn debug_long_path(
     budget: usize,
     elapsed: std::time::Duration,
     route_len: Option<usize>,
-    exit: &str,
+    exit: LongExit,
 ) {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     if !*ENABLED.get_or_init(|| std::env::var_os("OPENSHARD_PATH_DEBUG").is_some()) {
@@ -794,7 +834,7 @@ fn debug_long_path(
         return;
     }
     eprintln!(
-        "path-debug kind=find_long_path from=({}, {}, {}) to=({}, {}, {}) budget={budget} elapsed_ms={:.3} exit={exit} route_steps={route_len:?}",
+        "path-debug kind=find_long_path from=({}, {}, {}) to=({}, {}, {}) budget={budget} elapsed_ms={:.3} exit={exit:?} route_steps={route_len:?}",
         from.x,
         from.y,
         from.z,

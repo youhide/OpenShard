@@ -67,7 +67,7 @@ pub use openshard_map::map::LandTile;
 pub use pace::{
     Pace, RUN_HOLD, RUN_INTERVAL, WALK_BUFFER, WALK_HOLD, WALK_INTERVAL, WalkPace, step_hold, step_progress,
 };
-pub use path::{find_path, find_path_toward};
+pub use path::{MAX_SEARCH_TIME, PathSearch, SearchExit, find_path, find_path_toward, search_path};
 pub(crate) use path::{find_path_toward_until, find_path_until};
 pub use sequence::{OutOfSequence, StepCounter, WalkSequence};
 pub use terrain::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};

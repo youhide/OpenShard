@@ -674,28 +674,37 @@ mod tests {
     /// cargo test --release -p openshard-state boat_step_cost -- --nocapture --ignored
     /// ```
     ///
-    /// # What it measured, 2026-08-16
+    /// # What it measured, 2026-08-22
     ///
-    /// Release, 100,000 steps: **1.5ms with no boats, 5.5ms with one moored** —
-    /// 15ns against 55ns a step.
+    /// Release, 100,000 steps: **11.0ms with no boats, 12.3ms with one moored**
+    /// — 110ns against 123ns a step, so the moored ship costs **13ns and 12%**.
     ///
     /// The empty case is the one that matters, because it is every facet on
     /// every shard that has no ships, and it is the `is_empty` length check
     /// doing its job.
     ///
-    /// **The 3.6x is the least flattering framing available and is stated that
-    /// way on purpose.** `Sea::can_step` below is a single integer comparison,
-    /// so the boat lookup is very nearly the whole of the measured work. A real
-    /// `MapTerrain::can_step` reads map blocks, walks the statics on the tile
-    /// and computes surfaces; against that baseline the same absolute 40ns is a
-    /// small fraction rather than a multiple. What the number establishes is the
-    /// **absolute** cost of a hash probe per step, which is the thing that was
-    /// worth knowing.
+    /// # The earlier reading, and why it was replaced
+    ///
+    /// 2026-08-16 recorded **1.5ms against 5.5ms** — 15ns and 55ns a step, a
+    /// 3.6× — and said in the same breath why that framing was the least
+    /// flattering available: the `Sea` it walked was a test double whose
+    /// `can_step` was one integer comparison, so the boat lookup was very
+    /// nearly the whole of the measured work. It predicted its own correction:
+    /// *"a real `MapTerrain::can_step` reads map blocks, walks the statics on
+    /// the tile and computes surfaces; against that baseline the same absolute
+    /// cost is a small fraction rather than a multiple."*
+    ///
+    /// `docs/map/terrain_seam.md`'s node D replaced that double with a `Scene`
+    /// building a real `MapTerrain`, which made the prediction testable and the
+    /// old number stale. It came out as predicted: 12% of a real step rather
+    /// than 267% of a synthetic one. Both readings are kept because the pair is
+    /// the point — the same probe against two baselines, and only one of them
+    /// was a world.
     ///
     /// If it ever needs to be smaller, the obvious move is a bounding box per
     /// facet — one integer range test to skip the probe for tiles nowhere near
-    /// any ship. Not done, because 40ns did not justify a second structure to
-    /// keep in step.
+    /// any ship. Not done, and now less justified than it was: 13ns does not
+    /// buy a second structure to keep in step.
     #[test]
     #[ignore = "a measurement, not an assertion — see the doc comment"]
     fn boat_step_cost() {
