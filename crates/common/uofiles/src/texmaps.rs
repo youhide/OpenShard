@@ -38,6 +38,7 @@ use std::path::{Path, PathBuf};
 
 use crate::color::Color16;
 use crate::image::Image;
+use openshard_tiles::TextureId;
 
 /// How many textures the index has room for. The same 0x4000 as the land half
 /// of the art, and not the same index space.
@@ -52,13 +53,6 @@ const LARGE_SIDE: u16 = 128;
 
 /// An entry that says this is where a texture is absent.
 const NO_OFFSET: u32 = u32::MAX;
-
-/// Which texture a land tile is stretched over.
-///
-/// Its own index space: `tiledata`'s land entry holds one of these, and it has
-/// nothing to do with the [`crate::art`] graphic of the same tile.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
-pub struct TextureId(pub u16);
 
 /// The texture maps could not be read.
 #[derive(Debug)]

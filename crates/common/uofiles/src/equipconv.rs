@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 
 use openshard_protocol::wire::{Graphic, Hue};
 
-use crate::tiledata::AnimId;
+use openshard_tiles::AnimId;
 
 /// What one `(body, item graphic)` pair resolves to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

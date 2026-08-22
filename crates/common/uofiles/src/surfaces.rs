@@ -6,7 +6,7 @@
 
 use openshard_map::map::WorldMap;
 
-use crate::tiledata::TileData;
+use openshard_tiles::TileData;
 
 /// Every height a body could stand at on one map tile.
 ///

@@ -9,8 +9,6 @@
 //! cargo run -p openshard-uofiles --example tile_probe -- 6044 1999
 //! ```
 
-use openshard_uofiles::tiledata::TileData;
-
 fn main() {
     let mut args = std::env::args().skip(1);
     let first = args.next().expect("x, or `art <graphic>`");
@@ -18,7 +16,9 @@ fn main() {
         // The other question this answers: not what is on a tile, but what one
         // graphic *is* — the same table, read the way a placed item is read.
         let dir = std::path::PathBuf::from(std::env::var_os("OPENSHARD_CLIENT").expect("OPENSHARD_CLIENT"));
-        let tiles = TileData::load(dir.join("tiledata.mul")).expect("tiledata should load");
+        let tiles = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata should load")
+            .tiles;
         let graphic: u16 = args
             .next()
             .expect("graphic")
@@ -41,7 +41,9 @@ fn main() {
 
     let dir = std::path::PathBuf::from(std::env::var_os("OPENSHARD_CLIENT").expect("OPENSHARD_CLIENT"));
     let map = openshard_uofiles::map::read_facet(&dir, facet).expect("the facet should load");
-    let tiles = TileData::load(dir.join("tiledata.mul")).expect("tiledata should load");
+    let tiles = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata should load")
+        .tiles;
 
     if let Some(land) = map.land(x, y) {
         let data = tiles.land(land.tile.0);

@@ -17,6 +17,7 @@
 
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::{Graphic, Hue};
+use openshard_tiles::{LAND_TILE_COUNT, TextureId, TileData};
 use openshard_uofiles::anim::{Anim, AnimationDirection, AnimationKey, BodyKind, DIRECTIONS};
 use openshard_uofiles::art::Art;
 use openshard_uofiles::equipconv::EquipConv;
@@ -24,8 +25,8 @@ use openshard_uofiles::font::{AsciiFonts, CHARS_PER_FONT, FONT_COUNT, GLYPH_BASE
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::skillgrp::SkillGroups;
 use openshard_uofiles::skills::{SkillId, Skills};
-use openshard_uofiles::texmaps::{TEXTURE_COUNT, TexMaps, TextureId};
-use openshard_uofiles::tiledata::{LAND_TILE_COUNT, TileData, TileDataFormat};
+use openshard_uofiles::texmaps::{TEXTURE_COUNT, TexMaps};
+use openshard_uofiles::tiledata::TileDataFormat;
 
 /// The client directory, or `None` to skip.
 ///
@@ -38,7 +39,11 @@ fn client_dir() -> Option<std::path::PathBuf> {
 
 fn tiledata() -> Option<TileData> {
     let dir = client_dir()?;
-    Some(TileData::load(dir.join("tiledata.mul")).expect("a client ships a readable tiledata.mul"))
+    Some(
+        openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("a client ships a readable tiledata.mul")
+            .tiles,
+    )
 }
 
 /// Every facet a client ships, and what it must come out as.
@@ -179,9 +184,9 @@ fn the_shipped_tiledata_is_the_high_seas_layout() {
         return;
     };
     let bytes = std::fs::read(dir.join("tiledata.mul")).unwrap();
-    let data = TileData::parse(&bytes).expect("a shipped tiledata.mul parses");
+    let read = openshard_uofiles::tiledata::parse(&bytes).expect("a shipped tiledata.mul parses");
     assert_eq!(
-        data.format(),
+        read.format,
         TileDataFormat::HighSeas,
         "a 7.0.x client is High Seas"
     );
@@ -192,7 +197,7 @@ fn the_shipped_tiledata_is_the_high_seas_layout() {
     // rounded would pick the wrong stride and read every tile's flags from the
     // middle of its neighbour.
     assert!(
-        TileData::parse(&bytes[..bytes.len() - 1]).is_none(),
+        openshard_uofiles::tiledata::parse(&bytes[..bytes.len() - 1]).is_none(),
         "a file one byte short still parsed, so the layout was not decided by arithmetic"
     );
 }
@@ -286,14 +291,8 @@ fn a_real_tiledata_name_carries_the_plural_marker_the_client_resolves() {
     };
     let board = data.static_tile(0x1BD7);
     assert_eq!(board.name, "board%s", "the marker survives the name field");
-    assert_eq!(
-        openshard_uofiles::tiledata::pluralize_name(&board.name, true),
-        "boards"
-    );
-    assert_eq!(
-        openshard_uofiles::tiledata::pluralize_name(&board.name, false),
-        "board"
-    );
+    assert_eq!(openshard_tiles::pluralize_name(&board.name, true), "boards");
+    assert_eq!(openshard_tiles::pluralize_name(&board.name, false), "board");
 }
 
 #[test]
@@ -317,7 +316,7 @@ fn land_tile_zero_is_a_dummy_and_sets_no_movement_bit() {
     assert!(!dummy.flags.is_platform());
     assert!(!dummy.flags.is_climbable());
     assert!(
-        !dummy.flags.has(openshard_uofiles::tiledata::TileFlags::FLOOR),
+        !dummy.flags.has(openshard_tiles::TileFlags::FLOOR),
         "the dummy record must not read as a floor"
     );
     // The neighbours are ordinary records, which is what makes record 0 a quirk
@@ -1143,7 +1142,7 @@ fn radar_colours_are_the_colours_the_things_are() {
 
     // The land half must at least cover every land tile the tile table has.
     assert!(
-        colors.len() >= openshard_uofiles::tiledata::LAND_TILE_COUNT,
+        colors.len() >= openshard_tiles::LAND_TILE_COUNT,
         "the table is shorter than the land tiles it is indexed by"
     );
 

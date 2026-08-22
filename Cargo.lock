@@ -2957,6 +2957,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "openshard-tiles"
+version = "0.0.1"
+
+[[package]]
 name = "openshard-uofiles"
 version = "0.0.1"
 dependencies = [
@@ -2966,6 +2970,7 @@ dependencies = [
  "openshard-basemap",
  "openshard-map",
  "openshard-protocol",
+ "openshard-tiles",
 ]
 
 [[package]]

@@ -1,0 +1,17 @@
+[package]
+name = "openshard-tiles"
+description = "What every tile in the game is: the two tables of tiledata, the flags on them, and the ids that name them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+# No dependencies, and that is the point: a table is not a file. The reader that
+# fills one lives in `openshard-uofiles` and depends on this crate, never the
+# other way round.
+[dependencies]

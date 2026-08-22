@@ -4,7 +4,7 @@
 //! anybody touching them. The file says nothing about *where* they are: it is a
 //! table indexed by static graphic, and every copy of that graphic on the map
 //! plays the same cycle in the same phase. Which of them animate at all is
-//! [`TileFlags::ANIMATION`](crate::tiledata::TileFlags::ANIMATION) in
+//! [`TileFlags::ANIMATION`](openshard_tiles::TileFlags::ANIMATION) in
 //! `tiledata.mul` and not anything in here — this file has an entry for every
 //! graphic and most of them are zeroed.
 //!
@@ -401,13 +401,13 @@ mod tests {
     /// graphic and then draws the base one for those whose `FrameCount` is zero.
     #[test]
     fn the_animation_flag_is_the_bit_that_predicts_an_animdata_entry() {
-        use crate::tiledata::TileData;
-
         let Some(dir) = std::env::var_os("OPENSHARD_CLIENT").map(PathBuf::from) else {
             return;
         };
         let data = AnimData::load(&dir).expect("animdata.mul");
-        let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+        let tiledata = crate::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata.mul")
+            .tiles;
 
         let described: Vec<bool> = (0..=u16::MAX)
             .map(|graphic| data.sequence(Graphic(graphic)).is_some())
@@ -441,7 +441,7 @@ mod tests {
         let (_, runner_up) = ranked[1];
         assert_eq!(
             best,
-            crate::tiledata::TileFlags::ANIMATION,
+            openshard_tiles::TileFlags::ANIMATION,
             "0x{best:08X} predicts animdata.mul better ({best_score:.3}) than the bit \
              this crate calls ANIMATION",
         );

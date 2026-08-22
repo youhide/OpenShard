@@ -16,6 +16,10 @@ workspace = true
 # builds one: the world type lives in `openshard-map` and nothing here owns it.
 openshard-map.workspace = true
 openshard-protocol.workspace = true
+# What `tiledata` reads *into*: the two tables, the flags on them and the ids
+# that name them. A table is not a file, so it lives in its own crate and this
+# one is only the reader that fills it.
+openshard-tiles.workspace = true
 # For `openshard-map-import`, the binary that chains this crate's reader to our
 # own base set. The dependency runs this way round on purpose: the base set
 # knows nothing of a UO install, and the thing that reads one is what knows both.
