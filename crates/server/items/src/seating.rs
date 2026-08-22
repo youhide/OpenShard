@@ -1,91 +1,51 @@
-//! Sitting on the chairs the UO client itself recognises.
+//! Walking onto the chairs the UO client itself recognises.
 //!
-//! A seated human is a normal mobile placed at a chair's `z`, facing one of the
-//! four cardinal directions.  Classic clients look for that exact relationship
-//! and substitute their sit animation themselves; no non-standard packet is
-//! involved.  The catalogue below is the public ClassicUO chair catalogue,
-//! reduced to the four direction preferences the server needs.
+//! A seated human is a normal mobile placed at a chair's `z`. Classic clients
+//! look for that exact relationship and substitute their sit animation
+//! themselves; no non-standard packet is involved. The catalogue below is the
+//! public ClassicUO chair catalogue.
 
 use super::*;
-use openshard_protocol::direction::{Direction, Facing};
 
-/// Try to seat `player` on `chair`.
+/// Record whether a mobile has just walked onto a supported chair.
 ///
-/// Returns `true` once the target is known to be a chair, including when the
-/// request is refused.  That makes a chair a built-in interaction rather than
-/// letting a generic item-use trigger reinterpret a failed attempt.
-pub fn try_sit(state: &mut WorldState, player: EntityId, chair: EntityId) -> bool {
-    let Some(&Drawn { id, .. }) = state.registry.get::<Drawn>(chair) else {
-        return false;
+/// Classic UO does not make chairs a double-click action: the client switches
+/// to its seated pose when a human reaches the chair's own tile and height.
+/// This tiny server-side marker reserves that occupied seat and lets the next
+/// movement request leave it cleanly, but the movement itself stays ordinary.
+pub fn occupy_chair(state: &mut WorldState, mobile: EntityId) {
+    let Some(&Position(at)) = state.registry.get::<Position>(mobile) else {
+        return;
     };
-    let Some(directions) = chair_directions(id) else {
-        return false;
-    };
-    let Some(&Position(chair_at)) = state.registry.get::<Position>(chair) else {
-        return true;
-    };
-    let Some(&Position(player_at)) = state.registry.get::<Position>(player) else {
-        return true;
-    };
-
-    // Mounted bodies have their saddle picture rather than the human pose the
-    // client replaces, and ghosts have no sitting art.  More importantly,
-    // neither should be teleported into furniture by a double-click.
-    if state.registry.has::<Riding>(player) || state.registry.has::<Ghost>(player) {
-        return true;
+    // The client supplies this pose only for living human bodies. Do not give
+    // a mount, ghost, or creature the movement special-case when it cannot be
+    // drawn as seated in the first place.
+    let human = state.registry.get::<Body>(mobile).is_some_and(|body| {
+        openshard_state::components::body_type(body.id) == openshard_state::components::BodyType::Human
+    });
+    if !human || state.registry.has::<Ghost>(mobile) || state.registry.has::<Riding>(mobile) {
+        state.registry.remove::<Seated>(mobile);
+        return;
     }
-    if state.facet_of(chair) != state.facet_of(player) || !in_reach(state, chair, player) {
-        return true;
+    let facet = state.facet_of(mobile);
+    let chair = state.registry.query::<Drawn>().find_map(|(entity, drawn)| {
+        (entity != mobile
+            && state.facet_of(entity) == facet
+            && state
+                .registry
+                .get::<Position>(entity)
+                .is_some_and(|position| position.0 == at)
+            && chair_directions(drawn.id).is_some())
+        .then_some(entity)
+    });
+    match chair {
+        Some(chair) => {
+            state.registry.insert(mobile, Seated { chair });
+        }
+        None => {
+            state.registry.remove::<Seated>(mobile);
+        }
     }
-    // A seat is a one-body surface.  Compare the actual landing point — chairs
-    // on different storeys may share x/y but must not reserve one another.
-    if state.mobile_occupies(state.facet_of(player), chair_at, player) {
-        return true;
-    }
-
-    let facing = seated_facing(player_at, chair_at, directions);
-    state.registry.insert(player, Heading(facing));
-    state.registry.insert(player, Seated { chair });
-    state.disrupt(player);
-    if let Some(Movement(mut walker)) = state.registry.get::<Movement>(player).copied() {
-        walker.facing = facing;
-        state.registry.insert(player, Movement(walker));
-    }
-    // `move_to` updates Position, Walker, sector membership, the player's
-    // camera and every watcher in one transaction.  A bare component write
-    // makes the client retain its old location and is not a valid seat.
-    state.move_to(player, state.facet_of(player), chair_at);
-    true
-}
-
-/// Choose the cardinal direction the client uses to render a person on this
-/// particular chair.  The approaching side breaks ties for chairs which can
-/// face more than one way, mirroring ClassicUO's chair table logic.
-fn seated_facing(from: Point, chair: Point, directions: [i8; 4]) -> Facing {
-    let approach = openshard_movement::direction_toward(chair, from).unwrap_or(Direction::South);
-    // ClassicUO resolves the eight possible approach directions this way before
-    // selecting the two stored animation directions.  In particular, NE tries
-    // east before north; treating every diagonal as its preceding cardinal
-    // makes half the side entries face the wrong way.
-    let (primary, alternate) = match approach {
-        Direction::North => (directions[0], directions[1]),
-        Direction::NorthWest => (directions[0], directions[3]),
-        Direction::NorthEast => (directions[1], directions[0]),
-        Direction::East => (directions[1], directions[2]),
-        Direction::SouthEast => (directions[2], directions[1]),
-        Direction::South => (directions[2], directions[3]),
-        Direction::SouthWest => (directions[3], directions[2]),
-        Direction::West => (directions[3], directions[0]),
-    };
-    // Every supported graphic has at least one real direction, but keep the
-    // fallback total so a future catalogue row cannot turn `-1` into a wire
-    // direction by accident.
-    let direction = [primary, alternate]
-        .into_iter()
-        .find(|direction| *direction >= 0)
-        .or_else(|| directions.into_iter().find(|direction| *direction >= 0))
-        .unwrap_or(Direction::South.to_bits() as i8);
-    Facing::walking(Direction::from_bits(direction as u8))
 }
 
 /// The four preferred facings (north, east, south, west) for a seat graphic.
@@ -278,28 +238,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classic_chair_catalogue_has_the_crafted_chairs_only() {
+    fn classic_chair_catalogue_includes_crafted_chairs_and_rejects_unrelated_items() {
         assert!(chair_directions(Graphic(0x0B57)).is_some());
         assert!(chair_directions(Graphic(0x1218)).is_some());
         assert!(chair_directions(Graphic(0x2DE3)).is_some());
         assert!(chair_directions(Graphic(0x0001)).is_none());
-    }
-
-    #[test]
-    fn approach_selects_the_chair_facing() {
-        let chair = Point::new(10, 10, 0);
-        assert_eq!(
-            seated_facing(Point::new(10, 9, 0), chair, [0, 2, 4, 6]).direction,
-            Direction::North
-        );
-        assert_eq!(
-            seated_facing(Point::new(11, 10, 0), chair, [0, 2, 4, 6]).direction,
-            Direction::East
-        );
-        assert_eq!(
-            seated_facing(Point::new(11, 9, 0), chair, [-1, 2, -1, 6]).direction,
-            Direction::East,
-            "a north-east approach uses the east side before its north fallback"
-        );
     }
 }

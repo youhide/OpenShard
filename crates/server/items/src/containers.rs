@@ -21,10 +21,6 @@ pub fn double_click(state: &mut WorldState, connection: ConnectionId, target_ser
     // is its own interaction.
     if state.registry.has::<Door>(target) {
         toggle_door(state, player, target, target_serial);
-    } else if try_sit(state, player, target) {
-        // A supported chair is a complete interaction of its own.  Do this
-        // before generic item use so a pack cannot accidentally give a chair a
-        // second, conflicting double-click meaning.
     } else if state.registry.has::<KeyValue>(target) {
         // A key raises a cursor for the lock it is about to turn.
         crate::use_key(state, connection, player, target);

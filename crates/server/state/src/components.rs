@@ -2066,10 +2066,10 @@ pub struct Movement(pub Walker);
 
 /// A player currently occupying a chair.
 ///
-/// The client recognizes the seated pose from the chair graphic, the mobile's
-/// position and its heading.  This component is the server-side half: it
-/// reserves that one seat and lets movement give it up atomically rather than
-/// leaving two characters able to claim the same chair.
+/// The client recognizes the seated pose from the chair graphic and the
+/// mobile's position. This component is the server-side half: it records that
+/// placement and lets movement leave it atomically rather than leaving two
+/// characters able to claim the same chair.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Seated {
     /// The chair entity whose tile the mobile occupies.
