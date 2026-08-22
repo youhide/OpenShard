@@ -29,13 +29,18 @@ carry.
 
 [`snapshot.md`](snapshot.md) is built, all three phases of it: the block order
 is `LandGrid`'s and only `LandGrid`'s, every reader takes a handle to one
-revisioned `MapSnapshot` per facet, and **the world is one type in
-`openshard-map` that has never opened a file** — UO's `.mul` is an importer in
-`uofiles`, and the dependency runs that way round. That was directions A0 and A
-plus the move they turned out to imply, and none of it added a feature.
+revisioned `MapSnapshot` per facet, and the world is one type in `openshard-map`
+that has never opened a file. That was directions A0 and A plus the move they
+turned out to imply, and none of it added a feature.
 
-The next move is direction B — our own chunk format and a UO importer, which now
-starts from a crate that already *is* the world. Where it stands in detail, what
-was decided along the way, and the smaller landable things left behind are in
-the newest [handoff](handoffs/2026-08-22-the-world-leaves-the-file-reader.md);
-the plan itself records intent, not progress.
+**Direction B is most of the way built, and it is the first thing here that
+does.** There is a chunk — 64×64 tiles, decided by measurement — with a
+canonical encoding, and `openshard-basemap` is the file a facet goes in.
+`openshard-map-import` bakes a UO facet into one: on Felucca that is 7,168
+chunks and 102.6 MiB, and reading it back reproduces all 29,360,128 tiles and
+writes the same bytes again. What is left of B is the step that makes it
+*matter* — the server reading a base set instead of the install — which needs a
+config decision and drags a piece of direction D forward. Both are named in the
+newest [handoff](handoffs/2026-08-22-a-world-without-an-install.md), which is
+also where the decisions and the leftovers are; the plan itself records intent,
+not progress.

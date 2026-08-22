@@ -36,26 +36,35 @@ We already store the world close to this shape.
 statics per block, each block sorted by the tile its items stand on. A chunk is
 that, with an identity and a revision on it.
 
-Two things a chunk must settle, both with a right answer we do not have yet:
+Two things a chunk had to settle, **both now settled and both built** — see
+[`chunk.rs`](../../../crates/common/map/src/chunk.rs), whose module header is the
+decision record:
 
-- **Size.** UO's own block is 8×8; the first draft guessed 64×64. This is a
-  measurement, not an opinion: size of a full base set for Felucca, average
-  chunk with its statics, the working set around one screen, and how many
-  chunks one editor brush touches. **A house is the sharpest input to it.**
-  The shipped castle is 3,667 components over 31×32 tiles and puts **339 into
-  a single 8×8 block** — nineteen times Felucca's median block of 18, and near
-  its worst natural block of 467. At 8×8 that castle is sixteen chunks and
-  moving one wall touches one small chunk; at 64×64 it sits inside one, and
-  moving that wall rewrites and retransmits all 4,096 tiles around it. The
-  numbers are in [`client_today.md`](client_today.md).
-- **Who owns a static that overhangs a border.** A wall anchored in one chunk
-  is drawn, walked and lit from the neighbour too. Ownership by anchor tile is
-  the obvious rule, and it forces the second half: a reader that needs an area
-  pins every chunk the area touches and reads owners. Copying a static into the
-  neighbour would make removal and hashing ambiguous, which is the argument
-  against it — see [`occluders.md`](../../occluders.md) and
-  [`footprints.md`](../../footprints.md), which already reason about art footprints
-  that cross tiles.
+- **Size: 64×64 tiles**, which is eight map blocks square, so no chunk boundary
+  ever splits the block the statics are indexed by. It was decided by
+  measurement, as this document asked. The base set's *total* size turned out
+  to be flat across every candidate — 137 to 151 MiB at 8, 16, 32, 64 and 128
+  tiles — so size was not the argument, and what was left was overhead against
+  blast radius. UO's own 8×8 loses on overhead and not narrowly: a manifest
+  with a hash per chunk is 17.5 MiB, a ninth of the set it indexes, and one
+  widest-zoom rectangle pins 625 chunks against 64×64's sixteen. The argument
+  the other way is that one wall then rewrites 18 KiB — and
+  [`overview.md`](overview.md) refuses that argument by name, since thrift is
+  not a goal. Sixty-four is also the grid every artefact derived from terrain
+  is already keyed to, so direction D's invalidation is one-to-one. **A house
+  is still the sharpest input**: the shipped castle is 3,667 components over
+  31×32 tiles and puts 339 into a single 8×8 block, and it stays an argument
+  that a flat base array must never be inserted into rather than an argument
+  about the size. The numbers are in [`client_today.md`](client_today.md).
+- **A static that overhangs a border belongs to the chunk its anchor tile is
+  in.** Ownership by anchor was the obvious rule and is now the built one, held
+  against a real facet by `a_static_belongs_to_the_chunk_its_anchor_is_in`. It
+  forces the second half, which is unchanged: a reader that needs an area pins
+  every chunk the area touches and reads owners. Copying a static into the
+  neighbour would make removal and hashing ambiguous — see
+  [`occluders.md`](../../occluders.md) and
+  [`footprints.md`](../../footprints.md), which already reason about art
+  footprints that cross tiles.
 
 ## Patches
 
@@ -130,9 +139,10 @@ whatever graphic the player's own install has under that number.
 
 | Question | What settles it |
 |---|---|
-| Chunk size | Measurement on Felucca: base set size, per-chunk statics, screen working set, brush blast radius — with a castle's 339-per-block as the density case |
+| ~~Chunk size~~ | **Closed: 64×64 tiles.** Measured on Felucca; the reasoning is above and in [`chunk.rs`](../../../crates/common/map/src/chunk.rs) |
+| ~~Whether the address needs a `map_id` above [`Facet`](../../../crates/common/protocol/src/world.rs#L1252)~~ | **Closed: no.** It was conditional on ever running two worlds whose facet numbers collide, and we do not. The encoding carries a version byte, which is what the door back in looks like |
+| ~~Who owns a static that overhangs a border~~ | **Closed: the chunk its anchor tile is in**, and nothing is copied into the neighbour |
 | Whether a house is a patch to the world or stays an entity overlay | The densest case is decided by this and nothing else: a castle is 3,667 statics, so if a house is a patch, placing one is a bulk insert into the base. An overlay read alongside the base keeps the base immutable, which is what a flat per-chunk layout wants. See [`housing.md`](../../housing.md) and [`customisation.md`](../../customisation.md) |
-| Whether the address needs a `map_id` above [`Facet`](../../../crates/common/protocol/src/world.rs#L1252) | Whether we ever run two worlds whose facet numbers collide |
 | Land height per tile (UO's model) or per corner | Whichever keeps movement and rendering identical to today until we *mean* to change the geometry |
 | Our own material/asset ids vs UO graphic numbers | Whether the first importer is the only importer |
 | Where a per-shard asset pack comes from and what may be redistributed | A licensing answer, not a technical one |
