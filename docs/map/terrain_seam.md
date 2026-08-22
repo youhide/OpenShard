@@ -304,15 +304,21 @@ Four additions, read off what the doubles actually do:
 - **A named graphic.** `place` mints ids in sequence, so a caller cannot say
   *this* graphic. `Shop` and `harvest`'s `Ground` answer `statics_at` with
   particular ids that domain tables match against.
-- **A tiledata row.** `NamedTerrain` exists for `item_name`; `Scene` already
-  calls `set_static_tile`, so this is exposing what it does internally.
+- **A land id.** `Scene::flat` hardcodes `LandTile(0)`, and three of the doubles
+  left (`housing`'s `Ground`, `boats`' `Sea`, `harvest`'s `Ground`) exist partly
+  to answer `land_tile` — a road id is what makes a plot a street and a water id
+  is what makes it the sea.
 - **An owned `into_terrain`**, since `terrain()` borrows, and a multi table —
   [`Multis::of`](../../crates/common/uofiles/src/multi.rs#L282) already builds
   one from hand-made values, so it is wiring, not parsing.
 
-**Done when:** a `Scene` can express what each of the seven double types
-(`Ground` in three shapes, `Sea`, `Shop`, `BlindTerrain`, `FrameTerrain`,
-`NamedTerrain`, `RaisedFloorTerrain`) was written to say.
+B shrank this list. `NamedTerrain` is gone, and the doubles that were only
+saying "allow everything" went with it; what is left is geometry, which is what
+`Scene` is for.
+
+**Done when:** a `Scene` can express what each of the seven remaining doubles
+(`Ground` in two shapes, `Sea` in two, `Shop`, `BlindTerrain`, `FrameTerrain`,
+`RaisedFloorTerrain`) was written to say.
 
 ## B — the table leaves the trait ✅
 
@@ -349,9 +355,34 @@ What landed, and where it differs from what this section planned:
   now, which is what they meant — and the fact that those are two different
   clearings is the defect this node removes.
 
-515 insertions, 642 deletions across 32 files. `cargo test --workspace` and
-`cargo fmt --all` are clean, and `clippy` warns in the same ten places it warned
-in before.
+- Four of the fifteen boxed doubles became **exactly the trait defaults** and
+  were deleted rather than rewritten: once `item_blocks` and friends were gone,
+  all they said was `can_step -> Some(to)` and `can_fit -> true`, which is what
+  `FacetState::terrain = None` already answers through `OpenWorld`. Seven boxed
+  substitutions are left, and `impl Terrain for` is down from 38 sites to 33.
+
+`cargo test --workspace` and `cargo fmt --all` are clean, and `clippy` warns in
+the same ten places it warned in before.
+
+### One `Arc` is gone and one is not, and the difference is the box
+
+`multis` is owned outright: after `MapTerrain` lost its copy, `WorldState` is the
+only thing on the shard holding a multi table, so there is nothing to share it
+with and the `Arc` was vestigial the moment it was written.
+
+`tiles` keeps one, and it has **exactly one other holder**: the
+`MapTerrain<MapSnapshot, Arc<TileData>>` boxed inside every `FacetState`. That
+box is the whole reason. `MapTerrain`'s `AsRef` parameters exist so it can own
+its inputs and therefore have no lifetime and therefore fit in a `Box` in a
+struct field — and the `Arc` is what stops that ownership from being a copy of
+the table per facet.
+
+So the `Arc` is not a decision anyone took about tiledata. **It is D's price,
+paid in advance.** When `FacetState` holds a `MapSnapshot` and `WorldState` owns
+the `TileData`, a `MapTerrain<'_>` built per query borrows both out of the same
+`&WorldState` — no self-reference, no sharing, no `Arc`, and no `AsRef` bound
+either. That is one more thing D buys, and it is worth naming because "why is
+there an `Arc` here" has a better answer than "because two things hold it".
 
 ### What it was, for the record
 
@@ -396,8 +427,9 @@ already contains: a `MapSnapshot`, an `Arc<TileData>`, an `Option<Arc<Multis>>`
 decided here. `travel.rs`'s `terrain.is_none()` becomes a question about the
 map, which is what it was asking.
 
-**Done when:** `grep -rn "dyn Terrain" crates/server` is empty, and every one
-of the 26 sites names what it takes.
+**Done when:** `grep -rn "dyn Terrain" crates/server` is empty, every one of the
+remaining sites names what it takes, and the `Arc` around the tile table is
+gone with the box that needed it.
 
 ## E — one `Overlay`, and a search that takes explicit types
 
@@ -518,6 +550,8 @@ each one removes implementors rather than re-typing callers.
 
 Small things this document is the only current record of:
 
+- `WorldState.tiles` is behind an `Arc` only because a facet's terrain is boxed;
+  see [above](#one-arc-is-gone-and-one-is-not-and-the-difference-is-the-box).
 - ~~`Cluttered` does not forward `multi_components` or `land_is_water`~~ — B
   removed the first by removing the question; `land_is_water` is now forwarded
   by nobody on that end, because `Cluttered` never wrote it and the map answers

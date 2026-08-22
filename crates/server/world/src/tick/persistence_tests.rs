@@ -785,19 +785,11 @@ fn an_alliance_survives_a_restart_with_its_membership_and_its_counter() {
 /// `House` component came back would pass on a shard you can walk through.
 #[test]
 fn a_house_survives_a_restart_with_its_walls() {
-    use openshard_movement::Terrain;
     use openshard_uofiles::multi::Component;
 
-    struct Ground;
     const COTTAGE: u16 = 0x64;
     const WALL: u16 = 0x0006;
     const FLOOR: u16 = 0x0007;
-
-    impl Terrain for Ground {
-        fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-            Some(to)
-        }
-    }
 
     /// One multi: two walls and a floor. The floor is here so the restore is
     /// asserted to keep dropping it, not merely to add walls — and it is the
@@ -816,7 +808,6 @@ fn a_house_survives_a_restart_with_its_walls() {
     }
 
     let mut world = World::new(START).with_save_every(0);
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Ground));
     world.state.tiles = Some(super::tests::tiles_with(&[(WALL, super::tests::WALL_FLAGS, 20)]));
     world.state.multis = Some(super::tests::multis_with(COTTAGE, cottage()));
     let now = Instant::now();
@@ -840,7 +831,6 @@ fn a_house_survives_a_restart_with_its_walls() {
 
     // The shard comes back up on that save, with the same terrain.
     let mut restored = World::new(START);
-    restored.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Ground));
     restored.state.tiles = Some(super::tests::tiles_with(&[(WALL, super::tests::WALL_FLAGS, 20)]));
     restored.state.multis = Some(super::tests::multis_with(COTTAGE, cottage()));
     restored.restore_houses(houses, Vec::new());

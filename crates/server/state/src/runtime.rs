@@ -592,7 +592,12 @@ pub struct WorldState {
     /// Beside [`tiles`](Self::tiles) and for the same reason — a multi's
     /// components are a fact about the install, not about a facet. Read through
     /// [`multi_components`](Self::multi_components).
-    pub multis: Option<Arc<openshard_uofiles::multi::Multis>>,
+    ///
+    /// Owned outright, where [`tiles`](Self::tiles) is behind an `Arc`: this is
+    /// the only thing on the shard that holds a multi table, so there is nothing
+    /// to share it with. The tile table has a second holder — every facet's boxed
+    /// terrain — and that box is what the `Arc` is paying for.
+    pub multis: Option<openshard_uofiles::multi::Multis>,
     /// Which entity a connection is driving.
     pub players: HashMap<ConnectionId, EntityId>,
     /// Every connection the world is holding, playing a character or not.

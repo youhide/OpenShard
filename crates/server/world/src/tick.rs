@@ -392,7 +392,7 @@ impl World {
     pub fn with_tiles(
         mut self,
         tiles: std::sync::Arc<openshard_uofiles::tiledata::TileData>,
-        multis: Option<std::sync::Arc<openshard_uofiles::multi::Multis>>,
+        multis: Option<openshard_uofiles::multi::Multis>,
     ) -> Self {
         self.state.tiles = Some(tiles);
         self.state.multis = multis;

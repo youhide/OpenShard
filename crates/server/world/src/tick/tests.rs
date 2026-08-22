@@ -80,10 +80,8 @@ pub(super) fn tiles_with(
 pub(super) fn multis_with(
     id: u16,
     components: Vec<openshard_uofiles::multi::Component>,
-) -> std::sync::Arc<openshard_uofiles::multi::Multis> {
-    std::sync::Arc::new(openshard_uofiles::multi::Multis::of([
-        openshard_uofiles::multi::Multi::new(id, components),
-    ]))
+) -> openshard_uofiles::multi::Multis {
+    openshard_uofiles::multi::Multis::of([openshard_uofiles::multi::Multi::new(id, components)])
 }
 
 /// The long-distance guide shares a facet's static-terrain lifetime, and it is
@@ -15457,21 +15455,11 @@ fn the_house_command_is_refused_on_a_shard_with_no_multis() {
 /// to consume the deed hands out free houses.
 #[test]
 fn a_deed_raises_the_house_cursor_and_answering_it_builds() {
-    use openshard_movement::Terrain;
     use openshard_state::components::HouseDeed;
     use openshard_uofiles::multi::Component;
 
-    struct Ground;
     const COTTAGE: u16 = 0x64;
     const WALL: u16 = 0x0006;
-    impl Terrain for Ground {
-        fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-            Some(to)
-        }
-        fn can_fit(&self, _tile: openshard_movement::Tile, _z: i32, _height: i32) -> bool {
-            true
-        }
-    }
     /// One wall, one tile east — the cottage the tables below describe.
     fn cottage() -> Vec<Component> {
         vec![Component {
@@ -15485,7 +15473,6 @@ fn a_deed_raises_the_house_cursor_and_answering_it_builds() {
 
     let now = Instant::now();
     let mut world = world();
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Ground));
     world.state.tiles = Some(tiles_with(&[(WALL, WALL_FLAGS, 20)]));
     world.state.multis = Some(multis_with(COTTAGE, cottage()));
     let connection = enter(&mut world, now);
@@ -15574,21 +15561,11 @@ fn a_deed_raises_the_house_cursor_and_answering_it_builds() {
 /// could not be demonstrated. This is that demonstration.
 #[test]
 fn a_designed_house_announces_its_revision_and_answers_the_ask() {
-    use openshard_movement::Terrain;
     use openshard_uofiles::multi::Component;
 
-    struct Ground;
     const COTTAGE: u16 = 0x64;
     const WALL: u16 = 0x0006;
     const VILLA_WALL: u16 = 0x0007;
-    impl Terrain for Ground {
-        fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-            Some(to)
-        }
-        fn can_fit(&self, _tile: openshard_movement::Tile, _z: i32, _height: i32) -> bool {
-            true
-        }
-    }
     /// One wall, one tile east — the cottage the tables below describe.
     fn cottage() -> Vec<Component> {
         vec![Component {
@@ -15611,7 +15588,6 @@ fn a_designed_house_announces_its_revision_and_answers_the_ask() {
 
     let now = Instant::now();
     let mut world = world();
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Ground));
     world.state.tiles = Some(tiles_with(&[
         (WALL, WALL_FLAGS, 20),
         (VILLA_WALL, WALL_FLAGS, 20),
@@ -15722,21 +15698,11 @@ fn a_designed_house_announces_its_revision_and_answers_the_ask() {
 /// placement in one.
 #[test]
 fn a_deed_for_a_foundation_builds_a_house_with_a_design() {
-    use openshard_movement::Terrain;
     use openshard_state::components::HouseDeed;
     use openshard_uofiles::multi::Component;
 
-    struct Ground;
     const FOUNDATION: u16 = 0x13EC;
     const WALL: u16 = 0x0006;
-    impl Terrain for Ground {
-        fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-            Some(to)
-        }
-        fn can_fit(&self, _tile: openshard_movement::Tile, _z: i32, _height: i32) -> bool {
-            true
-        }
-    }
 
     /// A platform three tiles across. Width matters: the stair strip runs
     /// `1..width`, so a one-tile platform gets none — which is the reference's
@@ -15756,7 +15722,6 @@ fn a_deed_for_a_foundation_builds_a_house_with_a_design() {
 
     let now = Instant::now();
     let mut world = world();
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Ground));
     world.state.tiles = Some(tiles_with(&[(WALL, WALL_FLAGS, 20)]));
     world.state.multis = Some(multis_with(FOUNDATION, platform()));
     let connection = enter(&mut world, now);

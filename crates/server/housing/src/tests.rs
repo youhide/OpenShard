@@ -98,11 +98,11 @@ fn tiledata() -> std::sync::Arc<TileData> {
 
 /// A real multi table holding `components` under both ids the fixture places, so
 /// a test can ask for the cottage or the foundation without a second table.
-fn multis(components: Vec<Component>) -> std::sync::Arc<Multis> {
-    std::sync::Arc::new(Multis::of([
+fn multis(components: Vec<Component>) -> Multis {
+    Multis::of([
         Multi::new(COTTAGE, components.clone()),
         Multi::new(FOUNDATION, components),
-    ]))
+    ])
 }
 
 fn component(graphic: u16, dx: i16, dy: i16, dz: i16, drawn: bool) -> Component {

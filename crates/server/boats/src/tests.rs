@@ -82,8 +82,8 @@ fn tiledata() -> std::sync::Arc<TileData> {
 }
 
 /// A real multi table holding the sloop under the one id these tests place.
-fn multis() -> std::sync::Arc<Multis> {
-    std::sync::Arc::new(Multis::of([Multi::new(SLOOP, sloop())]))
+fn multis() -> Multis {
+    Multis::of([Multi::new(SLOOP, sloop())])
 }
 
 fn component(graphic: u16, dx: i16, dy: i16, dz: i16, drawn: bool) -> Component {
