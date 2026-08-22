@@ -11,11 +11,11 @@ use openshard_client_render::cutaway::Cutaway;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
-use openshard_client_render::composite::MapBlock;
 use openshard_client_render::frame::{self, Impostor};
 use openshard_client_render::mobiles::Mobile;
 use openshard_client_render::sprite::{SpriteQuad, split_corners};
 use openshard_client_render::{ground, items, light, mobiles, statics};
+use openshard_uofiles::grid::BlockCoord;
 
 use crate::crowd::Who;
 use crate::diagnostics::Pick;
@@ -134,7 +134,7 @@ impl FrameGeometry {
     /// thousands of copies per frame that answer identically to `self.quads`.
     /// The owned arm is the cached-block case, where the list really is
     /// shorter than the one assembled.
-    pub(crate) fn detail_ground(&self, cached: &BTreeSet<MapBlock>) -> Cow<'_, [ground::GroundQuad]> {
+    pub(crate) fn detail_ground(&self, cached: &BTreeSet<BlockCoord>) -> Cow<'_, [ground::GroundQuad]> {
         if cached.is_empty() {
             return Cow::Borrowed(&self.quads);
         }
@@ -143,7 +143,7 @@ impl FrameGeometry {
             .iter()
             .copied()
             .filter(|quad| {
-                let block = MapBlock::containing_tile(quad.place.x, quad.place.y);
+                let block = BlockCoord::containing(quad.place.x, quad.place.y);
                 let sloped = !quad.is_flat();
                 // Keep one detailed ground-tile rim beneath every cached block:
                 // the deferred restore overwrites it where its cache texel is
@@ -174,7 +174,7 @@ impl FrameGeometry {
     /// `map_static_instances` and copying it would be one whole instance list
     /// per frame — the far-zoom case is tens of thousands of rows — handed to
     /// a pass that only reads it.
-    pub(crate) fn detail_map_statics(&self, _cached: &BTreeSet<MapBlock>) -> (&[SpriteQuad], u32) {
+    pub(crate) fn detail_map_statics(&self, _cached: &BTreeSet<BlockCoord>) -> (&[SpriteQuad], u32) {
         (&self.map_static_instances.rows, self.map_static_instances.drawn)
     }
 }

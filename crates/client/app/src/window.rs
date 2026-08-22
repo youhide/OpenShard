@@ -302,7 +302,7 @@ pub(crate) fn prepare_composite_job(
             .reject_block(key, None, CompositeQuarantineReason::NonFlatGround);
         return None;
     };
-    let (first_x, first_y) = key.block.first_tile();
+    let (first_x, first_y) = openshard_client_render::composite::tile_origin(key.block);
     let owner = TileBounds {
         min_x: i32::from(first_x),
         max_x: i32::from(first_x) + openshard_uofiles::map::BLOCK_SIZE as i32 - 1,

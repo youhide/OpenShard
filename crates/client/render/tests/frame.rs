@@ -39,7 +39,7 @@ const TORCH_TILES: f32 = 3.0;
 use openshard_client_render::camera::TileBounds;
 use openshard_client_render::composite::{
     CaptureSource, CompositeCache, CompositeKey, CompositeProducerJob, CompositeQuad, CompositeRenderer,
-    CompositeTier, CompositeWorkQueue, ImmutableRevision, MapBlock, MapBlockBounds,
+    CompositeTier, CompositeWorkQueue, ImmutableRevision, MapBlockBounds,
 };
 use openshard_client_render::gbuffer;
 use openshard_client_render::mobiles::{self, Mobile};
@@ -56,6 +56,7 @@ use openshard_uofiles::anim::{Anim, AnimFrame, AnimationDirection, AnimationFram
 use openshard_uofiles::art::{Art, LAND_TILE_SIZE, land_row};
 use openshard_uofiles::color::{Color16, Rgb8};
 use openshard_uofiles::equipconv::EquipConv;
+use openshard_uofiles::grid::BlockCoord;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::image::Image;
 use openshard_uofiles::map::Map;
@@ -896,7 +897,7 @@ fn read_texture(
 }
 
 fn producer_owner_tiles(
-    block: MapBlock,
+    block: BlockCoord,
     width: u32,
     kind: Kind,
     ids: &[u8],
@@ -925,7 +926,7 @@ fn producer_owner_tiles(
             "{kind:?} ID at texel {at} has no finite world position"
         );
         let tile = (x.floor() as u16, y.floor() as u16);
-        if block.contains_tile(tile.0, tile.1) {
+        if BlockCoord::containing(tile.0, tile.1) == block {
             owned.insert(tile);
         }
     }
@@ -945,7 +946,7 @@ fn real_map_block_producer_keeps_every_owned_map_tile_after_restore() {
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
     // A dense central-Britain block: a quiet sea block proves only ground.
-    let block = MapBlock { x: 186, y: 203 };
+    let block = BlockCoord { x: 186, y: 203 };
     let key = CompositeKey {
         block,
         tier: CompositeTier::Lod1,
@@ -1144,8 +1145,13 @@ fn real_map_block_producer_keeps_every_owned_map_tile_after_restore() {
     );
     queue.submit([encoder.finish()]);
 
-    let expected: BTreeSet<_> = (block.first_tile().1..block.first_tile().1 + 8)
-        .flat_map(|y| (block.first_tile().0..block.first_tile().0 + 8).map(move |x| (x, y)))
+    // `origin` answers in `u32` because a block coordinate need not be on any
+    // facet; this one is the block the producer was pointed at.
+    let (first_x, first_y) = block.origin();
+    let first_x = u16::try_from(first_x).expect("the producer block is on the facet");
+    let first_y = u16::try_from(first_y).expect("the producer block is on the facet");
+    let expected: BTreeSet<_> = (first_y..first_y + 8)
+        .flat_map(|y| (first_x..first_x + 8).map(move |x| (x, y)))
         .filter(|&(x, y)| map.land(x, y).is_some())
         .collect();
     assert_eq!(

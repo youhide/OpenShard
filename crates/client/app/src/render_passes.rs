@@ -11,7 +11,7 @@ use std::sync::{Once, OnceLock};
 
 use openshard_client_render::camera::Camera;
 use openshard_client_render::composite::{
-    CompositeProducerJob, CompositeQuad, ImmutableRevision, MapBlock, MapBlockBounds,
+    CompositeProducerJob, CompositeQuad, ImmutableRevision, MapBlockBounds,
 };
 use openshard_client_render::geometry::Rect;
 use openshard_client_render::gump::{self as gump_art};
@@ -23,6 +23,7 @@ use openshard_client_render::renderer::Target;
 use openshard_client_render::select::{self, Selection};
 use openshard_client_render::sprite::SpriteQuad;
 use openshard_client_render::{paperdoll, solids};
+use openshard_uofiles::grid::BlockCoord;
 use std::time::{Duration, Instant};
 
 use crate::frame_geometry::FrameGeometry;
@@ -1011,7 +1012,7 @@ pub(crate) fn encode_world_passes(
     // why that is so and why the bracket is a pair of calls rather than a
     // scope guard. Nothing when the adapter has no timestamp queries.
     let ready: Vec<(
-        MapBlock,
+        BlockCoord,
         Rect,
         &openshard_client_render::composite::CompositeTexture,
     )> = (geometry.cutaway_instances.drawn == 0)

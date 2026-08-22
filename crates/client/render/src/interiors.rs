@@ -10,20 +10,14 @@ use std::sync::Arc;
 use openshard_movement::{MapTerrain, PLAYER_HEIGHT, Terrain};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
+use openshard_uofiles::grid::BlockCoord;
 use openshard_uofiles::map::{BLOCK_SIZE, Map};
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
-
-/// The stable address of one eight-by-eight map block.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct BlockId {
-    pub x: u32,
-    pub y: u32,
-}
 
 /// The stable identity of a cell within a baked map block.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CellId {
-    pub block: BlockId,
+    pub block: BlockCoord,
     pub slot: u32,
 }
 
@@ -34,7 +28,7 @@ pub struct CellId {
 /// eight-by-eight bake already knows the whole map.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct RoomId {
-    pub block: BlockId,
+    pub block: BlockCoord,
     pub slot: u32,
 }
 
@@ -349,7 +343,7 @@ impl Building {
 /// One map door that was baked as shut.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct DoorId {
-    pub block: BlockId,
+    pub block: BlockCoord,
     pub slot: u32,
 }
 
@@ -452,16 +446,20 @@ impl Cell {
 /// can stitch these stable local identities at block seams.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct BlockCells {
-    pub id: BlockId,
+    pub id: BlockCoord,
     cells: Vec<Cell>,
     doors: Vec<Door>,
 }
 
 impl BlockCells {
     /// Bake one valid map block, or return `None` when the block is off-map.
-    pub fn bake(map: &Map, tiledata: &TileData, id: BlockId) -> Option<Self> {
-        let origin_x = u16::try_from(id.x.checked_mul(BLOCK_SIZE)?).ok()?;
-        let origin_y = u16::try_from(id.y.checked_mul(BLOCK_SIZE)?).ok()?;
+    pub fn bake(map: &Map, tiledata: &TileData, id: BlockCoord) -> Option<Self> {
+        let (origin_x, origin_y) = id.origin();
+        // A block past the `u16` a tile coordinate is expressed in is a block
+        // no facet has; `map.contains` below would refuse it anyway, and the
+        // conversion is where that becomes visible rather than a wrap.
+        let origin_x = u16::try_from(origin_x).ok()?;
+        let origin_y = u16::try_from(origin_y).ok()?;
         if !map.contains(origin_x, origin_y) {
             return None;
         }
@@ -560,7 +558,7 @@ pub struct BlockRooms {
 
 impl BlockRooms {
     /// Bake the closed-door room graph of one valid map block.
-    pub fn bake(map: &Map, tiledata: &TileData, id: BlockId) -> Option<Self> {
+    pub fn bake(map: &Map, tiledata: &TileData, id: BlockCoord) -> Option<Self> {
         Self::bake_with_shapes(map, tiledata, id, &|_| crate::occlusion::Shape::UNREAD)
     }
 
@@ -572,7 +570,7 @@ impl BlockRooms {
     pub fn bake_with_shapes(
         map: &Map,
         tiledata: &TileData,
-        id: BlockId,
+        id: BlockCoord,
         shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
     ) -> Option<Self> {
         let cells = BlockCells::bake(map, tiledata, id)?;
@@ -1250,7 +1248,7 @@ impl BuildingMap {
     /// cache. Returning blocks rather than a camera rectangle is crucial: a
     /// doorway at the far side of a house must not change room reachability
     /// merely because the camera panned away from it.
-    pub fn blocks_for(&self, building: u32) -> BTreeSet<BlockId> {
+    pub fn blocks_for(&self, building: u32) -> BTreeSet<BlockCoord> {
         if building == 0 {
             return BTreeSet::new();
         }
@@ -1259,9 +1257,10 @@ impl BuildingMap {
             .iter()
             .enumerate()
             .filter_map(|(at, &label)| (label == building).then_some(at))
-            .map(|at| BlockId {
-                x: u32::try_from(at % width).expect("facet x fits u32") / BLOCK_SIZE,
-                y: u32::try_from(at / width).expect("facet y fits u32") / BLOCK_SIZE,
+            .map(|at| {
+                let x = u16::try_from(at % width).expect("facet x fits u16");
+                let y = u16::try_from(at / width).expect("facet y fits u16");
+                BlockCoord::containing(x, y)
             })
             .collect()
     }
@@ -1874,7 +1873,7 @@ impl InteriorFrame {
     /// intentionally labels only the space *inside* their contour.
     pub fn outside(buildings: BuildingMap) -> Self {
         let root = CellId {
-            block: BlockId { x: 0, y: 0 },
+            block: BlockCoord { x: 0, y: 0 },
             slot: 0,
         };
         Self {
@@ -1899,7 +1898,7 @@ impl InteriorFrame {
     /// membership participates.
     pub fn z_slice(player: Point, view: ZSliceView) -> Self {
         let root = CellId {
-            block: BlockId { x: 0, y: 0 },
+            block: BlockCoord { x: 0, y: 0 },
             slot: 0,
         };
         Self {
@@ -2354,13 +2353,13 @@ fn neighbours((x, y): (u16, u16)) -> impl Iterator<Item = (u16, u16)> {
 /// open/closed reachability remains a per-frame question.
 #[derive(Default, Debug)]
 pub struct Index {
-    blocks: BTreeMap<BlockId, BlockRooms>,
+    blocks: BTreeMap<BlockCoord, BlockRooms>,
 }
 
 impl Index {
     /// Return a cached cell block, baking its room graph from the read-only map
     /// on first use.
-    pub fn block(&mut self, map: &Map, tiledata: &TileData, id: BlockId) -> Option<&BlockCells> {
+    pub fn block(&mut self, map: &Map, tiledata: &TileData, id: BlockCoord) -> Option<&BlockCells> {
         Some(self.rooms(map, tiledata, id)?.cells())
     }
 
@@ -2368,7 +2367,7 @@ impl Index {
     /// use. Cells and rooms deliberately share this one cache entry: a second
     /// bake would give the two phases two opportunities to disagree about a
     /// wall or a doorway in the same map block.
-    pub fn rooms(&mut self, map: &Map, tiledata: &TileData, id: BlockId) -> Option<&BlockRooms> {
+    pub fn rooms(&mut self, map: &Map, tiledata: &TileData, id: BlockCoord) -> Option<&BlockRooms> {
         self.rooms_with_shapes(map, tiledata, id, &|_| crate::occlusion::Shape::UNREAD)
     }
 
@@ -2380,7 +2379,7 @@ impl Index {
         &mut self,
         map: &Map,
         tiledata: &TileData,
-        id: BlockId,
+        id: BlockCoord,
         shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
     ) -> Option<&BlockRooms> {
         if let Entry::Vacant(entry) = self.blocks.entry(id) {
@@ -2400,7 +2399,7 @@ impl Index {
         &mut self,
         map: &Map,
         tiledata: &TileData,
-        ids: impl IntoIterator<Item = BlockId>,
+        ids: impl IntoIterator<Item = BlockCoord>,
     ) -> Option<StitchedRooms> {
         self.stitched_with_shapes(map, tiledata, ids, &|_| crate::occlusion::Shape::UNREAD)
     }
@@ -2410,7 +2409,7 @@ impl Index {
         &mut self,
         map: &Map,
         tiledata: &TileData,
-        ids: impl IntoIterator<Item = BlockId>,
+        ids: impl IntoIterator<Item = BlockCoord>,
         shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
     ) -> Option<StitchedRooms> {
         let ids: BTreeSet<_> = ids.into_iter().collect();
@@ -2429,7 +2428,7 @@ impl Index {
         &mut self,
         map: &Map,
         tiledata: &TileData,
-        ids: impl IntoIterator<Item = BlockId>,
+        ids: impl IntoIterator<Item = BlockCoord>,
     ) -> Option<Buildings> {
         Some(Buildings::bake(
             map,
@@ -2440,10 +2439,7 @@ impl Index {
 
     /// Look up the cell containing a point, baking only that point's block.
     pub fn cell_at(&mut self, map: &Map, tiledata: &TileData, point: Point) -> Option<CellId> {
-        let id = BlockId {
-            x: u32::from(point.x) / BLOCK_SIZE,
-            y: u32::from(point.y) / BLOCK_SIZE,
-        };
+        let id = BlockCoord::containing(point.x, point.y);
         self.block(map, tiledata, id)?.cell_at(point)
     }
 
@@ -2510,7 +2506,7 @@ mod tests {
             hue: Hue(0),
         });
 
-        let block = BlockRooms::bake(&map, &tiledata, BlockId { x: 0, y: 0 }).expect("map block");
+        let block = BlockRooms::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("map block");
         let rooms = StitchedRooms::bake([block]);
         let lower = rooms
             .cells()
@@ -2550,7 +2546,7 @@ mod tests {
             hue: Hue(0),
         });
 
-        let cells = BlockCells::bake(&map, &tiledata, BlockId { x: 0, y: 0 }).expect("map block");
+        let cells = BlockCells::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("map block");
         let column: Vec<_> = cells
             .cells()
             .iter()
@@ -2590,7 +2586,7 @@ mod tests {
             hue: Hue(0),
         });
 
-        let cells = BlockCells::bake(&map, &tiledata, BlockId { x: 0, y: 0 }).expect("map block");
+        let cells = BlockCells::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("map block");
         let cell = cells
             .cells()
             .iter()
@@ -2647,7 +2643,7 @@ mod tests {
             hue: Hue(0),
         });
 
-        let block = BlockRooms::bake(&map, &tiledata, BlockId { x: 0, y: 0 }).expect("map block");
+        let block = BlockRooms::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("map block");
         let rooms = StitchedRooms::bake([block]);
         let centre = rooms
             .cells()
@@ -2668,7 +2664,7 @@ mod tests {
 
     #[test]
     fn open_sky_and_a_negative_floor_can_join_without_overflowing() {
-        let block = BlockId { x: 0, y: 0 };
+        let block = BlockCoord { x: 0, y: 0 };
         let low = Cell {
             id: CellId { block, slot: 0 },
             tile: (0, 0),
@@ -2707,7 +2703,7 @@ mod tests {
             z: 0,
             hue: Hue(0),
         });
-        let block = BlockId { x: 0, y: 0 };
+        let block = BlockCoord { x: 0, y: 0 };
         let here = Cell {
             id: CellId { block, slot: 0 },
             tile: (1, 1),
@@ -2832,7 +2828,7 @@ mod tests {
         assert!(!topology.wall_tiles[9], "a stage riser is not a house contour");
         let cell = Cell {
             id: CellId {
-                block: BlockId { x: 0, y: 0 },
+                block: BlockCoord { x: 0, y: 0 },
                 slot: 9,
             },
             tile: (1, 1),
@@ -2969,7 +2965,7 @@ mod tests {
             hue: Hue(0),
         });
 
-        let rooms = BlockRooms::bake_with_shapes(&map, &tiledata, BlockId { x: 0, y: 0 }, &|_| {
+        let rooms = BlockRooms::bake_with_shapes(&map, &tiledata, BlockCoord { x: 0, y: 0 }, &|_| {
             crate::occlusion::Shape::UNREAD
         })
         .expect("map block");
@@ -3005,7 +3001,7 @@ mod tests {
             tile: LandTile(0),
             z: 0,
         });
-        assert!(BlockCells::bake(&map, &TileData::empty(), BlockId { x: 1, y: 0 }).is_none());
+        assert!(BlockCells::bake(&map, &TileData::empty(), BlockCoord { x: 1, y: 0 }).is_none());
     }
 
     #[test]
@@ -3032,7 +3028,7 @@ mod tests {
         let mut index = Index::default();
 
         let buildings = index
-            .buildings(&map, &tiledata, [BlockId { x: 0, y: 0 }])
+            .buildings(&map, &tiledata, [BlockCoord { x: 0, y: 0 }])
             .expect("map block");
 
         assert!(buildings.buildings().is_empty());
@@ -3062,7 +3058,7 @@ mod tests {
             hue: Hue(0),
         });
 
-        let cells = BlockCells::bake(&map, &tiledata, BlockId { x: 0, y: 0 }).expect("map block");
+        let cells = BlockCells::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("map block");
         let column: Vec<_> = cells
             .cells()
             .iter()
@@ -3116,7 +3112,7 @@ mod tests {
             }
         }
 
-        let rooms = BlockRooms::bake(&map, &tiledata, BlockId { x: 0, y: 0 }).expect("map block");
+        let rooms = BlockRooms::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("map block");
 
         assert_eq!(rooms.rooms().len(), 2, "a shut door does not merge its rooms");
         assert_eq!(
@@ -3136,7 +3132,7 @@ mod tests {
 
     #[test]
     fn an_open_portal_reveals_a_sealed_room_but_a_shut_one_does_not() {
-        let block = BlockId { x: 0, y: 0 };
+        let block = BlockCoord { x: 0, y: 0 };
         let outside = RoomId { block, slot: 0 };
         let sealed = RoomId { block, slot: 1 };
         let door = Door {
@@ -3240,8 +3236,8 @@ mod tests {
             hue: Hue(0),
         });
 
-        let left = BlockRooms::bake(&map, &tiledata, BlockId { x: 0, y: 0 }).expect("left block");
-        let right = BlockRooms::bake(&map, &tiledata, BlockId { x: 1, y: 0 }).expect("right block");
+        let left = BlockRooms::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("left block");
+        let right = BlockRooms::bake(&map, &tiledata, BlockCoord { x: 1, y: 0 }).expect("right block");
         assert!(
             left.portals().is_empty(),
             "the other side is beyond this local bake"
@@ -3251,7 +3247,7 @@ mod tests {
         assert_eq!(rooms.portals().len(), 1, "the seam doorway has both sides");
         let left = rooms
             .room_at(CellId {
-                block: BlockId { x: 0, y: 0 },
+                block: BlockCoord { x: 0, y: 0 },
                 slot: 30,
             })
             .expect("left ground cell");
@@ -3263,7 +3259,7 @@ mod tests {
             .iter()
             .flat_map(StitchedRoom::cells)
             .copied()
-            .find(|cell| cell.block == BlockId { x: 1, y: 0 })
+            .find(|cell| cell.block == BlockCoord { x: 1, y: 0 })
             .expect("right room cell");
         let right = rooms.room_at(right_cell).expect("right room");
         assert_ne!(left, right);
@@ -3281,7 +3277,7 @@ mod tests {
 
     #[test]
     fn a_low_supported_platform_is_a_child_of_its_surrounding_room() {
-        let block = BlockId { x: 0, y: 0 };
+        let block = BlockCoord { x: 0, y: 0 };
         let base = CellId { block, slot: 0 };
         let platform = CellId { block, slot: 1 };
         let base_room = StitchedRoomId {
@@ -3383,7 +3379,7 @@ mod tests {
     /// building's open entrance; `sealed` is behind its portal; `upper` is the
     /// next structural floor of that sealed room.
     fn indexed_picture() -> (Buildings, StitchedRooms, CellId, CellId, CellId) {
-        let block = BlockId { x: 0, y: 0 };
+        let block = BlockCoord { x: 0, y: 0 };
         let outside = CellId { block, slot: 0 };
         let sealed = CellId { block, slot: 1 };
         let upper = CellId { block, slot: 2 };

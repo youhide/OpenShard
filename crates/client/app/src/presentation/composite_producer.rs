@@ -36,7 +36,7 @@ pub(super) fn produce(
     debug_assert_eq!(job.source_rect().width, job.source_size().width as f32);
     debug_assert_eq!(job.source_rect().height, job.source_size().height as f32);
     let camera = job.camera();
-    let (first_x, first_y) = job.key().block.first_tile();
+    let (first_x, first_y) = openshard_client_render::composite::tile_origin(job.key().block);
     let owner = TileBounds {
         min_x: i32::from(first_x),
         max_x: i32::from(first_x) + openshard_uofiles::map::BLOCK_SIZE as i32 - 1,

@@ -27,7 +27,7 @@ use openshard_client_render::blit::{self, Blit, ViewportRect};
 use openshard_client_render::camera::{Camera, ViewPixel};
 use openshard_client_render::composite::{
     CompositeKey, CompositeProducerJob, CompositeQuarantineReason, CompositeTexture, CompositeTier,
-    ImmutableRevision, MapBlock, MapBlockBounds,
+    ImmutableRevision, MapBlockBounds,
 };
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::debug::View;
@@ -45,6 +45,7 @@ use openshard_client_render::{ground, light, statics};
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 use openshard_protocol::world::Point;
+use openshard_uofiles::grid::BlockCoord;
 use openshard_uofiles::map::Map;
 
 use crate::app::App;
@@ -205,7 +206,7 @@ fn audit_captured_composite_ids(
     let job = CompositeProducerJob::for_flat_ground(captured.key(), captured.ground());
     let divisor = captured.key().tier.source_pixels_per_texel();
     let mut missing_owner_centres = Vec::new();
-    let (first_x, first_y) = captured.key().block.first_tile();
+    let (first_x, first_y) = openshard_client_render::composite::tile_origin(captured.key().block);
     for y in first_y..first_y + openshard_uofiles::map::BLOCK_SIZE as u16 {
         for x in first_x..first_x + openshard_uofiles::map::BLOCK_SIZE as u16 {
             let Some(land) = map.land(x, y) else {
@@ -975,7 +976,7 @@ fn audit_lod_map_equivalence(
                 .map(|quad| quad.is_flat()),
             _ => None,
         };
-        let expected_source_block = expected_source_tile.map(|(x, y)| MapBlock::containing_tile(x, y));
+        let expected_source_block = expected_source_tile.map(|(x, y)| BlockCoord::containing(x, y));
         // Do not make a person wait for a second report to get their scene
         // back. A direct-map land pixel replaced by `Nothing` is a definite
         // cache coverage failure, not a benign ordering difference. Quarantine

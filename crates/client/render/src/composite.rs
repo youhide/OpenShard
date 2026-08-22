@@ -17,6 +17,7 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
+use openshard_uofiles::grid::BlockCoord;
 use openshard_uofiles::map::BLOCK_SIZE;
 
 use crate::blit::WORLD_FORMAT;
@@ -36,41 +37,6 @@ use crate::lod::BlockLod;
 /// or changes zoom.
 pub const COMPOSITE_SOURCE_SIDE: u32 = BLOCK_SIZE * TILE_WIDTH as u32;
 
-/// The fixed coordinate of one 8×8 map block.
-///
-/// This is a map-block address, not a tile coordinate: `(1, 0)` starts at tile
-/// `(8, 0)`.  It stays independent of a [`Map`](openshard_uofiles::map::Map)
-/// so a queue can hold requests while the map is being streamed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MapBlock {
-    /// Block column.
-    pub x: u16,
-    /// Block row.
-    pub y: u16,
-}
-
-impl MapBlock {
-    /// The map block containing tile `(x, y)`.
-    pub const fn containing_tile(x: u16, y: u16) -> Self {
-        Self {
-            x: x / BLOCK_SIZE as u16,
-            y: y / BLOCK_SIZE as u16,
-        }
-    }
-
-    /// The top-left tile of this block.
-    pub const fn first_tile(self) -> (u16, u16) {
-        (self.x * BLOCK_SIZE as u16, self.y * BLOCK_SIZE as u16)
-    }
-
-    /// Whether a map tile belongs to this block.
-    ///
-    /// A ground composite has exactly this block's own 8×8 tile pixels.
-    pub const fn contains_tile(self, x: u16, y: u16) -> bool {
-        Self::containing_tile(x, y).x == self.x && Self::containing_tile(x, y).y == self.y
-    }
-}
-
 /// One cacheable terrain owner: all 64 tiles form the same level surface.
 ///
 /// This is deliberately stronger than "every tile is flat". A block where
@@ -80,19 +46,26 @@ impl MapBlock {
 /// later restore rectangle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FlatGroundBlock {
-    block: MapBlock,
+    block: BlockCoord,
     elevation: i8,
 }
 
 impl FlatGroundBlock {
     /// Inspect the authoritative map and return the block only when one cached
     /// texture can own all of its ground pixels without a live overlap.
-    pub fn inspect(map: &openshard_uofiles::map::Map, block: MapBlock) -> Option<Self> {
-        let (first_x, first_y) = block.first_tile();
+    pub fn inspect(map: &openshard_uofiles::map::Map, block: BlockCoord) -> Option<Self> {
+        // This is the function that decides whether the map has the block at
+        // all, so it narrows the origin itself rather than through
+        // [`tile_origin`]: a block past a tile coordinate is one no facet has,
+        // and saying so here is the same `None` the first `map.land` would give.
+        let (first_x, first_y) = block.origin();
+        let first_x = u16::try_from(first_x).ok()?;
+        let first_y = u16::try_from(first_y).ok()?;
         let mut elevation = None;
-        for y in u32::from(first_y)..u32::from(first_y) + BLOCK_SIZE {
-            for x in u32::from(first_x)..u32::from(first_x) + BLOCK_SIZE {
-                let (x, y) = (x as u16, y as u16);
+        for local_y in 0..BLOCK_SIZE as u16 {
+            for local_x in 0..BLOCK_SIZE as u16 {
+                let x = first_x.checked_add(local_x)?;
+                let y = first_y.checked_add(local_y)?;
                 let land = map.land(x, y)?;
                 let corners = crate::ground::corner_heights(map, x, y, land.z);
                 if !corners.iter().all(|height| *height == corners[0]) {
@@ -113,12 +86,12 @@ impl FlatGroundBlock {
         })
     }
 
-    const fn at(block: MapBlock, elevation: i8) -> Self {
+    const fn at(block: BlockCoord, elevation: i8) -> Self {
         Self { block, elevation }
     }
 
     /// The map block this surface owns.
-    pub const fn block(self) -> MapBlock {
+    pub const fn block(self) -> BlockCoord {
         self.block
     }
 
@@ -162,7 +135,7 @@ impl CompositeProducerJob {
             "a composite key and its ground owner must name the same map block"
         );
         let ground_z = ground.elevation();
-        let (x, y) = key.block.first_tile();
+        let (x, y) = tile_origin(key.block);
         // The ground diamond for 8×8 tiles has its vertical centre 22 pixels
         // above the centre of tile `(x + 4, y + 4)`.  Looking there centres
         // the 352-pixel diamond in the fixed 352-pixel producer target.
@@ -209,7 +182,7 @@ impl CompositeProducerJob {
 
     /// The ground block footprint in this job's own source attachment.
     pub fn rect_in(self, camera: Camera) -> Rect {
-        let (x, y) = self.key.block.first_tile();
+        let (x, y) = tile_origin(self.key.block);
         let top = camera.to_screen(openshard_protocol::world::Point::new(
             x,
             y,
@@ -230,6 +203,36 @@ impl CompositeProducerJob {
     }
 }
 
+/// A block's north-west tile, as a tile coordinate.
+///
+/// [`BlockCoord::origin`] answers in `u32` because a block coordinate is not
+/// promised to be on any facet. A composite is only ever built for a block the
+/// map contains — [`FlatGroundBlock::inspect`] asks the map first — so here the
+/// origin is a real tile and the narrowing is the place that says so.
+pub fn tile_origin(block: BlockCoord) -> (u16, u16) {
+    let (x, y) = block.origin();
+    (
+        u16::try_from(x).expect("a composite's block is on the facet"),
+        u16::try_from(y).expect("a composite's block is on the facet"),
+    )
+}
+
+/// A block column as signed, for the pan arithmetic that steps a rectangle by
+/// its own width and can land left of the map before it is clamped.
+///
+/// A facet is at most 7,168 tiles across — 896 blocks — so the conversion is
+/// total in both directions; it is written out rather than cast so that a grid
+/// that somehow was not would stop here instead of wrapping into a rectangle
+/// on the other side of the world.
+fn signed(blocks: u32) -> i32 {
+    i32::try_from(blocks).expect("a facet's block count fits i32")
+}
+
+/// The inverse, for a clamped result that is back inside the map.
+fn unsigned(blocks: i32) -> u32 {
+    u32::try_from(blocks).expect("a clamped block column is not negative")
+}
+
 /// An inclusive rectangle of map blocks.
 ///
 /// This is the queue's cell range.  It is deliberately separate from
@@ -238,13 +241,13 @@ impl CompositeProducerJob {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MapBlockBounds {
     /// Lowest block column, inclusive.
-    pub min_x: u16,
+    pub min_x: u32,
     /// Highest block column, inclusive.
-    pub max_x: u16,
+    pub max_x: u32,
     /// Lowest block row, inclusive.
-    pub min_y: u16,
+    pub min_y: u32,
     /// Highest block row, inclusive.
-    pub max_y: u16,
+    pub max_y: u32,
 }
 
 impl MapBlockBounds {
@@ -252,37 +255,40 @@ impl MapBlockBounds {
     /// camera slack before it can become a request.
     pub fn from_tiles(bounds: TileBounds, map_width: u32, map_height: u32) -> Option<Self> {
         let (xs, ys) = bounds.clamp_to(map_width, map_height)?;
+        let first = BlockCoord::containing(*xs.start(), *ys.start());
+        let last = BlockCoord::containing(*xs.end(), *ys.end());
         Some(Self {
-            min_x: *xs.start() / BLOCK_SIZE as u16,
-            max_x: *xs.end() / BLOCK_SIZE as u16,
-            min_y: *ys.start() / BLOCK_SIZE as u16,
-            max_y: *ys.end() / BLOCK_SIZE as u16,
+            min_x: first.x,
+            max_x: last.x,
+            min_y: first.y,
+            max_y: last.y,
         })
     }
 
     /// Number of blocks across, inclusive.
-    pub const fn width(self) -> u16 {
+    pub const fn width(self) -> u32 {
         self.max_x - self.min_x + 1
     }
 
     /// Number of blocks down, inclusive.
-    pub const fn height(self) -> u16 {
+    pub const fn height(self) -> u32 {
         self.max_y - self.min_y + 1
     }
 
     fn centre(self) -> (i32, i32) {
         (
-            (i32::from(self.min_x) + i32::from(self.max_x)) / 2,
-            (i32::from(self.min_y) + i32::from(self.max_y)) / 2,
+            (signed(self.min_x) + signed(self.max_x)) / 2,
+            (signed(self.min_y) + signed(self.max_y)) / 2,
         )
     }
 
     /// Iterate every block in deterministic row-major order.
-    pub fn blocks(self) -> impl Iterator<Item = MapBlock> {
-        (self.min_y..=self.max_y).flat_map(move |y| (self.min_x..=self.max_x).map(move |x| MapBlock { x, y }))
+    pub fn blocks(self) -> impl Iterator<Item = BlockCoord> {
+        (self.min_y..=self.max_y)
+            .flat_map(move |y| (self.min_x..=self.max_x).map(move |x| BlockCoord { x, y }))
     }
 
-    fn contains(self, block: MapBlock) -> bool {
+    fn contains(self, block: BlockCoord) -> bool {
         (self.min_x..=self.max_x).contains(&block.x) && (self.min_y..=self.max_y).contains(&block.y)
     }
 
@@ -291,7 +297,7 @@ impl MapBlockBounds {
     /// This is deliberately expressed in map blocks rather than pixels.  A
     /// small pan must not immediately discard a just-left composite only to
     /// queue and upload it again on the next pan back.
-    pub fn expanded_by(self, margin: u16) -> Self {
+    pub fn expanded_by(self, margin: u32) -> Self {
         Self {
             min_x: self.min_x.saturating_sub(margin),
             max_x: self.max_x.saturating_add(margin),
@@ -314,17 +320,17 @@ impl MapBlockBounds {
         if dx == 0 && dy == 0 {
             return None;
         }
-        let shift_x = dx * i32::from(self.width());
-        let shift_y = dy * i32::from(self.height());
-        let min_x = (i32::from(self.min_x) + shift_x).clamp(i32::from(map.min_x), i32::from(map.max_x));
-        let max_x = (i32::from(self.max_x) + shift_x).clamp(i32::from(map.min_x), i32::from(map.max_x));
-        let min_y = (i32::from(self.min_y) + shift_y).clamp(i32::from(map.min_y), i32::from(map.max_y));
-        let max_y = (i32::from(self.max_y) + shift_y).clamp(i32::from(map.min_y), i32::from(map.max_y));
+        let shift_x = dx * signed(self.width());
+        let shift_y = dy * signed(self.height());
+        let min_x = (signed(self.min_x) + shift_x).clamp(signed(map.min_x), signed(map.max_x));
+        let max_x = (signed(self.max_x) + shift_x).clamp(signed(map.min_x), signed(map.max_x));
+        let min_y = (signed(self.min_y) + shift_y).clamp(signed(map.min_y), signed(map.max_y));
+        let max_y = (signed(self.max_y) + shift_y).clamp(signed(map.min_y), signed(map.max_y));
         (min_x <= max_x && min_y <= max_y).then_some(Self {
-            min_x: min_x as u16,
-            max_x: max_x as u16,
-            min_y: min_y as u16,
-            max_y: max_y as u16,
+            min_x: unsigned(min_x),
+            max_x: unsigned(max_x),
+            min_y: unsigned(min_y),
+            max_y: unsigned(max_y),
         })
     }
 }
@@ -371,7 +377,7 @@ pub struct ImmutableRevision(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CompositeKey {
     /// The map block pictured by the texture.
-    pub block: MapBlock,
+    pub block: BlockCoord,
     /// The cache's intentional sampling resolution.
     pub tier: CompositeTier,
     /// Immutable source revision used to produce its pixels.
@@ -394,7 +400,7 @@ pub enum CompositeQuarantineReason {
 /// The compact immutable owner record retained for a quarantined block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CompositeQuarantine {
-    pub block: MapBlock,
+    pub block: BlockCoord,
     pub key: CompositeKey,
     pub ground: Option<FlatGroundBlock>,
     pub reason: CompositeQuarantineReason,
@@ -923,16 +929,16 @@ pub struct CompositeCacheLimits {
     /// satisfy this limit; they are the working set, not the cache tail.
     pub max_gpu_bytes: u64,
     /// Number of map blocks kept on every side of the visible rectangle.
-    pub viewport_margin_blocks: u16,
+    pub viewport_margin_blocks: u32,
 }
 
 impl CompositeCacheLimits {
     /// The shipped 128 MiB tail budget and one-block pan hysteresis margin.
     pub const DEFAULT_MAX_GPU_BYTES: u64 = 128 * 1024 * 1024;
-    pub const DEFAULT_VIEWPORT_MARGIN_BLOCKS: u16 = 1;
+    pub const DEFAULT_VIEWPORT_MARGIN_BLOCKS: u32 = 1;
 
     /// A non-zero tail budget and its viewport hysteresis margin.
-    pub const fn new(max_gpu_bytes: u64, viewport_margin_blocks: u16) -> Option<Self> {
+    pub const fn new(max_gpu_bytes: u64, viewport_margin_blocks: u32) -> Option<Self> {
         if max_gpu_bytes == 0 {
             None
         } else {
@@ -975,7 +981,7 @@ pub struct CompositeCache {
     /// Blocks the full-frame oracle has proved unsafe to restore. They stay at
     /// LOD0 for the rest of the session: a correct fallback is preferable to
     /// repeatedly rebuilding a known-bad cache image every frame.
-    rejected: BTreeMap<MapBlock, CompositeQuarantine>,
+    rejected: BTreeMap<BlockCoord, CompositeQuarantine>,
     latest_quarantine: Option<CompositeQuarantine>,
     limits: CompositeCacheLimits,
     use_clock: Cell<u64>,
@@ -1034,7 +1040,7 @@ impl CompositeCache {
     /// full map block synchronously in the camera frame.
     pub fn selected_or_more_detailed(
         &self,
-        block: MapBlock,
+        block: BlockCoord,
         selected: BlockLod,
         revision: ImmutableRevision,
     ) -> Option<&CompositeTexture> {
@@ -1137,7 +1143,7 @@ impl CompositeCache {
 
     /// A rejected block acts as ready to the scheduler so it does not consume
     /// an atlas/preparation slot every frame only to be discarded again.
-    pub fn is_rejected(&self, block: MapBlock) -> bool {
+    pub fn is_rejected(&self, block: BlockCoord) -> bool {
         self.rejected.contains_key(&block)
     }
 
@@ -1156,12 +1162,12 @@ impl CompositeCache {
     /// A map/static mutation changes the source pixels for both cached LODs;
     /// keeping another revision around would make it too easy for a fallback
     /// lookup to show stale map state.
-    pub fn invalidate_block(&mut self, block: MapBlock) -> usize {
+    pub fn invalidate_block(&mut self, block: BlockCoord) -> usize {
         self.invalidate_matching(|key| key.block == block)
     }
 
     /// Forget selected cached tiers of one changed map block.
-    pub fn invalidate_block_tiers(&mut self, block: MapBlock, tiers: &[CompositeTier]) -> usize {
+    pub fn invalidate_block_tiers(&mut self, block: BlockCoord, tiers: &[CompositeTier]) -> usize {
         self.invalidate_matching(|key| key.block == block && tiers.contains(&key.tier))
     }
 
@@ -1459,7 +1465,7 @@ impl CompositeWorkQueue {
 
     fn request(
         &mut self,
-        block: MapBlock,
+        block: BlockCoord,
         tier: CompositeTier,
         revision: ImmutableRevision,
         priority: CompositePriority,
@@ -1475,7 +1481,7 @@ impl CompositeWorkQueue {
             return;
         }
         let distance =
-            i32::abs(i32::from(block.x) - centre.0) as u32 + i32::abs(i32::from(block.y) - centre.1) as u32;
+            i32::abs(signed(block.x) - centre.0) as u32 + i32::abs(signed(block.y) - centre.1) as u32;
         let order = QueueOrder {
             priority,
             distance,
@@ -1589,12 +1595,12 @@ impl CompositeWorkQueue {
     /// after the mutation reaches [`finish_into_cache`](Self::finish_into_cache)
     /// or [`finish_capture`](Self::finish_capture), sees that its reservation
     /// is gone, and discards its stale result instead of reviving old pixels.
-    pub fn invalidate_block(&mut self, block: MapBlock) -> usize {
+    pub fn invalidate_block(&mut self, block: BlockCoord) -> usize {
         self.invalidate_matching(|key| key.block == block)
     }
 
     /// Cancel selected cached LOD jobs for one changed map block.
-    pub fn invalidate_block_tiers(&mut self, block: MapBlock, tiers: &[CompositeTier]) -> usize {
+    pub fn invalidate_block_tiers(&mut self, block: BlockCoord, tiers: &[CompositeTier]) -> usize {
         self.invalidate_matching(|key| key.block == block && tiers.contains(&key.tier))
     }
 
@@ -1749,7 +1755,7 @@ fn write_capture_uniform(
     buffer: &wgpu::Buffer,
     size: CompositeSize,
     source: crate::blit::ViewportRect,
-    block: MapBlock,
+    block: BlockCoord,
 ) {
     let values = [
         size.width as f32,
@@ -1758,8 +1764,8 @@ fn write_capture_uniform(
         source.y as f32,
         source.width as f32,
         source.height as f32,
-        f32::from(block.x * BLOCK_SIZE as u16),
-        f32::from(block.y * BLOCK_SIZE as u16),
+        f32::from(tile_origin(block).0),
+        f32::from(tile_origin(block).1),
         0.0,
         0.0,
     ];
@@ -3026,12 +3032,12 @@ mod tests {
                 .unwrap()
         };
         let left_key = CompositeKey {
-            block: MapBlock { x: 0, y: 0 },
+            block: BlockCoord { x: 0, y: 0 },
             tier: CompositeTier::Lod1,
             revision: ImmutableRevision::default(),
         };
         let right_key = CompositeKey {
-            block: MapBlock { x: 1, y: 0 },
+            block: BlockCoord { x: 1, y: 0 },
             tier: CompositeTier::Lod1,
             revision: ImmutableRevision::default(),
         };
@@ -3338,7 +3344,7 @@ mod tests {
             });
         }
 
-        let block = MapBlock { x: 0, y: 0 };
+        let block = BlockCoord { x: 0, y: 0 };
         let key = CompositeKey {
             block,
             tier: CompositeTier::Lod1,
@@ -3736,7 +3742,7 @@ mod tests {
         let source_depth = crate::renderer::depth_texture(&device, SOURCE, SOURCE);
         let source_depth_view = source_depth.create_view(&wgpu::TextureViewDescriptor::default());
         let key = CompositeKey {
-            block: MapBlock { x: 0, y: 0 },
+            block: BlockCoord { x: 0, y: 0 },
             tier: CompositeTier::Lod2,
             revision: ImmutableRevision::default(),
         };
@@ -3820,20 +3826,13 @@ mod tests {
     }
 
     #[test]
-    fn block_coordinates_are_not_tile_coordinates() {
-        assert_eq!(MapBlock::containing_tile(0, 7).first_tile(), (0, 0));
-        assert_eq!(MapBlock::containing_tile(8, 15).first_tile(), (8, 8));
-        assert_eq!(MapBlock::containing_tile(23, 24).first_tile(), (16, 24));
-    }
-
-    #[test]
     fn block_ownership_excludes_neighbouring_capture_pixels() {
-        let block = MapBlock { x: 2, y: 3 };
-        assert!(block.contains_tile(16, 24));
-        assert!(block.contains_tile(23, 31));
-        assert!(!block.contains_tile(15, 24));
-        assert!(!block.contains_tile(24, 31));
-        assert!(!block.contains_tile(16, 32));
+        let block = BlockCoord { x: 2, y: 3 };
+        assert_eq!(BlockCoord::containing(16, 24), block);
+        assert_eq!(BlockCoord::containing(23, 31), block);
+        assert_ne!(BlockCoord::containing(15, 24), block);
+        assert_ne!(BlockCoord::containing(24, 31), block);
+        assert_ne!(BlockCoord::containing(16, 32), block);
     }
 
     #[test]
@@ -3855,7 +3854,7 @@ mod tests {
     #[test]
     fn producer_job_has_a_fixed_local_camera_and_canonical_source_extent() {
         let key = CompositeKey {
-            block: MapBlock { x: 12, y: 19 },
+            block: BlockCoord { x: 12, y: 19 },
             tier: CompositeTier::Lod2,
             revision: ImmutableRevision(41),
         };
@@ -3879,7 +3878,7 @@ mod tests {
     #[test]
     fn elevated_flat_plateau_keeps_its_source_rect_at_the_full_attachment() {
         let key = CompositeKey {
-            block: MapBlock { x: 12, y: 19 },
+            block: BlockCoord { x: 12, y: 19 },
             tier: CompositeTier::Lod1,
             revision: ImmutableRevision(41),
         };
@@ -3905,7 +3904,7 @@ mod tests {
             tile: LandTile(7),
             z: 20,
         });
-        let block = MapBlock { x: 0, y: 0 };
+        let block = BlockCoord { x: 0, y: 0 };
         let plateau = FlatGroundBlock::inspect(&map, block).expect("one level 8x8 plateau");
         assert_eq!(plateau.block(), block);
         assert_eq!(plateau.elevation(), 20);
@@ -3933,7 +3932,7 @@ mod tests {
             z: 20,
         });
         let key = CompositeKey {
-            block: MapBlock { x: 1, y: 1 },
+            block: BlockCoord { x: 1, y: 1 },
             tier: CompositeTier::Lod1,
             revision: ImmutableRevision(9),
         };
@@ -3969,7 +3968,7 @@ mod tests {
     #[should_panic(expected = "source proof for its own block")]
     fn prepared_work_rejects_a_source_proof_for_another_block() {
         let key = CompositeKey {
-            block: MapBlock { x: 0, y: 0 },
+            block: BlockCoord { x: 0, y: 0 },
             tier: CompositeTier::Lod1,
             revision: ImmutableRevision::default(),
         };
@@ -3981,13 +3980,13 @@ mod tests {
         };
         let mut queue = CompositeWorkQueue::new(1, 1).expect("one bounded prepared job");
         queue.refresh(bounds, bounds, BlockLod::Lod1, key.revision, |_| false);
-        queue.mark_prepared(key, FlatGroundBlock::at(MapBlock { x: 1, y: 0 }, 0));
+        queue.mark_prepared(key, FlatGroundBlock::at(BlockCoord { x: 1, y: 0 }, 0));
     }
 
     #[test]
     fn producer_source_and_runtime_rects_share_one_canonical_transform() {
         let key = CompositeKey {
-            block: MapBlock { x: 12, y: 19 },
+            block: BlockCoord { x: 12, y: 19 },
             tier: CompositeTier::Lod1,
             revision: ImmutableRevision::default(),
         };
@@ -3995,11 +3994,11 @@ mod tests {
         assert_eq!(job.source_rect(), job.rect_in(job.camera()));
 
         let east = CompositeProducerJob::new(CompositeKey {
-            block: MapBlock { x: 13, y: 19 },
+            block: BlockCoord { x: 13, y: 19 },
             ..key
         });
         let south = CompositeProducerJob::new(CompositeKey {
-            block: MapBlock { x: 12, y: 20 },
+            block: BlockCoord { x: 12, y: 20 },
             ..key
         });
         let mut camera = Camera::new(openshard_protocol::world::Point::new(100, 100, 0), 640, 480);
@@ -4042,7 +4041,7 @@ mod tests {
         assert_eq!(ready.deferred().unwrap().depth_base(), 17);
     }
 
-    fn blocks(min_x: u16, max_x: u16, min_y: u16, max_y: u16) -> MapBlockBounds {
+    fn blocks(min_x: u32, max_x: u32, min_y: u32, max_y: u32) -> MapBlockBounds {
         MapBlockBounds {
             min_x,
             max_x,
@@ -4087,7 +4086,7 @@ mod tests {
 
         let work = queue.take_prepared_for_frame(|_| true);
         assert_eq!(work.len(), 1);
-        assert_eq!(work[0].key.block, MapBlock { x: 3, y: 4 });
+        assert_eq!(work[0].key.block, BlockCoord { x: 3, y: 4 });
         assert_eq!(queue.pending_len(), 0);
         assert_eq!(queue.in_flight_len(), 1);
     }
@@ -4231,7 +4230,7 @@ mod tests {
         assert_eq!(queue.pending_len(), 2);
         let work = queue.take_for_frame();
         assert_eq!(work[0].priority, CompositePriority::Visible);
-        assert_eq!(work[0].key.block, MapBlock { x: 1, y: 0 });
+        assert_eq!(work[0].key.block, BlockCoord { x: 1, y: 0 });
     }
 
     #[test]
@@ -4323,7 +4322,7 @@ mod tests {
         let mut cache = CompositeCache::with_limits(limits);
         let size = CompositeSize::new(2, 2).unwrap();
         let key = |x| CompositeKey {
-            block: MapBlock { x, y: 0 },
+            block: BlockCoord { x, y: 0 },
             tier: CompositeTier::Lod1,
             revision: ImmutableRevision(0),
         };
@@ -4352,16 +4351,16 @@ mod tests {
     #[test]
     fn viewport_margin_is_hysteresis_not_an_eager_eviction_target() {
         let bounds = blocks(10, 11, 20, 21);
-        assert!(bounds.expanded_by(1).contains(MapBlock { x: 9, y: 19 }));
-        assert!(bounds.expanded_by(1).contains(MapBlock { x: 12, y: 22 }));
-        assert!(!bounds.expanded_by(1).contains(MapBlock { x: 8, y: 20 }));
+        assert!(bounds.expanded_by(1).contains(BlockCoord { x: 9, y: 19 }));
+        assert!(bounds.expanded_by(1).contains(BlockCoord { x: 12, y: 22 }));
+        assert!(!bounds.expanded_by(1).contains(BlockCoord { x: 8, y: 20 }));
     }
 
     #[test]
     fn quarantine_retains_the_latest_owner_and_reason() {
         let mut cache = CompositeCache::default();
         let key = CompositeKey {
-            block: MapBlock { x: 3, y: 7 },
+            block: BlockCoord { x: 3, y: 7 },
             tier: CompositeTier::Lod1,
             revision: ImmutableRevision(12),
         };
