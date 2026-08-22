@@ -2036,3 +2036,40 @@ is kept in § *The aperture*, beside what measuring it actually found: the run
 coordinate cost a boundary crossing rather than only a merge, the `z` byte was
 *not* the harmless quantisation this entry called it, and the merge it was
 supposed to unblock is refused by a different field entirely.
+
+🔴 **A second fresh-seed disagreement, of exactly the family the pinned corner
+graze was — found 2026-08-22, and not pinned.** The fuzzer went red on a session
+that touched neither `light.rs` nor `lighting.rs`, in one run of
+`cargo test -p openshard-client-render`, and both of its tests failed on the
+same input:
+
+```
+spot  (103.3108, 100.1455, 6.49) tile (103, 100)
+light ( 96.7425,  99.8349, 8.91) tile ( 96,  99)
+walk_cells says blocked, the brute-force oracle says open
+walk_the_record says blocked, the brute-force oracle says open
+```
+
+```
+cc 9bdadf636c3cb9da1dd1e37405359d2436cfd56f3795e50d56fbb43ffef58263 # shrinks to spot_dx = 2.3108275, spot_frac = 0.14551114, spot_z = 6.487659, flame_dx = 2.2574825, flame_z = 8.913442, row = 100.0, frac = -0.16507894
+```
+
+**The line was deliberately taken back out of `lighting.proptest-regressions`**,
+and that is the part to disagree with rather than to inherit: pinned, it makes
+`cargo test --workspace` red for every session until the disagreement is
+settled, and the session that found it was in another track's crate entirely.
+Un-pinned, the case is only as reachable as the next random seed. Paste the line
+back to work on it — it reproduces on the spot.
+
+What the last one of this family cost is § *The pinned corner graze*: the walks
+were right and the **oracle** was wrong, and it was settled by the exact test —
+`segment_inside_box` over the eight flame points — rather than by trusting
+either disputant. Both walks agreeing is the same clue as last time, and last
+time reading it as "two walks, one shared DDA bug" was reading it backwards.
+Start there.
+
+Worth naming as a property rather than as an incident: **this suite can go red
+on a run that changed nothing.** The fuzzers draw a fresh seed each run, so a
+green workspace is evidence about the seeds that ran, and a red one is not
+automatically about the diff in hand. The first question on a red fuzzer is
+which file the failing case is even in.
