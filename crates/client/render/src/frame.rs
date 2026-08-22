@@ -30,9 +30,9 @@
 //! folding them in would make the struct a bag of everything a caller might want
 //! rather than the inputs of one assembly.
 
+use openshard_map::map::Map;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 use std::time::{Duration, Instant};
 

@@ -49,6 +49,7 @@ use openshard_client_render::place::{Kind, Place};
 use openshard_client_render::renderer::{self, GroundRenderer, SpriteRenderer, Target};
 use openshard_client_render::sprite::{SpriteQuad, split_corners};
 use openshard_client_render::statics;
+use openshard_map::grid::BlockCoord;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
@@ -56,10 +57,8 @@ use openshard_uofiles::anim::{Anim, AnimFrame, AnimationDirection, AnimationFram
 use openshard_uofiles::art::{Art, LAND_TILE_SIZE, land_row};
 use openshard_uofiles::color::{Color16, Rgb8};
 use openshard_uofiles::equipconv::EquipConv;
-use openshard_uofiles::grid::BlockCoord;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::image::Image;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::texmaps::TexMaps;
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
@@ -566,7 +565,7 @@ fn level_ground_covers_every_pixel() {
     let (Some(dir), Some((device, queue))) = (client_dir(), gpu()) else {
         return;
     };
-    let map = Map::load_facet(&dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
 
     // Open sea off the north-west corner: 80 tiles square at a single height.
@@ -633,7 +632,7 @@ fn hilly_ground_covers_every_pixel() {
     let (Some(dir), Some((device, queue))) = (client_dir(), gpu()) else {
         return;
     };
-    let map = Map::load_facet(&dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
 
     // Britain, near the bank: the ground here runs from z = -15 to z = 25.
@@ -942,7 +941,7 @@ fn real_map_block_producer_keeps_every_owned_map_tile_after_restore() {
     let (Some(dir), Some((device, queue))) = (client_dir(), gpu()) else {
         return;
     };
-    let map = Map::load_facet(&dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
     // A dense central-Britain block: a quiet sea block proves only ground.
@@ -5160,7 +5159,7 @@ fn the_same_camera_renders_the_same_frame() {
     let (Some(dir), Some((device, queue))) = (client_dir(), gpu()) else {
         return;
     };
-    let map = Map::load_facet(&dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
     let camera = Camera::new(Point::new(1495, 1629, 0), 768, 512);
 
@@ -5228,7 +5227,7 @@ fn a_third_of_a_virtual_pixel_moves_a_magnified_frame_one_real_pixel() {
     let (Some(dir), Some((device, queue))) = (client_dir(), gpu()) else {
         return;
     };
-    let map = Map::load_facet(&dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
 
     let mut camera = Camera::new(Point::new(1495, 1629, 0), 512, 256);
@@ -5436,7 +5435,7 @@ fn britains_statics_cover_part_of_a_frame_that_is_still_whole() {
     let (Some(dir), Some((device, queue))) = (client_dir(), gpu()) else {
         return;
     };
-    let map = Map::load_facet(&dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
     let camera = Camera::new(Point::new(1495, 1629, 0), 768, 512);
@@ -5527,7 +5526,7 @@ fn dump_a_frame_of_britain() {
     let (Some(dir), Some((device, queue))) = (client_dir(), gpu()) else {
         return;
     };
-    let map = Map::load_facet(&dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
     let centre = Point::new(1495, 1629, 0);
     let camera = Camera::new(centre, 768, 512);

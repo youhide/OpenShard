@@ -11,7 +11,7 @@ use std::sync::Arc;
 use openshard_client_render::atlas::FontAtlas;
 use openshard_client_render::gump::GumpAtlas;
 use openshard_client_render::hue::HueRamp;
-use openshard_map::MapSnapshot;
+use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::NavigationGraph;
 use openshard_uofiles::anim::Anim;
 use openshard_uofiles::art::Art;

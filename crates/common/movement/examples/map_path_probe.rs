@@ -15,7 +15,6 @@ use std::time::{Duration, Instant};
 use clap::Parser;
 use openshard_movement::{MapTerrain, find_path, find_path_toward};
 use openshard_protocol::world::Point;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 #[derive(Debug, Parser)]
@@ -44,7 +43,7 @@ struct Reading {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let tiles = TileData::load(cli.client.join("tiledata.mul"))?;
-    let map = Map::load_facet(&cli.client, 0)?;
+    let map = openshard_uofiles::map::read_facet(&cli.client, 0)?;
     let terrain = MapTerrain::new(&map, &tiles);
     let from = Point::new(
         cli.x,

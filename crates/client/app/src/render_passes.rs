@@ -23,7 +23,7 @@ use openshard_client_render::renderer::Target;
 use openshard_client_render::select::{self, Selection};
 use openshard_client_render::sprite::SpriteQuad;
 use openshard_client_render::{paperdoll, solids};
-use openshard_uofiles::grid::BlockCoord;
+use openshard_map::grid::BlockCoord;
 use std::time::{Duration, Instant};
 
 use crate::frame_geometry::FrameGeometry;

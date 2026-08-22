@@ -39,9 +39,9 @@ pub(super) fn produce(
     let (first_x, first_y) = openshard_client_render::composite::tile_origin(job.key().block);
     let owner = TileBounds {
         min_x: i32::from(first_x),
-        max_x: i32::from(first_x) + openshard_uofiles::map::BLOCK_SIZE as i32 - 1,
+        max_x: i32::from(first_x) + openshard_map::map::BLOCK_SIZE as i32 - 1,
         min_y: i32::from(first_y),
-        max_y: i32::from(first_y) + openshard_uofiles::map::BLOCK_SIZE as i32 - 1,
+        max_y: i32::from(first_y) + openshard_map::map::BLOCK_SIZE as i32 - 1,
     };
     let ground: Vec<_> = ground::collect_in(
         resources.map.map(),

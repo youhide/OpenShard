@@ -41,14 +41,14 @@ use openshard_client_render::light::{self, Tuning};
 use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, SpriteRenderer, Target};
 use openshard_client_render::statics::StaticGeometry;
 use openshard_client_render::{dump, ground};
+use openshard_map::grid::BlockExtent;
+use openshard_map::map::{LandCell, Map};
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::animdata::AnimData;
 use openshard_uofiles::art::Art;
-use openshard_uofiles::grid::BlockExtent;
 use openshard_uofiles::hues::Hues;
-use openshard_uofiles::map::{LandCell, Map};
 use openshard_uofiles::texmaps::TexMaps;
 use openshard_uofiles::tiledata::TileData;
 
@@ -121,7 +121,7 @@ fn draw(
             down: BLOCKS,
         },
         |_, _| LandCell {
-            tile: openshard_uofiles::map::LandTile(LAND),
+            tile: openshard_map::map::LandTile(LAND),
             z: 0,
         },
     );

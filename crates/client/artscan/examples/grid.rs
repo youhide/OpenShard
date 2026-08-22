@@ -7,13 +7,12 @@ use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::occlusion::{self, Edges};
 use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 fn main() {
     let dir = std::path::PathBuf::from(std::env::var_os("OPENSHARD_CLIENT").expect("client"));
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata");
-    let map = Map::load_facet(&dir, 0).expect("felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("felucca");
     let art = Art::open(&dir).expect("art");
 
     let args: Vec<String> = std::env::args().skip(1).collect();

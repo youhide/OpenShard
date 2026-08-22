@@ -6,7 +6,7 @@ use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use openshard_map::MapRevision;
+use openshard_map::snapshot::MapRevision;
 use openshard_protocol::world::{Facet, Point};
 
 use crate::NavigationGraph;

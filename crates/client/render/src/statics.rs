@@ -18,9 +18,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
+use openshard_map::map::Map;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 use crate::animate::StaticAnimations;
@@ -1184,7 +1184,7 @@ pub fn selected(
 pub fn for_each_static_in(
     map: &Map,
     bounds: TileBounds,
-    mut each: impl FnMut(&openshard_uofiles::map::StaticItem),
+    mut each: impl FnMut(&openshard_map::map::StaticItem),
 ) {
     let Some((xs, ys)) = bounds.clamp_to(map.width(), map.height()) else {
         return;
@@ -1207,11 +1207,11 @@ pub fn for_each_static_in(
 mod tests {
     use crate::atlas::StaticAtlasPages;
 
+    use openshard_map::grid::BlockExtent;
+    use openshard_map::map::{LandCell, LandTile, StaticItem};
     use openshard_protocol::wire::Hue;
     use openshard_uofiles::color::Color16;
-    use openshard_uofiles::grid::BlockExtent;
     use openshard_uofiles::image::Image;
-    use openshard_uofiles::map::{LandCell, LandTile, StaticItem};
 
     use super::*;
 
@@ -1894,7 +1894,7 @@ mod tests {
         let Some(dir) = std::env::var_os("OPENSHARD_CLIENT").map(std::path::PathBuf::from) else {
             return;
         };
-        let map = Map::load_facet(&dir, 0).expect("Felucca");
+        let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
         let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
         let animdata = AnimData::load(&dir).expect("animdata.mul");
         let mut animations = StaticAnimations::build(&animdata, &tiledata);
@@ -2021,7 +2021,7 @@ mod tests {
         let Some(dir) = std::env::var_os("OPENSHARD_CLIENT").map(std::path::PathBuf::from) else {
             return;
         };
-        let map = Map::load_facet(&dir, 0).expect("Felucca");
+        let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
         let art = openshard_uofiles::art::Art::open(&dir).expect("artLegacyMUL.uop");
         let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
 
@@ -2088,7 +2088,7 @@ mod tests {
         let Some(dir) = std::env::var_os("OPENSHARD_CLIENT").map(std::path::PathBuf::from) else {
             return;
         };
-        let map = Map::load_facet(&dir, 0).expect("Felucca");
+        let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
         let art = openshard_uofiles::art::Art::open(&dir).expect("artLegacyMUL.uop");
         let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
 

@@ -24,13 +24,13 @@
 //! the blit. A scene that also carried sprites would need a client install, and
 //! then none of these tests would run anywhere.
 
+use openshard_map::grid::BlockExtent;
+use openshard_map::map::{LandCell, Map};
 use openshard_movement::Tile;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
-use openshard_uofiles::grid::BlockExtent;
-use openshard_uofiles::map::{LandCell, Map};
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
 use crate::atlas::StaticAtlas;
@@ -295,7 +295,7 @@ impl Scene {
 /// ground itself neither burns nor stops anything.
 fn ground() -> Map {
     Map::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
-        tile: openshard_uofiles::map::LandTile(0),
+        tile: openshard_map::map::LandTile(0),
         z: 0,
     })
 }

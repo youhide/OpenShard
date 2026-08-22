@@ -36,11 +36,11 @@ use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, 
 use openshard_client_render::select::Select;
 use openshard_client_render::solids::SolidsRenderer;
 use openshard_client_render::{ground, light, statics};
+use openshard_map::map::Map;
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::anim::Anim;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::equipconv::EquipConv;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::texmaps::TexMaps;
 use openshard_uofiles::tiledata::TileData;
 use winit::event_loop::ActiveEventLoop;
@@ -305,9 +305,9 @@ pub(crate) fn prepare_composite_job(
     let (first_x, first_y) = openshard_client_render::composite::tile_origin(key.block);
     let owner = TileBounds {
         min_x: i32::from(first_x),
-        max_x: i32::from(first_x) + openshard_uofiles::map::BLOCK_SIZE as i32 - 1,
+        max_x: i32::from(first_x) + openshard_map::map::BLOCK_SIZE as i32 - 1,
         min_y: i32::from(first_y),
-        max_y: i32::from(first_y) + openshard_uofiles::map::BLOCK_SIZE as i32 - 1,
+        max_y: i32::from(first_y) + openshard_map::map::BLOCK_SIZE as i32 - 1,
     };
     let (owner_x, owner_y) = owner.clamp_to(map_width as u32, map_height as u32)?;
     let owner = TileBounds {

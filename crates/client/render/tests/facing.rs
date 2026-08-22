@@ -31,7 +31,6 @@ use openshard_client_render::facing::{self, Face, Facing};
 use openshard_client_render::occlusion::Shape;
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::{TileData, TileFlags};
 
 /// How much of the install's wall *art* this has to be able to read.
@@ -211,7 +210,7 @@ fn britain_s_walls_are_read_where_they_stand() {
     let Some(dir) = client() else { return };
     let art = Art::open(&dir).expect("the client's art");
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
-    let map = Map::load_facet(&dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
 
     // Read once per graphic, the way the atlas does: the answer is a property of
     // the picture, and a city repeats its pictures thousands of times.

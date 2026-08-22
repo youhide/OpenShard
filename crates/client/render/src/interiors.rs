@@ -7,11 +7,11 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque, btree_map::Entry};
 use std::sync::Arc;
 
+use openshard_map::grid::BlockCoord;
+use openshard_map::map::{BLOCK_SIZE, Map};
 use openshard_movement::{MapTerrain, PLAYER_HEIGHT, Terrain};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::grid::BlockCoord;
-use openshard_uofiles::map::{BLOCK_SIZE, Map};
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
 /// The stable identity of a cell within a baked map block.
@@ -2451,9 +2451,9 @@ impl Index {
 
 #[cfg(test)]
 mod tests {
+    use openshard_map::grid::BlockExtent;
+    use openshard_map::map::{LandCell, LandTile, StaticItem};
     use openshard_protocol::wire::{Graphic, Hue};
-    use openshard_uofiles::grid::BlockExtent;
-    use openshard_uofiles::map::{LandCell, LandTile, StaticItem};
     use openshard_uofiles::tiledata::{StaticTile, TileFlags};
 
     use super::*;

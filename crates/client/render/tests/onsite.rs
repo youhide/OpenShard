@@ -44,7 +44,6 @@ use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 /// The place the reports came from: the lamp is on `(1441, 1693)` and the house
@@ -106,7 +105,7 @@ fn what_the_lighting_knows_about_a_place() {
         return;
     };
     let (at_x, at_y) = place();
-    let map = Map::load_facet(&dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
 

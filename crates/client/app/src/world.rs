@@ -21,11 +21,11 @@ use openshard_client_render::follow::Gaze;
 use openshard_client_render::items::GroundItem;
 use openshard_client_render::mobiles::Mobile;
 use openshard_client_render::statics::StaticGeometry;
+use openshard_map::map::Map;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Hue;
 use openshard_protocol::world::Point;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 use crate::crowd::{Crowd, Who};

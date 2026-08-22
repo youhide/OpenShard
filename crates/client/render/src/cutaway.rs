@@ -42,9 +42,9 @@
 
 use std::collections::BTreeMap;
 
+use openshard_map::map::Map;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
 use crate::depth;
@@ -678,7 +678,7 @@ mod tests {
         let Some(dir) = std::env::var_os("OPENSHARD_CLIENT").map(std::path::PathBuf::from) else {
             return;
         };
-        let map = openshard_uofiles::map::Map::load_facet(&dir, 0).expect("Felucca");
+        let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
         let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
 
         // A block of Britain wide enough to hold whole buildings and the
@@ -759,7 +759,7 @@ mod tests {
         let Some(dir) = std::env::var_os("OPENSHARD_CLIENT").map(std::path::PathBuf::from) else {
             return;
         };
-        let map = openshard_uofiles::map::Map::load_facet(&dir, 0).expect("Felucca");
+        let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
         let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
 
         let mut checked = 0;

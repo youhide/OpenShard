@@ -17,12 +17,12 @@ use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::depth;
 use openshard_client_render::mobiles::{self, Mobile};
 use openshard_client_render::{light, occlusion};
+use openshard_map::map::Map;
 use openshard_movement::{Terrain, Tile};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::map::Map;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -212,7 +212,7 @@ impl App {
     /// tread against its riser, a cliff edge one tile from level ground.
     ///
     /// Off the map is simply absent: `checked_add`/`checked_sub` at the world's
-    /// corner, and [`Map::land`](openshard_uofiles::map::Map::land) answers
+    /// corner, and [`Map::land`](openshard_map::map::Map::land) answers
     /// nothing for a block that never loaded, which `tile_info` already reports
     /// as `land: None`.
     ///

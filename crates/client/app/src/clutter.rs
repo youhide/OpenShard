@@ -66,10 +66,10 @@ use std::collections::HashMap;
 use openshard_client_net::view::Mobile;
 use openshard_client_render::doors;
 use openshard_client_render::items::GroundItem;
+use openshard_map::map::Map;
 use openshard_movement::{MapTerrain, Terrain, Tile};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 /// A mobile's body height in z-units — how tall a span a blocker has to reach

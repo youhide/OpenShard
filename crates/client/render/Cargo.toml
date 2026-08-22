@@ -16,6 +16,7 @@ description = "Draws what the client has been shown: isometric ground, and event
 # read back and asserted on, which is the only way a renderer gets an oracle.
 [dependencies]
 openshard-client-model.workspace = true
+openshard-map.workspace = true
 openshard-uofiles.workspace = true
 openshard-protocol.workspace = true
 # For the walk's pace, and for nothing else: the camera bench walks a scripted

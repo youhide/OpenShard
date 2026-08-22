@@ -558,7 +558,7 @@ impl Link {
 ///
 /// **No map and no tile definitions.** The walk predicts the height of a step
 /// and the server does not send one, but the terrain that answers it belongs to
-/// the process's one [`MapSnapshot`](openshard_map::MapSnapshot) — so the
+/// the process's one [`MapSnapshot`](openshard_map::snapshot::MapSnapshot) — so the
 /// prediction happens beside it and this thread receives a `0x02` already
 /// encoded. What crosses in the other direction is decoded packets; the owner
 /// folds them into its own [`Walk`].

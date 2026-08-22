@@ -35,11 +35,11 @@
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
+use openshard_map::grid::BlockCoord;
+use openshard_map::map::{BLOCK_SIZE, Map};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Facet;
 use openshard_uofiles::color::Color16;
-use openshard_uofiles::grid::BlockCoord;
-use openshard_uofiles::map::{BLOCK_SIZE, Map};
 use openshard_uofiles::radarcol::RadarColors;
 
 use crate::chunk_cache::{LruBudget, WorkQueue};
@@ -1938,9 +1938,9 @@ pub fn static_color(colors: &RadarColors, graphic: Graphic) -> Color16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openshard_map::grid::BlockExtent;
+    use openshard_map::map::{LandCell, LandTile, StaticItem};
     use openshard_protocol::wire::Hue;
-    use openshard_uofiles::grid::BlockExtent;
-    use openshard_uofiles::map::{LandCell, LandTile, StaticItem};
     use openshard_uofiles::tiledata::LAND_TILE_COUNT;
     use std::collections::BTreeSet;
 

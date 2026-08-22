@@ -414,7 +414,7 @@ impl World {
     /// Give the default facet a map.
     pub fn with_terrain<M, T>(self, terrain: MapTerrain<M, T>) -> Self
     where
-        M: AsRef<openshard_uofiles::map::Map> + Send + Sync + 'static,
+        M: AsRef<openshard_map::map::Map> + Send + Sync + 'static,
         T: AsRef<openshard_uofiles::tiledata::TileData> + Send + Sync + 'static,
     {
         let facet = self.state.default_facet;
@@ -429,7 +429,7 @@ impl World {
         coarse: Option<openshard_movement::NavigationGraph>,
     ) -> Self
     where
-        M: AsRef<openshard_uofiles::map::Map> + Send + Sync + 'static,
+        M: AsRef<openshard_map::map::Map> + Send + Sync + 'static,
         T: AsRef<openshard_uofiles::tiledata::TileData> + Send + Sync + 'static,
     {
         let (width, height) = (terrain.map().width(), terrain.map().height());

@@ -15,7 +15,7 @@ use openshard_client_render::frame::{self, Impostor};
 use openshard_client_render::mobiles::Mobile;
 use openshard_client_render::sprite::{SpriteQuad, split_corners};
 use openshard_client_render::{ground, items, light, mobiles, statics};
-use openshard_uofiles::grid::BlockCoord;
+use openshard_map::grid::BlockCoord;
 
 use crate::crowd::Who;
 use crate::diagnostics::Pick;
@@ -153,12 +153,12 @@ impl FrameGeometry {
                 // heights that are not safely owned by one 8x8 producer.
                 !cached.contains(&block)
                     || sloped
-                    || quad.place.x % openshard_uofiles::map::BLOCK_SIZE as u16 == 0
-                    || quad.place.x % openshard_uofiles::map::BLOCK_SIZE as u16
-                        == openshard_uofiles::map::BLOCK_SIZE as u16 - 1
-                    || quad.place.y % openshard_uofiles::map::BLOCK_SIZE as u16 == 0
-                    || quad.place.y % openshard_uofiles::map::BLOCK_SIZE as u16
-                        == openshard_uofiles::map::BLOCK_SIZE as u16 - 1
+                    || quad.place.x % openshard_map::map::BLOCK_SIZE as u16 == 0
+                    || quad.place.x % openshard_map::map::BLOCK_SIZE as u16
+                        == openshard_map::map::BLOCK_SIZE as u16 - 1
+                    || quad.place.y % openshard_map::map::BLOCK_SIZE as u16 == 0
+                    || quad.place.y % openshard_map::map::BLOCK_SIZE as u16
+                        == openshard_map::map::BLOCK_SIZE as u16 - 1
             })
             .collect();
         Cow::Owned(kept)

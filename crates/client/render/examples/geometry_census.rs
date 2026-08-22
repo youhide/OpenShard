@@ -24,7 +24,6 @@ use openshard_client_render::atlas::StaticAtlas;
 use openshard_client_render::occlusion;
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 /// What kind of claim a picture's box is.
@@ -81,7 +80,7 @@ fn main() {
     let cy: i32 = args.next().expect("y").parse().expect("y is a number");
     let radius: i32 = args.next().map_or(20, |v| v.parse().expect("radius"));
 
-    let map = Map::load_facet(&dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
 

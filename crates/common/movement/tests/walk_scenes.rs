@@ -16,11 +16,11 @@
 //! An oracle that asked the code what the answer should be would agree with it
 //! always, including when it is wrong.
 
+use openshard_map::map::Map;
 use openshard_movement::scene::{SIDE, Scene};
 use openshard_movement::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT, Terrain};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 // ---------------------------------------------------------------- regressions
@@ -178,7 +178,7 @@ fn reach_from(scene: &Scene, x: u16, y: u16, z: i32) -> i32 {
     let mut top = z;
     // The land: you stand at the average of its corners and step off its highest.
     if let Some(corners) = scene.map().land_corners(x, y) {
-        let land_stand = i32::from(openshard_uofiles::map::average_corner_z(corners));
+        let land_stand = i32::from(openshard_map::map::average_corner_z(corners));
         if land_stand <= z {
             top = top.max(corners.iter().copied().map(i32::from).max().unwrap_or(z));
         }
@@ -222,7 +222,7 @@ fn surfaces(scene: &Scene, x: u16, y: u16) -> Vec<(i32, i32, i32, i32)> {
 fn justified(scene: &Scene, x: u16, y: u16, landing: i32, reach: i32) -> bool {
     if let Some(corners) = scene.map().land_corners(x, y) {
         let lowest = corners.iter().copied().map(i32::from).min().unwrap_or(landing);
-        let average = i32::from(openshard_uofiles::map::average_corner_z(corners));
+        let average = i32::from(openshard_map::map::average_corner_z(corners));
         if average == landing && lowest <= reach {
             return true;
         }
@@ -292,7 +292,7 @@ fn random_scene(seed: u64) -> Scene {
 fn stands(terrain: &MapTerrain<&Map, &TileData>, scene: &Scene, x: u16, y: u16) -> Vec<i32> {
     let mut candidates = vec![];
     if let Some(corners) = scene.map().land_corners(x, y) {
-        candidates.push(i32::from(openshard_uofiles::map::average_corner_z(corners)));
+        candidates.push(i32::from(openshard_map::map::average_corner_z(corners)));
     }
     for item in scene.map().statics_at(x, y) {
         let tile = scene.tiles().static_tile(item.tile.0);

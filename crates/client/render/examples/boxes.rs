@@ -268,8 +268,8 @@ use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, 
 // distinction that matters most.
 use openshard_client_pathtrace::light as pt_light;
 use openshard_client_pathtrace::trace as pt_trace;
+use openshard_map::grid::BlockExtent;
 use openshard_protocol::wire::Graphic;
-use openshard_uofiles::grid::BlockExtent;
 use openshard_uofiles::tiledata::{StaticTile, TileFlags};
 use oracle::boxes::{BoxSpec, box_mesh, box_owner};
 use oracle::{Shade, dump, read_gbuffer, segment_clear_of_box};
@@ -849,14 +849,14 @@ fn main() {
         openshard_uofiles::art::LAND_TILE_SIZE,
         vec![floor_pixel; usize::from(openshard_uofiles::art::LAND_TILE_SIZE).pow(2)],
     );
-    let blocks = (bounds.max_x as u32).div_ceil(openshard_uofiles::map::BLOCK_SIZE) + 1;
-    let synthetic_map = openshard_uofiles::map::Map::from_blocks(
+    let blocks = (bounds.max_x as u32).div_ceil(openshard_map::map::BLOCK_SIZE) + 1;
+    let synthetic_map = openshard_map::map::Map::from_blocks(
         BlockExtent {
             wide: blocks,
             down: blocks,
         },
-        |_x, _y| openshard_uofiles::map::LandCell {
-            tile: openshard_uofiles::map::LandTile(FLOOR_GRAPHIC.0),
+        |_x, _y| openshard_map::map::LandCell {
+            tile: openshard_map::map::LandTile(FLOOR_GRAPHIC.0),
             z: 0,
         },
     );

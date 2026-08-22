@@ -46,10 +46,10 @@
 //! is not allowed to read a clock, so the time arrives as an argument and there
 //! is exactly one place it is used.
 
+use openshard_map::map::Map;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 use crate::camera::Camera;
@@ -3462,9 +3462,9 @@ fn flicker(time: f32, phase: f32, depth: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use openshard_map::grid::BlockExtent;
+    use openshard_map::map::LandCell;
     use openshard_protocol::wire::Hue;
-    use openshard_uofiles::grid::BlockExtent;
-    use openshard_uofiles::map::LandCell;
     use openshard_uofiles::tiledata::{StaticTile, TileFlags};
 
     use super::*;

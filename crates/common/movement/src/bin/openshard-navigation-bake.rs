@@ -3,7 +3,6 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use clap::Parser;
-use openshard_map::MapSnapshot;
 use openshard_movement::{MapTerrain, NavigationGraph, bake};
 use openshard_protocol::world::Facet;
 use openshard_uofiles::tiledata::TileData;
@@ -63,7 +62,7 @@ fn bake_one(
     eprintln!("navigation bake: loading facet {facet}");
     // The map first, then the stamp: the revision recorded in the artifact is
     // the revision the graph is about to be built from.
-    let map = MapSnapshot::load_facet(client, facet)?;
+    let map = openshard_uofiles::map::load_facet(client, facet)?;
     let stamp = bake::stamp_of(client, facet, map.revision())?;
     let (width, height) = (map.map().width(), map.map().height());
     eprintln!(

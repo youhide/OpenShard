@@ -63,7 +63,7 @@ mod walk;
 pub use cache::{CachedTerrain, TransitionCacheStats};
 pub use detour::{Around, Detour, Leeway, Step};
 pub use navigation::{NavigationGraph, find_long_path};
-pub use openshard_uofiles::map::LandTile;
+pub use openshard_map::map::LandTile;
 pub use pace::{
     Pace, RUN_HOLD, RUN_INTERVAL, WALK_BUFFER, WALK_HOLD, WALK_INTERVAL, WalkPace, step_hold, step_progress,
 };

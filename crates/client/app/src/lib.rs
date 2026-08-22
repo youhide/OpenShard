@@ -53,8 +53,6 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Instant;
 
-use openshard_map::MapSnapshot;
-
 mod app;
 mod audio;
 mod chat;
@@ -459,7 +457,7 @@ pub fn run<D: Dial + Send + 'static>(
     // Reading the whole facet takes a moment and a few hundred megabytes. That
     // is the shape `uofiles` has today — see the backlog in docs/client.md — and
     // it is honest to do it up front rather than to stall on the first frame.
-    let map = match MapSnapshot::load_facet(dir, openshard_protocol::world::Facet(FACET)) {
+    let map = match openshard_uofiles::map::load_facet(dir, openshard_protocol::world::Facet(FACET)) {
         Ok(map) => map,
         Err(error) => {
             eprintln!("loading facet {FACET}: {error}");

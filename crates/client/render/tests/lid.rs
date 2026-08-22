@@ -46,15 +46,15 @@ use openshard_client_render::occlusion::{self, Shape};
 use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, SpriteRenderer, Target};
 use openshard_client_render::statics::StaticGeometry;
 use openshard_client_render::{dump, ground};
+use openshard_map::grid::BlockExtent;
+use openshard_map::map::{LandCell, Map};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::animdata::AnimData;
 use openshard_uofiles::art::Art;
-use openshard_uofiles::grid::BlockExtent;
 use openshard_uofiles::hues::Hues;
-use openshard_uofiles::map::{LandCell, Map};
 use openshard_uofiles::texmaps::TexMaps;
 use openshard_uofiles::tiledata::TileData;
 
@@ -174,7 +174,7 @@ fn draw(
     items: &[GroundItem],
 ) -> Drawn {
     let map = Map::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
-        tile: openshard_uofiles::map::LandTile(0),
+        tile: openshard_map::map::LandTile(0),
         z: 27,
     });
     let camera = Camera::new(at, VIEWPORT.0, VIEWPORT.1);

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use openshard_client_render::interiors::BuildingMap;
-use openshard_map::{MapRevision, MapSnapshot};
+use openshard_map::snapshot::MapRevision;
 use openshard_protocol::world::Facet;
 use openshard_uofiles::tiledata::TileData;
 
@@ -164,7 +164,7 @@ pub fn stamp_of(client_dir: &Path, facet: Facet, revision: MapRevision) -> Resul
 /// artifact with what it is handed here.
 pub fn build(client_dir: &Path, facet: Facet) -> Result<(BuildingMap, MapRevision), Error> {
     let table = load(client_dir).map_err(Error::Art)?;
-    let map = MapSnapshot::load_facet(client_dir, facet).map_err(|source| Error::Read {
+    let map = openshard_uofiles::map::load_facet(client_dir, facet).map_err(|source| Error::Read {
         path: client_dir.to_path_buf(),
         source: Box::new(source),
     })?;

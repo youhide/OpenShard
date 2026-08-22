@@ -58,10 +58,10 @@ use openshard_client_render::facing::{Block, Blocks, Footprint, Span, blocks_sil
 use openshard_client_render::impostor::{self, Volume};
 use openshard_client_render::light::WorldVec;
 use openshard_client_render::occlusion::{self, Shape};
+use openshard_map::map::Map;
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::image::Image;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::{StaticTile, TileData};
 
 /// Half a tile in virtual pixels — `statics.wesl`'s `HALF_TILE_HEIGHT` and
@@ -688,7 +688,7 @@ fn main() {
     let cy: i32 = args.next().expect("y").parse().expect("y is a number");
     let radius: i32 = args.next().map_or(20, |v| v.parse().expect("radius"));
 
-    let map = Map::load_facet(&dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
 

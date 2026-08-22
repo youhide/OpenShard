@@ -18,8 +18,8 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
-use openshard_uofiles::grid::BlockCoord;
-use openshard_uofiles::map::BLOCK_SIZE;
+use openshard_map::grid::BlockCoord;
+use openshard_map::map::BLOCK_SIZE;
 
 use crate::blit::WORLD_FORMAT;
 use crate::camera::{Camera, TILE_HEIGHT, TILE_WIDTH, TileBounds, WorldPixel, project};
@@ -55,7 +55,7 @@ pub struct FlatGroundBlock {
 impl FlatGroundBlock {
     /// Inspect the authoritative map and return the block only when one cached
     /// texture can own all of its ground pixels without a live overlap.
-    pub fn inspect(map: &openshard_uofiles::map::Map, block: BlockCoord) -> Option<Self> {
+    pub fn inspect(map: &openshard_map::map::Map, block: BlockCoord) -> Option<Self> {
         // This is the function that decides whether the map has the block at
         // all, so it narrows the origin itself rather than through
         // [`tile_origin`]: a block past a tile coordinate is one no facet has,
@@ -2768,7 +2768,7 @@ impl CompositeRenderer {
 
 #[cfg(test)]
 mod tests {
-    use openshard_uofiles::grid::BlockExtent;
+    use openshard_map::grid::BlockExtent;
 
     use super::*;
 
@@ -3886,7 +3886,7 @@ mod tests {
 
     #[test]
     fn flat_ground_block_accepts_only_one_common_surface_height() {
-        use openshard_uofiles::map::{LandCell, LandTile, Map};
+        use openshard_map::map::{LandCell, LandTile, Map};
 
         let mut map = Map::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
             tile: LandTile(7),
@@ -3913,7 +3913,7 @@ mod tests {
 
     #[test]
     fn prepared_work_preserves_the_verified_plateau_for_producer_and_restore() {
-        use openshard_uofiles::map::{LandCell, LandTile, Map};
+        use openshard_map::map::{LandCell, LandTile, Map};
 
         let map = Map::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
             tile: LandTile(7),

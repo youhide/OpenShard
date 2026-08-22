@@ -9,7 +9,6 @@
 //! cargo run -p openshard-uofiles --example tile_probe -- 6044 1999
 //! ```
 
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 fn main() {
@@ -41,7 +40,7 @@ fn main() {
     let facet: u8 = args.next().map_or(0, |f| f.parse().expect("facet is a number"));
 
     let dir = std::path::PathBuf::from(std::env::var_os("OPENSHARD_CLIENT").expect("OPENSHARD_CLIENT"));
-    let map = Map::load_facet(&dir, facet).expect("the facet should load");
+    let map = openshard_uofiles::map::read_facet(&dir, facet).expect("the facet should load");
     let tiles = TileData::load(dir.join("tiledata.mul")).expect("tiledata should load");
 
     if let Some(land) = map.land(x, y) {

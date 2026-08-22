@@ -6,9 +6,9 @@
 
 use std::collections::BTreeSet;
 
+use openshard_map::map::{LandCell, Map};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::map::{LandCell, Map};
 
 use crate::atlas::{LandAtlas, Region, TexmapAtlas};
 use crate::camera::{Camera, TileBounds};
@@ -425,7 +425,7 @@ pub fn corner_heights(map: &Map, x: u16, y: u16, own: i8) -> [f32; 4] {
 fn for_each_cell_in(
     map: &Map,
     bounds: TileBounds,
-    mut each: impl FnMut(u16, u16, openshard_uofiles::map::LandCell),
+    mut each: impl FnMut(u16, u16, openshard_map::map::LandCell),
 ) {
     let Some((xs, ys)) = bounds.clamp_to(map.width(), map.height()) else {
         return;
@@ -444,10 +444,10 @@ fn for_each_cell_in(
 
 #[cfg(test)]
 mod tests {
+    use openshard_map::grid::BlockExtent;
+    use openshard_map::map::LandCell;
     use openshard_uofiles::color::Color16;
-    use openshard_uofiles::grid::BlockExtent;
     use openshard_uofiles::image::Image;
-    use openshard_uofiles::map::LandCell;
 
     use super::*;
 

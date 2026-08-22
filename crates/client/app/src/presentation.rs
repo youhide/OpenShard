@@ -43,11 +43,11 @@ use openshard_client_render::renderer::{self, Target};
 use openshard_client_render::sprite::SpriteQuad;
 use openshard_client_render::text::{self, Label};
 use openshard_client_render::{ground, light, statics};
+use openshard_map::grid::BlockCoord;
+use openshard_map::map::Map;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Hue;
 use openshard_protocol::world::Point;
-use openshard_uofiles::grid::BlockCoord;
-use openshard_uofiles::map::Map;
 
 use crate::app::App;
 use crate::chat::draw_chat_and_speech;
@@ -306,8 +306,8 @@ fn audit_captured_composite_ids(
     let divisor = captured.key().tier.source_pixels_per_texel();
     let mut missing_owner_centres = Vec::new();
     let (first_x, first_y) = openshard_client_render::composite::tile_origin(captured.key().block);
-    for y in first_y..first_y + openshard_uofiles::map::BLOCK_SIZE as u16 {
-        for x in first_x..first_x + openshard_uofiles::map::BLOCK_SIZE as u16 {
+    for y in first_y..first_y + openshard_map::map::BLOCK_SIZE as u16 {
+        for x in first_x..first_x + openshard_map::map::BLOCK_SIZE as u16 {
             let Some(land) = map.land(x, y) else {
                 continue;
             };

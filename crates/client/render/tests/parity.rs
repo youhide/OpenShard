@@ -51,15 +51,15 @@ use openshard_client_render::light::{self, Lighting, Tuning};
 use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, SpriteRenderer, Target};
 use openshard_client_render::statics::StaticGeometry;
 use openshard_client_render::{dump, ground, statics};
+use openshard_map::grid::BlockExtent;
+use openshard_map::map::{LandCell, Map};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_uofiles::animdata::AnimData;
 use openshard_uofiles::art::Art;
-use openshard_uofiles::grid::BlockExtent;
 use openshard_uofiles::hues::Hues;
-use openshard_uofiles::map::{LandCell, Map};
 use openshard_uofiles::texmaps::TexMaps;
 use openshard_uofiles::tiledata::TileData;
 
@@ -144,7 +144,7 @@ fn synthetic_map_covering(real: &Map, places: &[Point], tuning: &Tuning) -> Map 
         },
         |x, y| {
             real.land(x, y).unwrap_or(LandCell {
-                tile: openshard_uofiles::map::LandTile(0),
+                tile: openshard_map::map::LandTile(0),
                 z: 0,
             })
         },
@@ -532,7 +532,7 @@ struct Client {
 }
 
 fn load(dir: PathBuf) -> Client {
-    let real_map = Map::load_facet(&dir, 0).expect("Felucca");
+    let real_map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
     let animdata = AnimData::load(&dir).expect("animdata.mul");

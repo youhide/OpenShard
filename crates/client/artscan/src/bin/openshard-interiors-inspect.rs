@@ -6,7 +6,6 @@ use std::process::ExitCode;
 use clap::Parser;
 use openshard_client_artscan::interiors;
 use openshard_client_render::doors;
-use openshard_map::MapSnapshot;
 use openshard_protocol::world::Facet;
 use openshard_uofiles::tiledata::TileData;
 
@@ -47,7 +46,7 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let facet = Facet(cli.facet);
-    let map = MapSnapshot::load_facet(&cli.client, facet)?;
+    let map = openshard_uofiles::map::load_facet(&cli.client, facet)?;
     let stamp = interiors::stamp_of(&cli.client, facet, map.revision())?;
     let graph = interiors::load_baked(&interiors::artifact_path(&cli.client, facet), &stamp)?;
     let tiles = TileData::load(cli.client.join("tiledata.mul"))?;

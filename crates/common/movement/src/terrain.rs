@@ -11,9 +11,9 @@
 //! entity registry a client does not have.
 
 use crate::{Terrain, Tile};
+use openshard_map::map::{LandTile, Map};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::map::{LandTile, Map};
 use openshard_uofiles::tiledata::{TileData, TileFlags};
 
 /// How far a walking human can step up.
@@ -372,7 +372,7 @@ where
         // `z`, so each end lands its own step, and two formulas that agree today
         // are two formulas. Off the map there is no tile and no relief.
         let corners = self.map().land_corners(x, y).unwrap_or([0; 4]);
-        let avg = i32::from(openshard_uofiles::map::average_corner_z(corners));
+        let avg = i32::from(openshard_map::map::average_corner_z(corners));
         let [top, right, left, bottom] = corners.map(i32::from);
         let min = top.min(left).min(right).min(bottom);
         let max = top.max(left).max(right).max(bottom);
@@ -725,7 +725,7 @@ mod tests {
 
     fn load_client(swimming: bool) -> Option<MapTerrain> {
         let dir = client_dir()?;
-        let map = Map::load_facet(&dir, 0).expect("the client's map0 should load");
+        let map = openshard_uofiles::map::read_facet(&dir, 0).expect("the client's map0 should load");
         let tiles = TileData::load(dir.join("tiledata.mul")).expect("tiledata should load");
         Some(MapTerrain::new(map, tiles).swimming(swimming))
     }

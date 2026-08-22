@@ -23,7 +23,6 @@ use openshard_client_render::atlas::StaticAtlas;
 use openshard_client_render::occlusion;
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 /// How many tiles either side of the named one to print.
@@ -35,7 +34,7 @@ fn main() {
     let cx: i32 = args.next().expect("x").parse().expect("x is a number");
     let cy: i32 = args.next().expect("y").parse().expect("y is a number");
 
-    let map = Map::load_facet(&dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
 

@@ -107,7 +107,7 @@ use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 
 use crate::facing::{Face, Facing, Hole};
-use openshard_uofiles::map::Map;
+use openshard_map::map::Map;
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
 use crate::camera::TileBounds;
@@ -2894,10 +2894,10 @@ mod tests {
     /// about flags rather than about doors. Zero is below every family base.
     const NOT_A_DOOR: Graphic = Graphic(0);
 
+    use openshard_map::grid::BlockExtent;
+    use openshard_map::map::{LandCell, Map};
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_protocol::world::Point;
-    use openshard_uofiles::grid::BlockExtent;
-    use openshard_uofiles::map::{LandCell, Map};
 
     use super::*;
     use openshard_protocol::items::ItemAmount;
@@ -5006,7 +5006,7 @@ mod tests {
         let Some(dir) = std::env::var_os("OPENSHARD_CLIENT").map(std::path::PathBuf::from) else {
             return;
         };
-        let map = Map::load_facet(&dir, 0).expect("Felucca");
+        let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
         let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
         // The same block of Britain the cutaway's own tests walk: wide enough to
         // hold whole buildings and the streets between them.
@@ -5090,7 +5090,7 @@ mod tests {
             eprintln!("no client files: nothing measured");
             return;
         };
-        let map = Map::load_facet(&dir, 0).expect("Felucca");
+        let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
         let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
         let art = openshard_uofiles::art::Art::open(&dir).expect("artLegacyMUL.uop");
 

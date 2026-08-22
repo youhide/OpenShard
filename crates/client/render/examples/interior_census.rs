@@ -29,9 +29,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use openshard_client_render::interiors::{BlockRooms, Buildings, Cell, StitchedRooms};
+use openshard_map::grid::BlockCoord;
+use openshard_map::map::{BLOCK_SIZE, Map};
 use openshard_movement::PLAYER_HEIGHT;
-use openshard_uofiles::grid::BlockCoord;
-use openshard_uofiles::map::{BLOCK_SIZE, Map};
 use openshard_uofiles::tiledata::TileData;
 
 #[derive(Clone, Debug)]
@@ -98,7 +98,7 @@ fn main() {
     let regions = (!regions.is_empty())
         .then_some(regions)
         .unwrap_or_else(Region::defaults);
-    let map = Map::load_facet(&dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
 
     for region in regions {

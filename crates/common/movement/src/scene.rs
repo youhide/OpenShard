@@ -44,11 +44,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use openshard_map::grid::BlockExtent;
+use openshard_map::map::{LandCell, LandTile, Map, StaticItem};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
-use openshard_uofiles::grid::BlockExtent;
-use openshard_uofiles::map::{LandCell, LandTile, Map, StaticItem};
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
 use crate::terrain::MapTerrain;

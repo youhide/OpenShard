@@ -13,7 +13,7 @@
 //! so that introducing cached composites cannot quietly couple their lifetime
 //! to the current seven-rung camera ladder.
 
-use openshard_uofiles::map::BLOCK_SIZE;
+use openshard_map::map::BLOCK_SIZE;
 
 use crate::camera::{Camera, TILE_WIDTH};
 

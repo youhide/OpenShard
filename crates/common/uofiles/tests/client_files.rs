@@ -22,7 +22,6 @@ use openshard_uofiles::art::Art;
 use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::font::{AsciiFonts, CHARS_PER_FONT, FONT_COUNT, GLYPH_BASE};
 use openshard_uofiles::hues::Hues;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::skillgrp::SkillGroups;
 use openshard_uofiles::skills::{SkillId, Skills};
 use openshard_uofiles::texmaps::{TEXTURE_COUNT, TexMaps, TextureId};
@@ -67,7 +66,8 @@ fn every_facet_loads_as_the_facet_it_actually_is() {
         return;
     };
     for (facet, width, height, name) in FACETS {
-        let map = Map::load_facet(&dir, facet).unwrap_or_else(|e| panic!("map{facet} should load: {e}"));
+        let map = openshard_uofiles::map::read_facet(&dir, facet)
+            .unwrap_or_else(|e| panic!("map{facet} should load: {e}"));
         assert_eq!(
             (map.width(), map.height()),
             (width, height),
@@ -87,7 +87,7 @@ fn a_facets_far_corner_is_on_the_map_and_one_past_it_is_not() {
         return;
     };
     for (facet, width, height, _) in FACETS {
-        let map = Map::load_facet(&dir, facet).unwrap();
+        let map = openshard_uofiles::map::read_facet(&dir, facet).unwrap();
         let (far_x, far_y) = ((width - 1) as u16, (height - 1) as u16);
         assert!(
             map.land(far_x, far_y).is_some(),
@@ -134,7 +134,7 @@ fn the_statics_a_facet_reports_are_the_statics_its_index_describes() {
         expected += length / 7;
     }
 
-    let map = Map::load_facet(&dir, facet).unwrap();
+    let map = openshard_uofiles::map::read_facet(&dir, facet).unwrap();
     assert_eq!(map.static_count(), expected, "the loader and the index disagree");
     assert!(
         expected > 1_000_000,
@@ -153,7 +153,7 @@ fn a_statics_coordinates_land_inside_its_own_block() {
     let Some(dir) = client_dir() else {
         return;
     };
-    let map = Map::load_facet(&dir, 0).unwrap();
+    let map = openshard_uofiles::map::read_facet(&dir, 0).unwrap();
 
     let mut found = 0;
     // Britain: dense enough that a sweep this small finds thousands.
@@ -334,7 +334,7 @@ fn the_corner_of_felucca_is_ocean_and_britain_is_not() {
     let Some(dir) = client_dir() else {
         return;
     };
-    let map = Map::load_facet(&dir, 0).unwrap();
+    let map = openshard_uofiles::map::read_facet(&dir, 0).unwrap();
     let data = tiledata().unwrap();
 
     let corner = map.land(0, 0).expect("(0,0) is on the map");
@@ -1160,10 +1160,10 @@ fn radar_colours_are_the_colours_the_things_are() {
         }
     }
 
-    let grass = colors.land(openshard_uofiles::map::LandTile(0x0003));
+    let grass = colors.land(openshard_map::map::LandTile(0x0003));
     assert_eq!(dominant(grass), "green", "land 0x0003 is grass and is not green");
 
-    let water = colors.land(openshard_uofiles::map::LandTile(0x00A8));
+    let water = colors.land(openshard_map::map::LandTile(0x00A8));
     assert_eq!(
         dominant(water),
         "blue",
@@ -1180,7 +1180,7 @@ fn radar_colours_are_the_colours_the_things_are() {
     );
     assert_ne!(
         wall,
-        colors.land(openshard_uofiles::map::LandTile(0x0006)),
+        colors.land(openshard_map::map::LandTile(0x0006)),
         "a static read the land half, so the split is in the wrong place"
     );
 }

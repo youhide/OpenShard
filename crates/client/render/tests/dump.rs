@@ -42,7 +42,6 @@ use openshard_protocol::world::Point;
 use openshard_uofiles::animdata::AnimData;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::hues::Hues;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::texmaps::TexMaps;
 use openshard_uofiles::tiledata::TileData;
 
@@ -135,7 +134,7 @@ fn draw_britain(
     draw: frame::Draw,
     zoom: openshard_client_render::camera::Zoom,
 ) -> Drawn {
-    let map = Map::load_facet(dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(dir, 0).expect("Felucca");
     let art = Art::open(dir).expect("artLegacyMUL.uop");
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
     let animdata = AnimData::load(dir).expect("animdata.mul");

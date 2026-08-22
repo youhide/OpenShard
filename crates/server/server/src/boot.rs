@@ -611,7 +611,7 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
             "world load +{:.3}s: reading facet {facet}",
             started.elapsed().as_secs_f64()
         );
-        let map = openshard_map::MapSnapshot::load_facet(dir, facet)?;
+        let map = openshard_uofiles::map::load_facet(dir, facet)?;
         let stamp = openshard_movement::bake::stamp_of(dir, facet, map.revision())?;
         let navigation_path = openshard_movement::bake::artifact_path(dir, facet);
         let coarse = openshard_movement::bake::load(&navigation_path, &stamp).map_err(|error| {

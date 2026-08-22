@@ -5,7 +5,7 @@
 //! (`tests/cost.rs`) repoints the camera at a real place but still draws the
 //! whole neighbourhood around it, and a house standing beside the thing under
 //! test is a second variable in every picture. This draws a **synthetic**
-//! [`openshard_uofiles::map::Map`] instead — `Map::from_blocks` never carries
+//! [`openshard_map::map::Map`] instead — `Map::from_blocks` never carries
 //! statics (see `crate::scene`'s own doc) — and puts back only what is asked
 //! for: the real map's statics within a stated radius of a stated point,
 //! optionally filtered to a list of tile IDs, the real ground under them or
@@ -193,12 +193,12 @@ use openshard_client_render::ground;
 use openshard_client_render::items::{self, GroundItem};
 use openshard_client_render::renderer::{GroundRenderer, MeshFaceRenderer, SpriteRenderer, Target};
 use openshard_client_render::{light, renderer};
+use openshard_map::grid::BlockExtent;
+use openshard_map::map::{LandCell, Map};
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
-use openshard_uofiles::grid::BlockExtent;
-use openshard_uofiles::map::{LandCell, Map};
 use openshard_uofiles::texmaps::TexMaps;
 use openshard_uofiles::tiledata::TileData;
 
@@ -595,7 +595,7 @@ fn main() {
     let dir = PathBuf::from(env("OPENSHARD_CLIENT"));
     let (device, queue) = gpu().expect("an adapter");
 
-    let real_map = Map::load_facet(&dir, FACET).expect("Felucca");
+    let real_map = openshard_uofiles::map::read_facet(&dir, FACET).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
 
@@ -655,13 +655,13 @@ fn main() {
         |sx, sy| {
             if !want_ground {
                 return LandCell {
-                    tile: openshard_uofiles::map::LandTile(0),
+                    tile: openshard_map::map::LandTile(0),
                     z: at.z,
                 };
             }
             let (rx, ry) = unshift(anchor, (sx, sy));
             real_map.land(rx, ry).unwrap_or(LandCell {
-                tile: openshard_uofiles::map::LandTile(0),
+                tile: openshard_map::map::LandTile(0),
                 z: at.z,
             })
         },

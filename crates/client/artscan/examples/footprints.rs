@@ -25,7 +25,6 @@ use std::collections::BTreeMap;
 use openshard_client_render::facing;
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
-use openshard_uofiles::map::Map;
 use openshard_uofiles::tiledata::TileData;
 
 /// How many static graphics an install can hold — the id space, not the count
@@ -152,7 +151,7 @@ fn main() {
 /// `examples/geometry_census.rs` in `client/render` counts the same class; this
 /// says how much of it a footprint would replace.
 fn placed(dir: &std::path::Path, art: &Art, cx: i32, cy: i32, radius: i32) {
-    let map = Map::load_facet(dir, 0).expect("Felucca");
+    let map = openshard_uofiles::map::read_facet(dir, 0).expect("Felucca");
     let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
 
     let (mut total, mut unread, mut measured, mut whole, mut roofs) = (0u32, 0u32, 0u32, 0u32, 0u32);
