@@ -5,6 +5,7 @@
 //! point for ordinary outgoing traffic, while walking remains separate because
 //! its sequence and prediction state are owned by [`crate::walk::Walk`].
 
+use openshard_protocol::casting::SpellId;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::gump::{RawButtonId, RawGumpId, RawGumpKey, RawSwitchId};
 use openshard_protocol::items::ItemAmount;
@@ -84,6 +85,11 @@ pub enum Outgoing {
         lock: SkillLock,
     },
     UseSkill(RawSkillId),
+    /// Cast a spell selected from a spellbook this client opened.
+    CastSpell {
+        spellbook: Serial,
+        spell: SpellId,
+    },
     /// Ask for the tooltips of these objects, in one `0xD6`. Driven by the
     /// hover — see [`crate::properties`] for why not by everything on screen.
     QueryProperties(Vec<Serial>),
@@ -140,6 +146,7 @@ impl Outgoing {
             Self::Virtue(mobile) => crate::doll::virtue(player, mobile),
             Self::SkillLock { skill, lock } => crate::skill::set_lock(skill, lock),
             Self::UseSkill(skill) => crate::skill::use_skill(skill),
+            Self::CastSpell { spellbook, spell } => crate::casting::cast(spellbook, spell),
             Self::QueryProperties(serials) => crate::properties::query(&serials, version),
             Self::PartySay(text) => crate::party::say(&text),
             Self::PartyAdd => crate::party::add(),

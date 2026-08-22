@@ -58,12 +58,111 @@ use crate::panes::minimap::radar_region_for;
 use crate::picking::SelectedIdentity;
 use crate::profile;
 use crate::render_passes::{WorldPassAudit, draw_gump_windows, encode_world_passes};
-use crate::window::{prepare_composite_job, ready_atlases};
+use crate::window::{Screen, prepare_composite_job, ready_atlases};
 use crate::world::{
     DAMAGE_NUMBER_HOLD, DAMAGE_NUMBER_RISE, PlayerMotion, SPEECH_LINE_HEIGHT, advance_presentation_to,
 };
 
 mod composite_producer;
+
+/// Text which belongs to a thing in the world, rather than to a client window
+/// or the HUD.
+///
+/// `fonts.mul` glyphs draw into the world texture, so their quads travel with
+/// [`encode_world_passes`]. A TrueType glyph must instead be drawn after the
+/// world has been blitted to the surface: unlike a pixel-art sprite, it must
+/// not be scaled by camera zoom. The two routes differ technically, but they
+/// occupy the same compositor layer. Keeping that fact in this enum makes it
+/// impossible for a TrueType world label to quietly become HUD text again.
+enum WorldText<'a> {
+    Bitmap(Vec<SpriteQuad>),
+    TrueType {
+        labels: Vec<text::ScreenLabel<'a>>,
+        counts: Vec<text::ScreenLabel<'a>>,
+    },
+}
+
+impl WorldText<'_> {
+    /// The part that is rasterized into the camera's world texture.
+    fn bitmap_quads(&self) -> &[SpriteQuad] {
+        match self {
+            Self::Bitmap(quads) => quads,
+            Self::TrueType { .. } => &[],
+        }
+    }
+}
+
+/// Draw the TrueType half of [`WorldText`] after the world reaches the surface
+/// and before a client window can cover it.
+///
+/// This is deliberately separate from `draw_chat_and_speech`: a name, speech
+/// bubble, damage number or pile count is anchored to the world even when the
+/// font needs a surface-space pass. `GumpRenderer::render_layer` gives this
+/// layer an independent instance buffer, so later HUD text cannot replace it.
+fn draw_world_text(
+    resources: &crate::resources::Resources,
+    window: &mut Screen,
+    encoder: &mut wgpu::CommandEncoder,
+    view: &wgpu::TextureView,
+    fonts: crate::desk::FontSizes,
+    density: f32,
+    text: &WorldText<'_>,
+) {
+    let WorldText::TrueType { labels, counts } = text else {
+        return;
+    };
+    let font = resources
+        .ttf_font
+        .as_ref()
+        .expect("TrueType world text requires the configured TrueType face");
+    let speech_size = fonts.speech.scaled(density);
+    let count_size = fonts.stack_count.scaled(density);
+    let quads = {
+        let atlas = window
+            .ttf_atlas
+            .as_mut()
+            .expect("create_window builds ttf_atlas whenever ttf_font is set");
+        if let Err(error) = atlas.add_or_reset(
+            font,
+            speech_size,
+            labels.iter().flat_map(|label| label.text.chars()),
+        ) {
+            eprintln!("packing world TTF glyphs: {error}");
+        }
+        if !counts.is_empty() {
+            if let Err(error) = atlas.add_or_reset(
+                font,
+                count_size,
+                counts.iter().flat_map(|label| label.text.chars()),
+            ) {
+                eprintln!("packing world TTF glyphs: {error}");
+            }
+        }
+        let mut quads = text::collect_screen_ttf(labels, atlas, speech_size);
+        quads.extend(text::collect_screen_ttf(counts, atlas, count_size));
+        quads
+    };
+    window.upload_ttf_dirty();
+    let timed = profile::begin(window.gpu.as_ref(), "world text", encoder);
+    window
+        .ttf_gump_pass
+        .as_mut()
+        .expect("create_window builds ttf_gump_pass whenever ttf_atlas is")
+        .render_layer(
+            &window.device,
+            &window.queue,
+            encoder,
+            openshard_client_render::gump::Frame {
+                target: view,
+                width: window.config.width,
+                height: window.config.height,
+                // `ScreenLabel` coordinates and glyphs are already real pixels.
+                scale: 1.0,
+            },
+            &quads,
+        );
+    profile::end(window.gpu.as_ref(), encoder, timed);
+}
 
 /// Read one texture into packed rows for an opt-in producer/cache audit.
 fn audit_texture_bytes(
@@ -1798,9 +1897,9 @@ impl App {
         // also reads the whole of `self`.
         let chat_style = self.chat_style();
         // The player's own sizes, read before the window is borrowed for the
-        // reason the line above is: they are `self.desk`'s, and the window is
-        // part of `self`.
-        let fonts = self.desk.fonts;
+        // reason the line above is: they come from the live HUD when it exists,
+        // and the window is part of `self`.
+        let fonts = self.font_sizes();
         // What the camera has walked onto since the atlases were last grown.
         // Gathered before the window is borrowed, and not inside the borrow: it
         // reads the whole of `self`, and the window is part of it.
@@ -2270,25 +2369,16 @@ impl App {
         // all-or-nothing switch. `fonts.mul` still draws into the world
         // image, at the world's own camera-scaled zoom — a bitmap font's
         // blocky nearest-sampled magnification is the look every other
-        // sprite already has. A TrueType face does not go through the world
-        // passes at all any more: `screen_speech` is collected in real
-        // screen pixels instead, held until the HUD block further down folds
-        // it into `hud_quads` for `Screen::ttf_gump_pass`'s one call — see
-        // `text::ScreenLabel`'s doc for why the pass and `hud_quads`'s own
-        // comment for why it has to be one call.
+        // sprite already has. A TrueType face reaches the surface after the
+        // blit, but remains in the same *world* compositor layer: see
+        // `WorldText` and `draw_world_text`, which keep it below every
+        // client window rather than folding it into the HUD.
         let encode_started = Instant::now();
-        #[allow(clippy::type_complexity)]
-        let (text_quads, screen_speech, screen_counts): (
-            Vec<SpriteQuad>,
-            Vec<text::ScreenLabel<'_>>,
-            Vec<text::ScreenLabel<'_>>,
-        ) = match self.resources.ttf_font.is_some() {
+        let world_text = match self.resources.ttf_font.is_some() {
             true => {
-                // Nothing is packed here any more. Growing the atlas needs
-                // the *size* each line is drawn at, and the sizes live with
-                // the draw that uses them — `draw_chat_and_speech` grows
-                // both roles and draws both, so there is one place that
-                // knows what was rasterized at what. This only projects.
+                // Nothing is packed here. Growing the atlas needs the size
+                // each line is drawn at, and world text is packed by the
+                // world-text layer that draws it below.
                 //
                 // `to_viewport` and not the projection directly: it is the
                 // one place that already undoes both a magnifying zoom's
@@ -2319,11 +2409,10 @@ impl App {
                         })
                         .collect()
                 }
-                (
-                    Vec::new(),
-                    screen_of(&overhead, project),
-                    screen_of(&counts, project),
-                )
+                WorldText::TrueType {
+                    labels: screen_of(&overhead, project),
+                    counts: screen_of(&counts, project),
+                }
             }
             false => {
                 let labels: Vec<Label<'_>> = overhead
@@ -2345,18 +2434,9 @@ impl App {
                         depth: 0.0,
                     })
                     .collect();
-                (
-                    text::collect(&labels, &self.resources.font_atlas),
-                    Vec::new(),
-                    Vec::new(),
-                )
+                WorldText::Bitmap(text::collect(&labels, &self.resources.font_atlas))
             }
         };
-        // Uploads whatever the `add` above (and the HUD's own, further down
-        // this frame) packed fresh — see `Screen::upload_ttf_dirty`'s doc for
-        // why this is the one place both call through rather than each taking
-        // `TtfAtlas::take_dirty` for itself.
-        window.upload_ttf_dirty();
         let depth_view = window.depth.create_view(&wgpu::TextureViewDescriptor::default());
         let gbuffer_views = window.gbuffer.views();
         let cutaway_gbuffer_views = window.cutaway_gbuffer.views();
@@ -2393,7 +2473,7 @@ impl App {
             camera,
             solid_cut,
             &geometry,
-            &text_quads,
+            world_text.bitmap_quads(),
             render_width,
             render_height,
             composite_lod,
@@ -2413,6 +2493,22 @@ impl App {
                 [window.config.width, window.config.height],
             );
         }
+        // The surface-space half of the world layer. This must remain before
+        // `draw_gump_windows`: a character's name or speech belongs to the
+        // character in the map, never to whichever paperdoll happens to be
+        // open over that point.
+        draw_world_text(
+            &self.resources,
+            window,
+            &mut encoder,
+            &view,
+            fonts,
+            self.shell
+                .as_ref()
+                .map(|shell| shell.pixels_per_point())
+                .unwrap_or(1.0),
+            &world_text,
+        );
         // The shard's dialogs, in the client's own art, over the finished
         // picture and under egui's.
         //
@@ -2432,8 +2528,8 @@ impl App {
         // neighbours above: `resources.gump_atlas` and `windows.drawn_windows`
         // are the two things on `self` it really writes, and both are named
         // in its signature rather than reached through `&mut self`.
-        let mut text_quads: Vec<SpriteQuad> = Vec::new();
-        let mut ttf_quads: Vec<SpriteQuad> = Vec::new();
+        let mut window_text_quads: Vec<SpriteQuad> = Vec::new();
+        let mut window_ttf_quads: Vec<SpriteQuad> = Vec::new();
         draw_gump_windows(
             &mut self.resources,
             &self.world,
@@ -2447,10 +2543,12 @@ impl App {
             window,
             &mut encoder,
             &view,
-            &mut text_quads,
-            &mut ttf_quads,
+            &mut window_text_quads,
+            &mut window_ttf_quads,
         );
-        // Every line of gump-space text this frame, from both the blocks below.
+        // Gump-space text belongs either to the client windows above or to
+        // the HUD below. World-attached text was already drawn in its own
+        // layer, so no later addition can put it above a paperdoll.
         //
         // **One list because there is one pass.** `GumpRenderer` holds a single
         // instance buffer, and `queue.write_buffer` lands before the encoder is
@@ -2476,7 +2574,7 @@ impl App {
         // otherwise have had to update a dialog's arm in both.
         // `draw_chat_and_speech` is a free function like its neighbours
         // above, though a plainer one: nothing it is handed is written back
-        // to `self` at all, only appended to the caller's own `text_quads`.
+        // to `self` at all, only appended to the caller's window/HUD lists.
         draw_chat_and_speech(
             &self.resources,
             &self.world,
@@ -2487,10 +2585,8 @@ impl App {
             &view,
             chat_style,
             fonts,
-            &screen_speech,
-            &screen_counts,
-            &mut text_quads,
-            &mut ttf_quads,
+            &mut window_text_quads,
+            &mut window_ttf_quads,
         );
         let encode_cost = encode_started.elapsed();
         // The UI over it, with no depth attachment: the world's depth buffer

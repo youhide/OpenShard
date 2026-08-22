@@ -803,8 +803,8 @@ impl Screen {
     /// Copy whatever [`Screen::ttf_atlas`] has newly packed this frame onto
     /// [`Screen::ttf_gump_pass`]'s texture.
     ///
-    /// The single place both of `App::draw`'s callers route through — overhead
-    /// speech's own `atlas.add` and the HUD's — rather than each calling
+    /// The single place every surface-space text layer routes through — world
+    /// text, client windows and the HUD — rather than each calling
     /// [`TtfAtlas::take_dirty`] on its own: that method hands back the rows
     /// written since the *last* call and then forgets them (see its doc), so
     /// a second independent caller the same frame would find nothing to

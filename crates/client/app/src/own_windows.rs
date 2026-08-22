@@ -709,6 +709,13 @@ impl App {
                 self.windows.locally_closed.insert(subject);
                 self.apply_close_window(link::CloseTarget::Paperdoll(serial));
             }
+            // The shard has no close packet for a spellbook.  Forget this
+            // thread's `0xBF 0x1B` snapshot; using the book again supplies a
+            // fresh one and reopens it through ordinary reconciliation.
+            WindowSubject::Spellbook(serial) => {
+                self.windows.locally_closed.insert(subject);
+                self.apply_close_window(link::CloseTarget::Spellbook(serial));
+            }
             // Nothing in the view to tell and so nothing to overlay: the
             // skills and the status numbers stay where they are, the way a
             // paperdoll's equipment does. What closing takes away is whatever

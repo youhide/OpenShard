@@ -313,6 +313,15 @@ impl Shell {
         self.desk.chat
     }
 
+    /// The text sizes the Chat tab is currently showing.
+    ///
+    /// This is deliberately read from the shell's [`Desk`], not the app's
+    /// startup copy: a drag changes this value immediately, while the latter
+    /// is only refreshed when the client exits and writes `client_ui.toml`.
+    pub fn fonts(&self) -> crate::desk::FontSizes {
+        self.desk.fonts
+    }
+
     /// How big the client's own windows are drawn right now — the Windows
     /// tab's own number, and [`Shell::tuning`]'s reason again.
     ///

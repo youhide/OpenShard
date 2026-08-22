@@ -1,6 +1,8 @@
 //! The typed line and its rendering, together: [`Chat`] is what has not been
 //! sent yet, and [`draw_chat_and_speech`] is the speech line and the journal
-//! above it, over the finished picture and under egui's.
+//! above it, in the HUD layer over client windows and under egui's. World
+//! speech is deliberately not drawn here; `presentation::draw_world_text`
+//! owns the world-text layer below those windows.
 
 use openshard_client_render::atlas::TextSize;
 use openshard_client_render::geometry::Rect;
@@ -693,7 +695,7 @@ impl crate::app::App {
         // this reads the face rather than the atlas and cannot pick the
         // TrueType arithmetic for a `fonts.mul` frame.
         let truetype = self.resources.ttf_font.is_some();
-        let fonts = self.desk.fonts;
+        let fonts = self.font_sizes();
         // The size the frame drew this line at, density and all — the pointer
         // has to measure the button against the same glyphs that are on the
         // screen, and those were rasterized at the real size.
@@ -720,15 +722,15 @@ impl crate::app::App {
     }
 }
 
-/// The speech line and the journal above it, over the finished picture and
-/// under egui's — the same corner `shell::speech_line`'s `egui::Panel::bottom`
+/// The speech line and the journal above it, in the HUD layer over client
+/// windows and under egui's — the same corner `shell::speech_line`'s `egui::Panel::bottom`
 /// used to claim before this moved to the client's own rendering. Always
 /// drawn, unlike `crate::presentation::draw_gump_windows`: the font atlas
 /// needs no shard-sent gump art to exist, so there is nothing here to be
 /// `None` until.
 ///
 /// The plainest of this frame's free functions: every parameter is `&`, and
-/// the one exception — `text_quads` — is appended to rather than replaced,
+/// the one exception — the window/HUD quad lists — is appended to rather than replaced,
 /// so the caller keeps owning the one instance buffer `GumpRenderer` has
 /// room for (see the comment at this call's site in `App::draw_from`).
 /// Nothing here is written back to `self` at all.
@@ -743,17 +745,13 @@ pub(crate) fn draw_chat_and_speech(
     view: &wgpu::TextureView,
     chat_style: desk::Chat,
     fonts: desk::FontSizes,
-    screen_speech: &[text::ScreenLabel<'_>],
-    screen_counts: &[text::ScreenLabel<'_>],
-    text_quads: &mut Vec<SpriteQuad>,
-    ttf_quads: &mut Vec<SpriteQuad>,
+    window_text_quads: &mut Vec<SpriteQuad>,
+    window_ttf_quads: &mut Vec<SpriteQuad>,
 ) {
     let scale = shell.map(|shell| shell.pixels_per_point()).unwrap_or(1.0);
-    // The two roles this function draws through a TrueType face, each at its
-    // own real size — `docs/text_sizes.md`'s D3 — with the display's density
-    // folded into the size rather than into the finished quad (D4).
+    // HUD text's real size, with the display's density folded into the size
+    // rather than into the finished quad (D4).
     let speech_size = fonts.speech.scaled(scale);
-    let count_size = fonts.stack_count.scaled(scale);
     // The surface's size in gump pixels rather than real ones —
     // `Frame::scale`'s doc is what the one below multiplies out, and
     // this is that arithmetic done once for where the corner is
@@ -869,7 +867,7 @@ pub(crate) fn draw_chat_and_speech(
     // `fonts.mul` has no Cyrillic past `0xFF` — see `run`'s
     // `--ttf-font` doc — and this is the box a player actually reads
     // what they typed back from, so unlike the dialog captions
-    // `text_quads` carries below, this switches to `App::ttf_font`
+    // `window_text_quads` carries below, this switches to `App::ttf_font`
     // and `Screen::ttf_gump_pass` whenever one is set rather than
     // drawing a line nobody can read the second half of.
     if let Some(font) = &resources.ttf_font {
@@ -886,21 +884,10 @@ pub(crate) fn draw_chat_and_speech(
             .flat_map(|label| label.text.chars())
             .chain(prompt.chars())
             .chain(Channel::ALL.iter().flat_map(|channel| channel.label().chars()))
-            .chain(std::iter::once('|'))
-            .chain(screen_speech.iter().flat_map(|label| label.text.chars()));
+            .chain(std::iter::once('|'));
         if let Err(error) = atlas.add_or_reset(font, speech_size, wanted) {
             // Same corner as the speech line's own `atlas.add` above.
             eprintln!("packing ttf glyphs: {error}");
-        }
-        // The counts written over piles, grown at *their* size — the same
-        // characters at another size are other glyphs, which is the whole of
-        // `TtfAtlas`'s `(char, size)` key. Skipped entirely when nothing on
-        // screen is counted, which is most frames.
-        if !screen_counts.is_empty() {
-            let digits = screen_counts.iter().flat_map(|label| label.text.chars());
-            if let Err(error) = atlas.add_or_reset(font, count_size, digits) {
-                eprintln!("packing ttf glyphs: {error}");
-            }
         }
         // `labels`' own positions are gump pixels, `rows`/`input_at`'s
         // space — real pixels only once here, not per glyph inside
@@ -957,7 +944,7 @@ pub(crate) fn draw_chat_and_speech(
         // depth and painter's order is the only order there is. In real pixels
         // like everything else in this branch, which is why the row's height is
         // multiplied here and not in the branch below.
-        let mut hud_quads = std::mem::take(ttf_quads);
+        let mut hud_quads = std::mem::take(window_ttf_quads);
         hud_quads.push(plate_of(button, scale));
         if let Some(index) = highlighted {
             let widest = rows[..popup_rows]
@@ -978,25 +965,8 @@ pub(crate) fn draw_chat_and_speech(
             ));
         }
         hud_quads.extend(text::collect_gump_ttf(&real_labels, atlas, speech_size));
-        // Overhead speech's own quads, folded into this same list
-        // rather than a render call of their own — `GumpRenderer::render`'s
-        // doc is explicit that a second call the same frame does not
-        // add a second draw, it *replaces* the first: the instances
-        // live in one buffer written through `queue.write_buffer`,
-        // which lands before either call's encoded draw actually
-        // runs, so a first, separate `screen_speech` call earlier in
-        // the frame was silently overwritten by this one and never
-        // drew anything. One call, everything it should draw.
-        hud_quads.extend(text::collect_screen_ttf(screen_speech, atlas, speech_size));
-        // And the counts, in their own size — the second role this one call
-        // draws. One call rather than two passes, for the reason the comment
-        // above gives: `GumpRenderer::render` replaces its instances rather
-        // than adding to them, so everything that is to be drawn through it
-        // this frame has to be in one list.
-        hud_quads.extend(text::collect_screen_ttf(screen_counts, atlas, count_size));
-        // Picks up this call's own `add` above and, the first time
-        // through this frame, the speech line's — see
-        // `Screen::upload_ttf_dirty`'s doc.
+        // Picks up this call's additions. World text was uploaded and rendered
+        // through the preceding compositor layer.
         window.upload_ttf_dirty();
         let timed = profile::begin(window.gpu.as_ref(), "ttf gump text", encoder);
         window
@@ -1013,7 +983,7 @@ pub(crate) fn draw_chat_and_speech(
                     height: window.config.height,
                     // Not `scale`: `hud_quads` are already in real
                     // pixels, so the shader's own multiply — the one
-                    // `text_quads` below still needs, being in gump
+                    // `window_text_quads` below still needs, being in gump
                     // pixels — would double it.
                     scale: 1.0,
                 },
@@ -1066,7 +1036,7 @@ pub(crate) fn draw_chat_and_speech(
         // The button's plate, before every label that stands on it — including
         // the journal's, which cannot reach it, and the button's own, which is
         // the point.
-        text_quads.push(plate_of(button, 1.0));
+        window_text_quads.push(plate_of(button, 1.0));
         // The plate under the highlighted row, before the text that stands on
         // it — the TrueType branch's own paragraph, in gump pixels: `magnify`
         // is what `fonts.mul`'s measured widths are drawn at, and `line_height`
@@ -1078,7 +1048,7 @@ pub(crate) fn draw_chat_and_speech(
                 .max()
                 .unwrap_or_default();
             let at = rows[index].0;
-            text_quads.push(gump_art::plate(
+            window_text_quads.push(gump_art::plate(
                 Rect {
                     x: at.x as f32,
                     y: at.y as f32,
@@ -1089,7 +1059,7 @@ pub(crate) fn draw_chat_and_speech(
                 gump_art::Shade::new(PLATE_SHADE),
             ));
         }
-        text_quads.extend(scaled_gump_quads(
+        window_text_quads.extend(scaled_gump_quads(
             &labels,
             &resources.font_atlas,
             chat_style.scale.glyph_scale_factor(),
@@ -1097,7 +1067,7 @@ pub(crate) fn draw_chat_and_speech(
     }
     // The one call, with the windows' lines already in front of the
     // chat's: painter's order inside a single pass, and the only order
-    // there is — see `text_quads` for what a second call would cost.
+    // there is — see `window_text_quads` for what a second call would cost.
     // Draws only the windows' captions when `App::ttf_font` is set:
     // the chat's own quads went through `ttf_gump_pass` above instead.
     let timed = profile::begin(window.gpu.as_ref(), "gump text", encoder);
@@ -1111,7 +1081,7 @@ pub(crate) fn draw_chat_and_speech(
             height: window.config.height,
             scale,
         },
-        text_quads,
+        window_text_quads,
     );
     profile::end(window.gpu.as_ref(), encoder, timed);
 }

@@ -255,7 +255,7 @@ impl ServerPacket {
             Self::LocalizedMessage(_) => <LocalizedMessage as EncodePacket>::ID,
             Self::UnicodeMessage(_) => <UnicodeMessage as EncodePacket>::ID,
             Self::ContextMenu(_) => ContextMenu::ID,
-            Self::SpellbookContent(_) => SpellbookContent::ID,
+            Self::SpellbookContent(_) => <SpellbookContent as EncodePacket>::ID,
             Self::CloseGump(_) => <CloseGump as EncodePacket>::ID,
             Self::GumpDisplay(_) => <GumpDisplay as EncodePacket>::ID,
         }
@@ -452,6 +452,9 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
         crate::gump::CloseGump::SUBCOMMAND => decode_server(packet, version)
             .map(ServerPacket::CloseGump)
             .map_err(ServerDecodeError::CloseGump)?,
+        crate::spellbook::SpellbookContent::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::SpellbookContent)
+            .map_err(ServerDecodeError::SpellbookContent)?,
         crate::design::DesignRevision::SUBCOMMAND => decode_server(packet, version)
             .map(ServerPacket::DesignRevision)
             .map_err(ServerDecodeError::DesignRevision)?,
@@ -794,6 +797,8 @@ pub enum ServerDecodeError {
     Party(DecodeError),
     /// `0xBF` subcommand `0x04` did not decode.
     CloseGump(DecodeError),
+    /// `0xBF` subcommand `0x1B` did not decode.
+    SpellbookContent(DecodeError),
 }
 
 impl fmt::Display for ServerDecodeError {
@@ -822,6 +827,7 @@ impl fmt::Display for ServerDecodeError {
             Self::PropertyListReply(error) => ("0xD6 property list", error),
             Self::Party(error) => ("0xBF 0x06 party", error),
             Self::CloseGump(error) => ("0xBF 0x04 close gump", error),
+            Self::SpellbookContent(error) => ("0xBF 0x1B spellbook content", error),
             Self::OpenContainer(error) => ("0x24 open container", error),
             Self::AddToContainer(error) => ("0x25 add to container", error),
             Self::ContainerContents(error) => ("0x3C container contents", error),

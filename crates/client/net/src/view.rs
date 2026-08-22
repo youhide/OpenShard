@@ -39,6 +39,7 @@ use openshard_protocol::properties::PropertyEntry;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::speech::{Font, LocalizedMessage, SpokenMessage, TalkMode, UnicodeMessage};
+use openshard_protocol::spellbook::SpellbookContent;
 use openshard_protocol::target::TargetCursor;
 use openshard_protocol::vendor::{BuyLine, SellLine};
 use openshard_protocol::wire::{Graphic, Hue};
@@ -413,6 +414,10 @@ pub struct WorldView {
     /// [`paperdoll_closed`](Self::paperdoll_closed): closing one is a click,
     /// exactly as it is for a container and a gump.
     pub paperdolls: FxHashMap<Serial, Paperdoll>,
+    /// The books this client has opened, keyed by book serial.  The spellbook
+    /// content packet is the window's source of truth, not the bag it came
+    /// from: books can be carried, equipped, or opened from the ground.
+    pub spellbooks: FxHashMap<Serial, Spellbook>,
     /// The party this client is in, and who has asked it into one.
     ///
     /// One value, not a table: a mobile is in at most one party, and the shard
@@ -552,6 +557,31 @@ pub struct Paperdoll {
     pub can_lift: bool,
 }
 
+/// The contents the shard last sent for one open spellbook.
+///
+/// A spellbook's `0x24` only says that it is a book.  The usable spells arrive
+/// separately in `0xBF 0x1B`, so they have their own table rather than being
+/// inferred from a container redraw.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Spellbook {
+    /// The book's graphic, retained for a later spell school.
+    pub graphic: Graphic,
+    /// The one-based spell number represented by bit zero.
+    pub offset: u16,
+    /// Bit `n` says this book holds spell `offset + n`.
+    pub content: u64,
+}
+
+impl From<SpellbookContent> for Spellbook {
+    fn from(content: SpellbookContent) -> Self {
+        Self {
+            graphic: content.graphic,
+            offset: content.offset,
+            content: content.content,
+        }
+    }
+}
+
 /// A dialog the server has opened on this client, layout already read.
 ///
 /// The elements are parsed once, when the packet arrives, rather than every time
@@ -658,6 +688,7 @@ impl WorldView {
             pending_vendor_buys: FxHashMap::default(),
             vendor_stock: FxHashMap::default(),
             paperdolls: FxHashMap::default(),
+            spellbooks: FxHashMap::default(),
             party: Party::default(),
             tooltips: FxHashMap::default(),
             designs: FxHashMap::default(),
@@ -697,6 +728,7 @@ impl WorldView {
         self.containers.clear();
         self.gumps.clear();
         self.paperdolls.clear();
+        self.spellbooks.clear();
         self.vendor_buys.clear();
         self.vendor_sells.clear();
         self.pending_vendor_buys.clear();
@@ -734,6 +766,13 @@ impl WorldView {
     /// Answers whether one was actually open.
     pub fn paperdoll_closed(&mut self, mobile: Serial) -> bool {
         self.paperdolls.remove(&mobile).is_some()
+    }
+
+    /// Forget a spellbook window this client has just closed.  A book does not
+    /// send a close packet, so reopening it is the next `0xBF 0x1B` the shard
+    /// sends after the player uses the item again.
+    pub fn spellbook_closed(&mut self, book: Serial) -> bool {
+        self.spellbooks.remove(&book).is_some()
     }
 
     /// Forget a container window this client has just closed.
@@ -1242,6 +1281,15 @@ impl WorldView {
                 }
                 changed
             }
+            // A spellbook's ordinary `0x24` has already described the book
+            // itself.  This companion packet decides which spell rows are
+            // available and may refresh after a scroll is scribed.
+            ServerPacket::SpellbookContent(content) => {
+                let fresh = Spellbook::from(*content);
+                let changed = self.spellbooks.get(&content.serial) != Some(&fresh);
+                self.spellbooks.insert(content.serial, fresh);
+                changed
+            }
             // The stance settled. Sent unprompted as well as in answer to the
             // client's own `0x72` — a shard puts a player into war mode when
             // something attacks them — so this is folded rather than assumed
@@ -1335,6 +1383,10 @@ impl WorldView {
                 // A container that is itself removed takes its window with it.
                 let had_window = self.containers.remove(&remove.serial).is_some();
                 self.contents.remove(&remove.serial);
+                // A spellbook may be held by that container or lie on the
+                // ground; either way a removed book cannot keep its spell
+                // page open, and a reused serial must not inherit its mask.
+                let had_spellbook = self.spellbooks.remove(&remove.serial).is_some();
                 let had_vendor = self.vendor_buys.remove(&remove.serial).is_some()
                     || self.vendor_sells.remove(&remove.serial).is_some()
                     || self.pending_vendor_buys.remove(&remove.serial).is_some()
@@ -1357,6 +1409,7 @@ impl WorldView {
                     || had_item
                     || was_held
                     || had_window
+                    || had_spellbook
                     || had_vendor
                     || had_paperdoll
                     || had_tooltip
@@ -2013,6 +2066,15 @@ mod tests {
         })
     }
 
+    fn spellbook_of(serial: Serial, content: u64) -> ServerPacket {
+        ServerPacket::SpellbookContent(SpellbookContent {
+            serial,
+            graphic: Graphic(0x0EFA),
+            offset: 1,
+            content,
+        })
+    }
+
     /// A `0x88` opens a window and dresses nobody: the equipment it draws came
     /// in a `0x78` and stays on the mobile. Asserted together because the
     /// tempting shape — a paperdoll that carries its own copy of the equipment —
@@ -2044,6 +2106,24 @@ mod tests {
             !view.apply(&paperdoll_of(other())),
             "the same window twice settles"
         );
+    }
+
+    #[test]
+    fn a_spellbook_content_packet_keeps_the_book_and_its_mask_together() {
+        let mut view = WorldView::entered(start());
+        let book = Serial::new(0x4000_0001).expect("an item serial");
+
+        assert!(view.apply(&spellbook_of(book, 1 | (1 << 17))));
+        assert_eq!(
+            view.spellbooks.get(&book),
+            Some(&Spellbook {
+                graphic: Graphic(0x0EFA),
+                offset: 1,
+                content: 1 | (1 << 17),
+            })
+        );
+        assert!(view.spellbook_closed(book));
+        assert!(view.spellbooks.is_empty());
     }
 
     /// The one home for the stance, and the two doors into it: the `0x88` this

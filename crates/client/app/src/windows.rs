@@ -216,6 +216,10 @@ pub enum WindowSubject {
     /// The facet-wide map.  Its terrain is the same generated radar product
     /// as the minimap, only shown through a rectangular, pannable viewport.
     WorldMap,
+    /// A spellbook the shard has opened, keyed by its item serial.  Its
+    /// membership is a `0xBF 0x1B` record, separate from the pack containing
+    /// the book.
+    Spellbook(Serial),
 }
 
 impl WindowSubject {
@@ -280,6 +284,8 @@ pub enum Drawn {
     Minimap(crate::panes::minimap::Window),
     /// The rectangular facet-map bounds; it intentionally has no gump art.
     WorldMap(crate::panes::world_map::Window),
+    /// The spell list on an opened book.
+    Spellbook(openshard_client_render::spellbook::Window),
 }
 
 /// Whose press the client's own modal is standing over.
@@ -325,6 +331,7 @@ impl Drawn {
             Self::Party(manifest) => &manifest.pictures,
             Self::Minimap(minimap) => std::slice::from_ref(&minimap.frame),
             Self::WorldMap(_) => &[],
+            Self::Spellbook(book) => &book.pictures,
         }
     }
 }
@@ -574,6 +581,7 @@ pub fn reconcile_own_windows(
         WindowSubject::Status => false,
         WindowSubject::Minimap => false,
         WindowSubject::WorldMap => false,
+        WindowSubject::Spellbook(serial) => view.spellbooks.contains_key(&serial),
         // Nothing in the view holds the picker open, so there is nothing for an
         // overlay entry to be ahead *of* — the same as the two kinds above.
         WindowSubject::Split { .. } => false,
@@ -593,12 +601,15 @@ pub fn reconcile_own_windows(
         }
         match window.subject {
             WindowSubject::Container(serial) => {
-                view.containers.contains_key(&serial) && !view.vendor_buys.contains_key(&serial)
+                view.containers.contains_key(&serial)
+                    && !view.vendor_buys.contains_key(&serial)
+                    && !view.spellbooks.contains_key(&serial)
             }
             WindowSubject::Vendor(serial) => {
                 view.vendor_buys.contains_key(&serial) || view.vendor_sells.contains_key(&serial)
             }
             WindowSubject::Paperdoll(serial) => view.paperdolls.contains_key(&serial),
+            WindowSubject::Spellbook(serial) => view.spellbooks.contains_key(&serial),
             WindowSubject::Dialog(gump_id) => view.gumps.iter().any(|gump| gump.gump_id == gump_id),
             // Nothing to reconcile against, and nothing to ask: the window is
             // open because it is here. `close_window`'s own `retain` is what
@@ -627,12 +638,17 @@ pub fn reconcile_own_windows(
     let wanted = view
         .containers
         .keys()
-        .filter(|serial| !view.vendor_buys.contains_key(serial))
+        .filter(|serial| !view.vendor_buys.contains_key(serial) && !view.spellbooks.contains_key(serial))
         .map(|serial| WindowSubject::Container(*serial))
         .chain(
             view.paperdolls
                 .keys()
                 .map(|serial| WindowSubject::Paperdoll(*serial)),
+        )
+        .chain(
+            view.spellbooks
+                .keys()
+                .map(|serial| WindowSubject::Spellbook(*serial)),
         );
     let wanted = wanted.chain(
         view.vendor_buys

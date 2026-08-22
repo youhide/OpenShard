@@ -341,6 +341,8 @@ pub enum CloseTarget {
     Container(Serial),
     /// A dialog, named by the gump id the shard opened it under.
     Gump(GumpId),
+    /// A spellbook, named by its item serial.
+    Spellbook(Serial),
 }
 
 /// The handle the window keeps: somewhere to send commands.

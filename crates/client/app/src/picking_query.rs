@@ -386,6 +386,15 @@ impl App {
             .map_or_else(desk::Chat::default, shell::Shell::chat)
     }
 
+    /// The current text sizes, from the live HUD while it is open.
+    ///
+    /// Like [`Self::chat_style`] and [`Self::window_scale`], the app's desk is
+    /// a startup-and-save snapshot. Reading it while a shell exists makes the
+    /// font-size sliders appear inert until the next launch.
+    pub(crate) fn font_sizes(&self) -> desk::FontSizes {
+        self.shell.as_ref().map_or(self.desk.fonts, shell::Shell::fonts)
+    }
+
     /// What `common/movement` makes of the ground on screen — the HUD's terrain
     /// overlay, gathered only while it is switched on.
     ///

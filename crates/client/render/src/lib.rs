@@ -80,6 +80,7 @@ pub mod select;
 pub mod skills;
 pub mod solid;
 pub mod solids;
+pub mod spellbook;
 pub mod split;
 pub mod sprite;
 pub mod statics;

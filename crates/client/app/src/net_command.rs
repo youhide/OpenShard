@@ -211,6 +211,7 @@ impl App {
             link::CloseTarget::Paperdoll(serial) => view.paperdoll_closed(serial),
             link::CloseTarget::Container(serial) => view.container_closed(serial),
             link::CloseTarget::Gump(gump_id) => view.gump_closed(gump_id),
+            link::CloseTarget::Spellbook(serial) => view.spellbook_closed(serial),
         };
     }
 

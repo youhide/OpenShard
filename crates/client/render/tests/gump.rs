@@ -450,10 +450,7 @@ fn a_translucent_untinted_picture_is_not_run_through_the_ramp() {
     );
 
     let white = frame.pixels[0];
-    assert!(
-        white > 223,
-        "the art's own white, not a ramp lookup's {white}"
-    );
+    assert!(white > 223, "the art's own white, not a ramp lookup's {white}");
 }
 
 /// Later covers earlier: with no depth buffer, the caller's order is the

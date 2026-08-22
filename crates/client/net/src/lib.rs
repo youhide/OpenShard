@@ -25,6 +25,7 @@
 //! [`openshard_gateway::Connection`]: https://docs.rs/openshard-gateway
 
 pub mod action;
+pub mod casting;
 pub mod combat;
 pub mod connection;
 pub mod doll;

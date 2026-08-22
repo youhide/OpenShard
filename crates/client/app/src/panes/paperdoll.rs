@@ -168,6 +168,10 @@ fn button_effects(
         paperdoll::DollButton::LogOut => answer.with(Effect::Net(Outgoing::LogOut)),
         paperdoll::DollButton::Quests => answer.with(Effect::Net(Outgoing::QuestLog)),
         paperdoll::DollButton::Guild => answer.with(Effect::Net(Outgoing::GuildMenu)),
+        // The reference's Options button owns a client-local window.  This
+        // client has a facet map ready for exactly that role; unlike a shard
+        // gump it must be opened here, because there is no packet to wait for.
+        paperdoll::DollButton::Options if own => answer.with(Effect::Open(LocalWindow::WorldMap)),
         // Status packets describe this connection's player, so a stranger's
         // Status control must not open a misleading local window — and it
         // asks the shard nothing either, which is what the old handler did.
@@ -191,7 +195,7 @@ fn button_effects(
             Some(serial) => answer.with(Effect::Net(Outgoing::Use(serial))),
             None => answer,
         },
-        // Help, Options, and the first click of every scroll pair: drawn,
+        // Help and the first click of every scroll pair: drawn,
         // pressed, released — and wired to nothing yet, exactly as they were
         // before this pane existed.
         _ => answer,
@@ -495,9 +499,31 @@ impl PaperdollPane {
     /// are resolved here rather than in the render crate's layout.
     fn lines(&self, frame: &PaneFrame<'_>) -> Vec<Line> {
         let mut lines = Vec::new();
-        if let Some(doll) = frame.view.paperdolls.get(&self.mobile) {
+        // `0x88` is the paperdoll title's usual authority.  At world entry,
+        // though, `0x11` already contains the character name; retain that as a
+        // fallback so a client never shows an anonymous own doll while a
+        // lagged/older shard has not supplied the optional title string.
+        let title = frame
+            .view
+            .paperdolls
+            .get(&self.mobile)
+            .map(|doll| doll.title.as_str())
+            .filter(|title| !title.is_empty())
+            .or_else(|| {
+                self.own(frame)
+                    .then(|| {
+                        frame
+                            .view
+                            .player
+                            .status
+                            .as_ref()
+                            .map(|status| status.name.as_str())
+                    })
+                    .flatten()
+            });
+        if let Some(title) = title {
             // Window-local — see `PaneFrame::cursor`'s doc.
-            let name = paperdoll::title(&doll.title, GumpPixel::new(0, 0));
+            let name = paperdoll::title(title, GumpPixel::new(0, 0));
             lines.push(Line {
                 at: name.at,
                 font: name.font,
@@ -749,6 +775,11 @@ mod tests {
                 Effect::Net(Outgoing::Skills(who)),
                 Effect::Open(LocalWindow::Skills)
             ] if *who == me
+        ));
+        let answer = button_effects(paperdoll::DollButton::Options, me, true, false, None, false);
+        assert!(matches!(
+            answer.out.as_slice(),
+            [Effect::Open(LocalWindow::WorldMap)]
         ));
         let answer = button_effects(paperdoll::DollButton::Status, me, true, false, None, false);
         assert!(matches!(

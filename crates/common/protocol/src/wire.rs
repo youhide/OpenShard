@@ -76,11 +76,11 @@ impl Hue {
     /// The hue a stack's own count is written in, where the client draws one
     /// over a pile — see `openshard-client-render`'s `items::stack_label`.
     ///
-    /// The same grey as [`LABEL`](Self::LABEL) and named separately for the
-    /// reason stated above it: this is the client writing a number of its own
-    /// onto a picture, not the shard answering a click with a name, and a
-    /// shard that recolours one has not asked for the other to move.
-    pub const STACK_COUNT: Self = Self::MUTED_GREY;
+    /// ClassicUO uses `0x0481` for an item's own label. A count has the same
+    /// job — identifying a particular item rather than carrying speech — and
+    /// needs that bright ink over the often-dark, often-busy art in a bag.
+    /// The muted system grey is lost against both.
+    pub const STACK_COUNT: Self = Self(0x0481);
 }
 
 /// An index into the client's sound files.

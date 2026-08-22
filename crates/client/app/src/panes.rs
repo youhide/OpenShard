@@ -56,6 +56,7 @@ pub(crate) mod paperdoll;
 pub(crate) mod party;
 mod route;
 mod skills;
+mod spellbook;
 pub(crate) mod split;
 mod status;
 mod vendor;
@@ -740,6 +741,7 @@ pub enum AnyPane {
     /// content pass; the pane supplies lifecycle and hit bounds.
     Minimap(minimap::MinimapPane),
     WorldMap(world_map::WorldMapPane),
+    Spellbook(spellbook::SpellbookPane),
 }
 
 impl AnyPane {
@@ -762,6 +764,7 @@ impl AnyPane {
             WindowSubject::Party => Self::Party(party::PartyPane::default()),
             WindowSubject::Minimap => Self::Minimap(minimap::MinimapPane::default()),
             WindowSubject::WorldMap => Self::WorldMap(world_map::WorldMapPane::default()),
+            WindowSubject::Spellbook(serial) => Self::Spellbook(spellbook::SpellbookPane::new(serial)),
             // The one subject that carries what its pane is built with rather
             // than what the pane looks up. Everything else here names something
             // in the view — a bag, a body, a gump — and the pane reads it every
@@ -789,6 +792,7 @@ impl Pane for AnyPane {
             Self::Party(pane) => pane.art(frame),
             Self::Minimap(pane) => pane.art(frame),
             Self::WorldMap(pane) => pane.art(frame),
+            Self::Spellbook(pane) => pane.art(frame),
         }
     }
 
@@ -805,6 +809,7 @@ impl Pane for AnyPane {
             Self::Party(pane) => pane.layout(frame),
             Self::Minimap(pane) => pane.layout(frame),
             Self::WorldMap(pane) => pane.layout(frame),
+            Self::Spellbook(pane) => pane.layout(frame),
         }
     }
 
@@ -821,6 +826,7 @@ impl Pane for AnyPane {
             Self::Party(pane) => pane.handle(input, ctx),
             Self::Minimap(pane) => pane.handle(input, ctx),
             Self::WorldMap(pane) => pane.handle(input, ctx),
+            Self::Spellbook(pane) => pane.handle(input, ctx),
         }
     }
 }

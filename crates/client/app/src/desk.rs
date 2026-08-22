@@ -91,7 +91,7 @@ impl Tab {
             Tab::World => "World",
             Tab::Tile => "Tile",
             Tab::Light => "Light",
-            Tab::Chat => "Chat",
+            Tab::Chat => "Chat/Font",
             Tab::Audio => "Audio",
             Tab::Windows => "Windows",
         }

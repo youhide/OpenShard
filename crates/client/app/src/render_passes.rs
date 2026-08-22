@@ -247,6 +247,9 @@ pub(crate) fn draw_gump_windows(
                     // Like the minimap, its generated terrain is recorded in
                     // the specialised window pass below rather than as gump art.
                     WindowSubject::WorldMap => {}
+                    // Laid out by `SpellbookPane`; the book's membership is
+                    // held in the view and its page is ordinary gump art.
+                    WindowSubject::Spellbook(_) => {}
                     // Laid out by `panes::split::SplitPane` above, and
                     // **unreachable**: it is the one kind that draws nothing out
                     // of the view at all — the frame, the bar and the number are
@@ -409,6 +412,9 @@ pub(crate) fn draw_gump_windows(
                     // whichever face draws them puts the two into its own
                     // space together — see `window_text`.
                     labels.extend(sheet.lines.iter().map(|line| (line.label(), line.scissor)));
+                }
+                (WindowSubject::Spellbook(_), Drawn::Spellbook(book)) => {
+                    labels.extend(book.lines.iter().map(|line| (line.label(), line.scissor)));
                 }
                 (WindowSubject::Status, Drawn::Status(status)) => {
                     labels.extend(status.lines.iter().map(|line| (line.label(), None)));
@@ -678,20 +684,39 @@ pub(crate) fn draw_gump_windows(
                 }
                 _ => {}
             }
-            window_text(
-                WindowText {
-                    labels: &labels,
-                    at,
-                    magnify,
-                    density: frame.scale,
-                    size: fonts.window,
-                },
-                resources.ttf_font.as_ref(),
-                &resources.font_atlas,
-                window.ttf_atlas.as_mut(),
-                bitmap_quads,
-                ttf_quads,
-            );
+            // Most lines are window captions, but a pile's quantity is its
+            // own text role.  In particular, a TrueType atlas keys glyphs by
+            // size, so handing this one mixed list `fonts.window` would make
+            // the quantity use the ordinary window face size despite its
+            // `STACK_COUNT_FONT`.  Keep contiguous runs together: that
+            // preserves the pane's painter order (a hover label still comes
+            // after the count beneath it) while each role reaches the atlas
+            // at the size its control edits.
+            let mut first = 0;
+            while first < labels.len() {
+                let count = labels[first].0.font == openshard_client_render::items::STACK_COUNT_FONT;
+                let mut end = first + 1;
+                while end < labels.len()
+                    && (labels[end].0.font == openshard_client_render::items::STACK_COUNT_FONT) == count
+                {
+                    end += 1;
+                }
+                window_text(
+                    WindowText {
+                        labels: &labels[first..end],
+                        at,
+                        magnify,
+                        density: frame.scale,
+                        size: if count { fonts.stack_count } else { fonts.window },
+                    },
+                    resources.ttf_font.as_ref(),
+                    &resources.font_atlas,
+                    window.ttf_atlas.as_mut(),
+                    bitmap_quads,
+                    ttf_quads,
+                );
+                first = end;
+            }
         }
         let mut dragged = gump_art::collect(&pictures, &resources.gump_atlas);
         // Placed at the cursor rather than at a window's corner: the icon is
@@ -863,7 +888,23 @@ fn window_text(
     if text.labels.is_empty() {
         return;
     }
-    let (Some(font), Some(atlas)) = (font, ttf_atlas) else {
+    // `fonts.mul` face 9 is the quantity face: compact and sans-serif, unlike
+    // the ordinary caption face. A supplied TrueType face has only one family
+    // and cannot represent that choice, so never let its all-text shortcut
+    // replace the quantity labels in a container.
+    let stack_count = text
+        .labels
+        .iter()
+        .all(|(label, _)| label.font == openshard_client_render::items::STACK_COUNT_FONT);
+    if stack_count || font.is_none() || ttf_atlas.is_none() {
+        // Face 9 is a bitmap, so its size knob is an intentional nearest-
+        // sampled scale from the 11-pixel default rather than a request to a
+        // rasterizer. Counts are never clipped today; crop before that scale
+        // nevertheless, which keeps this branch correct if one gains a clip.
+        let scale = match stack_count {
+            true => text.size.pixels() / 11.0,
+            false => 1.0,
+        };
         let mut quads = Vec::new();
         for (label, scissor) in text.labels {
             let mut line =
@@ -875,11 +916,22 @@ fn window_text(
             if let Some(scissor) = scissor {
                 scissor.cut(&mut line);
             }
+            if stack_count {
+                for quad in &mut line {
+                    quad.rect.x = label.at.x as f32 + (quad.rect.x - label.at.x as f32) * scale;
+                    quad.rect.y = label.at.y as f32 + (quad.rect.y - label.at.y as f32) * scale;
+                    quad.rect.width *= scale;
+                    quad.rect.height *= scale;
+                }
+            }
             quads.extend(line);
         }
         gump_art::place(&mut quads, text.at, text.magnify);
         bitmap_quads.extend(quads);
         return;
+    }
+    let (Some(font), Some(atlas)) = (font, ttf_atlas) else {
+        unreachable!("the bitmap branch returned unless both TrueType resources exist")
     };
     let size = text.size.scaled(text.magnify * text.density);
     if let Err(error) = atlas.add_or_reset(
@@ -1324,8 +1376,9 @@ pub(crate) fn encode_world_passes(
     }
     // Always `text_pass`, `fonts.mul`'s own: `text_quads` is empty
     // whenever `App::ttf_font` is set, since a TrueType face's speech
-    // draws after the blit instead — see `screen_speech`'s own comment
-    // above and the render call after it, below.
+    // draws after the blit in the world-text layer instead — see
+    // `presentation::WorldText` and its render call immediately after this
+    // world layer.
     let timed = profile::begin(window.gpu.as_ref(), "overhead text", encoder);
     window.text_pass.render(
         &window.device,
