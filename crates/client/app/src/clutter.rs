@@ -105,17 +105,23 @@ pub fn of<'a>(
     let mut covers: HashMap<Tile, Vec<Cover>> = HashMap::new();
     for item in items {
         // What is drawn is what is in the way — see `GroundItem::displayed`.
-        let tile = tiles.static_tile(item.displayed().0);
-        if !tile.flags.is_blocking() || doors::is_open(item.displayed()) {
+        if doors::is_open(item.displayed()) {
             continue;
         }
+        // `Cover::of_static` and not this end's own reading of the flags: the
+        // shard lays the same cover from the same table through the same
+        // function, which is what "agree by construction" has to mean to be
+        // worth saying.
+        let Some(cover) = Cover::of_static(tiles.static_tile(item.displayed().0)) else {
+            continue;
+        };
         let at = Tile::new(item.at.x, item.at.y);
         covers
             .entry(at)
             .or_default()
             .push(match doors::is_door(item.displayed()) {
-                true => Cover::door(item.at.z, tile.height),
-                false => Cover::blocking(item.at.z, tile.height),
+                true => Cover::door(item.at.z, cover.height),
+                false => cover.based_at(item.at.z),
             });
     }
     // The server may permit two mobiles on one tile, but routing a player
