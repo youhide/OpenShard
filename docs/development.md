@@ -83,6 +83,12 @@ client install is not anyone else's. Then the command above is just
 cargo run -p openshard-playground
 ```
 
+The two ends are joined by a pair of in-memory pipes. Everything above the
+transport is the code that runs against ClassicUO — the transport itself is a
+parameter on both sides, `transport::Dial` for the client and any stream for
+`gateway::Gate`. It keeps nothing: the world is in memory and goes away with the
+process, which is what makes it a playground rather than a way to run a shard.
+
 ### Reproduce a static-atlas overflow while scrolling
 
 The playground can drive its logged-in player around a fixed, expanding route.
@@ -135,11 +141,28 @@ for both commands: a base set holds the map, and `tiledata.mul` still holds what
 a tile is. A shard configured with a base set and no `client_files` is refused
 at startup for that reason.
 
-The two ends are joined by a pair of in-memory pipes. Everything above the
-transport is the code that runs against ClassicUO — the transport itself is a
-parameter on both sides, `transport::Dial` for the client and any stream for
-`gateway::Gate`. It keeps nothing: the world is in memory and goes away with the
-process, which is what makes it a playground rather than a way to run a shard.
+### Changing a world of our own
+
+A base set is immutable; what changes is the **patch log** beside it, at the
+same name with `.ospatch` for an extension. One command commits one change:
+
+```sh
+cargo run --release -p openshard-basemap --bin openshard-map-patch -- \
+    --base-set felucca.osbase --author yourname \
+    set-land --x 1495 --y 1629 --tile 1004 --z 25
+cargo run --release -p openshard-basemap --bin openshard-map-patch -- \
+    --base-set felucca.osbase show
+```
+
+`add-static` and `remove-static` are the other two operations there are;
+`list --x N --y N` prints what stands on a tile with the ordinal `remove-static`
+addresses it by, and `--dry-run` says what would be committed. The world the
+shard runs is the base set **plus** the log, so a committed change survives a
+restart and needs no other setting.
+
+Every bake over the facet is stale the moment a patch lands, and the navigation
+graph is the one that stops a shard booting — so rebake it, over the same base
+set, with the command in the section above. The tool prints it.
 
 ## No Rust toolchain? Install one without root
 
