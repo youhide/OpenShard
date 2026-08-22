@@ -9,11 +9,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use openshard_client_render::gump::{GumpArt, GumpPixel, Picture};
-#[cfg(test)]
-use openshard_client_render::radar::{RadarExtent, RadarRegion, RadarTile};
 use openshard_protocol::wire::Graphic;
-#[cfg(test)]
-use openshard_protocol::world::{Facet, Point};
 
 use crate::panes::{Input, Pane, PaneCtx, PaneFrame, Response};
 use crate::windows::Drawn;
@@ -28,119 +24,44 @@ const LARGE_FRAME: Graphic = Graphic(5011);
 pub const SMALL_EXTENT: (i32, i32) = (120, 120);
 pub const LARGE_EXTENT: (i32, i32) = (200, 200);
 
-/// The world-tile rectangle the minimap window shows, centred on where the
-/// body stands.
+/// The tangent margin's *physical* size, as a fraction of the window's content
+/// rectangle — turned into a world-tile count by
+/// [`RadarView::with_tangent_margin_fraction`](openshard_client_render::radar::RadarView::with_tangent_margin_fraction),
+/// which is where it is divided by `zoom` and by nothing else.
 ///
-/// A region and not a player marker: see `client/render/src/radar.rs`'s own
-/// doc for why the two are kept apart. `extent` is the window's own size in
-/// world tiles — one pixel a tile, so [`radar_native_extent`]'s answer doubles
-/// as both. Centring saturates rather than wrapping, so a body near the map's
-/// own edge shows a region clipped to it instead of one that reads from the
-/// far side.
-#[must_use]
-#[cfg(test)]
-pub(crate) fn radar_region_for(player: Point, extent: RadarExtent) -> RadarRegion {
-    RadarRegion::new(
-        Facet(crate::FACET),
-        RadarTile::new(u32::from(player.x), u32::from(player.y)).saturating_sub(extent),
-        extent,
-    )
-}
-
-/// How many world tiles (native radar texels) the minimap needs fetched for
-/// one window, given its content rectangle in gump pixels.
+/// **Why there is a margin at all.** "Tangent" is an exact mathematical answer
+/// with zero room in it: `ceil` (never `round`, which can round the exact
+/// answer *down*) still lands the fetched edge exactly on the circle's own
+/// boundary, and a nearest-sampled chunk texture, drawn as a handful of
+/// axis-aligned quads rather than the true circle, does not paint up to a
+/// mathematical line with zero-width precision. Zero margin is what a thin
+/// ring of backdrop right at the frame reported as.
 ///
-/// The one source of truth for this arithmetic: the draw path (`render_passes`,
-/// which places the terrain) and the producer's own preparation
-/// (`App::draw_from`'s radar block, which requests and builds it) each used to
-/// carry their own copy, and a copy is a fork waiting to happen — the two had
-/// already drifted, see below.
-///
-/// The radar cache holds one texel per world tile, and a logical gump pixel
-/// can cover several *physical* pixels — HiDPI, or a larger desk scale, or
-/// this window's own zoom — so this asks for that many more tiles rather than
-/// magnifying the cached texture, which would blur or block up what nearest
-/// sampling is for.
-///
-/// **No `sqrt(2)` factor**, though a whole comment used to argue for one: a
-/// window's placed content is a square whose half-side already equals the
-/// round frame's own clip radius (`content_extent`'s min dimension over two),
-/// and a square that size fully contains its own inscribed circle *at any
-/// rotation* — its flat edges are tangent to the circle, never short of it,
-/// wherever the rotation happens to put them. Inflating the fetch bought
-/// nothing there; what it cost was real. Every extra tile came from the
-/// square's own corners, which are the single farthest ground from the
-/// player within the region — so under
-/// [`region_base_chunks_near`](openshard_client_render::radar::region_base_chunks_near)'s
-/// nearest-first production order, that ring is dead last to build and can
-/// never earn an LOD stand-in either (an ancestor needs every descendant built
-/// at least once, which unvisited edge ground never gets). A window at 2×
-/// desk scale asked for exactly twice its needed tile count for no reason,
-/// and every one of those needless tiles could starve a real one instead.
-///
-/// **[`TANGENT_MARGIN_FRACTION`] of real slack, though.** "Tangent" is an
-/// exact mathematical answer with zero room in it: `ceil` (never `round`,
-/// which can round the exact answer *down*) still lands the fetched edge
-/// exactly on the circle's own boundary, and a nearest-sampled chunk texture,
-/// drawn as a handful of axis-aligned quads rather than the true circle, does
-/// not paint up to a mathematical line with zero-width precision. Zero margin
-/// is what a thin ring of backdrop right at the frame reported as.
-///
-/// The margin is sized in *physical* pixels, not world tiles, and only
-/// converted to a tile count last — `margin_fraction * content_extent`,
-/// divided by `zoom` the same way the main fetch is. Two reports, in order,
-/// are why both halves of that are load-bearing:
+/// **Why it is a fraction of the window, and why it is divided by `zoom`.**
+/// Two reports, in order:
 ///
 /// - **A flat tile count** first covered the small classic frame and then
 ///   measured visibly short on the large one — whatever this slack pays for
-///   scales with the window's own size, so it has to be a *fraction of
-///   `content_extent`*, not a constant.
-/// - **A fraction of `content_extent` alone**, with no `zoom` in it, covered
-///   both frames at their default zoom and then thinned to an almost-invisible
-///   stripe at maximum zoom-out on the large one. One world tile is `zoom`
-///   physical pixels (see the fetch above), so a margin counted in *tiles* and
-///   held constant is a margin that shrinks in actual screen pixels as the
-///   window zooms out — backwards from what a fixed *visual* seam needs.
-///   Dividing by `zoom` keeps the margin's physical size constant instead.
+///   scales with the window's own size, so it has to be a fraction of the
+///   content rectangle, not a constant.
+/// - **A fraction alone**, with no `zoom` in it, covered both frames at their
+///   default zoom and then thinned to an almost-invisible stripe at maximum
+///   zoom-out on the large one. One world tile is `zoom` physical pixels, so a
+///   margin counted in *tiles* and held constant is a margin that shrinks in
+///   actual screen pixels as the window zooms out — backwards from what a
+///   fixed *visual* seam needs. Dividing by `zoom` keeps its physical size
+///   constant instead.
 ///
-/// It must **not** also scale with `magnify` or `device_scale` — the physical
-/// margin this pays for doesn't depend on HiDPI or desk scale, and multiplying
-/// it by them too would, at a zoomed-out HiDPI window, start reintroducing the
-/// corner-ring starvation the `sqrt(2)` factor caused. `TANGENT_MARGIN_FRACTION`
-/// is 21% per side.  At a 45° rotation, `(sqrt(2) - 1) / 2` is about 20.7%:
-/// that is the geometric expansion needed for the map square to reach the
-/// round clip in every direction.  The slight rounding up makes the circle
-/// clip, rather than a missing edge tile, decide the visible boundary.
-#[must_use]
-#[cfg(test)]
-pub(crate) fn radar_native_extent(
-    content_extent: (i32, i32),
-    magnify: f32,
-    device_scale: f32,
-    zoom: f32,
-) -> RadarExtent {
-    let physical = magnify * device_scale / zoom;
-    let margin = (
-        2 * (content_extent.0 as f32 * tangent_margin_fraction() / zoom).ceil() as i32,
-        2 * (content_extent.1 as f32 * tangent_margin_fraction() / zoom).ceil() as i32,
-    );
-    let extent = (
-        (content_extent.0 as f32 * physical).ceil().max(1.0) as i32 + margin.0,
-        (content_extent.1 as f32 * physical).ceil().max(1.0) as i32 + margin.1,
-    );
-    RadarExtent::new(
-        u16::try_from(extent.0).expect("the minimap extent fits UO map coordinates"),
-        u16::try_from(extent.1).expect("the minimap extent fits UO map coordinates"),
-    )
-    .expect("the minimap extent is non-empty")
-}
-
-/// The tangent margin's *physical* size, as a fraction of `content_extent` —
-/// converted to a world-tile count, divided by `zoom`, only inside
-/// [`radar_native_extent`]. See that function's own doc for why the exact
-/// circumscribing answer still leaves a visible seam, why the margin has to
-/// scale with the window rather than staying a flat tile count, and why it
-/// has to scale with `zoom` too or it thins to nothing at maximum zoom-out.
+/// It must **not** also scale with the desk's magnification or the device
+/// scale: the physical seam this pays for does not depend on HiDPI or desk
+/// scale, and multiplying by them too — on top of the whole fetch already
+/// scaling by them — is how a zoomed-out HiDPI window would reintroduce the
+/// corner-ring starvation `RadarView::region`'s doc describes.
+///
+/// 21% per side. At a 45° rotation `(sqrt(2) - 1) / 2` is about 20.7%: that is
+/// the geometric expansion needed for the map square to reach the round clip
+/// in every direction, and the slight rounding up makes the circle clip —
+/// rather than a missing edge tile — decide the visible boundary.
 const TANGENT_MARGIN_FRACTION: f32 = 0.21;
 
 /// A deliberately runtime-only diagnostic lever.  It changes both the source
@@ -271,9 +192,60 @@ impl Pane for MinimapPane {
 
 #[cfg(test)]
 mod tests {
-    use super::{RadarExtent, SMALL_EXTENT, SMALL_FRAME, Window, radar_native_extent, radar_region_for};
+    use super::{SMALL_EXTENT, SMALL_FRAME, TANGENT_MARGIN_FRACTION, Window};
     use openshard_client_render::gump::{GumpArt, GumpPixel, Picture};
+    use openshard_client_render::radar::{RadarExtent, RadarTile, RadarView};
+    use openshard_client_render::radar_pass::Placement;
     use openshard_protocol::world::{Facet, Point};
+
+    /// Britannia, so nothing below is clipped by a toy facet — except the two
+    /// edge cases that mean to be.
+    fn facet() -> RadarExtent {
+        RadarExtent::new(7168, 4096).expect("Britannia has an extent")
+    }
+
+    /// The view this pane's window produces, built exactly the way
+    /// `App::draw_from` builds it — the *one* construction, which is the whole
+    /// point of asserting against it here. Placement origin plays no part in a
+    /// region, so it is left at the corner.
+    fn view(
+        content_extent: (i32, i32),
+        magnify: f32,
+        device_scale: f32,
+        zoom: f32,
+        player: Point,
+    ) -> RadarView {
+        RadarView::new(
+            Facet(crate::FACET),
+            RadarTile::new(u32::from(player.x), u32::from(player.y)),
+            facet(),
+            1.0 / zoom,
+            Placement {
+                origin: (0.0, 0.0),
+                extent: (
+                    content_extent.0 as f32 * magnify,
+                    content_extent.1 as f32 * magnify,
+                ),
+                circle: true,
+                rotation: std::f32::consts::FRAC_PI_4,
+            },
+            device_scale,
+        )
+        .with_tangent_margin_fraction(content_extent, zoom, TANGENT_MARGIN_FRACTION)
+    }
+
+    /// The fetched extent for a window well away from every map edge.
+    fn native_extent(content_extent: (i32, i32), magnify: f32, device_scale: f32, zoom: f32) -> RadarExtent {
+        view(
+            content_extent,
+            magnify,
+            device_scale,
+            zoom,
+            Point::new(3000, 2000, 0),
+        )
+        .region()
+        .extent()
+    }
 
     #[test]
     fn hit_bounds_include_the_first_pixel_and_exclude_the_far_edges() {
@@ -290,19 +262,26 @@ mod tests {
     }
 
     #[test]
-    fn a_region_is_centred_on_the_player_and_clips_at_the_map_edge() {
-        let extent = RadarExtent::new(120, 120).unwrap();
-        let region = radar_region_for(Point::new(100, 100, 0), extent);
-        assert_eq!(region.facet(), Facet(crate::FACET));
-        assert_eq!(region.origin(), (40, 40));
-        assert_eq!(region.extent(), (120, 120));
+    fn a_region_is_centred_on_the_player_and_pushed_back_inside_both_map_edges() {
+        // 100 content pixels, no scaling, no zoom: 100 tiles plus a margin of
+        // 2 * ceil(100 * 0.21) = 42, so a 142-tile square around the body.
+        let middle = view((100, 100), 1.0, 1.0, 1.0, Point::new(3000, 2000, 0)).region();
+        assert_eq!(middle.facet(), Facet(crate::FACET));
+        assert_eq!(middle.extent(), (142, 142));
+        assert_eq!(middle.origin(), (3000 - 71, 2000 - 71));
 
-        let clipped = radar_region_for(Point::new(10, 10, 0), extent);
-        assert_eq!(
-            clipped.origin(),
-            (0, 0),
-            "half the window falls off the map, not off the u32"
-        );
+        // Half the window falls off the west and north edges, not off the u32.
+        let north_west = view((100, 100), 1.0, 1.0, 1.0, Point::new(10, 10, 0)).region();
+        assert_eq!(north_west.origin(), (0, 0));
+
+        // **And off the east and south edges too**, which is the half that
+        // used to saturate at zero and nowhere else: a region wider than the
+        // ground left in front of it is moved back inside the facet, so the
+        // window shows terrain with the marker off-centre rather than centred
+        // terrain with a band of `UNKNOWN` beside it. Deliberate, and asserted
+        // here so the next reader does not "fix" it back to a hole.
+        let south_east = view((100, 100), 1.0, 1.0, 1.0, Point::new(7160, 4090, 0)).region();
+        assert_eq!(south_east.origin(), (7168 - 142, 4096 - 142));
     }
 
     #[test]
@@ -313,13 +292,13 @@ mod tests {
         // keeps the fetch from landing exactly, zero-slack, on the circle's
         // own boundary. 140 * 0.21 / 1.0 = 29.4, ceil 30, doubled: 60 tiles.
         // This is just wider than the square a 45°-rotated circle requires.
-        assert_eq!(radar_native_extent((140, 140), 1.0, 1.0, 1.0), (200, 200));
+        assert_eq!(native_extent((140, 140), 1.0, 1.0, 1.0), (200, 200));
         // HiDPI and desk scale both widen the physical footprint, so both
         // widen the *scaled* part of the fetch by the same factor — the
         // margin does not widen again with them (see the dedicated test
         // below for why it must not).
-        assert_eq!(radar_native_extent((140, 140), 2.0, 1.0, 1.0), (340, 340));
-        assert_eq!(radar_native_extent((140, 140), 1.0, 2.0, 1.0), (340, 340));
+        assert_eq!(native_extent((140, 140), 2.0, 1.0, 1.0), (340, 340));
+        assert_eq!(native_extent((140, 140), 1.0, 2.0, 1.0), (340, 340));
     }
 
     #[test]
@@ -327,8 +306,8 @@ mod tests {
         // A flat tile count covered the small classic frame and then measured
         // short on the large one — the margin has to grow with the window's
         // own logical size, not stay a constant.
-        let small = radar_native_extent((84, 84), 1.0, 1.0, 1.0);
-        let large = radar_native_extent((140, 140), 1.0, 1.0, 1.0);
+        let small = native_extent((84, 84), 1.0, 1.0, 1.0);
+        let large = native_extent((140, 140), 1.0, 1.0, 1.0);
         assert_eq!(small, (120, 120), "84 scaled tiles plus a 36-tile margin");
         assert_eq!(
             large,
@@ -348,8 +327,8 @@ mod tests {
         // 60 tiles to 2 * ceil(140 * 0.21 / 0.25) = 2 * 118 = 236 — the same
         // order of magnitude as the fetch's own growth, not the flat 60 tiles
         // a full-zoom window gets.
-        let at_zoom_one = radar_native_extent((140, 140), 1.0, 1.0, 1.0);
-        let zoomed_out = radar_native_extent((140, 140), 1.0, 1.0, 0.25);
+        let at_zoom_one = native_extent((140, 140), 1.0, 1.0, 1.0);
+        let zoomed_out = native_extent((140, 140), 1.0, 1.0, 0.25);
         assert_eq!(at_zoom_one, (200, 200));
         assert_eq!(zoomed_out, (796, 796), "the margin grew from 60 tiles to 236");
     }
@@ -362,9 +341,9 @@ mod tests {
         // scaling the whole fetch by them — is exactly how a zoomed-out,
         // HiDPI window would start reintroducing the `sqrt(2)` factor's own
         // corner-ring starvation.
-        let baseline = radar_native_extent((140, 140), 1.0, 1.0, 1.0);
-        let hidpi = radar_native_extent((140, 140), 1.0, 2.0, 1.0);
-        let desk_scaled = radar_native_extent((140, 140), 2.0, 1.0, 1.0);
+        let baseline = native_extent((140, 140), 1.0, 1.0, 1.0);
+        let hidpi = native_extent((140, 140), 1.0, 2.0, 1.0);
+        let desk_scaled = native_extent((140, 140), 2.0, 1.0, 1.0);
         assert_eq!(baseline, (200, 200), "140 scaled tiles plus a 60-tile margin");
         assert_eq!(
             hidpi,

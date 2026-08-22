@@ -348,12 +348,17 @@ impl RadarView {
         }
     }
 
-    /// Add the minimap's measured tangent slack, expressed in world tiles.
-    #[must_use]
-    pub fn with_tangent_margin(self, logical_extent: (i32, i32), zoom: f32) -> Self {
-        self.with_tangent_margin_fraction(logical_extent, zoom, 0.21)
-    }
-
+    /// Add a round window's measured tangent slack to the fetch.
+    ///
+    /// `fraction` is a fraction of the window's own *logical* extent and is
+    /// converted to a tile count here — the whole of it, divided by `zoom`
+    /// once, and multiplied by nothing else. Both halves of that are
+    /// load-bearing and both were measured; the caller that owns the number
+    /// owns the reasoning with it (`panes::minimap::TANGENT_MARGIN_FRACTION`
+    /// in the client, which is the only caller there is). Kept here and not
+    /// inside [`Self::region`] because a square window needs none of it: a
+    /// view with no margin asked for is a view that fetches exactly its own
+    /// pixels.
     #[must_use]
     pub fn with_tangent_margin_fraction(
         mut self,
@@ -368,6 +373,35 @@ impl RadarView {
         self
     }
 
+    /// The world-tile rectangle this view needs fetched, and **the one copy of
+    /// that arithmetic**.
+    ///
+    /// One radar texel is one world tile, and a logical window pixel can cover
+    /// several *physical* ones — HiDPI, a larger desk scale, or the window's
+    /// own zoom — so the fetch asks for that many more tiles rather than
+    /// magnifying a cached texture, which would blur or block up what nearest
+    /// sampling is for. `tiles_per_pixel` and `device_scale` are the two
+    /// numbers that say how many; `placement.extent` is already in physical
+    /// pixels.
+    ///
+    /// **No `sqrt(2)` factor for a rotated round window**, though a whole
+    /// comment used to argue for one: a placed square whose half-side equals
+    /// the round frame's clip radius contains its own inscribed circle at
+    /// *any* rotation — its flat edges are tangent to the circle, never short
+    /// of it, wherever the rotation puts them. Inflating the fetch bought
+    /// nothing; what it cost was real, because every extra tile came from the
+    /// square's corners, which are the farthest ground from the centre and so
+    /// dead last to build under [`region_chunks_near`]'s order — a ring that
+    /// can never earn an LOD stand-in either, since an ancestor needs every
+    /// descendant built at least once. See [`Self::with_tangent_margin_fraction`]
+    /// for the small, measured slack that *is* worth paying.
+    ///
+    /// The origin is clamped against **both** facet edges, not saturated at
+    /// zero: a region wider than the ground left to the east is moved back
+    /// inside the facet rather than reading past it, which is what the west
+    /// and north edges always did. A body at the map's own corner therefore
+    /// sees terrain with its marker off-centre, rather than centred terrain
+    /// with a band of [`UNKNOWN`] beside it.
     #[must_use]
     pub fn region(self) -> RadarRegion {
         let width = (self.placement.extent.0 * self.device_scale * self.tiles_per_pixel)
