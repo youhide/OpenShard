@@ -210,6 +210,15 @@ impl Map {
         self.land.height()
     }
 
+    /// The facet's size in blocks.
+    ///
+    /// What a caller cutting the facet into pieces asks first — see
+    /// [`crate::chunk`] — and it is the land's own, so a piece is measured
+    /// against the same extent that indexes it.
+    pub const fn extent(&self) -> BlockExtent {
+        self.land.extent()
+    }
+
     /// What this facet appears to be.
     pub fn facet_name(&self) -> &'static str {
         describe_size(self.width(), self.height())
@@ -349,6 +358,19 @@ impl Map {
             .filter(move |item| item.x >= from_x && item.x <= to_x)
     }
 
+    /// One block's sixty-four cells, row-major within the block.
+    ///
+    /// [`Map::statics_in_block`]'s other half, and it exists for the same
+    /// caller: something that takes a whole block at a time rather than a
+    /// rectangle — [`crate::chunk::Chunk::of`] is the one in this crate. A
+    /// block the facet has not is empty, which is the same answer
+    /// [`Map::statics_in_block`] gives.
+    pub fn land_in_block(&self, block: BlockCoord) -> &[LandCell] {
+        self.land
+            .index_of(block)
+            .map_or(NO_LAND, |block| self.land.block(block))
+    }
+
     /// Every static in one block, in the block's own order.
     ///
     /// The whole slice and no search at all, which is what a *per-block* reader
@@ -470,6 +492,9 @@ const fn floor_average(a: i32, b: i32) -> i32 {
 
 /// A block the facet does not have, and a tile nothing stands on.
 const NO_STATICS: &[StaticItem] = &[];
+
+/// The ground of a block the facet does not have.
+const NO_LAND: &[LandCell] = &[];
 
 #[cfg(test)]
 mod tests {

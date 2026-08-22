@@ -69,6 +69,51 @@ pub struct BlockExtent {
     pub down: u32,
 }
 
+impl BlockExtent {
+    /// How many blocks the extent holds.
+    pub const fn count(self) -> u32 {
+        self.wide * self.down
+    }
+
+    /// Where a block sits in an array laid out in this extent's order, or
+    /// `None` for a block the extent has not.
+    ///
+    /// Column-major, from Sphere's `CServerMap.cpp:445`:
+    /// `bx * (SizeY / UO_BLOCK_SIZE) + by`. **This is the only place that
+    /// formula is written** — [`LandGrid::index_of`] is this call, and so is a
+    /// chunk's own local order, which is what makes a chunk self-similar to the
+    /// facet it was cut out of rather than a second layout that happens to
+    /// agree.
+    pub const fn index_of(self, block: BlockCoord) -> Option<BlockIndex> {
+        match block.x < self.wide && block.y < self.down {
+            true => Some(BlockIndex(block.x * self.down + block.y)),
+            false => None,
+        }
+    }
+
+    /// Which block a linear index names — the inverse of [`Self::index_of`],
+    /// and the one a static loader needs to recover a block's world origin.
+    ///
+    /// Open-coded backwards is how a `staidx` walk puts every block after the
+    /// first column somewhere else, which parses perfectly.
+    pub const fn coord_of(self, index: BlockIndex) -> Option<BlockCoord> {
+        // An empty extent counts zero blocks, so the guard rejects every index
+        // before either division runs: neither can be by a zero `down`.
+        match index.0 < self.count() {
+            true => Some(BlockCoord {
+                x: index.0 / self.down,
+                y: index.0 % self.down,
+            }),
+            false => None,
+        }
+    }
+
+    /// Every block of the extent, in the array's own order.
+    pub fn blocks(self) -> impl Iterator<Item = BlockIndex> {
+        (0..self.count()).map(BlockIndex)
+    }
+}
+
 impl BlockCoord {
     /// The block a tile falls in.
     ///
@@ -302,9 +347,21 @@ impl LandGrid {
         self.height / BLOCK_SIZE
     }
 
+    /// The facet's size in blocks.
+    ///
+    /// The order arithmetic itself is [`BlockExtent`]'s — a facet and a chunk
+    /// cut out of one are laid out by the same rule, and this is where the
+    /// facet borrows it.
+    pub const fn extent(&self) -> BlockExtent {
+        BlockExtent {
+            wide: self.blocks_wide(),
+            down: self.blocks_down(),
+        }
+    }
+
     /// How many blocks the facet holds.
     pub const fn block_count(&self) -> u32 {
-        self.blocks_wide() * self.blocks_down()
+        self.extent().count()
     }
 
     /// Whether a point is on the facet at all.
@@ -328,30 +385,13 @@ impl LandGrid {
 
     /// Where a block starts in the linear array, or `None` for a block the
     /// facet has not.
-    ///
-    /// Column-major, from Sphere's `CServerMap.cpp:445`:
-    /// `bx * (SizeY / UO_BLOCK_SIZE) + by`. This is the *only* place that
-    /// formula is written.
-    pub fn index_of(&self, block: BlockCoord) -> Option<BlockIndex> {
-        match block.x < self.blocks_wide() && block.y < self.blocks_down() {
-            true => Some(BlockIndex(block.x * self.blocks_down() + block.y)),
-            false => None,
-        }
+    pub const fn index_of(&self, block: BlockCoord) -> Option<BlockIndex> {
+        self.extent().index_of(block)
     }
 
-    /// Which block a linear index names — the inverse of [`Self::index_of`],
-    /// and the one a static loader needs to recover a block's world origin.
-    ///
-    /// Open-coded backwards is how a `staidx` walk puts every block after the
-    /// first column somewhere else, which parses perfectly.
-    pub fn coord_of(&self, block: BlockIndex) -> Option<BlockCoord> {
-        match block.0 < self.block_count() {
-            true => Some(BlockCoord {
-                x: block.0 / self.blocks_down(),
-                y: block.0 % self.blocks_down(),
-            }),
-            false => None,
-        }
+    /// Which block a linear index names — the inverse of [`Self::index_of`].
+    pub const fn coord_of(&self, block: BlockIndex) -> Option<BlockCoord> {
+        self.extent().coord_of(block)
     }
 
     /// The north-west tile of the block at a linear index, in tiles.
@@ -365,7 +405,7 @@ impl LandGrid {
     /// this grid, and this is the only way to say so without a caller building
     /// a [`BlockIndex`] out of a loop counter.
     pub fn blocks(&self) -> impl Iterator<Item = BlockIndex> {
-        (0..self.block_count()).map(BlockIndex)
+        self.extent().blocks()
     }
 
     /// Where a tile's cell is in the linear array, or `None` off the facet.
