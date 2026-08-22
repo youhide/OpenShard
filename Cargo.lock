@@ -2535,6 +2535,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "openshard-basemap"
+version = "0.0.1"
+dependencies = [
+ "openshard-map",
+ "openshard-protocol",
+]
+
+[[package]]
 name = "openshard-boats"
 version = "0.0.1"
 dependencies = [
@@ -2947,8 +2955,10 @@ dependencies = [
 name = "openshard-uofiles"
 version = "0.0.1"
 dependencies = [
+ "clap",
  "fontdue",
  "miniz_oxide 0.9.1",
+ "openshard-basemap",
  "openshard-map",
  "openshard-protocol",
 ]

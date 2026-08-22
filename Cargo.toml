@@ -88,6 +88,7 @@ opt-level = 1
 rustc-hash = "2.1"
 # Internal crates
 openshard-ai = { path = "crates/server/ai", version = "0.0.1" }
+openshard-basemap = { path = "crates/common/basemap", version = "0.0.1" }
 openshard-chat = { path = "crates/server/chat", version = "0.0.1" }
 openshard-client-app = { path = "crates/client/app", version = "0.0.1" }
 openshard-client-artscan = { path = "crates/client/artscan", version = "0.0.1" }

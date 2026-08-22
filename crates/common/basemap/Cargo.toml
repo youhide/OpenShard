@@ -1,0 +1,19 @@
+[package]
+name = "openshard-basemap"
+description = "The base set: one imported facet as chunks in a file, and the file back into a facet."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# The world and its chunks. Nothing here knows what a UO install is: this crate
+# is where our own format meets a path, and `openshard-uofiles` is the separate
+# thing that turns a client's files into a facet in the first place.
+openshard-map.workspace = true
+openshard-protocol.workspace = true

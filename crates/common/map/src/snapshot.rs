@@ -59,10 +59,15 @@ pub struct MapSnapshot {
 impl MapSnapshot {
     /// Publish `map` as the first version of `facet`.
     ///
-    /// **The only way to make one**, which is what keeps "a facet was loaded"
-    /// and "a facet has an identity and a revision" the same event. An importer
-    /// calls this — `openshard_uofiles::map::load_facet` is the one that reads a
-    /// UO install — and so does a test with a scene built by hand.
+    /// What keeps "a facet was loaded" and "a facet has an identity and a
+    /// revision" the same event. An importer calls this —
+    /// `openshard_uofiles::map::load_facet` is the one that reads a UO install
+    /// — and so does a test with a scene built by hand.
+    ///
+    /// **For a world that arrives without a revision**, which is what an import
+    /// is. A world that arrives *with* one comes through
+    /// [`MapSnapshot::restored`] instead, and between them they are the only
+    /// two ways to make a snapshot at all.
     #[must_use]
     pub fn new(facet: Facet, map: Map) -> Self {
         Self {
@@ -70,6 +75,25 @@ impl MapSnapshot {
             revision: MapRevision::INITIAL,
             map,
         }
+    }
+
+    /// Publish a facet a stored world already gave a revision to.
+    ///
+    /// [`MapSnapshot::new`]'s other half, and the only other way to make one.
+    /// The difference is who decides the revision: `new` is for an importer
+    /// minting a first one out of files that carried none, and this is for a
+    /// reader of something that *recorded* one — `openshard_basemap` is the
+    /// caller, reading a base set back.
+    ///
+    /// The distinction is the same one [`MapRevision::decoded`] makes, and for
+    /// the same reason: a reader that minted its own revision could claim
+    /// agreement with a snapshot it never saw. A base set read back is the same
+    /// world at the same revision it was written at, and every bake stamped
+    /// against that revision stays valid across the round trip — which is the
+    /// point of writing one.
+    #[must_use]
+    pub fn restored(facet: Facet, revision: MapRevision, map: Map) -> Self {
+        Self { facet, revision, map }
     }
 
     /// The facet this snapshot describes.
