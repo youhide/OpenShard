@@ -1,5 +1,8 @@
 # The client's map today, measured
 
+> **Status: live — the measured backlog era R spends.** Findings 6, 7 and 10 are
+> [`realtime_map.md`](../realtime_map.md)'s R4, R5 and the readers.
+
 What direction A takes a handle to, stated as facts about the code and numbers
 off a real Felucca install (7168×4096, `statics0.mul` = 2,906,871 statics in
 120,744 non-empty blocks). [`plan.md`](plan.md) lists *who* reads the world;

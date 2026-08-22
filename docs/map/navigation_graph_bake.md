@@ -1,5 +1,9 @@
 # Offline bake for the navigation graph
 
+> **Status: built.** The artifact, its stamp and its validation, as shipped — and
+> the stamp now carries a `MapRevision` as well as the input files. Entry point:
+> [`map_rebuild.md`](map_rebuild.md).
+
 ## Why
 
 `NavigationGraph::build` is too expensive to run during startup on a production

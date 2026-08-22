@@ -1,5 +1,9 @@
 # A map we can change
 
+> **Status: live.** The want, unchanged, and the only document here you have to
+> read to argue about the idea. Entry point for the area:
+> [`map_rebuild.md`](../map_rebuild.md).
+
 We want a world we can edit. The shard should be able to move a coastline,
 raise ground, put a wall up or knock one down, and have every connected player
 see it — with nobody editing files on their own machine.

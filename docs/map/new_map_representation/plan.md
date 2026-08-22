@@ -1,5 +1,9 @@
 # The map: the work, and where it touches the code
 
+> **Status: era S.** A0, A and B are built and C's first half with them; D, E, F
+> and the rest of C resume after eras R and P. The **Order** section below is
+> superseded — see [`map_rebuild.md`](../map_rebuild.md).
+
 The plan behind [`overview.md`](overview.md), with the mechanics in
 [`mechanics.md`](mechanics.md). Seven directions and one deferred. The first two
 are not features — they are putting the map we already have behind one door, and

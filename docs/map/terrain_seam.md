@@ -1,5 +1,10 @@
 # Six terrains, and one of them is a terrain
 
+> **Status: closed — a record, not a plan.** Nodes 0 and A–E are built and F is
+> answered; there is no `Terrain` trait in the workspace. Read it for how the
+> seam went and for the facet-0 oracle every number in the plans beside it comes
+> from. What is next lives in [`map_rebuild.md`](map_rebuild.md).
+
 The question that produced this document was *why is there a trait here at all,
 rather than an explicit reference?* — and the answer is that there should not
 be one. `Terrain` has six implementors outside a test, and **five of them are

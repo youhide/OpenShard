@@ -1,5 +1,9 @@
 # One world, one door
 
+> **Status: built — a record.** All three phases landed. Kept for its decisions,
+> one of which has since been struck: the map crate may name the tile table. See
+> [`map_rebuild.md`](../map_rebuild.md)'s R1.
+
 The executable plan for directions **A0** and **A** of
 [`plan.md`](plan.md) — and nothing else in this track. It is worth landing on
 its own: no format, no patches, no network, no editor, and every test in the

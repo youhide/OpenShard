@@ -1,5 +1,10 @@
 # Automatic navigation graph
 
+> **Status: built — the decision record for the graph as it stands.** Its regions,
+> portals and the both-directions rule are what the shard bakes today.
+> [`navigation_spans.md`](navigation_spans.md)'s N4 rebuilds it over spans and
+> makes its edges directed. Entry point: [`map_rebuild.md`](map_rebuild.md).
+
 ## Decision
 
 Long-distance routing is an automatically derived coarse navigation graph. Its

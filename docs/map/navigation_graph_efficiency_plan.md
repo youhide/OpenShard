@@ -1,5 +1,10 @@
 # Navigation graph efficiency plan
 
+> **Status: phases 1, 2 and 4 built; phase 3 shut until spans exist.** A second
+> hierarchy level over a one-storey model would be a second level of the same
+> mistake — see [`navigation_spans.md`](navigation_spans.md)'s N4. Entry point:
+> [`map_rebuild.md`](map_rebuild.md).
+
 ## Goal
 
 Keep long-distance routing complete and deterministic without making graph

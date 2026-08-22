@@ -1,5 +1,9 @@
 # The first storey
 
+> **Status: live — era P, not started.** Its N0 is done and it waits for
+> [`realtime_map.md`](realtime_map.md)'s R1 and R2, which move the two types N1
+> is built from. See [`map_rebuild.md`](map_rebuild.md) for the order.
+
 Two defects were found in one session and they are the same omission seen from
 two sides. The coarse graph
 [models one height per tile](terrain_seam.md#-the-coarse-graph-is-a-one-storey-model-of-a-two-storey-world),

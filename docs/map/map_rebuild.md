@@ -123,6 +123,13 @@ Read off the workspace and the plans, so a session does not re-derive it:
 
 ## Era R — the map you hold
 
+**The executable plan is [`realtime_map.md`](realtime_map.md)** — the commit
+order, the code sites, the tests and the risk per node. What follows here is the
+era's shape and what each node owes; the two are the same split
+[`plan.md`](new_map_representation/plan.md) and
+[`snapshot.md`](new_map_representation/snapshot.md) already use, and progress
+belongs in neither: it goes in [`handoffs/`](handoffs/).
+
 ### R1 — the table leaves the file reader
 
 **Goal.** `openshard-uofiles` reads files and does nothing else.
@@ -496,10 +503,14 @@ waits for a measurement that says the statics are still on a hot path.
 
 ## Where a session starts
 
-**R1.** It is the one node with no incoming edge: a crate move, mechanical, and
-every era below it reaches the tile table through a crate that does not read
-files. R2 is next and is the type change this whole document is named for; R3 is
-the first thing a player would notice.
+**R1, commit 1 — and the plan to run it from is
+[`realtime_map.md`](realtime_map.md).** It is the one node with no incoming edge:
+a crate move, mechanical, and every era below it reaches the tile table through a
+crate that does not read files. R2 is next and is the type change this whole
+document is named for; R3 is the first thing a player would notice.
+
+**Where the work stands is [`handoffs/`](handoffs/)**, newest last — not here,
+and not in the plan.
 
 **Nothing in era P starts until R2 lands**, for the reason `navigation_spans.md`
 already gives about its own gate: a structure written against a map that is about

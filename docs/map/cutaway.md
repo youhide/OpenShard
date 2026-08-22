@@ -1,5 +1,9 @@
 # Cutaway: living plan
 
+> **Status: the rule as it stands, being replaced.** The global roof-and-height
+> policy [`interiors.md`](interiors.md) supersedes. Entry point for the area:
+> [`map_rebuild.md`](map_rebuild.md).
+
 > The entry point for architectural transparency.  It records the rendering
 > contract, the order of work, and the next concrete hand-off; it is not a
 > promise that an object merely hidden by `Cutaway` has become transparent.

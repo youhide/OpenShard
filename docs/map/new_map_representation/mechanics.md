@@ -1,5 +1,8 @@
 # How a changeable map works
 
+> **Status: live**, with every open question now closed — the last of them, whether
+> a house is a patch or a layer, in [`map_rebuild.md`](../map_rebuild.md)'s R3.
+
 The mechanics behind [`overview.md`](overview.md). This document says what
 has to be true and what the real choices are; where a decision is not made yet
 it says so and names what would settle it. [`plan.md`](plan.md) is the work

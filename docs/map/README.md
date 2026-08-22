@@ -14,6 +14,17 @@ being 120,745 vectors); **P, the map you search**; **S, the map you change.**
 Read it before opening any of the plans below: it says which era owns what is
 left of each, and it takes the decisions that were open between them.
 
+## The plan being executed
+
+[`realtime_map.md`](realtime_map.md) — **era R, in order.** The executable half:
+what moves where, in which commit, with a done-when and a risk per node. R1 the
+tile table leaves the file reader · R2 the live layer joins the type · R3 a house
+has floors · R4 the statics become one immutable run · R5 one install, one load.
+A session starts at **R1, commit 1**.
+
+[`handoffs/`](handoffs/) — where the work stands, one file per session. The
+plans hold intent; a handoff holds state.
+
 ## The track — era S, half built
 
 [`new_map_representation/`](new_map_representation/) — **a map we can change.**

@@ -1,5 +1,10 @@
 # Superseded: coarse HPA*-style routing
 
+> **Status: superseded — a record.** The first pass at long routes; what shipped
+> is described in [`navigation_graph.md`](navigation_graph.md) and what replaces
+> the model is [`navigation_spans.md`](navigation_spans.md)'s N4. Entry point for
+> the area: [`map_rebuild.md`](map_rebuild.md).
+
 This was the first long-distance routing experiment. It is superseded by the
 automatic, topology-derived navigation graph in
 [`navigation_graph.md`](navigation_graph.md): the replacement has no fixed
