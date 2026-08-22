@@ -6,15 +6,15 @@
 //! yields nothing on ground that looks minable; a bank that never depletes reads
 //! as working perfectly until somebody notices Britannia has infinite valorite.
 //!
-//! The map is a stub [`Ground`] rather than a client file: what these tests are
-//! about is the *rules*, and a fake terrain lets them name the tile under the
-//! player instead of hunting for a real mountain. `resolve_harvest_target`, the
-//! half that reads a real map, is exercised here too — against a terrain that
-//! knows one static, which is what the anti-spoof check needs to have an opinion.
+//! The map is a [`Scene`] rather than a client file: what these tests are about
+//! is the *rules*, and a scene lets them name the tile under the player instead
+//! of hunting for a real mountain. It is a real map either way — [`ground`]
+//! builds one and the shard reads it through its own `MapTerrain`, so a test
+//! here cannot pass against a rule the shard does not have.
 
-use super::tests::{START, enter, packets_for, world};
+use super::tests::{START, WALL_FLAGS, enter, packets_for, world};
 use super::*;
-use openshard_movement::{LandTile, Terrain, Tile};
+use openshard_movement::scene::Scene;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::RawSerial;
@@ -39,33 +39,40 @@ const WATER: u16 = 0x00A9;
 /// Plain grass, which is nothing to anybody.
 const GRASS: u16 = 3;
 
-/// A terrain that answers one land tile everywhere and holds one static.
+/// How far east of [`START`] these tests ever point. `swing_at` reaches six, and
+/// one test names a tile forty away to be out of reach — so the ground has to be
+/// itself that far, and no further.
+const REACH: u16 = 48;
+
+/// Lay `land` under the whole facet, with an optional static standing on the one
+/// tile the target tests name.
 ///
-/// Enough to be a mountain, a beach or a lake for the length of a test, and — with
-/// `static_at` set — enough for `resolve_harvest_target` to have something to
-/// verify a claimed static against.
-struct Ground {
-    land: u16,
-    static_at: Option<(u16, i8)>,
-}
-
-impl Terrain for Ground {
-    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-        Some(to)
-    }
-
-    fn land_tile(&self, _tile: Tile) -> Option<LandTile> {
-        Some(LandTile(self.land))
-    }
-
-    fn statics_at(&self, _tile: Tile, out: &mut Vec<(Graphic, i8)>) {
-        out.extend(self.static_at.map(|(graphic, z)| (Graphic(graphic), z)));
-    }
-}
-
-/// Lay `land` under the whole facet, with an optional static standing on it.
+/// **A real map, not a terrain that answers for one.** The land id comes out of
+/// a [`Scene`]'s [`WorldMap`](openshard_map::map::WorldMap) and the static out of
+/// its statics list, so `land_tile` and `statics_at` are the shard's own reads
+/// rather than a fixture's opinion of them. Two things the double did that a map
+/// cannot: it laid its static under *every* tile of the facet, and it allowed
+/// every step regardless of what was standing there. Neither is a world, and
+/// neither is what any test here asks for — the claims are all about one tile a
+/// pace to the east.
+///
+/// The land id is set without a tiledata row on purpose. Harvesting matches the
+/// *id* against ServUO's tables — mountain, sand, water — and what the tile can
+/// do is a second question no test here asks; giving the sea a
+/// [`TileFlags::WATER`](openshard_uofiles::tiledata::TileFlags::WATER) row would
+/// pull the player who is already standing on it under.
 fn ground(world: &mut World, land: u16, static_at: Option<(u16, i8)>) {
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Ground { land, static_at }));
+    let mut scene = Scene::flat_holding(START.0 + REACH, START.1 + REACH, 0);
+    scene.land_everywhere(land);
+    if let Some((graphic, z)) = static_at {
+        // A tree: tall and impassable, which is what a static the client can
+        // claim to be chopping actually is.
+        scene.art(graphic, WALL_FLAGS, 20);
+        scene.put(START.0 + 1, START.1, z, graphic);
+    }
+    let (terrain, tiles) = scene.into_shard();
+    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(terrain));
+    world.state.tiles = tiles;
 }
 
 /// Put a tool in the player's pack and return its entity.

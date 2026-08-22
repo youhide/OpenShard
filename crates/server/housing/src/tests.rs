@@ -15,7 +15,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use openshard_entities::Registry;
 use openshard_events::EventBus;
-use openshard_movement::{Terrain, Tile};
+use openshard_movement::Tile;
+use openshard_movement::scene::Scene;
 use openshard_protocol::serial::{Serial, SerialKind};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::{Facet, Point};
@@ -23,7 +24,7 @@ use openshard_state::harvest::Banks;
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
 use openshard_uofiles::multi::{Component, Multi, Multis};
-use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
+use openshard_uofiles::tiledata::{TileData, TileFlags};
 
 use super::*;
 use openshard_state::{Dialogue, FacetState, Gameplay, QuestDefs, Regions};
@@ -43,57 +44,32 @@ const WALL: u16 = 0x0006;
 /// be sealed shut from the inside.
 const FLOOR: u16 = 0x0007;
 
-/// Ground that answers only about the ground.
+/// The ground these tests build on, and the table it reads.
 ///
-/// `can_step` allows everything, so a refused step in a test below is the
-/// obstruction index refusing it and never the terrain. What a house is *made
-/// of* is no longer asked here: the multi table and the tiledata are the shard's,
-/// built by [`tiledata`] and [`multis`] below, and a real one of each is cheaper
-/// to write than a double that had to be trusted to agree with them.
-struct Ground {
-    /// What every tile's land id is. `0` is nothing in particular; a road id
-    /// makes the whole facet a street.
-    land: u16,
-    /// Whether the ground will take a house at all — `can_fit`'s answer, which
-    /// is ServUO's rules two and four asked as one question.
-    fits: bool,
-}
-
-impl Terrain for Ground {
-    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-        Some(to)
-    }
-
-    fn land_tile(&self, _tile: Tile) -> Option<openshard_movement::LandTile> {
-        Some(openshard_movement::LandTile(self.land))
-    }
-
-    fn can_fit(&self, _tile: Tile, _z: i32, _height: i32) -> bool {
-        self.fits
-    }
-}
-
-/// A real tiledata with the fixture's two graphics in it: the wall is impassable
-/// and twenty tall, the floor is neither.
-fn tiledata() -> std::sync::Arc<TileData> {
-    let mut tiles = TileData::empty();
-    tiles.set_static_tile(
-        WALL,
-        StaticTile {
-            flags: TileFlags::new(TileFlags::WALL | TileFlags::BLOCK),
-            height: 20,
-            ..StaticTile::default()
-        },
-    );
-    tiles.set_static_tile(
-        FLOOR,
-        StaticTile {
-            flags: TileFlags::new(TileFlags::FLOOR),
-            height: 0,
-            ..StaticTile::default()
-        },
-    );
-    std::sync::Arc::new(tiles)
+/// **A real map.** `land` is the id under every tile — `0` is nothing in
+/// particular, a road id makes the whole facet a street — and `fits` is whether
+/// the ground will take a house at all, said the way the world says it: land
+/// flagged [`TileFlags::BLOCK`] is ground nobody stands on, so there is no
+/// surface for a footprint to rest on and `can_fit` refuses it through the
+/// shard's own rule. That is ServUO's rules two and four asked as one question,
+/// and it used to be a boolean a double returned.
+///
+/// A refused *step* in a test below is therefore the obstruction index refusing
+/// it and never the terrain — flat ground at one height allows every step, which
+/// is the same guarantee the double gave by fiat.
+///
+/// The wall is impassable and twenty tall, the floor is drawn and walked over.
+/// Both come from the scene's own tiledata, which is the table the shard is
+/// handed, so a house's footprint and the terrain under it cannot be reading two
+/// different files.
+fn ground_scene(land: u16, fits: bool) -> Scene {
+    let side = u16::try_from(SIZE - 1).unwrap();
+    let mut scene = Scene::flat_holding(side, side, 0);
+    scene.land_art(land, if fits { 0 } else { TileFlags::BLOCK });
+    scene.land_everywhere(land);
+    scene.art(WALL, TileFlags::WALL | TileFlags::BLOCK, 20);
+    scene.art(FLOOR, TileFlags::FLOOR, 0);
+    scene
 }
 
 /// A real multi table holding `components` under both ids the fixture places, so
@@ -156,11 +132,14 @@ fn britannia_with(components: Vec<Component>) -> WorldState {
 }
 
 fn ground_of(components: Vec<Component>, land: u16, fits: bool) -> WorldState {
+    // The ground and the table it reads, from one scene: a wall's height cannot
+    // disagree with the tiledata the terrain is looking at.
+    let (terrain, tiles) = ground_scene(land, fits).into_shard();
     let mut facets = BTreeMap::new();
     facets.insert(
         Facet(0),
         FacetState {
-            terrain: Some(Box::new(Ground { land, fits })),
+            terrain: Some(Box::new(terrain)),
             coarse: None,
             width: SIZE,
             height: SIZE,
@@ -176,7 +155,7 @@ fn ground_of(components: Vec<Component>, land: u16, fits: bool) -> WorldState {
         bus: EventBus::new(),
         facets,
         default_facet: Facet(0),
-        tiles: tiledata(),
+        tiles,
         multis: multis(components),
         players: HashMap::new(),
         connections: HashMap::new(),
@@ -470,6 +449,46 @@ fn ground_that_will_not_take_a_house_refuses_one() {
     assert_eq!(
         place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner),
         Err(Refusal::BadGround)
+    );
+}
+
+/// **A house with an upper storey goes up on ordinary ground.**
+///
+/// The rule the sentence above hides: `can_fit` demands a *surface* at the z it
+/// is asked about, so asking it at each component's own z means the second floor
+/// is standing on thin air — every villa, keep and two-storey shop in the game
+/// refused with `BadGround`, everywhere, forever. It went unseen because the
+/// fixture terrain answered `can_fit` with a boolean the test set to `true`.
+///
+/// The ground is asked about the components that rest on it. Everything above
+/// the house's own z rests on the house.
+#[test]
+fn a_second_storey_stands_on_the_house_and_not_on_the_ground() {
+    let mut components = cottage();
+    // A wall twenty units up, over a tile the ground floor also has a wall on —
+    // the shape of every real house with a first floor.
+    components.push(component(WALL, -1, -1, 20, true));
+    let mut state = ground_of(components, 0, true);
+    let (actor, owner) = an_actor(&mut state);
+
+    assert!(
+        place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner).is_ok(),
+        "the ground was asked to hold up a wall standing on the first floor",
+    );
+}
+
+/// And the ground floor is still asked, so a house on ground that will take
+/// nothing is refused however many storeys it has.
+#[test]
+fn a_second_storey_does_not_excuse_the_ground_floor() {
+    let mut components = cottage();
+    components.push(component(WALL, -1, -1, 20, true));
+    let mut state = ground_of(components, 0, false);
+    let (actor, owner) = an_actor(&mut state);
+
+    assert_eq!(
+        place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner),
+        Err(Refusal::BadGround),
     );
 }
 

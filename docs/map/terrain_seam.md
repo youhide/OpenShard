@@ -258,10 +258,10 @@ done, and C is what they were for:
 
 ```
  A. Scene grows what the doubles need ✅ ─┐
-                                          ├─> C. the doubles become Scenes ─┐
- B. the table leaves the trait ✅ ────────┴──────────────────────────────────┼─> D. FacetState holds data
-                                                                             │      MapTerrain is borrows
- 0. the facet-0 oracle ──────────────────────────────────────────────────────┴─> E. Overlay, and the search
+                                          ├─> C. the doubles become Scenes 4/8 ─┐
+ B. the table leaves the trait ✅ ────────┴──────────────────────────────────────┼─> D. FacetState holds data
+                                                                                 │      MapTerrain is borrows
+ 0. the facet-0 oracle ──────────────────────────────────────────────────────────┴─> E. Overlay, and the search
                                                                                     takes explicit types
  F. the coarse graph nobody reads — no edges at all, in or out
 ```
@@ -427,15 +427,65 @@ forwarding method bodies** across `CachedTerrain`, `Cluttered` and
 **Done when:** no caller reaches a client-file table through `Terrain`, and the
 trait is nine methods.
 
-## C — the doubles become Scenes
+## C — the doubles become Scenes — **four of eight**
 
-Needs A, which is done. Eight doubles left, each one replaced by a `Scene` that
-builds a real `MapTerrain` through [`Scene::into_shard`](#a--scene-grows-what-the-doubles-need-).
+Needs A, which is done. Each double is replaced by a `Scene` that builds a real
+`MapTerrain` through [`Scene::into_shard`](#a--scene-grows-what-the-doubles-need-).
 This is worth doing on its own evidence and would be worth doing if the rest of
 this document were abandoned: a double that answers `can_step` with `Some(to)`
 is a test that proves the caller compiles.
 
+**Converted:** `boats`' `Sea`, `persistence_tests`' `Sea`, `harvest_tests`'
+`Ground`, `housing`' `Ground`. **Left:** `crafting_tests`' `Shop`, and
+`tick/tests.rs`'s `BlindTerrain`, `FrameTerrain` and `RaisedFloorTerrain`.
+
 **Done when:** `facet_state_mut().terrain` is assigned nothing hand-written.
+
+### What the first four cost, and what they were hiding
+
+**A double answers questions its subject never asks, and being wrong there is
+free.** `boats`' `Sea` had four methods; `check_berth` reads one of them.
+`land_tile` and `can_fit` were dead, which is why the disagreement this document
+predicted — a real `MapTerrain::can_fit` says *true* over water where the double
+said `y == 0` — turned out to be unobservable. That is the seam's defect in a
+third form: not a decorator that forgot a method
+([`LiveTerrain`](#a-decorator-that-forgets-a-method-is-the-bug-this-seam-ships)),
+not a decorator that inherited a wrong default (`Cluttered`), but a double
+answering into the void. The count that matters is not "how many methods does
+the double implement" but "how many does its caller reach".
+
+**A double can hold a world that cannot exist.** `persistence_tests`' `Sea` said
+every tile is water *and* every step is allowed. Water is a surface only a
+swimmer stands on, so as a scene it needs a jetty at `START` for the character
+who launches the ship — the contradiction becomes a line of fixture instead of a
+rule quietly overridden.
+
+**🚩 `housing::check_ground` refused every house with an upper storey, and the
+double is why nobody knew.** `can_fit` requires a *surface* at the z it is asked
+about, and `check_ground` asked it at each component's own z — so a wall twenty
+units up is standing on thin air and the whole placement is `BadGround`. Every
+villa, keep and two-storey shop, on any real map, everywhere. The fixture
+answered `can_fit` with a boolean the test set to `true`, so the check had never
+once been run against ground. ServUO gates the same question the same way — its
+`hasSurface` is only ever set for a component at `addTile.Z == 0`
+([`HousePlacement.cs:174`](/home/sc/t/ServUO/Scripts/Multis/HousePlacement.cs)) —
+and `check_region` four lines above already carried the doctrine in its own
+header: *"the house's `z`, once, and never the component's"*. Fixed, with two
+tests that fail without it.
+
+**Left behind by that fix:** ServUO's rule two for the *upper* components — a
+roof driven into a hillside over a tile the house has no ground-level wall on.
+`can_fit` at the house's z covers every tile that does have one. Closing the
+rest needs a terrain question that is *"is anything in this body"* without
+*"and is there a surface"*, which `MapTerrain::is_obstructed` already is and the
+`Terrain` trait does not carry. **Do not add it to the trait** — E is where
+`check_ground` stops going through one.
+
+**A facet-sized scene is free if you pave it by id.** `Scene::flat_holding`
+lays land id `0` everywhere, so `land_art(0, flags)` makes the whole facet water
+or void with no pass over its cells. `land_everywhere` costs a pass and is still
+cheap — thirteen harvest tests over a 1416×1656 scene run in 0.41 s — but the id
+trick is the one to reach for when the whole square is one kind of ground.
 
 ## D — `FacetState` holds data, `MapTerrain` holds borrows
 
