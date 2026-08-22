@@ -27,7 +27,13 @@ carry.
 
 ## Status
 
-Nothing is built. The work being taken first is [`snapshot.md`](snapshot.md). The documents exist, the readers are inventoried in
-[`plan.md`](plan.md), and the next move is direction A — one revisioned
-snapshot everything takes a handle to, which is worth landing even if the rest
-of the track slipped.
+[`snapshot.md`](snapshot.md) is built, both phases of it: the block order is
+`LandGrid`'s and only `LandGrid`'s, and every reader takes a handle to one
+revisioned `MapSnapshot` per facet. That was directions A0 and A, and neither
+added a feature.
+
+The next move is direction B — our own chunk format and a UO importer. Where it
+stands in detail, what was decided along the way, and the smaller landable
+things left behind are in the newest
+[handoff](handoffs/2026-08-22-snapshot-built.md); the plan itself records
+intent, not progress.
