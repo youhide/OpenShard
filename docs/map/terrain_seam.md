@@ -253,21 +253,22 @@ goes until there is a swimmer. What it must not do is stay a field.
 
 ## What has no incoming edge
 
-The collapse is a graph, not a sequence. Two nodes have nothing before them and
-can be worked in either order, or at once:
+The collapse is a graph, not a sequence. Both nodes with nothing before them are
+done, and C is what they were for:
 
 ```
- A. Scene grows what the doubles need ─┐
-                                       ├─> C. the doubles become Scenes ─┐
- B. the table leaves the trait ✅ ─────┴──────────────────────────────────┼─> D. FacetState holds data
-                                                                          │      MapTerrain is borrows
- 0. the facet-0 oracle ───────────────────────────────────────────────────┴─> E. Overlay, and the search
-                                                                                 takes explicit types
+ A. Scene grows what the doubles need ✅ ─┐
+                                          ├─> C. the doubles become Scenes ─┐
+ B. the table leaves the trait ✅ ────────┴──────────────────────────────────┼─> D. FacetState holds data
+                                                                             │      MapTerrain is borrows
+ 0. the facet-0 oracle ──────────────────────────────────────────────────────┴─> E. Overlay, and the search
+                                                                                    takes explicit types
  F. the coarse graph nobody reads — no edges at all, in or out
 ```
 
 `Box<dyn Terrain>` is held up in `FacetState` by **tests**, not by production:
-fifteen `= Some(Box::new(...))` substitutions across four files, plus three
+fifteen `= Some(Box::new(...))` substitutions across four files when this was
+written — B deleted four of them and eight doubles are left — plus three
 `= None` in two more, against exactly one production construction at
 [`boot.rs:664`](../../crates/server/server/src/boot.rs#L664). That is the edge
 `A → C → D`, and it is why D cannot be the first commit however mechanical it
@@ -286,9 +287,9 @@ two that are one](#and-they-do-not-compute-the-same-set) — mobiles, identity,
 door opacity, decks. Those are answered by reading, and E is where they are
 answered.
 
-## A — `Scene` grows what the doubles need
+## A — `Scene` grows what the doubles need ✅
 
-No incoming edges. Pure addition: nothing breaks while it lands.
+**Done.** No incoming edges, and pure addition: nothing broke while it landed.
 
 [`Scene`](../../crates/common/movement/src/scene.rs) builds a real
 `MapTerrain` from hand-placed ground, floors, stairs and walls with no client
@@ -296,29 +297,53 @@ files, and its own header is the argument for using it: *"A fixture that
 reimplemented the rule would agree with itself and prove nothing."* Most of the
 doubles it replaces answer `can_step` with `Some(to)`.
 
-Four additions, read off what the doubles actually do:
+What it grew, read off what the doubles actually do:
 
-- **More than one block.** `SIDE` is 8 and `Scene::flat` builds
-  `BlockExtent { wide: 1, down: 1 }`, while `obstruct.rs`'s tests place things
-  at (10, 10). `Map::from_blocks` already takes an extent; this is an argument.
-- **A named graphic.** `place` mints ids in sequence, so a caller cannot say
-  *this* graphic. `Shop` and `harvest`'s `Ground` answer `statics_at` with
-  particular ids that domain tables match against.
-- **A land id.** `Scene::flat` hardcodes `LandTile(0)`, and three of the doubles
-  left (`housing`'s `Ground`, `boats`' `Sea`, `harvest`'s `Ground`) exist partly
-  to answer `land_tile` — a road id is what makes a plot a street and a water id
-  is what makes it the sea.
-- **An owned `into_terrain`**, since `terrain()` borrows, and a multi table —
-  [`Multis::of`](../../crates/common/uofiles/src/multi.rs#L282) already builds
-  one from hand-made values, so it is wiring, not parsing.
+- **A size.** `Scene::flat_over(BlockExtent, z)` builds as many blocks as asked
+  and `Scene::flat_holding(x, y, z)` builds enough to hold one coordinate, which
+  is the size a fixture actually knows — (10, 10) for a house, (102, 100) for a
+  door frame. `Scene::flat` is one block still, and `picture` draws whatever the
+  scene turned out to be.
+- **A named graphic.** `Scene::art(graphic, flags, height)` declares what an id
+  *is* and `Scene::put` places copies of it. The mint-an-id path is untouched
+  and still right for geometry; identity is what `Shop`, `harvest`'s `Ground`
+  and `FrameTerrain` need, because a domain table matches the id.
+- **A land id, and what it can do.** `Scene::land`, `Scene::land_everywhere` and
+  `Scene::land_art` — the last one needed a new
+  [`TileData::set_land_tile`](../../crates/common/uofiles/src/tiledata.rs),
+  `set_static_tile`'s missing other half. **That absence is why three doubles
+  exist**: water and impassable ground are flags on a land row, so a fixture
+  that could not write one had to override `land_is_water` or `can_fit`
+  instead — a fixture agreeing with itself, which is the thing this whole seam
+  is against.
+- **An owned terrain.** `Scene::into_terrain` hands out a
+  `MapTerrain<Map, Arc<TileData>>`, which has no lifetime and therefore fits in
+  `FacetState`'s box; `Scene::into_shard` hands out that *and* the `Arc`, so the
+  shard's `WorldState.tiles` and the ground under it are one table. A fixture
+  that built them separately could stand a house on a wall the ground had never
+  heard of.
 
-B shrank this list. `NamedTerrain` is gone, and the doubles that were only
-saying "allow everything" went with it; what is left is geometry, which is what
-`Scene` is for.
+The multi table stayed out, and B is why: a multi is no longer asked of the
+ground at all. A fixture that needs one writes `Multis::of` into `state.multis`,
+which is where the shard keeps it — the same two lines it already writes.
 
-**Done when:** a `Scene` can express what each of the seven remaining doubles
-(`Ground` in two shapes, `Sea` in two, `Shop`, `BlindTerrain`, `FrameTerrain`,
-`RaisedFloorTerrain`) was written to say.
+Six tests pin the new abilities, each through the real rule rather than through
+the fixture: the far coordinate is on the map and the one past the corner is
+not; a named graphic comes back under its own id and blocks; a road id is what
+`land_tile` answers; water is a flag that only a swimmer stands on; ground
+flagged impassable leaves a raised floor as the only surface, out of a step's
+reach and inside a placement's; and `into_shard`'s two holders answer alike.
+
+One latent defect fell out: `Scene::ground` wrote `LandTile(0)` back while
+moving a tile's height, so naming ground and then sloping it would silently
+un-name it. Height and identity are two facts about one cell now.
+
+**Done when** ~~a `Scene` can express what each of the seven remaining doubles
+was written to say~~ — it can. `Ground` in two shapes is land ids plus a static;
+`Sea` in two is a water flag with a shore row, swimming where the double allowed
+every step; `Shop` is `art`/`put` over the square; `FrameTerrain` is two frames
+at their real coordinates with a wall for `walled`; `RaisedFloorTerrain` is the
+test above outright; `BlindTerrain` is a wall between two people. Doing it is C.
 
 ## B — the table leaves the trait ✅
 
@@ -404,10 +429,11 @@ trait is nine methods.
 
 ## C — the doubles become Scenes
 
-Needs A. Fifteen substitutions, each one replaced by a `Scene` that builds a
-real `MapTerrain`. This is worth doing on its own evidence and would be worth
-doing if the rest of this document were abandoned: a double that answers
-`can_step` with `Some(to)` is a test that proves the caller compiles.
+Needs A, which is done. Eight doubles left, each one replaced by a `Scene` that
+builds a real `MapTerrain` through [`Scene::into_shard`](#a--scene-grows-what-the-doubles-need-).
+This is worth doing on its own evidence and would be worth doing if the rest of
+this document were abandoned: a double that answers `can_step` with `Some(to)`
+is a test that proves the caller compiles.
 
 **Done when:** `facet_state_mut().terrain` is assigned nothing hand-written.
 
@@ -608,17 +634,30 @@ Small things this document is the only current record of:
 
 ## Where a session starts
 
-**A.** B is done; A is the only node left with nothing before it, and it is what
-unblocks C and therefore D. It needs no client install and breaks nothing while
-it lands: `Scene` grows four abilities, and only then do the fifteen boxed
-doubles have somewhere to go.
+**C.** A and B are done, so C is the only node left with everything it needs:
+`Scene` can now say what each of the eight remaining boxed doubles says, and
+nothing else is waiting on anything. It is the node that pays A back — the
+abilities exist and are tested, and until a double actually uses one they are
+API with no reader.
 
-Two of B's findings are worth carrying into A and D:
+Take the doubles in the order they teach something, not in file order. The two
+`Sea`s first, because they are where a scene and a double **disagree about a
+rule rather than about a shape**: over water a real `MapTerrain::can_fit`
+answers *true* — water is a surface at its own z and is not flagged impassable —
+while `boats`' `Sea` answers `tile.y == 0`, which is false out at sea. One of
+the two is wrong about what `check_berth` is asking, and finding out which is
+the point of converting it rather than a distraction from it.
+
+Three of B's findings are worth carrying into C and D:
 
 - The doubles that were replaced in B were replaced by **real tables**, not by
   `Scene`s — a `TileData::empty()` with three rows written into it. The ones
   left are about *geometry*, which is what `Scene` is for, so the split between
   the two fixtures is now clean rather than incidental.
+- A scene hands out `into_shard`'s pair — the terrain and the `Arc<TileData>`
+  the shard holds — so a converted test sets `state.tiles` from the same table
+  its ground reads. That pairing is what D collapses into one field, and using
+  it now means D changes a type rather than hunting for disagreements.
 - ~~`WorldState.tiles` being `Option` is load-bearing and should stay one~~ —
   reversed and done. Both tables are total; see [There is always a
   table](#decisions-taken-here). A shard with no client files is still a real

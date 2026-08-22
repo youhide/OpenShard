@@ -544,6 +544,21 @@ impl TileData {
         self.statics[id as usize] = tile;
     }
 
+    /// Put one land entry into the table, replacing whatever was there.
+    ///
+    /// [`set_static_tile`](Self::set_static_tile)'s other half, and it exists for
+    /// the same callers with one more reason: what makes a tile *water* or
+    /// *impassable ground* is a flag on this row and nowhere else, so a fixture
+    /// that cannot write one has to fake water by overriding a movement rule —
+    /// which is a fixture agreeing with itself. `openshard_movement::scene` is
+    /// the caller, and `land_is_water` is the question.
+    ///
+    /// The id is masked into range exactly as [`land`](Self::land) masks it, so
+    /// the two cannot disagree about which row an id names.
+    pub fn set_land_tile(&mut self, id: u16, tile: LandTile) {
+        self.land[(id as usize) & (LAND_TILE_COUNT - 1)] = tile;
+    }
+
     fn parse_land(bytes: &[u8], format: TileDataFormat, index: usize) -> Option<LandTile> {
         let entry = format.land_entry();
         let offset = (index / GROUP_SIZE) * (GROUP_HEADER + GROUP_SIZE * entry)
