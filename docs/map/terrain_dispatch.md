@@ -3,12 +3,19 @@
 **A design error, not a trade-off.** `Terrain` is the seam between the map and
 every question anyone asks it, and it is reached through `dyn` in all 39 places
 that name it. Nothing needs that. This document is the plan to remove it —
-everywhere, storage included — and to fix the two other things that turned up
-in the same reading: a navigation graph the server pays for and never reads,
-and a hot path with no measurement on any real facet.
+everywhere, storage included.
 
-One document rather than three because they are one question with three
-answers: *what does it cost to get from the map to a step, and who checked?*
+Asking *why there is a trait at all* turned up the larger half. The trait holds
+one real thing, a crate boundary, and that justifies about two of its fifteen
+methods: the rest are a client-file lookup table wearing a terrain's coat. So
+phase 1 is not about dispatch at all.
+
+Two more things surfaced in the same reading and are here rather than lost: a
+navigation graph the server loads, validates and never reads, and a hot path
+with no measurement on any real facet.
+
+One document rather than four because they are one question with four answers:
+*what does it cost to get from the map to a step, and who checked?*
 
 Track: [`README.md`](README.md) · The map's owner:
 [`new_map_representation/snapshot.md`](new_map_representation/snapshot.md) ·
@@ -60,6 +67,52 @@ argues against those doubles in a different context: *"A fixture that
 reimplemented the rule would agree with itself and prove nothing."* A test
 terrain answering `can_step` with `Some(to)` is that fixture.
 
+### And why there is a trait at all
+
+Worth answering before removing `dyn`, because the answer is *not* "so that
+terrain can be polymorphic".
+
+**The trait holds exactly one thing: a crate boundary.**
+[`find_path`](../../crates/common/movement/src/path.rs#L68) lives in
+`common/movement`. What production hands it lives in `server/state`
+(`LiveTerrain`) and `client/app` (`Cluttered`). The dependency rule forbids
+`common` naming either, so an explicit reference is not available — and a
+generic does not change that, because a generic's bound *is* the trait.
+`&dyn T` versus `&impl T` is a choice about dispatch, not about whether a trait
+exists.
+
+That is the whole justification, and it does not cover the trait we have.
+
+**Fifteen methods serving three unrelated questions.** Read off the callers:
+
+| | |
+|---|---|
+| *may a body step here* | `can_step`, `ground_z` — **two**, and that is every pathfinding use. [`path.rs`](../../crates/common/movement/src/path.rs) does not call the trait at all; it goes through `step_allowed`, which calls `can_step`. `navigation.rs` adds `ground_z`. |
+| *where is the surface* | `stand_z`, `spawn_z`, `can_fit`, `sight_clear` — spawning, the door generator, line of sight |
+| *what does tiledata say about this graphic* | `item_blocks`, `item_height`, `item_weight`, `item_layer`, `item_name`, `multi_components`, `land_is_water`, `land_tile`, `statics_at` |
+
+**The third group is not about the map at all.** `item_weight(graphic)` takes
+no coordinate, reads no cell, and cannot be affected by a placed crate. It is a
+client *table*, and the trait became its door because `server/items`,
+`server/crafting` and `server/npc` do not depend on `openshard-uofiles` — while
+`server/housing`, `server/world` and `server/state` do, and could ask it
+directly today.
+
+The cost of that conflation shows up in two places without looking for it:
+
+- [`CachedTerrain`](../../crates/common/movement/src/cache.rs) memoises **one**
+  method and is obliged to forward all fifteen.
+- `FacetState.terrain` is read from ten production sites — `items/weight.rs`,
+  `items/capacity.rs`, `items/backpack.rs`, `housing`, `crafting/environment.rs`,
+  `npc/spawn.rs`, `decor.rs`, `spawners.rs`, `speech.rs`, `gm.rs` — and almost
+  none of them wants a floor. They want an item's weight, its layer, or a
+  multi's components.
+
+So the honest answer to "why not an explicit reference" is: **for the third
+group there is no reason, and for the first there may not be once the third
+leaves.** With `Terrain` cut down to `can_step` and `ground_z`, the question
+stops being rhetorical — see phase 1, and the door it deliberately leaves open.
+
 ## The migration that does not break a caller
 
 `&dyn Terrain` becomes `&T where T: Terrain + ?Sized`.
@@ -67,7 +120,7 @@ terrain answering `can_step` with `Some(to)` is that fixture.
 `dyn Terrain` satisfies that bound, so **every existing caller keeps compiling
 unchanged** while the concrete ones start monomorphising. That is what makes
 each phase below landable on its own, in any order after phase 0, without a
-flag day. The `?Sized` bound is scaffolding: phase 4 removes the last `dyn`,
+flag day. The `?Sized` bound is scaffolding: phase 5 removes the last `dyn`,
 and the bound comes off with it.
 
 `Terrain` stays object-safe until then — not as a goal, but because deleting
@@ -95,7 +148,43 @@ this document — p50/p95/worst per route class, node counts, and
 `TransitionCacheStats` hit rates — so every phase after this can be reported as
 a delta rather than a belief. A phase that cannot show one is not finished.
 
-## Phase 1 — the free functions
+## Phase 1 — the trait that is three traits
+
+First, because it shrinks every phase after it: monomorphising a seam that
+should not have this shape is work spent on the wrong object.
+
+Split by the table above:
+
+- **The tiledata half leaves the terrain.** `item_blocks`, `item_height`,
+  `item_weight`, `item_layer`, `item_name`, `multi_components` are questions
+  about client tables, not about ground. They become their own narrow seam —
+  or, for the three crates that could simply depend on `openshard-uofiles` as
+  `housing` already does, no seam at all. Which of the two is this phase's one
+  real decision, and what decides it is whether `items`, `crafting` and `npc`
+  gaining that dependency is allowed by
+  [`architecture.md`](../architecture.md)'s layering. If it is, the seam is not
+  worth minting.
+- **The surface half is a second trait**, or stays on the first — `stand_z`,
+  `spawn_z`, `can_fit` and `sight_clear` are asked of the same overlay that
+  answers `can_step`, so unlike the tiledata half they have a real reason to
+  travel with it.
+- **`Terrain` keeps `can_step` and `ground_z`.**
+
+**What this deliberately leaves open.** With the trait down to two methods, the
+question that prompted this section becomes worth asking for real: could the
+search take *two explicit references* — `find_path(&MapTerrain, &Overlay)` —
+and no trait at all? It needs `Obstructions` + `Boats` on the server and
+`WorldView.items` on the client to meet on one overlay type living in `common`,
+and [`LiveTerrain::aboard`](../../crates/server/state/src/obstruct.rs#L183)
+proves that type must be able to *add* a surface — a ship's deck — rather than
+only subtract. That is a larger change than this plan, and it is named here
+rather than assumed away: a two-method trait is cheap enough that it may simply
+be the answer.
+
+**Done when:** no caller reaches a client-file table through `Terrain`, and the
+trait's own doc says which of the three questions it is for.
+
+## Phase 2 — the free functions
 
 The searches themselves: [`path.rs`](../../crates/common/movement/src/path.rs)
 (`find_path`, `find_path_toward`, `search` and the two `_until` variants),
@@ -114,7 +203,7 @@ genuinely different types, so it takes two parameters.
 **Done when:** no `dyn` in `common/movement` outside `cache.rs`, every caller
 untouched, and phase 0's probes re-run.
 
-## Phase 2 — `CachedTerrain`
+## Phase 3 — `CachedTerrain`
 
 [`CachedTerrain<'a>`](../../crates/common/movement/src/cache.rs#L30) holds
 `&'a dyn Terrain` and is the outermost layer on the client's hot path, so it is
@@ -123,7 +212,7 @@ miss. It becomes `CachedTerrain<'a, T: Terrain + ?Sized>`.
 
 **Done when:** `common/movement` names `dyn` nowhere.
 
-## Phase 3 — `steer::Ground`
+## Phase 4 — `steer::Ground`
 
 [`Ground`](../../crates/client/app/src/steer.rs#L314) holds three terrains —
 `real`, `through_doors`, `guide` — and they are three different concrete types,
@@ -132,7 +221,7 @@ than assumed. Three type parameters, not one.
 
 **Done when:** `client/app` names `dyn Terrain` nowhere.
 
-## Phase 4 — `LiveTerrain`, `FacetState`, and the last `dyn`
+## Phase 5 — `LiveTerrain`, `FacetState`, and the last `dyn`
 
 The expensive one, and the only one that needs a decision rather than a
 rewrite.
@@ -166,9 +255,9 @@ being worked around with a feature flag on a `#[cfg(test)]` variant, which is
 the wrong answer and is named here so nobody reaches for it.
 
 **Done when:** `grep -rn "dyn Terrain" crates` is empty, and the `?Sized`
-bounds from phases 1–3 come off in the same commit.
+bounds from phases 2–4 come off in the same commit.
 
-## Phase 5 — the graph nobody reads
+## Phase 6 — the graph nobody reads
 
 Unrelated to dispatch, and found in the same reading, so it is here rather than
 lost.
@@ -208,9 +297,18 @@ moved the virtual call inward, not removed it — every `can_step` pays it just
 the same. Half of this refactor is worth less than none of it, because it costs
 the same churn and leaves the reason for it in place.
 
-**`?Sized` is scaffolding with an end date.** It exists so phases 1–3 do not
-break callers, and it comes off in phase 4. Left in permanently it would be a
+**`?Sized` is scaffolding with an end date.** It exists so phases 2–4 do not
+break callers, and it comes off in phase 5. Left in permanently it would be a
 door back to `dyn` that nobody notices going through.
+
+**A trait is not the same question as `dyn`, and only one of them is settled.**
+Removing `dyn` is decided. Whether the *seam* should be a trait is decided only
+for the part that crosses a crate boundary it cannot name — and phase 1 shrinks
+that part to two methods, at which point `find_path(&MapTerrain, &Overlay)`
+becomes a real option rather than a rhetorical one. This plan does not take
+that step; it makes it possible to take and says what it would cost. What it
+refuses is the reverse order: making the seam generic first and asking what it
+is for afterwards.
 
 **Code size is not the objection.** There are three production terrain stacks.
 A search monomorphised three ways is three copies of a bounded A\*, not an
@@ -255,5 +353,7 @@ kind of claim.
 ## Where a session starts
 
 Phase 0. It needs a client install and produces the numbers every later phase
-is reported against. Phases 1–3 are independent of each other and of phase 5;
-phase 4 is last because it is the one that ends the `?Sized` scaffolding.
+is reported against. Phase 1 comes next, because it decides how much trait
+there is left to be generic over. Phases 2–4 are independent of each other and
+of phase 6; phase 5 is last, because it is the one that ends the `?Sized`
+scaffolding.
