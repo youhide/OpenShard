@@ -23,7 +23,7 @@ reader takes a handle to. Start at its
 | [`navigation_graph_efficiency_plan.md`](navigation_graph_efficiency_plan.md) | Making the bake and the search affordable. |
 | [`interiors.md`](interiors.md) | 🚩 The building flood: which cells are inside, which floor a person is on, and a sealed room as a black area. |
 | [`cutaway.md`](cutaway.md) | The older, global roof-and-height rule the interior policy is replacing. |
-| [`radar.md`](radar.md) | 🚩 **The radar raster, and every window that draws it.** The inventory of the two LOD systems this client has, the numbers for the shipped facet, and the one gap under every radar defect: nothing chooses a level. Read it before the two below. |
+| [`radar.md`](radar.md) | 🚩 **The radar raster, and every window that draws it.** The inventory of the two LOD systems this client has, the numbers for the shipped facet, and the gap that used to be under every radar defect: nothing chose a level. **R0–R6 are built and their loose ends closed**; what is left is section 10, and R7 is a measurement phase that wants asking first. Read it before the two below. |
 | [`minimap_lod_plan.md`](minimap_lod_plan.md) | The radar raster as a revisioned, chunked LOD cache — the contract it is built to. |
 | [`minimap_lod_handoff.md`](minimap_lod_handoff.md) | Where that work stands, and the four defects it cost. |
 

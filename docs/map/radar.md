@@ -13,15 +13,17 @@ cache is built to, or [`minimap_lod_handoff.md`](minimap_lod_handoff.md),
 which is still the record of what landed. It is the layer those two never
 reached: **nothing chooses an LOD.**
 
-> **Status: R0–R6 are built; R7 is not.** A window now picks its own level from
-> its own pixels, both windows are one `RadarView`, the queue and the byte
-> budget are one implementation under both subsystems, the pyramid is swept, the
-> CPU cache evicts, and the facet map wears a plate with a close button.
-> Sections 1–3 below are therefore **the record of what was wrong**, not a
-> description of the code — read them for the reasoning, not for the current
-> shape. What the build left open is section 9, and that is where the next
-> session starts. `MAX_LOD` no longer exists (it is `max_lod(extent)`), and the
-> line numbers in section 3 are pre-build.
+> **Status: R0–R6 are built and their loose ends are closed; R7 is not built.**
+> A window picks its own level from its own pixels, both windows are one
+> `RadarView` — one construction, handed to the draw — the queue and the byte
+> budget are one implementation under both subsystems, the pyramid is swept
+> until it exists, the CPU cache evicts, and the facet map wears a plate with a
+> close button. Sections 1–3 below are therefore **the record of what was
+> wrong**, not a description of the code — read them for the reasoning, not for
+> the current shape. Section 9 is now the record of the eight things the build
+> left open and what closed each; **section 10 is what is open now**, and that
+> is where the next session starts. `MAX_LOD` no longer exists (it is
+> `max_lod(extent)`), and the line numbers in section 3 are pre-build.
 
 ---
 
@@ -622,123 +624,172 @@ reachable in ordinary play.
 
 ---
 
-## 9. What the build left open
+## 9. What the build left open, and what closed it
 
-R0–R6 landed together. Everything below was found by reading that work against
-this plan; each entry names the file, what the code does, and what the plan said
-it would do instead. Nothing here is a redesign — the design of sections 4 and 6
-held. `cargo test -p openshard-client-render -p openshard-client-app` is green
-and neither crate's clippy output grew.
+R0–R6 landed together, and everything in this section was found by reading that
+work against this plan. Nothing here was a redesign — the design of sections 4
+and 6 held — and all eight are now closed. Each entry keeps what was wrong,
+because the reasoning is the part worth reading twice, and ends with what the
+fix was.
 
-### 9.1 The view is built twice, and only the level crosses between them
+### 9.1 The view was built twice, and only the level crossed between them ✅
 
-This is the one item that matters, because it is the defect this whole document
-was written against, one layer up.
+This was the one item that mattered, because it was the defect this whole
+document was written against, one layer up.
 
-`App::draw_from` builds a `RadarView` per open window to compute *demand* and to
-drive that window's `RadarLodSelector`
-([`presentation.rs`](../../crates/client/app/src/presentation.rs), the
-`radar_views` vector). `draw_gump_windows` then builds **a second `RadarView`**
-per window, from the same `Drawn` bounds, to compute the *draw*
-([`render_passes.rs`](../../crates/client/app/src/render_passes.rs)). What
-crosses the seam is a `&[(WindowSubject, RadarLod)]` slice — the level only.
+`App::draw_from` built a `RadarView` per open window to compute *demand* and to
+drive that window's `RadarLodSelector`; `draw_gump_windows` then built **a
+second `RadarView`** per window, from the same `Drawn` bounds, to compute the
+*draw*. What crossed the seam was a `&[(WindowSubject, RadarLod)]` slice — the
+level only.
 
-The two constructions agree today by arithmetic coincidence, not by
-construction: one reads `window_scale.factor()` and `App::gump_scale()`, the
-other reads `magnify` and `frame.scale`, and `gump_scale()` and `frame.scale`
-are separately-written spellings of `shell.pixels_per_point()`. Let either
-drift and the requested region stops being the drawn region — a chunk built and
-never shown, or shown and never built, which is exactly
-[`parity.md`](../parity.md)'s hazard.
+The two constructions agreed by arithmetic coincidence, not by construction:
+one read `window_scale.factor()` and `App::gump_scale()`, the other `magnify`
+and `frame.scale`, and `gump_scale()` and `frame.scale` are separately-written
+spellings of `shell.pixels_per_point()`. Let either drift and the requested
+region stops being the drawn region — a chunk built and never shown, or shown
+and never built, which is exactly [`parity.md`](../parity.md)'s hazard.
 
-R3 said the two arms become one taking a `RadarView`. Half of that happened:
-`draw_radar_view` is one function, but its argument is re-derived rather than
-handed over. **Widen the slice already being threaded** to
-`&[(WindowSubject, RadarView, RadarLod)]` and delete the second construction.
+**Closed by widening the slice.** `draw_gump_windows` takes
+`&[(WindowSubject, RadarView, RadarLod)]` and looks its window up; the second
+construction is gone. The one that remains is in `App::draw_from`, where the
+window's live position is read from `own_windows` — the half the draw arm had
+that the demand arm did not.
 
-### 9.2 `radar_native_extent` and `radar_region_for` are now `#[cfg(test)]`
+Two properties of the surviving construction are worth stating, because both
+are now load-bearing rather than incidental:
+
+- It reads `windows.drawn_windows`, which is **a frame behind** by that list's
+  own design (a window is not pickable until it has been drawn once). The
+  radar's placement is therefore a frame behind too, and it is the *same* frame
+  behind for the request and the draw, which is the property that matters.
+- A window opened this frame has no view yet, so its first frame draws its rim
+  with no terrain in it — the same one-frame rule, in the same list.
+
+### 9.2 `radar_native_extent` and `radar_region_for` were `#[cfg(test)]` ✅
 
 R3 said `radar_native_extent`'s hard-won arithmetic "becomes `region()`'s body,
 unchanged and still the one copy". It was instead *copied* into
 `RadarView::region` and `with_tangent_margin_fraction`, and the original pair in
 [`minimap.rs`](../../crates/client/app/src/panes/minimap.rs) was marked
-`#[cfg(test)]` so its tests would keep compiling.
+`#[cfg(test)]` so its tests would keep compiling. So there were two copies,
+production read one, and the five tests recording the three measured margin
+reports — flat count, no-`zoom` fraction, no HiDPI scaling — asserted about the
+copy no frame calls.
 
-So there are two copies, production reads one, and the five tests recording the
-three measured margin reports — flat count, no-`zoom` fraction, no HiDPI scaling
-— now assert about the copy no frame calls. Retarget them at
-`RadarView::region()` and delete the pair. Until that happens the margin rule is
-documented and tested in a place where breaking it costs nothing.
+**Closed by deleting the pair.** The five tests build the same `RadarView`
+`App::draw_from` builds and assert on `region()`. The reasoning moved with
+them: `TANGENT_MARGIN_FRACTION` carries why the margin exists and what it may
+not scale with, `RadarView::region` carries the `sqrt(2)` refusal and the
+corner-ring starvation it caused. `with_tangent_margin` — a second spelling of
+the same 21%, with no callers at all — went with them.
 
-### 9.3 The sweep can drop chunks and still call itself done
+### 9.3 The sweep could drop chunks and still call itself done ✅
 
-`RadarCache::begin_sweep` flips a per-facet flag the first time a facet map
-opens, and the enqueue loop then calls `request_sweep` once per chunk.
+`RadarCache::begin_sweep` flipped a per-facet flag the first time a facet map
+opened, and the enqueue loop then called `request_sweep` once per chunk.
 `request_sweep` returns `false` when the queue is at `max_queued`, and a refused
-key is never offered again — the flag already says the sweep ran.
+key was never offered again — the flag already said the sweep had run. It worked
+by arithmetic rather than by construction (599 sweep chunks plus both windows'
+demand under 1024), and its failure was silent: a hole in the fallback floor
+that shows up as a patch of backdrop at some zoom, weeks later.
 
-Today 599 sweep chunks plus both windows' view demand fit under 1024, so it
-works by arithmetic rather than by construction, and the failure is silent:
-a hole in the fallback floor that only shows up as a patch of backdrop at some
-zoom, weeks later. The plan's own words for the flag were "guarded by a flag on
-the cache, not by *is the queue empty*" — the flag is right, its granularity is
-not. Make it a remaining-set (or a cursor) the requester drains across frames
-until every sweep key is ready or queued.
+**Closed by making the cache owe the keys.** `begin_sweep(facet, extent)`
+enumerates every level from `SWEEP_LOD` to the facet's own `max_lod` into an
+owed set; `drain_sweep` offers what is left every frame the facet map is open
+and strikes a key off when its product lands — or when a mutation has moved the
+facet's revision past it, from which moment the chunk belongs to the dirty set
+and not to the sweep. A refused request is simply one tried again next frame.
+The test drives the whole floor through a queue of eight.
 
-### 9.4 The demand loop cannot be tested, so R3's own acceptance test is missing
+### 9.4 The demand loop could not be tested ✅
 
-R3's "done when" asks for a test that an open facet map changes not one of the
-minimap's requested keys — defect 3.3, the one that starved the minimap. It does
-not exist, because the requester lives inside `App::draw_from`, which needs a
+R3's "done when" asked for a test that an open facet map changes not one of the
+minimap's requested keys — defect 3.3, the one that starved the minimap. It did
+not exist, because the requester lived inside `App::draw_from`, which needs a
 window, a device and a shell.
 
-The loop is a pure function of `(&[RadarView], &RadarCache, &mut RadarWorkQueue)`
-returning the protected key list. Lift it out and the missing test is three
-lines. This is the precondition for 9.1 as well: one view list, computed once,
-is what both the requester and the draw would then take.
+**Closed by lifting it out.** `radar::request_views` is the whole per-frame
+requester as a function of `(views, &RadarCache, &mut RadarWorkQueue)`, and the
+missing test is three lines: the facet map's demand is offered first, which is
+the order that starves the minimap if anything at all is shared, and every key
+the minimap asks for alone survives.
 
-### 9.5 `RadarLodSelector` remembers a level across a facet change
+### 9.5 `RadarLodSelector` remembered a level across a facet change ✅
 
-`update` clamps upward only while `selected < max`, and the downward loop stops
-at zero. A selector carrying a level chosen for Britannia keeps it when the view
-moves to a smaller facet, and can then return a level above that facet's own
-`max_lod` — naming a grid that does not exist. Clamp `selected` to `max` on
-entry, or key the selector by facet the way the cache keys everything else.
+`update` clamped upward only while `selected < max`, and its downward loop
+stopped at zero. A selector carrying a level chosen for Britannia kept it when
+the view moved to a smaller facet, and could then return a level above that
+facet's own `max_lod` — naming a grid that does not exist.
 
-### 9.6 Two small hardening items in the same files
+**Closed by clamping `selected` to `max` on entry**, with a test that moves one
+selector from Britannia to a two-chunk facet.
 
-- **`take_for_producer`/`take_for_producer_near` index `priorities[key]` inside
-  the sort comparator.** Every path that makes a key pending also inserts its
-  priority, so it is an invariant rather than a bug — but a panic sited inside
-  an `Ord` comparator, in a frame, is a bad place to spend one.
-  `.get().copied().unwrap_or(View)` costs nothing and cannot fire.
-- **`RadarCache::evict_to_budget` rebuilds its pinned set from every ready key,
-  every frame**, and `LruBudget::retained_bytes` sums every entry each call.
-  With the sweep resident that is ~600 entries walked twice per frame — fine
-  now, and worth naming before levels 0 and 1 make it thousands.
+### 9.6 Two small hardening items in the same files ✅
 
-### 9.7 What is built but not tested to its own bar
+- **`take_for_producer`/`take_for_producer_near` indexed `priorities[key]`
+  inside the sort comparator.** Every path that makes a key pending also
+  inserts its priority, so it was an invariant rather than a bug — but a panic
+  sited inside an `Ord` comparator, in a frame, is a bad place to spend one.
+  Both now read `.get().copied().unwrap_or(View)`.
+- **`RadarCache::evict_to_budget` rebuilt its pinned set from every ready key,
+  every frame**, and `LruBudget::retained_bytes` summed every entry each call.
+  Nothing pinned can *lower* the ceiling, so a cache inside its tail budget
+  cannot evict: that question is asked first and answered in `O(1)`, because
+  `LruBudget` now carries its retained total instead of summing to find it.
 
-- **R6's window furniture.** There are tests for the close button and for the
-  unpressed-move guard. There is none for the drag actually panning, none for
-  raise/z-order, and none for "the canvas cannot be dragged out of its own frame
-  at any zoom" — which is the phase's own headline claim and the one
-  `clamp_centre` exists for.
-- **R0's per-frame allocation.** `instance_capacity` grows on demand and is
-  reused; nothing asserts that two identical draws allocate once. The cheap
-  oracle is the capacity field itself.
-- **`RadarPageCounters::over_capacity_draws`.** R0 correctly replaced the
-  per-frame `eprintln!` with a counter — and nothing reads it, so a truncated
-  draw is now *completely* invisible until R7 lands. That is the right trade
-  (the `eprintln!` spammed at frame rate), but it means R7 is no longer only a
-  measurement phase: it is where a real symptom regains a voice.
+### 9.7 What was built but not tested to its own bar ✅
 
-### 9.8 One behaviour change nothing records
+- **R6's window furniture.** There are now tests for the drag actually panning
+  (a press takes the drag and raises; the move walks the centre by the
+  pointer's own distance in that zoom's tiles) and for "the canvas cannot be
+  dragged out of its own frame at any zoom" — the phase's own headline claim,
+  at every one of the twenty-one zoom steps, pulled into both corners, asserted
+  against the visible rectangle. Removing `clamp_centre` fails it.
+- **R0's per-frame allocation.** `RadarChunkRenderer::instance_capacity` is
+  public, and a GPU test draws the same two chunks three times: the capacity
+  moves once and then not at all.
+- **`RadarPageCounters::over_capacity_draws`.** Still written and never read —
+  see 10.1, which is where it regains a voice.
+
+### 9.8 One behaviour change nothing recorded ✅
 
 `RadarView::region()` clamps the fetched rectangle's origin against **both**
 facet edges; `radar_region_for` saturated only at zero. Standing at the map's
-east or south edge, the minimap therefore now shifts its region back inside the
+east or south edge, the minimap therefore shifts its region back inside the
 facet — terrain where there used to be a band of `UNKNOWN`, and a player marker
 that walks off the centre of the circle instead. It is the better behaviour and
-it matches the west/north edge, which always did this. No test says so, so
-nothing stops the next reader from "fixing" it back.
+it matches the west/north edge, which always did this.
+
+**Closed by asserting it**, in the same test as the west/north case, with the
+reason it is deliberate written beside it.
+
+---
+
+## 10. What is open now
+
+### 10.1 R7, which is section 7's own entry and is still not built
+
+`RadarCacheCounters`, `RadarWorkCounters` and `RadarPageCounters` exist and
+nobody reads them. Putting them in the frame report **is a UI addition and
+wants asking first** — the handoff already flags this, and it stays flagged.
+`over_capacity_draws` is the one that makes this more than a measurement phase:
+a truncated draw is completely invisible until something reads it.
+
+### 10.2 The coarse floor is swept once, and a terrain edit does not re-sweep
+
+`drain_sweep` strikes a key off when the facet's revision moves past it, on the
+grounds that the chunk is then the dirty set's to rebuild. That is correct for a
+chunk an `invalidate_tile` actually named, and it is *not* the same claim as
+"the floor is current": a revision bump that reaches the whole facet would leave
+coarse products that only `select_ready`'s stale-fallback path can use. Nothing
+in the shard moves a facet revision that way today. Naming it because the next
+map-editing feature is what would.
+
+### 10.3 The margin fraction is measured, and its measurement is a person looking
+
+`TANGENT_MARGIN_FRACTION` is 21% because three reports said 20.7% left a visible
+seam. The tests pin the *arithmetic* — that it scales with the window and with
+`zoom` and with nothing else — and no test says the seam is gone, because
+nothing here can see. It is a `silhouettes.md`-shaped question: first attribute
+it with a debug view, then decide.
