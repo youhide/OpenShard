@@ -28,9 +28,11 @@ The routing it feeds:
 
 ## The six, and what each one actually is
 
-Read off the workspace, not remembered. `impl Terrain for` appears at **37
-sites under 27 distinct names**; 31 of those sites are test doubles. These are
-the rest:
+Read off the workspace, not remembered. `impl Terrain for` appeared at **37
+sites under 27 distinct names** when this was written; 31 of those sites were
+test doubles. B and C between them took it to **17 sites under 16 names**, and
+every one of the eleven left in a test is now local to the crate whose own rule
+it exercises — none is handed to a `FacetState`. These six are the rest:
 
 | | | |
 |---|---|---|
@@ -253,26 +255,27 @@ goes until there is a swimmer. What it must not do is stay a field.
 
 ## What has no incoming edge
 
-The collapse is a graph, not a sequence. Both nodes with nothing before them are
-done, and C is what they were for:
+The collapse is a graph, not a sequence. A, B and C are done, and **D is the
+only node left with everything it needs**:
 
 ```
  A. Scene grows what the doubles need ✅ ─┐
-                                          ├─> C. the doubles become Scenes 4/8 ─┐
- B. the table leaves the trait ✅ ────────┴──────────────────────────────────────┼─> D. FacetState holds data
-                                                                                 │      MapTerrain is borrows
- 0. the facet-0 oracle ──────────────────────────────────────────────────────────┴─> E. Overlay, and the search
-                                                                                    takes explicit types
+                                          ├─> C. the doubles become Scenes ✅ ─┐
+ B. the table leaves the trait ✅ ────────┴────────────────────────────────────┼─> D. FacetState holds data
+                                                                               │      MapTerrain is borrows
+ 0. the facet-0 oracle ────────────────────────────────────────────────────────┴─> E. Overlay, and the search
+                                                                                      takes explicit types
  F. the coarse graph nobody reads — no edges at all, in or out
 ```
 
-`Box<dyn Terrain>` is held up in `FacetState` by **tests**, not by production:
-fifteen `= Some(Box::new(...))` substitutions across four files when this was
-written — B deleted four of them and eight doubles are left — plus three
-`= None` in two more, against exactly one production construction at
-[`boot.rs:664`](../../crates/server/server/src/boot.rs#L664). That is the edge
-`A → C → D`, and it is why D cannot be the first commit however mechanical it
-looks.
+`Box<dyn Terrain>` **was** held up in `FacetState` by tests rather than by
+production: fifteen `= Some(Box::new(...))` substitutions across four files when
+this was written, against exactly one production construction at
+[`boot.rs:664`](../../crates/server/server/src/boot.rs#L664). That was the edge
+`A → C → D`, and it is why D could not be the first commit however mechanical it
+looked. B deleted four of the doubles and C converted the other eight, so what is
+in the box now is a `MapTerrain` at every site — the box itself is all D has left
+to remove.
 
 ### Following the compiler works for B and D, and not for E
 
@@ -722,35 +725,40 @@ Small things this document is the only current record of:
 
 ## Where a session starts
 
-**C.** A and B are done, so C is the only node left with everything it needs:
-`Scene` can now say what each of the eight remaining boxed doubles says, and
-nothing else is waiting on anything. It is the node that pays A back — the
-abilities exist and are tested, and until a double actually uses one they are
-API with no reader.
+**D.** A, B and C are done, so D is the only node left with everything it needs,
+and it is now the narrowest it will ever be: every `FacetState::terrain` in the
+tree already holds a `MapTerrain`, so the change is the *field's type* rather
+than a hunt for what is in it.
 
-Take the doubles in the order they teach something, not in file order. The two
-`Sea`s first, because they are where a scene and a double **disagree about a
-rule rather than about a shape**: over water a real `MapTerrain::can_fit`
-answers *true* — water is a surface at its own z and is not flagged impassable —
-while `boats`' `Sea` answers `tile.y == 0`, which is false out at sea. One of
-the two is wrong about what `check_berth` is asking, and finding out which is
-the point of converting it rather than a distraction from it.
+**It is also the map track's C2.** `new_map_representation/`'s live publish —
+an edit taking effect in a running shard between two ticks — is blocked on
+exactly this box: `with_facet` boxes `MapTerrain<MapSnapshot, _>` as
+`Box<dyn Terrain + Send + Sync>` at
+[`tick.rs:447`](../../crates/server/world/src/tick.rs#L447), so the shard holds
+the snapshot inside a trait object and has nothing to call `publish` on. Two
+tracks, one field.
 
-Three of B's findings are worth carrying into C and D:
+Take it in the order the field's three parts come apart:
 
-- The doubles that were replaced in B were replaced by **real tables**, not by
-  `Scene`s — a `TileData::empty()` with three rows written into it. The ones
-  left are about *geometry*, which is what `Scene` is for, so the split between
-  the two fixtures is now clean rather than incidental.
+1. **The `Box` goes first**, because it is what forces the other two. `FacetState`
+   holds a `MapSnapshot` and an accessor hands out a `MapTerrain<'_>`; the
+   `AsRef` parameters and their `'static` bounds go with it, since they exist
+   only so the type can own its inputs and therefore fit in a box.
+2. **Then the `Arc<TileData>`**, which had exactly one other holder — that box.
+   `WorldState` owns the table outright and a `MapTerrain<'_>` built per query
+   borrows both out of the same `&WorldState`. See [one `Arc` is gone and one is
+   not](#one-arc-is-gone-and-one-is-not-and-the-difference-is-the-box).
+3. **Then `travel.rs`'s `terrain.is_none()`** becomes a question about the map,
+   which is what it was asking, and `swimming` is decided here.
+
+Two of B's findings carry into D:
+
 - A scene hands out `into_shard`'s pair — the terrain and the `Arc<TileData>`
-  the shard holds — so a converted test sets `state.tiles` from the same table
-  its ground reads. That pairing is what D collapses into one field, and using
-  it now means D changes a type rather than hunting for disagreements.
+  the shard holds — so every converted test already sets `state.tiles` from the
+  same table its ground reads. C did that eight times, which is why D changes a
+  type rather than hunting for disagreements.
 - ~~`WorldState.tiles` being `Option` is load-bearing and should stay one~~ —
   reversed and done. Both tables are total; see [There is always a
   table](#decisions-taken-here). A shard with no client files is still a real
   configuration, and it is now spelled the same way everywhere: empty tables,
-  not absent ones. The twelve lookups lost their `as_deref().map_or(...)` and
-  `WorldState::multi_components` lost its reason to exist — with a total field
-  it was a pass-through to `Multis::components`, so its four callers now say
-  that.
+  not absent ones.
