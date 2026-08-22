@@ -65,6 +65,17 @@ impl World {
             return;
         };
 
+        // Sitting is a placement, not a different kind of locomotion.  The
+        // first directional request should therefore leave the chair in that
+        // direction, rather than spending a key press merely turning the
+        // seated sprite.  Keep the reservation until a step is actually
+        // accepted: a wall beside the chair must not make its occupant vanish
+        // from the seat while the client still draws them there.
+        let leaving_seat = self.state.registry.has::<openshard_state::Seated>(entity);
+        if leaving_seat {
+            walker.facing = openshard_protocol::direction::Facing::walking(request.facing.direction);
+        }
+
         let facet = self.state.facet_of(entity);
         let was = walker.position;
         let out_of_sequence = walker.sequence.is_fresh() && request.sequence != RawStepSequence(0);
@@ -112,6 +123,9 @@ impl World {
 
         match outcome {
             Walk::Moved { position, facing } => {
+                if leaving_seat {
+                    self.state.registry.remove::<openshard_state::Seated>(entity);
+                }
                 // A step breaks concentration — ServUO's `Mobile.Move` ends with
                 // `DisruptiveAction`, and a trance is over the moment you walk out
                 // of it. A *turn* is not a step and does not. Hiding is spent one

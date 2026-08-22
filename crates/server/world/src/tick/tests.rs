@@ -1014,6 +1014,98 @@ fn double_clicking_a_container_opens_it() {
     assert!(packets.iter().any(|p| p[0] == 0x3C), "the contents follow");
 }
 
+/// A regular wooden chair — one of the four graphics players can craft and the
+/// client recognizes as a sitting surface.
+const WOODEN_CHAIR: Graphic = Graphic(0x0B57);
+
+#[test]
+fn double_clicking_a_chair_seats_one_player_and_the_next_step_leaves_it() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let chair_at = Point::new(START.0, START.1, 0);
+    world.queue(Command::SpawnItem {
+        graphic: WOODEN_CHAIR,
+        hue: Hue::NONE,
+        amount: 1,
+        stackable: false,
+        position: chair_at,
+        facet: Facet(0),
+    });
+    world.tick(now);
+    let chair = loose_item_serial(&world);
+    let player_entity = entity(&world, serial_of(&world, player));
+    let _ = packets_for(&mut world, player);
+
+    world.queue(Command::DoubleClick {
+        connection: player,
+        request: UseRequest::Use(RawSerial(chair.raw())),
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world.state.registry.get::<Position>(player_entity),
+        Some(&Position(chair_at)),
+        "the player lands at the chair's own z, which is the client's seating predicate"
+    );
+    assert!(world.registry().has::<openshard_state::Seated>(player_entity));
+    assert!(
+        packets_for(&mut world, player)
+            .iter()
+            .any(|packet| packet[0] == 0x20),
+        "the seated player's own client is snapped to the chair"
+    );
+
+    world.queue(Command::Walk {
+        connection: player,
+        request: walk(0, Direction::North),
+    });
+    world.tick(now + WALK_INTERVAL);
+
+    assert!(!world.registry().has::<openshard_state::Seated>(player_entity));
+    assert_eq!(
+        world.state.registry.get::<Position>(player_entity),
+        Some(&Position(Point::new(START.0, START.1 - 1, 0))),
+        "the first directional request walks out of the seat instead of merely turning"
+    );
+}
+
+#[test]
+fn an_occupied_chair_does_not_move_a_second_player() {
+    let now = Instant::now();
+    let mut world = world();
+    let first = enter(&mut world, now);
+    let second = enter(&mut world, now + WALK_INTERVAL);
+    let chair_at = Point::new(START.0, START.1, 0);
+    teleport(&mut world, second, Point::new(START.0 + 1, START.1, 0));
+    world.queue(Command::SpawnItem {
+        graphic: WOODEN_CHAIR,
+        hue: Hue::NONE,
+        amount: 1,
+        stackable: false,
+        position: chair_at,
+        facet: Facet(0),
+    });
+    world.tick(now + WALK_INTERVAL);
+    let chair = loose_item_serial(&world);
+
+    for connection in [first, second] {
+        world.queue(Command::DoubleClick {
+            connection,
+            request: UseRequest::Use(RawSerial(chair.raw())),
+        });
+        world.tick(now + WALK_INTERVAL);
+    }
+
+    let second_entity = entity(&world, serial_of(&world, second));
+    assert_eq!(
+        world.state.registry.get::<Position>(second_entity),
+        Some(&Position(Point::new(START.0 + 1, START.1, 0))),
+        "a second character cannot overwrite the seat occupant"
+    );
+    assert!(!world.registry().has::<openshard_state::Seated>(second_entity));
+}
+
 /// A bottle graphic — the engine has no built-in double-click behaviour for it,
 /// so it is the plain-item case the trigger seam exists for.
 const POTION_GRAPHIC: Graphic = Graphic(0x0F0E);

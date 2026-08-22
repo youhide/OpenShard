@@ -28,9 +28,9 @@ use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue, Layer, RawLayer
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{
     Amount, Body, Client, Combat, Contained, Container, Corpse, Decays, Decoration, Door, Drawn, Equipped,
-    Ghost, KeyValue, Lock, Name, PoisonCharges, Position, RUNEBOOK_ENTRIES, RUNEBOOK_GRAPHIC, Ridden, Riding,
-    RuneMark, Runebook, RunebookEntry, SPELLBOOK_GRAPHIC, Spellbook, Stackable, Weapon, mount_item_for,
-    scroll_spell,
+    Ghost, Heading, KeyValue, Lock, Movement, Name, PoisonCharges, Position, RUNEBOOK_ENTRIES,
+    RUNEBOOK_GRAPHIC, Ridden, Riding, RuneMark, Runebook, RunebookEntry, SPELLBOOK_GRAPHIC, Seated,
+    Spellbook, Stackable, Weapon, mount_item_for, scroll_spell,
 };
 use openshard_state::sectors::in_range;
 use openshard_state::{HeldItem, Origin, Outbound, TICKS_PER_SECOND, TradeWindow, WorldState};
@@ -46,6 +46,7 @@ mod doors;
 mod drag;
 mod equip;
 mod mounts;
+mod seating;
 mod spawn;
 mod stack;
 mod trade;
@@ -62,6 +63,7 @@ pub use doors::*;
 pub use drag::*;
 pub use equip::*;
 pub use mounts::*;
+pub use seating::*;
 pub use spawn::*;
 pub use stack::*;
 pub use trade::*;
