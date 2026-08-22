@@ -910,6 +910,13 @@ than waiting for a phase of its own:
   either, and the gap would otherwise read as a pathfinding regression the day
   that lands. **Wants an in-game confirmation before the repair is scoped** —
   walk a character upstairs in a placed villa and see.
+  **The repair is owned**, since 2026-08-23, by
+  [`map_rebuild.md`](map/map_rebuild.md#r3--a-house-is-a-layer-and-it-has-floors)'s
+  R3: a house is the live layer over the map rather than a patch to it — which is
+  what closed `mechanics.md`'s open row — and `Cover::of_static` grows the arm
+  that makes a platform component a surface. This entry stays here because the
+  *content* is housing's: which components a shipped house calls floors, and what
+  a demolition takes back out.
 - **The five multis that draw nothing** (`findings.md`) are treasure-site markers,
   and placement must refuse an id with no drawn components rather than spawn an
   invisible house.

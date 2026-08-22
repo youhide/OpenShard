@@ -305,8 +305,13 @@ declared inside the `.mul` reader.
 ### What was built
 
 `WorldMap`, `LandGrid` and the cell types moved to `openshard-map`, beside
-`MapSnapshot`. The crate now depends on `openshard-protocol` and nothing else,
-and reads no files at all. Three modules:
+`MapSnapshot`. The crate depended on `openshard-protocol` and nothing else when
+this landed, and read no files at all. **The second half of that has been kept
+and the first half struck** — a map crate that may not name the tile table is a
+world that cannot say what it is made of; see
+[`map_rebuild.md`](../map_rebuild.md)'s R1, which moves `TileData` out of the
+file reader and lets `openshard-map` depend on it. What stays true is *no files*.
+Three modules:
 
 | | |
 |---|---|
@@ -360,8 +365,10 @@ mechanical.
 
 ### Done when — all met
 
-- `openshard-map` depends on `openshard-protocol` and nothing else, and no
-  function in it takes a path.
+- ~~`openshard-map` depends on `openshard-protocol` and nothing else~~, and no
+  function in it takes a path. **The dependency half is struck** — see
+  [`map_rebuild.md`](../map_rebuild.md#decisions-taken-here); the path half is
+  the property that was actually meant and it stands.
 - No type named `WorldMap`, `LandGrid`, `LandCell`, `LandTile` or `StaticItem`
   is declared outside `openshard-map`.
 - `uofiles::map` exposes the importer only, and `uofiles` depends on

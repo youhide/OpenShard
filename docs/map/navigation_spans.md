@@ -154,10 +154,13 @@ and it is the right split for the same reason it always was: the overlay is the
 part that changes between ticks and therefore cannot be baked. What changes is
 what the static half *is*.
 
-**Nothing here starts until [`terrain_seam.md`](terrain_seam.md) closes**, and
-that is a decision rather than a dependency graph falling out that way. What this
-plan substitutes is *one argument* of a call that terrain_seam's E is in the
-middle of creating:
+**Nothing here starts until [`terrain_seam.md`](terrain_seam.md) closes** —
+which it since has, and the gate moved rather than lifted: it is now
+[`map_rebuild.md`](map_rebuild.md)'s R1 and R2, for the same reason spelled out
+in [where a session starts](#where-a-session-starts). The reason it is a decision
+rather than a dependency graph falling out that way is unchanged. What this plan
+substitutes is *one argument* of a call that terrain_seam's E was in the middle
+of creating:
 
 ```rust
 find_path(&MapTerrain, &Overlay, doors, …)   // where the seam ends
@@ -304,8 +307,9 @@ a house floor is the general case of what `aboard` does for one ship, and
 ## The nodes
 
 ```
- terrain_seam.md closes ──┐
-                          ▼
+ terrain_seam.md ✅ ──> map_rebuild.md R1 + R2 ──┐
+ (the signature)       (the map, in one type)   │
+                                                ▼
  N0. the census ✅ ──> N1. three tiers ──> N2. the step rule reads them ──┬─> N3. the search takes Spans
                                                     (the agreement oracle) │
                                                                            │
@@ -502,9 +506,11 @@ against `step_allowed` and against a whole-facet flood, N3 against bit-identical
 node counts, N4 against `refused_but_walkable = 0`. Every one of those tools
 exists already.
 
-**This plan waits for the seam; the measuring did not.** Every number it is
-built on was taken before E began, and none of the code is written until E ends.
-An optimisation is not urgent enough to be worth writing twice.
+**This plan waits for the map; the measuring did not.** Every number it is built
+on was taken before E began, and none of the code was written until E ended —
+and the wait carried over to [`map_rebuild.md`](map_rebuild.md)'s R1 and R2 when
+E closed, for the same reason under a different name. An optimisation is not
+urgent enough to be worth writing twice.
 
 **No hoisting.** The 2.87× available from computing `start_surface(from)` once
 per node expansion instead of sixteen times
@@ -512,8 +518,13 @@ per node expansion instead of sixteen times
 deliberately not taken. It is a local repair to a query that should be a table
 lookup, and taking it would make the table look less necessary than it is.
 
-**E first, and only N3 waits for it.** The rest of this plan is a new structure
-and its oracle, and neither touches the trait E is collapsing.
+~~**E first, and only N3 waits for it.**~~ **The map first, and N1 waits too.**
+E landed, and what replaced it as the gate reaches further into this plan than E
+did: `Spans` is built *from* a `&WorldMap` and a `&TileData`, and
+[`map_rebuild.md`](map_rebuild.md)'s R1 moves the second of those into its own
+crate while R2 folds the live layer into the first. N3 still waits for the
+signature; N1 now waits for what it reads. N4–N7 are unaffected, since a region
+graph over spans names neither.
 
 ## What this supersedes
 
@@ -557,12 +568,17 @@ and its oracle, and neither touches the trait E is collapsing.
 
 ## Where a session starts
 
-**Not here yet — [`terrain_seam.md`](terrain_seam.md) first.** Its E is the last
-node of that plan and the one that gives `find_path` the shape this plan
-substitutes into. A session that wants to work on movement should be finishing E,
-not starting N1.
+**Not here yet — [`map_rebuild.md`](map_rebuild.md)'s era R first.**
+[`terrain_seam.md`](terrain_seam.md) has closed and its E landed the signature
+this plan substitutes into, so the gate this section was written against is
+gone — and a second one replaced it. The map is about to become one type holding
+three layers (R2), the tile table is about to leave the file reader (R1), and
+`Spans` is built from exactly the two layers underneath the live one. Written
+before that, N1 is written against a `&WorldMap` and a `&TileData` it will be
+handed differently a week later, which is the same mistake this plan already
+waited once to avoid.
 
-When it closes:
+When era R closes — R1 and R2 are what N1 actually needs, not R3–R5:
 
 **N1, and it needs no client install to write** — only to test, which this
 machine can do. The census is done and the tier boundaries are decided; N1 is the

@@ -1445,24 +1445,24 @@ Small things this document is the only current record of:
 
 ## Where a session starts
 
-**E, and nothing else in this document.**
-
-0, A, B, C and D are done, and E's decisions are all taken by reading — blockers
-and surfaces are one `Cover`, mobiles are not a category the shared type names,
-identity stays with the server, and `CachedTerrain` is deleted rather than
-relocated. What is left is
-[the order it lands in](#the-order-it-lands-in): five commits, of which the
-compiler leads the last two. `grep -rn "dyn Terrain" crates` is the running
-count, and E is done when it is empty and the agreement test stands.
+**Nowhere in this document — it is closed.** 0, A, B, C, D and E are done and
+`grep -rn "dyn Terrain" crates` is empty; there is no `Terrain` trait in the
+workspace. A session that wants the map starts at
+[`map_rebuild.md`](map_rebuild.md), which is the area's entry point and which
+this plan feeds: its era R is the runtime map — the tile table out of the file
+reader, the live layer this plan's E built joining the type that holds the
+ground and the statics, and a house that gets floors.
 
 **F is answered and needs no session.** The oracle picked its arm — the graph
 stays, because it routes 24 of 28 long destinations where flat A\* routes 3 —
 and its repair belongs to the plan after this one. Nothing here is waiting on it.
 
-**And the plan after this one waits for E.**
-[`navigation_spans.md`](navigation_spans.md) is written, decided and measured;
-it is not started, because it substitutes one argument of the call E is still
-shaping. [Why](#what-comes-after-the-seam-and-why-it-waits).
+**And the plan after this one no longer waits for E — it waits for the map.**
+[`navigation_spans.md`](navigation_spans.md) is written, decided and measured,
+and its gate moved rather than lifted when E landed: `Spans` is a projection of
+the two layers under the live one, so it is built after
+[`map_rebuild.md`](map_rebuild.md)'s R1 and R2 rather than against a map that is
+about to gain a layer. [Why](#what-comes-after-the-seam-and-why-it-waits).
 
 **Every measurement this section used to owe is paid.** The probes have their
 facet-0 runs, above; `boat_step_cost`'s 15ns/55ns — measured against a double D

@@ -111,8 +111,10 @@ its own even if everything below slipped.
 
 - The crate exists: [`openshard-map`](../../../crates/common/map/src/lib.rs),
   under `crates/common/` because both ends need it. It already holds the world
-  and its snapshot, depends on `openshard-protocol` and nothing else, and has
-  never opened a file. B fills it with the chunk types, the canonical encoding,
+  and its snapshot, and has never opened a file. (It also depended on
+  `openshard-protocol` and nothing else when this was written; that half is
+  struck — see [`map_rebuild.md`](../map_rebuild.md)'s R1.) B fills it with the
+  chunk types, the canonical encoding,
   bounds checking and hashing. It knows nothing of sockets, ECS or renderers.
 - Entities: `ChunkKey` (facet, chunk x, chunk y — plus a `map_id` only if the
   question in the mechanics table answers yes), `Chunk` (dense land arrays,
@@ -270,6 +272,13 @@ the same one this whole track has: a format chosen without knowing they are
 coming is a format that will have to be reopened to get them.
 
 ## Order
+
+> **Superseded past C.** A0, A, B and C's first half are built, and what is left
+> of this track now runs *after* the two eras in
+> [`map_rebuild.md`](../map_rebuild.md): the runtime map (R) and the search over
+> it (P). D keyed to a revision of a layout R4 is still changing, and an editor
+> previewing through an apply path R2 is still shaping, are both written twice if
+> they go first. The order below is kept as the reasoning it was.
 
 A0, then A, then B, then C, with D following C closely because a stale bake is
 how a changed world lies to a player. A0 is internal to `uofiles` and touches

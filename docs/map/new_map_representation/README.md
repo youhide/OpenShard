@@ -52,6 +52,15 @@ cannot arrive at different revisions of it. `openshard-map-patch` commits one
 change from a command line, and a committed change survives a restart and
 changes what the server allows.
 
+**This track is era S of [`map_rebuild.md`](../map_rebuild.md)**, which is the
+map area's entry point and the document that ordered the nine plans here. What
+is left below resumes after era R (the runtime map — the tile table out of the
+file reader, the live layer joining the type, a house with floors, the statics as
+one immutable run) and era P (spans, and the graph the server finally reads).
+Nothing here is blocked by them; it is sequenced behind them so that a bake keyed
+to a revision, and an editor previewing through the runtime's apply path, are not
+written against a layout that is still moving.
+
 What is left of C is the *live* publish: an edit taking effect in a running
 shard between two ticks, and reaching a connected client. The decisions and the
 leftovers are in the newest
