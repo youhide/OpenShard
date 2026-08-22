@@ -67,8 +67,8 @@ async fn a_client_walks_and_the_shard_agrees_on_where_it_ended_up() {
                 // No ground function: this test is about the sequence seam, and
                 // the client here has no map of its own to predict a height from
                 // — the window is what loads one and hands it to `Walk`.
-                let request = walk.step(heading, |_, _| None).expect("room on the map to walk");
-                socket.send(&request).await.expect("the shard is listening");
+                let step = walk.step(heading, |_, _| None).expect("room on the map to walk");
+                socket.send(step.bytes()).await.expect("the shard is listening");
                 sent += 1;
             }
             if sent == burst && walk.in_flight() == InFlightSteps::new(0) {

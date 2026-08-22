@@ -313,9 +313,11 @@ pub enum Command {
     /// [`FramedClientPacket`] rather than a bare `Vec<u8>`: this thread no
     /// longer knows *which* packet it is about to write, so nothing here can
     /// notice a caller handing over half of one, two end to end, or bytes for
-    /// an id nobody registered. [`Link::step`] and [`Link::resync`] are the
-    /// only two constructors of one, which is what keeps that check narrow
-    /// instead of duplicated at every call site.
+    /// an id nobody registered. Both of the two things that ride this variant
+    /// are wrapped by their own encoder — `Walk::step` for the `0x02` and
+    /// [`Link::resync`] for the `0x22` — which is what keeps that check at the
+    /// one place per packet that can answer it without looking, instead of
+    /// duplicated at every call site.
     Send(FramedClientPacket),
     /// An ordinary network action. Its packet mapping is owned by `client-net`.
     ///
@@ -382,10 +384,12 @@ impl Link {
     ///
     /// The packet comes from the owner's own [`Walk`], which is where the
     /// prediction and its terrain lookup live — see [`Command::Send`]. Taking
-    /// [`FramedClientPacket`] rather than raw bytes moves the "is this really
-    /// one whole packet" check to the caller, who is the one holding the
-    /// connection's [`ClientVersion`] — this thread never learns it, because
-    /// nothing it does needs to.
+    /// [`FramedClientPacket`] rather than raw bytes means the "is this really
+    /// one whole packet" question is answered by whoever encoded it, and never
+    /// again on the way here. `Walk::step` is that place, and it needs no
+    /// [`ClientVersion`] to answer: `0x02` is seven bytes for every client
+    /// there has ever been. This thread never learns the connection's version
+    /// either, because nothing it does needs to.
     ///
     /// A closed channel is ignored rather than reported: it means the shard
     /// thread has already ended, and it has already said why. The same holds

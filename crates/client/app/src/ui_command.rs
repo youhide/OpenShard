@@ -19,7 +19,6 @@ use openshard_client_render::camera::{self, Camera};
 use openshard_client_render::{doors, items, mobiles};
 use openshard_movement::{Heading, Lean};
 use openshard_protocol::direction::{Direction, Facing};
-use openshard_protocol::packet::FramedClientPacket;
 use openshard_protocol::target::{TargetKind, TargetResponse};
 use openshard_protocol::wire::Layer;
 use openshard_protocol::world::Point;
@@ -245,8 +244,8 @@ impl App {
         let stepped = walk.step(facing, |from, tile| {
             i8::try_from(terrain.predict_step(from, tile.x, tile.y)).ok()
         });
-        let bytes = match stepped {
-            Ok(bytes) => bytes,
+        let packet = match stepped {
+            Ok(packet) => packet,
             // A step this end refused on its own: the edge of the map, which
             // the server would refuse too, or a shard that has stopped
             // answering and is five steps behind already. Neither is worth a
@@ -263,12 +262,6 @@ impl App {
         let sequence = walk
             .newest_pending_sequence()
             .expect("an accepted step is pending");
-        // `Walk::step` just encoded these bytes as one `WalkRequest`, and
-        // `0x02` is a fixed seven bytes for every client version — see
-        // `client_packet_length` — so this cannot fail; it is the invariant
-        // `FramedClientPacket` exists to state, not to enforce here.
-        let packet = FramedClientPacket::new(bytes, Some(crate::VERSION))
-            .expect("Walk::step encodes exactly one whole 0x02 packet");
         self.world
             .shard
             .link()

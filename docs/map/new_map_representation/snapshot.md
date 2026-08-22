@@ -313,10 +313,17 @@ Written down as it was found. None of it blocks the track's next direction.
   a new one, and a check that ignored the version would get both wrong in
   opposite directions. `Link::step` takes one and `Link::resync` builds one;
   `link::play` unwraps it back to bytes at the single point before the socket
-  write. **`Walk::step` still returns `Vec<u8>`** — it is the producer and the
-  cleaner place for the type, but its bytes are also read by `dst.rs`'s
-  simulated queue and by four `crates/e2e/shard` tests that index into them, so
-  moving it there is a wider diff than this seam, and it is left open.
+  write. **`Walk::step` returns one too, and that half is closed now.** The
+  producer is the cleaner place for the type because it is the only place that
+  can make the claim without checking anything: the bytes were just encoded as
+  one `WalkRequest`. It passes `None` for the version rather than threading one
+  down — `0x02` is seven bytes for every client there has ever been, so the
+  framing answer does not depend on one and a `Walk` never learns the
+  connection's. What that removed is the `expect` `ui_command` had beside the
+  call, re-deriving a claim the encoder already knew; what it cost is four
+  `crates/e2e/shard` tests and `dst.rs`'s simulated queue reading
+  `packet.bytes()` at their socket, which is the same single unwrap point
+  `link::play` has.
 - **The `facet: u8` gate had been red since 2026-08-20.**
   `crates/common/protocol/tests/facet_bare_fields.rs` compares an allowlist with
   what is in the workspace, and the two interiors binaries added their `--facet`
@@ -349,13 +356,15 @@ Written down as it was found, and none of it blocks phase 2.
   `LandGrid::index_of` — which is as close to enforcement as two parallel
   `Vec`s get. A type that cannot express the mismatch is
   [direction B](plan.md#b--our-own-chunk-format-and-a-uo-importer)'s to build.
-- **The transitions have no caller yet.** `east_of`, `south_of` and
-  `cells_in_row` are tested against a fresh `cell_index` per tile, and nothing
-  walks them: every rectangle walk in the workspace is `client/render`'s, which
-  is outside A0's reach. The first caller is what turns the walk order into a
-  property of one iterator — which is the half of the point that
-  [`depth::Order`](../../../crates/client/render/src/depth.rs#L55)'s
-  anti-diagonal tie is waiting on.
+- **The transitions have their first callers.** `Map::land_in_row` reads
+  through `LandGrid::cells_in_row`; [`radar::fill`](../../../crates/client/render/src/radar.rs),
+  [`LandWindow::gather`](../../../crates/client/render/src/ground.rs), and
+  `for_each_cell_in` use it for their rectangle walks. The iterator ends at the
+  facet's eastern edge, so callers that walk an unclamped rectangle account for
+  its missing cells; the clamped `for_each_cell_in` can safely zip it with its
+  own x range. The walk order is now a property of that iterator — the half of
+  A0 that [`depth::Order`](../../../crates/client/render/src/depth.rs#L55)'s
+  anti-diagonal tie was waiting on.
 - **A block column is an eight-wide strip, and that is now written down.** The
   two orders compose: `block_y * 64 + y_local * 8 + x_local == y * 8 + x_local`,
   so a whole block column is one row-major image eight tiles wide. It is why

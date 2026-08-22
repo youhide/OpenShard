@@ -39,6 +39,7 @@ use std::collections::VecDeque;
 use openshard_movement::{Intent, StepCounter, Tile, intend};
 use openshard_protocol::direction::Facing;
 use openshard_protocol::mobile::Notoriety;
+use openshard_protocol::packet::FramedClientPacket;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::world::{Point, RawFastwalkKey, RawStepSequence, StepSequence, WalkRequest};
 
@@ -357,6 +358,13 @@ impl Walk {
 
     /// Ask to take one step, and get the `0x02` to write to the socket.
     ///
+    /// The answer is a [`FramedClientPacket`] rather than a `Vec<u8>` because
+    /// this is where the bytes are *made*: the type says they are exactly one
+    /// whole client packet, and the one place that can say so without checking
+    /// anything is the encoder. A caller that received bare bytes would have to
+    /// re-derive the claim — `client/app`'s `ui_command` did, with an `expect`
+    /// beside the call — or hand the wire something nobody had framed.
+    ///
     /// `facing` is a direction and whether to run, exactly as the packet carries
     /// it. Asking for a direction the character is not already facing turns it
     /// and moves it nowhere — that is a whole step in UO, it gets its own
@@ -387,7 +395,7 @@ impl Walk {
         &mut self,
         facing: Facing,
         ground: impl Fn(Point, Tile) -> Option<i8>,
-    ) -> Result<Vec<u8>, NotSent> {
+    ) -> Result<FramedClientPacket, NotSent> {
         // Two refusals before anything is decided about the geometry, and the
         // reference checks the same two first thing in `PlayerMobile.Walk`.
         //
@@ -434,7 +442,7 @@ impl Walk {
             position,
             facing,
         });
-        Ok(WalkRequest {
+        let bytes = WalkRequest {
             facing,
             sequence,
             // Never read by anything, on either side of the wire — see
@@ -442,7 +450,13 @@ impl Walk {
             // doing once the key is ignored.
             fastwalk_key: RawFastwalkKey(0),
         }
-        .encode())
+        .encode();
+        // `0x02` is a fixed seven bytes for every client version — see
+        // `client_packet_length` — so the framing answer does not depend on one,
+        // and a `Walk` never learns the connection's version. `None` is the
+        // honest argument rather than a convenient one.
+        Ok(FramedClientPacket::new(bytes, None)
+            .expect("WalkRequest::encode always writes exactly one whole 0x02 packet"))
     }
 
     /// Advance the walk with one packet from the server.
@@ -606,7 +620,8 @@ mod tests {
     }
 
     /// The sequence byte in the `0x02` a `step` produced.
-    fn sent_sequence(bytes: &[u8]) -> u8 {
+    fn sent_sequence(packet: &FramedClientPacket) -> u8 {
+        let bytes = packet.bytes();
         assert_eq!(bytes.len(), 7, "0x02 is seven bytes");
         assert_eq!(bytes[0], 0x02);
         bytes[2]
@@ -617,8 +632,8 @@ mod tests {
         // The one sequence rule the server actually enforces: a fresh
         // connection opens at zero or the step is refused.
         let mut walk = walk();
-        let bytes = walk.step(Facing::walking(Direction::North), |_, _| None).unwrap();
-        assert_eq!(sent_sequence(&bytes), 0);
+        let packet = walk.step(Facing::walking(Direction::North), |_, _| None).unwrap();
+        assert_eq!(sent_sequence(&packet), 0);
         assert_eq!(
             sent_sequence(&walk.step(Facing::walking(Direction::North), |_, _| None).unwrap()),
             1
@@ -715,8 +730,8 @@ mod tests {
         );
         assert_eq!(walk.predicted().position, Point::new(100, 100, 0));
 
-        let bytes = walk.step(Facing::walking(Direction::North), |_, _| None).unwrap();
-        assert_eq!(sent_sequence(&bytes), 0, "both ends are fresh again");
+        let packet = walk.step(Facing::walking(Direction::North), |_, _| None).unwrap();
+        assert_eq!(sent_sequence(&packet), 0, "both ends are fresh again");
     }
 
     #[test]
@@ -865,7 +880,7 @@ mod tests {
         );
         assert_eq!(
             walk.step(Facing::walking(Direction::East), |_, _| None)
-                .map(|bytes| sent_sequence(&bytes)),
+                .map(|packet| sent_sequence(&packet)),
             Ok(0),
             "and the sequence was not spent on it"
         );
@@ -1008,7 +1023,7 @@ mod tests {
         assert!(!walk.out_of_step(), "and the walk is free again");
         assert_eq!(
             walk.step(Facing::walking(Direction::North), |_, _| None)
-                .map(|bytes| sent_sequence(&bytes)),
+                .map(|packet| sent_sequence(&packet)),
             Ok(0),
             "from a fresh sequence, which is what the server also went back to"
         );
@@ -1059,8 +1074,8 @@ mod tests {
         // different refusal and would hide this one.
         let mut walk = Walk::new(Point::new(100, 1000, 0), Facing::walking(Direction::North));
         for step in 0..260 {
-            let bytes = walk.step(Facing::walking(Direction::North), |_, _| None).unwrap();
-            let sequence = sent_sequence(&bytes);
+            let packet = walk.step(Facing::walking(Direction::North), |_, _| None).unwrap();
+            let sequence = sent_sequence(&packet);
             assert!(step == 0 || sequence != 0, "step {step} sent a second zero");
             walk.on_packet(&ServerPacket::WalkAck(WalkAck {
                 sequence: StepSequence(sequence),

@@ -96,8 +96,8 @@ async fn a_lost_client_asks_where_it_is_and_the_shard_tells_it() {
     // shard reset its own when it answered, and a client that carried on counting
     // would be refused on this very step.
     let heading = Facing::walking(view.player.facing.direction);
-    let request = walk.step(heading, |_, _| None).expect("the walk is free again");
-    socket.send(&request).await.expect("the shard is listening");
+    let step = walk.step(heading, |_, _| None).expect("the walk is free again");
+    socket.send(step.bytes()).await.expect("the shard is listening");
 
     let allowed = tokio::time::timeout(Duration::from_secs(20), async {
         while let Some(event) = socket.next_event().await.expect("the socket stayed up") {

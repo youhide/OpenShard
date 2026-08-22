@@ -76,7 +76,7 @@ use openshard_movement::{
 };
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::mobile::Notoriety;
-use openshard_protocol::packet::decode_packet;
+use openshard_protocol::packet::{FramedClientPacket, decode_packet};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::version::ClientVersion;
@@ -380,7 +380,7 @@ struct Sim {
     field: Field,
 
     /// `0x02`s crossing to the shard, and answers crossing back, by arrival.
-    to_shard: VecDeque<(Duration, Vec<u8>)>,
+    to_shard: VecDeque<(Duration, FramedClientPacket)>,
     to_client: VecDeque<(Duration, ServerPacket)>,
     /// The prediction crossing the mpsc back into the window — `link::Update`.
     to_window: VecDeque<(Duration, Predicted, bool)>,
@@ -561,8 +561,10 @@ impl Sim {
     /// Everything whose time has come, in the order it would really arrive.
     fn deliver(&mut self) {
         while self.to_shard.front().is_some_and(|(at, _)| *at <= self.now) {
-            let (_, bytes) = self.to_shard.pop_front().unwrap();
-            let request: WalkRequest = decode_packet(&bytes, version()).unwrap();
+            let (_, packet) = self.to_shard.pop_front().unwrap();
+            // The one place the wrapper is opened, and it is the simulated
+            // socket read — the same seam `link::play` unwraps at.
+            let request: WalkRequest = decode_packet(packet.bytes(), version()).unwrap();
             let sequence = request.sequence.interpret();
             let answer = match self.shard.request(request, &self.field, self.instant(), false) {
                 Handled::Turned { .. } | Handled::Moved { .. } => ServerPacket::WalkAck(WalkAck {
@@ -688,8 +690,8 @@ impl Sim {
         // `link.rs` logs a refusal and sends nothing, and so does this: a step
         // past the cap on unanswered ones is a shard that has gone quiet, and the
         // body waits where it is.
-        let bytes = match self.walk.step(facing, |_, _| None) {
-            Ok(bytes) => bytes,
+        let packet = match self.walk.step(facing, |_, _| None) {
+            Ok(packet) => packet,
             Err(refusal) => {
                 self.not_sent.push((self.now, refusal));
                 return;
@@ -699,7 +701,7 @@ impl Sim {
             self.stepped_at.push(self.now);
         }
         let at = self.now + self.hop();
-        self.to_shard.push_back((at, bytes));
+        self.to_shard.push_back((at, packet));
         self.to_window.push_back((self.now, self.walk.predicted(), false));
     }
 
