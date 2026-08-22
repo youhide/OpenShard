@@ -33,7 +33,7 @@ revisioned `MapSnapshot` per facet, and the world is one type in `openshard-map`
 that has never opened a file. That was directions A0 and A plus the move they
 turned out to imply, and none of it added a feature.
 
-**Direction B is built, and it is the first thing here that adds a feature.**
+**Direction B is built, and it was the first thing here that added a feature.**
 There is a chunk — 64×64 tiles, decided by measurement — with a canonical
 encoding, and `openshard-basemap` is the file a facet goes in.
 `openshard-map-import` bakes a UO facet into one: on Felucca that is 7,168
@@ -44,7 +44,16 @@ graph over it, and the movement rules answer identically over both sources at
 tens of thousands of sampled places. What a base set does *not* replace is
 `tiledata.mul` and the multis, which are still the install's.
 
-Next is direction **C** — patches, and the resolved snapshot. The decisions and
-the leftovers are in the newest
-[handoff](handoffs/2026-08-22-the-shard-runs-on-a-world-it-owns.md); the plan
-itself records intent, not progress.
+**Direction C has its first half.** A world is now a base set *plus a log of
+patches over it*: `Patch` and its three operations, `MapSnapshot::publish`,
+the `.ospatch` log beside the base set, and `openshard_basemap::load` — the one
+call both the shard and the navigation bake resolve a facet through, so the two
+cannot arrive at different revisions of it. `openshard-map-patch` commits one
+change from a command line, and a committed change survives a restart and
+changes what the server allows.
+
+What is left of C is the *live* publish: an edit taking effect in a running
+shard between two ticks, and reaching a connected client. The decisions and the
+leftovers are in the newest
+[handoff](handoffs/2026-08-22-a-world-with-a-history.md); the plan itself
+records intent, not progress.

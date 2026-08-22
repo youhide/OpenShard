@@ -70,26 +70,50 @@ decision record:
 
 A patch is what an editor commits. To be revertible rather than merely applied
 it carries: the parent revision it was made against, an ordered list of
-operations, who made it and when, and which chunks it touches.
+operations, who made it and when, and which chunks it touches. **Built** — see
+[`patch.rs`](../../../crates/common/map/src/patch.rs), whose module header is
+the decision record, and [`patches.rs`](../../../crates/common/basemap/src/patches.rs)
+for the log the committed ones live in.
 
 The operation set can start very small — set the land of a tile, add a static,
 remove a static — because editor brushes (raise, flatten, smooth, stamp) are
 *editor* commands that compile down to those before publishing. That keeps the
 diff explainable and the undo exact, and keeps a brush algorithm out of the
-world's history.
+world's history. It is those three and nothing else.
 
-Two constraints that are not stylistic:
+Two constraints that are not stylistic, both now settled:
 
 - **A static needs a stable identity.** Two identical rocks can stand on one
   tile at one height. Addressing a static by coordinates and graphic cannot
   tell them apart, so "remove *that* rock" is not expressible. Today a static
   is a position in a block's vector
   ([`StaticItem`](../../../crates/common/map/src/map.rs#L43)), which is not an
-  identity that survives an edit.
+  identity that survives an edit. **Closed: the ordinal on its tile, read
+  against the patch's parent revision.** What makes it stable is not a field —
+  it is the constraint below. A patch is only ever applied to the one world it
+  was made against, so "the second static standing here" names exactly one
+  thing; and the op carries the item it is taking away, so a patch read against
+  the wrong world is refused rather than applied to whatever is in that
+  position. That is why `StaticId` needs no bytes in the base format.
 - **A patch applies to a parent, and conflicts are refused.** If the world
   moved under an unpublished edit, the editor gets a conflict and makes a new
   patch on the new parent. Silent last-write-wins on terrain would let one
-  operator's hillside quietly eat another's.
+  operator's hillside quietly eat another's. **Closed, and it is the whole
+  conflict model**: `MapSnapshot::publish` takes `&mut self` and refuses a
+  parent that is not the revision it is holding. The `&mut` is also what makes
+  a publish atomic — a reader borrows a `&Map` out of the snapshot, so the
+  borrow checker is what stops one from ever seeing half a change, rather than
+  a rule about ticks that somebody has to remember.
+
+Two more that the doing settled:
+
+- **Ops are a sequence, not a set**, and each one sees what the ones before it
+  did. It is the only reading under which "remove both of these" is one patch.
+- **All of a patch or none of it.** An op that cannot apply aborts the patch and
+  the ops already applied are undone — and the undo is free, because applying an
+  op returns its own inverse. That inverse is what a revert will be built out
+  of, which is how "revert is a new patch" stays true without a second apply
+  path.
 
 ## Caches, and what goes stale
 
