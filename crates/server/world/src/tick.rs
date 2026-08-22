@@ -63,12 +63,9 @@ use openshard_state::components::{
     Drawn, Equipped, Ghost, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name, Position, Resistance,
     Ridden, Riding, SpawnedBy, Spellbook, Stackable, Stamina, Stats, Vendor,
 };
-use openshard_state::harvest::Banks;
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
-use openshard_state::{
-    FacetState, Gameplay, Obstructions, Outbound, Regions, TICKS_PER_SECOND, TooltipMode, WorldState,
-};
+use openshard_state::{FacetState, Gameplay, Outbound, TICKS_PER_SECOND, TooltipMode, WorldState};
 
 use openshard_ai as ai;
 use openshard_chat as chat;
@@ -241,17 +238,7 @@ impl World {
         let mut facets = BTreeMap::new();
         facets.insert(
             Facet(DEFAULT_FACET),
-            FacetState {
-                map: None,
-                coarse: None,
-                width: FACET_WITHOUT_A_MAP.0,
-                height: FACET_WITHOUT_A_MAP.1,
-                sectors: Sectors::new(FACET_WITHOUT_A_MAP.0, FACET_WITHOUT_A_MAP.1),
-                obstructions: Obstructions::default(),
-                boats: openshard_state::Boats::default(),
-                regions: Regions::new(FACET_WITHOUT_A_MAP.0, FACET_WITHOUT_A_MAP.1),
-                banks: Banks::default(),
-            },
+            FacetState::new(None, None, FACET_WITHOUT_A_MAP.0, FACET_WITHOUT_A_MAP.1),
         );
         Self {
             state: WorldState {
@@ -435,21 +422,9 @@ impl World {
                 .as_ref()
                 .is_none_or(|graph| graph.dimensions() == (width, height))
         );
-        let sectors = Sectors::new(width, height);
-        self.state.facets.insert(
-            facet,
-            FacetState {
-                map: Some(map),
-                coarse,
-                width,
-                height,
-                sectors,
-                obstructions: Obstructions::default(),
-                boats: openshard_state::Boats::default(),
-                regions: Regions::new(width, height),
-                banks: Banks::default(),
-            },
-        );
+        self.state
+            .facets
+            .insert(facet, FacetState::new(Some(map), coarse, width, height));
         self
     }
 

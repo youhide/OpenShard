@@ -28,6 +28,7 @@
 //! not only silent, they were walking away.
 
 use openshard_entities::EntityId;
+use openshard_movement::Doors;
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::world::{Facet, Point};
@@ -272,10 +273,13 @@ fn wander_step(state: &mut WorldState, npc: EntityId, at: Point) -> Option<Direc
 /// auto-close swings it shut again behind them).
 fn walk_home(state: &mut WorldState, npc: EntityId, at: Point, post: Point) -> Option<Direction> {
     let facet = state.facet_of(npc);
-    let dir = openshard_ai::step_toward(state, facet, at, post, true)?;
+    let dir = openshard_ai::step_toward(state, facet, at, post, Doors::AllOpen)?;
     if let Some(tile) = openshard_movement::step_from(at, dir) {
+        // The obstruction index and not the terrain: the overlay a step reads
+        // says a door is in the way, and only this says which door to open.
         let door = state
-            .live_terrain(facet)
+            .facet_state(facet)
+            .obstructions()
             .blocker_at(tile.x, tile.y)
             .filter(|o| o.door)
             .map(|o| o.entity);

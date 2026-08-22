@@ -150,7 +150,7 @@ impl World {
             // gets a ship that draws on every client and carries nobody — the
             // same bargain a house's walls make, and for the same reason.
             match openshard_boats::planks_of(&self.state, entity, at, record.multi) {
-                Ok(berth) => self.state.facet_state_mut(facet).boats.moor(entity, berth),
+                Ok(berth) => self.state.facet_state_mut(facet).moor(entity, berth),
                 Err(_) => shapeless += 1,
             }
             restored += 1;

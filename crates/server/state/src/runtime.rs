@@ -20,7 +20,7 @@ use openshard_entities::{EntityId, Registry};
 use openshard_events::EventBus;
 use openshard_gateway::ConnectionId;
 use openshard_map::snapshot::MapSnapshot;
-use openshard_movement::{MapTerrain, NavigationGraph, Terrain, Tile};
+use openshard_movement::{Doors, MapTerrain, NavigationGraph, Overlay, Terrain, Tile};
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::combat::HealthBar;
 use openshard_protocol::feedback::{Animation, NewAnimation, PlaySound};
@@ -37,6 +37,7 @@ use openshard_protocol::world::{
 };
 use openshard_protocol::{access::AccessLevel, feature::Feature, version::ClientVersion};
 
+use crate::boat::Plank;
 use crate::components::{
     Access, Amount, Body, Client, Combat, Contained, CorpseBody, CraftedBy, Drawn, Equipped, Ghost, Heading,
     HearsGhosts, Hidden, Hitpoints, InRegion, Meditating, Movement, Name, Position, Quality, Staff,
@@ -405,13 +406,29 @@ pub struct FacetState {
     /// Who is near what, on this facet.
     pub sectors: Sectors,
     /// What the live world has put in the way: closed doors, placed decoration.
-    pub obstructions: Obstructions,
+    ///
+    /// **Private, and mutated only through this facet.** Every write here has to
+    /// be followed by a rewrite of the same tile in [`overlay`](Self::overlay),
+    /// and a public field is a way to forget — which is the failure mode
+    /// `docs/map/terrain_seam.md` is entirely about. See
+    /// [`FacetState::block`].
+    obstructions: Obstructions,
     /// The ships moored on this facet, and the decks they put over the water.
     ///
-    /// Beside the obstruction index rather than in it, because that index can
-    /// only ever *subtract* and a deck is somewhere to stand that the map does
-    /// not have — `docs/boats.md`'s B3.
-    pub boats: crate::boat::Boats,
+    /// Beside the obstruction index rather than in it, because the two move on
+    /// different clocks: a door flips where it hangs, a ship sails. What they
+    /// used to be beside each other *for* — being asked separately by every step
+    /// — is over; they project into one overlay now. Private for the same reason
+    /// as [`obstructions`](Self::obstructions).
+    boats: crate::boat::Boats,
+    /// The two indexes above as every step decision reads them: one type, by
+    /// tile, shared with the client.
+    ///
+    /// A projection and not a third source of truth. Nothing writes here except
+    /// [`refresh`](Self::refresh), and nothing calls that except the four
+    /// mutators below, which is what makes the invariant — *the overlay states
+    /// what the indexes hold* — unforgettable rather than remembered.
+    overlay: Overlay,
     /// The named areas of this facet — towns, dungeons, guarded zones.
     pub regions: Regions,
     /// What each block of this facet's ground still has left to give: the
@@ -424,12 +441,104 @@ pub struct FacetState {
 }
 
 impl FacetState {
+    /// A facet `width` by `height`, with its ground and nothing on it yet.
+    ///
+    /// The sector grid and the region index are sized from the same pair rather
+    /// than passed, because every caller built them that way and a facet whose
+    /// grid disagrees with its own width is not a configuration anybody wants
+    /// to be able to spell. The three live indexes start empty and are private
+    /// — see [`obstructions`](Self::obstructions).
+    #[must_use]
+    pub fn new(map: Option<MapSnapshot>, coarse: Option<NavigationGraph>, width: u32, height: u32) -> Self {
+        Self {
+            map,
+            coarse,
+            width,
+            height,
+            sectors: Sectors::new(width, height),
+            obstructions: Obstructions::default(),
+            boats: crate::boat::Boats::default(),
+            overlay: Overlay::default(),
+            regions: Regions::new(width, height),
+            banks: Banks::default(),
+        }
+    }
+
     /// The facet's static long-distance guide, when it has a map in movement's
     /// coordinate space. Kept as an accessor so no caller can mistake it for
     /// the live terrain that actually approves a step.
     #[must_use]
     pub const fn coarse_router(&self) -> Option<&NavigationGraph> {
         self.coarse.as_ref()
+    }
+
+    /// What the live world has put in the way, with the entity that put it
+    /// there.
+    ///
+    /// The *identity* half, and the only reason to come here rather than to the
+    /// overlay: the overlay says a door is in the way, and this says which door
+    /// — which is what a townsperson about to open one needs.
+    #[must_use]
+    pub const fn obstructions(&self) -> &Obstructions {
+        &self.obstructions
+    }
+
+    /// The ships moored here.
+    #[must_use]
+    pub const fn boats(&self) -> &crate::boat::Boats {
+        &self.boats
+    }
+
+    /// The live world over this facet's map, as every step decision reads it.
+    #[must_use]
+    pub const fn overlay(&self) -> &Overlay {
+        &self.overlay
+    }
+
+    /// Mark `entity` as blocking `(x, y)` through `[z, z + height)`.
+    ///
+    /// See [`Obstructions::block`] for what the identity is and why one entity
+    /// may hold several spans on one tile. The overlay follows.
+    pub fn block(&mut self, x: u16, y: u16, entity: EntityId, door: bool, z: i8, height: u8) {
+        self.obstructions.block(x, y, entity, door, z, height);
+        self.refresh(x, y);
+    }
+
+    /// Remove `entity`'s block on `(x, y)`, if it holds one.
+    pub fn unblock(&mut self, x: u16, y: u16, entity: EntityId) {
+        self.obstructions.unblock(x, y, entity);
+        self.refresh(x, y);
+    }
+
+    /// Put a boat's tiles down, replacing whatever that boat had before.
+    pub fn moor(&mut self, boat: EntityId, planks: impl IntoIterator<Item = ((u16, u16), Plank)>) {
+        // The old footprint first: a boat that moved leaves tiles behind that no
+        // longer carry it, and only `cast_off` knows which those were.
+        self.cast_off(boat);
+        self.boats.moor(boat, planks);
+        for &(x, y) in self.boats.covered_by(boat).to_vec().as_slice() {
+            self.refresh(x, y);
+        }
+    }
+
+    /// Take a boat's tiles back out.
+    pub fn cast_off(&mut self, boat: EntityId) {
+        let was = self.boats.covered_by(boat).to_vec();
+        self.boats.cast_off(boat);
+        for (x, y) in was {
+            self.refresh(x, y);
+        }
+    }
+
+    /// Rewrite one tile's covers from both indexes. **The invariant.**
+    ///
+    /// Both sources at once, rather than each index maintaining its own slice of
+    /// the overlay: a crate lashed to a deck is one tile with entries from both,
+    /// and a per-source rule for merging them is a rule that can be wrong. This
+    /// has nothing to merge.
+    fn refresh(&mut self, x: u16, y: u16) {
+        let covers = crate::obstruct::covers_at(&self.obstructions, &self.boats, x, y);
+        self.overlay.set(Tile::new(x, y), covers);
     }
 }
 
@@ -1055,7 +1164,7 @@ impl WorldState {
     /// and for the same reason: every live entity is on a loaded facet.
     #[must_use]
     pub fn live_terrain(&self, facet: Facet) -> LiveTerrain<'_> {
-        self.planning_terrain(facet, false)
+        self.planning_terrain(facet, Doors::AsTheyStand)
     }
 
     /// The same terrain as a door-opener plans over: closed doors do not block,
@@ -1065,14 +1174,8 @@ impl WorldState {
     ///
     /// See [`live_terrain`](Self::live_terrain).
     #[must_use]
-    pub fn planning_terrain(&self, facet: Facet, through_doors: bool) -> LiveTerrain<'_> {
-        let state = self.facet_state(facet);
-        LiveTerrain::new(
-            self.map_terrain(facet),
-            &state.obstructions,
-            &state.boats,
-            through_doors,
-        )
+    pub fn planning_terrain(&self, facet: Facet, doors: Doors) -> LiveTerrain<'_> {
+        LiveTerrain::new(self.map_terrain(facet), self.facet_state(facet).overlay(), doors)
     }
 
     /// Is any connected player within `range` tiles (Chebyshev) of `centre` on

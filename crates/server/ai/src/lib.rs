@@ -14,7 +14,7 @@ use openshard_combat as combat;
 use openshard_combat::MobileDamaged;
 use openshard_entities::EntityId;
 use openshard_items as items;
-use openshard_movement::{Terrain, direction_toward, find_path, step_from};
+use openshard_movement::{Doors, Terrain, direction_toward, find_path, step_from};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::world::{Facet, Point, Sight};
@@ -70,12 +70,12 @@ pub fn step_toward(
     facet: Facet,
     from: Point,
     to: Point,
-    through_doors: bool,
+    doors: Doors,
 ) -> Option<Direction> {
     // The live terrain, not the bare map: a route must not thread a placed
     // crate the step would then refuse. A door-opener plans through doors and
     // opens them on arrival.
-    let planner = state.planning_terrain(facet, through_doors);
+    let planner = state.planning_terrain(facet, doors);
     if let Some(path) = find_path(&planner, from, to, PATH_BUDGET) {
         return path.first().copied();
     }
@@ -225,7 +225,12 @@ fn probe(state: &WorldState, facet: Facet, from: Point, dir: Direction) -> (bool
     if live.can_step(from, target).is_some() {
         return (true, None);
     }
-    let door = live
+    // Which door, and not just that one is there: the overlay says a door is in
+    // the way, and only the obstruction index says which entity to open. That
+    // is the identity half staying server-side — see `movement::overlay`.
+    let door = state
+        .facet_state(facet)
+        .obstructions()
         .blocker_at(target.x, target.y)
         .filter(|o| o.door)
         .map(|o| o.entity);
@@ -291,7 +296,7 @@ fn chase_step(
     // Blocked: plan a route around. A door-opener plans through doors and
     // opens them on arrival.
     let planned = {
-        let planner = state.planning_terrain(facet, brain.opens_doors);
+        let planner = state.planning_terrain(facet, Doors::for_opener(brain.opens_doors));
         find_path(&planner, from, to, PATH_BUDGET)
     };
     match planned {
@@ -516,7 +521,7 @@ pub fn pet_beat(state: &mut WorldState, pet: EntityId) -> Option<Direction> {
             if openshard_state::in_range(at, target_at, 1) {
                 return None;
             }
-            step_toward(state, facet, at, target_at, true)
+            step_toward(state, facet, at, target_at, Doors::AllOpen)
         }
         PetOrder::Guard | PetOrder::Follow | PetOrder::Come => {
             let &Position(owner_at) = state.registry.get::<Position>(owner)?;
@@ -528,7 +533,7 @@ pub fn pet_beat(state: &mut WorldState, pet: EntityId) -> Option<Direction> {
                 // than pathing across the map, the same give-up the chase has.
                 return None;
             }
-            step_toward(state, facet, at, owner_at, true)
+            step_toward(state, facet, at, owner_at, Doors::AllOpen)
         }
     }
 }

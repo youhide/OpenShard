@@ -20,6 +20,7 @@
 use openshard_combat::MobileDied;
 use openshard_entities::EntityId;
 use openshard_items::Contents;
+use openshard_movement::Doors;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::{Font, TalkMode};
@@ -182,7 +183,9 @@ pub fn advance_escorts(state: &mut WorldState) -> Vec<(Serial, Direction)> {
             .registry
             .get::<openshard_state::components::Body>(npc)
             .is_some_and(|body| openshard_state::components::body_opens_doors(body.id));
-        if let Some(direction) = openshard_ai::step_toward(state, facet, here, there, opens_doors) {
+        if let Some(direction) =
+            openshard_ai::step_toward(state, facet, here, there, Doors::for_opener(opens_doors))
+        {
             if let Some(serial) = state.registry.serial_of(npc) {
                 steps.push((serial, direction));
             }

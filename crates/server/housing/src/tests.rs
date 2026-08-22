@@ -20,7 +20,6 @@ use openshard_movement::scene::Scene;
 use openshard_protocol::serial::{Serial, SerialKind};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::{Facet, Point};
-use openshard_state::harvest::Banks;
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
 use openshard_uofiles::multi::{Component, Multi, Multis};
@@ -136,20 +135,7 @@ fn ground_of(components: Vec<Component>, land: u16, fits: bool) -> WorldState {
     // disagree with the tiledata the terrain is looking at.
     let (map, tiles) = ground_scene(land, fits).into_shard(Facet(0));
     let mut facets = BTreeMap::new();
-    facets.insert(
-        Facet(0),
-        FacetState {
-            map: Some(map),
-            coarse: None,
-            width: SIZE,
-            height: SIZE,
-            sectors: Sectors::new(SIZE, SIZE),
-            obstructions: Obstructions::default(),
-            boats: openshard_state::Boats::default(),
-            regions: Regions::new(SIZE, SIZE),
-            banks: Banks::default(),
-        },
-    );
+    facets.insert(Facet(0), FacetState::new(Some(map), None, SIZE, SIZE));
     WorldState {
         registry: Registry::new(),
         bus: EventBus::new(),
@@ -256,7 +242,7 @@ fn the_walls_block_and_the_floor_does_not() {
     let at = Point::new(10, 10, 0);
     place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
 
-    let obstructions = &state.facet_state(Facet(0)).obstructions;
+    let obstructions = &state.facet_state(Facet(0)).obstructions();
     for (dx, dy) in [(-1, -1), (1, -1), (-1, 1), (1, 1)] {
         let tile = Tile::new((10 + dx) as u16, (10 + dy) as u16);
         assert!(
@@ -285,7 +271,7 @@ fn an_upper_storey_wall_leaves_the_ground_floor_open() {
     let (actor, owner) = an_actor(&mut state);
     place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner).expect("a legal spot");
 
-    let obstructions = &state.facet_state(Facet(0)).obstructions;
+    let obstructions = &state.facet_state(Facet(0)).obstructions();
     // One tile, one entity, two walls: both must be there. Keyed by the entity
     // alone the second would have overwritten the first.
     assert!(
@@ -398,7 +384,7 @@ fn unblocking_gives_the_ground_back() {
 
     unblock(&mut state, house, Facet(0), &footprint);
     assert!(
-        !state.facet_state(Facet(0)).obstructions.is_blocked(9, 9),
+        !state.facet_state(Facet(0)).obstructions().is_blocked(9, 9),
         "a wall outlived the house"
     );
 
@@ -1247,7 +1233,7 @@ fn a_collapsed_house_leaves_a_crate_and_no_walls() {
     assert!(
         state
             .facet_state(Facet(0))
-            .obstructions
+            .obstructions()
             .is_blocked(at.x - 1, at.y - 1),
         "the cottage never had walls"
     );
@@ -1264,7 +1250,7 @@ fn a_collapsed_house_leaves_a_crate_and_no_walls() {
     assert!(
         !state
             .facet_state(Facet(0))
-            .obstructions
+            .obstructions()
             .is_blocked(at.x - 1, at.y - 1),
         "the walls outlived the house"
     );
@@ -1624,13 +1610,13 @@ fn a_redesigned_house_takes_its_old_walls_out_and_puts_its_new_ones_in() {
     let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
 
     assert!(
-        state.facet_state(Facet(0)).obstructions.is_blocked(9, 9),
+        state.facet_state(Facet(0)).obstructions().is_blocked(9, 9),
         "the cottage's north-west wall"
     );
 
     design::redesign(&mut state, actor, house, a_lean_to()).expect("the owner may redesign");
 
-    let obstructions = &state.facet_state(Facet(0)).obstructions;
+    let obstructions = &state.facet_state(Facet(0)).obstructions();
     assert!(
         !obstructions.is_blocked(9, 9),
         "a wall that is no longer part of the house is still blocking"
@@ -1696,7 +1682,7 @@ fn a_design_that_draws_nothing_leaves_the_house_exactly_as_it_was() {
         "a design of one undrawn signature tile is not a house"
     );
     assert!(
-        state.facet_state(Facet(0)).obstructions.is_blocked(9, 9),
+        state.facet_state(Facet(0)).obstructions().is_blocked(9, 9),
         "the refusal took the walls down anyway"
     );
     assert_eq!(
@@ -1855,7 +1841,7 @@ fn a_foundation_blocks_where_its_design_says_and_not_where_its_platform_does() {
     // The cottage fixture's walls are at ±1, and the design keeps them: a
     // design is the platform *plus* a floor and stairs, never a replacement.
     assert!(
-        state.facet_state(Facet(0)).obstructions.is_blocked(9, 9),
+        state.facet_state(Facet(0)).obstructions().is_blocked(9, 9),
         "the platform's own components were dropped from the design"
     );
 }

@@ -58,6 +58,22 @@ pub enum Doors {
     AllOpen,
 }
 
+impl Doors {
+    /// The reading a body plans under, given whether it can work a latch.
+    ///
+    /// The one place a `bool` legitimately becomes one of these: whether a
+    /// creature opens doors is a fact about the creature, held as a flag on its
+    /// brain, and this is the seam where that fact turns into a way of reading
+    /// the ground. Everywhere else the enum is what travels.
+    #[must_use]
+    pub const fn for_opener(opens_doors: bool) -> Self {
+        match opens_doors {
+            true => Self::AllOpen,
+            false => Self::AsTheyStand,
+        }
+    }
+}
+
 /// What one entry over one tile does to a body.
 ///
 /// An enum and not a pair of flags, because the world already says the two are

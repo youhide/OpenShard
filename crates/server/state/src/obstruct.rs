@@ -23,8 +23,9 @@
 
 use std::collections::HashMap;
 
+use crate::boat::Boats;
 use openshard_entities::EntityId;
-use openshard_movement::{LandTile, MapTerrain, OpenWorld, Terrain, Tile};
+use openshard_movement::{Cover, CoverKind, Doors, LandTile, MapTerrain, OpenWorld, Overlay, Terrain, Tile};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 
@@ -51,6 +52,23 @@ pub struct Obstacle {
     /// beneath it — without it, a placed multi-storey building sealed every floor
     /// below its highest impassable piece.
     pub height: u8,
+}
+
+impl Obstacle {
+    /// This obstacle as the overlay states it: the same span, minus the entity.
+    ///
+    /// The projection [`FacetState`](crate::FacetState) maintains. Who put the
+    /// wall here is this crate's business and no reader of a step's outcome
+    /// needs it — see `openshard_movement::overlay`'s header for why the
+    /// shared type carries no owner.
+    #[must_use]
+    pub const fn cover(&self) -> Cover {
+        Cover {
+            z: self.z,
+            height: self.height,
+            kind: CoverKind::Blocks { door: self.door },
+        }
+    }
 }
 
 /// The dynamic obstacles on one facet: tile → the entities blocking it.
@@ -129,6 +147,54 @@ impl Obstructions {
     pub fn is_blocked(&self, x: u16, y: u16) -> bool {
         self.tiles.contains_key(&(x, y))
     }
+
+    /// Every tile this index holds anything on.
+    pub fn tiles(&self) -> impl Iterator<Item = (u16, u16)> + '_ {
+        self.tiles.keys().copied()
+    }
+
+    /// Everything registered on `(x, y)`.
+    ///
+    /// What [`FacetState`](crate::FacetState) projects into the overlay after
+    /// every mutation of this index — see its `refresh`. Read outwards rather
+    /// than kept private because this is the *identity* half: the overlay says
+    /// a door is in the way, and only this says which door, which is what a
+    /// townsperson about to open one needs.
+    #[must_use]
+    pub fn at(&self, x: u16, y: u16) -> &[Obstacle] {
+        self.tiles.get(&(x, y)).map_or(&[], Vec::as_slice)
+    }
+}
+
+/// Everything the two live indexes put on one tile, as the overlay states it.
+///
+/// **The projection, in one place.** Both sources at once rather than each
+/// index maintaining its own slice of the overlay: a crate lashed to a deck is
+/// one tile with entries from both, and a per-source rule for merging them is a
+/// rule that can be wrong. This has nothing to merge.
+#[must_use]
+pub fn covers_at(obstructions: &Obstructions, boats: &Boats, x: u16, y: u16) -> Vec<Cover> {
+    obstructions
+        .at(x, y)
+        .iter()
+        .map(Obstacle::cover)
+        .chain(boats.at(x, y).iter().map(|plank| plank.cover()))
+        .collect()
+}
+
+/// Both live indexes projected into one overlay, whole.
+///
+/// What a caller holding the indexes and no facet builds. A facet does not go
+/// through here — it keeps its overlay in step one tile at a time, which is the
+/// point of [`FacetState::block`](crate::FacetState::block) and its three
+/// siblings.
+#[must_use]
+pub fn project(obstructions: &Obstructions, boats: &Boats) -> Overlay {
+    let mut overlay = Overlay::default();
+    for (x, y) in obstructions.tiles().chain(boats.tiles()) {
+        overlay.set(Tile::new(x, y), covers_at(obstructions, boats, x, y));
+    }
+    overlay
 }
 
 /// The map's terrain with the live world's obstacles laid over it.
@@ -143,60 +209,47 @@ pub struct LiveTerrain<'a> {
     /// forget one and silently inherit a trait default instead. See
     /// `docs/map/terrain_seam.md`.
     map: Option<MapTerrain<'a>>,
-    obstructions: &'a Obstructions,
-    /// The ships. A third source beside the map and the obstruction index, and
-    /// the only one that can *add* somewhere to stand — see [`crate::boat`].
-    boats: &'a crate::boat::Boats,
-    /// Plan as a door-opener: a closed door does not block, because the mobile
-    /// walking this route will open it on arrival. Pathfinding for a creature
-    /// that opens doors sets this; the actual step never does.
-    through_doors: bool,
+    /// Everything the live world has laid over that map — doors, placed decor,
+    /// house walls, hulls and decks — as the one type both ends of the wire
+    /// build. It used to be two borrows here, the obstruction index and the
+    /// ships, each asked in its own arithmetic; the facet keeps them projected
+    /// into this instead. See `openshard_movement::overlay`.
+    overlay: &'a Overlay,
+    /// Which reading of the shut doors this is. A door-opener plans over
+    /// [`Doors::AllOpen`] because the mobile walking the route opens them on
+    /// arrival; the actual step never does.
+    doors: Doors,
 }
 
 impl std::fmt::Debug for LiveTerrain<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LiveTerrain")
             .field("has_map", &self.map.is_some())
-            .field("through_doors", &self.through_doors)
+            .field("doors", &self.doors)
             .finish()
     }
 }
 
 impl<'a> LiveTerrain<'a> {
-    pub(crate) fn new(
-        map: Option<MapTerrain<'a>>,
-        obstructions: &'a Obstructions,
-        boats: &'a crate::boat::Boats,
-        through_doors: bool,
-    ) -> Self {
-        Self {
-            map,
-            obstructions,
-            boats,
-            through_doors,
-        }
+    pub(crate) const fn new(map: Option<MapTerrain<'a>>, overlay: &'a Overlay, doors: Doors) -> Self {
+        Self { map, overlay, doors }
     }
 
-    /// Where a body coming from `from` would land on a deck at `to`, if a boat
-    /// covers it.
+    /// Where a body coming from `from` would land on a deck at `to`, if the
+    /// live world put one there.
     ///
     /// **The one thing that can overrule the map's refusal.** Open water is not
     /// ground, so `can_step` onto it answers `None` — correctly, because there
     /// is nothing there. A ship makes there be something there, and no index
     /// that only subtracts could say so.
     fn aboard(&self, from: Point, to: Point) -> Option<Point> {
-        if self.boats.is_empty() {
+        if self.overlay.is_empty() {
             return None;
         }
-        let deck = self.boats.deck_at(to.x, to.y, i32::from(from.z))?;
+        let deck = self
+            .overlay
+            .surface_at(Tile::new(to.x, to.y), i32::from(from.z))?;
         Some(Point::new(to.x, to.y, i8::try_from(deck).ok()?))
-    }
-
-    /// What blocks `(x, y)`, if anything — so a caller can tell a door from a
-    /// crate before deciding to open, path around, or give up.
-    #[must_use]
-    pub fn blocker_at(&self, x: u16, y: u16) -> Option<Obstacle> {
-        self.obstructions.blocker_at(x, y)
     }
 }
 
@@ -211,20 +264,19 @@ impl Terrain for LiveTerrain<'_> {
             },
             None => OpenWorld.can_step(from, to)?,
         };
-        // A hull is a wall that is not in the obstruction index, so it is asked
-        // separately — and asked after the landing is known, because a gunwale
-        // seals the deck's height and not the water under the ship.
-        if !self.boats.is_empty() && self.boats.hull_blocks(to.x, to.y, i32::from(landed.z)) {
+        // Anything the live world has put in the mobile's own vertical span on
+        // the destination tile: a shut door yields only to a planner told it
+        // will be opened, and a hull, a wall or a crate stops the step outright.
+        // Checked at the z the mobile will stand at, so an upper-floor wall does
+        // not block the floor below — and a gunwale seals the deck's height
+        // rather than the water under the ship, which used to be a separate
+        // question asked in its own arithmetic.
+        if self
+            .overlay
+            .blocker_at(Tile::new(to.x, to.y), i32::from(landed.z), self.doors)
+            .is_some()
+        {
             return None;
-        }
-        // A live obstacle in the mobile's own vertical span on the destination
-        // tile: a shut door yields only to a planner told it will be opened,
-        // anything else stops the step. Checked at the z the mobile will stand at,
-        // so an upper-floor wall does not block the floor below.
-        match self.obstructions.blocker_at_z(to.x, to.y, i32::from(landed.z)) {
-            Some(o) if o.door && self.through_doors => {}
-            Some(_) => return None,
-            None => {}
         }
         // The diagonal corner rule: a diagonal step may not slip through the
         // corner where two blockers meet — both cardinal tiles flanking it must
@@ -275,18 +327,18 @@ impl Terrain for LiveTerrain<'_> {
     }
 
     fn can_fit(&self, tile: Tile, z: i32, height: i32) -> bool {
-        if !self.boats.is_empty() {
-            if self.boats.hull_blocks(tile.x, tile.y, z) {
-                return false;
-            }
-            // A deck at exactly this height is a surface the map does not have,
-            // so it answers for the map rather than alongside it.
-            if self.boats.deck_at(tile.x, tile.y, z) == Some(z) {
-                return self.obstructions.blocker_at_z(tile.x, tile.y, z).is_none();
-            }
+        // `Doors::AsTheyStand` and never the other reading: this asks whether an
+        // object *fits*, and a door that could be opened is still a door hanging
+        // in the gap. Only a body that will open it may read past one.
+        if self.overlay.blocker_at(tile, z, Doors::AsTheyStand).is_some() {
+            return false;
+        }
+        // A deck at exactly this height is a surface the map does not have, so
+        // it answers for the map rather than alongside it.
+        if self.overlay.surface_at(tile, z) == Some(z) {
+            return true;
         }
         self.map.is_none_or(|m| m.can_fit(tile, z, height))
-            && self.obstructions.blocker_at_z(tile.x, tile.y, z).is_none()
     }
 
     fn spawn_z(&self, tile: Tile, near_z: i32) -> Option<i32> {
@@ -313,9 +365,9 @@ impl Terrain for LiveTerrain<'_> {
         openshard_movement::line_tiles(Tile::new(from.x, from.y), Tile::new(to.x, to.y))
             .into_iter()
             .all(|tile| {
-                self.obstructions
-                    .blocker_at(tile.x, tile.y)
-                    .is_none_or(|o| !o.door)
+                self.overlay
+                    .blocker_anywhere(tile)
+                    .is_none_or(|cover| !cover.is_door())
             })
     }
 }
@@ -384,7 +436,8 @@ mod tests {
         let mut obstructions = Obstructions::default();
         let door = an_entity();
         obstructions.block(10, 10, door, true, 0, DOOR_HEIGHT);
-        let live = LiveTerrain::new(None, &obstructions, &NO_BOATS, false);
+        let live_overlay = project(&obstructions, &NO_BOATS);
+        let live = LiveTerrain::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(
             live.can_step(Point::new(10, 9, 0), Point::new(10, 10, 0))
                 .is_none()
@@ -400,7 +453,8 @@ mod tests {
         let mut obstructions = Obstructions::default();
         obstructions.block(10, 10, an_entity(), true, 0, DOOR_HEIGHT);
         obstructions.block(12, 10, an_entity(), false, 0, DOOR_HEIGHT);
-        let planner = LiveTerrain::new(None, &obstructions, &NO_BOATS, true);
+        let planner_overlay = project(&obstructions, &NO_BOATS);
+        let planner = LiveTerrain::new(None, &planner_overlay, Doors::AllOpen);
         assert!(
             planner
                 .can_step(Point::new(10, 9, 0), Point::new(10, 10, 0))
@@ -418,17 +472,20 @@ mod tests {
         let mut obstructions = Obstructions::default();
         let door = an_entity();
         obstructions.block(10, 10, door, true, 0, DOOR_HEIGHT);
-        let live = LiveTerrain::new(None, &obstructions, &NO_BOATS, false);
+        let live_overlay = project(&obstructions, &NO_BOATS);
+        let live = LiveTerrain::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(!live.sight_clear(Point::new(10, 8, 0), Point::new(10, 12, 0)));
         obstructions.unblock(10, 10, door);
-        let live = LiveTerrain::new(None, &obstructions, &NO_BOATS, false);
+        let live_overlay = project(&obstructions, &NO_BOATS);
+        let live = LiveTerrain::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(live.sight_clear(Point::new(10, 8, 0), Point::new(10, 12, 0)));
     }
 
     #[test]
     fn a_diagonal_passes_an_open_corner() {
         let obstructions = Obstructions::default();
-        let live = LiveTerrain::new(None, &obstructions, &NO_BOATS, false);
+        let live_overlay = project(&obstructions, &NO_BOATS);
+        let live = LiveTerrain::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(
             live.can_step(Point::new(10, 10, 0), Point::new(11, 11, 0))
                 .is_some(),
@@ -443,7 +500,8 @@ mod tests {
         // wide open. This is the case a server-driven creature used to exploit.
         let mut obstructions = Obstructions::default();
         obstructions.block(11, 10, an_entity(), false, 0, DOOR_HEIGHT);
-        let live = LiveTerrain::new(None, &obstructions, &NO_BOATS, false);
+        let live_overlay = project(&obstructions, &NO_BOATS);
+        let live = LiveTerrain::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(
             live.can_step(Point::new(10, 10, 0), Point::new(11, 11, 0))
                 .is_none(),
@@ -474,7 +532,8 @@ mod tests {
         // ground level must still block. The mobile steps at z 0.
         let mut obstructions = Obstructions::default();
         obstructions.block(10, 10, an_entity(), false, 20, 20);
-        let live = LiveTerrain::new(None, &obstructions, &NO_BOATS, false);
+        let live_overlay = project(&obstructions, &NO_BOATS);
+        let live = LiveTerrain::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(
             live.can_step(Point::new(10, 9, 0), Point::new(10, 10, 0))
                 .is_some(),
@@ -482,7 +541,8 @@ mod tests {
         );
 
         obstructions.block(11, 10, an_entity(), false, 0, 20);
-        let live = LiveTerrain::new(None, &obstructions, &NO_BOATS, false);
+        let live_overlay = project(&obstructions, &NO_BOATS);
+        let live = LiveTerrain::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(
             live.can_step(Point::new(11, 9, 0), Point::new(11, 10, 0))
                 .is_none(),
@@ -523,7 +583,8 @@ mod tests {
     fn the_live_terrain_answers_the_map_and_not_the_trait_default() {
         let obstructions = Obstructions::default();
         let charted = charted();
-        let live = LiveTerrain::new(Some(charted.terrain()), &obstructions, &NO_BOATS, false);
+        let live_overlay = project(&obstructions, &NO_BOATS);
+        let live = LiveTerrain::new(Some(charted.terrain()), &live_overlay, Doors::AsTheyStand);
 
         assert!(live.land_is_water(Tile::new(100, 5)), "the sea");
         assert!(!live.land_is_water(Tile::new(99, 5)), "and the shore");
@@ -534,7 +595,8 @@ mod tests {
     #[test]
     fn a_live_terrain_with_no_map_reports_no_water() {
         let obstructions = Obstructions::default();
-        let live = LiveTerrain::new(None, &obstructions, &NO_BOATS, false);
+        let live_overlay = project(&obstructions, &NO_BOATS);
+        let live = LiveTerrain::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(!live.land_is_water(Tile::new(100, 5)));
     }
 
@@ -602,7 +664,8 @@ mod tests {
         let obstructions = Obstructions::default();
         let boats = a_ship_at(an_entity(), 10, 1);
         let sea = sea();
-        let live = LiveTerrain::new(Some(sea.terrain()), &obstructions, &boats, false);
+        let live_overlay = project(&obstructions, &boats);
+        let live = LiveTerrain::new(Some(sea.terrain()), &live_overlay, Doors::AsTheyStand);
 
         assert!(
             live.can_step(Point::new(20, 0, 0), Point::new(20, 1, 0))
@@ -629,7 +692,8 @@ mod tests {
         let obstructions = Obstructions::default();
         let boats = a_ship_at(an_entity(), 10, 1);
         let sea = sea();
-        let live = LiveTerrain::new(Some(sea.terrain()), &obstructions, &boats, false);
+        let live_overlay = project(&obstructions, &boats);
+        let live = LiveTerrain::new(Some(sea.terrain()), &live_overlay, Doors::AsTheyStand);
 
         assert!(
             live.can_step(Point::new(10, 1, 5), Point::new(11, 1, 5))
@@ -645,7 +709,8 @@ mod tests {
     fn an_empty_harbour_changes_no_answer() {
         let obstructions = Obstructions::default();
         let sea = sea();
-        let live = LiveTerrain::new(Some(sea.terrain()), &obstructions, &NO_BOATS, false);
+        let live_overlay = project(&obstructions, &NO_BOATS);
+        let live = LiveTerrain::new(Some(sea.terrain()), &live_overlay, Doors::AsTheyStand);
 
         assert!(
             live.can_step(Point::new(10, 0, 0), Point::new(10, 1, 0))
@@ -714,7 +779,8 @@ mod tests {
         let sea = sea();
 
         let walk = |boats: &Boats| {
-            let live = LiveTerrain::new(Some(sea.terrain()), &obstructions, boats, false);
+            let live_overlay = project(&obstructions, boats);
+            let live = LiveTerrain::new(Some(sea.terrain()), &live_overlay, Doors::AsTheyStand);
             let start = std::time::Instant::now();
             let mut allowed = 0u32;
             for step in 0..STEPS {

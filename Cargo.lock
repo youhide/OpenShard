@@ -2897,6 +2897,7 @@ dependencies = [
  "openshard-entities",
  "openshard-gateway",
  "openshard-items",
+ "openshard-movement",
  "openshard-protocol",
  "openshard-state",
  "tracing",

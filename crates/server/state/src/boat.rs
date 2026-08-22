@@ -36,6 +36,7 @@
 use std::collections::HashMap;
 
 use openshard_entities::EntityId;
+use openshard_movement::Cover;
 
 /// One tile of one boat, as the step check needs it.
 ///
@@ -60,6 +61,21 @@ impl Plank {
     #[must_use]
     pub const fn surface(self) -> i32 {
         self.z as i32 + self.height as i32
+    }
+
+    /// This plank as the overlay states it.
+    ///
+    /// The projection [`FacetState`](crate::FacetState) maintains. `blocks` is
+    /// what picks the arm, and it partitions: a hull stops a body, a deck
+    /// carries one, and no plank has ever been both — which is the whole
+    /// argument for the overlay's `CoverKind` being an enum rather than a pair
+    /// of flags.
+    #[must_use]
+    pub const fn cover(self) -> Cover {
+        match self.blocks {
+            true => Cover::blocking(self.z, self.height),
+            false => Cover::standing(self.z, self.height),
+        }
     }
 }
 
@@ -121,6 +137,11 @@ impl Boats {
                 self.tiles.remove(&tile);
             }
         }
+    }
+
+    /// Every tile any boat covers.
+    pub fn tiles(&self) -> impl Iterator<Item = (u16, u16)> + '_ {
+        self.tiles.keys().copied()
     }
 
     /// What is at `(x, y)`, if anything.

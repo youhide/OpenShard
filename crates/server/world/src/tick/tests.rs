@@ -6600,7 +6600,7 @@ fn wall_of_stone_blocks_the_way_then_clears() {
         world
             .state
             .facet_state(Facet(0))
-            .obstructions
+            .obstructions()
             .is_blocked(spot.x, spot.y),
         "the wall blocks its centre tile"
     );
@@ -6624,7 +6624,7 @@ fn wall_of_stone_blocks_the_way_then_clears() {
         !world
             .state
             .facet_state(Facet(0))
-            .obstructions
+            .obstructions()
             .is_blocked(spot.x, spot.y),
         "and the way is free again"
     );
@@ -10776,7 +10776,7 @@ fn decoration_and_door_state_survive_a_restart() {
         shard
             .state
             .facet_state(Facet(0))
-            .obstructions
+            .obstructions()
             .blocker_at(shut_at.x, shut_at.y)
             .is_some(),
         "the shut door blocks its tile again"
@@ -10786,7 +10786,7 @@ fn decoration_and_door_state_survive_a_restart() {
         shard
             .state
             .facet_state(Facet(0))
-            .obstructions
+            .obstructions()
             .blocker_at(open_pos.x, open_pos.y)
             .is_none(),
         "the open door does not"
@@ -12964,20 +12964,10 @@ pub(super) fn add_empty_facet(world: &mut World, facet: Facet) {
 /// The same, at a size of the test's choosing — the facets are not all the
 /// shape of Britannia, and what the client is told about that is a rule.
 pub(super) fn add_empty_facet_sized(world: &mut World, facet: Facet, width: u32, height: u32) {
-    world.state.facets.insert(
-        facet,
-        FacetState {
-            map: None,
-            coarse: None,
-            width,
-            height,
-            sectors: Sectors::new(width, height),
-            obstructions: Obstructions::default(),
-            boats: openshard_state::Boats::default(),
-            regions: Regions::new(width, height),
-            banks: Banks::default(),
-        },
-    );
+    world
+        .state
+        .facets
+        .insert(facet, FacetState::new(None, None, width, height));
 }
 
 pub(super) fn enter_on_facet(world: &mut World, connection: ConnectionId, facet: Facet, now: Instant) {
@@ -13742,7 +13732,7 @@ fn fence_around(world: &mut World, center: Point) {
                 continue;
             }
             let crate_entity = world.state.registry.spawn();
-            world.state.facet_state_mut(Facet(0)).obstructions.block(
+            world.state.facet_state_mut(Facet(0)).block(
                 (i32::from(center.x) + dx) as u16,
                 (i32::from(center.y) + dy) as u16,
                 crate_entity,
@@ -13801,7 +13791,7 @@ fn a_chase_rounds_a_wall_of_crates() {
     // A five-tile wall between quarry and creature, open at both ends.
     for dx in -2i32..=2 {
         let crate_entity = world.state.registry.spawn();
-        world.state.facet_state_mut(Facet(0)).obstructions.block(
+        world.state.facet_state_mut(Facet(0)).block(
             (i32::from(player_at.x) + dx) as u16,
             player_at.y + 2,
             crate_entity,
@@ -14940,7 +14930,7 @@ fn no_volley_passes_a_shut_door() {
                 continue; // the north gap stays open for the door
             }
             let crate_entity = world.state.registry.spawn();
-            world.state.facet_state_mut(Facet(0)).obstructions.block(
+            world.state.facet_state_mut(Facet(0)).block(
                 (i32::from(den.x) + dx) as u16,
                 (i32::from(den.y) + dy) as u16,
                 crate_entity,
@@ -15679,7 +15669,7 @@ fn a_deed_raises_the_house_cursor_and_answering_it_builds() {
         world
             .state
             .facet_state(Facet(0))
-            .obstructions
+            .obstructions()
             .blocker_at_z(at.x + 1, at.y, 0)
             .is_some(),
         "the house has no walls"

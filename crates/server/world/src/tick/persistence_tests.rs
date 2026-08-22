@@ -848,7 +848,7 @@ fn a_house_survives_a_restart_with_its_walls() {
             .map(|h| h.multi),
         Some(COTTAGE)
     );
-    let obstructions = &restored.state.facet_state(Facet(0)).obstructions;
+    let obstructions = &restored.state.facet_state(Facet(0)).obstructions();
     assert!(
         obstructions.blocker_at_z(at.x - 1, at.y, 0).is_some(),
         "a restored house has no walls, so it is a picture and not a building"
@@ -981,7 +981,7 @@ fn a_house_restored_without_client_files_stands_but_stops_nobody() {
         !world
             .state
             .facet_state(Facet(0))
-            .obstructions
+            .obstructions()
             .is_blocked(START.0 + 4, START.1 + 5),
         "a shard with no multi table invented a wall"
     );
@@ -1260,7 +1260,7 @@ fn a_boat_survives_a_restart_with_its_deck() {
     );
 
     // And the berth is back, which is the half a `Boat` component cannot prove.
-    let index = &restored.state.facet_state(Facet(0)).boats;
+    let index = &restored.state.facet_state(Facet(0)).boats();
     assert_eq!(
         index.deck_at(at.x, at.y, 0),
         Some(3),

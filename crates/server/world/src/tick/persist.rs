@@ -1648,7 +1648,7 @@ impl World {
                     // A shut door seals its doorway again; an open one blocks
                     // nobody until it swings shut.
                     if !door.is_open {
-                        self.state.facet_state_mut(facet).obstructions.block(
+                        self.state.facet_state_mut(facet).block(
                             position.x,
                             position.y,
                             entity,
@@ -1667,7 +1667,6 @@ impl World {
                     if let Some(height) = height {
                         self.state
                             .facet_state_mut(facet)
-                            .obstructions
                             .block(position.x, position.y, entity, false, position.z, height);
                     }
                 }

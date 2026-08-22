@@ -85,7 +85,7 @@ impl World {
         self.state.registry.insert(entity, field);
         self.state.facet_state_mut(facet).sectors.insert(entity, pos);
         if field.blocks {
-            self.state.facet_state_mut(facet).obstructions.block(
+            self.state.facet_state_mut(facet).block(
                 pos.x,
                 pos.y,
                 entity,
@@ -189,10 +189,7 @@ impl World {
                 .get::<Field>(entity)
                 .is_some_and(|field| field.blocks)
             {
-                self.state
-                    .facet_state_mut(facet)
-                    .obstructions
-                    .unblock(at.x, at.y, entity);
+                self.state.facet_state_mut(facet).unblock(at.x, at.y, entity);
             }
         }
         for watcher in self.state.watchers_of(entity) {

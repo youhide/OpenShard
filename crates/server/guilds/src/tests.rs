@@ -18,12 +18,10 @@ use openshard_protocol::serial::SerialKind;
 use openshard_protocol::version::ClientVersion;
 use openshard_protocol::world::Facet;
 use openshard_state::connection::Connection;
-use openshard_state::harvest::Banks;
 use openshard_state::rng::Rng;
-use openshard_state::sectors::Sectors;
 use openshard_state::{
     Client, Dialogue, FacetState, Gameplay, GuildCandidate, GuildGumpContext, GuildId, GuildMember,
-    GuildPage, Obstructions, QuestDefs, Rank, Regions, TargetPurpose, WorldState,
+    GuildPage, QuestDefs, Rank, TargetPurpose, WorldState,
 };
 
 use crate::{Outcome, Refusal, may_lead, roster};
@@ -35,17 +33,7 @@ fn world() -> WorldState {
     let mut facets = BTreeMap::new();
     facets.insert(
         Facet(0),
-        FacetState {
-            map: None,
-            coarse: None,
-            width: SIZE,
-            height: SIZE,
-            sectors: Sectors::new(SIZE, SIZE),
-            obstructions: Obstructions::default(),
-            boats: openshard_state::Boats::default(),
-            regions: Regions::new(SIZE, SIZE),
-            banks: Banks::default(),
-        },
+        FacetState::new(None, None, SIZE, SIZE),
     );
     WorldState {
         registry: Registry::new(),

@@ -16,10 +16,8 @@ use openshard_movement::scene::Scene;
 use openshard_movement::{Terrain, Walker};
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::serial::SerialKind;
-use openshard_state::harvest::Banks;
 use openshard_state::rng::Rng;
-use openshard_state::sectors::Sectors;
-use openshard_state::{Boats, Dialogue, FacetState, Gameplay, Obstructions, QuestDefs, Regions};
+use openshard_state::{Dialogue, FacetState, Gameplay, QuestDefs};
 use openshard_uofiles::multi::{Component, Multi, Multis};
 use openshard_uofiles::tiledata::TileFlags;
 
@@ -104,20 +102,7 @@ fn a_sea() -> WorldState {
     // the terrain is looking at.
     let (map, tiles) = sea().into_shard(Facet(0));
     let mut facets = BTreeMap::new();
-    facets.insert(
-        Facet(0),
-        FacetState {
-            map: Some(map),
-            coarse: None,
-            width: SIZE,
-            height: SIZE,
-            sectors: Sectors::new(SIZE, SIZE),
-            obstructions: Obstructions::default(),
-            boats: Boats::default(),
-            regions: Regions::new(SIZE, SIZE),
-            banks: Banks::default(),
-        },
-    );
+    facets.insert(Facet(0), FacetState::new(Some(map), None, SIZE, SIZE));
     WorldState {
         registry: Registry::new(),
         bus: EventBus::new(),
@@ -196,7 +181,7 @@ fn the_hull_blocks_and_the_deck_carries() {
     let (actor, owner) = a_captain(&mut state);
     place(&mut state, actor, Point::new(20, 20, 0), Facet(0), SLOOP, owner).expect("open water");
 
-    let boats = &state.facet_state(Facet(0)).boats;
+    let boats = &state.facet_state(Facet(0)).boats();
     assert_eq!(boats.deck_at(20, 20, 0), Some(3), "the deck plank's own top");
     assert_eq!(boats.deck_at(20, 21, 0), Some(3), "and the tile behind it");
     assert!(boats.hull_blocks(19, 20, 0), "the port hull");
@@ -213,7 +198,7 @@ fn the_signature_tile_is_not_a_plank() {
     place(&mut state, actor, Point::new(20, 20, 0), Facet(0), SLOOP, owner).expect("open water");
 
     // Four drawn components, so four planks — not five.
-    let boats = &state.facet_state(Facet(0)).boats;
+    let boats = &state.facet_state(Facet(0)).boats();
     let covered = [(19, 20), (20, 20), (20, 21), (21, 20)];
     let total: usize = covered.iter().map(|&(x, y)| boats.at(x, y).len()).sum();
     assert_eq!(total, 4, "the signature tile was launched as part of the ship");
@@ -235,7 +220,7 @@ fn a_ship_half_on_the_beach_is_refused() {
         "the shore runs along y = 0",
     );
     assert!(
-        state.facet_state(Facet(0)).boats.is_empty(),
+        state.facet_state(Facet(0)).boats().is_empty(),
         "a refused launch left a ship in the index",
     );
 
@@ -268,7 +253,7 @@ fn two_boats_do_not_occupy_one_tile() {
         Err(Refusal::Occupied),
         "and an overlap of one tile is still an overlap",
     );
-    assert_eq!(state.facet_state(Facet(0)).boats.len(), 1);
+    assert_eq!(state.facet_state(Facet(0)).boats().len(), 1);
 }
 
 /// Far enough apart is fine, which is the other half of the same check.
@@ -279,7 +264,7 @@ fn two_boats_moor_side_by_side_when_they_do_not_touch() {
     place(&mut state, actor, Point::new(20, 20, 0), Facet(0), SLOOP, owner).expect("open water");
     place(&mut state, actor, Point::new(30, 20, 0), Facet(0), SLOOP, owner).expect("open water");
 
-    assert_eq!(state.facet_state(Facet(0)).boats.len(), 2);
+    assert_eq!(state.facet_state(Facet(0)).boats().len(), 2);
 }
 
 /// Staff skip the *judgements* about the berth and nothing else — housing's D10
@@ -347,7 +332,7 @@ fn sinking_a_ship_clears_the_index_the_grid_and_the_registry() {
 
     sink(&mut state, boat);
 
-    assert!(state.facet_state(Facet(0)).boats.is_empty());
+    assert!(state.facet_state(Facet(0)).boats().is_empty());
     assert_eq!(boat_at(&state, at, Facet(0)), None);
     assert!(state.registry.get::<Position>(boat).is_none());
 }
@@ -401,7 +386,7 @@ fn a_ship_sails_a_tile() {
         state.registry.get::<Position>(boat).map(|p| p.0),
         Some(Point::new(20, 21, 0)),
     );
-    let boats = &state.facet_state(Facet(0)).boats;
+    let boats = &state.facet_state(Facet(0)).boats();
     assert_eq!(boats.deck_at(20, 21, 0), Some(3), "the deck came with it");
     assert!(boats.hull_blocks(19, 21, 0), "and so did the port hull");
     assert!(
@@ -480,7 +465,7 @@ fn a_ship_steered_into_the_shore_stops_and_moves_nobody() {
         "the crew walked ashore without the ship",
     );
     assert_eq!(
-        state.facet_state(Facet(0)).boats.deck_at(20, 1, 0),
+        state.facet_state(Facet(0)).boats().deck_at(20, 1, 0),
         Some(3),
         "the berth it was refused out of is still the berth it is in",
     );

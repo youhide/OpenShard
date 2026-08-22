@@ -76,7 +76,7 @@ impl World {
                     },
                 );
             }
-            self.state.facet_state_mut(facet).obstructions.block(
+            self.state.facet_state_mut(facet).block(
                 door.position.x,
                 door.position.y,
                 entity,
@@ -163,7 +163,6 @@ impl World {
         if let Some(height) = height {
             self.state
                 .facet_state_mut(facet)
-                .obstructions
                 .block(position.x, position.y, entity, false, position.z, height);
         }
         self.state.facet_state_mut(facet).sectors.insert(entity, position);
@@ -287,7 +286,7 @@ impl World {
                         close_at: 0,
                     },
                 );
-                self.state.facet_state_mut(facet).obstructions.block(
+                self.state.facet_state_mut(facet).block(
                     position.x,
                     position.y,
                     entity,
@@ -317,10 +316,7 @@ impl World {
                 }
             }
             if let Some(&Position(at)) = self.state.registry.get::<Position>(entity) {
-                self.state
-                    .facet_state_mut(facet)
-                    .obstructions
-                    .unblock(at.x, at.y, entity);
+                self.state.facet_state_mut(facet).unblock(at.x, at.y, entity);
             }
             self.state.facet_state_mut(facet).sectors.remove(entity);
             self.state.registry.despawn(entity);

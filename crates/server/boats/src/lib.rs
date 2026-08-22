@@ -190,7 +190,7 @@ pub fn place(
     // On the sector grid like any item, so a client sailing into view is told
     // about it by the ordinary interest sweep rather than by a path of its own.
     state.facet_state_mut(facet).sectors.insert(entity, at);
-    state.facet_state_mut(facet).boats.moor(entity, berth);
+    state.facet_state_mut(facet).moor(entity, berth);
     Ok(entity)
 }
 
@@ -207,7 +207,7 @@ fn check_berth(state: &WorldState, facet: Facet, berth: &[((u16, u16), Plank)]) 
         if !terrain.land_is_water(Tile::new(x, y)) {
             return Err(Refusal::NotOnWater);
         }
-        if facet_state.boats.boat_at(x, y).is_some() {
+        if facet_state.boats().boat_at(x, y).is_some() {
             return Err(Refusal::Occupied);
         }
     }
@@ -274,7 +274,7 @@ pub fn step(
 
     // Apply. The index first, so a body relocated below lands on a deck that is
     // already where the ship is going rather than on the one it is leaving.
-    state.facet_state_mut(facet).boats.moor(boat, berth);
+    state.facet_state_mut(facet).moor(boat, berth);
     state.registry.insert(boat, Position(to));
     state.facet_state_mut(facet).sectors.insert(boat, to);
 
@@ -342,7 +342,12 @@ fn check_course(state: &WorldState, facet: Facet, boat: EntityId, berth: &[Berth
         if !terrain.land_is_water(Tile::new(x, y)) {
             return Err(Refusal::NotOnWater);
         }
-        if facet_state.boats.at(x, y).iter().any(|plank| plank.boat != boat) {
+        if facet_state
+            .boats()
+            .at(x, y)
+            .iter()
+            .any(|plank| plank.boat != boat)
+        {
             return Err(Refusal::Occupied);
         }
     }
@@ -361,7 +366,7 @@ fn check_course(state: &WorldState, facet: Facet, boat: EntityId, berth: &[Berth
 /// than [`WorldState::move_to`], which is a mobile's.
 fn aboard(state: &WorldState, boat: EntityId, facet: Facet) -> Vec<(EntityId, Point)> {
     let facet_state = state.facet_state(facet);
-    let covered = facet_state.boats.covered_by(boat);
+    let covered = facet_state.boats().covered_by(boat);
     let Some(&first) = covered.first() else {
         return Vec::new();
     };
@@ -380,7 +385,7 @@ fn aboard(state: &WorldState, boat: EntityId, facet: Facet) -> Vec<(EntityId, Po
         .nearby(centre, reach)
         .filter(|&(entity, _)| entity != boat)
         .filter(|(entity, _)| state.registry.has::<Movement>(*entity))
-        .filter(|&(_, at)| facet_state.boats.deck_at(at.x, at.y, i32::from(at.z)) == Some(i32::from(at.z)))
+        .filter(|&(_, at)| facet_state.boats().deck_at(at.x, at.y, i32::from(at.z)) == Some(i32::from(at.z)))
         .collect()
 }
 
@@ -472,7 +477,7 @@ pub fn sail(state: &mut WorldState) -> Vec<EntityId> {
 /// undoable and what a scuttled ship will need when there is one.
 pub fn sink(state: &mut WorldState, boat: EntityId) {
     let facet = state.facet_of(boat);
-    state.facet_state_mut(facet).boats.cast_off(boat);
+    state.facet_state_mut(facet).cast_off(boat);
     state.facet_state_mut(facet).sectors.remove(boat);
     state.registry.despawn(boat);
 }
@@ -483,7 +488,7 @@ pub fn sink(state: &mut WorldState, boat: EntityId) {
 /// `housing::house_at` this one is asked by the step path.
 #[must_use]
 pub fn boat_at(state: &WorldState, at: Point, facet: Facet) -> Option<EntityId> {
-    state.facet_state(facet).boats.boat_at(at.x, at.y)
+    state.facet_state(facet).boats().boat_at(at.x, at.y)
 }
 
 #[cfg(test)]

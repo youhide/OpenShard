@@ -42,7 +42,7 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{Drawn, House, Position};
-use openshard_state::{Obstructions, WorldState};
+use openshard_state::{FacetState, WorldState};
 use openshard_uofiles::multi::Component;
 
 /// The bit that turns a multi id into the graphic the wire carries.
@@ -290,8 +290,7 @@ pub fn place(
     // On the sector grid like any item, so a client entering the area is told
     // about it by the ordinary interest sweep rather than by a path of its own.
     state.facet_state_mut(facet).sectors.insert(entity, at);
-    let obstructions = &mut state.facet_state_mut(facet).obstructions;
-    block_footprint(obstructions, entity, &footprint);
+    block_footprint(state.facet_state_mut(facet), entity, &footprint);
     adopt_doors(state, entity, facet, at, multi);
     hang_sign(state, entity, facet, at, multi);
     Ok(entity)
@@ -656,8 +655,7 @@ pub fn house_at(state: &WorldState, at: Point, facet: Facet) -> Option<EntityId>
 /// and a house legal when it was built stays built even if the rules have since
 /// tightened — so restoring one is the registry half by hand and this.
 pub fn block(state: &mut WorldState, entity: EntityId, facet: Facet, footprint: &[Footprint]) {
-    let obstructions = &mut state.facet_state_mut(facet).obstructions;
-    block_footprint(obstructions, entity, footprint);
+    block_footprint(state.facet_state_mut(facet), entity, footprint);
 }
 
 /// Take a house's walls back out of the obstruction index.
@@ -665,9 +663,9 @@ pub fn block(state: &mut WorldState, entity: EntityId, facet: Facet, footprint: 
 /// The entity itself is the caller's to despawn: this is the half that has to
 /// happen *before* it goes, because the footprint is derived from where it stood.
 pub fn unblock(state: &mut WorldState, entity: EntityId, facet: Facet, footprint: &[Footprint]) {
-    let obstructions = &mut state.facet_state_mut(facet).obstructions;
+    let facet_state = state.facet_state_mut(facet);
     for spot in footprint {
-        obstructions.unblock(spot.tile.x, spot.tile.y, entity);
+        facet_state.unblock(spot.tile.x, spot.tile.y, entity);
     }
 }
 
@@ -866,12 +864,16 @@ fn within_yard(one: Tile, other: Tile) -> bool {
 }
 
 /// Register every wall of a footprint against one entity.
-fn block_footprint(obstructions: &mut Obstructions, entity: EntityId, footprint: &[Footprint]) {
+///
+/// The facet and not its obstruction index, because the index is only half of
+/// what a wall has to reach: the overlay every step reads is the other half, and
+/// only the facet holds both. See `FacetState::block`.
+fn block_footprint(facet_state: &mut FacetState, entity: EntityId, footprint: &[Footprint]) {
     for spot in footprint {
         // Not a door: a house's own doors are entities of their own, placed on
         // top of it, and a wall a mobile could ask to open is a wall that stops
         // nobody who knows how.
-        obstructions.block(spot.tile.x, spot.tile.y, entity, false, spot.z, spot.height);
+        facet_state.block(spot.tile.x, spot.tile.y, entity, false, spot.z, spot.height);
     }
 }
 
@@ -883,7 +885,7 @@ fn block_footprint(obstructions: &mut Obstructions, entity: EntityId, footprint:
 /// road are the rest of D3 and are not here yet — see `docs/housing.md`, which
 /// says so rather than letting a reader assume the check is complete.
 fn occupied_tile(state: &WorldState, facet: Facet, footprint: &[Footprint]) -> Option<Tile> {
-    let obstructions = &state.facet_state(facet).obstructions;
+    let obstructions = &state.facet_state(facet).obstructions();
     footprint
         .iter()
         .find(|spot| {
