@@ -695,7 +695,7 @@ impl App {
         // a step cannot go through. Rebuilt here rather than per decision: one
         // click plans a route over hundreds of tiles, and each of them would
         // otherwise rescan everything on screen. See `clutter.rs`.
-        self.world.presentation.clutter = clutter::Clutter::of(
+        self.world.presentation.overlay = clutter::of(
             &self.world.presentation.items,
             view.mobiles.values(),
             &self.resources.tiledata,

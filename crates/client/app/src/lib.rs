@@ -844,7 +844,7 @@ pub fn run<D: Dial + Send + 'static>(
                 multi_preview: Vec::new(),
                 damage_numbers: Vec::new(),
                 health_estimates: std::collections::BTreeMap::new(),
-                clutter: clutter::Clutter::default(),
+                overlay: openshard_movement::Overlay::default(),
                 crowd: {
                     // The body's ease, which is not the camera's — see `STARTUP_EASE`.
                     let mut crowd = Crowd::default();

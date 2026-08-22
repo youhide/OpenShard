@@ -215,8 +215,12 @@ pub struct PresentationWorld {
     pub damage_numbers: Vec<DamageNumber>,
     /// Presentation-only delayed health, keyed by the mobile the shard named.
     pub health_estimates: BTreeMap<Serial, HealthEstimate>,
-    /// The corresponding transient obstacles used by local movement.
-    pub clutter: clutter::Clutter,
+    /// What the shard has put on the ground, as local movement reads it.
+    ///
+    /// The same type the shard keeps on the other end of the wire — built here
+    /// from the view rather than from an entity registry, and rebuilt whole
+    /// whenever the view changes. See [`clutter::of`].
+    pub overlay: openshard_movement::Overlay,
     /// Animation and glide history, which belongs to presentation rather than
     /// authoritative state.
     pub crowd: Crowd,
@@ -921,30 +925,32 @@ pub(crate) fn terrain(resources: &resources::Resources) -> openshard_movement::M
 }
 
 /// [`terrain`] with the shard's own items laid over it — what every step
-/// decision on this end should actually ask. See [`clutter::Clutter::over`],
+/// decision on this end should actually ask. See [`clutter::of`],
 /// and `terrain`'s own docs for why this takes references rather than being
 /// an `App` method.
 pub(crate) fn cluttered<'a>(
     world: &'a WorldState,
     resources: &'a resources::Resources,
 ) -> clutter::Cluttered<'a, openshard_movement::MapTerrain<'a>> {
-    world
-        .presentation
-        .clutter
-        .over(resources.map.map(), &resources.tiledata)
+    clutter::Cluttered::new(
+        terrain(resources),
+        &world.presentation.overlay,
+        openshard_movement::Doors::AsTheyStand,
+    )
 }
 
 /// The same, read as though every shut door on it stood open: what a route
 /// may be *planned* through, and never what decides a step. See
-/// [`clutter::Clutter::over_with_doors_open`].
+/// [`openshard_movement::Doors::AllOpen`].
 pub(crate) fn cluttered_with_doors_open<'a>(
     world: &'a WorldState,
     resources: &'a resources::Resources,
 ) -> clutter::Cluttered<'a, openshard_movement::MapTerrain<'a>> {
-    world
-        .presentation
-        .clutter
-        .over_with_doors_open(resources.map.map(), &resources.tiledata)
+    clutter::Cluttered::new(
+        terrain(resources),
+        &world.presentation.overlay,
+        openshard_movement::Doors::AllOpen,
+    )
 }
 
 #[cfg(test)]
@@ -983,7 +989,7 @@ mod tests {
             multi_preview: Vec::new(),
             damage_numbers: Vec::new(),
             health_estimates: BTreeMap::new(),
-            clutter: clutter::Clutter::default(),
+            overlay: openshard_movement::Overlay::default(),
             crowd: Crowd::default(),
         };
         let update_interval = Duration::from_millis(750);

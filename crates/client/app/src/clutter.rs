@@ -17,10 +17,10 @@
 //! down. Walls worked only because a wall is static art and therefore in the
 //! files.
 //!
-//! So this is the client's half of `Obstructions`, built from the one thing this
-//! end has: the ground items in the [`WorldView`](openshard_client_net::view::WorldView),
+//! So this is the client's half of the shard's own index, built from the one
+//! thing this end has: the ground items in the [`WorldView`](openshard_client_net::view::WorldView),
 //! and the same `tiledata.mul` the server read to decide they block. Same
-//! predicate (`Terrain::item_blocks`), same z-span (base z, tiledata height), so
+//! predicate (the tiledata blocking flag), same z-span (base z, tiledata height), so
 //! the two ends agree by construction rather than by resemblance — see
 //! `world::tick::decor::place_decoration`, which is where the server's copy of
 //! this decision is made.
@@ -32,14 +32,15 @@
 //! # A door is not a crate, and the graphic does not say which
 //!
 //! Both stop a step; only one of them is something a player can open. So a
-//! blocker records *which* it is ([`Blocker::door`]), and the tiles the shut ones
+//! cover records *which* it is (`CoverKind::Blocks`'s `door`), and the tiles the shut ones
 //! stand on are the list this module exists to keep: **potentially passable, and
 //! currently closed**. [`Cluttered`] can then be read either way — as the world
 //! stands, or as it would be with every door open — which is what lets a route be
 //! planned *through* a shut door to find out where the way would go, and the walk
 //! stop in front of it. `steer::plan` is the reader; the server has the same pair
-//! under the same name (`state::obstruct`'s `Obstacle::door` and
-//! `LiveTerrain::through_doors`), which is the point.
+//! under the same name (`state::obstruct`'s `Obstacle::door`), and since node E
+//! of `docs/map/terrain_seam.md` it is not merely the same name but the same
+//! type: both ends build an `openshard_movement::Overlay`.
 //!
 //! **The graphic is what says a door is open, and its own art disagrees.** This
 //! module used to argue that no state had to be tracked at all — "a door's own
@@ -66,8 +67,7 @@ use std::collections::HashMap;
 use openshard_client_net::view::Mobile;
 use openshard_client_render::doors;
 use openshard_client_render::items::GroundItem;
-use openshard_map::map::WorldMap;
-use openshard_movement::{MapTerrain, Terrain, Tile};
+use openshard_movement::{Cover, Doors, Overlay, Terrain, Tile};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_uofiles::tiledata::TileData;
@@ -78,202 +78,64 @@ use openshard_uofiles::tiledata::TileData;
 /// the other end of the wire.
 const MOBILE_HEIGHT: i32 = openshard_movement::PLAYER_HEIGHT;
 
-/// A placed item's tiledata height, kept distinct from other byte-sized item
-/// properties such as weight and layer.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct TileHeight(u8);
-
-impl TileHeight {
-    const fn new(raw: u8) -> Self {
-        Self(raw)
-    }
-
-    /// The span a blocker occupies. Zero-height art still occupies its tile.
-    fn span(self) -> i32 {
-        i32::from(self.0).max(1)
-    }
-}
-
-/// One placed item blocking a tile: where its body starts, how tall it is, and
-/// whether it is something that could be opened.
+/// Index whatever in `items` or `mobiles` is in the way, and say of each placed
+/// item whether it is a door.
 ///
-/// No graphic and no serial. This end never has to say *which* item stopped the
-/// step — it cannot open one anyway; a player does that by double-clicking — but
-/// it does have to say what *kind* stopped it, because a route that stops at a
-/// door means "go and open it" and a route that stops at a crate means "there is
-/// no way through". The server's `Obstacle` carries the same flag beside the
-/// entity, for the same distinction.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct Blocker {
-    /// The base z the item sits at — its `0x1A` position's z.
-    z: i8,
-    /// Its tiledata height: its body spans `[z, z + height)`. Zero-height art
-    /// still occupies its own tile, so the span is never empty — see
-    /// [`Clutter::blocked_at`].
-    height: TileHeight,
-    /// A shut door: in the way now, and not in the way at all if somebody opens
-    /// it. What [`Clutter::blocked_through_doors`] leaves out, and the whole of
-    /// what "potentially passable" means here.
-    door: bool,
-}
-
-/// The ground items that block, indexed by tile.
+/// Two questions, two sources, and the module header is where the argument for
+/// the second one lives:
 ///
-/// Built once per view update and read by every step decision, rather than
-/// scanned per call: `find_path` asks about hundreds of tiles for one click, and
-/// a linear pass over everything on screen for each of them is the same answer
-/// bought a hundred times over.
-#[derive(Default, Debug)]
-pub struct Clutter {
-    tiles: HashMap<Tile, Vec<Blocker>>,
-}
-
-impl Clutter {
-    /// Index whatever in `items` or `mobiles` is in the way, and say of each
-    /// placed item whether it is a door.
-    ///
-    /// Two questions, two sources, and the module header is where the argument
-    /// for the second one lives:
-    ///
-    /// - **Does it block?** `Terrain::item_blocks` — the tiledata flags — which
-    ///   is the same predicate the server decides with, so the two ends agree by
-    ///   construction rather than by resemblance.
-    /// - **Is it a door, and has it swung?** `client/render`'s door table, which
-    ///   is the reference emulator's own arithmetic over the art indices. The
-    ///   flags cannot answer either half: an open leaf is impassable in tiledata
-    ///   just as often as a shut one.
-    ///
-    /// An open leaf is therefore left out altogether — nothing is in the way of a
-    /// body walking through an open door — and a shut one goes in marked, which
-    /// is the list [`Clutter::blocked_through_doors`] reads.
-    pub fn of<'a>(
-        items: &[GroundItem],
-        mobiles: impl IntoIterator<Item = &'a Mobile>,
-        tiles: &TileData,
-    ) -> Self {
-        let mut blocked: HashMap<Tile, Vec<Blocker>> = HashMap::new();
-        for item in items {
-            // What is drawn is what is in the way — see `GroundItem::displayed`.
-            let tile = tiles.static_tile(item.displayed().0);
-            if !tile.flags.is_blocking() || doors::is_open(item.displayed()) {
-                continue;
-            }
-            let at = Tile::new(item.at.x, item.at.y);
-            blocked.entry(at).or_default().push(Blocker {
-                z: item.at.z,
-                height: TileHeight::new(tile.height),
-                door: doors::is_door(item.displayed()),
+/// - **Does it block?** The tiledata flags, which is the same predicate the
+///   server decides with, so the two ends agree by construction rather than by
+///   resemblance.
+/// - **Is it a door, and has it swung?** `client/render`'s door table, which is
+///   the reference emulator's own arithmetic over the art indices. The flags
+///   cannot answer either half: an open leaf is impassable in tiledata just as
+///   often as a shut one.
+///
+/// An open leaf is therefore left out altogether — nothing is in the way of a
+/// body walking through an open door — and a shut one goes in marked, which is
+/// what [`Doors::AllOpen`] reads.
+///
+/// Built whole and thrown away whole. This end has no identities to address a
+/// finer edit to, which is the same fact that keeps [`Cover`] free of an owner
+/// — see `openshard_movement::overlay`.
+pub fn of<'a>(
+    items: &[GroundItem],
+    mobiles: impl IntoIterator<Item = &'a Mobile>,
+    tiles: &TileData,
+) -> Overlay {
+    let mut covers: HashMap<Tile, Vec<Cover>> = HashMap::new();
+    for item in items {
+        // What is drawn is what is in the way — see `GroundItem::displayed`.
+        let tile = tiles.static_tile(item.displayed().0);
+        if !tile.flags.is_blocking() || doors::is_open(item.displayed()) {
+            continue;
+        }
+        let at = Tile::new(item.at.x, item.at.y);
+        covers
+            .entry(at)
+            .or_default()
+            .push(match doors::is_door(item.displayed()) {
+                true => Cover::door(item.at.z, tile.height),
+                false => Cover::blocking(item.at.z, tile.height),
             });
-        }
-        // The server may permit two mobiles on one tile, but routing a player
-        // visibly through an NPC is still a bad client-side result.
-        for mobile in mobiles {
-            let at = Tile::new(mobile.position.x, mobile.position.y);
-            blocked.entry(at).or_default().push(Blocker {
-                z: mobile.position.z,
-                height: TileHeight::new(MOBILE_HEIGHT as u8),
-                door: false,
-            });
-        }
-        Self { tiles: blocked }
     }
-
-    /// Whether anything here is in the way of a body standing at `stand_z` —
-    /// its body `[z, z + height)` meeting the mobile's `[stand_z, stand_z +
-    /// MOBILE_HEIGHT)`.
-    ///
-    /// The z-span and not the tile, so a crate on a building's upper floor
-    /// leaves the ground floor beneath it open. `max(1)` on the height because
-    /// tiledata gives plenty of impassable art a height of zero — a flat span
-    /// would overlap nothing and block nowhere, which reads exactly like the bug
-    /// this module exists to fix.
-    fn blocked_at(&self, tile: Tile, stand_z: i32) -> bool {
-        self.blocked(tile, stand_z, Doors::AsTheyStand)
+    // The server may permit two mobiles on one tile, but routing a player
+    // visibly through an NPC is still a bad client-side result. Not a category
+    // the shared type names: nothing downstream reads a mobile *as* one, so it
+    // goes in as furniture with a body's height.
+    for mobile in mobiles {
+        let at = Tile::new(mobile.position.x, mobile.position.y);
+        covers
+            .entry(at)
+            .or_default()
+            .push(Cover::blocking(mobile.position.z, MOBILE_HEIGHT as u8));
     }
-
-    /// The same question with every shut door on the tile opened: what would
-    /// still be in the way then.
-    ///
-    /// The list this module keeps, read the way a plan reads it. A doorway with
-    /// nothing but a shut leaf in it comes back open; a doorway with a crate
-    /// dragged into it does not, because opening the door does not move the
-    /// crate. Both halves matter: the first is where a route may be planned
-    /// through, the second is why a route may not be planned through everything.
-    fn blocked_through_doors(&self, tile: Tile, stand_z: i32) -> bool {
-        self.blocked(tile, stand_z, Doors::AllOpen)
+    let mut overlay = Overlay::default();
+    for (tile, covers) in covers {
+        overlay.set(tile, covers);
     }
-
-    /// The two above, which differ only in whether a shut door counts.
-    fn blocked(&self, tile: Tile, stand_z: i32, doors: Doors) -> bool {
-        self.tiles.get(&tile).is_some_and(|blockers| {
-            blockers.iter().any(|blocker| {
-                if blocker.door && doors == Doors::AllOpen {
-                    return false;
-                }
-                let bottom = i32::from(blocker.z);
-                let top = bottom + blocker.height.span();
-                bottom < stand_z + MOBILE_HEIGHT && stand_z < top
-            })
-        })
-    }
-
-    /// The map with this clutter laid over it — what every step decision on this
-    /// end should actually ask.
-    pub const fn over<'a>(&'a self, map: &'a WorldMap, tiles: &'a TileData) -> Cluttered<'a, MapTerrain<'a>> {
-        self.over_terrain(MapTerrain::new(map, tiles))
-    }
-
-    /// The same map read as though every shut door on it stood open.
-    ///
-    /// **Not a walkability answer**, and never what decides a step: nothing here
-    /// opens a door, and a body walked into one on this terrain's word would be
-    /// refused by the shard. It is what a *plan* asks to find out where the way
-    /// would go if the door were opened — `steer::plan`, which walks the real
-    /// half of the answer and stops where the two part company. The server's
-    /// `LiveTerrain::through_doors` is the same terrain under the same name, for
-    /// the creature that plans a route it intends to open its way along.
-    pub const fn over_with_doors_open<'a>(
-        &'a self,
-        map: &'a WorldMap,
-        tiles: &'a TileData,
-    ) -> Cluttered<'a, MapTerrain<'a>> {
-        Cluttered {
-            map: MapTerrain::new(map, tiles),
-            clutter: self,
-            doors: Doors::AllOpen,
-        }
-    }
-
-    /// The same, over any terrain at all.
-    ///
-    /// What [`over`](Self::over) is written in terms of, and the reason the
-    /// overlay is generic rather than nailed to `MapTerrain`: the behaviour this
-    /// module exists for — a held direction *going around* a barrel instead of
-    /// shuddering against it — is a property of the overlay and the detour rule
-    /// together, and pinning it to a real facet would make the only test of it
-    /// one that skips on every machine without a couple of gigabytes of client
-    /// files. Over `OpenWorld` the ground is flat and infinite, so the one thing
-    /// left that can refuse a step is the clutter itself.
-    pub const fn over_terrain<M: Terrain>(&self, map: M) -> Cluttered<'_, M> {
-        Cluttered {
-            map,
-            clutter: self,
-            doors: Doors::AsTheyStand,
-        }
-    }
-}
-
-/// Which of the two readings of the same ground a [`Cluttered`] is.
-///
-/// A `bool` would do and is exactly what this must not be: the two are read at
-/// call sites four modules apart, and "true" there says nothing about which way
-/// round it is. See [`Clutter::over_with_doors_open`].
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Doors {
-    /// Shut is shut: what a step is actually allowed by.
-    AsTheyStand,
-    /// Every shut door stands open: what a route may be planned through.
-    AllOpen,
+    overlay
 }
 
 /// The client's map with the shard's placed items laid over it.
@@ -284,18 +146,21 @@ enum Doors {
 #[derive(Debug)]
 pub struct Cluttered<'a, M> {
     map: M,
-    clutter: &'a Clutter,
-    /// Which reading this is — see [`Clutter::over_with_doors_open`].
+    overlay: &'a Overlay,
+    /// Which reading this is — as the doors stand, or as a route may be planned
+    /// through them.
     doors: Doors,
 }
 
-impl<M: Terrain> Cluttered<'_, M> {
+impl<'a, M: Terrain> Cluttered<'a, M> {
+    /// The map with `overlay` laid over it, read under `doors`.
+    pub const fn new(map: M, overlay: &'a Overlay, doors: Doors) -> Self {
+        Self { map, overlay, doors }
+    }
+
     /// Whether this tile is blocked, by whichever of the two readings this is.
     fn blocked(&self, tile: Tile, stand_z: i32) -> bool {
-        match self.doors {
-            Doors::AsTheyStand => self.clutter.blocked_at(tile, stand_z),
-            Doors::AllOpen => self.clutter.blocked_through_doors(tile, stand_z),
-        }
+        self.overlay.blocker_at(tile, stand_z, self.doors).is_some()
     }
 }
 
@@ -340,12 +205,12 @@ impl<M: Terrain> Terrain for Cluttered<'_, M> {
     // all and fell into the trait's defaults, so a caller asking this overlay
     // about a multi was told there was none. Nothing on this end asked, which is
     // the only reason it was not a bug; the client reads `Resources::tiledata`
-    // and `Resources::multis` directly, as `Clutter::of` above already does.
+    // and `Resources::multis` directly, as [`of`] above already does.
     fn sight_clear(&self, from: Point, to: Point) -> bool {
         // The map's answer alone. A crate is furniture, not a wall — the same
         // line the server draws, which only treats a shut *door* as opaque.
         //
-        // That door is now a fact this end holds ([`Blocker::door`]), so the
+        // That door is now a fact this end holds (`Cover::is_door`), so the
         // remaining half of the server's rule *could* be drawn here. It is not,
         // because nothing on this end computes line of sight for gameplay yet
         // and a rule with no reader is a rule nobody will notice going wrong.
@@ -354,29 +219,29 @@ impl<M: Terrain> Terrain for Cluttered<'_, M> {
     }
 }
 
+/// Index blockers by hand, with no tiledata to read flags from.
+///
+/// For the tests that are about the *span* and the detour rather than about
+/// which art is impassable — the flag half is [`of`]'s and is covered against
+/// the real `tiledata.mul` below.
+///
+/// Nothing placed this way is a door: which art is a door is the other half
+/// [`of`] answers, and a fixture that could claim it would be claiming the very
+/// thing under test.
 #[cfg(test)]
-impl Clutter {
-    /// Index blockers by hand, with no tiledata to read flags from.
-    ///
-    /// For the tests that are about the *span* and the detour rather than about
-    /// which art is impassable — the flag half is [`Clutter::of`]'s and is
-    /// covered against the real `tiledata.mul` below. Everything downstream of
-    /// here, `blocked_at` included, is the one the shipping path uses.
-    ///
-    /// Nothing placed this way is a door: which art is a door is the other half
-    /// [`Clutter::of`] answers, and a fixture that could claim it would be
-    /// claiming the very thing under test.
-    fn placed(blockers: &[(Point, u8)]) -> Self {
-        let mut tiles: HashMap<Tile, Vec<Blocker>> = HashMap::new();
-        for (at, height) in blockers {
-            tiles.entry(Tile::new(at.x, at.y)).or_default().push(Blocker {
-                z: at.z,
-                height: TileHeight::new(*height),
-                door: false,
-            });
-        }
-        Self { tiles }
+fn placed(blockers: &[(Point, u8)]) -> Overlay {
+    let mut covers: HashMap<Tile, Vec<Cover>> = HashMap::new();
+    for (at, height) in blockers {
+        covers
+            .entry(Tile::new(at.x, at.y))
+            .or_default()
+            .push(Cover::blocking(at.z, *height));
     }
+    let mut overlay = Overlay::default();
+    for (tile, covers) in covers {
+        overlay.set(tile, covers);
+    }
+    overlay
 }
 
 #[cfg(test)]
@@ -399,8 +264,8 @@ mod tests {
     #[test]
     fn a_step_into_a_barrel_is_refused_by_this_end() {
         let east = Point::new(HERE.x + 1, HERE.y, 0);
-        let clutter = Clutter::placed(&[(east, BARREL_HEIGHT)]);
-        let terrain = clutter.over_terrain(OpenWorld);
+        let clutter = placed(&[(east, BARREL_HEIGHT)]);
+        let terrain = Cluttered::new(OpenWorld, &clutter, Doors::AsTheyStand);
         assert!(
             step_allowed(&terrain, HERE, Direction::East).is_none(),
             "a barrel due east did not stop the step"
@@ -416,8 +281,8 @@ mod tests {
         let east = Point::new(HERE.x + 1, HERE.y, 0);
         // Mobiles enter the shipping index with this same body-height span;
         // keep the routing rule test independent of client art files.
-        let clutter = Clutter::placed(&[(east, MOBILE_HEIGHT as u8)]);
-        let terrain = clutter.over_terrain(OpenWorld);
+        let clutter = placed(&[(east, MOBILE_HEIGHT as u8)]);
+        let terrain = Cluttered::new(OpenWorld, &clutter, Doors::AsTheyStand);
         assert!(
             step_allowed(&terrain, HERE, Direction::East).is_none(),
             "an NPC due east did not stop the step"
@@ -434,8 +299,8 @@ mod tests {
     #[test]
     fn a_diagonal_held_at_a_barrel_rounds_it() {
         let north_east = Point::new(HERE.x + 1, HERE.y - 1, 0);
-        let clutter = Clutter::placed(&[(north_east, BARREL_HEIGHT)]);
-        let terrain = clutter.over_terrain(OpenWorld);
+        let clutter = placed(&[(north_east, BARREL_HEIGHT)]);
+        let terrain = Cluttered::new(OpenWorld, &clutter, Doors::AsTheyStand);
         let intent = Heading {
             direction: Direction::NorthEast,
             lean: Lean::Centred,
@@ -462,8 +327,8 @@ mod tests {
     #[test]
     fn a_barrel_overhead_stops_nothing() {
         let east = Point::new(HERE.x + 1, HERE.y, 40);
-        let clutter = Clutter::placed(&[(east, BARREL_HEIGHT)]);
-        let terrain = clutter.over_terrain(OpenWorld);
+        let clutter = placed(&[(east, BARREL_HEIGHT)]);
+        let terrain = Cluttered::new(OpenWorld, &clutter, Doors::AsTheyStand);
         assert!(
             step_allowed(&terrain, HERE, Direction::East).is_some(),
             "a barrel two storeys up blocked the ground"
@@ -541,9 +406,11 @@ mod tests {
             "a water barrel's flags are no longer article-only"
         );
         assert!(!data.flags.is_blocking());
-        let clutter = Clutter::of(&[item(100, 100, 0, water_barrel)], [], &tiles);
+        let clutter = of(&[item(100, 100, 0, water_barrel)], [], &tiles);
         assert!(
-            !clutter.blocked_at(Tile::new(100, 100), 0),
+            clutter
+                .blocker_at(Tile::new(100, 100), 0, Doors::AsTheyStand)
+                .is_none(),
             "a water barrel was made solid here and the shard would still allow the step"
         );
     }
@@ -553,13 +420,17 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = Clutter::of(&[item(100, 100, 0, BARREL)], [], &tiles);
+        let clutter = of(&[item(100, 100, 0, BARREL)], [], &tiles);
         assert!(
-            clutter.blocked_at(Tile::new(100, 100), 0),
+            clutter
+                .blocker_at(Tile::new(100, 100), 0, Doors::AsTheyStand)
+                .is_some(),
             "a barrel underfoot is not in the way"
         );
         assert!(
-            !clutter.blocked_at(Tile::new(101, 100), 0),
+            clutter
+                .blocker_at(Tile::new(101, 100), 0, Doors::AsTheyStand)
+                .is_none(),
             "a barrel blocked a tile it is not on"
         );
     }
@@ -569,13 +440,17 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = Clutter::of(&[item(100, 100, 40, BARREL)], [], &tiles);
+        let clutter = of(&[item(100, 100, 40, BARREL)], [], &tiles);
         assert!(
-            !clutter.blocked_at(Tile::new(100, 100), 0),
+            clutter
+                .blocker_at(Tile::new(100, 100), 0, Doors::AsTheyStand)
+                .is_none(),
             "a crate on an upper floor sealed the floor beneath it"
         );
         assert!(
-            clutter.blocked_at(Tile::new(100, 100), 40),
+            clutter
+                .blocker_at(Tile::new(100, 100), 40, Doors::AsTheyStand)
+                .is_some(),
             "a crate did not block the floor it stands on"
         );
     }
@@ -592,9 +467,11 @@ mod tests {
             !tiles.static_tile(gold.0).flags.is_blocking(),
             "gold's tiledata calls it impassable"
         );
-        let clutter = Clutter::of(&[item(100, 100, 0, gold)], [], &tiles);
+        let clutter = of(&[item(100, 100, 0, gold)], [], &tiles);
         assert!(
-            !clutter.blocked_at(Tile::new(100, 100), 0),
+            clutter
+                .blocker_at(Tile::new(100, 100), 0, Doors::AsTheyStand)
+                .is_none(),
             "a coin on the floor stopped a step"
         );
     }
@@ -637,9 +514,11 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = Clutter::of(&[item(100, 100, 0, DOOR_OPEN)], [], &tiles);
+        let clutter = of(&[item(100, 100, 0, DOOR_OPEN)], [], &tiles);
         assert!(
-            !clutter.blocked_at(Tile::new(100, 100), 0),
+            clutter
+                .blocker_at(Tile::new(100, 100), 0, Doors::AsTheyStand)
+                .is_none(),
             "an open door blocked its own doorway"
         );
     }
@@ -651,11 +530,14 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = Clutter::of(&[item(100, 100, 0, DOOR_SHUT)], [], &tiles);
+        let clutter = of(&[item(100, 100, 0, DOOR_SHUT)], [], &tiles);
         let doorway = Tile::new(100, 100);
-        assert!(clutter.blocked_at(doorway, 0), "a shut door let a step through");
         assert!(
-            !clutter.blocked_through_doors(doorway, 0),
+            clutter.blocker_at(doorway, 0, Doors::AsTheyStand).is_some(),
+            "a shut door let a step through"
+        );
+        assert!(
+            clutter.blocker_at(doorway, 0, Doors::AllOpen).is_none(),
             "a shut door is what 'potentially passable' means; the plan must be able to look past it"
         );
     }
@@ -669,8 +551,12 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = Clutter::of(&[item(100, 100, 0, BARREL)], [], &tiles);
-        assert!(clutter.blocked_through_doors(Tile::new(100, 100), 0));
+        let clutter = of(&[item(100, 100, 0, BARREL)], [], &tiles);
+        assert!(
+            clutter
+                .blocker_at(Tile::new(100, 100), 0, Doors::AllOpen)
+                .is_some()
+        );
     }
 
     /// A crate dragged into a doorway seals it: the tile is blocked in both
@@ -682,13 +568,15 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = Clutter::of(
+        let clutter = of(
             &[item(100, 100, 0, DOOR_SHUT), item(100, 100, 0, BARREL)],
             [],
             &tiles,
         );
         assert!(
-            clutter.blocked_through_doors(Tile::new(100, 100), 0),
+            clutter
+                .blocker_at(Tile::new(100, 100), 0, Doors::AllOpen)
+                .is_some(),
             "a doorway with a barrel in it was called openable"
         );
     }
