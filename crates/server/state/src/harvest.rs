@@ -40,20 +40,28 @@ pub enum HarvestKind {
     Fish,
 }
 
+/// A tile id in the normalized form harvest definitions use.
+///
+/// Land ids are raw; static ids have their high bit set. Keeping the normalized
+/// value distinct from a wire [`Graphic`] makes it impossible to compare a raw
+/// tile to a harvest-definition entry by accident.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct HarvestTile(pub u16);
+
 /// How a definition matches a tile id.
 #[derive(Clone, Copy, Debug)]
 pub enum TileSet {
     /// An explicit list — ServUO's default `Validate`.
-    List(&'static [u16]),
+    List(&'static [HarvestTile]),
     /// Inclusive `(low, high)` pairs — ServUO's `RangedTiles`, which is how the
     /// several thousand water tiles are written without listing them.
-    Ranges(&'static [(u16, u16)]),
+    Ranges(&'static [(HarvestTile, HarvestTile)]),
 }
 
 impl TileSet {
     /// Whether a tile id belongs to this set.
     #[must_use]
-    pub fn contains(&self, tile: u16) -> bool {
+    pub fn contains(&self, tile: HarvestTile) -> bool {
         match self {
             Self::List(ids) => ids.contains(&tile),
             Self::Ranges(pairs) => pairs.iter().any(|(lo, hi)| tile >= *lo && tile <= *hi),
@@ -214,8 +222,8 @@ pub enum TileSource {
 /// written in those terms, so a mountain *wall* static and the mountain *ground*
 /// under it both hit the ore definition.
 #[must_use]
-pub fn tile_key(tile: Graphic, source: TileSource) -> Graphic {
-    Graphic(match source {
+pub fn tile_key(tile: Graphic, source: TileSource) -> HarvestTile {
+    HarvestTile(match source {
         TileSource::Land => tile.0,
         TileSource::Static => (tile.0 & 0x3FFF) | 0x4000,
     })
@@ -230,7 +238,7 @@ pub fn tile_key(tile: Graphic, source: TileSource) -> Graphic {
 #[must_use]
 pub fn definition_for(tile: Graphic, source: TileSource, ml: bool) -> Option<&'static HarvestDef> {
     let key = tile_key(tile, source);
-    definitions(ml).iter().find(|def| def.tiles.contains(key.0))
+    definitions(ml).iter().find(|def| def.tiles.contains(key))
 }
 
 /// The definition for a kind.
@@ -785,21 +793,21 @@ mod tests {
         // several hundred magic numbers is exactly where a transcription slip
         // hides, and it surfaces months later as "mining does not work in Minoc".
         // Mountain and cave land, and the Ter Mur cave statics at the end.
-        assert!(MOUNTAIN_AND_CAVE_TILES.contains(&220));
-        assert!(MOUNTAIN_AND_CAVE_TILES.contains(&2105));
-        assert!(MOUNTAIN_AND_CAVE_TILES.contains(&0x454F));
+        assert!(MOUNTAIN_AND_CAVE_TILES.contains(&HarvestTile(220)));
+        assert!(MOUNTAIN_AND_CAVE_TILES.contains(&HarvestTile(2105)));
+        assert!(MOUNTAIN_AND_CAVE_TILES.contains(&HarvestTile(0x454F)));
         // Sand runs from 22, and takes in the desert at 1650.
-        assert!(SAND_TILES.contains(&22));
-        assert!(SAND_TILES.contains(&1650));
+        assert!(SAND_TILES.contains(&HarvestTile(22)));
+        assert!(SAND_TILES.contains(&HarvestTile(1650)));
         // Trees are statics, so every id already carries the 0x4000 bit.
-        assert!(TREE_TILES.iter().all(|&t| t >= 0x4000));
-        assert!(TREE_TILES.contains(&0x4CCA));
-        assert!(TREE_TILES.contains(&0x52C7));
+        assert!(TREE_TILES.iter().all(|&t| t >= HarvestTile(0x4000)));
+        assert!(TREE_TILES.contains(&HarvestTile(0x4CCA)));
+        assert!(TREE_TILES.contains(&HarvestTile(0x52C7)));
         // Water is ranges: the open-sea land tiles and the deep-water statics.
-        assert!(TileSet::Ranges(WATER_TILES).contains(0x00A9));
-        assert!(TileSet::Ranges(WATER_TILES).contains(0x75D5));
-        assert!(!TileSet::Ranges(WATER_TILES).contains(0x00A7));
-        assert!(!TileSet::Ranges(WATER_TILES).contains(0x75D6));
+        assert!(TileSet::Ranges(WATER_TILES).contains(HarvestTile(0x00A9)));
+        assert!(TileSet::Ranges(WATER_TILES).contains(HarvestTile(0x75D5)));
+        assert!(!TileSet::Ranges(WATER_TILES).contains(HarvestTile(0x00A7)));
+        assert!(!TileSet::Ranges(WATER_TILES).contains(HarvestTile(0x75D6)));
     }
 
     #[test]
@@ -821,8 +829,8 @@ mod tests {
         // 286..294 are in both of ServUO's arrays and it resolves them by table
         // order, `OreAndStone` first. If this ever flips, a stretch of Britannia
         // silently becomes a sand pit.
-        assert!(MOUNTAIN_AND_CAVE_TILES.contains(&286));
-        assert!(SAND_TILES.contains(&286));
+        assert!(MOUNTAIN_AND_CAVE_TILES.contains(&HarvestTile(286)));
+        assert!(SAND_TILES.contains(&HarvestTile(286)));
         assert_eq!(
             definition_for(Graphic(286), TileSource::Land, true).map(|d| d.kind),
             Some(HarvestKind::Ore)

@@ -353,9 +353,9 @@ fn harvest_tiles(text: &str) -> String {
         ("SAND_TILES", "ServUO's sand tiles, verbatim.", &tiles.sand),
     ] {
         writeln!(out, "/// {doc}").unwrap();
-        writeln!(out, "static {ident}: &[u16] = &[").unwrap();
+        writeln!(out, "static {ident}: &[HarvestTile] = &[").unwrap();
         for chunk in values.chunks(10) {
-            let row: Vec<String> = chunk.iter().map(u16::to_string).collect();
+            let row: Vec<String> = chunk.iter().map(|tile| format!("HarvestTile({tile})")).collect();
             writeln!(out, "    {},", row.join(", ")).unwrap();
         }
         out.push_str("];\n\n");
@@ -365,13 +365,13 @@ fn harvest_tiles(text: &str) -> String {
         "/// ServUO's `Lumberjacking.m_TreeTiles`, verbatim — all statics, so every id is\n\
          /// matched through [`tile_key`]'s `| 0x4000`.\n",
     );
-    out.push_str("static TREE_TILES: &[u16] = &[\n");
+    out.push_str("static TREE_TILES: &[HarvestTile] = &[\n");
     for chunk in tiles.tree.chunks(8) {
         let row: Vec<String> = chunk
             .iter()
             .map(|t| {
                 let _ = id(t);
-                t.clone()
+                format!("HarvestTile({t})")
             })
             .collect();
         writeln!(out, "    {},", row.join(", ")).unwrap();
@@ -382,10 +382,10 @@ fn harvest_tiles(text: &str) -> String {
         "/// Water, as inclusive `(from, to)` ranges: the sets are contiguous runs and\n\
          /// listing every id would be four hundred rows for no gain.\n",
     );
-    out.push_str("static WATER_TILES: &[(u16, u16)] = &[\n");
+    out.push_str("static WATER_TILES: &[(HarvestTile, HarvestTile)] = &[\n");
     for (from, to) in &tiles.water {
         assert!(id(from) <= id(to), "water range {from}..{to} runs backwards");
-        writeln!(out, "    ({from}, {to}),").unwrap();
+        writeln!(out, "    (HarvestTile({from}), HarvestTile({to})),").unwrap();
     }
     out.push_str("];\n");
     out

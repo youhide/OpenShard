@@ -54,7 +54,7 @@ const ALREADY_BUSY: ClilocId = ClilocId(500_972);
 /// its being the one facet without protection. Facet `0` is Felucca; the constant
 /// is here rather than inline because it is a *rule*, not a coincidence of
 /// numbering.
-const FELUCCA: u8 = 0;
+const FELUCCA: Facet = Facet(0);
 
 /// What a resolved harvest target is: the ground, and what is on it.
 ///
@@ -319,7 +319,7 @@ fn deliver(
     // Felucca pays double, and only up to what the bank can actually give — a
     // half-empty vein hands over what is in it rather than going negative.
     let facet = state.facet_of(harvester);
-    let wanted = if facet == Facet(FELUCCA) {
+    let wanted = if facet == FELUCCA {
         def.consumed_felucca
     } else {
         def.consumed

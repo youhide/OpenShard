@@ -221,9 +221,9 @@ fn search(
     // Pack the planar tile into one integer. Besides making the key cheaper to
     // hash, this lets FxHash use its integer fast path. The resolved landing
     // point lives in came_from, so there is no second point_at map to maintain.
-    let mut cost: FxHashMap<u32, u32> = FxHashMap::default();
-    let mut came_from: FxHashMap<u32, (u32, Direction, Point)> = FxHashMap::default();
-    let mut closed: FxHashSet<u32> = FxHashSet::default();
+    let mut cost: FxHashMap<PathTileKey, u32> = FxHashMap::default();
+    let mut came_from: FxHashMap<PathTileKey, (PathTileKey, Direction, Point)> = FxHashMap::default();
+    let mut closed: FxHashSet<PathTileKey> = FxHashSet::default();
     // The tuple's third field is a tie-breaker, not a second admissible heuristic:
     // Chebyshev alone cannot tell a straight cardinal line from a route that
     // drifts off it and back — both cost the same eight-way step count. Manhattan
@@ -374,7 +374,7 @@ fn debug_slow(
 /// Walk the parent chain from the goal back to the start, collecting the steps in
 /// travel order.
 fn reconstruct(
-    came_from: &FxHashMap<u32, (u32, Direction, Point)>,
+    came_from: &FxHashMap<PathTileKey, (PathTileKey, Direction, Point)>,
     start: Tile,
     goal: Tile,
 ) -> Vec<Direction> {
@@ -390,9 +390,17 @@ fn reconstruct(
     steps
 }
 
+/// A planar tile packed for A*'s hash tables.
+///
+/// Its representation retains `u32`'s inexpensive integer hashing, while the
+/// newtype prevents the packed coordinate from being mixed with a path cost or
+/// another unrelated integer.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct PathTileKey(u32);
+
 #[inline]
-fn tile_key(tile: Tile) -> u32 {
-    (u32::from(tile.x) << 16) | u32::from(tile.y)
+fn tile_key(tile: Tile) -> PathTileKey {
+    PathTileKey((u32::from(tile.x) << 16) | u32::from(tile.y))
 }
 
 /// The remaining distance estimate: Chebyshev, the count of eight-way steps, which

@@ -93,6 +93,13 @@ pub struct WorldMap {
     statics: Vec<Vec<StaticItem>>,
 }
 
+/// A static's sortable coordinate within its block: **`y` first**, then `x`.
+///
+/// This is deliberately not a bare coordinate tuple: it is valid only for the
+/// order `WorldMap` keeps its statics in.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct StaticTileKey(u16, u16);
+
 /// Where a static sorts within its block: by tile, **`y` first**.
 ///
 /// The row before the column, and that is the whole reason this is a named
@@ -106,8 +113,8 @@ pub struct WorldMap {
 /// whole of both is used: the items of one block share the same high bits, so
 /// the two orders are the same one, and the key is then the same comparison the
 /// lookups make.
-fn tile_key(item: &StaticItem) -> (u16, u16) {
-    (item.y, item.x)
+fn tile_key(item: &StaticItem) -> StaticTileKey {
+    StaticTileKey(item.y, item.x)
 }
 
 impl fmt::Debug for WorldMap {
@@ -315,8 +322,9 @@ impl WorldMap {
         let slot = &mut self.statics[block.get() as usize];
         // The same two searches [`WorldMap::statics_at`] makes, over the same sorted
         // run: the first item of the tile, and how many of them there are.
-        let from = slot.partition_point(|item| tile_key(item) < (y, x));
-        let count = slot[from..].partition_point(|item| tile_key(item) == (y, x));
+        let key = StaticTileKey(y, x);
+        let from = slot.partition_point(|item| tile_key(item) < key);
+        let count = slot[from..].partition_point(|item| tile_key(item) == key);
         (nth < count).then(|| slot.remove(from + nth))
     }
 
@@ -336,8 +344,9 @@ impl WorldMap {
             return NO_STATICS.iter();
         };
         let block = self.statics_of(block);
-        let from = block.partition_point(|item| tile_key(item) < (y, x));
-        let count = block[from..].partition_point(|item| tile_key(item) == (y, x));
+        let key = StaticTileKey(y, x);
+        let from = block.partition_point(|item| tile_key(item) < key);
+        let count = block[from..].partition_point(|item| tile_key(item) == key);
         block[from..from + count].iter()
     }
 
