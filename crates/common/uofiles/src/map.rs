@@ -456,6 +456,29 @@ impl Map {
         self.land.get(x, y)
     }
 
+    /// The ground of one row of tiles, from `from_x` to `to_x` inclusive, in
+    /// ascending `x`.
+    ///
+    /// [`Map::statics_in_row`]'s other half, and it exists for the same reason:
+    /// a rectangle is walked row by row, and a row is where the cost is. Each
+    /// cell here is one step east of the last — see
+    /// [`LandGrid::cells_in_row`] — rather than a fresh derivation of a block
+    /// index and an offset inside it per tile.
+    ///
+    /// It yields cells and not positions: a caller walking a rectangle already
+    /// knows where it is, and the row simply ends where the facet does. So a
+    /// row that starts off the map is empty, a row that runs off its eastern
+    /// edge stops there, and **a caller counting tiles must not assume it got
+    /// one cell per tile it asked for** — the tiles past the end are the ones
+    /// [`Map::land`] answers `None` for.
+    ///
+    /// A range that runs backwards is empty.
+    pub fn land_in_row(&self, y: u16, from_x: u16, to_x: u16) -> impl Iterator<Item = LandCell> + '_ {
+        self.land
+            .cells_in_row(y, from_x, to_x)
+            .map(|at| self.land.cell(at))
+    }
+
     /// Change the ground at one tile, for a map built by [`Map::from_blocks`].
     ///
     /// The other half of building a scene — see [`Map::place_static`] for what
@@ -959,6 +982,37 @@ mod tests {
         assert_eq!((map.width(), map.height()), (1448, 1448));
         assert_eq!(map.facet_name(), "Tokuno");
         assert_eq!(map.static_count(), 0);
+    }
+
+    /// A stepped row is the same row a per-tile lookup builds — and it stops
+    /// where the facet does rather than wrapping onto the next row.
+    ///
+    /// The two failures worth naming, because both leave a plausible picture:
+    /// a step that crosses a block's eastern edge by `+1` reads the tile eight
+    /// rows down of the *same* block, and a row that runs past the last column
+    /// and keeps stepping reads the western edge of the row below.
+    #[test]
+    fn a_stepped_row_is_the_row_a_lookup_builds() {
+        // Three blocks across, two down, and every tile carries its own
+        // position — so a cell that came from the wrong tile says which.
+        let map = Map::from_blocks(3, 2, |x, y| LandCell {
+            tile: LandTile(x),
+            z: y as i8,
+        });
+
+        for y in [0u16, 7, 8, 15] {
+            let stepped: Vec<LandCell> = map.land_in_row(y, 0, 23).collect();
+            let looked_up: Vec<LandCell> = (0..24).map(|x| map.land(x, y).unwrap()).collect();
+            assert_eq!(stepped, looked_up, "row {y}, across three blocks");
+        }
+
+        // Past the eastern edge the row ends; it does not wrap.
+        let over = map.land_in_row(5, 20, 40);
+        assert_eq!(over.count(), 4, "four tiles left of a 24-wide facet");
+
+        // A row the facet has not, and a range that runs backwards.
+        assert_eq!(map.land_in_row(16, 0, 23).count(), 0);
+        assert_eq!(map.land_in_row(0, 5, 4).count(), 0);
     }
 
     /// A tile's corners are its own height and its three neighbours', and the

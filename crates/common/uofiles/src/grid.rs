@@ -343,6 +343,21 @@ impl LandGrid {
         &self.cells[from..from + CELLS_PER_BLOCK]
     }
 
+    /// The cell at a linear index.
+    ///
+    /// What a walk that stepped its way to an index reads through — see
+    /// [`Self::cells_in_row`]. A tile-shaped caller wants [`Self::get`]
+    /// instead; this one is for a caller that already has the position.
+    ///
+    /// # Panics
+    ///
+    /// If `at` came from a different, larger grid, which is the same argument
+    /// as [`Self::block`]: a [`CellIndex`] is only ever made here, so that is a
+    /// caller mixing up two facets rather than a value it could have got wrong.
+    pub fn cell(&self, at: CellIndex) -> LandCell {
+        self.cells[at.0 as usize]
+    }
+
     /// The cell one tile east, or `None` at the facet's eastern edge.
     ///
     /// A step, not a fresh derivation. Inside a block east is the next cell;

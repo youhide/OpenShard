@@ -38,6 +38,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Facet;
 use openshard_uofiles::color::Color16;
+use openshard_uofiles::grid::BlockCoord;
 use openshard_uofiles::map::{BLOCK_SIZE, Map};
 use openshard_uofiles::radarcol::RadarColors;
 
@@ -1167,20 +1168,36 @@ pub fn fill(
     into: &mut [Color16],
 ) {
     let (origin_x, origin_y) = origin;
-    // Every tile starts as its land, and the statics are laid over it block by
-    // block. Two passes rather than one because the land is a direct lookup and
-    // the statics are not: interleaving them would put a binary search back in
-    // the inner loop, which is the whole thing this avoids.
+    // The land, and the statics laid over it block by block. Two passes rather
+    // than one because the land is a direct lookup and the statics are not:
+    // interleaving them would put a binary search back in the inner loop, which
+    // is the whole thing this avoids.
+    //
+    // `best_z` starts at the land's own height so a static below the ground is
+    // skipped, and a floor *at* it is not — see the module header. It is filled
+    // by the same walk as the colours: what a tile's land decides is one lookup
+    // answering two questions, not two lookups of the same cell.
+    let mut best_z = vec![i8::MIN; into.len().min(usize::from(width) * usize::from(height))];
+    let last_column = origin_x.saturating_add(width.saturating_sub(1));
     for row in 0..height {
+        // One row of land, each cell one step east of the last rather than a
+        // block index derived per tile — see [`Map::land_in_row`]. It ends
+        // where the facet does, so a column with no cell is a column off the
+        // map, and `None` for the whole row is a row past the coordinate space
+        // — off the map in the same sense, and [`UNKNOWN`] the same way.
+        let mut cells = origin_y
+            .checked_add(row)
+            .map(|y| map.land_in_row(y, origin_x, last_column));
         for column in 0..width {
-            let Some(cell) = into.get_mut(usize::from(row) * usize::from(width) + usize::from(column)) else {
+            let index = usize::from(row) * usize::from(width) + usize::from(column);
+            let land = cells.as_mut().and_then(Iterator::next);
+            if let (Some(land), Some(z)) = (land, best_z.get_mut(index)) {
+                *z = land.z;
+            }
+            let Some(cell) = into.get_mut(index) else {
                 continue;
             };
-            let (Some(x), Some(y)) = (origin_x.checked_add(column), origin_y.checked_add(row)) else {
-                *cell = UNKNOWN;
-                continue;
-            };
-            *cell = match map.land(x, y) {
+            *cell = match land {
                 Some(land) => {
                     let color = colors.land(land.tile);
                     if color == Color16::TRANSPARENT {
@@ -1194,33 +1211,15 @@ pub fn fill(
         }
     }
 
-    // The highest static on each tile, one block at a time. `best_z` starts at
-    // the land's own height so a static below the ground is skipped, and a floor
-    // *at* it is not — see the module header.
-    let mut best_z = vec![i8::MIN; into.len().min(usize::from(width) * usize::from(height))];
-    for row in 0..height {
-        for column in 0..width {
-            let index = usize::from(row) * usize::from(width) + usize::from(column);
-            let (Some(z), Some(x), Some(y)) = (
-                best_z.get_mut(index),
-                origin_x.checked_add(column),
-                origin_y.checked_add(row),
-            ) else {
-                continue;
-            };
-            if let Some(land) = map.land(x, y) {
-                *z = land.z;
-            }
-        }
-    }
-
     let last_x = origin_x.saturating_add(width.saturating_sub(1));
     let last_y = origin_y.saturating_add(height.saturating_sub(1));
-    let (first_block_x, first_block_y) = (origin_x / BLOCK_TILES, origin_y / BLOCK_TILES);
-    let (last_block_x, last_block_y) = (last_x / BLOCK_TILES, last_y / BLOCK_TILES);
-    for block_x in first_block_x..=last_block_x {
-        for block_y in first_block_y..=last_block_y {
-            for item in map.statics_in_block(u32::from(block_x), u32::from(block_y)) {
+    let (first_block, last_block) = (
+        BlockCoord::containing(origin_x, origin_y),
+        BlockCoord::containing(last_x, last_y),
+    );
+    for block_x in first_block.x..=last_block.x {
+        for block_y in first_block.y..=last_block.y {
+            for item in map.statics_in_block(block_x, block_y) {
                 let (Some(column), Some(row)) = (item.x.checked_sub(origin_x), item.y.checked_sub(origin_y))
                 else {
                     continue;
