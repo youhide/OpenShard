@@ -819,7 +819,22 @@ coarse products that only `select_ready`'s stale-fallback path can use. Nothing
 in the shard moves a facet revision that way today. Naming it because the next
 map-editing feature is what would.
 
-### 10.3 The margin fraction is measured, and its measurement is a person looking
+### 10.3 One page eviction per insert is an invariant nothing states
+
+`RadarChunkRenderer::resident_layer` inserts one page, evicts to budget, and
+takes `eviction.keys.first()` as the layer to reuse. Every other evicted key
+would be dropped from `residency` while staying in `self.pages` — a page the
+budget believes is free and the map still hands out, which is the corruption
+`cap_draws_by_distance` exists to prevent, arriving by the other door.
+
+It cannot happen today: one insert of one fixed-size page can put the budget at
+most one page over, so `keys` is never longer than one. That is an arithmetic
+argument about `RADAR_CHUNK_PAGE_BYTES` being constant, made in a different
+file from the loop that depends on it, and written down nowhere. Found while
+adding the eviction counter, which is what made the plural in `keys.len()`
+visible at all. Either assert the length or drain the whole list.
+
+### 10.4 The margin fraction is measured, and its measurement is a person looking
 
 `TANGENT_MARGIN_FRACTION` is 21% because three reports said 20.7% left a visible
 seam. The tests pin the *arithmetic* — that it scales with the window and with
