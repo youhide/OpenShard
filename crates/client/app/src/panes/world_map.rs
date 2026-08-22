@@ -282,6 +282,118 @@ mod tests {
         assert_eq!(window.lines[0].text, "World Map");
     }
 
+    /// The window this pane is: a press inside the canvas takes the drag and
+    /// raises, and the move that follows pans the world by exactly the
+    /// distance the pointer travelled, in that zoom's own tiles.
+    #[test]
+    fn a_press_then_a_move_pans_the_canvas_by_the_pointers_own_distance() {
+        let install = fixture::Install::shipping([]);
+        let view = fixture::world(Serial::new(1).unwrap());
+        // Zoomed in far enough that the visible rectangle is smaller than the
+        // facet: at the fit-to-window default the whole world is on screen and
+        // every pan is clamped away, which would assert nothing.
+        let mut pane = WorldMapPane {
+            zoom_steps: 6,
+            ..WorldMapPane::default()
+        };
+        let drawn = pane
+            .layout(&install.ctx(&view, None, GumpPixel::new(0, 0), true).frame)
+            .expect("the map lays out");
+        let Drawn::WorldMap(window) = &drawn else {
+            panic!("the map lays out");
+        };
+        let centre = window.centre;
+        let tiles_per_pixel = window.tiles_per_pixel;
+        let from = GumpPixel::new(
+            window.content_at.x + window.content_extent.0 / 2,
+            window.content_at.y + window.content_extent.1 / 2,
+        );
+
+        let press = pane.handle(
+            Input::Press(Button::Left),
+            &install.ctx(&view, Some(&drawn), from, true),
+        );
+        assert!(press.taken);
+        assert!(matches!(press.out.as_slice(), [Effect::Raise]));
+
+        let moved = pane.handle(
+            Input::Move,
+            &install.ctx(&view, Some(&drawn), from.offset(GumpPixel::new(-40, 25)), true),
+        );
+        assert!(moved.taken);
+        // The canvas is dragged, so the world moves the other way: the hand
+        // pulls the picture west, which walks the centre east.
+        assert_eq!(
+            pane.centre,
+            Some(RadarTile::new(
+                (centre.x() as f32 + 40.0 * tiles_per_pixel).round() as u32,
+                (centre.y() as f32 - 25.0 * tiles_per_pixel).round() as u32,
+            )),
+        );
+    }
+
+    /// `clamp_centre`'s whole reason, and R6's own headline claim. Every zoom
+    /// step, dragged hard into both corners: the visible rectangle stays
+    /// inside the facet, so the canvas can never be pushed off its own frame
+    /// into a field of `UNKNOWN`.
+    #[test]
+    fn the_canvas_cannot_be_dragged_out_of_its_own_frame_at_any_zoom() {
+        let install = fixture::Install::shipping([]);
+        let view = fixture::world(Serial::new(1).unwrap());
+        for steps in -8..=12 {
+            for pull in [-4000, 4000] {
+                let mut pane = WorldMapPane {
+                    zoom_steps: steps,
+                    ..WorldMapPane::default()
+                };
+                let drawn = pane
+                    .layout(&install.ctx(&view, None, GumpPixel::new(0, 0), true).frame)
+                    .expect("the map lays out");
+                let Drawn::WorldMap(window) = &drawn else {
+                    panic!("the map lays out");
+                };
+                let from = GumpPixel::new(
+                    window.content_at.x + window.content_extent.0 / 2,
+                    window.content_at.y + window.content_extent.1 / 2,
+                );
+                let _ = pane.handle(
+                    Input::Press(Button::Left),
+                    &install.ctx(&view, Some(&drawn), from, true),
+                );
+                let _ = pane.handle(
+                    Input::Move,
+                    &install.ctx(&view, Some(&drawn), from.offset(GumpPixel::new(pull, pull)), true),
+                );
+
+                // Laid out again, because the layout is what a frame draws
+                // with — and it clamps a second time, against this zoom.
+                let drawn = pane
+                    .layout(&install.ctx(&view, None, GumpPixel::new(0, 0), true).frame)
+                    .expect("the map lays out");
+                let Drawn::WorldMap(window) = &drawn else {
+                    panic!("the map lays out");
+                };
+                let visible = |pixels: i32, tiles: u16| {
+                    (pixels as f32 * window.tiles_per_pixel)
+                        .ceil()
+                        .min(f32::from(tiles)) as u32
+                };
+                for (centre, pixels, tiles) in [
+                    (window.centre.x(), window.content_extent.0, view.map.width),
+                    (window.centre.y(), window.content_extent.1, view.map.height),
+                ] {
+                    let visible = visible(pixels, tiles);
+                    let first = centre.saturating_sub(visible / 2);
+                    assert!(
+                        first + visible <= u32::from(tiles),
+                        "zoom {steps}, pull {pull}: {first}..{} leaves a facet {tiles} wide",
+                        first + visible,
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn close_button_raises_on_press_and_closes_on_release() {
         let install = fixture::Install::shipping([]);

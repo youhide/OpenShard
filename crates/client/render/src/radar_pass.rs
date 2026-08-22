@@ -819,6 +819,16 @@ impl RadarChunkRenderer {
         }
     }
 
+    /// How many chunk instances the buffer behind this pass can hold.
+    ///
+    /// A frame's own allocation oracle: the buffer grows on demand and is
+    /// reused, so two draws of the same size must move this number once and
+    /// then never again. Nothing else can see a `wgpu::Buffer` being replaced.
+    #[must_use]
+    pub const fn instance_capacity(&self) -> u64 {
+        self.instance_capacity
+    }
+
     fn ensure_instance_capacity(&mut self, device: &wgpu::Device, needed: u64) {
         if needed <= self.instance_capacity {
             return;

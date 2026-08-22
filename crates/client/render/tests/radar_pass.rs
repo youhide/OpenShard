@@ -120,6 +120,64 @@ fn adjacent_chunks_each_draw_their_own_pixels() {
     );
 }
 
+/// **A second identical draw allocates nothing.** The instance buffer grows on
+/// demand and is reused; that is R0's whole claim, and until now the only thing
+/// that could have noticed it growing every frame was a profiler. The capacity
+/// is the cheap oracle: it moves once, to the power of two above what the first
+/// draw needed, and a draw of the same size never moves it again.
+#[test]
+fn two_identical_draws_grow_the_instance_buffer_once() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU: skipping");
+        return;
+    };
+    let cache = RadarCache::default();
+    let facet = Facet(0);
+    let chunk = |x: u32| {
+        RadarChunk::new(
+            cache.key(facet, 0, RadarChunkCoord::new(x, 0)),
+            vec![Color16(0x03E0); usize::from(BASE_CHUNK_TILES) * usize::from(BASE_CHUNK_TILES)],
+        )
+        .expect("a complete chunk")
+    };
+    let west = chunk(0);
+    let east = chunk(1);
+
+    let (width, height) = (u32::from(BASE_CHUNK_TILES) * 2, u32::from(BASE_CHUNK_TILES));
+    let whole = Placement {
+        origin: (0.0, 0.0),
+        extent: (width as f32, height as f32),
+        circle: false,
+        rotation: 0.0,
+    };
+    let mut chunks = RadarChunkRenderer::new(&device, FORMAT, 16 * 1024 * 1024);
+    let mut draw = || {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let (_target, view) = cleared_target(&device, &mut encoder, width, height);
+        chunks.render_region(
+            &device,
+            &queue,
+            &mut encoder,
+            Frame {
+                target: &view,
+                width,
+                height,
+                scale: 1.0,
+            },
+            region(facet, (0, 0), (BASE_CHUNK_TILES * 2, BASE_CHUNK_TILES)),
+            whole,
+            whole,
+            [&west, &east],
+        );
+        queue.submit([encoder.finish()]);
+        chunks.instance_capacity()
+    };
+    let first = draw();
+    assert!(first >= 2, "two chunks were drawn");
+    assert_eq!(draw(), first, "the same two chunks reuse the same buffer");
+    assert_eq!(draw(), first);
+}
+
 /// **The body's marker is drawn over the terrain, not into it.** The overlay's
 /// own pipeline is validated by being built, and the cross's shape and place are
 /// asserted against the one chunk under it: a marker that landed a tile out, or
