@@ -333,7 +333,7 @@ waits is the rest of
 | | |
 |---|---|
 | **C, second half** | a live publish: an edit taking effect in a running shard between two ticks, and reaching a connected client. The precondition landed with `terrain_seam.md`'s D — `FacetState.map` is a `MapSnapshot` the shard can take `&mut` of. What is left is **who** calls it and **where in the tick** |
-| **D** | derived data keyed by the source revision instead of by file mtimes — the navigation bake, the building flood, the occluder measurements, the minimap cache |
+| **D** | derived data keyed by the source revision instead of by file mtimes — the navigation bake and the building flood **already carry a `MapRevision` and refuse themselves on a mismatch**; the occluder measurements and the radar do not, and the radar's revision dimension has no production writer at all |
 | **E** | whole chunks to our client, over a pipe chosen there and not before |
 | **F** | the editor, and committing a house into the base as its one-way operation |
 | **G** | residency and compression, still a constraint rather than a step |
@@ -344,6 +344,63 @@ the next thing; with R and P in front of it, a bake keyed to a revision would be
 keyed to revisions of a layout R4 is still changing. The order is now R, P, S,
 and `plan.md`'s own Order section carries a pointer here.
 
+### A tile of ground moved — rebake, and never an overlay
+
+The question this era is actually asked, and the one the plans answered in
+pieces: an operator raises a tile of land and publishes. What happens?
+
+**The map resolves it. There is no patch overlay, and there must not be one.**
+[`MapSnapshot::publish`](../../crates/common/map/src/snapshot.rs#L165) applies
+the ops to the world in place and moves the revision, and its own comment already
+draws the line this section is about: *"it changes only the tiles the ops name —
+no chunk is re-cut, nothing is re-hashed and no facet is rebuilt… what is
+invalidated by it is every bake over `Patch::touched_chunks`, and that is
+direction D's to notice."*
+
+An overlay of *ground* would be a fourth layer, and it fails on every count the
+three real ones pass:
+
+- a reader would be applying patches itself, which
+  [`mechanics.md`](new_map_representation/mechanics.md) forbids by name —
+  nobody may see a half-applied world;
+- two sources of truth for a column's height, on the hottest path there is: a
+  node expansion reads sixteen of them;
+- **it would break this document's own invariant.** A ground overlay has to be
+  *in* the bake for the bake to be right — so it is not a live layer at all, it
+  is the base with a slower spelling. The live layer is entities, and the ground
+  is not an entity.
+
+**So: rebake, and the whole question is how local.** A facet's navigation graph
+takes 96 s to build, which is not a publish — it is an outage. Everything needed
+to make it local already exists and nothing has been wired to it:
+
+- [`Patch::touched_chunks`](../../crates/common/map/src/patch.rs#L236) hands back
+  the chunks the ops fell in, deduplicated;
+- the chunk is 64×64 and every artefact derived from terrain is already keyed to
+  that grid, which is [`mechanics.md`](new_map_representation/mechanics.md#chunks)'s
+  stated reason for the size — D's invalidation is one-to-one;
+- the graph's regions are 32×32, so what a raised tile can change is bounded: the
+  walkability of the column, the eight transitions into it, its region's internal
+  components, and the portals of the region borders it touches. The neighbours
+  whose answer *crossed* into the changed chunk are the second half, and they are
+  the half a naive implementation forgets.
+
+**What is genuinely undecided is the window.** Between the publish and the
+finished rebake, a stale bake exists. Today's rule is that a stale artifact
+refuses itself rather than answering from the old world — which means routing in
+those chunks degrades to flat A\* until the rebake lands, and is the default this
+plan inherits. The alternative is to rebuild the touched regions *inside* the
+publish, so a revision is never visible without the derived data that matches it.
+That is a real choice with a latency cost, it is C's and D's to take together,
+and it should be taken with a measurement of a single-region rebuild rather than
+by preference.
+
+**To the client, whole chunks — never a stream of operations.** A client that
+lost the connection mid-stream would hold a world that never existed. That is
+[direction E](new_map_representation/plan.md#e--to-the-client), and the classic
+2D client is out of it by design: it reads its own files and does not see our
+changes.
+
 ## The readers, and what they owe
 
 [`interiors.md`](interiors.md), [`cutaway.md`](cutaway.md),
@@ -351,9 +408,12 @@ and `plan.md`'s own Order section carries a pointer here.
 in the eras: they consume the map rather than shaping it. Two things are true of
 all of them and worth stating once.
 
-- **Each bakes something off terrain and each is keyed to the files it was baked
-  from.** That is D's to fix, in era S, and until then a changed world does not
-  invalidate them.
+- **Each bakes something off terrain, and they no longer agree about what makes
+  one stale.** The navigation bake and the building flood carry a `MapRevision`
+  and refuse themselves when the world has moved; the occluder measurements are
+  keyed to files, and the radar cache has a revision dimension whose only writers
+  are tests. Finishing that is D's, in era S — and a reader that cannot say which
+  revision it was built from cannot be invalidated by a publish at all.
 - **Each is a separate walk of the same statics.** `client_today.md`'s finding
   10 — *"the highest static on a tile is re-derived by linear scan in four
   places"* — is the shape of that, and R4 makes it cheaper without making it
@@ -418,6 +478,7 @@ waits for a measurement that says the statics are still on a hot path.
 | **Which components of a multi are floors** | R3 reads the platform flag, which is what a static floor already is. If a shipped house has a floor that flag does not mark, that is a finding about the table and belongs in [`findings.md`](../findings.md) |
 | **Two floors over one tile, for the picture** | The step check chooses by `surface_at`; the *renderer* choosing a storey is [`interiors.md`](interiors.md)'s own subject, and R3 gives it the second surface it currently lacks |
 | **The packed static record** | N3's node-expansion measurement: whether the statics are still on a hot path once spans exist |
+| **The publish window** — a revision is visible before the rebake over its touched chunks finishes. Does routing there degrade to flat A\* until it lands, or does the publish carry the rebuild and pay the latency? | A measurement of one region's rebuild against the 96 s whole-facet bake. See [a tile of ground moved](#a-tile-of-ground-moved--rebake-and-never-an-overlay) |
 | **Residency** | [direction G](new_map_representation/plan.md#g--residency-and-size-deferred-on-purpose), unchanged: the working set a real session touches against the cost of a miss |
 
 ## Where a session starts
