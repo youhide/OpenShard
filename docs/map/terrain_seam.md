@@ -266,17 +266,16 @@ swimmer yet; no longer unusable, which was the defect.
 
 ## What has no incoming edge
 
-The collapse is a graph, not a sequence. **0, A, B, C and D are done, and every
-edge into E is met** — it is the last node of the seam and nothing is waiting on
-anything:
+The collapse is a graph, not a sequence. **The seam is gone: 0, A, B, C, D and E
+are done.** F is what is left, and it was never part of the seam:
 
 ```
  A. Scene grows what the doubles need ✅ ─┐
                                           ├─> C. the doubles become Scenes ✅ ─┐
  B. the table leaves the trait ✅ ────────┴────────────────────────────────────┼─> D. FacetState holds data ✅
                                                                                │      MapTerrain is borrows
- 0. the facet-0 oracle ✅ ─────────────────────────────────────────────────────┴─> E. Overlay, and the search
-                                                                                      takes explicit types
+ 0. the facet-0 oracle ✅ ─────────────────────────────────────────────────────┴─> E. Overlay, and the search ✅
+                                                                                      takes a Footing
                                                                                         │
  F. the coarse graph nobody reads ── answered by 0, and its repair handed on ──────────> │
                                                                                         ▼
@@ -939,10 +938,11 @@ Six changes, each of which was load-bearing for a number above:
 document — p50/p95/worst per route class, node counts, `TransitionCacheStats`
 hit rates~~ — all four, above.
 
-## E — one `Overlay`, and a search that takes explicit types
+## E — one `Overlay`, and a search that takes explicit types ✅
 
-**Both its edges are met**: D landed, and [the oracle](#0--the-oracle-) above is
-the measurement it was held behind. It is the last node of the seam.
+**Done**, bar one test whose home is a decision rather than a line of code —
+see [the agreement](#the-agreement-is-by-construction-which-is-stronger-than-the-test-).
+It was the last node of the seam.
 
 `Overlay` lands in `common/movement`: blockers by tile with their z-spans and
 their door flag, plus the surfaces a deck adds. `Obstructions` becomes the
@@ -1037,31 +1037,86 @@ actually written for — a gunwale at deck height seals neither the deck nor the
 water — because a plank's span ends exactly where its own deck surface begins.
 It is a change, so it gets a test rather than a sentence.
 
-### The order it lands in
+### What it landed as ✅
 
-Five commits, and the compiler leads only the last two:
+Six commits, and the compiler led only the last three:
 
 1. **`Overlay`, `Cover`, `Doors`** in `common/movement`, with their own tests.
-   Pure addition; `Doors` replaces `LiveTerrain::through_doors` and
-   `clutter.rs`'s private enum of the same name, which are the same two readings
-   under two spellings.
+   Pure addition; `Doors` replaced `LiveTerrain::through_doors` and
+   `clutter.rs`'s private enum of the same name, which were the same two
+   readings under two spellings.
 2. **The server projects.** `FacetState` owns the overlay, `Obstructions` and
-   `Boats` go private behind it, `LiveTerrain` reads the overlay instead of the
-   two indexes. Behaviour unchanged, trait still standing.
-3. **The client projects.** `Clutter` builds an `Overlay` and `Cluttered` reads
-   it.
-4. **The search takes explicit types.** `find_path`, `find_path_toward`,
-   `search`, `search_path`, `step_allowed`, `corner_open`, `Around::read`,
-   `Walker::request` and the whole of `navigation.rs`; `InRegion` becomes a
-   `Region` argument rather than a decorator; `CachedTerrain` and its
-   `TransitionCacheStats` are deleted; `OpenWorld` becomes `None`.
-5. **The trait goes**, with `LiveTerrain` and `Cluttered`, and the agreement
-   test lands.
+   `Boats` are private behind it, and `block`/`unblock`/`moor`/`cast_off` on the
+   facet are the only way to mutate either — so the refresh cannot be forgotten.
+3. **The client projects.** `Clutter`, its `Blocker` and its span arithmetic are
+   gone; `clutter::of` returns an `Overlay`.
+4. **The search takes explicit types**, and the trait goes with them.
+5. **`Cover::of_static`**, which both ends' placement now calls.
+6. Its client half, which commit 5 claimed and a silently-failed scripted edit
+   had left out.
 
-**Done when:** `grep -rn "dyn Terrain" crates` is empty, `Terrain` is gone, and
-one test asserts the two ends produce the same blockers for the same items —
-which is the agreement `clutter.rs`'s header claims and nothing currently
-checks.
+### `Footing`, and the one place this plan was departed from 🚩
+
+The target was written `find_path(&MapTerrain, &Overlay, Doors)`. It is
+`find_path(&Footing, …)` — one `Copy` struct with those three as public fields.
+
+Three parameters through some thirty signatures is a data clump, and
+`navigation.rs`'s search needed a fourth for its region bound. What matters is
+that every property the trait's removal was for survives the bundling:
+[`Footing`](../../crates/common/movement/src/footing.rs) is concrete, nothing
+implements it, and **it has no methods** — every rule over it is a free function
+reading its fields, so there is nothing to forward and nothing to forget. A
+caller that wants less takes less: the bake takes a `MapTerrain`, `harvest` asks
+the map what land is under a spot, and the two door-openers ask the obstruction
+index *which* door.
+
+It also earned its keep at once. `Footing::reading` makes "the same ground the
+other way" a method on one value rather than a second thing a caller assembles,
+and the client's `steer::Ground` collapsed from three terrains to one footing
+and a guide because of it.
+
+### The agreement is by construction, which is stronger than the test 🚩
+
+`clutter.rs`'s header has always said the two ends "agree by construction rather
+than by resemblance". What it described was two structs with the same fields and
+two three-line predicates a crate apart — `flags.is_blocking()`, then
+`tile.height`. That is resemblance exactly, and it is what this node's "done
+when" wanted a test against.
+
+There is no second reading to test against now.
+[`Cover::of_static`](../../crates/common/movement/src/overlay.rs) is the one
+rule, and `world::tick::decor::place_decoration` and `clutter::of` both call it.
+A test would have caught a divergence; this removes the place one could appear.
+
+**What the shared rule deliberately does not carry is the door flag**, and that
+is the one thing the two ends can still say differently. Which leaves are doors
+is not in the tiledata: the shard knows because it made the entity, the client
+knows from `client/render`'s ported table. Two consequences are filed rather
+than fixed:
+
+- 🚩 **A door's span is 20 on one end and the art's height on the other.** The
+  shard blocks a `Door` with `DOOR_HEIGHT`, a constant whose own comment says it
+  is for "when the placer has no tiledata height to hand" — and
+  `place_decoration` has one. The client uses the art's. They agree only for
+  door art that happens to be twenty tall.
+- 🚩 **A door the shard did not make an entity of is a door to the client
+  anyway.** `doors::is_door` reads the art; the shard reads its own registry. A
+  placed leaf the pack never turned into a `Door` is planned *through* by the
+  client and refused by the shard, which is the rubber-band this module was
+  written to end, in its last remaining form.
+
+Neither is reachable from one crate: `openshard-state` and `openshard-client-app`
+may not name each other, and the only place that can see both is
+[`crates/e2e/shard`](../../crates/e2e/shard), whose tests would have to take the
+windowing crate as a dev-dependency to get at `clutter::of`. That is the
+decision the test is waiting on, and it is the whole of what E has left.
+
+**Done:** `grep -rn "dyn Terrain" crates` is empty and `Terrain` is gone, along
+with `OpenWorld`, `CachedTerrain`, `TransitionCacheStats`, `InRegion`,
+`LiveTerrain`, `Cluttered`, `Clutter` and eight test doubles.
+
+**Left:** the two door divergences above, and where a test that can see both
+ends is allowed to live.
 
 ## F — the graph nobody reads
 
@@ -1221,12 +1276,22 @@ seam to mint and no layering rule to weigh.
 
 **`Doors` is the enum.** clutter.rs took that decision with a reason — call
 sites four modules apart cannot read a `bool` — and this plan does not reopen
-it. The server's `through_doors: bool` is what changes.
+it. The server's `through_doors: bool` is what changed, along with the client's
+private copy of the same enum. `Doors::for_opener` is the one seam left where a
+`bool` becomes one: whether a creature can work a latch is a fact about the
+creature, held as a flag on its brain.
 
 **`MapTerrain` becomes three borrows.** Its `AsRef` parameters existed to let
 one caller box it with no lifetime, and that caller was `FacetState`, which
 stopped boxing in D. Both ends already held the fields. Landed as two borrows
 and a flag, because B had already taken `multis` off it.
+
+**A parameter object is not the trait.** E's target was three explicit
+parameters and it landed as one `Footing` carrying them, because thirty
+signatures times three is a clump and `navigation.rs` needed a fourth. What made
+that safe rather than a relapse is spelled in
+[E](#footing-and-the-one-place-this-plan-was-departed-from-): nothing implements
+it, and it has no methods, so it cannot grow into something that forwards.
 
 **The accessor lives where both halves do.** `live_terrain` and its siblings are
 `WorldState` methods rather than `FacetState` ones, and that follows from the
@@ -1303,6 +1368,17 @@ Small things this document is the only current record of:
   the double said 267%. Its own doc predicted exactly that (*"a small fraction
   rather than a multiple"*), and both readings are kept in `obstruct.rs` because
   the pair is the point: one probe, two baselines, and only one of them a world.
+- 🚩 **A one-way transition is a thing no ground can produce, and the graph's
+  component pass is written for one.** `navigation.rs` computed strong
+  components with directed movement, tested by a `OneWayGrid` double whose
+  `can_step` refused one direction outright. Converting it to real ground found
+  the situation cannot occur: a land climb is not bounded by `MAX_STEP_UP` (see
+  `check`'s `land_check`) and land heights interpolate between cells, so a cliff
+  is a ramp; a static floor *is* a hard ledge, and `NavigationGraph::build`
+  samples the land alone and cannot see it. The double was asserting the
+  builder's handling of a situation its own input cannot contain — the shape
+  `BlindTerrain` had in node C. Deleted with its reasoning in place, and owed
+  back the moment F changes what height a node is sampled at.
 - 🚩 **A sight line has no height and neither does the navigation graph.**
   [`sight_clear`](#-blindterrain-stood-for-a-rule-that-cannot-exist) reads the
   statics on the tiles it crosses and not the endpoints' own columns, so two
