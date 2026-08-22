@@ -158,7 +158,7 @@ impl Map {
     /// such a map is memory that exists to be unreachable; the largest facet a
     /// client ships is 7,168 tiles across.
     pub fn from_blocks(extent: BlockExtent, cell: impl FnMut(u16, u16) -> LandCell) -> Self {
-        let land = LandGrid::from_blocks(extent.wide, extent.down, cell);
+        let land = LandGrid::from_blocks(extent, cell);
         let statics = vec![Vec::new(); land.block_count() as usize];
         Self { land, statics }
     }

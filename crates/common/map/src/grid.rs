@@ -264,23 +264,19 @@ impl LandGrid {
     /// Every tile past that is one nothing could ever ask about, so such a grid
     /// is memory that exists to be unreachable; the largest facet a client ships
     /// is 7,168 tiles across.
-    pub fn from_blocks(
-        blocks_wide: u32,
-        blocks_down: u32,
-        mut cell: impl FnMut(u16, u16) -> LandCell,
-    ) -> Self {
-        let (width, height) = (blocks_wide * BLOCK_SIZE, blocks_down * BLOCK_SIZE);
+    pub fn from_blocks(extent: BlockExtent, mut cell: impl FnMut(u16, u16) -> LandCell) -> Self {
+        let (width, height) = (extent.wide * BLOCK_SIZE, extent.down * BLOCK_SIZE);
         let reach = u32::from(u16::MAX) + 1;
         assert!(
             width <= reach && height <= reach,
             "a {width}x{height} facet is larger than a u16 coordinate reaches",
         );
 
-        let mut cells = Vec::with_capacity((blocks_wide * blocks_down) as usize * CELLS_PER_BLOCK);
+        let mut cells = Vec::with_capacity(extent.count() as usize * CELLS_PER_BLOCK);
         // The order, written once: blocks column-major, cells within a block
         // row-major. Everything else in this module reads it back.
-        for block_x in 0..blocks_wide {
-            for block_y in 0..blocks_down {
+        for block_x in 0..extent.wide {
+            for block_y in 0..extent.down {
                 for y in 0..BLOCK_SIZE {
                     for x in 0..BLOCK_SIZE {
                         let x = (block_x * BLOCK_SIZE + x) as u16;
@@ -294,7 +290,7 @@ impl LandGrid {
         Self {
             width,
             height,
-            cells: TerrainCells::of(cells, blocks_wide * blocks_down),
+            cells: TerrainCells::of(cells, extent.count()),
         }
     }
 
@@ -610,7 +606,7 @@ mod tests {
     /// that parses perfectly.
     #[test]
     fn a_blocks_origin_is_the_tile_it_started_from() {
-        let grid = LandGrid::from_blocks(5, 3, |_, _| LandCell::default());
+        let grid = LandGrid::from_blocks(BlockExtent { wide: 5, down: 3 }, |_, _| LandCell::default());
         for y in 0..24u16 {
             for x in 0..40u16 {
                 let block = grid.index_of(grid.block_of(x, y).unwrap()).unwrap();
@@ -666,7 +662,7 @@ mod tests {
     /// one block wide.
     #[test]
     fn the_two_orders_compose_into_a_strip() {
-        let grid = LandGrid::from_blocks(5, 3, |_, _| LandCell::default());
+        let grid = LandGrid::from_blocks(BlockExtent { wide: 5, down: 3 }, |_, _| LandCell::default());
         for y in 0..24u32 {
             for x in 0..40u32 {
                 let plain = ((x / BLOCK_SIZE) * grid.blocks_down() + y / BLOCK_SIZE) * CELLS_PER_BLOCK as u32
@@ -687,7 +683,7 @@ mod tests {
     /// happen many times and the two are not the same number.
     #[test]
     fn a_step_lands_where_a_fresh_index_would() {
-        let grid = LandGrid::from_blocks(5, 3, |_, _| LandCell::default());
+        let grid = LandGrid::from_blocks(BlockExtent { wide: 5, down: 3 }, |_, _| LandCell::default());
         for y in 0..24u16 {
             for x in 0..40u16 {
                 let at = grid.cell_index(x, y).unwrap();
@@ -711,7 +707,7 @@ mod tests {
     /// The row iterator is the tile walk written as steps, and nothing else.
     #[test]
     fn a_row_is_the_tile_walk_written_as_steps() {
-        let grid = LandGrid::from_blocks(5, 3, |_, _| LandCell::default());
+        let grid = LandGrid::from_blocks(BlockExtent { wide: 5, down: 3 }, |_, _| LandCell::default());
         for y in 0..24u16 {
             for (from_x, to_x) in [(0u16, 39u16), (7, 16), (9, 9), (16, 7), (0, 100), (38, 45)] {
                 let walked: Vec<CellIndex> = grid.cells_in_row(y, from_x, to_x).collect();
@@ -746,7 +742,9 @@ mod tests {
     #[test]
     fn building_by_tile_matches_the_files_own_order() {
         let from_file = grid_16x16();
-        let built = LandGrid::from_blocks(2, 2, |x, y| from_file.get(x, y).expect("inside the fixture"));
+        let built = LandGrid::from_blocks(BlockExtent { wide: 2, down: 2 }, |x, y| {
+            from_file.get(x, y).expect("inside the fixture")
+        });
 
         assert_eq!((built.width(), built.height()), (16, 16));
         for y in 0..16u16 {
@@ -772,7 +770,7 @@ mod tests {
     #[test]
     fn building_asks_for_each_tile_exactly_once() {
         let mut asked = Vec::new();
-        let grid = LandGrid::from_blocks(3, 2, |x, y| {
+        let grid = LandGrid::from_blocks(BlockExtent { wide: 3, down: 2 }, |x, y| {
             asked.push((x, y));
             LandCell::default()
         });
