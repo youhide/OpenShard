@@ -73,7 +73,7 @@ pub use components::{
 };
 pub use dialogue::{Dialogue, SpeechEntry, SpeechTable};
 pub use guild::{Alliance, AllianceId, Alliances, Guild, GuildId, Guilds, Rank, Removal};
-pub use obstruct::{DOOR_HEIGHT, LiveTerrain, Obstacle, Obstructions};
+pub use obstruct::{DOOR_HEIGHT, Obstacle, Obstructions};
 pub use openshard_protocol::world::{DamageType, RangedRange};
 pub use party::{Parties, Party, PartyId};
 pub use quest::{ObjectiveDef, ObjectiveKind, QuestDef, QuestDefs, RewardDef, RewardKind};

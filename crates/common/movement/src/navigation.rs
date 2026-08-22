@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 
-use crate::{Terrain, Tile, find_path_toward_until, find_path_until, step_allowed};
+use crate::footing::Footing;
+use crate::{Tile, find_path_toward_until, find_path_until, step_allowed};
 
 const MAX_LONG_PATH_TIME: Duration = Duration::from_millis(50);
 
@@ -51,7 +52,7 @@ pub(crate) struct Region {
 }
 
 impl Region {
-    fn contains(self, point: Point) -> bool {
+    pub(crate) fn contains(self, point: Point) -> bool {
         let x = u32::from(point.x);
         let y = u32::from(point.y);
         x >= u32::from(self.left)
@@ -78,24 +79,11 @@ pub(crate) struct Edge {
     pub(crate) cost: u32,
 }
 
-struct InRegion<'a> {
-    terrain: &'a dyn Terrain,
-    region: Region,
-}
-
-impl Terrain for InRegion<'_> {
-    fn can_step(&self, from: Point, to: Point) -> Option<Point> {
-        (self.region.contains(from) && self.region.contains(to))
-            .then(|| self.terrain.can_step(from, to))
-            .flatten()
-    }
-}
-
 impl NavigationGraph {
     /// Extract a static graph from one facet. Empty and unrepresentable facets
     /// cannot be addressed by `Point` and therefore have no graph.
     #[must_use]
-    pub fn build(terrain: &dyn Terrain, width: u32, height: u32) -> Option<Self> {
+    pub fn build(footing: &Footing<'_>, width: u32, height: u32) -> Option<Self> {
         let limit = u32::from(u16::MAX) + 1;
         if width == 0 || height == 0 || width >= limit || height >= limit {
             return None;
@@ -107,9 +95,13 @@ impl NavigationGraph {
         for y in 0..height as u16 {
             for x in 0..width as u16 {
                 let tile = Tile::new(x, y);
-                let near = terrain.ground_z(tile).unwrap_or(0);
+                // 🚩 The land alone, which is the one-storey defect node F is
+                // about: a tile whose only surface is a static floor is sampled
+                // at the ground beneath it. See `docs/map/terrain_seam.md`.
+                let near = footing.map.and_then(|map| map.ground_z(tile)).unwrap_or(0);
                 let point = Point::new(x, y, near);
-                points[usize::from(y) * width as usize + usize::from(x)] = terrain.can_step(point, point);
+                points[usize::from(y) * width as usize + usize::from(x)] =
+                    crate::can_step(footing, point, point);
             }
         }
         eprintln!(
@@ -137,14 +129,14 @@ impl NavigationGraph {
             started.elapsed().as_secs_f64(),
             graph.regions.len()
         );
-        let components = graph.component_labels(terrain, &points);
-        graph.portals(terrain, &points, &components);
+        let components = graph.component_labels(footing, &points);
+        graph.portals(footing, &points, &components);
         eprintln!(
             "navigation graph +{:.3}s: {} portal nodes found; calculating intra-region routes",
             started.elapsed().as_secs_f64(),
             graph.nodes.len()
         );
-        graph.intra_edges(terrain);
+        graph.intra_edges(footing);
         for edges in &mut graph.build_edges {
             edges.sort_unstable_by_key(|edge| (edge.to, edge.cost));
             edges.dedup_by_key(|edge| edge.to);
@@ -227,7 +219,7 @@ impl NavigationGraph {
     /// Mark strongly connected static components in each region.  These are
     /// bake-time scratch data: `u16` is enough because a region has at most
     /// 1,024 cells, and the labels never enter the artifact.
-    fn component_labels(&self, terrain: &dyn Terrain, points: &[Option<Point>]) -> Vec<u16> {
+    fn component_labels(&self, footing: &Footing<'_>, points: &[Option<Point>]) -> Vec<u16> {
         let mut labels = vec![NO_COMPONENT; points.len()];
         for &region in &self.regions {
             let width = usize::from(region.width);
@@ -246,7 +238,7 @@ impl NavigationGraph {
                     };
                     let from_index = local_index(from);
                     for direction in Direction::ALL {
-                        let Some(next) = step_allowed(terrain, from, direction) else {
+                        let Some(next) = step_allowed(footing, from, direction) else {
                             continue;
                         };
                         if !region.contains(next) || points[self.index(next.x, next.y)].is_none() {
@@ -330,13 +322,13 @@ impl NavigationGraph {
     /// Adjacent raw crossings share a logical entrance when they connect the
     /// same strong components.  This lets an isolated tree on a border remain
     /// a local obstacle instead of multiplying portal nodes.
-    fn portals(&mut self, terrain: &dyn Terrain, points: &[Option<Point>], components: &[u16]) {
+    fn portals(&mut self, footing: &Footing<'_>, points: &[Option<Point>], components: &[u16]) {
         for x in
             ((REGION_SIZE - 1) as u16..(self.width as u16).saturating_sub(1)).step_by(REGION_SIZE as usize)
         {
             let mut entrances = BTreeMap::<(usize, u16, usize, u16), Vec<(Point, Point)>>::new();
             for y in 0..self.height as u16 {
-                let Some(pair) = self.vertical_pair(terrain, points, x, y) else {
+                let Some(pair) = self.vertical_pair(footing, points, x, y) else {
                     continue;
                 };
                 let first = self
@@ -368,7 +360,7 @@ impl NavigationGraph {
         {
             let mut entrances = BTreeMap::<(usize, u16, usize, u16), Vec<(Point, Point)>>::new();
             for x in 0..self.width as u16 {
-                let Some(pair) = self.horizontal_pair(terrain, points, x, y) else {
+                let Some(pair) = self.horizontal_pair(footing, points, x, y) else {
                     continue;
                 };
                 let first = self
@@ -399,29 +391,29 @@ impl NavigationGraph {
 
     fn vertical_pair(
         &self,
-        terrain: &dyn Terrain,
+        footing: &Footing<'_>,
         points: &[Option<Point>],
         x: u16,
         y: u16,
     ) -> Option<(Point, Point)> {
         let left = points[self.index(x, y)]?;
         points[self.index(x + 1, y)]?;
-        let right = step_allowed(terrain, left, Direction::East)?;
-        let left = step_allowed(terrain, right, Direction::West)?;
+        let right = step_allowed(footing, left, Direction::East)?;
+        let left = step_allowed(footing, right, Direction::West)?;
         (left.x == x && left.y == y && right.x == x + 1 && right.y == y).then_some((left, right))
     }
 
     fn horizontal_pair(
         &self,
-        terrain: &dyn Terrain,
+        footing: &Footing<'_>,
         points: &[Option<Point>],
         x: u16,
         y: u16,
     ) -> Option<(Point, Point)> {
         let top = points[self.index(x, y)]?;
         points[self.index(x, y + 1)]?;
-        let bottom = step_allowed(terrain, top, Direction::South)?;
-        let top = step_allowed(terrain, bottom, Direction::North)?;
+        let bottom = step_allowed(footing, top, Direction::South)?;
+        let top = step_allowed(footing, bottom, Direction::North)?;
         (top.x == x && top.y == y && bottom.x == x && bottom.y == y + 1).then_some((top, bottom))
     }
 
@@ -451,13 +443,12 @@ impl NavigationGraph {
         self.build_edges[from.0].push(Edge { to, cost });
     }
 
-    fn intra_edges(&mut self, terrain: &dyn Terrain) {
+    fn intra_edges(&mut self, footing: &Footing<'_>) {
         for region in 0..self.regions.len() {
             let nodes = self.build_region_nodes[region].clone();
             let region = self.regions[region];
-            let local = InRegion { terrain, region };
             for &from in &nodes {
-                let costs = region_costs(&local, region, self.nodes[from.0].point);
+                let costs = region_costs(footing, region, self.nodes[from.0].point);
                 for &to in &nodes {
                     if from == to {
                         continue;
@@ -590,7 +581,7 @@ impl NavigationGraph {
 
     fn local_costs(
         &self,
-        terrain: &dyn Terrain,
+        footing: &Footing<'_>,
         region_id: RegionId,
         endpoint: Point,
         forbidden: &[bool],
@@ -598,7 +589,6 @@ impl NavigationGraph {
         deadline: Instant,
     ) -> Vec<(NodeId, u32)> {
         let region = self.regions[region_id.0];
-        let local = InRegion { terrain, region };
         let budget = usize::from(region.width) * usize::from(region.height);
         self.nodes_in_region(region_id)
             .filter(|node| !forbidden[node.0])
@@ -610,14 +600,15 @@ impl NavigationGraph {
                     true => (self.nodes[node.0].point, endpoint),
                     false => (endpoint, self.nodes[node.0].point),
                 };
-                find_path_until(&local, from, to, budget, deadline).map(|route| (node, route.len() as u32))
+                find_path_until(footing, from, to, budget, deadline, Some(region))
+                    .map(|route| (node, route.len() as u32))
             })
             .collect()
     }
 
     fn refine(
         &self,
-        terrain: &dyn Terrain,
+        footing: &Footing<'_>,
         from: Point,
         to: Point,
         nodes: &[NodeId],
@@ -636,13 +627,13 @@ impl NavigationGraph {
             let next = self.nodes[node.0];
             let next_region = self.node_region(node);
             let segment = match next_region == region {
-                true => region_route(terrain, self.regions[region.0], at, next.point, budget, deadline),
-                false => cross_portal(terrain, at, next.point),
+                true => region_route(footing, self.regions[region.0], at, next.point, budget, deadline),
+                false => cross_portal(footing, at, next.point),
             };
             let Some(segment) = segment else {
                 return Err(node);
             };
-            let Some(next_at) = append(terrain, at, &segment, &mut route) else {
+            let Some(next_at) = append(footing, at, &segment, &mut route) else {
                 return Err(node);
             };
             at = next_at;
@@ -654,10 +645,10 @@ impl NavigationGraph {
         if Instant::now() >= deadline {
             return Err(last);
         }
-        let Some(segment) = region_route(terrain, self.regions[region.0], at, to, budget, deadline) else {
+        let Some(segment) = region_route(footing, self.regions[region.0], at, to, budget, deadline) else {
             return Err(last);
         };
-        append(terrain, at, &segment, &mut route).ok_or(last)?;
+        append(footing, at, &segment, &mut route).ok_or(last)?;
         Ok(route)
     }
 
@@ -674,7 +665,7 @@ impl NavigationGraph {
 /// Exact uniform-cost routes from one point to every tile in one small region.
 /// One traversal replaces the old one-A*-per-node-pair construction while
 /// retaining directed movement and height resolution through `step_allowed`.
-fn region_costs(terrain: &dyn Terrain, region: Region, from: Point) -> Vec<Option<u32>> {
+fn region_costs(footing: &Footing<'_>, region: Region, from: Point) -> Vec<Option<u32>> {
     let width = usize::from(region.width);
     let cells = width * usize::from(region.height);
     let index = |point: Point| usize::from(point.y - region.top) * width + usize::from(point.x - region.left);
@@ -685,7 +676,7 @@ fn region_costs(terrain: &dyn Terrain, region: Region, from: Point) -> Vec<Optio
     while let Some(point) = open.pop_front() {
         let cost = costs[index(point)].expect("queued points have a cost");
         for direction in Direction::ALL {
-            let Some(next) = step_allowed(terrain, point, direction) else {
+            let Some(next) = step_allowed(footing, point, direction) else {
                 continue;
             };
             if !region.contains(next) {
@@ -744,15 +735,15 @@ const LIVE_REROUTES: usize = 8;
 /// Refine a route proposed by a static navigation graph through live terrain.
 #[must_use]
 pub fn find_long_path(
-    guide: &dyn Terrain,
-    terrain: &dyn Terrain,
+    guide: &Footing<'_>,
+    footing: &Footing<'_>,
     graph: &NavigationGraph,
     from: Point,
     to: Point,
     budget: usize,
 ) -> Option<Vec<Direction>> {
     let started = Instant::now();
-    let (mut result, mut exit) = find_long_path_inner(guide, terrain, graph, from, to, budget);
+    let (mut result, mut exit) = find_long_path_inner(guide, footing, graph, from, to, budget);
     let elapsed = started.elapsed();
     // The inner loops observe the same deadline, but an individual live A*
     // call can finish just after it.  Do not hand an interactive caller a
@@ -766,8 +757,8 @@ pub fn find_long_path(
 }
 
 fn find_long_path_inner(
-    guide: &dyn Terrain,
-    terrain: &dyn Terrain,
+    guide: &Footing<'_>,
+    footing: &Footing<'_>,
     graph: &NavigationGraph,
     from: Point,
     to: Point,
@@ -778,7 +769,7 @@ fn find_long_path_inner(
         return (None, LongExit::OffGraph);
     };
     if from_region == to_region {
-        let route = region_route(terrain, graph.regions[from_region.0], from, to, budget, deadline);
+        let route = region_route(footing, graph.regions[from_region.0], from, to, budget, deadline);
         let exit = match route {
             Some(_) => LongExit::Route,
             None => LongExit::NoLocalRoute,
@@ -805,7 +796,7 @@ fn find_long_path_inner(
         let Some(path) = graph.abstract_path(from, to, &forbidden, &source, &target) else {
             return (None, LongExit::NoCorridor);
         };
-        match graph.refine(terrain, from, to, &path, budget, deadline) {
+        match graph.refine(footing, from, to, &path, budget, deadline) {
             Ok(route) => return (Some(route), LongExit::Route),
             Err(node) if !forbidden[node.0] => graph.forbid_portal(node, &mut forbidden),
             Err(_) => return (None, LongExit::PortalsExhausted),
@@ -845,7 +836,7 @@ fn debug_long_path(
     );
 }
 
-fn cross_portal(terrain: &dyn Terrain, from: Point, to: Point) -> Option<Vec<Direction>> {
+fn cross_portal(footing: &Footing<'_>, from: Point, to: Point) -> Option<Vec<Direction>> {
     let direction = match (to.x.cmp(&from.x), to.y.cmp(&from.y)) {
         (std::cmp::Ordering::Greater, std::cmp::Ordering::Equal) => Direction::East,
         (std::cmp::Ordering::Less, std::cmp::Ordering::Equal) => Direction::West,
@@ -853,20 +844,19 @@ fn cross_portal(terrain: &dyn Terrain, from: Point, to: Point) -> Option<Vec<Dir
         (std::cmp::Ordering::Equal, std::cmp::Ordering::Less) => Direction::North,
         _ => return None,
     };
-    step_allowed(terrain, from, direction)
+    step_allowed(footing, from, direction)
         .filter(|landing| landing.x == to.x && landing.y == to.y)
         .map(|_| vec![direction])
 }
 
 fn region_route(
-    terrain: &dyn Terrain,
+    footing: &Footing<'_>,
     region: Region,
     from: Point,
     to: Point,
     budget: usize,
     deadline: Instant,
 ) -> Option<Vec<Direction>> {
-    let local = InRegion { terrain, region };
     let hop = u16::try_from((budget / 2).max(1)).unwrap_or(u16::MAX);
     let mut route = Vec::new();
     let mut at = from;
@@ -877,23 +867,23 @@ fn region_route(
         // Aim at the real destination and keep the closest result when the
         // bounded search runs out. A synthetic point exactly `hop` tiles away
         // can itself be a tree, which must not make a whole forest unroutable.
-        let segment = find_path_toward_until(&local, at, to, budget, deadline)?;
-        at = append(terrain, at, &segment, &mut route)?;
+        let segment = find_path_toward_until(footing, at, to, budget, deadline, Some(region))?;
+        at = append(footing, at, &segment, &mut route)?;
     }
-    let segment = find_path_until(&local, at, to, budget, deadline)?;
-    append(terrain, at, &segment, &mut route)?;
+    let segment = find_path_until(footing, at, to, budget, deadline, Some(region))?;
+    append(footing, at, &segment, &mut route)?;
     Some(route)
 }
 
 fn append(
-    terrain: &dyn Terrain,
+    footing: &Footing<'_>,
     from: Point,
     route: &[Direction],
     out: &mut Vec<Direction>,
 ) -> Option<Point> {
     let mut at = from;
     for &direction in route {
-        at = step_allowed(terrain, at, direction)?;
+        at = step_allowed(footing, at, direction)?;
         out.push(direction);
     }
     Some(at)
@@ -901,57 +891,72 @@ fn append(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use crate::find_path;
 
     use proptest::prelude::*;
 
     use super::*;
+    use crate::overlay::{Cover, Doors, Overlay};
+    use crate::scene::Scene;
 
-    #[derive(Clone, Default)]
+    /// A bounded open grid with some tiles blocked.
+    ///
+    /// A real map for the ground and the heights, and an overlay for what is in
+    /// the way — which is what the shard and the client both are. It used to be
+    /// a `Terrain` implementation of its own, and that is the whole of what
+    /// node E took away: a fixture that reimplements the step rule agrees with
+    /// itself and proves nothing.
     struct Grid {
-        width: u16,
-        height: u16,
-        blocked: BTreeSet<(u16, u16)>,
+        scene: Scene,
+        blocked: Overlay,
     }
 
     impl Grid {
         fn open(width: u16, height: u16) -> Self {
-            Self {
-                width,
-                height,
-                blocked: BTreeSet::new(),
+            // A scene is a whole number of 8×8 blocks, and a fixture asks for
+            // the rectangle it wants: 20 by 14 is 24 by 16 of map. What is left
+            // over is fenced off, so the grid's edge refuses a step the way the
+            // double's bounds check used to.
+            let scene = Scene::flat_holding(width - 1, height - 1, 0);
+            let mut grid = Self {
+                scene,
+                blocked: Overlay::default(),
+            };
+            for y in 0..grid.scene.height() {
+                for x in 0..grid.scene.width() {
+                    if x >= width || y >= height {
+                        grid.block(x, y);
+                    }
+                }
             }
+            grid
         }
 
         fn block(&mut self, x: u16, y: u16) {
-            self.blocked.insert((x, y));
+            self.blocked.set(Tile::new(x, y), vec![Cover::blocking(0, 20)]);
+        }
+
+        fn footing(&self) -> Footing<'_> {
+            Footing::new(Some(self.scene.terrain()), &self.blocked, Doors::AsTheyStand)
         }
     }
 
-    impl Terrain for Grid {
-        fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-            (to.x < self.width && to.y < self.height && !self.blocked.contains(&(to.x, to.y))).then_some(to)
-        }
-    }
-
-    fn end(terrain: &dyn Terrain, from: Point, route: &[Direction]) -> Point {
+    fn end(footing: &Footing<'_>, from: Point, route: &[Direction]) -> Point {
         route.iter().fold(from, |at, &direction| {
-            step_allowed(terrain, at, direction).unwrap()
+            step_allowed(footing, at, direction).unwrap()
         })
     }
 
     #[test]
     fn an_open_facet_has_only_bounded_coarse_regions() {
         let terrain = Grid::open(704, 32);
-        let graph = NavigationGraph::build(&terrain, 704, 32).unwrap();
+        let graph = NavigationGraph::build(&terrain.footing(), 704, 32).unwrap();
         assert_eq!(graph.regions.len(), 22);
         assert_eq!(graph.nodes.len(), 84);
         let from = Point::new(1, 1, 0);
         let to = Point::new(702, 30, 0);
-        let route = find_long_path(&terrain, &terrain, &graph, from, to, 100).unwrap();
-        assert_eq!(end(&terrain, from, &route), to);
+        let route = find_long_path(&terrain.footing(), &terrain.footing(), &graph, from, to, 100).unwrap();
+        assert_eq!(end(&terrain.footing(), from, &route), to);
     }
 
     #[test]
@@ -962,14 +967,14 @@ mod tests {
                 terrain.block(48, y);
             }
         }
-        let graph = NavigationGraph::build(&terrain, 96, 64).unwrap();
+        let graph = NavigationGraph::build(&terrain.footing(), 96, 64).unwrap();
         let from = Point::new(2, 2, 0);
         let to = Point::new(93, 2, 0);
-        let route = find_long_path(&terrain, &terrain, &graph, from, to, 100).unwrap();
-        assert_eq!(end(&terrain, from, &route), to);
+        let route = find_long_path(&terrain.footing(), &terrain.footing(), &graph, from, to, 100).unwrap();
+        assert_eq!(end(&terrain.footing(), from, &route), to);
         let mut at = from;
         for direction in route {
-            at = step_allowed(&terrain, at, direction).unwrap();
+            at = step_allowed(&terrain.footing(), at, direction).unwrap();
             assert!(at.x != 48 || at.y == 40);
         }
     }
@@ -982,7 +987,7 @@ mod tests {
                 terrain.block(x, y);
             }
         }
-        let graph = NavigationGraph::build(&terrain, 128, 128).unwrap();
+        let graph = NavigationGraph::build(&terrain.footing(), 128, 128).unwrap();
         assert_eq!(graph.regions.len(), 16);
         assert!(
             graph.nodes.len() < 500,
@@ -991,8 +996,8 @@ mod tests {
         );
         let from = Point::new(1, 1, 0);
         let to = Point::new(126, 126, 0);
-        let route = find_long_path(&terrain, &terrain, &graph, from, to, 600).unwrap();
-        assert_eq!(end(&terrain, from, &route), to);
+        let route = find_long_path(&terrain.footing(), &terrain.footing(), &graph, from, to, 600).unwrap();
+        assert_eq!(end(&terrain.footing(), from, &route), to);
     }
 
     #[test]
@@ -1004,14 +1009,14 @@ mod tests {
             terrain.block(31, y);
             terrain.block(32, y);
         }
-        let graph = NavigationGraph::build(&terrain, 64, 32).unwrap();
+        let graph = NavigationGraph::build(&terrain.footing(), 64, 32).unwrap();
         // Two maximally separated representatives make four directed nodes;
         // raw contiguous runs would have made 32.
         assert_eq!(graph.nodes.len(), 4);
         let from = Point::new(2, 2, 0);
         let to = Point::new(61, 29, 0);
-        let route = find_long_path(&terrain, &terrain, &graph, from, to, 600).unwrap();
-        assert_eq!(end(&terrain, from, &route), to);
+        let route = find_long_path(&terrain.footing(), &terrain.footing(), &graph, from, to, 600).unwrap();
+        assert_eq!(end(&terrain.footing(), from, &route), to);
     }
 
     #[test]
@@ -1023,33 +1028,34 @@ mod tests {
         for x in 0..32 {
             terrain.block(x, 16);
         }
-        let graph = NavigationGraph::build(&terrain, 64, 32).unwrap();
+        let graph = NavigationGraph::build(&terrain.footing(), 64, 32).unwrap();
         assert_eq!(graph.nodes.len(), 8);
     }
 
-    #[derive(Clone)]
-    struct OneWayGrid(Grid);
-
-    impl Terrain for OneWayGrid {
-        fn can_step(&self, from: Point, to: Point) -> Option<Point> {
-            self.0.can_step(from, to).filter(|_| {
-                // The left region has a south-only height transition across
-                // this row.  It splits strong components without making the
-                // open region on the other side of the border one-way.
-                !(from.x < 32 && from.y >= 16 && to.y < 16)
-            })
-        }
-    }
-
-    #[test]
-    fn one_way_region_transitions_do_not_merge_component_pairs() {
-        let terrain = OneWayGrid(Grid::open(64, 32));
-        let graph = NavigationGraph::build(&terrain, 64, 32).unwrap();
-        // The top and bottom crossings touch different strong components in
-        // the left region, despite being connected when movement is treated
-        // as undirected.
-        assert_eq!(graph.nodes.len(), 8);
-    }
+    // 🚩 There is no `one_way_grid`, and there cannot be one.
+    //
+    // A test stood here — `one_way_region_transitions_do_not_merge_component_pairs`
+    // — over a `OneWayGrid` double whose `can_step` refused one direction
+    // outright. Converting it to real ground found that **no ground does that**,
+    // for two reasons that meet:
+    //
+    // - **Land cannot.** A land climb is not bounded by `MAX_STEP_UP` — see
+    //   `MapTerrain::check`'s `land_check` — so a drop of any depth is walked
+    //   back up. Land heights also interpolate between neighbouring cells, so
+    //   even a cliff is a ramp.
+    // - **A static can, and the bake cannot see it.** A floor's top *is* a hard
+    //   edge, and a three-unit one is a legal fall and an illegal climb. But
+    //   `build` samples one height per tile and that height is
+    //   `ground_z` — the land alone — so a tile whose only surface is a floor
+    //   is sampled at the land beneath it and comes back unwalkable. The whole
+    //   ledge is invisible.
+    //
+    // So the double was asserting the builder's handling of a situation the
+    // builder's own input cannot contain, which is the shape `BlindTerrain`
+    // had in node C. It is deleted rather than reimplemented, and it is owed
+    // back: `docs/map/terrain_seam.md`'s node F changes what height a graph
+    // node is sampled at, and a static ledge becomes representable the moment
+    // it lands. The directed-component pass is right and is untested until then.
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(32))]
@@ -1070,12 +1076,12 @@ mod tests {
             }
             let from = Point::new(1, 1, 0);
             let to = Point::new(18, 12, 0);
-            let exact = find_path(&terrain, from, to, 20 * 14);
-            let graph = NavigationGraph::build(&terrain, 20, 14).unwrap();
-            let route = find_long_path(&terrain, &terrain, &graph, from, to, 20 * 14);
+            let exact = find_path(&terrain.footing(), from, to, 20 * 14);
+            let graph = NavigationGraph::build(&terrain.footing(), 20, 14).unwrap();
+            let route = find_long_path(&terrain.footing(), &terrain.footing(), &graph, from, to, 20 * 14);
             prop_assert_eq!(route.is_some(), exact.is_some());
             if let Some(route) = route {
-                prop_assert_eq!(end(&terrain, from, &route), to);
+                prop_assert_eq!(end(&terrain.footing(), from, &route), to);
             }
         }
     }

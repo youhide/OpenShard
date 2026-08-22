@@ -179,8 +179,8 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use openshard_movement::{
-    Around, CachedTerrain, Detour, Heading, Lean, Leeway, NavigationGraph, RUN_HOLD, Step, Terrain, Tile,
-    WALK_HOLD, find_long_path, find_path, find_path_toward, step_allowed,
+    Around, Detour, Doors, Footing, Heading, Lean, Leeway, NavigationGraph, RUN_HOLD, Step, Tile, WALK_HOLD,
+    find_long_path, find_path, find_path_toward, step_allowed,
 };
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::world::Point;
@@ -305,20 +305,26 @@ impl Turning {
 /// that leaf instead of at nothing. See [`plan`].
 ///
 /// The server keeps the same pair under the same name: `state::obstruct`'s
-/// `Obstacle::door` and `LiveTerrain::through_doors`, for the creature that
-/// plans a route it means to open its way along. That both ends draw the line in
-/// the same place, from the same door table, is the property worth having.
+/// `Obstacle::door`, and `Doors` — the same enum, from `common/movement` — for
+/// the creature that plans a route it means to open its way along. That both
+/// ends draw the line in the same place, from the same door table, is the
+/// property worth having.
+///
+/// **The two readings are one field.** They used to be two terrains built
+/// separately and passed side by side, which made "the same ground, read the
+/// other way" something a caller had to construct rather than something the
+/// type said. See [`Footing::reading`].
 #[derive(Clone, Copy)]
 pub struct Ground<'a> {
-    /// What a step is allowed by — the map with everything on it, doors shut.
-    pub real: &'a dyn Terrain,
-    /// The same ground with every shut door opened. Never what decides a step:
-    /// walking on its word is a step the shard refuses.
-    pub through_doors: &'a dyn Terrain,
-    /// The bare static map the coarse graph was built from. Unlike the two
-    /// live readings above it never contains a door, crate or mobile, so those
-    /// can reject a proposed corridor without rewriting its topology.
-    pub guide: &'a dyn Terrain,
+    /// The map with everything the shard has put on it. Read as the doors
+    /// stand, this is what a step is allowed by; read with them open, it is
+    /// what a route may be *planned* through — never what decides a step, since
+    /// walking on that word is a step the shard refuses.
+    pub live: Footing<'a>,
+    /// The bare static map the coarse graph was built from. Unlike the live
+    /// reading it never contains a door, crate or mobile, so those can reject a
+    /// proposed corridor without rewriting its topology.
+    pub guide: Footing<'a>,
     /// The map-only connectivity cache, absent in mapless/test callers.
     pub coarse: Option<&'a NavigationGraph>,
 }
@@ -328,8 +334,8 @@ impl Ground<'_> {
     /// divide a long answer into the same exact, live-aware hops. `terrain` is
     /// chosen by the caller: real ground for a player's open half, or the
     /// existing doors-open reading for the route that is later cut at a leaf.
-    fn path(&self, terrain: &CachedTerrain<'_>, from: Point, to: Point) -> Option<Vec<Direction>> {
-        let local = find_path(terrain, from, to, PLAN_BUDGET);
+    fn path(&self, footing: &Footing<'_>, from: Point, to: Point) -> Option<Vec<Direction>> {
+        let local = find_path(footing, from, to, PLAN_BUDGET);
         if local.is_some() {
             return local;
         }
@@ -342,25 +348,21 @@ impl Ground<'_> {
         self.coarse.and_then(|coarse| {
             // Graph and endpoint joins are both the bare map. Live terrain
             // only approves or rejects the resulting exact steps.
-            find_long_path(self.guide, terrain, coarse, from, to, PLAN_BUDGET)
+            find_long_path(&self.guide, footing, coarse, from, to, PLAN_BUDGET)
         })
     }
 }
 
-/// A world with no doors in it, where the two readings are one terrain.
+/// A world with no coarse graph over it, where the guide is the ground itself.
 ///
-/// Test-only, the same way `Clutter::placed` is: every shipping caller has the
-/// shard's items laid over the map and must say which reading it is asking for.
-/// Not a shortcut for "the other half is not handy here" — the two being equal is
-/// a statement about the world, and a caller with a shut door that made it anyway
-/// would plan every route as though the door were a wall.
+/// Test-only: every shipping caller has a baked graph to hand or knows it has
+/// none.
 #[cfg(test)]
 impl<'a> Ground<'a> {
-    pub const fn plain(terrain: &'a dyn Terrain) -> Self {
+    pub const fn plain(footing: Footing<'a>) -> Self {
         Self {
-            real: terrain,
-            through_doors: terrain,
-            guide: terrain,
+            live: footing,
+            guide: footing,
             coarse: None,
         }
     }
@@ -414,6 +416,15 @@ const STUCK_STEPS: u8 = 4;
 /// Which way the player is asking to walk, from every input that can ask.
 #[derive(Clone, Debug, Default)]
 pub struct Steering {
+    /// How many searches this steering has run.
+    ///
+    /// Test-only, and on the *caller* rather than on the ground: "did a search
+    /// run" is this module's own business, and the terrain has no way to say so
+    /// any more. It used to be counted by a `CountingTerrain` double whose
+    /// `can_step` incremented a cell — an instrument that existed only because
+    /// the seam was a trait. See `docs/map/terrain_seam.md`'s node E.
+    #[cfg(test)]
+    plans: std::cell::Cell<u32>,
     /// The arrows, and shift.
     keys: Held,
     /// What a held right button (with no modifier) is asking for, recomputed
@@ -655,7 +666,7 @@ impl Steering {
                 return cached.plan.clone();
             }
         }
-        let planned = plan(ground, from, goal);
+        let planned = self.planned(ground, from, goal);
         self.cached_plan = Some(CachedPlan {
             from,
             goal,
@@ -906,7 +917,7 @@ impl Steering {
                         plan
                     }
                     None => {
-                        let planned = plan(ground, from, tile);
+                        let planned = self.planned(ground, from, tile);
                         self.cached_plan = Some(CachedPlan {
                             from,
                             goal: tile,
@@ -966,7 +977,7 @@ impl Steering {
                 let step = match self.goal {
                     Some(_) => step,
                     None => match self.detour(
-                        ground.real,
+                        &ground.live,
                         from,
                         Heading {
                             direction: step.direction,
@@ -1214,11 +1225,20 @@ impl Steering {
     /// Only a *held* direction comes here. A planned route answers for what is
     /// in its way by replanning, on its own patience; a heading has no route
     /// and no destination, so this local look is the whole of what it can do.
-    fn detour(&mut self, terrain: &dyn Terrain, from: Point, intent: Heading) -> Step {
-        let around = Around::read(terrain, from, intent);
+    fn detour(&mut self, footing: &Footing<'_>, from: Point, intent: Heading) -> Step {
+        let around = Around::read(footing, from, intent);
         let step = self.detour.step(&around, self.leeway);
         debug_detour(from, &around, step);
         step
+    }
+}
+
+impl Steering {
+    /// [`plan`], counted. The single place this module runs a search.
+    fn planned(&self, ground: Ground<'_>, from: Point, tile: Tile) -> Option<Plan> {
+        #[cfg(test)]
+        self.plans.set(self.plans.get() + 1);
+        plan(ground, from, tile)
     }
 }
 
@@ -1269,10 +1289,13 @@ impl Steering {
 pub fn plan(ground: Ground<'_>, from: Point, tile: Tile) -> Option<Plan> {
     let started = Instant::now();
     let goal = Point::new(tile.x, tile.y, from.z);
-    // Each half gets its own cache.  The real and doors-open readings are
-    // different terrain snapshots, so sharing even a successful transition
-    // between them could walk through a door that is still shut.
-    let real = CachedTerrain::new(ground.real);
+    // The two readings of one ground. Which one is "real" is the caller's —
+    // `ground.live` as it was handed over — because an auto-door client walks
+    // its own way through a shut leaf and its real half *is* the open one. The
+    // barred half is always the open reading, since that is what "where would
+    // the way go if the door were opened" means.
+    let real = ground.live;
+    let doors_open = ground.live.reading(Doors::AllOpen);
     if let Some(open) = ground.path(&real, from, goal) {
         let result = Some(Plan {
             open_points: replay(&real, from, &open),
@@ -1280,17 +1303,16 @@ pub fn plan(ground: Ground<'_>, from: Point, tile: Tile) -> Option<Plan> {
             barred: Vec::new(),
             barred_points: Vec::new(),
         });
-        debug_plan_cache(from, goal, started.elapsed(), &real, None, result.as_ref());
+        debug_plan(from, goal, started.elapsed(), result.as_ref());
         return result;
     }
-    let doors_open = CachedTerrain::new(ground.through_doors);
     let Some(through) = ground.path(&doors_open, from, goal) else {
         // Not even with the doors open, so there is nothing to say about the
         // far side of anything: no route through this destination's own tile is
         // known, and drawing one would be inventing it. What is left is how
         // close the world as it stands can get, which is a walk and not a guess.
         let Some(open) = find_path_toward(&real, from, goal, PLAN_BUDGET) else {
-            debug_plan_cache(from, goal, started.elapsed(), &real, Some(&doors_open), None);
+            debug_plan(from, goal, started.elapsed(), None);
             return None;
         };
         let result = Some(Plan {
@@ -1299,14 +1321,7 @@ pub fn plan(ground: Ground<'_>, from: Point, tile: Tile) -> Option<Plan> {
             barred: Vec::new(),
             barred_points: Vec::new(),
         });
-        debug_plan_cache(
-            from,
-            goal,
-            started.elapsed(),
-            &real,
-            Some(&doors_open),
-            result.as_ref(),
-        );
+        debug_plan(from, goal, started.elapsed(), result.as_ref());
         return result;
     };
     let mut open = Vec::new();
@@ -1345,53 +1360,43 @@ pub fn plan(ground: Ground<'_>, from: Point, tile: Tile) -> Option<Plan> {
         open_points,
         barred_points,
     });
-    debug_plan_cache(
-        from,
-        goal,
-        started.elapsed(),
-        &real,
-        Some(&doors_open),
-        result.as_ref(),
-    );
+    debug_plan(from, goal, started.elapsed(), result.as_ref());
     result
 }
 
-/// Replay a direction list while the query-local cache still owns its terrain
-/// snapshot. The returned points are immutable plan output, not a live query.
-fn replay(terrain: &CachedTerrain<'_>, from: Point, directions: &[Direction]) -> Vec<Point> {
+/// Replay a direction list over the ground it was planned on. The returned
+/// points are immutable plan output, not a live query.
+fn replay(footing: &Footing<'_>, from: Point, directions: &[Direction]) -> Vec<Point> {
     let mut at = from;
     directions
         .iter()
         .filter_map(|&direction| {
-            let next = step_allowed(terrain, at, direction)?;
+            let next = step_allowed(footing, at, direction)?;
             at = next;
             Some(next)
         })
         .collect()
 }
 
-/// Emit one compact summary for the two query-local terrain snapshots.  This
-/// remains opt-in: these paths run on the render thread and per-transition
-/// logging would both obscure the useful numbers and distort them.
-fn debug_plan_cache(
-    from: Point,
-    goal: Point,
-    elapsed: Duration,
-    real: &CachedTerrain<'_>,
-    doors_open: Option<&CachedTerrain<'_>>,
-    result: Option<&Plan>,
-) {
+/// Emit one compact summary for a plan. This remains opt-in: this path runs on
+/// the render thread and per-transition logging would both obscure the useful
+/// numbers and distort them.
+///
+/// It used to report two `TransitionCacheStats` as well — the per-query caches
+/// each half of the plan wrapped its terrain in. `CachedTerrain` is gone: the
+/// oracle measured it at a 50.6% hit rate and about 5% *slower* than the calls
+/// it memoised, so the numbers it reported were about a thing not worth having.
+/// See `docs/map/terrain_seam.md`'s node 0.
+fn debug_plan(from: Point, goal: Point, elapsed: Duration, result: Option<&Plan>) {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if !*ENABLED.get_or_init(|| std::env::var_os("OPENSHARD_PATH_DEBUG").is_some()) {
         return;
     }
-    let real = real.stats();
-    let doors_open = doors_open.map(CachedTerrain::stats).unwrap_or_default();
     let (open_steps, barred_steps) = result
         .map(|plan| (plan.open.len(), plan.barred.len()))
         .unwrap_or((0, 0));
     eprintln!(
-        "path-debug kind=plan from=({}, {}, {}) to=({}, {}, {}) elapsed_ms={:.3} result={} open_steps={open_steps} barred_steps={barred_steps} real_calls={} real_hits={} real_misses={} real_entries={} doors_calls={} doors_hits={} doors_misses={} doors_entries={}",
+        "path-debug kind=plan from=({}, {}, {}) to=({}, {}, {}) elapsed_ms={:.3} result={} open_steps={open_steps} barred_steps={barred_steps}",
         from.x,
         from.y,
         from.z,
@@ -1400,14 +1405,6 @@ fn debug_plan_cache(
         goal.z,
         elapsed.as_secs_f64() * 1_000.0,
         result.is_some(),
-        real.hits + real.misses,
-        real.hits,
-        real.misses,
-        real.entries,
-        doors_open.hits + doors_open.misses,
-        doors_open.hits,
-        doors_open.misses,
-        doors_open.entries,
     );
 }
 
@@ -1430,7 +1427,20 @@ fn debug_detour(from: Point, around: &Around, step: Step) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openshard_movement::{OpenWorld, step_from};
+    use openshard_movement::{Cover, Overlay, step_from};
+    use std::sync::LazyLock;
+
+    /// Open ground: no map, so no floor and no walls, and nothing placed on it.
+    /// The only thing that can refuse a step here is an overlay a test builds.
+    static NOTHING: LazyLock<Overlay> = LazyLock::new(Overlay::default);
+
+    fn open_ground() -> Footing<'static> {
+        Footing::new(None, &NOTHING, Doors::AsTheyStand)
+    }
+
+    fn over(overlay: &Overlay) -> Footing<'_> {
+        Footing::new(None, overlay, Doors::AsTheyStand)
+    }
 
     /// The clock is a parameter here as it is in `WalkPace`, so a rate can be
     /// tested without sleeping through one.
@@ -1455,7 +1465,7 @@ mod tests {
                 here(),
                 start,
                 Direction::NorthWest,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::NorthWest))
         );
@@ -1465,7 +1475,7 @@ mod tests {
                 at(start, 399),
                 here(),
                 Direction::NorthWest,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None
         );
@@ -1474,7 +1484,7 @@ mod tests {
                 at(start, 400),
                 here(),
                 Direction::NorthWest,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::NorthWest))
         );
@@ -1483,7 +1493,7 @@ mod tests {
                 at(start, 401),
                 here(),
                 Direction::NorthWest,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None
         );
@@ -1503,7 +1513,7 @@ mod tests {
                 here(),
                 start,
                 Direction::NorthWest,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .unwrap();
         for repeat in 1..30 {
@@ -1513,7 +1523,7 @@ mod tests {
                     here(),
                     at(start, repeat * 10),
                     Direction::NorthWest,
-                    Ground::plain(&OpenWorld)
+                    Ground::plain(open_ground())
                 ),
                 None
             );
@@ -1533,7 +1543,7 @@ mod tests {
                 here(),
                 start,
                 Direction::SouthEast,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::running(Direction::SouthEast))
         );
@@ -1542,7 +1552,7 @@ mod tests {
                 at(start, 199),
                 here(),
                 Direction::SouthEast,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None
         );
@@ -1551,7 +1561,7 @@ mod tests {
                 at(start, 200),
                 here(),
                 Direction::SouthEast,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::running(Direction::SouthEast))
         );
@@ -1570,7 +1580,7 @@ mod tests {
                 here(),
                 start,
                 Direction::North,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .unwrap();
         steering.set_running(true);
@@ -1579,7 +1589,7 @@ mod tests {
                 at(start, 200),
                 here(),
                 Direction::North,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None,
             "the walk's deadline stands"
@@ -1589,7 +1599,7 @@ mod tests {
                 at(start, 400),
                 here(),
                 Direction::North,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::running(Direction::North))
         );
@@ -1599,7 +1609,7 @@ mod tests {
                 at(start, 600),
                 here(),
                 Direction::North,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::running(Direction::North))
         );
@@ -1616,7 +1626,7 @@ mod tests {
                 here(),
                 start,
                 Direction::West,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .unwrap();
         steering.release(Direction::West);
@@ -1626,7 +1636,7 @@ mod tests {
                 at(start, 10_000),
                 here(),
                 Direction::West,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None
         );
@@ -1645,7 +1655,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::East)),
             "the first step leaves at once"
@@ -1658,7 +1668,7 @@ mod tests {
                     now,
                     Point::new(x, 100, 0),
                     Direction::East,
-                    Ground::plain(&OpenWorld)
+                    Ground::plain(open_ground())
                 ),
                 Some(Facing::walking(Direction::East)),
                 "still short of it"
@@ -1671,7 +1681,7 @@ mod tests {
                 at(now, 400),
                 Point::new(103, 100, 0),
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None
         );
@@ -1691,7 +1701,7 @@ mod tests {
                 here(),
                 start,
                 Direction::SouthEast,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::SouthEast))
         );
@@ -1702,26 +1712,17 @@ mod tests {
     /// the goal and refusing at the wall. Blocks a single tile east of the body,
     /// which is exactly where the old `direction_toward` step would have gone
     /// and stalled.
-    struct Wall {
-        blocked: Tile,
-    }
-
-    impl openshard_movement::Terrain for Wall {
-        fn can_step(&self, from: Point, to: Point) -> Option<Point> {
-            match Tile::new(to.x, to.y) == self.blocked {
-                true => None,
-                false => OpenWorld.can_step(from, to),
-            }
-        }
+    fn blocking(tile: Tile) -> Overlay {
+        let mut overlay = Overlay::default();
+        overlay.set(tile, vec![Cover::blocking(0, 20)]);
+        overlay
     }
 
     #[test]
     fn a_click_to_walk_destination_routes_around_a_wall_in_its_way() {
         let start = Instant::now();
         let mut steering = Steering::default();
-        let wall = Wall {
-            blocked: Tile::new(101, 100),
-        };
+        let wall = blocking(Tile::new(101, 100));
 
         // Straight east into the blocked tile, then three more east. The old
         // greedy step would ask for East every time, walk into (101, 100) and
@@ -1732,7 +1733,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&wall),
+                Ground::plain(over(&wall)),
             )
             .expect("a route around the wall exists");
         assert_ne!(
@@ -1753,14 +1754,14 @@ mod tests {
             here().z,
         );
         assert!(
-            wall.can_step(here(), pos).is_some(),
+            openshard_movement::can_step(&over(&wall), here(), pos).is_some(),
             "the first step is not onto the wall"
         );
 
         let mut now = start;
         for step in 1..10 {
             now = at(now, WALK_HOLD.as_millis() as u64);
-            let Some(facing) = steering.due(now, pos, Direction::East, Ground::plain(&wall)) else {
+            let Some(facing) = steering.due(now, pos, Direction::East, Ground::plain(over(&wall))) else {
                 break;
             };
             let (dx, dy) = facing.direction.step();
@@ -1770,7 +1771,7 @@ mod tests {
                 pos.z,
             );
             assert!(
-                wall.can_step(pos, next).is_some(),
+                openshard_movement::can_step(&over(&wall), pos, next).is_some(),
                 "step {step} walked onto the blocked tile"
             );
             pos = next;
@@ -1795,9 +1796,7 @@ mod tests {
         let mut steering = Steering::default();
         // Four tiles east, and the clicked tile itself is the blocked one, so
         // no search finds a route to it however it looks.
-        let wall = Wall {
-            blocked: Tile::new(104, 100),
-        };
+        let wall = blocking(Tile::new(104, 100));
 
         let mut pos = here();
         let mut now = start;
@@ -1807,7 +1806,7 @@ mod tests {
                 pos,
                 now,
                 Direction::East,
-                Ground::plain(&wall)
+                Ground::plain(over(&wall))
             ),
             Some(Facing::walking(Direction::East)),
             "as close as the ground allows is still somewhere worth walking"
@@ -1817,12 +1816,13 @@ mod tests {
         for _ in 0..3 {
             pos = Point::new(pos.x + 1, pos.y, pos.z);
             now = at(now, 400);
-            let step = steering.due(now, pos, Direction::East, Ground::plain(&wall));
+            let step = steering.due(now, pos, Direction::East, Ground::plain(over(&wall)));
             if step.is_none() {
                 break;
             }
             assert!(
-                wall.can_step(pos, Point::new(pos.x + 1, pos.y, pos.z)).is_some(),
+                openshard_movement::can_step(&over(&wall), pos, Point::new(pos.x + 1, pos.y, pos.z))
+                    .is_some(),
                 "a step was asked for onto the blocked tile at {}, {}",
                 pos.x + 1,
                 pos.y
@@ -1837,7 +1837,12 @@ mod tests {
         // patience, and then let go of.
         for step in 1..u64::from(STUCK_STEPS) {
             assert_eq!(
-                steering.due(at(now, 400 * step), pos, Direction::East, Ground::plain(&wall)),
+                steering.due(
+                    at(now, 400 * step),
+                    pos,
+                    Direction::East,
+                    Ground::plain(over(&wall))
+                ),
                 None,
                 "beat {step} against the wall must send nothing"
             );
@@ -1852,7 +1857,7 @@ mod tests {
                 at(now, 400 * u64::from(STUCK_STEPS)),
                 pos,
                 Direction::East,
-                Ground::plain(&wall)
+                Ground::plain(over(&wall))
             ),
             None
         );
@@ -1866,9 +1871,7 @@ mod tests {
     fn a_destination_with_nowhere_closer_to_stand_sends_nothing_at_all() {
         let start = Instant::now();
         let mut steering = Steering::default();
-        let wall = Wall {
-            blocked: Tile::new(101, 100),
-        };
+        let wall = blocking(Tile::new(101, 100));
 
         assert_eq!(
             steering.go_to(
@@ -1876,7 +1879,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&wall)
+                Ground::plain(over(&wall))
             ),
             None,
             "the body is already against it; a step would only be refused"
@@ -1892,7 +1895,7 @@ mod tests {
                     at(start, 400 * step),
                     here(),
                     Direction::East,
-                    Ground::plain(&wall)
+                    Ground::plain(over(&wall))
                 ),
                 None,
                 "beat {step} still has nothing to send"
@@ -1903,7 +1906,7 @@ mod tests {
                 at(start, 400 * u64::from(STUCK_STEPS)),
                 here(),
                 Direction::East,
-                Ground::plain(&wall)
+                Ground::plain(over(&wall))
             ),
             None
         );
@@ -1918,49 +1921,41 @@ mod tests {
     /// "no route" means can only be answered by asking both. `shut` stands in
     /// for `clutter.rs`'s own list of doors, which is where a real client gets
     /// the same two answers from one index.
-    struct Doorwall {
-        shut: bool,
-    }
-
     /// The one gap in [`Doorwall`]'s line, three tiles east of the body.
     const DOORWAY: Tile = Tile::new(103, 100);
 
-    impl openshard_movement::Terrain for Doorwall {
-        fn can_step(&self, from: Point, to: Point) -> Option<Point> {
-            let barred = to.x == DOORWAY.x && (Tile::new(to.x, to.y) != DOORWAY || self.shut);
-            match barred {
-                true => None,
-                false => OpenWorld.can_step(from, to),
-            }
+    /// A wall three tiles east with one doorway in it, and a shut leaf hanging
+    /// in the doorway.
+    ///
+    /// Read [`Doors::AsTheyStand`] the leaf is in the way; read
+    /// [`Doors::AllOpen`] it is not. That pair is the whole of what this
+    /// module's open/barred split is about, and it used to be two hand-written
+    /// terrains that had to agree with each other by hand.
+    fn doorwall() -> Overlay {
+        let mut overlay = Overlay::default();
+        for y in 0..=u16::MAX {
+            let tile = Tile::new(DOORWAY.x, y);
+            overlay.set(
+                tile,
+                vec![match tile == DOORWAY {
+                    true => Cover::door(0, 20),
+                    false => Cover::blocking(0, 20),
+                }],
+            );
         }
+        overlay
     }
 
-    struct MutableDoor {
-        shut: std::cell::Cell<bool>,
-    }
-
-    impl openshard_movement::Terrain for MutableDoor {
-        fn can_step(&self, from: Point, to: Point) -> Option<Point> {
-            (to.x != DOORWAY.x || !self.shut.get())
-                .then(|| OpenWorld.can_step(from, to))
-                .flatten()
+    /// A wall of shut leaves at `x`, `height` rows tall — a full-height door
+    /// with no gap, for a destination past the ordinary plan budget. The coarse
+    /// graph is built over open ground; the shut reading is what must keep the
+    /// executable half from crossing the leaf.
+    fn long_door(x: u16, height: u16) -> Overlay {
+        let mut overlay = Overlay::default();
+        for y in 0..height {
+            overlay.set(Tile::new(x, y), vec![Cover::door(0, 20)]);
         }
-    }
-
-    /// The same door contract at a distance that exceeds [`PLAN_BUDGET`]. The
-    /// coarse graph is built from the open map; the `shut` reading is what must
-    /// still keep the executable half from crossing the leaf.
-    struct LongDoor {
-        shut: bool,
-        x: u16,
-    }
-
-    impl openshard_movement::Terrain for LongDoor {
-        fn can_step(&self, from: Point, to: Point) -> Option<Point> {
-            (!self.shut || to.x != self.x)
-                .then(|| OpenWorld.can_step(from, to))
-                .flatten()
-        }
+        overlay
     }
 
     /// Two tiles past the doorway: a destination only reachable through it.
@@ -1970,8 +1965,9 @@ mod tests {
     /// answers, and its answer is the whole plan.
     #[test]
     fn a_way_through_the_world_as_it_stands_is_the_whole_plan() {
-        let open = Doorwall { shut: false };
-        let plan = plan(Ground::plain(&open), here(), BEYOND).expect("the doorway is open");
+        let doorwall = doorwall();
+        let open = over(&doorwall).reading(Doors::AllOpen);
+        let plan = plan(Ground::plain(open), here(), BEYOND).expect("the doorway is open");
         assert_eq!(plan.open, vec![Direction::East; 5]);
         assert!(
             plan.barred.is_empty(),
@@ -1985,18 +1981,17 @@ mod tests {
     /// reaches for the graph rather than merely storing one at startup.
     #[test]
     fn a_far_destination_uses_the_coarse_route_after_the_ordinary_budget_ends() {
-        let router = NavigationGraph::build(&OpenWorld, 704, 32).expect("a representable map");
+        let router = NavigationGraph::build(&open_ground(), 704, 32).expect("a representable map");
         let from = Point::new(1, 1, 0);
         let goal = Tile::new(702, 1);
         assert!(
-            find_path(&OpenWorld, from, Point::new(goal.x, goal.y, 0), PLAN_BUDGET).is_none(),
+            find_path(&open_ground(), from, Point::new(goal.x, goal.y, 0), PLAN_BUDGET).is_none(),
             "the flat plan is intentionally too short"
         );
         let plan = plan(
             Ground {
-                real: &OpenWorld,
-                through_doors: &OpenWorld,
-                guide: &OpenWorld,
+                live: open_ground(),
+                guide: open_ground(),
                 coarse: Some(&router),
             },
             from,
@@ -2009,16 +2004,16 @@ mod tests {
 
     #[test]
     fn a_far_shut_door_is_still_a_cut_coarse_route_not_a_walk_through_it() {
-        let open = LongDoor { shut: false, x: 400 };
-        let shut = LongDoor { shut: true, x: 400 };
-        let router = NavigationGraph::build(&open, 704, 32).expect("a representable map");
+        let door = long_door(400, 32);
+        let shut = over(&door);
+        let open = shut.reading(Doors::AllOpen);
+        let router = NavigationGraph::build(&open_ground(), 704, 32).expect("a representable map");
         let from = Point::new(1, 1, 0);
         let goal = Tile::new(702, 1);
         let plan = plan(
             Ground {
-                real: &shut,
-                through_doors: &open,
-                guide: &open,
+                live: shut,
+                guide: open,
                 coarse: Some(&router),
             },
             from,
@@ -2047,17 +2042,17 @@ mod tests {
     /// somewhere useful and the drawn line change colour at the door.
     #[test]
     fn a_shut_door_plans_up_to_it_and_names_the_rest_barred() {
-        let shut = Doorwall { shut: true };
-        let open = Doorwall { shut: false };
+        let doorwall = doorwall();
+        let shut = over(&doorwall);
+        let open = shut.reading(Doors::AllOpen);
         assert!(
             find_path(&shut, here(), Point::new(BEYOND.x, BEYOND.y, 0), PLAN_BUDGET).is_none(),
             "the premise: as the world stands there is no way through at all"
         );
         let plan = plan(
             Ground {
-                real: &shut,
-                through_doors: &open,
-                guide: &open,
+                live: shut,
+                guide: open,
                 coarse: None,
             },
             here(),
@@ -2078,14 +2073,11 @@ mod tests {
 
     #[test]
     fn plan_replay_is_snapshot_data_after_terrain_mutates() {
-        let terrain = MutableDoor {
-            shut: std::cell::Cell::new(true),
-        };
+        let mut door = long_door(DOORWAY.x, u16::MAX);
         let plan = plan(
             Ground {
-                real: &terrain,
-                through_doors: &OpenWorld,
-                guide: &OpenWorld,
+                live: over(&door),
+                guide: open_ground(),
                 coarse: None,
             },
             here(),
@@ -2094,7 +2086,7 @@ mod tests {
         .expect("the open snapshot provides a route");
         assert_eq!(plan.open_points.len(), 2);
         assert_eq!(plan.barred_points.len(), 3);
-        terrain.shut.set(false);
+        door.clear();
         assert_eq!(
             plan.open_points.len(),
             2,
@@ -2109,14 +2101,11 @@ mod tests {
     /// crate stood on the straight line.
     #[test]
     fn a_thing_in_the_way_with_a_route_round_it_is_not_barred() {
-        let wall = Wall {
-            blocked: Tile::new(101, 100),
-        };
+        let wall = blocking(Tile::new(101, 100));
         let plan = plan(
             Ground {
-                real: &wall,
-                through_doors: &OpenWorld,
-                guide: &OpenWorld,
+                live: over(&wall),
+                guide: open_ground(),
                 coarse: None,
             },
             here(),
@@ -2145,12 +2134,12 @@ mod tests {
     fn a_destination_behind_a_shut_door_is_walked_up_to_and_no_further() {
         let start = Instant::now();
         let mut steering = Steering::default();
-        let shut = Doorwall { shut: true };
-        let open = Doorwall { shut: false };
+        let doorwall = doorwall();
+        let shut = over(&doorwall);
+        let open = shut.reading(Doors::AllOpen);
         let ground = Ground {
-            real: &shut,
-            through_doors: &open,
-            guide: &open,
+            live: shut,
+            guide: open,
             coarse: None,
         };
 
@@ -2211,8 +2200,9 @@ mod tests {
     fn the_walk_resumes_the_moment_the_door_opens() {
         let start = Instant::now();
         let mut steering = Steering::default();
-        let shut = Doorwall { shut: true };
-        let open = Doorwall { shut: false };
+        let doorwall = doorwall();
+        let shut = over(&doorwall);
+        let open = shut.reading(Doors::AllOpen);
 
         let waiting = Point::new(102, 100, 0);
         steering
@@ -2222,9 +2212,8 @@ mod tests {
                 start,
                 Direction::East,
                 Ground {
-                    real: &shut,
-                    through_doors: &open,
-                    guide: &open,
+                    live: shut,
+                    guide: open,
                     coarse: None,
                 },
             )
@@ -2234,9 +2223,8 @@ mod tests {
             Point::new(101, 100, 0),
             Direction::East,
             Ground {
-                real: &shut,
-                through_doors: &open,
-                guide: &open,
+                live: shut,
+                guide: open,
                 coarse: None,
             },
         );
@@ -2246,9 +2234,8 @@ mod tests {
                 waiting,
                 Direction::East,
                 Ground {
-                    real: &shut,
-                    through_doors: &open,
-                    guide: &open,
+                    live: shut,
+                    guide: open,
                     coarse: None,
                 }
             ),
@@ -2258,7 +2245,7 @@ mod tests {
         // The leaf swings: the same tile, now part of the world a step is
         // allowed by.
         assert_eq!(
-            steering.due(at(start, 1200), waiting, Direction::East, Ground::plain(&open)),
+            steering.due(at(start, 1200), waiting, Direction::East, Ground::plain(open)),
             Some(Facing::walking(Direction::East)),
             "the door opened and nothing asked again — the walk must carry on by itself"
         );
@@ -2277,7 +2264,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .unwrap();
         for tick in 1..20 {
@@ -2287,26 +2274,12 @@ mod tests {
                     here(),
                     at(start, tick * 10),
                     Direction::East,
-                    Ground::plain(&OpenWorld)
+                    Ground::plain(open_ground())
                 ),
                 None
             );
         }
         assert_eq!(steering.deadline(), Some(at(start, 400)));
-    }
-
-    /// A terrain that counts how many times it was asked, so a test can prove
-    /// no search ran rather than only that the right answer came back.
-    #[derive(Default)]
-    struct CountingTerrain {
-        can_step_calls: std::cell::Cell<u32>,
-    }
-
-    impl openshard_movement::Terrain for CountingTerrain {
-        fn can_step(&self, from: Point, to: Point) -> Option<Point> {
-            self.can_step_calls.set(self.can_step_calls.get() + 1);
-            OpenWorld.can_step(from, to)
-        }
     }
 
     /// A drag restates the destination on every raw mouse-move event — tens a
@@ -2318,7 +2291,6 @@ mod tests {
     fn restating_a_destination_mid_step_does_not_search_the_terrain() {
         let start = Instant::now();
         let mut steering = Steering::default();
-        let terrain = CountingTerrain::default();
 
         steering
             .go_to(
@@ -2326,11 +2298,11 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&terrain),
+                Ground::plain(open_ground()),
             )
             .unwrap();
-        let after_click = terrain.can_step_calls.get();
-        assert!(after_click > 0, "the click itself plans a route");
+        let after_click = steering.plans.get();
+        assert_eq!(after_click, 1, "the click itself plans a route");
 
         for tick in 1..20 {
             steering.go_to(
@@ -2338,11 +2310,11 @@ mod tests {
                 here(),
                 at(start, tick * 10),
                 Direction::East,
-                Ground::plain(&terrain),
+                Ground::plain(open_ground()),
             );
         }
         assert_eq!(
-            terrain.can_step_calls.get(),
+            steering.plans.get(),
             after_click,
             "restating the destination between steps must not run a search"
         );
@@ -2361,7 +2333,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .unwrap();
         // The body never moves: every step is refused by the server, which
@@ -2374,7 +2346,7 @@ mod tests {
                         at(start, 400 * step),
                         here(),
                         Direction::East,
-                        Ground::plain(&OpenWorld)
+                        Ground::plain(open_ground())
                     )
                     .is_some(),
                 "step {step} is still worth trying"
@@ -2385,7 +2357,7 @@ mod tests {
                 at(start, 400 * u64::from(STUCK_STEPS)),
                 here(),
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None
         );
@@ -2404,7 +2376,7 @@ mod tests {
                 here(),
                 start,
                 Direction::South,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .unwrap();
 
@@ -2415,7 +2387,7 @@ mod tests {
             let position = Point::new(100, y - u16::from(y % 2 == 0), 0);
             assert!(
                 steering
-                    .due(now, position, Direction::South, Ground::plain(&OpenWorld))
+                    .due(now, position, Direction::South, Ground::plain(open_ground()))
                     .is_some(),
                 "row {y}"
             );
@@ -2437,7 +2409,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .unwrap();
         assert_eq!(
@@ -2446,14 +2418,19 @@ mod tests {
                 here(),
                 at(start, 50),
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None,
             "the step under way is not cut short"
         );
         assert_eq!(steering.goal(), None, "but the destination is dropped at once");
         assert_eq!(
-            steering.due(at(start, 399), here(), Direction::East, Ground::plain(&OpenWorld)),
+            steering.due(
+                at(start, 399),
+                here(),
+                Direction::East,
+                Ground::plain(open_ground())
+            ),
             None
         );
         assert_eq!(
@@ -2461,7 +2438,7 @@ mod tests {
                 at(start, 400),
                 here(),
                 Direction::NorthWest,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::NorthWest)),
             "the keyboard's step, not the destination's"
@@ -2486,7 +2463,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::East))
         );
@@ -2497,7 +2474,7 @@ mod tests {
                 here(),
                 at(start, 200),
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None
         );
@@ -2509,7 +2486,12 @@ mod tests {
         // And it is the *new* direction that leaves at it: the queue is one step
         // deep and every press rebuilds it.
         assert_eq!(
-            steering.due(at(start, 400), here(), Direction::East, Ground::plain(&OpenWorld)),
+            steering.due(
+                at(start, 400),
+                here(),
+                Direction::East,
+                Ground::plain(open_ground())
+            ),
             Some(Facing::walking(Direction::West))
         );
     }
@@ -2539,7 +2521,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .unwrap();
         for (tick, direction) in arrows.iter().cycle().take(30).enumerate() {
@@ -2550,13 +2532,13 @@ mod tests {
                     here(),
                     now,
                     Direction::East,
-                    Ground::plain(&OpenWorld)
+                    Ground::plain(open_ground())
                 ),
                 None,
                 "at {now:?}"
             );
             assert_eq!(
-                steering.due(now, here(), Direction::East, Ground::plain(&OpenWorld)),
+                steering.due(now, here(), Direction::East, Ground::plain(open_ground())),
                 None,
                 "nor by asking the clock at {now:?}"
             );
@@ -2601,7 +2583,7 @@ mod tests {
                     here(),
                     now,
                     Direction::South,
-                    Ground::plain(&OpenWorld),
+                    Ground::plain(open_ground()),
                 )
                 .is_some()
             {
@@ -2637,7 +2619,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .unwrap();
         for tap in 1..8 {
@@ -2649,7 +2631,7 @@ mod tests {
                     here(),
                     now,
                     Direction::East,
-                    Ground::plain(&OpenWorld)
+                    Ground::plain(open_ground())
                 ),
                 None,
                 "tap {tap} bought a step"
@@ -2664,7 +2646,7 @@ mod tests {
                 here(),
                 at(start, 2_000),
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::East))
         );
@@ -2696,7 +2678,7 @@ mod tests {
                 here(),
                 start,
                 Direction::North,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::East))
         );
@@ -2710,7 +2692,7 @@ mod tests {
                 at(start, turn - 1),
                 here(),
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None,
             "the body is squaring up; nothing else has come due"
@@ -2722,7 +2704,7 @@ mod tests {
                 at(start, turn),
                 here(),
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::East))
         );
@@ -2747,9 +2729,7 @@ mod tests {
         let mut steering = Steering::default();
         // A wall exactly where the body would step if this were a walk: what
         // pins that no step is even considered.
-        let wall = Wall {
-            blocked: Tile::new(101, 100),
-        };
+        let wall = blocking(Tile::new(101, 100));
 
         assert_eq!(
             steering.steer(
@@ -2757,7 +2737,7 @@ mod tests {
                 here(),
                 start,
                 Direction::North,
-                Ground::plain(&wall)
+                Ground::plain(over(&wall))
             ),
             Some(Facing::walking(Direction::East)),
             "the turn is sent; the body is facing north and was asked to face east"
@@ -2770,7 +2750,7 @@ mod tests {
                     at(start, 400 * step),
                     here(),
                     Direction::East,
-                    Ground::plain(&wall)
+                    Ground::plain(over(&wall))
                 ),
                 None,
                 "step {step}: a turn-only ask sent something once it was already facing"
@@ -2793,7 +2773,7 @@ mod tests {
                 here(),
                 start,
                 Direction::North,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .expect("the turn");
         // Facing east and still inside the ring: nothing.
@@ -2803,7 +2783,7 @@ mod tests {
                 here(),
                 at(start, 400),
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None,
             "the same ask restated"
@@ -2815,7 +2795,7 @@ mod tests {
                 here(),
                 at(start, 500),
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::East)),
             "out past the ring, the same bearing is a walk"
@@ -2837,13 +2817,13 @@ mod tests {
                 here(),
                 start,
                 Direction::North,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::East)),
             "the turn"
         );
         assert_eq!(
-            steering.due(start, here(), Direction::East, Ground::plain(&OpenWorld)),
+            steering.due(start, here(), Direction::East, Ground::plain(open_ground())),
             Some(Facing::walking(Direction::East)),
             "and the step it was for, in the same instant"
         );
@@ -2864,7 +2844,7 @@ mod tests {
                 here(),
                 start,
                 Direction::North,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .expect("the turn");
         let turn = TURN_HOLD_FAST.as_millis() as u64;
@@ -2874,7 +2854,7 @@ mod tests {
                 at(start, turn),
                 here(),
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::East))
         );
@@ -2906,7 +2886,7 @@ mod tests {
                 here(),
                 now,
                 Direction::North,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             ) {
                 // What the body was facing when this left — `asked` is set to
                 // this step's own direction by then, so the caller's facing is
@@ -2939,7 +2919,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .unwrap();
         // The shard refuses it and says the body is still facing north.
@@ -2953,7 +2933,7 @@ mod tests {
                 at(start, 400),
                 here(),
                 Direction::North,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::East))
         );
@@ -2962,7 +2942,7 @@ mod tests {
                 at(start, 400),
                 here(),
                 Direction::North,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None,
             "the turn is a step of its own; the wake it left in owes nothing more"
@@ -2972,7 +2952,7 @@ mod tests {
                 at(start, 400 + TURN_HOLD.as_millis() as u64),
                 here(),
                 Direction::North,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::East)),
             "the step the turn was for"
@@ -2991,7 +2971,7 @@ mod tests {
                 here(),
                 start,
                 Direction::South,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .unwrap();
         steering.go_to(
@@ -2999,7 +2979,7 @@ mod tests {
             here(),
             start,
             Direction::South,
-            Ground::plain(&OpenWorld),
+            Ground::plain(open_ground()),
         );
         steering.clear();
         assert_eq!(steering.goal(), None);
@@ -3009,7 +2989,7 @@ mod tests {
                 at(start, 10_000),
                 here(),
                 Direction::South,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None
         );
@@ -3030,7 +3010,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::East))
         );
@@ -3040,7 +3020,7 @@ mod tests {
                 here(),
                 at(start, 10),
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None,
             "the same heading restated is not a fresh ask"
@@ -3052,14 +3032,12 @@ mod tests {
     /// doc), so a real trap needs the direction itself and both of its
     /// flanking cardinals blocked, not the diagonals — the inside corner of a
     /// building, with the body pushed at the corner.
-    struct Boxed;
-    impl openshard_movement::Terrain for Boxed {
-        fn can_step(&self, from: Point, to: Point) -> Option<Point> {
-            match (to.x, to.y) {
-                (101, 100) | (100, 99) | (100, 101) => None,
-                _ => OpenWorld.can_step(from, to),
-            }
+    fn boxed() -> Overlay {
+        let mut overlay = Overlay::default();
+        for tile in [Tile::new(101, 100), Tile::new(100, 99), Tile::new(100, 101)] {
+            overlay.set(tile, vec![Cover::blocking(0, 20)]);
         }
+        overlay
     }
 
     /// Wedged in a corner and leaning on the key: the body turns to face it
@@ -3086,7 +3064,7 @@ mod tests {
                 here(),
                 start,
                 Direction::North,
-                Ground::plain(&Boxed)
+                Ground::plain(over(&boxed()))
             ),
             Some(Facing::walking(Direction::East)),
             "the turn into the corner is legal and is what the body is drawn doing"
@@ -3097,7 +3075,7 @@ mod tests {
                     at(start, 400 * step),
                     here(),
                     Direction::East,
-                    Ground::plain(&Boxed)
+                    Ground::plain(over(&boxed()))
                 ),
                 None,
                 "step {step}: facing it already, there is no step left that the shard would take"
@@ -3121,7 +3099,7 @@ mod tests {
                 here(),
                 start,
                 Direction::North,
-                Ground::plain(&Boxed),
+                Ground::plain(over(&boxed())),
             )
             .expect("the turn");
         // The turn is a step of its own, so the retries are measured from the
@@ -3134,7 +3112,7 @@ mod tests {
                     at(start, turn + 400 * step),
                     here(),
                     Direction::East,
-                    Ground::plain(&Boxed)
+                    Ground::plain(over(&boxed()))
                 ),
                 None
             );
@@ -3150,7 +3128,7 @@ mod tests {
                 at(start, turn + 400 * 3),
                 here(),
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::East)),
             "nothing was asked for again; the heading was held the whole time"
@@ -3175,9 +3153,7 @@ mod tests {
         // eighth, and this scene is about the quarter turn.
         steering.set_leeway(Leeway::Quarter);
         // Directly in the heading's path; both cardinal sidesteps are open.
-        let wall = Wall {
-            blocked: Tile::new(101, 100),
-        };
+        let wall = blocking(Tile::new(101, 100));
 
         let detoured = steering
             .steer(
@@ -3185,7 +3161,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&wall),
+                Ground::plain(over(&wall)),
             )
             .expect("a sidestep is open");
         assert!(
@@ -3195,8 +3171,12 @@ mod tests {
             detoured.direction
         );
         assert!(
-            wall.can_step(here(), step_from(here(), detoured.direction).unwrap())
-                .is_some(),
+            openshard_movement::can_step(
+                &over(&wall),
+                here(),
+                step_from(here(), detoured.direction).unwrap()
+            )
+            .is_some(),
             "the direction taken must actually be open"
         );
     }
@@ -3214,9 +3194,7 @@ mod tests {
         steering.set_leeway(Leeway::Quarter);
         // North-east is blocked; north and east, the cardinals it splits
         // into, are both open — the detour must take one of them.
-        let corner = Wall {
-            blocked: Tile::new(101, 99),
-        };
+        let corner = blocking(Tile::new(101, 99));
 
         let detoured = steering
             .steer(
@@ -3224,7 +3202,7 @@ mod tests {
                 here(),
                 start,
                 Direction::NorthEast,
-                Ground::plain(&corner),
+                Ground::plain(over(&corner)),
             )
             .expect("a flanking cardinal is open");
         assert!(
@@ -3233,9 +3211,12 @@ mod tests {
             detoured.direction
         );
         assert!(
-            corner
-                .can_step(here(), step_from(here(), detoured.direction).unwrap())
-                .is_some(),
+            openshard_movement::can_step(
+                &over(&corner),
+                here(),
+                step_from(here(), detoured.direction).unwrap()
+            )
+            .is_some(),
             "the direction taken must actually be open"
         );
     }
@@ -3261,9 +3242,7 @@ mod tests {
         let mut steering = Steering::default();
         // Directly in the heading's path, with both sidesteps wide open — the
         // scene `Leeway::Quarter` answers with a sidestep.
-        let wall = Wall {
-            blocked: Tile::new(101, 100),
-        };
+        let wall = blocking(Tile::new(101, 100));
 
         assert_eq!(
             steering.steer(
@@ -3271,7 +3250,7 @@ mod tests {
                 here(),
                 start,
                 Direction::North,
-                Ground::plain(&wall)
+                Ground::plain(over(&wall))
             ),
             Some(Facing::walking(Direction::East)),
             "the turn to face what it walked into is still legal and still sent"
@@ -3282,7 +3261,7 @@ mod tests {
                     at(start, 400 * step),
                     here(),
                     Direction::East,
-                    Ground::plain(&wall)
+                    Ground::plain(over(&wall))
                 ),
                 None,
                 "step {step}: stopped means stopped, and a refused step is not sent to say so"
@@ -3292,7 +3271,12 @@ mod tests {
         // heading, with the sidestep allowed, walks.
         steering.set_leeway(Leeway::Quarter);
         let slid = steering
-            .due(at(start, 400 * 6), here(), Direction::East, Ground::plain(&wall))
+            .due(
+                at(start, 400 * 6),
+                here(),
+                Direction::East,
+                Ground::plain(over(&wall)),
+            )
             .expect("a sidestep is open");
         assert!(
             matches!(slid.direction, Direction::North | Direction::South),
@@ -3327,13 +3311,14 @@ mod tests {
         // The south-east tile is open ground. Due east is the wall's last
         // tile, so a step south-east clips the corner where it ends —
         // refused on the wire, and `Wall` alone cannot tell.
-        let corner = Wall {
-            blocked: Tile::new(101, 100),
-        };
+        let corner = blocking(Tile::new(101, 100));
         assert!(
-            corner
-                .can_step(here(), step_from(here(), Direction::SouthEast).unwrap())
-                .is_some(),
+            openshard_movement::can_step(
+                &over(&corner),
+                here(),
+                step_from(here(), Direction::SouthEast).unwrap()
+            )
+            .is_some(),
             "the tile itself is steppable — the corner rule is the only thing refusing it"
         );
 
@@ -3343,7 +3328,7 @@ mod tests {
                 here(),
                 start,
                 Direction::SouthEast,
-                Ground::plain(&corner),
+                Ground::plain(over(&corner)),
             )
             .expect("south is open");
         assert_eq!(
@@ -3372,15 +3357,11 @@ mod tests {
         // north (onward) are open: a fixed South-first order would try south
         // every single time and bounce between the two tiles forever, which
         // is exactly the doorway this was found against.
-        struct Doorway;
-        impl openshard_movement::Terrain for Doorway {
-            fn can_step(&self, from: Point, to: Point) -> Option<Point> {
-                match (to.x, to.y) {
-                    (101, _) | (100, 101) => None,
-                    _ => OpenWorld.can_step(from, to),
-                }
-            }
+        let mut doorway = Overlay::default();
+        for y in 0..=u16::MAX {
+            doorway.set(Tile::new(101, y), vec![Cover::blocking(0, 20)]);
         }
+        doorway.set(Tile::new(100, 101), vec![Cover::blocking(0, 20)]);
 
         let first = steering
             .steer(
@@ -3388,7 +3369,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&Doorway),
+                Ground::plain(over(&doorway)),
             )
             .expect("north is open");
         assert_eq!(
@@ -3402,7 +3383,7 @@ mod tests {
         for step in 1..4u32 {
             now = at(now, u64::from(step) * WALK_HOLD.as_millis() as u64);
             let facing = steering
-                .due(now, pos, Direction::East, Ground::plain(&Doorway))
+                .due(now, pos, Direction::East, Ground::plain(over(&doorway)))
                 .unwrap_or_else(|| panic!("step {step}: north keeps being open"));
             assert_eq!(
                 facing.direction,
@@ -3430,18 +3411,7 @@ mod tests {
                 (i32::from(here().x) + dx) as u16,
                 (i32::from(here().y) + dy) as u16,
             );
-            struct AheadBlocked {
-                ahead: Tile,
-            }
-            impl openshard_movement::Terrain for AheadBlocked {
-                fn can_step(&self, from: Point, to: Point) -> Option<Point> {
-                    match Tile::new(to.x, to.y) == self.ahead {
-                        true => None,
-                        false => OpenWorld.can_step(from, to),
-                    }
-                }
-            }
-            let terrain = AheadBlocked { ahead };
+            let terrain = blocking(ahead);
 
             let mut steering = Steering::default();
             // The wider leeway, stated: the default turns no more than an
@@ -3453,14 +3423,14 @@ mod tests {
                     here(),
                     start,
                     direction,
-                    Ground::plain(&terrain),
+                    Ground::plain(over(&terrain)),
                 )
                 .unwrap_or_else(|| panic!("{direction:?}: a heading never gives up, even on the first ask"));
 
             let to = step_from(here(), answer.direction)
                 .unwrap_or_else(|| panic!("{direction:?}: {:?} left the map", answer.direction));
             assert!(
-                terrain.can_step(here(), to).is_some(),
+                openshard_movement::can_step(&over(&terrain), here(), to).is_some(),
                 "{direction:?}: proposed {:?}, which the terrain (and so the server) refuses",
                 answer.direction
             );
@@ -3481,7 +3451,7 @@ mod tests {
                 here(),
                 start,
                 Direction::North,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .unwrap();
         // Queued behind the keyboard's own step, same as any other input
@@ -3492,7 +3462,7 @@ mod tests {
                 here(),
                 at(start, 10),
                 Direction::North,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None
         );
@@ -3502,7 +3472,7 @@ mod tests {
                 at(start, 400),
                 here(),
                 Direction::North,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             Some(Facing::walking(Direction::North)),
             "the keyboard is untouched by the mouse letting go"
@@ -3522,7 +3492,7 @@ mod tests {
                 here(),
                 start,
                 Direction::East,
-                Ground::plain(&OpenWorld),
+                Ground::plain(open_ground()),
             )
             .unwrap();
         assert_eq!(
@@ -3531,13 +3501,18 @@ mod tests {
                 here(),
                 at(start, 50),
                 Direction::East,
-                Ground::plain(&OpenWorld)
+                Ground::plain(open_ground())
             ),
             None,
             "the step under way is not cut short"
         );
         assert_eq!(
-            steering.due(at(start, 400), here(), Direction::West, Ground::plain(&OpenWorld)),
+            steering.due(
+                at(start, 400),
+                here(),
+                Direction::West,
+                Ground::plain(open_ground())
+            ),
             Some(Facing::walking(Direction::West)),
             "the keyboard's heading, not the mouse's"
         );

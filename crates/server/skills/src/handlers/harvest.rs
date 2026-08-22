@@ -16,7 +16,7 @@
 //! ends up when the pack will not take it, which is `items`' door.
 
 use openshard_entities::EntityId;
-use openshard_movement::{Terrain, Tile};
+use openshard_movement::Tile;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::target::{TargetCursor, TargetKind};
 use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue};
@@ -556,11 +556,12 @@ pub fn resolve_harvest_target(
     at: Point,
     graphic: Graphic,
 ) -> Option<HarvestTarget> {
-    // The panicking accessor, like every other reader of a facet's ground: a
-    // facet reached through `facet_of` is always loaded, and the `get(..)?` this
-    // replaced was the one caller that quietly answered "no such target" for a
-    // facet that cannot happen.
-    let terrain = state.live_terrain(facet);
+    // The *map* and not the live ground: what the land under a spot is, and
+    // which statics stand on it, are facts about the facet — a crate somebody
+    // dropped there does not make it a different tile. A facet reached through
+    // `facet_of` always has one loaded; `None` here is a shard with no client
+    // files, which has nothing to harvest either.
+    let terrain = state.map_terrain(facet)?;
     if graphic.0 == 0 {
         return Some(HarvestTarget {
             at,

@@ -14,7 +14,7 @@
 
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
-use openshard_movement::Terrain;
+use openshard_movement::Doors;
 use openshard_protocol::combat::{AttackTarget, WarMode};
 use openshard_protocol::feedback::{EffectKind, GraphicalEffect};
 use openshard_protocol::mobile::Notoriety;
@@ -714,7 +714,7 @@ pub fn volleys(state: &mut WorldState) {
         {
             continue; // melee's beat, or out of reach — the brain closes in
         }
-        if !state.live_terrain(facet).sight_clear(from, to) {
+        if !openshard_movement::sight_clear(&state.footing(facet, Doors::AsTheyStand), from, to) {
             continue; // no shooting through walls
         }
         let by = state.registry.serial_of(attacker);
@@ -788,7 +788,11 @@ pub fn swings(state: &mut WorldState) {
             // Adjacent tiles can still be separated by a closed door or wall.
             // Melee follows the same live-terrain sight rule as a volley and an
             // interaction: range alone must not allow a blow through an obstacle.
-            || !state.live_terrain(facet).sight_clear(attacker_pos, target_pos)
+            || !openshard_movement::sight_clear(
+                &state.footing(facet, Doors::AsTheyStand),
+                attacker_pos,
+                target_pos,
+            )
         {
             continue;
         }

@@ -28,8 +28,8 @@ use std::time::{Duration, Instant};
 use clap::Parser;
 use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::{
-    CachedTerrain, MapTerrain, NavigationGraph, OpenWorld, Terrain, Tile, bake, find_long_path, find_path,
-    search_path, step_allowed,
+    Doors, Footing, MapTerrain, NavigationGraph, Overlay, Tile, bake, find_long_path, find_path, search_path,
+    step_allowed,
 };
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::{Facet, Point};
@@ -172,7 +172,7 @@ fn sample_ring(terrain: &MapTerrain<'_>, origin: Point, radius: u32, width: u32,
 /// second route arriving at another height is not explored again. That
 /// under-counts — a gallery over a street is one entry, not two — so a tile it
 /// calls reachable really is, which is the direction that matters here.
-fn land_component(terrain: &MapTerrain<'_>, origin: Point, width: u32, height: u32) -> Vec<bool> {
+fn land_component(footing: &Footing<'_>, origin: Point, width: u32, height: u32) -> Vec<bool> {
     let mut reached = vec![false; (width as usize) * (height as usize)];
     let index = |x: u16, y: u16| (y as usize) * (width as usize) + (x as usize);
     let mut queue = std::collections::VecDeque::new();
@@ -180,7 +180,7 @@ fn land_component(terrain: &MapTerrain<'_>, origin: Point, width: u32, height: u
     queue.push_back(origin);
     while let Some(at) = queue.pop_front() {
         for direction in Direction::ALL {
-            let Some(next) = step_allowed(terrain, at, direction) else {
+            let Some(next) = step_allowed(footing, at, direction) else {
                 continue;
             };
             let slot = index(next.x, next.y);
@@ -201,13 +201,18 @@ fn synthetic() {
     const TO: Point = Point::new(WIDTH - 2, HEIGHT - 2, 0);
     const SAMPLES: usize = 25;
 
+    // No map and nothing on it: open ground, which is what this half of the
+    // bench is for.
+    let nothing = Overlay::default();
+    let open = Footing::new(None, &nothing, Doors::AsTheyStand);
+
     let built_at = Instant::now();
-    let router = NavigationGraph::build(&OpenWorld, u32::from(WIDTH), u32::from(HEIGHT))
+    let router = NavigationGraph::build(&open, u32::from(WIDTH), u32::from(HEIGHT))
         .expect("the synthetic facet fits Point's coordinate space");
     let built = built_at.elapsed();
 
     let flat_at = Instant::now();
-    let flat = find_path(&OpenWorld, FROM, TO, usize::from(WIDTH) * usize::from(HEIGHT))
+    let flat = find_path(&open, FROM, TO, usize::from(WIDTH) * usize::from(HEIGHT))
         .expect("open ground has a flat route");
     let flat_elapsed = flat_at.elapsed();
 
@@ -215,7 +220,7 @@ fn synthetic() {
     let mut coarse_steps = None;
     for _ in 0..SAMPLES {
         let coarse_at = Instant::now();
-        let coarse = find_long_path(&OpenWorld, &OpenWorld, &router, FROM, TO, 600)
+        let coarse = find_long_path(&open, &open, &router, FROM, TO, 600)
             .expect("the coarse corridor has bounded exact hops");
         coarse_steps = Some(coarse.len());
         coarse_samples.push(coarse_at.elapsed());
@@ -245,6 +250,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let graph = bake::load(&bake::artifact_path(&cli.client, facet), &stamp)?;
     let (regions, nodes, edges) = graph.counts();
     let terrain = MapTerrain::new(map.map(), &tiles);
+    // The map and nothing over it: a facet's numbers have to be about the facet.
+    let nothing_placed = Overlay::default();
+    let footing = Footing::new(Some(terrain), &nothing_placed, Doors::AsTheyStand);
     let (width, height) = (map.map().width(), map.map().height());
 
     let origin = standable(&terrain, cli.x, cli.y).ok_or("nothing stands at the origin")?;
@@ -255,7 +263,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let component = cli.component.then(|| {
         let started = Instant::now();
-        let reached = land_component(&terrain, origin, width, height);
+        let reached = land_component(&footing, origin, width, height);
         let count = reached.iter().filter(|&&flag| flag).count();
         println!(
             "  flood: {count} tiles walkable from the origin ({:.1}% of the facet) in {:.1}s",
@@ -265,40 +273,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         reached
     });
 
-    let (mut hits, mut misses) = (0usize, 0usize);
     for band in BANDS {
         let destinations = sample_ring(&terrain, origin, band, width, height);
         let mut readings = Vec::with_capacity(destinations.len());
         for to in destinations {
             let distance = u32::from(to.x.abs_diff(origin.x)).max(u32::from(to.y.abs_diff(origin.y)));
-            // Flat A* first, through the per-plan cache the client wraps it in.
+            // Flat A* first.
             let mut flat = Duration::MAX;
             let mut flat_search = None;
             for _ in 0..cli.repeat.max(1) {
-                let cache = CachedTerrain::new(&terrain);
                 let started = Instant::now();
-                let search = search_path(&cache, origin, to, cli.budget);
+                let search = search_path(&footing, origin, to, cli.budget);
                 flat = flat.min(started.elapsed());
-                let stats = cache.stats();
-                flat_search = Some((search, stats));
+                flat_search = Some(search);
             }
-            let (search, stats) = flat_search.expect("at least one repeat");
-            hits += stats.hits;
-            misses += stats.misses;
+            let search = flat_search.expect("at least one repeat");
 
             // Then the corridor, asked exactly as `steer::Ground::path` asks
-            // it: the bare map guides and joins, and the live reading — here a
-            // cache over the same map — approves the exact steps.
+            // it: the same ground guides, joins and approves the exact steps.
             let mut coarse = Duration::MAX;
             let mut coarse_route = None;
             for _ in 0..cli.repeat.max(1) {
-                let cache = CachedTerrain::new(&terrain);
                 let started = Instant::now();
-                let route = find_long_path(&terrain, &cache, &graph, origin, to, cli.budget);
+                let route = find_long_path(&footing, &footing, &graph, origin, to, cli.budget);
                 coarse = coarse.min(started.elapsed());
-                let stats = cache.stats();
-                hits += stats.hits;
-                misses += stats.misses;
                 coarse_route = Some(route);
             }
             readings.push(Reading {
@@ -368,10 +366,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     }
-    let calls = hits + misses;
-    println!(
-        "TransitionCacheStats over the whole run: hits={hits} misses={misses} hit_rate={:.1}%",
-        100.0 * hits as f64 / calls.max(1) as f64,
-    );
     Ok(())
 }

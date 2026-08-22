@@ -31,7 +31,7 @@ use openshard_entities::{EntityId, Registry};
 use openshard_events::{Cursor, EventBus};
 use openshard_gateway::ConnectionId;
 use openshard_map::snapshot::MapSnapshot;
-use openshard_movement::{Terrain, Tile, Walk, Walker, step_from};
+use openshard_movement::{Doors, Tile, Walk, Walker, step_from};
 use openshard_persistence::{
     CharacterRecord, DecorationRecord, DoorState, Inventory, ItemLocation, ItemRecord, Journal, MobileRecord,
     SCHEMA_VERSION, Snapshot,

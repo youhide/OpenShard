@@ -24,7 +24,7 @@
 
 use std::path::PathBuf;
 
-use openshard_movement::{MapTerrain, Terrain, Tile};
+use openshard_movement::{MapTerrain, Tile};
 use openshard_protocol::world::{Facet, Point};
 use openshard_uofiles::tiledata::TileData;
 

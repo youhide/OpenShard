@@ -1,5 +1,5 @@
 use super::*;
-use openshard_movement::{Terrain, Walker, step_from};
+use openshard_movement::{Doors, Walker, step_from};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::world::{Aggression, Sight};
 use openshard_state::components::{Brain, Heading, Hitpoints, Movement};
@@ -124,7 +124,9 @@ pub fn dismount(state: &mut WorldState, player: EntityId) {
     for dir in 0..8u8 {
         let dir = openshard_protocol::direction::Direction::from_bits(dir);
         if let Some(tile) = step_from(rider_at, dir) {
-            if let Some(landed) = state.live_terrain(facet).can_step(rider_at, tile) {
+            if let Some(landed) =
+                openshard_movement::can_step(&state.footing(facet, Doors::AsTheyStand), rider_at, tile)
+            {
                 landing = landed;
                 break;
             }

@@ -10,7 +10,7 @@
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_items as items;
-use openshard_movement::Terrain;
+use openshard_movement::Doors;
 use openshard_protocol::containers::{ContainerContents, GridSlot, encode_open_container};
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::{RawSerial, Serial, SerialKind};
@@ -92,7 +92,7 @@ fn in_trade_range(state: &WorldState, player: EntityId, vendor: EntityId) -> boo
     // A wall between the shopper and the counter is a wall: the same line-of-sight
     // ServUO and Sphere gate a vendor on, so there is no buying through it. The
     // ray is the one aggro uses (`Terrain::sight_clear`).
-    state.live_terrain(facet).sight_clear(at, vendor_at)
+    openshard_movement::sight_clear(&state.footing(facet, Doors::AsTheyStand), at, vendor_at)
 }
 
 /// How long a bought-out shelf takes to refill, in ticks. ServUO's

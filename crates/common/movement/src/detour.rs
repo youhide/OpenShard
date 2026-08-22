@@ -82,7 +82,8 @@
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 
-use crate::walk::{Heading, Lean, Terrain, step_allowed};
+use crate::footing::Footing;
+use crate::walk::{Heading, Lean, step_allowed};
 
 /// What is open around a body, as far as one step in one intended direction can
 /// tell: the intended tile and the two flanks that could take its place.
@@ -106,15 +107,15 @@ pub struct Around {
 impl Around {
     /// Read the four tiles from the world.
     ///
-    /// [`step_allowed`] and not [`Terrain::can_step`], for every one of them: a
-    /// terrain answers for the destination tile alone, and a diagonal that cuts
+    /// [`step_allowed`] and not [`can_step`](crate::can_step), for every one of
+    /// them: that answers for the destination tile alone, and a diagonal that cuts
     /// a wall's corner is refused on top of that. Asking the terrain directly
     /// here is what once had a client believing a corner-cutting diagonal was
     /// open, sending it, and being rolled back for as long as the player held
     /// the key.
     #[must_use]
-    pub fn read(terrain: &dyn Terrain, from: Point, intent: Heading) -> Self {
-        let open = |direction| step_allowed(terrain, from, direction).is_some();
+    pub fn read(footing: &Footing<'_>, from: Point, intent: Heading) -> Self {
+        let open = |direction| step_allowed(footing, from, direction).is_some();
         Self {
             intent,
             ahead: open(intent.direction),
@@ -330,6 +331,8 @@ const fn flanks(intent: Direction) -> [Direction; 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::overlay::{Cover, Doors, Overlay};
+    use crate::walk::Tile;
 
     /// Every state the machine can be in, for the enumerations below: the two
     /// slides are both flanks, because which one is remembered is exactly what
@@ -710,30 +713,25 @@ mod tests {
     /// something about a fiction.
     #[test]
     fn a_scene_read_from_the_world_is_a_scene_stated_outright() {
-        use crate::walk::OpenWorld;
-
         // East is walled, and so is the tile north of the body — which is the
         // counter-clockwise flank of East. South, the clockwise one, is open.
-        struct Corner;
-        impl Terrain for Corner {
-            fn can_step(&self, from: Point, to: Point) -> Option<Point> {
-                match (to.x, to.y) {
-                    (101, 100) | (100, 99) => None,
-                    _ => OpenWorld.can_step(from, to),
-                }
-            }
-        }
+        // No map at all under it, so the two walls are the only thing that can
+        // refuse anything.
+        let mut corner = Overlay::default();
+        corner.set(Tile::new(101, 100), vec![Cover::blocking(0, 20)]);
+        corner.set(Tile::new(100, 99), vec![Cover::blocking(0, 20)]);
+        let corner = Footing::new(None, &corner, Doors::AsTheyStand);
 
         let from = Point::new(100, 100, 0);
         assert_eq!(
-            Around::read(&Corner, from, Heading::centred(Direction::East)),
+            Around::read(&corner, from, Heading::centred(Direction::East)),
             Around::new(Heading::centred(Direction::East), false, true, false)
         );
         // And a diagonal whose tile is open ground but whose corner is cut:
-        // read must refuse it, which `Terrain::can_step` alone would not.
-        assert!(Corner.can_step(from, Point::new(101, 101, 0)).is_some());
+        // read must refuse it, which `can_step` alone would not.
+        assert!(crate::can_step(&corner, from, Point::new(101, 101, 0)).is_some());
         assert_eq!(
-            Around::read(&Corner, from, Heading::centred(Direction::SouthEast)),
+            Around::read(&corner, from, Heading::centred(Direction::SouthEast)),
             Around::new(Heading::centred(Direction::SouthEast), false, true, false)
         );
     }

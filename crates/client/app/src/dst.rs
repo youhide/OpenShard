@@ -72,7 +72,7 @@ use openshard_client_render::follow::Gaze;
 use openshard_client_render::follow::Rig;
 use openshard_client_render::mobiles::{self, Mobile};
 use openshard_movement::{
-    OpenWorld, Terrain, Tile, WALK_HOLD, Walk as Handled, Walker, step_hold, step_progress,
+    Cover, Doors, Footing, Overlay, Tile, WALK_HOLD, Walk as Handled, Walker, step_hold, step_progress,
 };
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::mobile::Notoriety;
@@ -335,24 +335,23 @@ impl Rng {
     }
 }
 
+/// Nothing placed: what the *client's* own reading of the ground is, which in
+/// this simulation never holds the shard's wall — see the notes at its two use
+/// sites.
+static EMPTY_FIELD: std::sync::LazyLock<Overlay> = std::sync::LazyLock::new(Overlay::default);
+
 /// A world with a wall in it, or none.
 ///
-/// `can_step` is the whole `Terrain` contract, and the only reason there is one
-/// here rather than [`OpenWorld`] is the rollback scenario: a refusal is the one
-/// event the oracle cannot predict, and the client's behaviour around it is
-/// worth pinning anyway.
-struct Field {
-    /// Tiles no step may land on. Empty is an open field.
-    walls: Vec<Tile>,
-}
-
-impl Terrain for Field {
-    fn can_step(&self, from: Point, to: Point) -> Option<Point> {
-        match self.walls.contains(&Tile::new(to.x, to.y)) {
-            true => None,
-            false => OpenWorld.can_step(from, to),
-        }
+/// No map at all, so the ground refuses nothing and the walls are the whole of
+/// what can. The only reason there is a wall here rather than plain open ground
+/// is the rollback scenario: a refusal is the one event the oracle cannot
+/// predict, and the client's behaviour around it is worth pinning anyway.
+fn field(walls: &[Tile]) -> Overlay {
+    let mut overlay = Overlay::default();
+    for &tile in walls {
+        overlay.set(tile, vec![Cover::blocking(0, 20)]);
     }
+    overlay
 }
 
 /// The client, the wire and a shard, on one virtual clock.
@@ -377,7 +376,8 @@ struct Sim {
     /// The shard's side of the same walk — the real rules, sequence check and
     /// anti-speedhack bucket included.
     shard: Walker,
-    field: Field,
+    /// What the *shard* refuses a step onto. See [`field`].
+    field: Overlay,
 
     /// `0x02`s crossing to the shard, and answers crossing back, by arrival.
     to_shard: VecDeque<(Duration, FramedClientPacket)>,
@@ -469,7 +469,7 @@ impl Sim {
             crowd,
             player,
             shard: Walker::new(START, facing),
-            field: Field { walls },
+            field: field(&walls),
             to_shard: VecDeque::new(),
             to_client: VecDeque::new(),
             to_window: VecDeque::new(),
@@ -533,14 +533,14 @@ impl Sim {
                 let act = acts.next().unwrap();
                 match act.input {
                     Input::Press(direction) => {
-                        // `OpenWorld`, not `self.field` — see the note on
+                        // open ground, not `self.field` — see the note on
                         // `about_to_wait`.
                         if let Some(facing) = self.steering.press(
                             direction,
                             self.player.at,
                             self.instant(),
                             self.player.facing,
-                            Ground::plain(&OpenWorld),
+                            Ground::plain(Footing::new(None, &EMPTY_FIELD, Doors::AsTheyStand)),
                         ) {
                             self.send(facing);
                         }
@@ -566,7 +566,12 @@ impl Sim {
             // socket read — the same seam `link::play` unwraps at.
             let request: WalkRequest = decode_packet(packet.bytes(), version()).unwrap();
             let sequence = request.sequence.interpret();
-            let answer = match self.shard.request(request, &self.field, self.instant(), false) {
+            let answer = match self.shard.request(
+                request,
+                &Footing::new(None, &self.field, Doors::AsTheyStand),
+                self.instant(),
+                false,
+            ) {
                 Handled::Turned { .. } | Handled::Moved { .. } => ServerPacket::WalkAck(WalkAck {
                     sequence,
                     notoriety: Notoriety::Innocent,
@@ -630,7 +635,7 @@ impl Sim {
 
     /// The ten lines of `App::about_to_wait` that walking goes through.
     fn about_to_wait(&mut self) {
-        // `OpenWorld`, not `self.field`: `field` models the wall the *shard*
+        // Open ground, not `self.field`: `field` models the wall the *shard*
         // enforces (see its own doc), and the client's own static map is a
         // separate, empty one in every scenario this harness runs — the
         // point of the rollback scenarios below is a wall this end finds out
@@ -645,7 +650,7 @@ impl Sim {
                 self.instant(),
                 self.player.at,
                 self.player.facing,
-                Ground::plain(&OpenWorld),
+                Ground::plain(Footing::new(None, &EMPTY_FIELD, Doors::AsTheyStand)),
             ) else {
                 break;
             };

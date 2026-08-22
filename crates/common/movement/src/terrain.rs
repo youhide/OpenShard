@@ -10,7 +10,7 @@
 //! `Obstructions` — the dynamic half, doors and placed items, which needs the
 //! entity registry a client does not have.
 
-use crate::{Terrain, Tile};
+use crate::Tile;
 use openshard_map::map::{LandTile, WorldMap};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
@@ -516,14 +516,21 @@ impl<'a> MapTerrain<'a> {
     }
 }
 
-impl Terrain for MapTerrain<'_> {
-    fn land_is_water(&self, tile: Tile) -> bool {
+/// The map's own answers — the nine questions a terrain trait used to hold, as
+/// inherent methods on the one type that could answer them from a map.
+///
+/// Five of that trait's six implementors were an *action over* a terrain rather
+/// than a terrain, and the trait existed so a search could take any of them. It
+/// does not any more: a search takes a [`Footing`](crate::Footing), and a caller
+/// that wants the bare map takes the map. See `docs/map/terrain_seam.md`.
+impl MapTerrain<'_> {
+    pub fn land_is_water(&self, tile: Tile) -> bool {
         self.map()
             .land(tile.x, tile.y)
             .is_some_and(|land| self.tiles().land(land.tile.0).flags.is_water())
     }
 
-    fn can_step(&self, from: Point, to: Point) -> Option<Point> {
+    pub fn can_step(&self, from: Point, to: Point) -> Option<Point> {
         let from_z = i32::from(from.z);
         // Reach the next tile from the top of what we stand on, not from our feet:
         // on a slope those differ, and starting from the feet refuses steps up the
@@ -538,18 +545,18 @@ impl Terrain for MapTerrain<'_> {
         Some(Point { x: to.x, y: to.y, z })
     }
 
-    fn ground_z(&self, tile: Tile) -> Option<i8> {
+    pub fn ground_z(&self, tile: Tile) -> Option<i8> {
         // The average, not the raw corner, so a character spawns at the same
         // height the client will compute for the tile — see `average_land_z`.
         self.map().land(tile.x, tile.y)?;
         i8::try_from(self.average_land_z(tile.x, tile.y)).ok()
     }
 
-    fn land_tile(&self, tile: Tile) -> Option<LandTile> {
+    pub fn land_tile(&self, tile: Tile) -> Option<LandTile> {
         self.map().land(tile.x, tile.y).map(|cell| cell.tile)
     }
 
-    fn statics_at(&self, tile: Tile, out: &mut Vec<(Graphic, i8)>) {
+    pub fn statics_at(&self, tile: Tile, out: &mut Vec<(Graphic, i8)>) {
         // `tile` is the static's graphic id — for statics it is the item graphic
         // itself, which is what the door-frame tables match against.
         out.extend(
@@ -559,11 +566,11 @@ impl Terrain for MapTerrain<'_> {
         );
     }
 
-    fn stand_z(&self, tile: Tile, near_z: i32) -> Option<i32> {
+    pub fn stand_z(&self, tile: Tile, near_z: i32) -> Option<i32> {
         self.surface_at(tile.x, tile.y, near_z)
     }
 
-    fn spawn_z(&self, tile: Tile, near_z: i32) -> Option<i32> {
+    pub fn spawn_z(&self, tile: Tile, near_z: i32) -> Option<i32> {
         // First the ordinary step check: from a ground-level placement it finds the
         // ground floor and — crucially — cannot reach the storey above, so a banker
         // placed at z=0 stays on the bank's ground floor rather than climbing to the
@@ -587,11 +594,7 @@ impl Terrain for MapTerrain<'_> {
             .min_by_key(|&z| (z - near_z).abs())
     }
 
-    fn can_fit(&self, tile: Tile, z: i32, height: i32) -> bool {
-        MapTerrain::can_fit(self, tile, z, height)
-    }
-
-    fn sight_clear(&self, from: Point, to: Point) -> bool {
+    pub fn sight_clear(&self, from: Point, to: Point) -> bool {
         // Eye height: the ray runs at head level, interpolated between the two
         // ends so a look up a hill follows the slope.
         const EYE: i32 = 9;

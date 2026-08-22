@@ -13,7 +13,7 @@ use openshard_events::EventBus;
 use openshard_movement::scene::Scene;
 // `Terrain` is in scope for its *methods*: the tests below ask a `LiveTerrain`
 // whether a step is allowed. Nothing here implements it any more.
-use openshard_movement::{Terrain, Walker};
+use openshard_movement::{Doors, Walker};
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::serial::SerialKind;
 use openshard_state::rng::Rng;
@@ -650,25 +650,23 @@ fn a_body_walks_from_the_shore_onto_the_deck_and_not_through_the_hull() {
     // Bow against the shore: the deck at (20, 1), hulls at (19, 1) and (21, 1).
     place(&mut state, actor, Point::new(20, 1, 0), Facet(0), SLOOP, owner).expect("staff-free water");
 
-    let live = state.live_terrain(Facet(0));
+    let live = state.footing(Facet(0), Doors::AsTheyStand);
     assert_eq!(
-        live.can_step(Point::new(20, 0, 0), Point::new(20, 1, 0)),
+        openshard_movement::can_step(&live, Point::new(20, 0, 0), Point::new(20, 1, 0)),
         Some(Point::new(20, 1, 3)),
         "stepping aboard lands on the deck and not in the water",
     );
     assert_eq!(
-        live.can_step(Point::new(20, 1, 3), Point::new(20, 2, 3)),
+        openshard_movement::can_step(&live, Point::new(20, 1, 3), Point::new(20, 2, 3)),
         Some(Point::new(20, 2, 3)),
         "and walking aft stays on it",
     );
     assert!(
-        live.can_step(Point::new(20, 1, 3), Point::new(21, 1, 3))
-            .is_none(),
+        openshard_movement::can_step(&live, Point::new(20, 1, 3), Point::new(21, 1, 3)).is_none(),
         "walked straight through the hull",
     );
     assert!(
-        live.can_step(Point::new(20, 0, 0), Point::new(30, 1, 0))
-            .is_none(),
+        openshard_movement::can_step(&live, Point::new(20, 0, 0), Point::new(30, 1, 0)).is_none(),
         "open water with no ship on it is still not walkable",
     );
 }

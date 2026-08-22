@@ -301,6 +301,15 @@ pub(crate) struct OccluderCache {
 }
 
 impl App {
+    /// Which reading of the shut doors this client's own steps are decided by.
+    ///
+    /// With auto-door mode on, a shut leaf *is* a usable next step — `walk`
+    /// sends the use before the step — so the real half of a plan is the
+    /// doors-open reading. With it off, shut is shut.
+    pub(crate) const fn walking_doors(&self) -> openshard_movement::Doors {
+        openshard_movement::Doors::for_opener(self.auto_open_doors)
+    }
+
     /// The sole cutaway policy for this client's current frame.
     ///
     /// The frame and an immediate world click must ask the same question: a

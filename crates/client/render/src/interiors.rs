@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use openshard_map::grid::BlockCoord;
 use openshard_map::map::{BLOCK_SIZE, WorldMap};
-use openshard_movement::{MapTerrain, PLAYER_HEIGHT, Terrain};
+use openshard_movement::{MapTerrain, PLAYER_HEIGHT};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};

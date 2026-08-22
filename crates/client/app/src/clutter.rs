@@ -34,10 +34,10 @@
 //! Both stop a step; only one of them is something a player can open. So a
 //! cover records *which* it is (`CoverKind::Blocks`'s `door`), and the tiles the shut ones
 //! stand on are the list this module exists to keep: **potentially passable, and
-//! currently closed**. [`Cluttered`] can then be read either way — as the world
-//! stands, or as it would be with every door open — which is what lets a route be
-//! planned *through* a shut door to find out where the way would go, and the walk
-//! stop in front of it. `steer::plan` is the reader; the server has the same pair
+//! currently closed**. A `Footing` over it can then be read either way — as the
+//! world stands, or as it would be with every door open — which is what lets a
+//! route be planned *through* a shut door to find out where the way would go, and
+//! the walk stop in front of it. `steer::plan` is the reader; the server has the same pair
 //! under the same name (`state::obstruct`'s `Obstacle::door`), and since node E
 //! of `docs/map/terrain_seam.md` it is not merely the same name but the same
 //! type: both ends build an `openshard_movement::Overlay`.
@@ -67,9 +67,7 @@ use std::collections::HashMap;
 use openshard_client_net::view::Mobile;
 use openshard_client_render::doors;
 use openshard_client_render::items::GroundItem;
-use openshard_movement::{Cover, Doors, Overlay, Terrain, Tile};
-use openshard_protocol::wire::Graphic;
-use openshard_protocol::world::Point;
+use openshard_movement::{Cover, Overlay, Tile};
 use openshard_uofiles::tiledata::TileData;
 
 /// A mobile's body height in z-units — how tall a span a blocker has to reach
@@ -138,87 +136,6 @@ pub fn of<'a>(
     overlay
 }
 
-/// The client's map with the shard's placed items laid over it.
-///
-/// The client-side twin of `openshard-state`'s `LiveTerrain`, and deliberately
-/// the same shape: a borrow, built per decision, delegating everything about the
-/// map to the map and answering only for what the world has put on top.
-#[derive(Debug)]
-pub struct Cluttered<'a, M> {
-    map: M,
-    overlay: &'a Overlay,
-    /// Which reading this is — as the doors stand, or as a route may be planned
-    /// through them.
-    doors: Doors,
-}
-
-impl<'a, M: Terrain> Cluttered<'a, M> {
-    /// The map with `overlay` laid over it, read under `doors`.
-    pub const fn new(map: M, overlay: &'a Overlay, doors: Doors) -> Self {
-        Self { map, overlay, doors }
-    }
-
-    /// Whether this tile is blocked, by whichever of the two readings this is.
-    fn blocked(&self, tile: Tile, stand_z: i32) -> bool {
-        self.overlay.blocker_at(tile, stand_z, self.doors).is_some()
-    }
-}
-
-impl<M: Terrain> Terrain for Cluttered<'_, M> {
-    fn can_step(&self, from: Point, to: Point) -> Option<Point> {
-        let landed = self.map.can_step(from, to)?;
-        // At the height the body will stand at, not the height it asked for:
-        // `to.z` is the caller's guess and `can_step` is what corrects it.
-        let onto = Tile::new(to.x, to.y);
-        match self.blocked(onto, i32::from(landed.z)) {
-            true => None,
-            false => Some(landed),
-        }
-    }
-
-    fn ground_z(&self, tile: Tile) -> Option<i8> {
-        self.map.ground_z(tile)
-    }
-
-    fn land_tile(&self, tile: Tile) -> Option<openshard_movement::LandTile> {
-        self.map.land_tile(tile)
-    }
-
-    fn statics_at(&self, tile: Tile, out: &mut Vec<(Graphic, i8)>) {
-        self.map.statics_at(tile, out);
-    }
-
-    fn stand_z(&self, tile: Tile, near_z: i32) -> Option<i32> {
-        self.map.stand_z(tile, near_z)
-    }
-
-    fn spawn_z(&self, tile: Tile, near_z: i32) -> Option<i32> {
-        self.map.spawn_z(tile, near_z)
-    }
-
-    fn can_fit(&self, tile: Tile, z: i32, height: i32) -> bool {
-        self.map.can_fit(tile, z, height) && !self.blocked(tile, z)
-    }
-
-    // The six tiledata questions this used to forward have left the trait. Two of
-    // them — `multi_components` and `land_is_water` — were never forwarded at
-    // all and fell into the trait's defaults, so a caller asking this overlay
-    // about a multi was told there was none. Nothing on this end asked, which is
-    // the only reason it was not a bug; the client reads `Resources::tiledata`
-    // and `Resources::multis` directly, as [`of`] above already does.
-    fn sight_clear(&self, from: Point, to: Point) -> bool {
-        // The map's answer alone. A crate is furniture, not a wall — the same
-        // line the server draws, which only treats a shut *door* as opaque.
-        //
-        // That door is now a fact this end holds (`Cover::is_door`), so the
-        // remaining half of the server's rule *could* be drawn here. It is not,
-        // because nothing on this end computes line of sight for gameplay yet
-        // and a rule with no reader is a rule nobody will notice going wrong.
-        // See `docs/client.md`'s backlog entry, which is where it is owed.
-        self.map.sight_clear(from, to)
-    }
-}
-
 /// Index blockers by hand, with no tiledata to read flags from.
 ///
 /// For the tests that are about the *span* and the detour rather than about
@@ -229,7 +146,7 @@ impl<M: Terrain> Terrain for Cluttered<'_, M> {
 /// [`of`] answers, and a fixture that could claim it would be claiming the very
 /// thing under test.
 #[cfg(test)]
-fn placed(blockers: &[(Point, u8)]) -> Overlay {
+fn placed(blockers: &[(openshard_protocol::world::Point, u8)]) -> Overlay {
     let mut covers: HashMap<Tile, Vec<Cover>> = HashMap::new();
     for (at, height) in blockers {
         covers
@@ -247,10 +164,11 @@ fn placed(blockers: &[(Point, u8)]) -> Overlay {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openshard_movement::{Around, Detour, Heading, Lean, Leeway, OpenWorld, Step, step_allowed};
+    use openshard_movement::{Around, Detour, Doors, Footing, Heading, Lean, Leeway, Step, step_allowed};
     use openshard_protocol::direction::Direction;
     use openshard_protocol::items::ItemAmount;
     use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_protocol::world::Point;
 
     /// A barrel's tiledata height, so the span in these tests is a real one.
     const BARREL_HEIGHT: u8 = 12;
@@ -265,7 +183,7 @@ mod tests {
     fn a_step_into_a_barrel_is_refused_by_this_end() {
         let east = Point::new(HERE.x + 1, HERE.y, 0);
         let clutter = placed(&[(east, BARREL_HEIGHT)]);
-        let terrain = Cluttered::new(OpenWorld, &clutter, Doors::AsTheyStand);
+        let terrain = Footing::new(None, &clutter, Doors::AsTheyStand);
         assert!(
             step_allowed(&terrain, HERE, Direction::East).is_none(),
             "a barrel due east did not stop the step"
@@ -282,7 +200,7 @@ mod tests {
         // Mobiles enter the shipping index with this same body-height span;
         // keep the routing rule test independent of client art files.
         let clutter = placed(&[(east, MOBILE_HEIGHT as u8)]);
-        let terrain = Cluttered::new(OpenWorld, &clutter, Doors::AsTheyStand);
+        let terrain = Footing::new(None, &clutter, Doors::AsTheyStand);
         assert!(
             step_allowed(&terrain, HERE, Direction::East).is_none(),
             "an NPC due east did not stop the step"
@@ -300,7 +218,7 @@ mod tests {
     fn a_diagonal_held_at_a_barrel_rounds_it() {
         let north_east = Point::new(HERE.x + 1, HERE.y - 1, 0);
         let clutter = placed(&[(north_east, BARREL_HEIGHT)]);
-        let terrain = Cluttered::new(OpenWorld, &clutter, Doors::AsTheyStand);
+        let terrain = Footing::new(None, &clutter, Doors::AsTheyStand);
         let intent = Heading {
             direction: Direction::NorthEast,
             lean: Lean::Centred,
@@ -328,7 +246,7 @@ mod tests {
     fn a_barrel_overhead_stops_nothing() {
         let east = Point::new(HERE.x + 1, HERE.y, 40);
         let clutter = placed(&[(east, BARREL_HEIGHT)]);
-        let terrain = Cluttered::new(OpenWorld, &clutter, Doors::AsTheyStand);
+        let terrain = Footing::new(None, &clutter, Doors::AsTheyStand);
         assert!(
             step_allowed(&terrain, HERE, Direction::East).is_some(),
             "a barrel two storeys up blocked the ground"

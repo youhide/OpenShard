@@ -119,10 +119,19 @@ fn a_facet_keeps_the_coarse_router_it_was_given_and_no_other() {
     );
 
     // The same map with its graph: kept, and over the map's own extent.
+    // Nothing live over it, because a baked graph is the *static* connectivity
+    // of a facet.
+    let nothing_placed = openshard_movement::Overlay::default();
+    let nothing_over = |map, tiles| {
+        openshard_movement::Footing::new(
+            Some(MapTerrain::new(map, tiles)),
+            &nothing_placed,
+            Doors::AsTheyStand,
+        )
+    };
     let empty = TileData::empty();
     let map = flat();
-    let baked =
-        NavigationGraph::build(&MapTerrain::new(&map, &empty), 8, 8).expect("an 8x8 facet has a graph");
+    let baked = NavigationGraph::build(&nothing_over(&map, &empty), 8, 8).expect("an 8x8 facet has a graph");
     let loaded = World::new(START).with_facet(Facet(0), snapshot(), Some(baked));
     assert_eq!(
         loaded

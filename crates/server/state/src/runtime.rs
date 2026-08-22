@@ -20,7 +20,7 @@ use openshard_entities::{EntityId, Registry};
 use openshard_events::EventBus;
 use openshard_gateway::ConnectionId;
 use openshard_map::snapshot::MapSnapshot;
-use openshard_movement::{Doors, MapTerrain, NavigationGraph, Overlay, Terrain, Tile};
+use openshard_movement::{Doors, Footing, MapTerrain, NavigationGraph, Overlay, Tile};
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::combat::HealthBar;
 use openshard_protocol::feedback::{Animation, NewAnimation, PlaySound};
@@ -46,7 +46,7 @@ use crate::components::{
 use crate::connection::Connection;
 use crate::dialogue::Dialogue;
 use crate::harvest::Banks;
-use crate::obstruct::{LiveTerrain, Obstructions};
+use crate::obstruct::Obstructions;
 use crate::quest::QuestDefs;
 use crate::region::{Region, Regions};
 use crate::rng::Rng;
@@ -1154,28 +1154,21 @@ impl WorldState {
         Some(MapTerrain::new(map.map(), &self.tiles))
     }
 
-    /// The terrain every movement decision actually checks: the map with the
-    /// live obstacles laid over it. Works with no map too — an open world with
-    /// doors in it still has doors.
+    /// The ground every movement decision is actually decided against: the map,
+    /// the live world over it, and how the doors are read. Works with no map
+    /// too — an open world with doors in it still has doors.
+    ///
+    /// `Doors::AsTheyStand` is what a step takes; `Doors::AllOpen` is what a
+    /// door-opener *plans* over, because the mobile walking that route opens
+    /// them on arrival.
     ///
     /// # Panics
     ///
     /// On a facet that is not loaded, like [`facet_state`](Self::facet_state)
     /// and for the same reason: every live entity is on a loaded facet.
     #[must_use]
-    pub fn live_terrain(&self, facet: Facet) -> LiveTerrain<'_> {
-        self.planning_terrain(facet, Doors::AsTheyStand)
-    }
-
-    /// The same terrain as a door-opener plans over: closed doors do not block,
-    /// because the mobile walking the route opens them on arrival.
-    ///
-    /// # Panics
-    ///
-    /// See [`live_terrain`](Self::live_terrain).
-    #[must_use]
-    pub fn planning_terrain(&self, facet: Facet, doors: Doors) -> LiveTerrain<'_> {
-        LiveTerrain::new(self.map_terrain(facet), self.facet_state(facet).overlay(), doors)
+    pub fn footing(&self, facet: Facet, doors: Doors) -> Footing<'_> {
+        Footing::new(self.map_terrain(facet), self.facet_state(facet).overlay(), doors)
     }
 
     /// Is any connected player within `range` tiles (Chebyshev) of `centre` on

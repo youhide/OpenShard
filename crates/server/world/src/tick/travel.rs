@@ -223,10 +223,15 @@ impl World {
         }
         // The live floor, so a wall the world put there since the rune was
         // marked counts as much as one the map has always had.
-        let live = self.state.live_terrain(facet);
         // Reached from its own height, which is what asking "is this tile
-        // standable" means when nobody is walking onto it from anywhere.
-        openshard_movement::Terrain::stand_z(&live, Tile::new(at.x, at.y), i32::from(at.z)).is_some()
+        // standable" means when nobody is walking onto it from anywhere. The
+        // *map* and not the live ground: whether a facet has a floor here is
+        // the facet's answer, and a crate standing on it is a separate question
+        // this caller does not ask.
+        self.state
+            .map_terrain(facet)
+            .and_then(|map| map.stand_z(Tile::new(at.x, at.y), i32::from(at.z)))
+            .is_some()
     }
 
     /// Whether `item` is inside the mobile's own backpack, at any depth.

@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use clap::Parser;
 use openshard_map::snapshot::MapSnapshot;
-use openshard_movement::{MapTerrain, NavigationGraph, bake};
+use openshard_movement::{Doors, Footing, MapTerrain, NavigationGraph, Overlay, bake};
 use openshard_protocol::world::Facet;
 use openshard_uofiles::tiledata::TileData;
 
@@ -137,8 +137,17 @@ fn bake_one(cli: &Cli, facet: Facet, tiles: &TileData) -> Result<(), Box<dyn std
         "navigation bake +{:.3}s: building facet {facet} ({width}x{height})",
         started.elapsed().as_secs_f64(),
     );
-    let graph = NavigationGraph::build(&MapTerrain::new(map.map(), tiles), width, height)
-        .ok_or("facet dimensions cannot be represented")?;
+    // Nothing live: a baked graph is the *static* connectivity of a facet, and
+    // a door that happened to be shut when the bake ran is not a property of
+    // the ground. See `docs/map/navigation_graph_bake.md`.
+    let nothing_placed = Overlay::default();
+    let footing = Footing::new(
+        Some(MapTerrain::new(map.map(), tiles)),
+        &nothing_placed,
+        Doors::AsTheyStand,
+    );
+    let graph =
+        NavigationGraph::build(&footing, width, height).ok_or("facet dimensions cannot be represented")?;
     let (regions, nodes, edges) = graph.counts();
     let path = cli.out.clone().unwrap_or(default_path);
     if cli.dry_run {

@@ -18,7 +18,7 @@ use openshard_client_render::depth;
 use openshard_client_render::mobiles::{self, Mobile};
 use openshard_client_render::{light, occlusion};
 use openshard_map::map::WorldMap;
-use openshard_movement::{Terrain, Tile};
+use openshard_movement::Tile;
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Graphic;
@@ -35,7 +35,7 @@ use crate::diagnostics::{
 };
 use crate::graphics::HighlightTarget;
 use crate::picking::SelectedIdentity;
-use crate::world::{InteriorCache, cluttered, cluttered_with_doors_open, terrain};
+use crate::world::{InteriorCache, footing, guide, terrain};
 use crate::{desk, frames, shell, steer, tooltips};
 
 /// The expensive sub-queries performed while assembling the development HUD.
@@ -168,17 +168,17 @@ impl App {
         // would be one of its own. The surfaces themselves come from the map:
         // where a floor *is* is a fact about the facet, and only whether a body
         // fits on it depends on what has been put there since.
-        let cluttered = cluttered(&self.world, &self.resources);
+        let cluttered = footing(
+            &self.world,
+            &self.resources,
+            openshard_movement::Doors::AsTheyStand,
+        );
         let mut levels: Vec<(Height, bool)> = terrain
             .surfaces(x, y)
             .into_iter()
             .map(|z| {
-                let fits = openshard_movement::Terrain::can_fit(
-                    &cluttered,
-                    tile,
-                    z,
-                    openshard_movement::PLAYER_HEIGHT,
-                );
+                let fits =
+                    openshard_movement::can_fit(&cluttered, tile, z, openshard_movement::PLAYER_HEIGHT);
                 (Height(drawn_z(z)), fits)
             })
             .collect();
@@ -417,7 +417,11 @@ impl App {
     pub(crate) fn terrain_overlay(&self, bounds: TileBounds) -> TerrainOverlay {
         use openshard_movement::{PLAYER_HEIGHT, Tile};
 
-        let terrain = cluttered(&self.world, &self.resources);
+        let terrain = footing(
+            &self.world,
+            &self.resources,
+            openshard_movement::Doors::AsTheyStand,
+        );
         let near = i32::from(self.world.motion.planning_state().position.z);
         let mut open = Vec::new();
         let mut blocked = Vec::new();
@@ -438,18 +442,21 @@ impl App {
                     // down) drew the refusal a tile and a half away from the
                     // barrel that caused it. `ground_z` is only the fallback for
                     // a tile with no surface at all.
-                    let surface = terrain.spawn_z(tile, near);
+                    let surface = terrain.map.and_then(|map| map.spawn_z(tile, near));
                     // `clamp` rather than `unwrap`: a `z` outside `i8` is a
                     // corrupt block and not an invariant of ours, and a diamond
                     // drawn at the wrong height is a better answer than a panic
                     // in a debugging overlay.
                     let drawn_z = |z: i32| z.clamp(i32::from(i8::MIN), i32::from(i8::MAX)) as i8;
-                    match surface.filter(|&z| terrain.can_fit(tile, z, PLAYER_HEIGHT)) {
+                    match surface.filter(|&z| openshard_movement::can_fit(&terrain, tile, z, PLAYER_HEIGHT)) {
                         Some(z) => open.push(Point { x, y, z: drawn_z(z) }),
                         None => blocked.push(Point {
                             x,
                             y,
-                            z: surface.map_or_else(|| terrain.ground_z(tile).unwrap_or(0), drawn_z),
+                            z: surface.map_or_else(
+                                || terrain.map.and_then(|map| map.ground_z(tile)).unwrap_or(0),
+                                drawn_z,
+                            ),
                         }),
                     }
                 }
@@ -634,13 +641,15 @@ impl App {
                 }
             }
         }
-        let guide = terrain(&self.resources);
-        let opened = cluttered_with_doors_open(&self.world, &self.resources);
-        let cluttered = cluttered(&self.world, &self.resources);
         let ground = steer::Ground {
-            real: &cluttered,
-            through_doors: &opened,
-            guide: &guide,
+            // The route the HUD draws is the one a step would take, so it reads
+            // the doors as they stand whatever the auto-door setting is.
+            live: footing(
+                &self.world,
+                &self.resources,
+                openshard_movement::Doors::AsTheyStand,
+            ),
+            guide: guide(&self.resources),
             coarse: self.resources.coarse.as_ref(),
         };
         let route = self.steer.plan_for(ground, from, goal).map(|plan| {

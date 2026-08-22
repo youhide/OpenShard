@@ -59,6 +59,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "the same `--facet` argument on the inspector beside it",
     ),
     (
+        "crates/common/movement/examples/coarse_bench.rs",
+        1,
+        "the same `--facet` argument on the coarse-router probe; widened at `Facet(cli.facet)`",
+    ),
+    (
         "crates/client/render/examples/shard/mod.rs",
         1,
         "a standalone diagnostic tool reading a SQL column directly, the record.rs shape, in a crate with no protocol dependency",

@@ -17,7 +17,7 @@
 //! always, including when it is wrong.
 
 use openshard_movement::scene::{SIDE, Scene};
-use openshard_movement::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT, Terrain};
+use openshard_movement::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 

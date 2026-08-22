@@ -26,7 +26,7 @@ use winit::window::CursorIcon;
 
 use crate::app::App;
 use crate::net_command::project_motion;
-use crate::world::{advance_presentation_to, cluttered, cluttered_with_doors_open, terrain};
+use crate::world::{advance_presentation_to, footing, guide, terrain};
 use crate::{DEAD_ZONE, TURN_ZONE, steer};
 
 impl App {
@@ -450,13 +450,10 @@ impl App {
         let Some(tile) = self.pick_tile(*self.control.camera()) else {
             return false;
         };
-        let guide = terrain(&self.resources);
-        let opened = cluttered_with_doors_open(&self.world, &self.resources);
-        let cluttered = cluttered(&self.world, &self.resources);
         let ground = steer::Ground {
-            real: if self.auto_open_doors { &opened } else { &cluttered },
-            through_doors: &opened,
-            guide: &guide,
+            live: footing(&self.world, &self.resources, self.walking_doors()),
+
+            guide: guide(&self.resources),
             coarse: self.resources.coarse.as_ref(),
         };
         let motion = self.world.motion.planning_state();

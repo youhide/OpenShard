@@ -17,7 +17,7 @@ use winit::window::WindowId;
 
 use crate::app::App;
 use crate::picking::SelectedIdentity;
-use crate::world::{cluttered, cluttered_with_doors_open, terrain};
+use crate::world::{footing, guide};
 use crate::{DOUBLE_CLICK, PAGE_PIXELS, desk, keyboard, keys, panes, shell, steer};
 
 impl App {
@@ -265,9 +265,6 @@ impl ApplicationHandler<()> for App {
                 if let Some(direction) = keys::Held::direction_of(code) {
                     let step = match event.state {
                         ElementState::Pressed => {
-                            let guide = terrain(&self.resources);
-                            let opened = cluttered_with_doors_open(&self.world, &self.resources);
-                            let cluttered = cluttered(&self.world, &self.resources);
                             let motion = self.world.motion.planning_state();
                             self.steer.press(
                                 direction,
@@ -276,11 +273,13 @@ impl ApplicationHandler<()> for App {
                                 motion.facing.direction,
                                 steer::Ground {
                                     // An enabled auto-door mode turns a shut
+
                                     // leaf into a usable next step; `walk`
+
                                     // sends its use before this step.
-                                    real: if self.auto_open_doors { &opened } else { &cluttered },
-                                    through_doors: &opened,
-                                    guide: &guide,
+                                    live: footing(&self.world, &self.resources, self.walking_doors()),
+
+                                    guide: guide(&self.resources),
                                     coarse: self.resources.coarse.as_ref(),
                                 },
                             )
@@ -830,13 +829,10 @@ impl ApplicationHandler<()> for App {
             // replans: see `steer::Ground`. Built here rather than held, for the
             // reason the single terrain always was — they borrow the map and the
             // view, and the walk borrows `steer` mutably beside them.
-            let guide = terrain(&self.resources);
-            let opened = cluttered_with_doors_open(&self.world, &self.resources);
-            let cluttered = cluttered(&self.world, &self.resources);
             let ground = steer::Ground {
-                real: if self.auto_open_doors { &opened } else { &cluttered },
-                through_doors: &opened,
-                guide: &guide,
+                live: footing(&self.world, &self.resources, self.walking_doors()),
+
+                guide: guide(&self.resources),
                 coarse: self.resources.coarse.as_ref(),
             };
             let motion = self.world.motion.planning_state();

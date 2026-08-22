@@ -28,7 +28,9 @@ use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::walk::{Terrain, Tile, step_allowed};
+use crate::footing::Footing;
+use crate::navigation::Region;
+use crate::walk::{Tile, step_allowed};
 
 /// How long one search may run before it gives up, whatever its budget says.
 ///
@@ -70,9 +72,9 @@ struct OpenEntry {
 /// stops it — wants [`find_path_toward`], which is the same search read for that
 /// question instead.
 #[must_use]
-pub fn find_path(terrain: &dyn Terrain, from: Point, to: Point, budget: usize) -> Option<Vec<Direction>> {
+pub fn find_path(footing: &Footing<'_>, from: Point, to: Point, budget: usize) -> Option<Vec<Direction>> {
     let started = Instant::now();
-    let search = search(terrain, from, to, budget, started + MAX_SEARCH_TIME);
+    let search = search(footing, from, to, budget, started + MAX_SEARCH_TIME, None);
     debug_slow("find_path", from, to, budget, started.elapsed(), &search);
     search.arrived.then_some(search.route)
 }
@@ -98,13 +100,13 @@ pub fn find_path(terrain: &dyn Terrain, from: Point, to: Point, budget: usize) -
 /// goal's direction rather than a refusal.
 #[must_use]
 pub fn find_path_toward(
-    terrain: &dyn Terrain,
+    footing: &Footing<'_>,
     from: Point,
     to: Point,
     budget: usize,
 ) -> Option<Vec<Direction>> {
     let started = Instant::now();
-    let search = search(terrain, from, to, budget, started + MAX_SEARCH_TIME);
+    let search = search(footing, from, to, budget, started + MAX_SEARCH_TIME, None);
     debug_slow("find_path_toward", from, to, budget, started.elapsed(), &search);
     (search.arrived || !search.route.is_empty()).then_some(search.route)
 }
@@ -118,8 +120,8 @@ pub fn find_path_toward(
 /// route, and asking through here would only make it drop the same fields
 /// again. It exists for the measurement the node budgets are argued from.
 #[must_use]
-pub fn search_path(terrain: &dyn Terrain, from: Point, to: Point, budget: usize) -> PathSearch {
-    search(terrain, from, to, budget, Instant::now() + MAX_SEARCH_TIME)
+pub fn search_path(footing: &Footing<'_>, from: Point, to: Point, budget: usize) -> PathSearch {
+    search(footing, from, to, budget, Instant::now() + MAX_SEARCH_TIME, None)
 }
 
 /// What one search found, before either entry point above reads it — and what
@@ -174,28 +176,37 @@ pub enum SearchExit {
 /// "there is no way" and "here is how far the way goes" come out of *one*
 /// search over one terrain, and cannot disagree about which tiles were reachable.
 pub(crate) fn find_path_until(
-    terrain: &dyn Terrain,
+    footing: &Footing<'_>,
     from: Point,
     to: Point,
     budget: usize,
     deadline: Instant,
+    within: Option<Region>,
 ) -> Option<Vec<Direction>> {
-    let search = search(terrain, from, to, budget, deadline);
+    let search = search(footing, from, to, budget, deadline, within);
     search.arrived.then_some(search.route)
 }
 
 pub(crate) fn find_path_toward_until(
-    terrain: &dyn Terrain,
+    footing: &Footing<'_>,
     from: Point,
     to: Point,
     budget: usize,
     deadline: Instant,
+    within: Option<Region>,
 ) -> Option<Vec<Direction>> {
-    let search = search(terrain, from, to, budget, deadline);
+    let search = search(footing, from, to, budget, deadline, within);
     (search.arrived || !search.route.is_empty()).then_some(search.route)
 }
 
-fn search(terrain: &dyn Terrain, from: Point, to: Point, budget: usize, deadline: Instant) -> PathSearch {
+fn search(
+    footing: &Footing<'_>,
+    from: Point,
+    to: Point,
+    budget: usize,
+    deadline: Instant,
+    within: Option<Region>,
+) -> PathSearch {
     let goal = Tile::new(to.x, to.y);
     let start = Tile::new(from.x, from.y);
     if start == goal {
@@ -279,9 +290,17 @@ fn search(terrain: &dyn Terrain, from: Point, to: Point, budget: usize, deadline
             // corner, and that half of the rule is not the terrain's to answer
             // — see its doc for why it is shared with the shard and the client
             // rather than restated here.
-            let Some(landing) = step_allowed(terrain, current, dir) else {
+            let Some(landing) = step_allowed(footing, current, dir) else {
                 continue;
             };
+            // The region bound, where there is one: a search inside one region
+            // of the navigation graph may not wander out of it and back. It was
+            // a decorating terrain that answered `None` outside the rectangle,
+            // which made staying put a property of the *ground* rather than of
+            // the question being asked.
+            if within.is_some_and(|region| !region.contains(landing)) {
+                continue;
+            }
             let next = Tile::new(landing.x, landing.y);
             if closed.contains(&tile_key(next)) {
                 continue;
@@ -395,25 +414,29 @@ fn manhattan(from: Point, to: Point) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::walk::OpenWorld;
+    use crate::overlay::{Cover, Doors, Overlay};
 
-    /// A flat world with a vertical wall of impassable tiles the path must go
-    /// around — every tile walkable except a column at `wall_x` spanning `gap`
-    /// rows, with one opening.
-    struct WalledWorld {
-        wall_x: u16,
-        wall_from: u16,
-        wall_to: u16,
-        opening_y: u16,
+    /// Ground with nothing on it: no map, so no floor and no walls, and the
+    /// overlay is the only thing that can refuse a step.
+    fn open_world() -> Overlay {
+        Overlay::default()
     }
-    impl Terrain for WalledWorld {
-        fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-            let blocked = to.x == self.wall_x
-                && to.y >= self.wall_from
-                && to.y <= self.wall_to
-                && to.y != self.opening_y;
-            if blocked { None } else { Some(to) }
+
+    /// A vertical wall of impassable tiles the path must go around — a column
+    /// at `wall_x` spanning `wall_from..=wall_to`, with one opening.
+    fn walled_world(wall_x: u16, wall_from: u16, wall_to: u16, opening_y: u16) -> Overlay {
+        let mut overlay = Overlay::default();
+        for y in wall_from..=wall_to {
+            if y != opening_y {
+                overlay.set(Tile::new(wall_x, y), vec![Cover::blocking(0, 20)]);
+            }
         }
+        overlay
+    }
+
+    /// The ground a search is asked over, with `overlay` the only thing on it.
+    fn over(overlay: &Overlay) -> Footing<'_> {
+        Footing::new(None, overlay, Doors::AsTheyStand)
     }
 
     /// Walk a path from a start and return where it lands.
@@ -431,8 +454,8 @@ mod tests {
         // Three tiles east: the route is three steps (any equal-cost mix of due-east
         // and diagonals), never a detour.
         let from = Point::new(10, 10, 0);
-        let path =
-            find_path(&OpenWorld, from, Point::new(13, 10, 0), 100).expect("open ground is always reachable");
+        let path = find_path(&over(&open_world()), from, Point::new(13, 10, 0), 100)
+            .expect("open ground is always reachable");
         assert_eq!(path.len(), 3, "no detour on open ground");
         let end = walk_path(from, &path);
         assert_eq!((end.x, end.y), (13, 10), "it arrives");
@@ -440,7 +463,13 @@ mod tests {
 
     #[test]
     fn already_at_the_goal_is_an_empty_path() {
-        let path = find_path(&OpenWorld, Point::new(5, 5, 0), Point::new(5, 5, 0), 100).unwrap();
+        let path = find_path(
+            &over(&open_world()),
+            Point::new(5, 5, 0),
+            Point::new(5, 5, 0),
+            100,
+        )
+        .unwrap();
         assert!(path.is_empty());
     }
 
@@ -448,20 +477,16 @@ mod tests {
     fn a_path_routes_around_a_wall() {
         // A wall at x=12 from y=8..12 with an opening at y=8; a route from the west
         // to the east must detour up to the gap rather than push into the wall.
-        let world = WalledWorld {
-            wall_x: 12,
-            wall_from: 8,
-            wall_to: 12,
-            opening_y: 8,
-        };
+        let world = walled_world(12, 8, 12, 8);
         let from = Point::new(10, 10, 0);
-        let path = find_path(&world, from, Point::new(14, 10, 0), 1000).expect("there is a way around");
+        let path =
+            find_path(&over(&world), from, Point::new(14, 10, 0), 1000).expect("there is a way around");
         // It must never stand on a blocked tile, and reach the far side.
         let mut at = from;
         for dir in &path {
             at = walk_path(at, std::slice::from_ref(dir));
             assert!(
-                world.can_step(at, at).is_some(),
+                crate::can_step(&over(&world), at, at).is_some(),
                 "the path steps onto a blocked tile at {},{}",
                 at.x,
                 at.y
@@ -473,13 +498,8 @@ mod tests {
     #[test]
     fn an_unreachable_goal_within_budget_is_none() {
         // Seal the goal behind a wall with no opening: no route exists.
-        let world = WalledWorld {
-            wall_x: 12,
-            wall_from: 0,
-            wall_to: u16::MAX,
-            opening_y: u16::MAX, // effectively no gap near the route
-        };
-        assert!(find_path(&world, Point::new(10, 10, 0), Point::new(14, 10, 0), 500).is_none());
+        let world = walled_world(12, 0, u16::MAX, u16::MAX);
+        assert!(find_path(&over(&world), Point::new(10, 10, 0), Point::new(14, 10, 0), 500).is_none());
     }
 
     /// The move order's answer to that same sealed wall: not "no", but "this
@@ -488,15 +508,11 @@ mod tests {
     /// there is owed and what stops the client sending steps into it.
     #[test]
     fn an_unreachable_goal_is_walked_toward_until_the_ground_runs_out() {
-        let world = WalledWorld {
-            wall_x: 12,
-            wall_from: 0,
-            wall_to: u16::MAX,
-            opening_y: u16::MAX,
-        };
+        let world = walled_world(12, 0, u16::MAX, u16::MAX);
         let from = Point::new(10, 10, 0);
         let to = Point::new(14, 10, 0);
-        let path = find_path_toward(&world, from, to, 500).expect("there is somewhere closer to stand");
+        let path =
+            find_path_toward(&over(&world), from, to, 500).expect("there is somewhere closer to stand");
         let end = walk_path(from, &path);
         assert_eq!(
             (end.x, end.y),
@@ -511,15 +527,13 @@ mod tests {
     /// away from the goal dressed up as progress.
     #[test]
     fn nothing_closer_to_stand_is_nothing_to_walk() {
-        let world = WalledWorld {
-            wall_x: 12,
-            wall_from: 0,
-            wall_to: u16::MAX,
-            opening_y: u16::MAX,
-        };
+        let world = walled_world(12, 0, u16::MAX, u16::MAX);
         // Standing against the wall, sent to the tile on its far side.
         let from = Point::new(11, 10, 0);
-        assert_eq!(find_path_toward(&world, from, Point::new(12, 10, 0), 500), None);
+        assert_eq!(
+            find_path_toward(&over(&world), from, Point::new(12, 10, 0), 500),
+            None
+        );
     }
 
     /// A goal that *is* reachable is answered the same way by both, so a caller
@@ -527,17 +541,12 @@ mod tests {
     /// for it.
     #[test]
     fn a_reachable_goal_is_the_same_route_either_way() {
-        let world = WalledWorld {
-            wall_x: 12,
-            wall_from: 8,
-            wall_to: 12,
-            opening_y: 8,
-        };
+        let world = walled_world(12, 8, 12, 8);
         let from = Point::new(10, 10, 0);
         let to = Point::new(14, 10, 0);
         assert_eq!(
-            find_path_toward(&world, from, to, 1000),
-            find_path(&world, from, to, 1000),
+            find_path_toward(&over(&world), from, to, 1000),
+            find_path(&over(&world), from, to, 1000),
             "the approach must not second-guess a route that arrives"
         );
     }

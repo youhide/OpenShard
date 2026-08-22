@@ -51,6 +51,8 @@ use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
 use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
+use crate::footing::Footing;
+use crate::overlay::{Doors, Overlay};
 use crate::terrain::MapTerrain;
 
 /// The side of the square [`Scene::flat`] covers, in tiles.
@@ -83,6 +85,13 @@ pub struct Scene {
     /// a forge, a door frame, an ore vein — is matching a domain table against
     /// the id, and an id chosen by a counter would match nothing.
     next_graphic: u16,
+    /// Nothing live on this ground.
+    ///
+    /// A scene is the *map* half of a fixture, and a footing needs all three —
+    /// so it owns the empty overlay rather than making every caller keep one
+    /// alive beside it. A test that wants a crate in the way builds its own
+    /// overlay and its own [`Footing`](crate::Footing).
+    nothing_placed: Overlay,
 }
 
 impl Scene {
@@ -106,6 +115,7 @@ impl Scene {
             map,
             tiles: TileData::empty(),
             next_graphic: 1,
+            nothing_placed: Overlay::default(),
         }
     }
 
@@ -291,6 +301,13 @@ impl Scene {
         MapTerrain::new(&self.map, &self.tiles)
     }
 
+    /// This scene as a step can be decided against: its map, nothing live over
+    /// it, and the doors as they stand.
+    #[must_use]
+    pub const fn footing(&self) -> Footing<'_> {
+        Footing::new(Some(self.terrain()), &self.nothing_placed, Doors::AsTheyStand)
+    }
+
     /// Everything a shard needs from a scene: `facet`'s ground as a published
     /// snapshot, and the tile table that says what is on it.
     ///
@@ -331,13 +348,13 @@ impl Scene {
     /// question, and one [`Scene::terrain`]'s `surface_at` answers.
     #[must_use]
     pub fn reachable(&self, from: Point) -> BTreeMap<(u16, u16), i8> {
-        let terrain = self.terrain();
+        let footing = self.footing();
         let mut found = BTreeMap::new();
         found.insert((from.x, from.y), from.z);
         let mut queue = vec![from];
         while let Some(here) = queue.pop() {
             for direction in Direction::ALL {
-                let Some(next) = crate::step_allowed(&terrain, here, direction) else {
+                let Some(next) = crate::step_allowed(&footing, here, direction) else {
                     continue;
                 };
                 if found.insert((next.x, next.y), next.z).is_none() {
@@ -378,8 +395,8 @@ impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Tile;
     use crate::terrain::PLAYER_HEIGHT;
-    use crate::{Terrain, Tile};
 
     /// The scene machinery itself: ground at the height it was asked for, and a
     /// static whose flags and height came back out of the tiledata.

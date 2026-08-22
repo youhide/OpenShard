@@ -7,7 +7,7 @@
 //!
 //! ```
 //! use std::time::Instant;
-//! use openshard_movement::{OpenWorld, Walk, Walker};
+//! use openshard_movement::{Doors, Footing, Overlay, Walk, Walker};
 //! use openshard_protocol::world::{Point, RawFastwalkKey, RawStepSequence, WalkRequest};
 //! use openshard_protocol::direction::{Direction, Facing};
 //!
@@ -18,7 +18,10 @@
 //!     sequence: RawStepSequence(0),
 //!     fastwalk_key: RawFastwalkKey(0),
 //! };
-//! assert!(matches!(walker.request(step, &OpenWorld, Instant::now(), false), Walk::Moved { .. }));
+//! // No map and nothing placed: open ground, where every step is allowed.
+//! let nothing = Overlay::default();
+//! let ground = Footing::new(None, &nothing, Doors::AsTheyStand);
+//! assert!(matches!(walker.request(step, &ground, Instant::now(), false), Walk::Moved { .. }));
 //! ```
 //!
 //! # What is here and what is not
@@ -26,13 +29,13 @@
 //! The walk *handshake*: the sequence rules, turning as a step, the world edge.
 //! And [`WalkPace`], which decides how often a step is allowed.
 //!
-//! [`Terrain`] — whether a tile can be stood on — is a trait, because the answer
-//! needs the client's map files, the statics, the multis and every other mobile.
-//! [`MapTerrain`] is the static half — the map and `tiledata.mul`, nothing else —
-//! shared between the server tick and the client's own click-to-walk planner;
-//! [`OpenWorld`] is what a shard with no client files runs. The dynamic half —
-//! doors, placed items, other mobiles — is `openshard-state::obstruct`, which
-//! stays server-side because it needs the entity registry.
+//! Whether a tile can be stood on is [`can_step`], and what it is asked of is a
+//! [`Footing`]: the map, what the live world has laid over it, and which way the
+//! shut doors are read. [`MapTerrain`] is the static half — the map and
+//! `tiledata.mul`, nothing else — shared between the server tick and the
+//! client's own click-to-walk planner; [`Overlay`] is the live half, which both
+//! ends *build* and neither end owns a private version of. A footing with no map
+//! is what a shard with no client files runs.
 //!
 //! And two ways of getting somewhere, which answer different questions.
 //! [`find_path`] needs a destination and searches for a route to it.
@@ -49,9 +52,9 @@
 //! defence that works is server-side: see [`WalkPace`].
 
 pub mod bake;
-mod cache;
 mod detour;
 pub mod door_frames;
+mod footing;
 mod navigation;
 mod overlay;
 mod pace;
@@ -61,8 +64,8 @@ mod sequence;
 mod terrain;
 mod walk;
 
-pub use cache::{CachedTerrain, TransitionCacheStats};
 pub use detour::{Around, Detour, Leeway, Step};
+pub use footing::Footing;
 pub use navigation::{NavigationGraph, find_long_path};
 pub use openshard_map::map::LandTile;
 pub use overlay::{Cover, CoverKind, Doors, Overlay};
@@ -74,6 +77,6 @@ pub(crate) use path::{find_path_toward_until, find_path_until};
 pub use sequence::{OutOfSequence, StepCounter, WalkSequence};
 pub use terrain::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
 pub use walk::{
-    Heading, Intent, Lean, OpenWorld, Terrain, Tile, Walk, Walker, direction_toward, heading_toward, intend,
-    line_tiles, step_allowed, step_from,
+    Heading, Intent, Lean, Tile, Walk, Walker, can_fit, can_step, direction_toward, heading_toward, intend,
+    line_tiles, sight_clear, step_allowed, step_from,
 };

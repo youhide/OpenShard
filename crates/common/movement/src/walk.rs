@@ -3,9 +3,10 @@
 use std::time::Instant;
 
 use openshard_protocol::direction::{Direction, Facing};
-use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::{Point, WalkRequest};
 
+use crate::footing::Footing;
+use crate::overlay::Doors;
 use crate::pace::{Pace, WalkPace};
 use crate::sequence::WalkSequence;
 
@@ -32,123 +33,6 @@ pub enum Walk {
     },
     /// The step is refused. The client snaps back and resets its sequence.
     Refused,
-}
-
-/// Whether a mobile may stand somewhere.
-///
-/// Every question here takes a **coordinate** and is answered by the map with
-/// whatever the live world has laid over it. That is the whole subject: what a
-/// graphic weighs, how tall it is or which hand it is held in used to be asked
-/// here too, and none of those could be changed by a placed crate — they were a
-/// `tiledata.mul` lookup wearing a terrain's coat, and they now go to the table
-/// directly (`WorldState::tiles`, `openshard_uofiles::tiledata::TileData`).
-///
-/// A trait for now, and not for much longer: five of its six implementors are an
-/// *action over* a terrain rather than a terrain — see `docs/map/terrain_seam.md`.
-/// [`OpenWorld`] is the answer when there is no map at all.
-pub trait Terrain {
-    /// Can a mobile at `from` step to `to`?
-    ///
-    /// `to`'s `z` is a guess from the caller; an implementation that knows the
-    /// map should correct it and return the real height.
-    fn can_step(&self, from: Point, to: Point) -> Option<Point>;
-
-    /// The ground height at `tile`, if this terrain knows one.
-    ///
-    /// Where a character spawns: the map holds the floor, not the config. An
-    /// implementation with no map — [`OpenWorld`] — returns `None`, and the
-    /// caller falls back to a flat default.
-    fn ground_z(&self, _tile: Tile) -> Option<i8> {
-        None
-    }
-
-    /// The *land* tile id at `tile` — the index into `tiledata.mul`'s land
-    /// table, not a static's graphic.
-    ///
-    /// Read for what the ground *is* rather than how high it stands: a mountain
-    /// face is a land tile a pickaxe works and a patch of sand is a land tile a
-    /// shovel does, and neither can be told apart by height. It exists because the
-    /// client does not send it — a `0x6C` location reply carries a graphic only
-    /// when a *static* was clicked, and a click on bare land arrives with a
-    /// graphic of zero (ServUO `PacketHandlers.cs`, the `LandTarget` branch), so
-    /// the server has to look the tile up itself.
-    fn land_tile(&self, _tile: Tile) -> Option<crate::LandTile> {
-        None
-    }
-
-    /// The static tiles standing at `tile`, appended to `out` as
-    /// `(graphic, z)` pairs.
-    ///
-    /// Only what the map holds; a terrain with no statics (an open world) adds
-    /// nothing. The primitive tuple keeps this trait — which lives below `world` —
-    /// free of the map's own types. Used to find door frames when generating the
-    /// functional doors a building's static art only implies.
-    fn statics_at(&self, _tile: Tile, _out: &mut Vec<(Graphic, i8)>) {}
-
-    /// The z a mobile stands at on `tile`, reached from near `near_z` — the top
-    /// of the walkable surface there, a building's raised floor and all.
-    ///
-    /// Where a spawn drops onto the ground: the pack gives a tile and a rough
-    /// height, and the map says which floor that lands on (asking from `near_z`
-    /// rather than the sky, so it finds the floor and not the roof above it).
-    /// `None` when the tile has no reachable surface, or the terrain has no map.
-    fn stand_z(&self, _tile: Tile, _near_z: i32) -> Option<i32> {
-        None
-    }
-
-    /// Where to *place* a mobile on `tile`, near `near_z` — like
-    /// [`stand_z`](Self::stand_z), but not bound by one step's reach.
-    ///
-    /// A spawn is not a step: a shopkeeper placed at ground level belongs on the
-    /// building's raised floor above it, which [`stand_z`](Self::stand_z) refuses
-    /// because it is more than a step up. This finds the surface a mobile actually
-    /// fits on regardless of how far it is from `near_z`, so an NPC stops sinking
-    /// through the shop floor. Defaults to [`stand_z`](Self::stand_z) for a terrain
-    /// with no map.
-    fn spawn_z(&self, tile: Tile, near_z: i32) -> Option<i32> {
-        self.stand_z(tile, near_z)
-    }
-
-    /// Whether an object `height` tall can sit at `tile, z` — nothing solid in
-    /// its body, and a surface under it to rest on.
-    ///
-    /// This is what keeps a generated door in a real doorway: a door belongs in an
-    /// open gap with a floor, so a spot that is a solid wall (something in the way)
-    /// or thin air (no surface) reports that nothing fits. An open world fits
-    /// everything — it has no walls and, having no map, generates no doors anyway.
-    fn can_fit(&self, _tile: Tile, _z: i32, _height: i32) -> bool {
-        true
-    }
-
-    /// Whether the land at `tile` is water — the tiledata flag, not a guess from
-    /// the land id.
-    ///
-    /// A terrain with no map answers `false`, which is the same bargain every
-    /// other method here makes: a shard with no client files has no sea, so it
-    /// has nowhere to moor a boat, and refusing every mooring is the safe half
-    /// of that answer rather than the surprising one.
-    ///
-    /// A *coordinate* and not a graphic, which is what keeps it here while the
-    /// tiledata questions have left: it cannot be answered without the map, since
-    /// the map is what says which land tile is at `tile` in the first place.
-    ///
-    /// The step check already reads this flag — [`can_step`](Self::can_step)
-    /// treats water as ground only for a swimming body — but it reads it *inside*
-    /// a decision and never says so. A boat needs the fact on its own: not "may I
-    /// walk here" but "is this the sea", and the two differ for a swimmer.
-    fn land_is_water(&self, _tile: Tile) -> bool {
-        false
-    }
-
-    /// Whether a straight sight line from `from` to `to` is clear of walls.
-    ///
-    /// What gates a creature noticing prey: both reference emulators require
-    /// line of sight to *acquire* a target, and relax to cheaper range checks
-    /// only for continuing a chase already begun. A terrain with no map hides
-    /// nothing.
-    fn sight_clear(&self, _from: Point, _to: Point) -> bool {
-        true
-    }
 }
 
 /// A tile's column and row, with no height — a [`Point`] flattened to the plane
@@ -200,20 +84,6 @@ pub fn line_tiles(from: Tile, to: Tile) -> Vec<Tile> {
         tiles.push(Tile::new(x as u16, y as u16));
     }
     tiles
-}
-
-/// A world with no floor and no walls: every step is allowed, z never changes.
-///
-/// What a shard runs with no client files configured, and what these tests run
-/// against. Useful for proving the handshake in isolation; useless as a game, so
-/// the server warns at startup when it is in use.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub struct OpenWorld;
-
-impl Terrain for OpenWorld {
-    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-        Some(to)
-    }
 }
 
 /// What a walk request means before terrain has a say.
@@ -299,7 +169,7 @@ impl Walker {
     pub fn request(
         &mut self,
         request: WalkRequest,
-        terrain: &dyn Terrain,
+        footing: &Footing<'_>,
         now: Instant,
         mounted: bool,
     ) -> Walk {
@@ -334,14 +204,18 @@ impl Walker {
             return Walk::Refused;
         }
 
-        let Intent::Stepped { target, .. } = intent else {
+        let Intent::Stepped { .. } = intent else {
             // Walked off the edge of the coordinate space. The client cannot
             // express where it wanted to go, so there is nowhere to allow.
             self.sequence.reset();
             return Walk::Refused;
         };
 
-        let Some(landed) = terrain.can_step(self.position, target) else {
+        // `step_allowed` and not `can_step`: the corner rule is half of what a
+        // diagonal step means, and this is the last word before a `0x22`.
+        // `intend` already produced `target` from this direction, so the two
+        // cannot disagree about where the step is going.
+        let Some(landed) = step_allowed(footing, self.position, request.facing.direction) else {
             self.sequence.reset();
             return Walk::Refused;
         };
@@ -511,41 +385,131 @@ pub fn step_from(position: Point, direction: Direction) -> Option<Point> {
     Some(Point { x, y, z: position.z })
 }
 
+/// Where a step from `from` onto the tile of `to` lands, or `None` when there
+/// is nothing there to stand on.
+///
+/// **The destination tile alone** — is there ground, does the body fit, is the
+/// climb within [`MAX_STEP_UP`], and has the live world put anything in the
+/// way. A diagonal has a second half to its answer that this does not give;
+/// [`step_allowed`] is the one every caller wants.
+///
+/// The order the three sources are asked in is the whole of what a footing is
+/// for. The map answers first, because it owns the ground. Where it refuses,
+/// the overlay may still put a floor there — a deck over open water is the one
+/// thing that can overrule a refusal, and no index that only subtracts could
+/// say so. Then, at the height the body will actually stand at, the overlay is
+/// asked what is in the way: a hull, a wall, a crate, or a shut door that
+/// yields only to a route planned by somebody who will open it.
+#[must_use]
+pub fn can_step(footing: &Footing<'_>, from: Point, to: Point) -> Option<Point> {
+    let landed = match footing.map {
+        Some(map) => match map.can_step(from, to) {
+            Some(landed) => landed,
+            // The map says there is nothing to stand on, which over open water
+            // is true right up until a ship is moored there.
+            None => aboard(footing, from, to)?,
+        },
+        // No map at all: no floor and no walls, so the ground allows everything
+        // and only what the live world put there can refuse.
+        None => to,
+    };
+    match footing
+        .overlay
+        .blocker_at(Tile::new(to.x, to.y), i32::from(landed.z), footing.doors)
+    {
+        Some(_) => None,
+        None => Some(landed),
+    }
+}
+
+/// Where a body coming from `from` would land on a surface the live world put
+/// at `to`, if it put one there.
+fn aboard(footing: &Footing<'_>, from: Point, to: Point) -> Option<Point> {
+    if footing.overlay.is_empty() {
+        return None;
+    }
+    let deck = footing
+        .overlay
+        .surface_at(Tile::new(to.x, to.y), i32::from(from.z))?;
+    Some(Point::new(to.x, to.y, i8::try_from(deck).ok()?))
+}
+
+/// Whether an object `height` tall fits at `tile, z`: nothing solid in its body,
+/// and a surface under it to rest on.
+///
+/// What keeps a generated door in a real doorway — a door belongs in an open gap
+/// with a floor, so a spot that is a solid wall or thin air fits nothing.
+///
+/// **[`Doors::AsTheyStand`] whatever the footing says**, and deliberately: this
+/// asks whether a thing *fits*, and a door that could be opened is still a door
+/// hanging in the gap. Only a body that will open one may read past it, and a
+/// body is not what this places.
+#[must_use]
+pub fn can_fit(footing: &Footing<'_>, tile: Tile, z: i32, height: i32) -> bool {
+    if footing.overlay.blocker_at(tile, z, Doors::AsTheyStand).is_some() {
+        return false;
+    }
+    // A surface the live world put at exactly this height is a floor the map
+    // does not have, so it answers for the map rather than alongside it.
+    if footing.overlay.surface_at(tile, z) == Some(z) {
+        return true;
+    }
+    footing.map.is_none_or(|map| map.can_fit(tile, z, height))
+}
+
+/// Whether a straight sight line from `from` to `to` is clear.
+///
+/// The map's walls, and then the live world's doors. A shut door is opaque; a
+/// crate is furniture, not a wall — which is why this asks
+/// [`Overlay::blocker_anywhere`](crate::Overlay::blocker_anywhere) and reads
+/// only the door flag off what it finds.
+#[must_use]
+pub fn sight_clear(footing: &Footing<'_>, from: Point, to: Point) -> bool {
+    if !footing.map.is_none_or(|map| map.sight_clear(from, to)) {
+        return false;
+    }
+    line_tiles(Tile::new(from.x, from.y), Tile::new(to.x, to.y))
+        .into_iter()
+        .all(|tile| {
+            footing
+                .overlay
+                .blocker_anywhere(tile)
+                .is_none_or(|cover| !cover.is_door())
+        })
+}
+
 /// Where one *legal* step from `from` lands, or `None` when that step is not a
 /// step this world allows at all.
 ///
-/// [`Terrain::can_step`] answers for the destination tile alone — is there
-/// ground, does the body fit, is the climb within [`MAX_STEP_UP`]. That is the
-/// whole answer for a cardinal and only half of it for a diagonal, which also
-/// may not clip the corner where two blockers meet: both cardinal tiles
-/// flanking it must themselves be steppable, the same rule the client enforces
-/// and the rule `openshard_state::obstruct`'s `LiveTerrain` applies to every
-/// step that reaches the wire.
+/// [`can_step`] answers for the destination tile alone. That is the whole
+/// answer for a cardinal and only half of it for a diagonal, which also may not
+/// clip the corner where two blockers meet: both cardinal tiles flanking it
+/// must themselves be steppable.
 ///
 /// It lives here, above every caller, because the three that need it are not
 /// one layer: [`find_path`](crate::find_path) planning a route, the shard
 /// validating a creature's step, and the client's own held-direction detour
-/// deciding whether the way ahead is open. A [`Terrain`] implementation is free
-/// to *also* refuse a corner — `LiveTerrain` does, because it is the last word
-/// before a `0x21` — but nothing may rely on one that does not, and
-/// [`MapTerrain`](crate::MapTerrain), the static map both ends share, is
-/// exactly such a one. A client asking `can_step` directly therefore believes a
-/// corner-cutting diagonal is walkable, sends it, and is rubber-banded — which
-/// is a body stuck against a building corner for as long as the player holds
-/// that direction.
+/// deciding whether the way ahead is open. **Every one of them goes through
+/// here, and that is now a property rather than a convention** — there is no
+/// longer a bare terrain to ask instead. A client that asked one used to
+/// believe a corner-cutting diagonal was walkable, send it, and be rubber-
+/// banded: a body stuck against a building corner for as long as the player
+/// held that direction.
 #[must_use]
-pub fn step_allowed(terrain: &dyn Terrain, from: Point, direction: Direction) -> Option<Point> {
+pub fn step_allowed(footing: &Footing<'_>, from: Point, direction: Direction) -> Option<Point> {
     let to = step_from(from, direction)?;
-    if direction.is_diagonal() && !corner_open(terrain, from, direction) {
+    if direction.is_diagonal() && !corner_open(footing, from, direction) {
         return None;
     }
-    terrain.can_step(from, to)
+    can_step(footing, from, to)
 }
 
 /// Whether both cardinal tiles flanking a diagonal are steppable, so the
 /// diagonal does not cut through a wall's corner. The flanks of a diagonal are
 /// the two wire directions either side of it (NE lies between N and E).
-fn corner_open(terrain: &dyn Terrain, from: Point, diagonal: Direction) -> bool {
+///
+/// The flanks are cardinal, so [`can_step`] here cannot re-enter this.
+fn corner_open(footing: &Footing<'_>, from: Point, diagonal: Direction) -> bool {
     let d = diagonal.to_bits();
     let flanks = [
         Direction::from_bits((d + 7) % 8),
@@ -553,7 +517,7 @@ fn corner_open(terrain: &dyn Terrain, from: Point, diagonal: Direction) -> bool 
     ];
     flanks.iter().all(|&card| {
         step_from(from, card)
-            .and_then(|tile| terrain.can_step(from, tile))
+            .and_then(|tile| can_step(footing, from, tile))
             .is_some()
     })
 }
@@ -563,6 +527,7 @@ mod tests {
     use openshard_protocol::world::{RawFastwalkKey, RawStepSequence};
 
     use super::*;
+    use crate::overlay::{Cover, Overlay};
 
     /// Where [`direction_toward`] flattens: far more east than south still
     /// reads as a diagonal, because only the signs of `dx`/`dy` are looked at.
@@ -651,6 +616,15 @@ mod tests {
         }
     }
 
+    /// A world with no floor and no walls: every step is allowed, z never
+    /// changes. What a shard with no client files runs, and what these tests
+    /// run against — it used to be a type of its own (`OpenWorld`) and an
+    /// implementor of the trait, which is how the absence of a map came to be
+    /// a kind of map.
+    fn open_world() -> Overlay {
+        Overlay::default()
+    }
+
     fn walker() -> Walker {
         Walker::new(Point::new(100, 100, 0), Facing::walking(Direction::North))
     }
@@ -664,7 +638,12 @@ mod tests {
     #[test]
     fn walking_the_way_you_face_moves_you() {
         let mut walker = walker();
-        let outcome = walker.request(request(Direction::North, 0), &OpenWorld, now(), false);
+        let outcome = walker.request(
+            request(Direction::North, 0),
+            &Footing::new(None, &open_world(), Doors::AsTheyStand),
+            now(),
+            false,
+        );
         assert_eq!(
             outcome,
             Walk::Moved {
@@ -682,7 +661,12 @@ mod tests {
         // animates the turn and waits for the ack, so collapsing this into a
         // move puts the two ends a tile apart.
         let mut walker = walker();
-        let outcome = walker.request(request(Direction::East, 0), &OpenWorld, now(), false);
+        let outcome = walker.request(
+            request(Direction::East, 0),
+            &Footing::new(None, &open_world(), Doors::AsTheyStand),
+            now(),
+            false,
+        );
         assert_eq!(
             outcome,
             Walk::Turned {
@@ -692,7 +676,12 @@ mod tests {
         assert_eq!(walker.position, Point::new(100, 100, 0), "did not move");
 
         // Now it moves.
-        let outcome = walker.request(request(Direction::East, 1), &OpenWorld, now(), false);
+        let outcome = walker.request(
+            request(Direction::East, 1),
+            &Footing::new(None, &open_world(), Doors::AsTheyStand),
+            now(),
+            false,
+        );
         assert_eq!(
             outcome,
             Walk::Moved {
@@ -706,7 +695,12 @@ mod tests {
     fn a_turn_still_consumes_a_sequence_number() {
         // It is a step as far as the client is concerned, and it gets an ack.
         let mut walker = walker();
-        let _ = walker.request(request(Direction::East, 0), &OpenWorld, now(), false);
+        let _ = walker.request(
+            request(Direction::East, 0),
+            &Footing::new(None, &open_world(), Doors::AsTheyStand),
+            now(),
+            false,
+        );
         assert_eq!(walker.sequence.expected(), 1);
     }
 
@@ -722,7 +716,7 @@ mod tests {
                 sequence: RawStepSequence(0),
                 fastwalk_key: RawFastwalkKey(0),
             },
-            &OpenWorld,
+            &Footing::new(None, &open_world(), Doors::AsTheyStand),
             now(),
             false,
         );
@@ -734,7 +728,12 @@ mod tests {
     fn every_direction_steps_the_right_way() {
         for direction in Direction::ALL {
             let mut walker = Walker::new(Point::new(100, 100, 0), Facing::walking(direction));
-            let outcome = walker.request(request(direction, 0), &OpenWorld, now(), false);
+            let outcome = walker.request(
+                request(direction, 0),
+                &Footing::new(None, &open_world(), Doors::AsTheyStand),
+                now(),
+                false,
+            );
 
             let (dx, dy) = direction.step();
             let expected = Point::new((100 + dx) as u16, (100 + dy) as u16, 0);
@@ -753,7 +752,12 @@ mod tests {
     fn a_fresh_walker_that_does_not_start_at_zero_is_refused() {
         let mut walker = walker();
         assert_eq!(
-            walker.request(request(Direction::North, 5), &OpenWorld, now(), false),
+            walker.request(
+                request(Direction::North, 5),
+                &Footing::new(None, &open_world(), Doors::AsTheyStand),
+                now(),
+                false
+            ),
             Walk::Refused
         );
         assert_eq!(walker.position, Point::new(100, 100, 0), "did not move");
@@ -763,19 +767,30 @@ mod tests {
     #[test]
     fn a_refusal_resets_the_sequence() {
         let mut walker = walker();
-        let _ = walker.request(request(Direction::North, 0), &OpenWorld, now(), false);
-        let _ = walker.request(request(Direction::North, 1), &OpenWorld, now(), false);
+        let _ = walker.request(
+            request(Direction::North, 0),
+            &Footing::new(None, &open_world(), Doors::AsTheyStand),
+            now(),
+            false,
+        );
+        let _ = walker.request(
+            request(Direction::North, 1),
+            &Footing::new(None, &open_world(), Doors::AsTheyStand),
+            now(),
+            false,
+        );
 
-        // A wall.
-        struct Wall;
-        impl Terrain for Wall {
-            fn can_step(&self, _from: Point, _to: Point) -> Option<Point> {
-                None
-            }
-        }
+        // A wall, due north of where those two steps left the walker.
+        let mut wall = Overlay::default();
+        wall.set(Tile::new(100, 97), vec![Cover::blocking(0, 20)]);
 
         assert_eq!(
-            walker.request(request(Direction::North, 2), &Wall, now(), false),
+            walker.request(
+                request(Direction::North, 2),
+                &Footing::new(None, &wall, Doors::AsTheyStand),
+                now(),
+                false
+            ),
             Walk::Refused
         );
         assert!(
@@ -787,24 +802,22 @@ mod tests {
     #[test]
     fn terrain_can_move_a_step_somewhere_else() {
         // What real terrain does: the caller guesses a z, the map corrects it.
-        // Walking up a hill lands you higher than you asked for.
-        struct Hill;
-        impl Terrain for Hill {
-            fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-                Some(Point { z: to.z + 5, ..to })
-            }
-        }
-
+        // A step onto a low platform lands you higher than you asked for. The
+        // climb is within `MAX_STEP_UP`, because a real map is what answers now
+        // and a real map refuses more than that — the double this replaced
+        // could lift a body five units in one step, which no ground does.
+        let mut hill = crate::scene::Scene::flat_holding(100, 100, 0);
+        hill.floor(100, 99, 0, 2);
         let mut walker = walker();
-        let outcome = walker.request(request(Direction::North, 0), &Hill, now(), false);
+        let outcome = walker.request(request(Direction::North, 0), &hill.footing(), now(), false);
         assert_eq!(
             outcome,
             Walk::Moved {
-                position: Point::new(100, 99, 5),
+                position: Point::new(100, 99, 2),
                 facing: Facing::walking(Direction::North),
             }
         );
-        assert_eq!(walker.position.z, 5, "the walker believes the terrain");
+        assert_eq!(walker.position.z, 2, "the walker believes the terrain");
     }
 
     #[test]
@@ -813,7 +826,12 @@ mod tests {
         // walker at x=65535 — the far side of the map, instantly.
         let mut walker = Walker::new(Point::new(0, 0, 0), Facing::walking(Direction::West));
         assert_eq!(
-            walker.request(request(Direction::West, 0), &OpenWorld, now(), false),
+            walker.request(
+                request(Direction::West, 0),
+                &Footing::new(None, &open_world(), Doors::AsTheyStand),
+                now(),
+                false
+            ),
             Walk::Refused
         );
         assert_eq!(walker.position, Point::new(0, 0, 0));
@@ -823,7 +841,12 @@ mod tests {
             Facing::walking(Direction::SouthEast),
         );
         assert_eq!(
-            walker.request(request(Direction::SouthEast, 0), &OpenWorld, now(), false),
+            walker.request(
+                request(Direction::SouthEast, 0),
+                &Footing::new(None, &open_world(), Doors::AsTheyStand),
+                now(),
+                false
+            ),
             Walk::Refused
         );
     }
@@ -927,7 +950,12 @@ mod tests {
         let mut step = |walker: &mut Walker, direction: Direction| {
             // Two requests per direction: one turns, one moves.
             for _ in 0..2 {
-                let _ = walker.request(request(direction, sequence), &OpenWorld, now(), false);
+                let _ = walker.request(
+                    request(direction, sequence),
+                    &Footing::new(None, &open_world(), Doors::AsTheyStand),
+                    now(),
+                    false,
+                );
                 sequence = sequence.wrapping_add(1);
             }
         };

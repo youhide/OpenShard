@@ -13,7 +13,6 @@ use openshard_client_net::view::{Heard, WorldView};
 use openshard_client_render::control::Follow;
 use openshard_client_render::items::GroundItem;
 use openshard_client_render::mobiles;
-use openshard_movement::Terrain;
 use openshard_protocol::items::{CORPSE_GRAPHIC, WorldItemPayload};
 use openshard_protocol::localized;
 use openshard_protocol::server_packet::ServerPacket;
@@ -24,7 +23,7 @@ use openshard_uofiles::anim::is_ghost;
 use openshard_uofiles::cliloc::{Cliloc, ClilocNumber};
 
 use crate::app::App;
-use crate::world::{MotionRenderState, advance_presentation_to, cluttered};
+use crate::world::{MotionRenderState, advance_presentation_to, footing};
 use crate::{clutter, crowd, link};
 
 /// Fold one locally predicted step into the presentation that ages it.
@@ -478,9 +477,12 @@ impl App {
             return;
         }
         let current = self.world.presentation.cutaway_at;
-        let reachable = cluttered(&self.world, &self.resources)
-            .can_step(current, next)
-            .is_some();
+        let reachable = openshard_movement::can_step(
+            &footing(&self.world, &self.resources, self.walking_doors()),
+            current,
+            next,
+        )
+        .is_some();
         if reachable {
             self.world.presentation.cutaway_at = next;
         }

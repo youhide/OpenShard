@@ -27,7 +27,7 @@ use openshard_protocol::wire::Hue;
 use openshard_protocol::world::Point;
 
 use crate::crowd::{Crowd, Who};
-use crate::{clutter, link, resources};
+use crate::{link, resources};
 
 /// How long a damage number remains over the mobile it struck.
 pub const DAMAGE_NUMBER_HOLD: Duration = Duration::from_secs(1);
@@ -925,32 +925,37 @@ pub(crate) fn terrain(resources: &resources::Resources) -> openshard_movement::M
 }
 
 /// [`terrain`] with the shard's own items laid over it — what every step
-/// decision on this end should actually ask. See [`clutter::of`],
-/// and `terrain`'s own docs for why this takes references rather than being
-/// an `App` method.
-pub(crate) fn cluttered<'a>(
-    world: &'a WorldState,
-    resources: &'a resources::Resources,
-) -> clutter::Cluttered<'a, openshard_movement::MapTerrain<'a>> {
-    clutter::Cluttered::new(
-        terrain(resources),
-        &world.presentation.overlay,
+/// decision on this end should actually ask. See [`clutter::of`], and
+/// `terrain`'s own docs for why this takes references rather than being an
+/// `App` method.
+///
+/// The two readings of the shut doors are the `doors` argument and not two
+/// functions: they are one facet at one moment, and the pair used to be two
+/// terrains a caller built side by side.
+/// Nothing placed, for a *map-only* reading to borrow.
+///
+/// The coarse graph was baked over the bare map, so the guide has to be read
+/// over the bare map too: a door that happens to be shut must not be able to
+/// rewrite a corridor's topology.
+static NOTHING_PLACED: std::sync::LazyLock<openshard_movement::Overlay> =
+    std::sync::LazyLock::new(openshard_movement::Overlay::default);
+
+/// The bare static map, as a footing with nothing live on it — what the coarse
+/// graph is guided and joined by.
+pub(crate) fn guide(resources: &resources::Resources) -> openshard_movement::Footing<'_> {
+    openshard_movement::Footing::new(
+        Some(terrain(resources)),
+        &NOTHING_PLACED,
         openshard_movement::Doors::AsTheyStand,
     )
 }
 
-/// The same, read as though every shut door on it stood open: what a route
-/// may be *planned* through, and never what decides a step. See
-/// [`openshard_movement::Doors::AllOpen`].
-pub(crate) fn cluttered_with_doors_open<'a>(
+pub(crate) fn footing<'a>(
     world: &'a WorldState,
     resources: &'a resources::Resources,
-) -> clutter::Cluttered<'a, openshard_movement::MapTerrain<'a>> {
-    clutter::Cluttered::new(
-        terrain(resources),
-        &world.presentation.overlay,
-        openshard_movement::Doors::AllOpen,
-    )
+    doors: openshard_movement::Doors,
+) -> openshard_movement::Footing<'a> {
+    openshard_movement::Footing::new(Some(terrain(resources)), &world.presentation.overlay, doors)
 }
 
 #[cfg(test)]

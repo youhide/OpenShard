@@ -14,7 +14,7 @@ use openshard_combat as combat;
 use openshard_combat::MobileDamaged;
 use openshard_entities::EntityId;
 use openshard_items as items;
-use openshard_movement::{Doors, Terrain, direction_toward, find_path, step_from};
+use openshard_movement::{Doors, direction_toward, find_path, step_from};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::world::{Facet, Point, Sight};
@@ -75,7 +75,7 @@ pub fn step_toward(
     // The live terrain, not the bare map: a route must not thread a placed
     // crate the step would then refuse. A door-opener plans through doors and
     // opens them on arrival.
-    let planner = state.planning_terrain(facet, doors);
+    let planner = state.footing(facet, doors);
     if let Some(path) = find_path(&planner, from, to, PATH_BUDGET) {
         return path.first().copied();
     }
@@ -128,7 +128,11 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction
                     state.registry.remove::<ChasePath>(creature);
                     return kite_step(state, facet, pos, target_pos);
                 }
-                let clear = state.live_terrain(facet).sight_clear(pos, target_pos);
+                let clear = openshard_movement::sight_clear(
+                    &state.footing(facet, Doors::AsTheyStand),
+                    pos,
+                    target_pos,
+                );
                 if gap <= u32::from(range.get()) && clear {
                     return None; // in reach, sight line clear: stand and loose
                 }
@@ -221,8 +225,8 @@ fn probe(state: &WorldState, facet: Facet, from: Point, dir: Direction) -> (bool
     let Some(target) = step_from(from, dir) else {
         return (false, None);
     };
-    let live = state.live_terrain(facet);
-    if live.can_step(from, target).is_some() {
+    let live = state.footing(facet, Doors::AsTheyStand);
+    if openshard_movement::can_step(&live, from, target).is_some() {
         return (true, None);
     }
     // Which door, and not just that one is there: the overlay says a door is in
@@ -296,7 +300,7 @@ fn chase_step(
     // Blocked: plan a route around. A door-opener plans through doors and
     // opens them on arrival.
     let planned = {
-        let planner = state.planning_terrain(facet, Doors::for_opener(brain.opens_doors));
+        let planner = state.footing(facet, Doors::for_opener(brain.opens_doors));
         find_path(&planner, from, to, PATH_BUDGET)
     };
     match planned {
@@ -361,7 +365,7 @@ fn nearest_player_in_sight(
     sight: Sight,
 ) -> Option<Serial> {
     let facet_state = state.facet_state(facet);
-    let live = state.live_terrain(facet);
+    let live = state.footing(facet, Doors::AsTheyStand);
     let sectors = &facet_state.sectors;
     let mut best: Option<(u32, Serial)> = None;
     for (id, pos) in sectors.nearby(from, u32::from(sight.0)) {
@@ -374,7 +378,7 @@ fn nearest_player_in_sight(
         // Noticing needs a sight line — both reference emulators gate the
         // *acquisition* on line of sight and keep the chase itself on the
         // cheaper range check, and so does this.
-        if !live.sight_clear(from, pos) {
+        if !openshard_movement::sight_clear(&live, from, pos) {
             continue;
         }
         if state.registry.get::<Hitpoints>(id).is_none_or(|h| h.current == 0) {

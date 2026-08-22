@@ -662,21 +662,39 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::{Terrain, Tile, find_long_path};
+    use crate::overlay::{Cover, Doors, Overlay};
+    use crate::scene::Scene;
+    use crate::{Footing, Tile, find_long_path};
 
+    /// A bounded open grid with some tiles blocked: a real map for the ground,
+    /// an overlay for what is in the way. See `navigation`'s twin of this — the
+    /// same fixture, because both are the same world.
     struct Grid {
-        width: u16,
-        height: u16,
-        blocked: BTreeSet<(u16, u16)>,
+        scene: Scene,
+        blocked: Overlay,
     }
 
-    impl Terrain for Grid {
-        fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-            (to.x < self.width && to.y < self.height && !self.blocked.contains(&(to.x, to.y))).then_some(to)
+    impl Grid {
+        fn new(width: u16, height: u16, blocked: &BTreeSet<(u16, u16)>) -> Self {
+            let scene = Scene::flat_holding(width - 1, height - 1, 0);
+            let mut overlay = Overlay::default();
+            for y in 0..scene.height() {
+                for x in 0..scene.width() {
+                    // The scene rounds up to whole blocks; fence off what the
+                    // fixture did not ask for, so its edge refuses a step.
+                    if x >= width || y >= height || blocked.contains(&(x, y)) {
+                        overlay.set(Tile::new(x, y), vec![Cover::blocking(0, 20)]);
+                    }
+                }
+            }
+            Self {
+                scene,
+                blocked: overlay,
+            }
         }
 
-        fn ground_z(&self, tile: Tile) -> Option<i8> {
-            (tile.x < self.width && tile.y < self.height).then_some(0)
+        fn footing(&self) -> Footing<'_> {
+            Footing::new(Some(self.scene.terrain()), &self.blocked, Doors::AsTheyStand)
         }
     }
 
@@ -703,12 +721,8 @@ mod tests {
                 blocked.insert((48, y));
             }
         }
-        let terrain = Grid {
-            width: 96,
-            height: 64,
-            blocked,
-        };
-        let graph = NavigationGraph::build(&terrain, 96, 64).unwrap();
+        let terrain = Grid::new(96, 64, &blocked);
+        let graph = NavigationGraph::build(&terrain.footing(), 96, 64).unwrap();
         assert!(graph.counts().1 > 0, "the payload must exercise graph nodes");
         let path = temp("round.bin");
         let s = stamp();
@@ -718,20 +732,16 @@ mod tests {
         let from = Point::new(2, 2, 0);
         let to = Point::new(93, 2, 0);
         assert_eq!(
-            find_long_path(&terrain, &terrain, &graph, from, to, 100),
-            find_long_path(&terrain, &terrain, &loaded, from, to, 100),
+            find_long_path(&terrain.footing(), &terrain.footing(), &graph, from, to, 100),
+            find_long_path(&terrain.footing(), &terrain.footing(), &loaded, from, to, 100),
         );
         let _ = fs::remove_file(path);
     }
 
     #[test]
     fn incompatible_stale_and_corrupt_files_are_distinct() {
-        let terrain = Grid {
-            width: 8,
-            height: 8,
-            blocked: BTreeSet::new(),
-        };
-        let graph = NavigationGraph::build(&terrain, 8, 8).unwrap();
+        let terrain = Grid::new(8, 8, &BTreeSet::new());
+        let graph = NavigationGraph::build(&terrain.footing(), 8, 8).unwrap();
         let path = temp("reject.bin");
         let s = stamp();
         save(&path, &graph, &s).unwrap();

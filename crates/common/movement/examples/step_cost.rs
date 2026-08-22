@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use openshard_movement::{MapTerrain, SearchExit, Terrain, Tile, search_path, step_allowed};
+use openshard_movement::{Doors, Footing, MapTerrain, Overlay, SearchExit, Tile, search_path, step_allowed};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 use openshard_uofiles::tiledata::TileData;
@@ -62,6 +62,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tiledata = TileData::load(cli.client.join("tiledata.mul"))?;
     let map = openshard_uofiles::map::read_facet(&cli.client, 0)?;
     let terrain = MapTerrain::new(&map, &tiledata);
+    // The map and nothing over it: this probe is about what the *ground* costs
+    // to ask, so the live world is empty on purpose.
+    let nothing_placed = Overlay::default();
+    let footing = Footing::new(Some(terrain), &nothing_placed, Doors::AsTheyStand);
 
     // Only tiles a body can stand on, so every measurement below is doing the
     // work a search would do rather than bailing out on the first `None`.
@@ -130,7 +134,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|&p| {
                 Direction::ALL
                     .into_iter()
-                    .filter_map(|d| step_allowed(black_box(&terrain), black_box(p), d))
+                    .filter_map(|d| step_allowed(black_box(&footing), black_box(p), d))
                     .map(|p| u64::from(p.x))
                     .sum::<u64>()
             })
@@ -142,7 +146,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         standing.iter().map(|&p| hoisted_expand(&terrain, p)).sum()
     });
     println!("what the search itself costs, with terrain taken away:");
-    let plain = Plain { wall_x: 3000 };
+    // Open ground with no map at all and nothing on it: the floor under every
+    // measurement above. A search here pops its whole budget — the goal is two
+    // thousand tiles away and the budget is hundreds — while a step is a hash
+    // miss and nothing else, so what is left on the clock is the *search*: a
+    // binary heap, two `FxHashMap`s and a closed set. Terrain work is what a
+    // span grid shrinks; this is what it shrinks it **towards**, and a ratio
+    // quoted without it is a ratio that ignores its own limit.
+    let nothing = Overlay::default();
+    let plain = Footing::new(None, &nothing, Doors::AsTheyStand);
     let from = Point::new(2000, 2000, 0);
     let to = Point::new(4000, 2000, 0);
     for budget in [400_usize, 600] {
@@ -155,7 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             explored = search.explored;
             assert!(
                 matches!(search.exit, SearchExit::Budget),
-                "the goal must stay walled off"
+                "the goal must stay out of reach of the budget"
             );
         }
         println!(
@@ -165,24 +177,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     Ok(())
-}
-
-/// Open ground with one impassable half-plane, and a step that costs nothing.
-///
-/// The floor under every measurement above. A search over this pops its whole
-/// budget — the goal is walled off, so nothing arrives — while `can_step` is one
-/// integer compare, so what is left on the clock is the *search*: a binary heap,
-/// two `FxHashMap`s and a closed set. Terrain work is what a span grid shrinks;
-/// this is what it shrinks it **towards**, and a ratio quoted without it is a
-/// ratio that ignores its own limit.
-struct Plain {
-    wall_x: u16,
-}
-
-impl Terrain for Plain {
-    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-        (to.x < self.wall_x).then_some(to)
-    }
 }
 
 const fn step_from_east(point: Point) -> Option<Point> {

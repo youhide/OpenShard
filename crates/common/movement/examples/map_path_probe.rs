@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use openshard_movement::{CachedTerrain, MapTerrain, PathSearch, SearchExit, Terrain, search_path};
+use openshard_movement::{Doors, Footing, MapTerrain, Overlay, PathSearch, SearchExit, search_path};
 use openshard_protocol::world::Point;
 use openshard_uofiles::tiledata::TileData;
 
@@ -44,10 +44,6 @@ struct Cli {
     /// 400 and a client plan at 600.
     #[arg(long, value_name = "N")]
     budget: Vec<usize>,
-    /// Also sweep through a per-query [`CachedTerrain`], which is what the
-    /// client's `plan` wraps every search in.
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-    cached: bool,
     /// Times to repeat each search, keeping the fastest.
     ///
     /// A shared workstation drifts: the same sweep measured 40.6 s and 65.5 s
@@ -198,6 +194,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tiles = TileData::load(cli.client.join("tiledata.mul"))?;
     let map = openshard_uofiles::map::read_facet(&cli.client, 0)?;
     let terrain = MapTerrain::new(&map, &tiles);
+    // The map and nothing over it. This probe measures the *ground*: a shard's
+    // doors and crates are its own, and a facet's numbers have to be about the
+    // facet to be comparable between runs.
+    let nothing_placed = Overlay::default();
+    let footing = Footing::new(Some(terrain), &nothing_placed, Doors::AsTheyStand);
     let standing = Point::new(
         cli.x,
         cli.y,
@@ -236,24 +237,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cli.budget,
     );
 
-    println!(
-        "each search repeated {} times, fastest kept; bare and cached are interleaved per destination",
-        cli.repeat,
-    );
+    println!("each search repeated {} times, fastest kept", cli.repeat,);
     for &budget in &cli.budget {
         let mut bare = Vec::with_capacity(destinations.len());
-        let mut cached = Vec::with_capacity(destinations.len());
-        let (mut hits, mut misses, mut entries) = (0usize, 0usize, 0usize);
         for &(x, y, distance) in &destinations {
             let to = Point::new(x, y, from.z);
-            // Both readings of one destination, back to back. A machine that
-            // drifts over a two-minute sweep drifts under both of them equally,
-            // which is what makes the pair comparable at all.
             let mut fastest = Duration::MAX;
             let mut last = None;
             for _ in 0..cli.repeat.max(1) {
                 let started = Instant::now();
-                let search = search_path(&terrain, from, to, budget);
+                let search = search_path(&footing, from, to, budget);
                 fastest = fastest.min(started.elapsed());
                 last = Some(search);
             }
@@ -264,30 +257,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 fastest,
                 &last.expect("at least one repeat"),
             ));
-
-            if !cli.cached {
-                continue;
-            }
-            // One cache per search, which is the lifetime the client's `plan`
-            // gives it: a new `CachedTerrain` per plan, discarded with the
-            // frame. Its hit rate is therefore a statement about one search's
-            // own re-expansions, not about reuse between searches — there is
-            // none, and a cache that outlived a frame would answer for a door
-            // that has since shut.
-            let mut fastest = Duration::MAX;
-            let mut last = None;
-            for _ in 0..cli.repeat.max(1) {
-                let cache = CachedTerrain::new(&terrain);
-                let started = Instant::now();
-                let search = search_path(&cache, from, to, budget);
-                fastest = fastest.min(started.elapsed());
-                last = Some((search, cache.stats()));
-            }
-            let (search, stats) = last.expect("at least one repeat");
-            cached.push(Reading::new(x, y, distance, fastest, &search));
-            hits += stats.hits;
-            misses += stats.misses;
-            entries += stats.entries;
         }
 
         report(&format!("budget={budget} bare"), &bare);
@@ -306,15 +275,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 reading.arrived,
             );
         }
-        if !cli.cached {
-            continue;
-        }
-        report(&format!("budget={budget} cached"), &cached);
-        let calls = hits + misses;
-        println!(
-            "  TransitionCacheStats: hits={hits} misses={misses} entries={entries} hit_rate={:.1}%",
-            100.0 * hits as f64 / calls.max(1) as f64,
-        );
     }
     Ok(())
 }
