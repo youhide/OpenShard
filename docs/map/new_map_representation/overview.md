@@ -20,8 +20,8 @@ The world is the player's UO install, and only that:
   ([`lib.rs:461`](../../../crates/client/app/src/lib.rs#L461)). They match because
   they opened the same install, not because either was told what the world is.
 - **Nothing in the engine can change the ground.**
-  [`Map::set_land`](../../../crates/common/uofiles/src/map.rs#L518) and
-  [`Map::place_static`](../../../crates/common/uofiles/src/map.rs#L549) exist, and
+  [`Map::set_land`](../../../crates/common/map/src/map.rs#L256) and
+  [`Map::place_static`](../../../crates/common/map/src/map.rs#L285) exist, and
   every caller is a test fixture or a bake. There is no path from "an operator
   changed the world" to "a player sees it", because a change would have to end
   up in the client's own `map0.mul`.

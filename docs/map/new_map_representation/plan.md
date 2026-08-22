@@ -4,7 +4,9 @@ The plan behind [`overview.md`](overview.md), with the mechanics in
 [`mechanics.md`](mechanics.md). Seven directions and one deferred. The first two
 are not features — they are putting the map we already have behind one door, and
 everything after them is cheap only if they land first. They have their own
-executable plan: [`snapshot.md`](snapshot.md).
+executable plan: [`snapshot.md`](snapshot.md), which grew a third phase in the
+doing: **the world is one type in `openshard-map`, and UO's files are an
+importer into it.** Every direction below inherits that, and B most of all.
 
 ## Who reads the world today
 
@@ -26,7 +28,7 @@ whatever those files said.
 
 ## A0 — the cell array becomes a type that owns the order
 
-> **Built** — `crates/common/uofiles/src/grid.rs`. Executed on its own, as
+> **Built** — `crates/common/map/src/grid.rs`. Executed on its own, as
 > [`snapshot.md`](snapshot.md)'s phase 1; what it left behind is that
 > document's [backlog](snapshot.md#what-phase-1-left-behind).
 
@@ -42,11 +44,11 @@ in five places inside one file:
 
 | Where | What it writes |
 |---|---|
-| [`from_blocks`](../../../crates/common/uofiles/src/map.rs#L332) | the triple loop that defines the order |
-| [`load_statics`](../../../crates/common/uofiles/src/map.rs#L448) | the **inverse** — `block / blocks_down`, `block % blocks_down` — to recover a block's world origin |
-| [`cell_index`](../../../crates/common/uofiles/src/map.rs#L502) | `(x / 8) * blocks_down + (y / 8)`, then the cell within |
-| [`statics_in_row`](../../../crates/common/uofiles/src/map.rs#L611) | `column * rows + y / 8` |
-| [`statics_in_block`](../../../crates/common/uofiles/src/map.rs#L645) and [`block_index`](../../../crates/common/uofiles/src/map.rs#L654) | the same formula twice more, in two functions that do not call each other |
+| [`from_blocks`](../../../crates/common/map/src/grid.rs#L222) | the triple loop that defines the order |
+| [`load_statics`](../../../crates/common/uofiles/src/map.rs#L252) | the **inverse** — `block / blocks_down`, `block % blocks_down` — to recover a block's world origin |
+| [`cell_index`](../../../crates/common/map/src/grid.rs#L372) | `(x / 8) * blocks_down + (y / 8)`, then the cell within |
+| [`statics_in_row`](../../../crates/common/map/src/map.rs#L331) | `column * rows + y / 8` |
+| [`statics_in_block`](../../../crates/common/map/src/map.rs#L368) and [`block_index`](../../../crates/common/map/src/map.rs#L388) | the same formula twice more, in two functions that do not call each other |
 
 - A `LandGrid` newtype over `Vec<LandCell>` holding `width`, `height` and the
   cells, and owning **every** conversion: tile to cell index, tile to block,
@@ -105,19 +107,26 @@ its own even if everything below slipped.
 
 **Goal.** A world that exists without a UO install.
 
-- A new crate under `crates/common/` (both ends need it, so the dependency
-  invariant puts it there, not under `server/` or `client/`). It owns the chunk
-  types, the canonical encoding, bounds checking, hashing. It knows nothing of
-  sockets, ECS or renderers.
+- The crate exists: [`openshard-map`](../../../crates/common/map/src/lib.rs),
+  under `crates/common/` because both ends need it. It already holds the world
+  and its snapshot, depends on `openshard-protocol` and nothing else, and has
+  never opened a file. B fills it with the chunk types, the canonical encoding,
+  bounds checking and hashing. It knows nothing of sockets, ECS or renderers.
 - Entities: `ChunkKey` (facet, chunk x, chunk y — plus a `map_id` only if the
   question in the mechanics table answers yes), `Chunk` (dense land arrays,
   statics grouped by tile), `StaticId`, `Revision`.
+- **A chunk reader is a second importer, not a second world.** It builds the
+  same [`Map`](../../../crates/common/map/src/map.rs#L75) the `.mul` reader
+  does, through the same
+  [`from_parts`](../../../crates/common/map/src/map.rs#L191) — which is what
+  makes the round-trip below an assertion about *bytes* rather than about two
+  parallel representations that happen to agree.
 - A CLI that bakes a facet out of a UO install into a base set, reusing
-  [`Map::load_facet`](../../../crates/common/uofiles/src/map.rs#L262) as the reader.
+  [`read_facet`](../../../crates/common/uofiles/src/map.rs#L185) as the reader.
 - **Done when** an imported facet round-trips byte-identically, and a decoded
   chunk answers the same land and statics as
-  [`Map::land`](../../../crates/common/uofiles/src/map.rs#L509) and
-  [`Map::statics_at`](../../../crates/common/uofiles/src/map.rs#L568) for sampled
+  [`Map::land`](../../../crates/common/map/src/map.rs#L224) and
+  [`Map::statics_at`](../../../crates/common/map/src/map.rs#L305) for sampled
   tiles across Felucca.
 
 Then the server reads the base set instead of the install, and existing
@@ -143,7 +152,7 @@ Three consequences, none of them yet decided:
 - **`hue` is dead weight in the common case** — two bytes on 99% of items that
   do not use them.
 - **`x` and `y` are stored absolute, and only three bits of each matter** in a
-  block. [`load_statics`](../../../crates/common/uofiles/src/map.rs#L455) expands
+  block. [`load_statics`](../../../crates/common/uofiles/src/map.rs#L252) expands
   them on purpose ("a world coordinate is more use to everyone downstream"),
   which costs four bytes an item and is the difference between a 10-byte record
   and a 4-byte one — 6.4 items per cache line against 16.
@@ -152,7 +161,7 @@ A CSR pair — one `Vec<StaticItem>` and a `Vec<u32>` of per-block offsets — i
 2 allocations against today's 120,745, and at 4 bytes an item takes the whole
 statics layer from 38.2 MiB to about 13.5 MiB. At that density a block's
 statics are 72 bytes, one or two cache lines, and the two binary searches
-[`statics_at`](../../../crates/common/uofiles/src/map.rs#L568) exists to avoid a
+[`statics_at`](../../../crates/common/map/src/map.rs#L305) exists to avoid a
 scan with are no longer obviously the cheaper answer. Two costs to weigh
 against it: accessors hand back a value rather than a reference, since the
 block origin is unpacked at the boundary; and an in-place `place_static`

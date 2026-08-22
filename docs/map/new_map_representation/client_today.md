@@ -8,7 +8,7 @@ directions A–D can be argued against a measurement rather than an impression.
 
 ## The one owner, and its shape
 
-[`Map`](../../../crates/common/uofiles/src/map.rs#L180) is flat, immutable, and
+[`Map`](../../../crates/common/map/src/map.rs#L75) is flat, immutable, and
 whole in memory:
 
 | Field | Layout | Felucca |

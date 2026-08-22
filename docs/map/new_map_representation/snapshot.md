@@ -10,21 +10,26 @@ state it starts from: [`client_today.md`](client_today.md)
 
 ## What this is
 
-Two changes that together make the world a thing with an owner.
+Three changes that together make the world a thing with an owner, and a thing
+that is not a file.
 
 1. **A0** — the block order stops being arithmetic written out five times and
    becomes one type whose whole job is that arithmetic. Internal to
    `openshard-uofiles`; no reader outside it changes. **Built.**
 2. **A** — the map stops being something a caller loads for itself and becomes
    a revisioned snapshot every reader takes a handle to. **Built.**
+3. **A2** — the world moves out of the file-reader crate. `Map` becomes **the**
+   representation of the world, in `openshard-map` beside its snapshot, and what
+   stays in `uofiles` is an importer. **Built.**
 
-Neither adds a feature. That is the point: everything after them in the track
-is cheap only if they land first, and if the rest of the track slipped these
-would still have been worth doing.
+None of them adds a feature. That is the point: everything after them in the
+track is cheap only if they land first, and if the rest of the track slipped
+these would still have been worth doing.
 
 ## Phase 1 — `LandGrid` — **built**
 
-Landed as [`crates/common/uofiles/src/grid.rs`](../../../crates/common/uofiles/src/grid.rs).
+Landed as [`crates/common/map/src/grid.rs`](../../../crates/common/map/src/grid.rs) —
+in `uofiles` at the time, and moved with `Map` by phase 3.
 What it turned out to owe beyond this section is under
 [What phase 1 left behind](#what-phase-1-left-behind).
 
@@ -39,13 +44,11 @@ walks into an ocean that should be a coastline.
 It is written out five times inside one file, listed in
 [`plan.md`'s A0](plan.md#a0--the-cell-array-becomes-a-type-that-owns-the-order),
 including two verbatim copies in functions that do not call each other
-([`cell_index`](../../../crates/common/uofiles/src/map.rs#L502) and
-[`block_index`](../../../crates/common/uofiles/src/map.rs#L654)) and one
-inverted ([`load_statics`](../../../crates/common/uofiles/src/map.rs#L448)).
+(`cell_index` and `block_index`) and one inverted (`load_statics`).
 
 ### What to build
 
-A new module `crates/common/uofiles/src/grid.rs`. `map.rs` imports from it; no
+A new module `grid.rs` beside `map.rs`, which imports from it; no
 `pub use` — [`style.md`](../../style.md)'s rule is that a type is imported from
 where it is declared.
 
@@ -67,7 +70,7 @@ pub struct CellIndex(u32);
 
 | | |
 |---|---|
-| construction | the triple loop now in [`from_blocks`](../../../crates/common/uofiles/src/map.rs#L332), and the byte walk in [`from_bytes`](../../../crates/common/uofiles/src/map.rs#L380) |
+| construction | the triple loop now in [`from_blocks`](../../../crates/common/map/src/grid.rs#L222), and the byte walk in [`from_bytes`](../../../crates/common/uofiles/src/map.rs#L212) |
 | tile → cell | today's `cell_index` |
 | tile → block | today's `block_index` |
 | block → linear | the `block_x * blocks_down + block_y` written four times |
@@ -142,7 +145,7 @@ reader.
 
 ## Phase 2 — the snapshot — **built**
 
-Landed as [`crates/common/map`](../../../crates/common/map/src/lib.rs). What it
+Landed as [`crates/common/map`](../../../crates/common/map/src/snapshot.rs). What it
 turned out to owe beyond this section is under
 [What phase 2 left behind](#what-phase-2-left-behind).
 
@@ -267,7 +270,7 @@ and it is the field C later makes mean something.
 
 ### Done when — all met
 
-- No production code outside `openshard-map` calls `Map::load_facet`.
+- No production code outside the importer calls the bare-map read.
 - The client `Resources` and the server facet terrain each own a `MapSnapshot`,
   and reach their terrain through it.
 - `link::connect` receives neither a `MapSnapshot` nor a map handle: it sends
@@ -283,6 +286,88 @@ and it is the field C later makes mean something.
   It is **not** silent as the workspace stands: eleven warnings sit in
   `client/render`'s interiors work and the two `client/app` call sites it
   added, none of them touched here. Whoever finishes that track clears them.
+
+## Phase 3 — the world is a crate, the files are an importer — **built**
+
+Phases 1 and 2 gave the world an order and an owner, and left it in the wrong
+place. `Map` was the workspace's single representation of the world and lived in
+`openshard-uofiles` — the crate whose stated job is "readers for the client's
+own files". So every reader of the world reached it through a file reader, and
+`openshard-map` depended on `uofiles` to say what a snapshot was a snapshot
+*of*.
+
+That is backwards against the thing [`overview.md`](overview.md) asks for in its
+first line: **the map is our data, and UO's files become one importer.** A shard
+that never had a client install cannot have a world while the world's type is
+declared inside the `.mul` reader.
+
+### What was built
+
+`Map`, `LandGrid` and the cell types moved to `openshard-map`, beside
+`MapSnapshot`. The crate now depends on `openshard-protocol` and nothing else,
+and reads no files at all. Three modules:
+
+| | |
+|---|---|
+| [`grid`](../../../crates/common/map/src/grid.rs) | the land, and the block order it is in — unchanged, moved whole |
+| [`map`](../../../crates/common/map/src/map.rs) | one facet: that land, and everything standing on it |
+| [`snapshot`](../../../crates/common/map/src/snapshot.rs) | which facet, and which published revision |
+
+What stayed in [`uofiles::map`](../../../crates/common/uofiles/src/map.rs) is the
+importer, as free functions rather than methods on a type it no longer owns:
+`.mul` and `.uop` reading, `staidx`, the byte constants, `MapError`, and the
+facet-shape table that breaks the Malas/Ter Mur tie. The dependency inverts with
+it — `uofiles` now *reads* the world (`surfaces`, `radarcol`) rather than
+declaring it.
+
+### Decisions, taken here
+
+**The line is grid geometry against file bytes, and it is not negotiable per
+item.** `BLOCK_SIZE` and `CELLS_PER_BLOCK` are facts about the grid and went
+with it; `BLOCK_BYTES`, `BLOCK_HEADER`, `CELL_BYTES`, `STAIDX_ENTRY` and
+`STATIC_BYTES` are facts about a file and stayed. A constant that describes how
+many bytes a thing is on disk has no business in a crate that will one day hold
+a world nobody serialised that way.
+
+**The importer reads, the type sorts.**
+[`Map::from_parts`](../../../crates/common/map/src/map.rs#L191) is the door an
+importer comes through, and it takes the per-block sort by tile away from the
+decoder. `statics_at` and `statics_in_row` are binary searches over `(y, x)`
+order, so a decoder that handed over an unsorted block would not fail — it would
+make every later lookup quietly find nothing. The invariant now belongs to the
+type, which is what makes a *second* importer safe: direction B's chunk reader
+cannot get it wrong differently from this one. It panics on a statics array
+whose length disagrees with the block count, because the two arrays sharing one
+`BlockIndex` is the property every lookup rests on.
+
+**The one door survived the move, and gained a name for its other half.**
+`MapSnapshot::load_facet` is
+[`uofiles::map::load_facet`](../../../crates/common/uofiles/src/map.rs#L167):
+still the only way production code reads a facet, and still the only thing that
+mints revision 1. `MapSnapshot::new` is now the *only* constructor in
+`openshard-map`, so "a facet was loaded" and "a facet has an identity and a
+revision" cannot come apart. The bare-map read is
+[`read_facet`](../../../crates/common/uofiles/src/map.rs#L185), and every caller
+of it is a test, an example or a diagnostic — which is what `Map::load_facet`'s
+callers already were.
+
+**The tree was left broken on purpose, for one commit.** The move landed first,
+naming nothing outside the two crates, and the ~50 files that named the old
+paths landed second. Two commits rather than one because the seam is worth
+seeing in the history: the first says what the world *is*, the second is
+mechanical.
+
+### Done when — all met
+
+- `openshard-map` depends on `openshard-protocol` and nothing else, and no
+  function in it takes a path.
+- No type named `Map`, `LandGrid`, `LandCell`, `LandTile` or `StaticItem` is
+  declared outside `openshard-map`.
+- `uofiles::map` exposes the importer only, and `uofiles` depends on
+  `openshard-map` rather than the reverse.
+- `cargo check --workspace --all-targets`, `cargo test --workspace` and
+  `cargo fmt --all` are silent. Clippy is unchanged: its warnings are the
+  interiors track's own, in files this phase only edited an import line of.
 
 ## What phase 2 left behind
 
@@ -350,7 +435,7 @@ Written down as it was found, and none of it blocks phase 2.
 - **The `BlockCoord` collapse is done.** `interiors::BlockId` and
   `composite::MapBlock` — the same value under two names, and disagreeing about
   its width — are both
-  [`BlockCoord`](../../../crates/common/uofiles/src/grid.rs) now.
+  [`BlockCoord`](../../../crates/common/map/src/grid.rs) now.
   `RadarChunkCoord` stayed, for the reason phase 1 gave. `MapBlockBounds`
   widened to `u32` with the coordinate it holds, so a block column has one
   width in `client/render` rather than two, and five more open-coded spellings
@@ -383,9 +468,9 @@ Written down as it was found, and none of it blocks phase 2.
   derives it and `the_two_orders_compose_into_a_strip` holds it against the
   plain spelling; direction B should know it before choosing a chunk layout,
   because it is the property that would be lost.
-- **`Map::from_blocks` takes a typed extent.** [`BlockExtent`](../../../crates/common/uofiles/src/grid.rs)
+- **`Map::from_blocks` takes a typed extent.** [`BlockExtent`](../../../crates/common/map/src/grid.rs)
   names a facet's `wide` and `down` dimensions in blocks, alongside
-  [`BlockCoord`](../../../crates/common/uofiles/src/grid.rs)'s position. Its
+  [`BlockCoord`](../../../crates/common/map/src/grid.rs)'s position. Its
   public named fields make a swapped width and height visible at every caller.
 
 ## Out of scope, named
@@ -412,10 +497,12 @@ Written down because each is a thing a session might reasonably drift into.
 
 ## Where a session starts
 
-Not here: both phases of this plan are built, and what each of them left behind
-is in the two lists above. The track's next direction is
+Not here: all three phases of this plan are built, and what each of them left
+behind is in the lists above. The track's next direction is
 [B](plan.md#b--our-own-chunk-format-and-a-uo-importer), and the state it starts
 from — what was decided, and which of the left-behind items are still open — is
 in the newest [handoff](handoffs/). This document is kept for its decisions,
 which B inherits: the block order belongs to `LandGrid`, a facet is a snapshot
-with a revision, and a bake records which revision it was built from.
+with a revision, a bake records which revision it was built from, and **the
+world is one type in `openshard-map` that has never opened a file** — so B's
+chunk format is a second importer into that same type, not a second world.

@@ -3280,7 +3280,7 @@ riding along with this one.
 - ~~**`app::shell::PickedTile`, the graphic half.**~~ Fixed: `land` is
   `Option<Graphic>` and `statics` is `Vec<(Graphic, i8, Hue)>` — the types the
   neighbouring `Hud::mobiles`/`items` already carry, and no new type needed.
-  The values come out of `openshard_uofiles::map::{LandCell, StaticItem}`,
+  The values come out of `openshard_map::map::{LandCell, StaticItem}`,
   which hold bare `u16`s of their own; `uofiles` is `common/`, so typing the
   format reader stays a separate decision and `App::tile_info` is the boundary
   the wrap happens at. The two HUD formatters destructure (`Some(Graphic(id))`,

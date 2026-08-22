@@ -32,7 +32,7 @@ The map is cut into fixed blocks because nobody reloads a facet to move a rock:
 a chunk is the unit of loading, caching, invalidation and transfer.
 
 We already store the world close to this shape.
-[`Map`](../../../crates/common/uofiles/src/map.rs#L180) holds land block-ordered and
+[`Map`](../../../crates/common/map/src/map.rs#L75) holds land block-ordered and
 statics per block, each block sorted by the tile its items stand on. A chunk is
 that, with an identity and a revision on it.
 
@@ -75,7 +75,7 @@ Two constraints that are not stylistic:
   tile at one height. Addressing a static by coordinates and graphic cannot
   tell them apart, so "remove *that* rock" is not expressible. Today a static
   is a position in a block's vector
-  ([`StaticItem`](../../../crates/common/uofiles/src/map.rs#L70)), which is not an
+  ([`StaticItem`](../../../crates/common/map/src/map.rs#L43)), which is not an
   identity that survives an edit.
 - **A patch applies to a parent, and conflicts are refused.** If the world
   moved under an unpublished edit, the editor gets a conflict and makes a new

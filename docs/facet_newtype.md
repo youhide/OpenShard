@@ -90,7 +90,7 @@ count.**
   [N4 amendment 4](protocol_newtypes.md#amendments-forced-by-n4-containersrs).
   Left as-is; not on this sweep's task list and not on its coverage count
   either — it was never bare by omission.
-- **`uofiles::map::{load_facet, candidate_shapes, facet_size,
+- **`uofiles::map::{read_facet, candidate_shapes, facet_size,
   largest_facet_within}`'s `facet: Option<u8>` indexes a fixed-size array
   (`FACET_SHAPES.get(facet as usize)`) and formats client filenames
   (`format!("map{facet}LegacyMUL.uop")`).** Both uses want the raw number,

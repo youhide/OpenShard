@@ -1517,7 +1517,7 @@ none of them is "somebody forgot a test".
    `client_dir()` and an `Occlusion::EMPTY`, so neither is a fixture — they skip
    where the client files are absent, and they ask nothing about volumes. A
    *synthetic* map is available and was not when item 3 chose to restate
-   `push_volumes`'s eight lines instead: `uofiles::map::Map::from_blocks` builds
+   `push_volumes`'s eight lines instead: `openshard_map::map::Map::from_blocks` builds
    the land and `Map::place_static` puts a static on it. What it still needs, and
    what to cost before planning the rest: a `TileData` the fixture states itself,
    and — the real constraint — **a picture a `Prism` fits**, since the fit reads

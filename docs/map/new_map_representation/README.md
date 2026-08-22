@@ -27,13 +27,15 @@ carry.
 
 ## Status
 
-[`snapshot.md`](snapshot.md) is built, both phases of it: the block order is
-`LandGrid`'s and only `LandGrid`'s, and every reader takes a handle to one
-revisioned `MapSnapshot` per facet. That was directions A0 and A, and neither
-added a feature.
+[`snapshot.md`](snapshot.md) is built, all three phases of it: the block order
+is `LandGrid`'s and only `LandGrid`'s, every reader takes a handle to one
+revisioned `MapSnapshot` per facet, and **the world is one type in
+`openshard-map` that has never opened a file** — UO's `.mul` is an importer in
+`uofiles`, and the dependency runs that way round. That was directions A0 and A
+plus the move they turned out to imply, and none of it added a feature.
 
-The next move is direction B — our own chunk format and a UO importer. Where it
-stands in detail, what was decided along the way, and the smaller landable
-things left behind are in the newest
-[handoff](handoffs/2026-08-22-transitions-first-caller.md); the plan itself
-records intent, not progress.
+The next move is direction B — our own chunk format and a UO importer, which now
+starts from a crate that already *is* the world. Where it stands in detail, what
+was decided along the way, and the smaller landable things left behind are in
+the newest [handoff](handoffs/2026-08-22-the-world-leaves-the-file-reader.md);
+the plan itself records intent, not progress.
