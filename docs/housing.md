@@ -890,11 +890,26 @@ than waiting for a phase of its own:
   from the map at boot and poked at by doors since. Placing a house is the first
   bulk write, and whether it wants one it can undo cheaply — a demolition is the
   same hundred entries coming back out — has not been asked.
-- **A multi's components carry a `dz` and the obstruction index is per tile.** A
-  two-storey house has two floors over one tile and the step check has to pick
-  the one the walker is on. This is the same question `can_step`'s `GetStartZ`
-  answers for statics, and it should be checked that it answers it for a floor
-  ten tiles up rather than assumed.
+- 🚩 **A house has no floors, for movement — the step check has nothing to pick
+  between.** This entry used to read *"a two-storey house has two floors over one
+  tile and the step check has to pick the one the walker is on"*, which assumed
+  the floors were in the step check at all. They are not.
+  `grep -rn "CoverKind::Stands" crates` has exactly one producer in the whole
+  workspace — a ship's plank — so the only live thing anything can stand on is a
+  deck. A placed multi contributes `Blocks` covers for its walls and nothing
+  else; `block_footprint` folds in the components whose tiledata says they block,
+  and the note above about that *"keeping a floor and a roof walkable"* is true
+  only in the sense of **un-blocked**, which is not the same as standable. The
+  ground floor works because the map's own ground is under it. An upper storey
+  has no surface, and neither end of the wire disagrees — the client cannot
+  stand on one either.
+  `CoverKind::Stands` is already the right type for the repair: a house floor is
+  the general case of what `aboard` does for one ship. Found while writing
+  [`docs/map/navigation_spans.md`](map/navigation_spans.md), which names it
+  because a span grid baked from client files will contain no player house
+  either, and the gap would otherwise read as a pathfinding regression the day
+  that lands. **Wants an in-game confirmation before the repair is scoped** —
+  walk a character upstairs in a placed villa and see.
 - **The five multis that draw nothing** (`findings.md`) are treasure-site markers,
   and placement must refuse an id with no drawn components rather than spawn an
   invisible house.

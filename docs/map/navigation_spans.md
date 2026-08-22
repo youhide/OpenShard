@@ -154,15 +154,69 @@ and it is the right split for the same reason it always was: the overlay is the
 part that changes between ticks and therefore cannot be baked. What changes is
 what the static half *is*.
 
-**E lands first.** Three reasons, and the third is the one that decides it:
+**E has landed**, so N3 is unblocked from the day N2 closes.
+[`Overlay`](../../crates/common/movement/src/overlay.rs) exists, both ends
+project into one, and `Doors` is the enum at both. What this plan substitutes is
+the *other* argument, and it substitutes it into a signature that already has one
+shape.
 
-1. E is one node from done and its `Overlay` is precisely the half this plan
-   does not touch.
-2. N3 then substitutes one type in a signature that already exists in one shape,
-   instead of writing a span search against a trait that E is deleting.
-3. N0–N2 have **no dependency on E at all** — they are a new structure and its
-   oracle. Only N3 waits. So the two run alongside each other rather than in
-   series.
+## The live half, and what it does not carry
+
+The overlay is the half a bake can never hold, so what it holds decides what the
+bake is *allowed* to assume. Read off the workspace, not off the design:
+
+| | where it lives | |
+|---|---|---|
+| **a door** | an entity, `Blocks { door: true }` | ✅ **already right** |
+| **a placed crate, a house wall** | an entity, `Blocks` | ✅ already right |
+| **a hull** | a plank, `Blocks` | ✅ already right |
+| **a moored deck** | a plank, `Stands` | ✅ already right |
+| **another mobile** | the client's index only | ⚠️ **the two ends disagree** |
+| **a house floor or stair** | **nowhere** | 🚩 **nothing can stand on it** |
+
+**Doors are the case that needs nothing.** A door is an entity and the doorway it
+hangs in is *an open gap in the statics by construction* —
+[`overlay.rs`](../../crates/common/movement/src/overlay.rs)'s header says so and
+it is why this works. A door therefore never reaches the bake, cannot be baked
+shut, and its two readings stay the `Doors` enum. The span grid is simply blind
+to doors, which is the correct relationship.
+
+**Mobiles are an open decision and this plan does not take it.** The server does
+not index them at all — two mobiles may stand on one tile — while the client's
+`Clutter` inserts every mobile at `PLAYER_HEIGHT` so that a *drawn* route does
+not pass through an NPC, and says so in its own comment. E left them out of
+`Overlay` deliberately (identity is the server's and the client has none to
+offer), so "a body in the way" is currently a client-side courtesy rather than a
+rule. Nothing here changes that, and nothing here should: it is a gameplay
+decision about whether bodies block, and it belongs wherever that is taken.
+
+### 🚩 Nothing but a ship can be stood upon
+
+`grep -rn "CoverKind::Stands" crates` has **one** producer in the whole
+workspace: [`Plank::cover`](../../crates/server/state/src/boat.rs). Every other
+live thing — a crate, a house wall, a house *floor* — is either `Blocks` or
+absent.
+
+So a placed multi contributes walls and nothing else. Its ground floor is
+walkable because the map's own ground is underneath it; **its upper storey has
+no surface at all**, because a floor ten units up is neither in the client's
+statics (a player house is a runtime entity) nor in the overlay (nothing emits a
+standable cover for it).
+
+[`housing.md`](../housing.md) has the question in its backlog and frames it one
+step short: *"a two-storey house has two floors over one tile and the step check
+has to pick the one the walker is on"*. The step check has nothing to pick
+between — and the same document's D-notes state the assumption this contradicts,
+that folding only blocking components into the footprint *"keeps a floor and a
+roof walkable"*. It keeps them **un-blocked**, which is not the same as
+standable, and the difference is invisible at ground level and total above it.
+
+**This is housing's defect, not this plan's** — it is true today, with no spans
+anywhere near it. It is named here because a span grid baked from client files
+will contain no player house either, so once N3 lands it will *look* like a
+pathfinding regression, and because it fixes the shape of what the overlay owes:
+a house floor is the general case of what `aboard` does for one ship, and
+`CoverKind::Stands` is already the right type for it.
 
 ## The nodes
 
@@ -251,6 +305,13 @@ node-expansion cost is in this document beside 1,462 ns. Arrivals and node
 counts must be **bit-identical** to the run recorded in
 [`terrain_seam.md`](terrain_seam.md#what-one-search-costs) — a faster search
 that finds different routes is a different search.
+
+**And the composition is asserted, not assumed.** A test that puts a `Stands`
+cover over bare ground and walks onto it, a `Blocks` cover in a body's span and
+is refused, and a shut door that both refuses under `Doors::AsTheyStand` and
+admits under `AllOpen` — over baked spans rather than over a scene built for the
+occasion. The overlay is consulted *after* the static answer and can overrule it
+in one direction only, which is the property this pins.
 
 ### N4 — regions over spans
 
