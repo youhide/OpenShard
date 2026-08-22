@@ -451,6 +451,10 @@ impl RadarView {
 }
 
 /// Per-window radar LOD hysteresis.
+///
+/// One selector per *window*, deliberately — two windows showing the same
+/// facet at two zooms are two answers, and a shared selector would be one of
+/// them dragging the other across its own dead band.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct RadarLodSelector {
     selected: Option<RadarLod>,
@@ -461,10 +465,16 @@ impl RadarLodSelector {
     pub fn update(&mut self, view: RadarView) -> RadarLod {
         let ideal = view.lod();
         let max = max_lod(view.facet_extent).value();
-        let Some(mut selected) = self.selected else {
+        let Some(selected) = self.selected else {
             self.selected = Some(ideal);
             return ideal;
         };
+        // Clamped on entry, because the remembered level was chosen for
+        // whichever facet the window showed last. The upward loop only runs
+        // while `selected < max` and the downward one stops at zero, so a
+        // level carried in from a larger facet would be returned untouched —
+        // naming a grid the smaller facet's ladder does not have.
+        let mut selected = RadarLod::new(selected.value().min(max));
         while selected.value() < max {
             let boundary = 2_f32.powi(i32::from(selected.value() + 1));
             if view.tiles_per_pixel < boundary * 1.1 {
@@ -1044,6 +1054,15 @@ impl RadarCache {
     /// Bound the demand-driven tail while retaining the coarse fallback floor
     /// and every key an open view is about to draw.
     pub fn evict_to_budget(&mut self, protected: impl IntoIterator<Item = RadarChunkKey>) -> usize {
+        // Nothing pinned can lower the ceiling: `max_bytes` is the tail budget
+        // *plus* whatever the pinned set turns out to weigh. So a cache inside
+        // the tail budget cannot evict, and the walk below — every ready key,
+        // every frame, to rebuild a set that is about to change nothing — is
+        // skipped without asking what is in it. This is the ordinary frame:
+        // the swept floor is 599 chunks against a budget of four thousand.
+        if self.budget.retained_bytes() <= self.tail_budget {
+            return 0;
+        }
         let mut pinned: BTreeSet<_> = self
             .ready
             .keys()
@@ -1221,8 +1240,14 @@ impl RadarWorkQueue {
     #[must_use]
     pub fn take_for_producer(&mut self) -> Vec<RadarChunkKey> {
         let priorities = &self.priorities;
+        // Read with a default rather than indexed. Every path that makes a key
+        // pending inserts its priority too, so a missing one is an invariant
+        // violation — but a panic sited inside an `Ord` comparator, in a
+        // frame, is a bad place to spend one, and `View` is the answer the
+        // invariant says it would have found.
+        let priority = |key: &RadarChunkKey| priorities.get(key).copied().unwrap_or(RadarWorkPriority::View);
         let keys = self.queue.take_for_producer_by_cost(
-            |left, right| (priorities[left], *left).cmp(&(priorities[right], *right)),
+            |left, right| (priority(left), *left).cmp(&(priority(right), *right)),
             |key| lod_cost(key.lod()),
         );
         for key in &keys {
@@ -1238,12 +1263,14 @@ impl RadarWorkQueue {
     #[must_use]
     pub fn take_for_producer_near(&mut self, centre: RadarChunkCoord) -> Vec<RadarChunkKey> {
         let priorities = &self.priorities;
+        // Defaulted for [`Self::take_for_producer`]'s reason.
+        let priority = |key: &RadarChunkKey| priorities.get(key).copied().unwrap_or(RadarWorkPriority::View);
         let keys = self.queue.take_for_producer_by_cost(
             |left, right| {
                 let distance_key = |key: &RadarChunkKey| {
                     let chunk = key.chunk();
                     (
-                        priorities[key],
+                        priority(key),
                         std::cmp::Reverse(key.lod().value()),
                         chunk
                             .x()
@@ -2054,6 +2081,41 @@ mod tests {
         assert_eq!(selector.update(test_view(2.21)), RadarLod::new(1));
         assert_eq!(selector.update(test_view(1.85)), RadarLod::new(1));
         assert_eq!(selector.update(test_view(1.79)), RadarLod::BASE);
+    }
+
+    /// A selector is per window and follows that window across facets. The
+    /// level it remembers was chosen against the ladder of the facet it was
+    /// looking at, and a smaller facet has a shorter one — a remembered level
+    /// above it names a grid that does not exist.
+    #[test]
+    fn a_remembered_level_is_clamped_to_the_facet_the_window_moved_to() {
+        let facet_view = |extent: RadarExtent, tiles_per_pixel: f32| {
+            RadarView::new(
+                Facet(0),
+                RadarTile::new(0, 0),
+                extent,
+                tiles_per_pixel,
+                Placement {
+                    origin: (0.0, 0.0),
+                    extent: (640.0, 480.0),
+                    circle: false,
+                    rotation: 0.0,
+                },
+                1.0,
+            )
+        };
+        let britannia = RadarExtent::new(7168, 4096).expect("Britannia");
+        let small = RadarExtent::new(BASE_CHUNK_TILES * 2, BASE_CHUNK_TILES * 2).expect("a two-chunk facet");
+        assert_eq!(max_lod(britannia), RadarLod::new(7));
+        assert_eq!(max_lod(small), RadarLod::new(1));
+
+        let mut selector = RadarLodSelector::default();
+        assert_eq!(selector.update(facet_view(britannia, 32.0)), RadarLod::new(5));
+        // The same window, now looking at a facet whose ladder ends at one.
+        // Without the clamp the dead band's upward loop never runs (five is
+        // already above the maximum) and its downward loop stops where the
+        // zoom says, so level five would be returned for a two-chunk world.
+        assert_eq!(selector.update(facet_view(small, 32.0)), RadarLod::new(1));
     }
 
     #[test]

@@ -190,6 +190,13 @@ pub struct LruBudget<K: Copy + Ord> {
     clock: Cell<u64>,
     entries: RefCell<BTreeMap<K, BudgetEntry>>,
     protected: BTreeSet<K>,
+    /// The sum of every entry's bytes, carried rather than recomputed.
+    ///
+    /// A caller asks this question once per frame to decide whether it has
+    /// anything to do at all, and summing a map to answer "no" makes the
+    /// cheap answer cost the same as the expensive one. Maintained by every
+    /// path that changes `entries`, which is why they are the only four.
+    retained: u64,
 }
 
 impl<K: Copy + Ord> LruBudget<K> {
@@ -200,18 +207,25 @@ impl<K: Copy + Ord> LruBudget<K> {
             clock: Cell::new(0),
             entries: RefCell::new(BTreeMap::new()),
             protected: BTreeSet::new(),
+            retained: 0,
         })
     }
 
     pub fn insert(&mut self, key: K, bytes: u64) {
         let stamp = self.next_stamp();
-        self.entries.borrow_mut().insert(
+        let replaced = self.entries.borrow_mut().insert(
             key,
             BudgetEntry {
                 bytes,
                 last_used: stamp,
             },
         );
+        // A re-insert replaces an entry rather than adding one, so its old
+        // weight comes off before the new one goes on.
+        self.retained = self
+            .retained
+            .saturating_sub(replaced.map_or(0, |entry| entry.bytes))
+            .saturating_add(bytes);
     }
 
     pub fn touch(&self, key: K) -> bool {
@@ -226,12 +240,17 @@ impl<K: Copy + Ord> LruBudget<K> {
 
     pub fn remove(&mut self, key: K) -> bool {
         self.protected.remove(&key);
-        self.entries.borrow_mut().remove(&key).is_some()
+        let removed = self.entries.borrow_mut().remove(&key);
+        self.retained = self
+            .retained
+            .saturating_sub(removed.map_or(0, |entry| entry.bytes));
+        removed.is_some()
     }
 
     pub fn clear(&mut self) {
         self.entries.get_mut().clear();
         self.protected.clear();
+        self.retained = 0;
     }
 
     pub fn set_protected(&mut self, keys: impl IntoIterator<Item = K>) {
@@ -243,9 +262,10 @@ impl<K: Copy + Ord> LruBudget<K> {
         self.max_bytes = max_bytes.max(1);
     }
 
+    /// What every entry weighs together. `O(1)`: see [`Self::retained`].
     #[must_use]
-    pub fn retained_bytes(&self) -> u64 {
-        self.entries.borrow().values().map(|entry| entry.bytes).sum()
+    pub const fn retained_bytes(&self) -> u64 {
+        self.retained
     }
 
     #[must_use]
@@ -280,6 +300,7 @@ impl<K: Copy + Ord> LruBudget<K> {
                 continue;
             };
             retained = retained.saturating_sub(entry.bytes);
+            self.retained = self.retained.saturating_sub(entry.bytes);
             report.keys.push(key);
             report.freed_bytes = report.freed_bytes.saturating_add(entry.bytes);
         }
@@ -323,5 +344,14 @@ mod tests {
         let report = budget.evict_to_budget();
         assert_eq!(report.keys, vec![3]);
         assert_eq!(report.retained_bytes, 20);
+        // The carried total follows eviction, replacement and removal — it is
+        // what a caller asks before deciding it has nothing to do.
+        assert_eq!(budget.retained_bytes(), 20);
+        budget.insert(1, 4);
+        assert_eq!(budget.retained_bytes(), 14, "a re-insert replaces its own weight");
+        assert!(budget.remove(2));
+        assert_eq!(budget.retained_bytes(), 4);
+        budget.clear();
+        assert_eq!(budget.retained_bytes(), 0);
     }
 }
