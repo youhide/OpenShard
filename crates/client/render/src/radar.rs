@@ -450,6 +450,46 @@ impl RadarLodSelector {
     }
 }
 
+/// Ask for everything the open views need, and answer with the keys this frame
+/// must not evict.
+///
+/// The whole of the per-frame requester, and a function of its three arguments
+/// alone. `App::draw_from` owns a device, a shell and a window; none of the
+/// three is part of *which chunks a view needs*, and while this loop lived
+/// inside that frame the rule could only be read, never asserted. Every view
+/// asks for its own region at its own level and for nothing else — which is
+/// what makes an open facet map unable to take a chunk away from the minimap,
+/// the defect one region standing for both windows used to be
+/// (`docs/map/radar.md`, defect 3.3).
+///
+/// A key the cache already holds is not requested and is still protected: a
+/// ready chunk about to be drawn is precisely the one eviction must not take.
+/// Order is nearest each view's own centre first, because
+/// [`RadarWorkQueue::request`] refuses once its bound is reached, and raster
+/// order would then decide whose far rows are never offered a slot at all —
+/// see [`region_chunks_near`].
+#[must_use]
+pub fn request_views(
+    views: impl IntoIterator<Item = (RadarView, RadarLod)>,
+    cache: &RadarCache,
+    queue: &mut RadarWorkQueue,
+) -> Vec<RadarChunkKey> {
+    let mut protected = Vec::new();
+    for (view, lod) in views {
+        let region = view.region();
+        let (base_centre, _) = world_tile_to_base_chunk(view.centre);
+        let centre = base_centre.ancestor_at(lod.value());
+        for coord in region_chunks_near(region, lod, centre) {
+            let key = cache.key(region.facet(), lod, coord);
+            protected.push(key);
+            if cache.get(key).is_none() {
+                queue.request(key);
+            }
+        }
+    }
+    protected
+}
+
 /// Convert a world tile to the level-zero chunk and local tile that contain it.
 ///
 /// The conversion is floor division and remainder by [`BASE_CHUNK_TILES`]:
@@ -1684,6 +1724,7 @@ mod tests {
     use openshard_uofiles::grid::BlockExtent;
     use openshard_uofiles::map::{LandCell, LandTile, StaticItem};
     use openshard_uofiles::tiledata::LAND_TILE_COUNT;
+    use std::collections::BTreeSet;
 
     /// Land id 1 is green, land id 2 is blue; static 1 is red, static 2 is
     /// white, static 3 has no colour at all.
@@ -1900,6 +1941,74 @@ mod tests {
         assert_eq!(
             region_chunks(fine.region(), fine.lod()).count(),
             region_chunks(coarse.region(), coarse.lod()).count(),
+        );
+    }
+
+    /// R3's own acceptance test. Defect 3.3 was one region standing for both
+    /// windows: opening the facet map moved that single region to the whole
+    /// world, and the minimap — still drawing a circle around the player —
+    /// was left asking for chunks nothing requested. Two views ask for two
+    /// regions at two levels, and neither can spend the other's slots.
+    #[test]
+    fn an_open_facet_map_adds_its_own_demand_and_takes_none_of_the_minimaps() {
+        let extent = RadarExtent::new(7168, 4096).expect("Britannia");
+        let placement = |width: f32, height: f32, circle: bool| Placement {
+            origin: (0.0, 0.0),
+            extent: (width, height),
+            circle,
+            rotation: 0.0,
+        };
+        // The minimap, drawn small and unzoomed around a player in Britain.
+        let minimap = RadarView::new(
+            Facet(0),
+            RadarTile::new(1400, 1600),
+            extent,
+            1.0,
+            placement(256.0, 256.0, true),
+            1.0,
+        );
+        // The facet map, drawn wide and fully zoomed out around the middle of
+        // the world — sixteen tiles to a pixel, so level four.
+        let facet_map = RadarView::new(
+            Facet(0),
+            RadarTile::new(3584, 2048),
+            extent,
+            16.0,
+            placement(592.0, 418.0, false),
+            1.0,
+        );
+        assert_eq!(minimap.lod(), RadarLod::BASE);
+        assert_eq!(facet_map.lod(), RadarLod::new(4));
+
+        let cache = RadarCache::default();
+        let mut alone = RadarWorkQueue::default();
+        let by_itself = request_views([(minimap, minimap.lod())], &cache, &mut alone);
+
+        let mut together = RadarWorkQueue::default();
+        // The facet map first, which is the order that starves the minimap if
+        // anything at all is shared between the two.
+        let both = request_views(
+            [(facet_map, facet_map.lod()), (minimap, minimap.lod())],
+            &cache,
+            &mut together,
+        );
+
+        assert!(!by_itself.is_empty());
+        for key in &by_itself {
+            assert!(
+                both.contains(key),
+                "the minimap keeps {key:?} with the facet map open"
+            );
+        }
+        assert!(
+            both.len() > by_itself.len(),
+            "the facet map adds a demand of its own"
+        );
+        let distinct: BTreeSet<_> = both.iter().collect();
+        assert_eq!(
+            together.pending_len(),
+            distinct.len(),
+            "every key either window named reached the queue",
         );
     }
 

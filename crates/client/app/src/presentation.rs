@@ -1982,14 +1982,39 @@ impl App {
                 u32::from(view.player.position.y),
             )
         });
-        let mut radar_views = Vec::new();
+        // Where every open radar window draws, and the **one** place a
+        // `RadarView` is built. What the requester below asks for and what
+        // `draw_gump_windows` draws are the same value handed across rather
+        // than two constructions that agree by arithmetic coincidence — the
+        // requested region *is* the drawn region, which is the property
+        // `docs/parity.md` exists to protect and the one this whole file used
+        // to leave to luck.
+        //
+        // A frame behind, like every other reader of `drawn_windows` — see its
+        // own doc for why that list is the previous frame's layout, and why
+        // this client already picks with it. The window's *position* is not:
+        // `own_windows` holds the live one, the same one the art pass places
+        // the frame with a moment later, so a window being dragged keeps its
+        // terrain under its own rim.
+        let mut radar_views: Vec<(crate::windows::WindowSubject, radar::RadarView, radar::RadarLod)> =
+            Vec::new();
         if let Some(player_tile) = player_tile {
             for (subject, drawn) in &self.windows.drawn_windows {
+                let at = self
+                    .windows
+                    .own_windows
+                    .iter()
+                    .find(|open| open.subject == *subject)
+                    .map(|open| open.at)
+                    .unwrap_or_default();
                 let view = match drawn {
                     crate::windows::Drawn::Minimap(bounds) => {
                         let (content_at, content_extent) = bounds.content();
                         let placement = Placement {
-                            origin: (content_at.x as f32, content_at.y as f32),
+                            origin: (
+                                at.x as f32 + content_at.x as f32 * window_scale.factor(),
+                                at.y as f32 + content_at.y as f32 * window_scale.factor(),
+                            ),
                             extent: (
                                 content_extent.0 as f32 * window_scale.factor(),
                                 content_extent.1 as f32 * window_scale.factor(),
@@ -2019,7 +2044,10 @@ impl App {
                             radar_facet_extent,
                             bounds.tiles_per_pixel / (window_scale.factor() * gump_scale),
                             Placement {
-                                origin: (content_at.x as f32, content_at.y as f32),
+                                origin: (
+                                    at.x as f32 + content_at.x as f32 * window_scale.factor(),
+                                    at.y as f32 + content_at.y as f32 * window_scale.factor(),
+                                ),
                                 extent: (
                                     content_extent.0 as f32 * window_scale.factor(),
                                     content_extent.1 as f32 * window_scale.factor(),
@@ -2113,19 +2141,11 @@ impl App {
         // step, and `Screen::radar_chunks` uploads a product only when a
         // content pass first draws it.
         if let Some(colors) = self.resources.radar_colors.as_ref() {
-            let mut protected = Vec::new();
-            for (_, view, lod) in &radar_views {
-                let region = view.region();
-                let (base_centre, _) = radar::world_tile_to_base_chunk(view.centre);
-                let centre = base_centre.ancestor_at(lod.value());
-                for coord in radar::region_chunks_near(region, *lod, centre) {
-                    let key = self.radar_cache.key(region.facet(), *lod, coord);
-                    protected.push(key);
-                    if self.radar_cache.get(key).is_none() {
-                        self.radar_queue.request(key);
-                    }
-                }
-            }
+            let mut protected = radar::request_views(
+                radar_views.iter().map(|(_, view, lod)| (*view, *lod)),
+                &self.radar_cache,
+                &mut self.radar_queue,
+            );
             let facet = openshard_protocol::world::Facet(crate::FACET);
             let world_map_open = radar_views
                 .iter()
@@ -2563,10 +2583,7 @@ impl App {
             &self.world,
             &mut self.windows,
             &self.radar_cache,
-            &radar_views
-                .iter()
-                .map(|(subject, _, lod)| (*subject, *lod))
-                .collect::<Vec<_>>(),
+            &radar_views,
             self.input.pointer_gump,
             &hover,
             window_scale,
