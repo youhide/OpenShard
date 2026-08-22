@@ -27,7 +27,21 @@ cargo run --release -p openshard-movement --bin openshard-navigation-bake -- \
 Measured on the shipped Felucca: the two patches are **115 bytes** of log
 between them, the whole world — 102.6 MiB of base set plus its log — resolves to
 revision 3 in **0.14 s**, and `show` reads the history back as two records with
-the ops that made them.
+the ops that made them. `base_set_world` then boots the shard on it: the
+navigation artifact is stamped against the base set, the log and `tiledata.mul`
+at revision 3, and it validates.
+
+Two things that run confirmed rather than merely compiled:
+
+- **The graph over the patched world is a different graph.** 8,527,823 bytes
+  against 8,527,780 for the same facet at revision 1. One raised tile and one
+  added static, and the routing changed — which is what makes the stamp's
+  refusal worth having rather than pedantic.
+- **The stamp refused the stale one, by name.** A graph built over the base set
+  alone reported `built from map revision 1, expected 3` and printed the command
+  that rebuilds it. That happened by accident here — an offline bake run with a
+  binary from before this session — which is exactly the accident the check
+  exists for.
 
 `cargo check --workspace --all-targets`, `cargo test --workspace`,
 `cargo clippy --workspace --all-targets` and `cargo fmt --all` are silent.
