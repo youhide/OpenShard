@@ -157,13 +157,19 @@ impl World {
         // obstacle right after. It blocks only its own z-span — its base z and
         // tiledata height — so an upper-floor wall does not seal the ground floor
         // beneath it (the Britain-library bug).
-        let height = Some(self.state.tiles.static_tile(graphic.0))
-            .filter(|tile| tile.flags.is_blocking())
-            .map(|tile| tile.height);
-        if let Some(height) = height {
-            self.state
-                .facet_state_mut(facet)
-                .block(position.x, position.y, entity, false, position.z, height);
+        // `Cover::of_static` and not this end's own reading of the flags: the
+        // client lays the same cover from the same table through the same
+        // function, which is what "agree by construction" has to mean to be
+        // worth saying. See `openshard_movement::overlay`.
+        if let Some(cover) = openshard_movement::Cover::of_static(self.state.tiles.static_tile(graphic.0)) {
+            self.state.facet_state_mut(facet).block(
+                position.x,
+                position.y,
+                entity,
+                false,
+                position.z,
+                cover.height,
+            );
         }
         self.state.facet_state_mut(facet).sectors.insert(entity, position);
         self.state.reveal(entity);

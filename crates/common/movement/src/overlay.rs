@@ -36,6 +36,8 @@
 
 use rustc_hash::FxHashMap;
 
+use openshard_uofiles::tiledata::StaticTile;
+
 use crate::terrain::PLAYER_HEIGHT;
 use crate::walk::Tile;
 
@@ -148,6 +150,43 @@ impl Cover {
             height,
             kind: CoverKind::Stands,
         }
+    }
+
+    /// The cover a placed item lays over its own tile, from the client-file
+    /// entry that says what its art is — or `None` where it lays none.
+    ///
+    /// **The one rule both ends of the wire call**, and the reason the two
+    /// agree by construction rather than by resemblance. It used to be written
+    /// twice: `world::tick::decor::place_decoration` filtered on
+    /// `flags.is_blocking()` and took `tile.height`, and `client/app`'s
+    /// `clutter::of` did the same three lines a crate away. Same predicate,
+    /// same span, two places to change one of them.
+    ///
+    /// **Not a door**, whichever way round that is. Which leaves are doors is
+    /// not a property of the tiledata — the shard knows because it made the
+    /// entity, and the client knows from `client/render`'s ported door table —
+    /// so the caller refines this with [`Cover::door`] where it knows better.
+    #[must_use]
+    pub fn of_static(tile: &StaticTile) -> Option<Self> {
+        tile.flags.is_blocking().then(|| Self::blocking_at(tile.height))
+    }
+
+    /// A blocker `height` tall whose base is the caller's to fill in.
+    const fn blocking_at(height: u8) -> Self {
+        Self {
+            z: 0,
+            height,
+            kind: CoverKind::Blocks { door: false },
+        }
+    }
+
+    /// The same cover, based at `z`.
+    ///
+    /// [`of_static`](Self::of_static) reads a table, which knows a height and
+    /// not a position; this is where the placement supplies the other half.
+    #[must_use]
+    pub const fn based_at(self, z: i8) -> Self {
+        Self { z, ..self }
     }
 
     /// Whether this is a door somebody could open.
@@ -317,6 +356,7 @@ impl Cover {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openshard_uofiles::tiledata::TileFlags;
 
     const HERE: Tile = Tile::new(100, 100);
 
@@ -425,6 +465,49 @@ mod tests {
         assert!(!overlay.is_empty());
         overlay.set(HERE, Vec::new());
         assert!(overlay.is_empty(), "an emptied tile is still hashed");
+    }
+
+    /// The rule both ends of the wire lay a placed item's cover with.
+    ///
+    /// This is the whole of the agreement `clutter.rs`'s header claims and that
+    /// nothing checked before node E: the shard's `place_decoration` and the
+    /// client's `clutter::of` both call [`Cover::of_static`], so a step refused
+    /// at one end is refused at the other for the same reason rather than for a
+    /// similar one. What is asserted here is the contract they share.
+    #[test]
+    fn a_placed_item_covers_its_tile_exactly_when_its_art_blocks() {
+        let barrel = StaticTile {
+            flags: TileFlags::new(TileFlags::BLOCK),
+            height: 12,
+            ..StaticTile::default()
+        };
+        assert_eq!(
+            Cover::of_static(&barrel).map(|cover| cover.based_at(-3)),
+            Some(Cover::blocking(-3, 12)),
+            "the span is the art's own height, based where the item was placed"
+        );
+
+        let rug = StaticTile {
+            flags: TileFlags::new(0),
+            height: 0,
+            ..StaticTile::default()
+        };
+        assert_eq!(
+            Cover::of_static(&rug),
+            None,
+            "art that does not block covers nothing"
+        );
+
+        // Impassable art with a tiledata height of zero is common, and it still
+        // occupies its tile — see `Cover::height`.
+        let flat = StaticTile {
+            flags: TileFlags::new(TileFlags::BLOCK),
+            height: 0,
+            ..StaticTile::default()
+        };
+        let flat = Cover::of_static(&flat).expect("it blocks").based_at(0);
+        assert!(flat.meets(0));
+        assert!(!flat.meets(1));
     }
 
     /// Sight and door-detection ask about the tile and not about a height.
