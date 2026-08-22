@@ -3919,6 +3919,17 @@ work had to touch anyway:
   fraction of the way along the line it was measuring — at the default scale of
   two, halfway back through what had been typed.
 
+### Found while closing the radar plan's section 9
+
+- **`cargo clippy --workspace --all-targets` is not silent**, though this
+  repo's own `CLAUDE.md` says all three commands are. Ten sites, none of them
+  radar's: `interiors.rs` (a redundant guard, two `if .. else` chains, a loop
+  variable used to index), `items.rs` and `statics.rs` (two functions past the
+  argument limit), `world.rs`, `presentation.rs`'s composite-LOD arm and
+  `examples/interior_census.rs` (a useless `i32` conversion). They are warnings
+  rather than denials, so CI is green and the claim is stale — either the
+  warnings go or the claim does.
+
 ## Later
 
 LLM NPCs, quest generation, GM assistant, Discord integration. All optional, all
