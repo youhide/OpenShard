@@ -123,6 +123,67 @@ impl CellIndex {
     }
 }
 
+/// One facet's land cells, in the order the file has them.
+///
+/// A `Vec<LandCell>` behind a door that opens only for a [`CellIndex`] or a
+/// [`BlockIndex`]. [`LandGrid`] was already the only thing that *derives* those,
+/// so what this adds is the other half: the conversion to `usize` happens here
+/// and nowhere else, and the array cannot be reached by a loop counter, walked
+/// in a caller's own order, or sliced by arithmetic written somewhere new.
+///
+/// It also gives the **length invariant** a home. [`Cells::of`] is the only way
+/// to make one and it takes the block count it is claiming to hold, so
+/// "a whole number of blocks' worth" is checked once at construction rather than
+/// assumed by every reader — which is what makes [`Cells::block`]'s slice total
+/// rather than hopeful.
+///
+/// Private to this module on purpose: no signature outside it names a cell
+/// array, so a public wrapper would be a type nobody could obtain and nobody
+/// needs.
+struct Cells(Vec<LandCell>);
+
+impl Cells {
+    /// The one door in. `blocks` is what the caller says it is handing over.
+    ///
+    /// # Panics
+    ///
+    /// If the vector is not exactly `blocks` blocks' worth. Both callers build
+    /// the array from the same block count they pass here, so a failure is this
+    /// module disagreeing with itself rather than a bad file.
+    fn of(cells: Vec<LandCell>, blocks: u32) -> Self {
+        let want = blocks as usize * CELLS_PER_BLOCK;
+        assert_eq!(cells.len(), want, "{blocks} blocks hold {want} cells");
+        Self(cells)
+    }
+
+    /// How many cells, for a diagnostic. Not a position anyone can index with.
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// The cell at a linear position.
+    ///
+    /// # Panics
+    ///
+    /// If `at` came from a different, larger grid — see [`LandGrid::cell`],
+    /// which is where that argument is made.
+    fn read(&self, at: CellIndex) -> LandCell {
+        self.0[at.0 as usize]
+    }
+
+    /// Put a cell at a linear position, with the same precondition.
+    fn write(&mut self, at: CellIndex, cell: LandCell) {
+        self.0[at.0 as usize] = cell;
+    }
+
+    /// One block's sixty-four cells, contiguous because [`Cells::of`] checked
+    /// that every block's worth is there.
+    fn block(&self, block: BlockIndex) -> &[LandCell] {
+        let from = block.0 as usize * CELLS_PER_BLOCK;
+        &self.0[from..from + CELLS_PER_BLOCK]
+    }
+}
+
 /// The land of one facet, in the block order the files are in.
 ///
 /// Every conversion between a tile, a block and a linear position is a method
@@ -132,7 +193,7 @@ pub struct LandGrid {
     height: u32,
     /// Blocks column-major, cells row-major within a block. See the module
     /// header — this is the only field in the workspace laid out that way.
-    cells: Vec<LandCell>,
+    cells: Cells,
 }
 
 impl fmt::Debug for LandGrid {
@@ -185,7 +246,11 @@ impl LandGrid {
             }
         }
 
-        Self { width, height, cells }
+        Self {
+            width,
+            height,
+            cells: Cells::of(cells, blocks_wide * blocks_down),
+        }
     }
 
     /// Take cells that are already in the file's order, straight down the file.
@@ -206,11 +271,14 @@ impl LandGrid {
             width.is_multiple_of(BLOCK_SIZE) && height.is_multiple_of(BLOCK_SIZE),
             "a {width}x{height} facet is not a whole number of {BLOCK_SIZE}-tile blocks",
         );
-        let cells: Vec<LandCell> = cells.collect();
-        let want = ((width / BLOCK_SIZE) * (height / BLOCK_SIZE)) as usize * CELLS_PER_BLOCK;
-        assert_eq!(cells.len(), want, "a {width}x{height} facet holds {want} cells",);
-
-        Self { width, height, cells }
+        let blocks = (width / BLOCK_SIZE) * (height / BLOCK_SIZE);
+        Self {
+            width,
+            height,
+            // The length check is `Cells::of`'s, and is the reason the loader
+            // hands over a count rather than a bare vector.
+            cells: Cells::of(cells.collect(), blocks),
+        }
     }
 
     /// The facet's width in tiles.
@@ -330,13 +398,15 @@ impl LandGrid {
 
     /// The ground at a point, or `None` off the facet.
     pub fn get(&self, x: u16, y: u16) -> Option<LandCell> {
-        self.cells.get(self.cell_index(x, y)?.0 as usize).copied()
+        // No second bounds check: `cell_index` already answered `None` off the
+        // facet, and `Cells` holds every block's worth of what is on it.
+        Some(self.cells.read(self.cell_index(x, y)?))
     }
 
     /// Change the ground at one tile. Off the facet it does nothing.
     pub fn set(&mut self, x: u16, y: u16, cell: LandCell) {
         if let Some(at) = self.cell_index(x, y) {
-            self.cells[at.0 as usize] = cell;
+            self.cells.write(at, cell);
         }
     }
 
@@ -352,8 +422,7 @@ impl LandGrid {
     /// ever made by [`Self::index_of`], so that is a caller mixing up two
     /// facets rather than a value it could have got wrong.
     pub fn block(&self, block: BlockIndex) -> &[LandCell] {
-        let from = block.0 as usize * CELLS_PER_BLOCK;
-        &self.cells[from..from + CELLS_PER_BLOCK]
+        self.cells.block(block)
     }
 
     /// The cell at a linear index.
@@ -368,7 +437,7 @@ impl LandGrid {
     /// as [`Self::block`]: a [`CellIndex`] is only ever made here, so that is a
     /// caller mixing up two facets rather than a value it could have got wrong.
     pub fn cell(&self, at: CellIndex) -> LandCell {
-        self.cells[at.0 as usize]
+        self.cells.read(at)
     }
 
     /// The cell one tile east, or `None` at the facet's eastern edge.
@@ -468,6 +537,15 @@ mod tests {
         // a cell: it is `index_of` that everything else is built on.
         let index = |x, y| grid.index_of(BlockCoord { x, y }).unwrap().get();
         assert_eq!((index(0, 0), index(0, 1), index(1, 0), index(1, 1)), (0, 1, 2, 3));
+    }
+
+    /// The length invariant has one home. A loader handing over the wrong number
+    /// of cells is refused at the door rather than found later as a block whose
+    /// slice ran off the end.
+    #[test]
+    #[should_panic(expected = "4 blocks hold 256 cells")]
+    fn a_short_facet_is_refused_where_the_cells_are_taken() {
+        LandGrid::from_file_order(16, 16, std::iter::empty());
     }
 
     #[test]

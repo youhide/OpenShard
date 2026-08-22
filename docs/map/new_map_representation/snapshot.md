@@ -107,6 +107,16 @@ is exactly the confusion [`pixels.md`](../../pixels.md) exists to prevent.
 hand is the precise bug the type is there to prevent, where a `LandTile` is
 read straight off the wire or the file and has to be constructible.
 
+**The cell array is a type too, and a private one.** `LandGrid.cells` is a
+`Cells(Vec<LandCell>)` whose only keys are `CellIndex` and `BlockIndex`, so the
+conversion to `usize` happens in one place rather than at four reads — and, the
+part worth more than the wrapper, the **length invariant has a home**:
+`Cells::of` takes the block count it is claiming to hold and checks it, which is
+what makes `block()`'s sixty-four-cell slice total rather than hopeful. It was
+checked in `from_file_order` only, and `from_blocks` was trusted. Private to
+`grid.rs`: no signature outside it names a cell array, so a public wrapper would
+be a type nobody could obtain.
+
 **Statics do not move in this phase.** `Map::statics` stays
 `Vec<Vec<StaticItem>>`; changing it is
 [direction B](plan.md#what-felucca-measures-before-the-layout-is-chosen). What
