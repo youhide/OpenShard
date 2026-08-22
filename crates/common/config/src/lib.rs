@@ -31,12 +31,13 @@
 //! assert_eq!(config.server.name, "OpenShard");
 //! ```
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::net::{IpAddr, SocketAddr, SocketAddrV4};
 use std::path::{Path, PathBuf};
 
 use openshard_protocol::identity::{AccountName, CharacterName, PlaintextPassword};
-use openshard_protocol::world::Season;
+use openshard_protocol::world::{Facet, Season};
 use serde::{Deserialize, Serialize};
 
 /// A whole shard configuration.
@@ -504,11 +505,33 @@ pub struct WorldConfig {
     #[serde(default)]
     pub start: StartConfig,
 
-    /// Which facets to load from `client_files`: 0 is Felucca, then Trammel,
-    /// Ilshenar, Malas, Tokuno, Ter Mur. Defaults to just the first. A character
-    /// stays on the facet it is on — there is no travel between them yet.
+    /// Which facets to load: 0 is Felucca, then Trammel, Ilshenar, Malas,
+    /// Tokuno, Ter Mur. Defaults to just the first. A character stays on the
+    /// facet it is on — there is no travel between them yet.
     #[serde(default = "default_facets")]
     pub facets: Vec<u8>,
+
+    /// Where a facet's world comes from, when it does not come from
+    /// `client_files`.
+    ///
+    /// One entry per facet, keyed by the same number [`WorldConfig::facets`]
+    /// lists: `0 = "felucca.osbase"`. A facet named here is read from that base
+    /// set — our own format, written by `openshard-map-import` — and a facet
+    /// not named here is read out of the install, exactly as before. Nothing is
+    /// derived from a file name and nothing is derived from `client_files`: a
+    /// path guessed from the other setting is a shard silently running the
+    /// wrong world.
+    ///
+    /// # It does not replace `client_files`
+    ///
+    /// A base set holds the **map** — the ground and the statics. It does not
+    /// hold `tiledata.mul`, which says what a tile *is*, or the multis, which
+    /// say what a house is; both are still read from the install. A config that
+    /// names a base set and leaves `client_files` empty is refused rather than
+    /// run, because a world whose tiles have no flags answers every movement
+    /// question wrongly and looks like a bug in the walk.
+    #[serde(default)]
+    pub base_sets: BTreeMap<FacetKey, PathBuf>,
 
     /// The seed the world's roll generator starts a *fresh* world from.
     ///
@@ -533,8 +556,57 @@ impl Default for WorldConfig {
             client_files: String::new(),
             start: StartConfig::default(),
             facets: default_facets(),
+            base_sets: BTreeMap::new(),
             seed: None,
         }
+    }
+}
+
+/// A facet number, as the key of a `world.base_sets` table.
+///
+/// TOML has no integer keys — a table's keys are strings, always — and serde
+/// will not turn `"0"` into a `u8` on the way past. The choice is between a map
+/// keyed by a `String` that every reader has to parse again (and that can hold
+/// `"felucca"` without anybody noticing until boot) and one conversion with a
+/// type around it. This is that type: it parses once, at the edge, and what
+/// comes out the other side is a facet number.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct FacetKey(pub Facet);
+
+impl Serialize for FacetKey {
+    /// Back out as the string it came in as, so a config round-trips.
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(&self.0.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for FacetKey {
+    /// A string, because that is what a TOML key is — and a plain integer too,
+    /// for a format that has them, so this type is not a TOML quirk leaking
+    /// into everything that ever reads a config.
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Visit;
+        impl serde::de::Visitor<'_> for Visit {
+            type Value = FacetKey;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a facet number: 0 is Felucca, then Trammel, Ilshenar, Malas, Tokuno, Ter Mur")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<FacetKey, E> {
+                value
+                    .parse()
+                    .map(|number| FacetKey(Facet(number)))
+                    .map_err(|_| E::invalid_value(serde::de::Unexpected::Str(value), &self))
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<FacetKey, E> {
+                u8::try_from(value)
+                    .map(|number| FacetKey(Facet(number)))
+                    .map_err(|_| E::invalid_value(serde::de::Unexpected::Unsigned(value), &self))
+            }
+        }
+        d.deserialize_any(Visit)
     }
 }
 
@@ -879,6 +951,34 @@ pub enum ConfigError {
         /// The cap given for one.
         individual: u16,
     },
+    /// `world.base_sets` names a facet, and `world.client_files` is empty.
+    ///
+    /// A base set holds the map and nothing else: `tiledata.mul` is what says a
+    /// tile is water, or a wall, or a stair, and without it every one of them is
+    /// an unremarkable nothing. The shard would run, and every question about
+    /// the ground would be answered wrongly — which reads as a broken walk
+    /// rather than as a missing setting.
+    BaseSetWithoutClientFiles {
+        /// The first facet named, in facet order.
+        facet: Facet,
+    },
+    /// `world.base_sets` names a facet `world.facets` does not load.
+    ///
+    /// A mistyped facet number would otherwise do nothing at all: the entry is
+    /// ignored, the facet it was meant for loads out of the install, and the
+    /// shard runs the world the operator was replacing.
+    BaseSetForUnloadedFacet {
+        /// The facet named.
+        facet: Facet,
+    },
+    /// A `world.base_sets` entry has an empty path.
+    ///
+    /// `client_files` reads empty as "no map at all"; a base set has no such
+    /// meaning, and an empty path here is a setting somebody started writing.
+    EmptyBaseSetPath {
+        /// The facet named.
+        facet: Facet,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -945,6 +1045,24 @@ impl fmt::Display for ConfigError {
                 f,
                 "gameplay.stat_cap_individual {individual} is above stat_cap {total}; one \
                  stat cannot be allowed more than all three together",
+            ),
+            Self::BaseSetWithoutClientFiles { facet } => write!(
+                f,
+                "world.base_sets names facet {}, but world.client_files is empty: a base set \
+                 holds the map, and tiledata.mul still holds what a tile is",
+                facet.0,
+            ),
+            Self::BaseSetForUnloadedFacet { facet } => write!(
+                f,
+                "world.base_sets names facet {}, which world.facets does not load; the entry \
+                 would do nothing and the facet it was meant for would come from the install",
+                facet.0,
+            ),
+            Self::EmptyBaseSetPath { facet } => write!(
+                f,
+                "world.base_sets has an empty path for facet {}; it must name the file \
+                 openshard-map-import wrote",
+                facet.0,
             ),
         }
     }
@@ -1076,6 +1194,22 @@ impl Config {
                 total: self.gameplay.stat_cap,
                 individual: self.gameplay.stat_cap_individual,
             });
+        }
+        // A base set replaces the *map* files and nothing else, and an entry
+        // that names a facet nobody loads is a typo that leaves the old world
+        // running. Both are checked here rather than at boot so that a config
+        // this wrong never reaches a running shard — see each variant for what
+        // it would otherwise look like.
+        for (&FacetKey(facet), path) in &self.world.base_sets {
+            if path.as_os_str().is_empty() {
+                return Err(ConfigError::EmptyBaseSetPath { facet });
+            }
+            if self.world.client_files.trim().is_empty() {
+                return Err(ConfigError::BaseSetWithoutClientFiles { facet });
+            }
+            if !self.world.facets.contains(&facet.0) {
+                return Err(ConfigError::BaseSetForUnloadedFacet { facet });
+            }
         }
         Ok(())
     }

@@ -534,3 +534,141 @@ fn a_zero_lod_idle_factor_is_refused_when_lod_is_on() {
     config.gameplay.lod_idle_factor = 0;
     assert!(matches!(config.validate(), Err(ConfigError::ZeroLodIdleFactor)));
 }
+
+#[test]
+fn a_facet_can_name_a_base_set_instead_of_the_install() {
+    // The keys of a TOML table are strings, and these are facet numbers: this
+    // test is as much about that conversion holding as about the field.
+    let config = config(
+        r#"
+            [server]
+            name = "OpenShard"
+            listen = "0.0.0.0:2593"
+            advertise = "127.0.0.1:2593"
+
+            [world]
+            client_files = "/uo"
+            facets = [0, 1]
+
+            [world.base_sets]
+            0 = "felucca.osbase"
+            "#,
+    );
+    assert_eq!(
+        config
+            .world
+            .base_sets
+            .get(&FacetKey(Facet(0)))
+            .map(PathBuf::as_path),
+        Some(Path::new("felucca.osbase"))
+    );
+    // Facet 1 is loaded, and says nothing about where from — so it comes from
+    // the install, which is what makes a shard convertible one facet at a time.
+    assert_eq!(config.world.base_sets.get(&FacetKey(Facet(1))), None);
+    config
+        .validate()
+        .expect("a base set beside an install is the whole point");
+}
+
+#[test]
+fn no_base_set_is_the_default_and_the_shipped_config_has_none() {
+    assert!(config(MINIMAL).world.base_sets.is_empty());
+    let default: Config = toml::from_str(DEFAULT_TOML).unwrap();
+    assert!(default.world.base_sets.is_empty());
+}
+
+#[test]
+fn a_base_set_without_client_files_is_refused() {
+    // The failure this prevents is silent: the map loads, every tile flag is
+    // whatever an empty tile table says, and the walk answers wrongly for ever.
+    let config = config(
+        r#"
+            [server]
+            name = "OpenShard"
+            listen = "0.0.0.0:2593"
+            advertise = "127.0.0.1:2593"
+
+            [world]
+            facets = [0]
+
+            [world.base_sets]
+            0 = "felucca.osbase"
+            "#,
+    );
+    let error = config
+        .validate()
+        .expect_err("tiledata has to come from somewhere");
+    assert!(matches!(
+        error,
+        ConfigError::BaseSetWithoutClientFiles { facet: Facet(0) }
+    ));
+    assert!(
+        error.to_string().contains("tiledata.mul"),
+        "the message has to name the file that is missing: {error}"
+    );
+}
+
+#[test]
+fn a_base_set_for_a_facet_nobody_loads_is_refused() {
+    // A mistyped facet number is the whole reason: `4` instead of `0` leaves
+    // Felucca coming out of the install, with the new world sitting unread.
+    let config = config(
+        r#"
+            [server]
+            name = "OpenShard"
+            listen = "0.0.0.0:2593"
+            advertise = "127.0.0.1:2593"
+
+            [world]
+            client_files = "/uo"
+            facets = [0]
+
+            [world.base_sets]
+            4 = "tokuno.osbase"
+            "#,
+    );
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::BaseSetForUnloadedFacet { facet: Facet(4) })
+    ));
+}
+
+#[test]
+fn an_empty_base_set_path_is_refused() {
+    // `client_files = ""` means "no map"; there is no such reading here, so an
+    // empty path is a half-written setting rather than a mode.
+    let config = config(
+        r#"
+            [server]
+            name = "OpenShard"
+            listen = "0.0.0.0:2593"
+            advertise = "127.0.0.1:2593"
+
+            [world]
+            client_files = "/uo"
+            facets = [0]
+
+            [world.base_sets]
+            0 = ""
+            "#,
+    );
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::EmptyBaseSetPath { facet: Facet(0) })
+    ));
+}
+
+#[test]
+fn a_base_set_table_survives_being_written_back_out() {
+    // The keys go out as strings because that is the only kind TOML has, and a
+    // config the shard rewrites has to be one it can read again.
+    let mut config = Config::default();
+    config.world.client_files = "/uo".into();
+    config
+        .world
+        .base_sets
+        .insert(FacetKey(Facet(0)), PathBuf::from("felucca.osbase"));
+    let text = toml::to_string(&config).expect("a config should serialise");
+    let back: Config = toml::from_str(&text).expect("and parse again");
+    assert_eq!(back.world.base_sets, config.world.base_sets);
+}

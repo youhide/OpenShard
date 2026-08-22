@@ -15,6 +15,10 @@ workspace = true
 clap.workspace = true
 openshard-protocol.workspace = true
 openshard-map.workspace = true
+# The base set, for the bake binary: a navigation graph can be built over a
+# facet that came out of our own format rather than out of an install, and the
+# stamp it records has to name what it was actually built from.
+openshard-basemap.workspace = true
 openshard-uofiles.workspace = true
 rustc-hash.workspace = true
 

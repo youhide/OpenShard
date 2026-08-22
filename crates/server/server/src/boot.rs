@@ -550,7 +550,107 @@ async fn restore_world(store: &dyn Store, world: World, pinned_seed: Option<u64>
     }
 }
 
-/// Load the client's map, if it is configured.
+/// Where one facet's world came from, and everything that follows from it.
+///
+/// The four fields travel together because they are one decision: a facet read
+/// from a base set is stamped against the base set, its navigation artifact
+/// lives beside the base set, and the command that rebuilds that artifact names
+/// the base set. Splitting them would let a shard stamp one world and look for
+/// the artifact of another — and both files exist, so it would not notice.
+struct FacetSource {
+    /// The facet, at the revision its source recorded.
+    map: openshard_map::snapshot::MapSnapshot,
+    /// What the navigation artifact must have been built from.
+    stamp: openshard_movement::bake::Stamp,
+    /// Where that artifact is.
+    navigation_path: std::path::PathBuf,
+    /// The command that makes it, for the error that says it is missing.
+    rebake: String,
+}
+
+/// The base set configured for `facet`, if the operator named one.
+///
+/// `world.base_sets` is a table keyed by facet, and a facet not in it comes out
+/// of the install exactly as before — so a shard converts one facet at a time.
+fn base_set_of(config: &Config, facet: Facet) -> Option<&Path> {
+    config
+        .world
+        .base_sets
+        .get(&openshard_config::FacetKey(facet))
+        .map(std::path::PathBuf::as_path)
+}
+
+/// Read one facet, from whichever source the config named for it.
+///
+/// The stamp is the half that matters. Before base sets there was one source,
+/// so stamping "the install's map files" was the same statement as "what this
+/// graph was built from". It is not any more: a facet read from a base set is
+/// derived from that file, and the install's `map0LegacyMUL.uop` still sits
+/// there with its old length and its old mtime — so a graph baked over the
+/// install would validate happily against a world it has never seen. That is
+/// `docs/map/new_map_representation/plan.md`'s direction D arriving one caller
+/// early, and it is the reason this function exists rather than an `if` at the
+/// call site.
+fn facet_source(
+    config: &Config,
+    dir: &Path,
+    facet: Facet,
+) -> Result<FacetSource, Box<dyn std::error::Error>> {
+    let bake = "cargo run --release -p openshard-movement --bin openshard-navigation-bake";
+    let Some(base_set) = base_set_of(config, facet) else {
+        let map = openshard_uofiles::map::load_facet(dir, facet)?;
+        let stamp = openshard_movement::bake::stamp_of(dir, facet, map.revision())?;
+        return Ok(FacetSource {
+            navigation_path: openshard_movement::bake::artifact_path(dir, facet),
+            stamp,
+            map,
+            rebake: format!("OPENSHARD_CLIENT={dir:?} {bake} -- --facet {facet}"),
+        });
+    };
+
+    eprintln!("world load: reading facet {facet} from {}", base_set.display());
+    let map = openshard_basemap::read(base_set)?;
+    // The file says which facet it is, and the config says which facet it was
+    // named for. Two answers to one question is a config that loads Tokuno as
+    // Felucca — every coordinate plausible, every place wrong.
+    if map.facet() != facet {
+        return Err(format!(
+            "world.base_sets names {} for facet {facet}, and the file is facet {}",
+            base_set.display(),
+            map.facet().0,
+        )
+        .into());
+    }
+    // `tiledata.mul` is still the install's, and still an input: a base set
+    // holds the map, and what a tile *means* is the tile table's. The config
+    // refuses a base set without client files for this reason, so the directory
+    // here is a real one.
+    let stamp = openshard_movement::bake::stamp_of_base_set(
+        base_set,
+        &dir.join("tiledata.mul"),
+        facet,
+        map.revision(),
+    )?;
+    // Beside the base set, not beside the install: the artifact belongs to the
+    // world it was built from, and two worlds of one facet must not share it.
+    let beside = base_set.parent().unwrap_or_else(|| Path::new("."));
+    Ok(FacetSource {
+        navigation_path: openshard_movement::bake::artifact_path(beside, facet),
+        stamp,
+        map,
+        rebake: format!(
+            "OPENSHARD_CLIENT={dir:?} {bake} -- --facet {facet} --base-set {:?}",
+            base_set.display()
+        ),
+    })
+}
+
+/// Load the world, if it is configured.
+///
+/// Each facet comes from whichever source `world.base_sets` names for it — our
+/// own format, or the install — and `facet_source` is where that is decided.
+/// Everything else here is per-shard rather than per-facet: the tile table and
+/// the multis are the install's either way.
 ///
 /// Blocking, and on purpose: this reads over a hundred megabytes and takes a
 /// moment, and there is no sense accepting a client before the world it will
@@ -559,6 +659,19 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
     let start = (config.world.start.x, config.world.start.y);
     let dir = config.world.client_files.trim();
     if dir.is_empty() {
+        // `Config::validate` already refuses this, and it is checked again here
+        // because `load_world` also takes configs nobody wrote down — a test's,
+        // the playground's — and the alternative is loading none of the base
+        // sets an operator named while saying only that there is no map.
+        if let Some((facet, path)) = config.world.base_sets.iter().next() {
+            return Err(format!(
+                "world.base_sets names {} for facet {}, but world.client_files is empty: a base \
+                 set holds the map, and tiledata.mul still holds what a tile is",
+                path.display(),
+                facet.0,
+            )
+            .into());
+        }
         warn!(
             "world.client_files is empty: running with no map. Every step will be allowed — \
              players walk through walls and across water. Set it to a client install."
@@ -611,27 +724,24 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
             "world load +{:.3}s: reading facet {facet}",
             started.elapsed().as_secs_f64()
         );
-        let map = openshard_uofiles::map::load_facet(dir, facet)?;
-        let stamp = openshard_movement::bake::stamp_of(dir, facet, map.revision())?;
-        let navigation_path = openshard_movement::bake::artifact_path(dir, facet);
-        let coarse = openshard_movement::bake::load(&navigation_path, &stamp).map_err(|error| {
-            format!(
-                "{error}\ncreate it with: OPENSHARD_CLIENT={:?} cargo run --release -p \
-                 openshard-movement --bin openshard-navigation-bake -- --facet {facet}",
-                dir
-            )
-        })?;
+        let source = facet_source(config, dir, facet)?;
+        let FacetSource {
+            map,
+            stamp,
+            navigation_path,
+            rebake,
+        } = source;
+        let coarse = openshard_movement::bake::load(&navigation_path, &stamp)
+            .map_err(|error| format!("{error}\ncreate it with: {rebake}"))?;
         if coarse.dimensions() != (map.map().width(), map.map().height()) {
             return Err(format!(
                 "navigation artifact {} has dimensions {}x{}, but facet {facet} is {}x{}\n\
-                 recreate it with: OPENSHARD_CLIENT={:?} cargo run --release -p openshard-movement \
-                 --bin openshard-navigation-bake -- --facet {facet}",
+                 recreate it with: {rebake}",
                 navigation_path.display(),
                 coarse.dimensions().0,
                 coarse.dimensions().1,
                 map.map().width(),
                 map.map().height(),
-                dir,
             )
             .into());
         }
@@ -657,6 +767,11 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
             name = map.map().facet_name(),
             size = format!("{}x{}", map.map().width(), map.map().height()),
             statics = map.map().static_count(),
+            revision = map.revision().get(),
+            source = %base_set_of(config, facet).map_or_else(
+                || "client files".to_owned(),
+                |path| path.display().to_string()
+            ),
             "facet loaded"
         );
         world = world.with_facet(facet, MapTerrain::new(map, tiles.clone()), Some(coarse));

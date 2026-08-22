@@ -2812,6 +2812,7 @@ name = "openshard-movement"
 version = "0.0.1"
 dependencies = [
  "clap",
+ "openshard-basemap",
  "openshard-map",
  "openshard-protocol",
  "openshard-uofiles",
@@ -2905,6 +2906,7 @@ name = "openshard-server"
 version = "0.0.1"
 dependencies = [
  "clap",
+ "openshard-basemap",
  "openshard-config",
  "openshard-events",
  "openshard-gateway",

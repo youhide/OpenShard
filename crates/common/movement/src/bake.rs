@@ -85,6 +85,9 @@ pub fn artifact_path(client_dir: &Path, facet: Facet) -> PathBuf {
 
 /// Inspect exactly the files `Map::load_facet` selects, plus tile data.
 ///
+/// For a facet loaded out of a UO install. A facet loaded out of a base set has
+/// different inputs and a different stamp — [`stamp_of_base_set`].
+///
 /// `revision` is the revision of the snapshot this graph is built from, or the
 /// one a caller is about to check a stored artifact against. It is asked for
 /// rather than assumed: a stamp that filled the field in for itself would
@@ -102,9 +105,65 @@ pub fn stamp_of(client_dir: &Path, facet: Facet, revision: MapRevision) -> Resul
         format!("statics{}.mul", facet.0),
         "tiledata.mul".into(),
     ];
-    let mut inputs = Vec::with_capacity(names.len());
-    for name in names {
-        let path = client_dir.join(&name);
+    let paths: Vec<(String, PathBuf)> = names
+        .into_iter()
+        .map(|name| {
+            let path = client_dir.join(&name);
+            (name, path)
+        })
+        .collect();
+    stamp_over(facet, revision, paths)
+}
+
+/// Inspect the base set a facet was read from, plus tile data.
+///
+/// [`stamp_of`]'s other half, and the reason it has one: a facet loaded from a
+/// base set is not derived from `map0LegacyMUL.uop` and `statics0.mul` any
+/// more, so stamping those files would validate a graph against inputs that are
+/// no longer the source. They still exist and still have those mtimes, so the
+/// check would *pass* — a stale bake answering for a world it was never built
+/// from, which is exactly what a stamp exists to stop.
+///
+/// `tiledata` is still an input, because it still is one: a base set holds the
+/// map, and what a tile *means* is `tiledata.mul`'s, so a graph built with one
+/// tile table is not valid under another.
+///
+/// This is `docs/map/new_map_representation/plan.md`'s direction D arriving one
+/// caller early. D's answer is that the revision is the whole key and the file
+/// stamps go away; until then the revision is carried *and* the real inputs are
+/// stamped, which is strictly more than either alone.
+pub fn stamp_of_base_set(
+    base_set: &Path,
+    tiledata: &Path,
+    facet: Facet,
+    revision: MapRevision,
+) -> Result<Stamp, Error> {
+    let paths = [base_set, tiledata]
+        .into_iter()
+        .map(|path| (file_name_of(path), path.to_owned()))
+        .collect::<Vec<_>>();
+    stamp_over(facet, revision, paths)
+}
+
+/// The name an input is recorded under: its file name, not its path.
+///
+/// A path would make moving the shard's directory invalidate every artifact in
+/// it, and the length and mtime beside it already separate two different files
+/// that happen to share a name.
+fn file_name_of(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    )
+}
+
+/// Read length and mtime for each named input, in the order given.
+///
+/// The order is part of the stamp: [`Stamp`] compares its inputs as a sequence,
+/// so two callers stamping the same files in different orders would disagree.
+fn stamp_over(facet: Facet, revision: MapRevision, paths: Vec<(String, PathBuf)>) -> Result<Stamp, Error> {
+    let mut inputs = Vec::with_capacity(paths.len());
+    for (name, path) in paths {
         let metadata = fs::metadata(&path).map_err(|source| io_error(path.clone(), source))?;
         let modified_ns = metadata
             .modified()
