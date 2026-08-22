@@ -2379,6 +2379,18 @@ fn a_point_on_its_own_tiles_far_edge_reads_that_tile_not_the_next_one() {
 /// same reason and by the same rule: this is a point sampler and *any* step can
 /// be defeated by a thin enough sliver, so the number moves when a fixture
 /// moves it and the whole file still runs in a second.
+///
+/// ⚠ **And it was defeated a third time, on 2026-08-22, at `0.0000282` tiles —
+/// so the rule above is retired and the number stops moving.** Tightening it
+/// again is a treadmill by construction: every round costs a proportional pile
+/// of point-in-box tests (33,000 per ray at this step already) and buys nothing
+/// but the next seed's sliver, and the two rounds it has already had were paid
+/// for with a red suite each. What replaced it is [`Oracles`]: the fuzz
+/// tests hold the walks to [`deepest_crossing`], which is exact and cannot be
+/// stepped over, and this sampler stays as a **control on that exact test**,
+/// consulted wherever it can resolve the answer at all. `the_second_corner_graze_
+/// is_blocked_and_the_sampler_is_the_blind_one` is the seed that settled it and
+/// the fixture that pins the carve-out.
 const BRUTE_STEP: f32 = 0.0002;
 
 /// Whether `point` stands anywhere in `tile`'s own column, boundaries included.
@@ -2623,6 +2635,12 @@ fn a_vertical_ray_meets_what_stands_over_it_whatever_shape_it_is() {
 /// walk itself is excusing — and it loses nothing but a graze of exactly zero
 /// depth, which `docs/occluders.md`'s D2 has already ruled is not a passage.
 ///
+/// **Since 2026-08-22 it is a control rather than the property**, and
+/// [`Oracles`] is where that is spelled out: it was defeated a third time by a
+/// sliver under its own step, [`deepest_crossing`] answers the same question
+/// exactly, and what this one is still uniquely good for is being *dumb* — a
+/// point it lands in a box really is in one, whatever a slab test believes.
+///
 /// Scoped to a binary answer, blocked or not: a boundary misread flips exactly
 /// that, and `walk_cells`'s own soft gradient across a grazing edge is a
 /// different property with its own tests already (`a_wall_stops_the_light...`
@@ -2674,6 +2692,193 @@ fn brute_force_blocked(
     false
 }
 
+/// The `t` interval of the segment `from`→`to` that stands in `tile`'s own
+/// column, boundaries included and the column unbounded in `z` —
+/// [`in_column`]'s question asked about the whole segment at once rather than
+/// about one sampled point of it.
+fn column_span(from: [f64; 3], to: [f64; 3], tile: (i32, i32)) -> Option<(f64, f64)> {
+    segment_inside_box(
+        from,
+        to,
+        [f64::from(tile.0), f64::from(tile.1), f64::NEG_INFINITY],
+        [f64::from(tile.0) + 1.0, f64::from(tile.1) + 1.0, f64::INFINITY],
+    )
+}
+
+/// The deepest crossing the segment `from`→`to` makes of any solid in the frame
+/// **outside the two tiles the walk itself exempts**, in tiles of ground run, or
+/// `None` where it crosses nothing.
+///
+/// This is the exact answer to the question [`brute_force_blocked`] samples, and
+/// `is_some()` is the same verdict — but a sampler cannot produce the *number*,
+/// and the number is what says whether a sampler that disagreed was wrong or
+/// merely blind. Built on [`segment_inside_box`], so it shares no arithmetic
+/// with either walk: same textbook as `solid::ray_vs_solid`, written out again
+/// in the test's own `f64`.
+///
+/// **Its conventions are the walks' own, restated here rather than inherited**,
+/// so that a disagreement is about geometry and never about a tie:
+///
+/// - a crossing is **closed**, so a box flat on one axis — a lid's plane — is
+///   crossed at a single `t` and that counts, which is what `light.rs` does and
+///   what no point sampler can see;
+/// - the two exempt tiles are **volumes**, closed on both sides, subtracted from
+///   the crossing rather than from a point — [`brute_force_blocked`]'s own rule,
+///   for the reason its doc gives. Each carries an end of the segment (the spot
+///   stands in its own tile, the flame point in the tile it was floored into),
+///   so what is left is the open span between them: a crossing of exactly zero
+///   depth pinned to an exempt boundary is excused, one strictly inside the span
+///   is not. That each column really does carry its end is asserted, because the
+///   span is only a single interval while it holds.
+fn deepest_crossing(
+    from: [f32; 3],
+    to: [f32; 3],
+    own_tile: (i32, i32),
+    target_tile: (i32, i32),
+    skip_last: bool,
+    occlusion: &occlusion::Occlusion,
+) -> Option<f64> {
+    let from = [f64::from(from[0]), f64::from(from[1]), f64::from(from[2])];
+    let to = [f64::from(to[0]), f64::from(to[1]), f64::from(to[2])];
+    let ground = ((to[0] - from[0]).powi(2) + (to[1] - from[1]).powi(2)).sqrt();
+
+    let (free_lo, free_hi) = {
+        let near = column_span(from, to, own_tile).expect("the spot stands in its own column");
+        assert_eq!(
+            near.0, 0.0,
+            "the exempt column {own_tile:?} does not hold the segment's start"
+        );
+        let far = match skip_last {
+            true => {
+                let far = column_span(from, to, target_tile)
+                    .expect("the flame point stands in the column it was floored into");
+                assert_eq!(
+                    far.1, 1.0,
+                    "the exempt column {target_tile:?} does not hold the segment's end"
+                );
+                far.0
+            }
+            false => 1.0,
+        };
+        (near.1, far)
+    };
+
+    let mut deepest: Option<f64> = None;
+    for solid in occlusion.solids() {
+        assert!(
+            solid.aperture.is_none(),
+            "deepest_crossing does not model apertures; one stands at {:?}",
+            solid.space.min,
+        );
+        let (min, max) = (solid.space.min, solid.space.max);
+        let Some((enter, leave)) = segment_inside_box(from, to, [min.x, min.y, min.z], [max.x, max.y, max.z])
+        else {
+            continue;
+        };
+        let (lo, hi) = (enter.max(free_lo), leave.min(free_hi));
+        // Left of the exemptions: a real interval, or a single point of the
+        // span's *interior* — the second is a lid's own plane, the case a
+        // positive-length rule was once blind to (see [`segment_inside_box`]).
+        if lo < hi || (lo == hi && lo > free_lo && lo < free_hi) {
+            let depth = (hi - lo) * ground;
+            deepest = Some(deepest.map_or(depth, |deepest: f64| deepest.max(depth)));
+        }
+    }
+    deepest
+}
+
+/// What the two oracles that are not a walk say about one flame's worth of
+/// shadow rays, and the one number that tells a sampler's *defect* from its
+/// *resolution*.
+///
+/// **Why a struct rather than one `bool` per oracle.** [`brute_force_blocked`]
+/// has now been defeated twice by a sliver thinner than [`BRUTE_STEP`] — the
+/// corner graze of 2026-08-09 at `0.000225` tiles (which it turned out to have
+/// *sampled*, and misindexed) and the graze of 2026-08-22 at `0.0000282`, seven
+/// times under a step already tightened twice. Chasing it with a smaller step is
+/// a treadmill by construction: any fixed step is defeated by a thin enough
+/// clip, and this one already costs 33,000 point-in-box tests per ray. So the
+/// **property** is the exact test and the sampler is kept as a control on it,
+/// asked only where it can resolve the answer — exactly the shape
+/// `a_segment_through_the_corner_two_leaves_meet_at_finds_what_stands_there`
+/// already uses for the same reason.
+///
+/// The sampler's error is one-directional, which is what makes the carve-out
+/// safe: a point it lands inside a box really is inside one, so it can miss a
+/// crossing and never invent one. A ray it calls blocked that [`deepest_crossing`]
+/// calls open is therefore never excused — that would be the exact test's own
+/// defect, and it is counted separately.
+struct Oracles {
+    /// [`deepest_crossing`] on every ray: blocked when all of them cross
+    /// something. **The property the walks are held to.**
+    exact: bool,
+    /// [`brute_force_blocked`] on the same rays, aggregated the same way.
+    sampled: bool,
+    /// The thickest crossing on a ray the sampler called open and the exact
+    /// test called blocked — `0.0` when there is no such ray. Under
+    /// [`BRUTE_STEP`] this is the sampler being blind; over it, the sampler and
+    /// the exact test disagree about a clip a march should have landed in.
+    thickest_missed: f64,
+    /// Rays the sampler called blocked and the exact test called open. Never
+    /// excusable; see this struct's own doc.
+    invented: usize,
+}
+
+impl Oracles {
+    /// Both oracles, over the flame the walk itself would sample —
+    /// `light::flame_points` at [`light::FLAME_RADIUS`], so the *scene* is
+    /// shared and the answer is not.
+    fn of(spot: Spot, flame: [f32; 3], own_tile: (i32, i32), occlusion: &occlusion::Occlusion) -> Self {
+        let from = [spot.at.x, spot.at.y, spot.z];
+        let (mut exact, mut sampled, mut thickest_missed, mut invented) = (true, true, 0.0_f64, 0);
+        for point in light::flame_points(
+            spot,
+            flame,
+            openshard_client_render::light::FLAME_RADIUS,
+            openshard_client_render::light::ShadowRays::DEFAULT,
+        )
+        .iter()
+        {
+            let target_tile = (point[0].floor() as i32, point[1].floor() as i32);
+            let crossing = deepest_crossing(from, point, own_tile, target_tile, true, occlusion);
+            let sampler = brute_force_blocked(from, point, own_tile, target_tile, true, occlusion);
+            match (crossing, sampler) {
+                (Some(depth), false) => thickest_missed = thickest_missed.max(depth),
+                (None, true) => invented += 1,
+                _ => {}
+            }
+            exact &= crossing.is_some();
+            sampled &= sampler;
+        }
+        Self {
+            exact,
+            sampled,
+            thickest_missed,
+            invented,
+        }
+    }
+
+    /// Why the sampler disagrees with the exact test, where that is not its own
+    /// resolution — `None` when the two agree or when the only crossings the
+    /// sampler walked through are thinner than the step it walks with.
+    fn sampler_complaint(&self) -> Option<String> {
+        if self.invented > 0 {
+            return Some(format!(
+                "the point sampler landed inside a solid on {} ray(s) that deepest_crossing says \
+                 miss every box — a point in a box is in it, so this is the exact test's defect",
+                self.invented,
+            ));
+        }
+        if self.sampled != self.exact && self.thickest_missed > f64::from(BRUTE_STEP) {
+            return Some(format!(
+                "the point sampler walked through a crossing {:.3e} tiles deep, which is over its \
+                 own step ({BRUTE_STEP:e}) — its resolution does not excuse this one",
+                self.thickest_missed,
+            ));
+        }
+        None
+    }
+}
 /// A brute-force point sampler, swept over a grid of light positions and
 /// angles, agrees with `light::sample`'s `walk_cells` — the net
 /// `docs/lighting_raymarch.md` step 4 asks for, independent of both DDA
@@ -2799,35 +3004,27 @@ fn a_brute_force_oracle_agrees_with_the_walk_over_a_grid_of_lights() {
             // comfortable distance from a corner, so it was green either way;
             // being green for the right reason is the difference between an
             // oracle and a coincidence.
-            let brute_blocked = light::flame_points(
-                spot,
-                [light_at.x, light_at.y, light_z],
-                openshard_client_render::light::FLAME_RADIUS,
-                openshard_client_render::light::ShadowRays::DEFAULT,
-            )
-            .iter()
-            .all(|point| {
-                brute_force_blocked(
-                    [at.x, at.y, z],
-                    point,
-                    (100, 100),
-                    (point[0].floor() as i32, point[1].floor() as i32),
-                    true,
-                    &occlusion,
-                )
-            });
+            let oracles = Oracles::of(spot, [light_at.x, light_at.y, light_z], (100, 100), &occlusion);
             compared += 1;
             blocked_count += usize::from(walked_blocked);
-            if walked_blocked != brute_blocked {
+            // The sampler is a control on the exact test and not the property,
+            // so what it has to say is *why* it disagrees — see [`Oracles`].
+            if let Some(complaint) = oracles.sampler_complaint() {
+                disagreed.push(format!(
+                    "spot ({:.2}, {:.2}, {z:.1}), light ({:.2}, {:.2}, {light_z:.1}): {complaint}",
+                    at.x, at.y, light_at.x, light_at.y,
+                ));
+            }
+            if walked_blocked != oracles.exact {
                 disagreed.push(format!(
                     "spot ({:.2}, {:.2}, {z:.1}), light ({:.2}, {:.2}, {light_z:.1}): \
-                     walk_cells says {}, the brute-force oracle says {}",
+                     walk_cells says {}, the exact oracle says {}",
                     at.x,
                     at.y,
                     light_at.x,
                     light_at.y,
                     if walked_blocked { "blocked" } else { "open" },
-                    if brute_blocked { "blocked" } else { "open" },
+                    if oracles.exact { "blocked" } else { "open" },
                 ));
             }
         }
@@ -2949,33 +3146,28 @@ fn a_fuzzed_flame_near_a_row_edge_agrees_with_the_brute_force_oracle() {
         // 100.49)` to `light (97.08, 99.71)`, where the centre ray clips the wall
         // tile's far corner and most of the eight miss it. `light::flame_points`
         // is where the rays end, shared so that the *scene* is shared and the
-        // answer is not — this oracle still walks the segment its own dumb way.
-        let brute_blocked = light::flame_points(
-                    spot,
-                    [light_at.x, light_at.y, flame_z],
-                    openshard_client_render::light::FLAME_RADIUS,
-                    openshard_client_render::light::ShadowRays::DEFAULT,
-                )
-            .iter()
-            .all(|point| {
-                brute_force_blocked(
-                    [spot_at.x, spot_at.y, spot_z],
-                    point,
-                    spot_tile,
-                    (point[0].floor() as i32, point[1].floor() as i32),
-                    true,
-                    &occlusion,
-                )
-            });
+        // answer is not — the oracles below answer the segment their own way,
+        // one of them exactly and one of them by walking it dumbly.
+        let oracles = Oracles::of(spot, [light_at.x, light_at.y, flame_z], spot_tile, &occlusion);
+        // The sampler is a control on the exact test and not the property, so
+        // what it has to say is *why* it disagrees — see [`Oracles`].
+        if let Some(complaint) = oracles.sampler_complaint() {
+            return Err(TestCaseError::fail(format!(
+                "spot ({:.4}, {:.4}, {:.2}) tile {:?}, light ({:.4}, {:.4}, {:.2}) \
+                 tile {:?}: {complaint}",
+                spot_at.x, spot_at.y, spot_z, spot_tile,
+                light_at.x, light_at.y, flame_z, target_tile,
+            )));
+        }
         prop_assert_eq!(
             walked_blocked,
-            brute_blocked,
+            oracles.exact,
             "spot ({:.4}, {:.4}, {:.2}) tile {:?}, light ({:.4}, {:.4}, {:.2}) \
-             tile {:?}: walk_cells says {}, the brute-force oracle says {}",
+             tile {:?}: walk_cells says {}, the exact oracle says {}",
             spot_at.x, spot_at.y, spot_z, spot_tile,
             light_at.x, light_at.y, flame_z, target_tile,
             if walked_blocked { "blocked" } else { "open" },
-            if brute_blocked { "blocked" } else { "open" },
+            if oracles.exact { "blocked" } else { "open" },
         );
     });
 }
@@ -3065,35 +3257,27 @@ fn a_brute_force_oracle_agrees_with_the_exact_walk_over_a_grid_of_lights() {
             // comfortable distance from a corner, so it was green either way;
             // being green for the right reason is the difference between an
             // oracle and a coincidence.
-            let brute_blocked = light::flame_points(
-                spot,
-                [light_at.x, light_at.y, light_z],
-                openshard_client_render::light::FLAME_RADIUS,
-                openshard_client_render::light::ShadowRays::DEFAULT,
-            )
-            .iter()
-            .all(|point| {
-                brute_force_blocked(
-                    [at.x, at.y, z],
-                    point,
-                    (100, 100),
-                    (point[0].floor() as i32, point[1].floor() as i32),
-                    true,
-                    &occlusion,
-                )
-            });
+            let oracles = Oracles::of(spot, [light_at.x, light_at.y, light_z], (100, 100), &occlusion);
             compared += 1;
             blocked_count += usize::from(walked_blocked);
-            if walked_blocked != brute_blocked {
+            // The sampler is a control on the exact test and not the property,
+            // so what it has to say is *why* it disagrees — see [`Oracles`].
+            if let Some(complaint) = oracles.sampler_complaint() {
+                disagreed.push(format!(
+                    "spot ({:.2}, {:.2}, {z:.1}), light ({:.2}, {:.2}, {light_z:.1}): {complaint}",
+                    at.x, at.y, light_at.x, light_at.y,
+                ));
+            }
+            if walked_blocked != oracles.exact {
                 disagreed.push(format!(
                     "spot ({:.2}, {:.2}, {z:.1}), light ({:.2}, {:.2}, {light_z:.1}): \
-                     walk_the_record says {}, the brute-force oracle says {}",
+                     walk_the_record says {}, the exact oracle says {}",
                     at.x,
                     at.y,
                     light_at.x,
                     light_at.y,
                     if walked_blocked { "blocked" } else { "open" },
-                    if brute_blocked { "blocked" } else { "open" },
+                    if oracles.exact { "blocked" } else { "open" },
                 ));
             }
         }
@@ -3197,33 +3381,28 @@ fn a_fuzzed_flame_near_a_row_edge_agrees_with_the_brute_force_oracle_through_the
         // 100.49)` to `light (97.08, 99.71)`, where the centre ray clips the wall
         // tile's far corner and most of the eight miss it. `light::flame_points`
         // is where the rays end, shared so that the *scene* is shared and the
-        // answer is not — this oracle still walks the segment its own dumb way.
-        let brute_blocked = light::flame_points(
-                    spot,
-                    [light_at.x, light_at.y, flame_z],
-                    openshard_client_render::light::FLAME_RADIUS,
-                    openshard_client_render::light::ShadowRays::DEFAULT,
-                )
-            .iter()
-            .all(|point| {
-                brute_force_blocked(
-                    [spot_at.x, spot_at.y, spot_z],
-                    point,
-                    spot_tile,
-                    (point[0].floor() as i32, point[1].floor() as i32),
-                    true,
-                    &occlusion,
-                )
-            });
+        // answer is not — the oracles below answer the segment their own way,
+        // one of them exactly and one of them by walking it dumbly.
+        let oracles = Oracles::of(spot, [light_at.x, light_at.y, flame_z], spot_tile, &occlusion);
+        // The sampler is a control on the exact test and not the property, so
+        // what it has to say is *why* it disagrees — see [`Oracles`].
+        if let Some(complaint) = oracles.sampler_complaint() {
+            return Err(TestCaseError::fail(format!(
+                "spot ({:.4}, {:.4}, {:.2}) tile {:?}, light ({:.4}, {:.4}, {:.2}) \
+                 tile {:?}: {complaint}",
+                spot_at.x, spot_at.y, spot_z, spot_tile,
+                light_at.x, light_at.y, flame_z, target_tile,
+            )));
+        }
         prop_assert_eq!(
             walked_blocked,
-            brute_blocked,
+            oracles.exact,
             "spot ({:.4}, {:.4}, {:.2}) tile {:?}, light ({:.4}, {:.4}, {:.2}) \
-             tile {:?}: walk_the_record says {}, the brute-force oracle says {}",
+             tile {:?}: walk_the_record says {}, the exact oracle says {}",
             spot_at.x, spot_at.y, spot_z, spot_tile,
             light_at.x, light_at.y, flame_z, target_tile,
             if walked_blocked { "blocked" } else { "open" },
-            if brute_blocked { "blocked" } else { "open" },
+            if oracles.exact { "blocked" } else { "open" },
         );
     });
 }
@@ -3554,6 +3733,152 @@ fn the_pinned_corner_graze_is_blocked_and_all_three_oracles_say_so() {
         brute_blocked,
         "brute_force_blocked says open where the segment provably crosses the box — \
          the cell lookup is back",
+    );
+}
+
+/// The corner graze a fuzz seed found on 2026-08-22, of the same family and with
+/// **the other answer about the sampler**.
+///
+/// Both fuzz tests called this ray blocked and [`brute_force_blocked`] called it
+/// open, exactly as on 2026-08-09 — and [`segment_inside_box`] settles it the
+/// same way: all eight rays really do enter the wall's box, so blocked is the
+/// truth and both walks had it again. What is different is *why* the sampler
+/// missed it. Last time the sampler had sampled the sliver and misindexed it, so
+/// there was a defect to fix and the fixture asserts the fix. This time the
+/// thinnest of the eight spends `0.0000282` of a tile inside the body — **seven
+/// times under [`BRUTE_STEP`]**, which had already been tightened twice for
+/// exactly this — and a march that steps over it is not wrong, it is blind.
+///
+/// So this is the fixture for the carve-out [`Oracles`] draws, and it asserts
+/// both halves of it: the sliver is under the step (or the carve-out would be
+/// covering a real defect) and [`Oracles::sampler_complaint`] stays quiet on it
+/// (or the carve-out would not be reaching the case it was written for). The
+/// seed is pinned in `lighting.proptest-regressions` beside its 2026-08-09
+/// sibling; between them, the two directions of the sampler's error are nailed
+/// down by fixtures rather than by whichever one a random seed reaches next.
+#[test]
+fn the_second_corner_graze_is_blocked_and_the_sampler_is_the_blind_one() {
+    use openshard_client_render::occlusion::{Builder, Shape};
+    use openshard_protocol::wire::Graphic;
+    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+
+    // The shrunk seed's own numbers, spelled out: `spot_dx = 2.3108275`,
+    // `spot_frac = 0.14551114`, `spot_z = 6.487659`, `flame_dx = 2.2574825`,
+    // `flame_z = 8.913442`, `row = 100.0`, `frac = -0.16507894`.
+    let spot_at = Vec2::new(101.0 + 2.3108275, 100.0 + 0.14551114);
+    let spot_z = 6.487659_f32;
+    let light_at = Vec2::new(99.0 - 2.2574825, 100.0 - 0.16507894);
+    let flame_z = 8.913442_f32;
+
+    let wall = StaticTile {
+        flags: TileFlags::new(TileFlags::NO_SHOOT),
+        height: 20,
+        ..StaticTile::default()
+    };
+    let mut grid = Builder::new(openshard_client_render::camera::TileBounds {
+        min_x: 90,
+        max_x: 110,
+        min_y: 90,
+        max_y: 110,
+    });
+    grid.add(100, 100, 0, Graphic(0x0100), &wall, Shape::UNREAD);
+    let occlusion = grid.finish(&Cutaway::OPEN);
+
+    let spot_tile = (spot_at.x.floor() as i32, spot_at.y.floor() as i32);
+    let spot = Spot::flat(spot_at, spot_z, spot_tile);
+    let light = light::Light {
+        at: light_at,
+        z: flame_z,
+        radius: 30.0,
+        color: [1.0, 1.0, 1.0],
+        intensity: 1.0,
+        beam: None,
+    };
+    let lighting = Lighting {
+        ambient: light::NIGHT,
+        lights: vec![light],
+        occlusion: occlusion.clone(),
+        sun: None,
+        view: debug::View::default(),
+        flame_radius: openshard_client_render::light::FLAME_RADIUS,
+        shadow_rays: openshard_client_render::light::ShadowRays::DEFAULT,
+        dead: false,
+    };
+
+    // 1. The exact answer, per ray, in double precision and over the frame's own
+    //    boxes. Neither exempt tile — the spot's `(103, 100)`, the flame's
+    //    `(96, 99)` — touches the wall's `(100, 100)`, so the whole segment
+    //    counts and there is nothing for an exemption to remove.
+    let wall = occlusion.solids().first().expect("the grid stood the wall up");
+    let (min, max) = (wall.space.min, wall.space.max);
+    let from = [f64::from(spot_at.x), f64::from(spot_at.y), f64::from(spot_z)];
+    let mut thinnest = f64::INFINITY;
+    for (ray, point) in light::flame_points(
+        spot,
+        [light_at.x, light_at.y, flame_z],
+        openshard_client_render::light::FLAME_RADIUS,
+        openshard_client_render::light::ShadowRays::DEFAULT,
+    )
+    .iter()
+    .enumerate()
+    {
+        let to = [f64::from(point[0]), f64::from(point[1]), f64::from(point[2])];
+        let Some((enter, leave)) = segment_inside_box(from, to, [min.x, min.y, min.z], [max.x, max.y, max.z])
+        else {
+            panic!(
+                "ray {ray} to ({:.5}, {:.5}, {:.5}) misses the wall exactly; the whole \
+                 verdict rests on all eight entering it",
+                to[0], to[1], to[2],
+            );
+        };
+        let ground = ((to[0] - from[0]).powi(2) + (to[1] - from[1]).powi(2)).sqrt();
+        thinnest = thinnest.min((leave - enter) * ground);
+    }
+    // The opposite assertion to its 2026-08-09 sibling's, and that is the whole
+    // point of the pair: there the sliver was thicker than the step and the
+    // sampler's miss was a defect, here it is thinner and the miss is arithmetic.
+    assert!(
+        thinnest < f64::from(BRUTE_STEP),
+        "the thinnest of the eight clips {thinnest:.3e} tiles of the wall, which is over \
+         BRUTE_STEP ({BRUTE_STEP:e}) — then the sampler had the resolution to see it after \
+         all, and this fixture no longer says what it was written to say",
+    );
+
+    // 2. Both walks. They were the accused, again, and right, again.
+    for (name, sample) in [
+        ("walk_cells", light::sample(spot, &lighting)),
+        ("walk_the_record", light::sample_exact(spot, &lighting)),
+    ] {
+        let reach = sample
+            .reaches
+            .iter()
+            .find(|reach| reach.within)
+            .expect("the flame is within reach of the spot");
+        assert!(
+            reach.through <= 0.004,
+            "{name} lets {:.4} of the light through a wall the segment provably enters",
+            reach.through,
+        );
+    }
+
+    // 3. The two oracles, and the carve-out between them: the exact test says
+    //    blocked, the sampler says open, and that is excused *because* of the
+    //    number asserted above and for no other reason.
+    let oracles = Oracles::of(spot, [light_at.x, light_at.y, flame_z], spot_tile, &occlusion);
+    assert!(
+        oracles.exact,
+        "the exact oracle answers open where every ray provably crosses"
+    );
+    assert!(
+        !oracles.sampled,
+        "the point sampler now sees a crossing {thinnest:.3e} tiles deep — then BRUTE_STEP has \
+         moved and this fixture is measuring the old one",
+    );
+    assert_eq!(
+        oracles.sampler_complaint(),
+        None,
+        "the sampler's blindness at {thinnest:.3e} tiles is what this seed is, and the carve-out \
+         has stopped covering it",
     );
 }
 

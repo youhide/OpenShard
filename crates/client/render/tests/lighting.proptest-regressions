@@ -9,3 +9,4 @@ cc 145b09f4bfa126fde37f6853c75bd851100584ed1eeb0398734c27e540dc866b # shrinks to
 cc 4f70425beb90a168927d1599b0045e1b39d57b8059d5da6a33832670272c89b0 # shrinks to spot_dx = 2.8860366, spot_frac = 0.88196355, spot_z = 1.0, flame_dx = 2.1075914, flame_z = 1.0, row = 101.0, frac = 0.2720155
 cc 1e4f6e6eaa919943628d56b76cc196bbee03a23f31b18e530abfcc054a7b5177 # shrinks to spot_dx = 2.3013456, spot_frac = 0.13126768, spot_z = 1.6417651, flame_dx = 3.1775167, flame_z = 1.0, row = 100.0, frac = -0.22519396
 cc 2444a8f54af2b31433cc9fd17edb47eaed6bfd5fbd47f062062c70c8257d4448 # shrinks to spot_dx = 3.6040761, spot_frac = 0.94628215, spot_z = 2.0036669, flame_dx = 5.8166175, flame_z = 13.689882, row = 101.0, frac = 0.025267871
+cc 9bdadf636c3cb9da1dd1e37405359d2436cfd56f3795e50d56fbb43ffef58263 # shrinks to spot_dx = 2.3108275, spot_frac = 0.14551114, spot_z = 6.487659, flame_dx = 2.2574825, flame_z = 8.913442, row = 100.0, frac = -0.16507894

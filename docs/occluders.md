@@ -489,6 +489,32 @@ arithmetic rather than calling `solid::ray_vs_solid` — being held to the crate
 own slab test would be the crate agreeing with itself. It answered the pinned case
 in one run. Reach for it first the next time this shape appears.
 
+### **And on 2026-08-22 it stopped being the tie-break and became the property**
+
+The shape appeared again — same family, same verdict, and this time the step
+*was* the culprit: `0.0000282` of a tile, seven times under a `BRUTE_STEP` that
+had already been tightened twice. Two red suites for the same lesson is enough,
+and the lesson is structural rather than numeric: a fixed step is defeated by a
+thin enough clip at any resolution, so a sampler cannot be the thing a walk is
+held to.
+
+> The **property** the fuzz tests and the grid sweeps assert is the exact test —
+> `deepest_crossing`, which is `segment_inside_box` over `Occlusion::solids()`
+> with the two exempt tiles subtracted as volumes. The **sampler is a control on
+> it**, and the carve-out runs one way only: the sampler missing a crossing
+> thinner than its own step is arithmetic and excused, the sampler finding a
+> crossing the exact test denies is never excused — a point in a box is in it,
+> and that would be the exact test's own defect.
+
+`Oracles` in `tests/lighting.rs` is both of them and the rule between them.
+`BRUTE_STEP` is frozen at `0.0002` by the same argument: the next sliver is not
+worth another proportional pile of point tests.
+
+`frame.rs`'s `ground_truth_blocked` is the same fixed-step shape and has **not**
+been moved, deliberately: it marches a fixed 64×64 grid of deterministic scenes,
+so it cannot go red on a seed nobody chose, and it already answers `Option` —
+"cannot say" is a verdict it has and the samplers here do not.
+
 ## Steps
 
 Each is landable alone and leaves the tree working. A session starts at the first
@@ -2037,9 +2063,10 @@ coordinate cost a boundary crossing rather than only a merge, the `z` byte was
 *not* the harmless quantisation this entry called it, and the merge it was
 supposed to unblock is refused by a different field entirely.
 
-🔴 **A second fresh-seed disagreement, of exactly the family the pinned corner
-graze was — found 2026-08-22, and not pinned.** The fuzzer went red on a session
-that touched neither `light.rs` nor `lighting.rs`, in one run of
+✅ **A second fresh-seed disagreement, of exactly the family the pinned corner
+graze was — found 2026-08-22, and closed the same day. The walks were right
+again; the sampler was not wrong this time, it was blind.** The fuzzer went red
+on a session that touched neither `light.rs` nor `lighting.rs`, in one run of
 `cargo test -p openshard-client-render`, and both of its tests failed on the
 same input:
 
@@ -2054,19 +2081,45 @@ walk_the_record says blocked, the brute-force oracle says open
 cc 9bdadf636c3cb9da1dd1e37405359d2436cfd56f3795e50d56fbb43ffef58263 # shrinks to spot_dx = 2.3108275, spot_frac = 0.14551114, spot_z = 6.487659, flame_dx = 2.2574825, flame_z = 8.913442, row = 100.0, frac = -0.16507894
 ```
 
-**The line was deliberately taken back out of `lighting.proptest-regressions`**,
-and that is the part to disagree with rather than to inherit: pinned, it makes
-`cargo test --workspace` red for every session until the disagreement is
-settled, and the session that found it was in another track's crate entirely.
-Un-pinned, the case is only as reachable as the next random seed. Paste the line
-back to work on it — it reproduces on the spot.
+**What it was.** `segment_inside_box` over the eight flame points, in one run and
+against neither disputant: all eight enter the wall's box, so blocked is the
+truth and both walks had it — the same verdict as 2026-08-09 and for the same
+reason, that both walks agreeing is a clue about the *oracle*. What differs is
+the sampler's excuse. Last time it had sampled the sliver and then misindexed it,
+which was a defect and was fixed. This time the thinnest of the eight spends
+`0.0000282` of a tile inside the body — **seven times under `BRUTE_STEP`**, which
+had already been tightened twice for exactly this — and a fixed-step march that
+steps over that is not wrong about anything, it simply cannot see it.
 
-What the last one of this family cost is § *The pinned corner graze*: the walks
-were right and the **oracle** was wrong, and it was settled by the exact test —
-`segment_inside_box` over the eight flame points — rather than by trusting
-either disputant. Both walks agreeing is the same clue as last time, and last
-time reading it as "two walks, one shared DDA bug" was reading it backwards.
-Start there.
+**So the number stops moving, and the oracles change places.** Tightening the
+step a third time is a treadmill by construction: any step is defeated by a thin
+enough clip, each round costs a proportional pile of point tests (33,000 per ray
+at the current step), and both previous rounds were paid for with a red suite.
+`tests/lighting.rs` now carries `deepest_crossing` — `segment_inside_box` over
+every solid in the frame, with the walk's own two exempt tiles subtracted as
+volumes — and the four comparisons (two grid sweeps, two fuzz tests) hold the
+walks to **that**, exactly. It cannot be stepped over.
+
+`brute_force_blocked` stays, demoted from the property to a **control on the
+exact test**, because its dumbness is still worth something no slab test can
+give: a point it lands inside a box really is inside one, whatever
+`segment_inside_box` and `ray_vs_solid` might come to believe together. `Oracles`
+holds both and states the carve-out in one direction only — the sampler calling
+*open* where the exact test says blocked is excused when the crossing is thinner
+than its own step, and the sampler calling *blocked* where the exact test says
+open is never excused, since that would be the exact test's defect. Both
+directions are gated: blinding `deepest_crossing` to clips under `0.01` turns the
+fuzz red through the second rule, and dropping the carve-out turns it red through
+the first, on this very seed.
+
+The seed is **pinned** in `lighting.proptest-regressions`, green, beside its
+2026-08-09 sibling, and
+`the_second_corner_graze_is_blocked_and_the_sampler_is_the_blind_one` is its
+fixture — asserting the mirror image of what the older one asserts: there the
+sliver was *over* the step and the sampler's miss was a defect, here it is under
+it and the miss is arithmetic. Between the two, both directions of the sampler's
+error are held down by fixtures rather than by whichever one a random seed
+reaches next.
 
 Worth naming as a property rather than as an incident: **this suite can go red
 on a run that changed nothing.** The fuzzers draw a fresh seed each run, so a
