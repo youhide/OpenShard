@@ -813,8 +813,12 @@ sixteen times per node forever.
 `find_path(&MapTerrain, &Overlay, Doors)`; what this says is that a search
 should not take a `MapTerrain` at all, and that `Overlay` — the live half — is
 exactly the part that must stay a query because it changes between ticks. The
-split survives; what it is layered over is what changes. It wants its own plan,
-and this section is the measurement that plan starts from.
+split survives; what it is layered over is what changes. **That plan is
+[`navigation_spans.md`](navigation_spans.md)**, and this section is the
+measurement it starts from — its census answers the question this one raises:
+92.1% of facet 0's columns hold no statics at all, and 96.5% of its standable
+surfaces are the land itself, so the structure a search should read is three
+tiers and under 20 MB rather than a span per column.
 
 ### 🚩 The coarse graph is a one-storey model of a two-storey world
 
