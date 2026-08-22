@@ -339,26 +339,12 @@ impl<M: Terrain> Terrain for Cluttered<'_, M> {
         self.map.can_fit(tile, z, height) && !self.blocked(tile, z)
     }
 
-    fn item_blocks(&self, graphic: openshard_protocol::wire::Graphic) -> bool {
-        self.map.item_blocks(graphic)
-    }
-
-    fn item_height(&self, graphic: openshard_protocol::wire::Graphic) -> u8 {
-        self.map.item_height(graphic)
-    }
-
-    fn item_name(&self, graphic: openshard_protocol::wire::Graphic) -> Option<&str> {
-        self.map.item_name(graphic)
-    }
-
-    fn item_weight(&self, graphic: openshard_protocol::wire::Graphic) -> u8 {
-        self.map.item_weight(graphic)
-    }
-
-    fn item_layer(&self, graphic: openshard_protocol::wire::Graphic) -> u8 {
-        self.map.item_layer(graphic)
-    }
-
+    // The six tiledata questions this used to forward have left the trait. Two of
+    // them — `multi_components` and `land_is_water` — were never forwarded at
+    // all and fell into the trait's defaults, so a caller asking this overlay
+    // about a multi was told there was none. Nothing on this end asked, which is
+    // the only reason it was not a bug; the client reads `Resources::tiledata`
+    // and `Resources::multis` directly, as `Clutter::of` above already does.
     fn sight_clear(&self, from: Point, to: Point) -> bool {
         // The map's answer alone. A crate is furniture, not a wall — the same
         // line the server draws, which only treats a shut *door* as opaque.

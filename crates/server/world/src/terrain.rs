@@ -10,8 +10,8 @@ pub use openshard_movement::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
 
 #[cfg(test)]
 mod tests {
-    use openshard_movement::{MapTerrain, Terrain};
-    use openshard_protocol::wire::{Graphic, Layer};
+    use openshard_movement::MapTerrain;
+    use openshard_protocol::wire::Layer;
     use openshard_uofiles::map::Map;
     use openshard_uofiles::tiledata::TileData;
 
@@ -41,20 +41,20 @@ mod tests {
             return;
         };
         assert_eq!(
-            Layer(terrain.item_layer(Graphic(0x13B2))),
+            Layer(terrain.tiles().static_tile(0x13B2).layer),
             openshard_state::weapon::LAYER_ONE_HANDED,
             "the bow, which is why the override exists"
         );
         for graphic in [0x143E, 0x0F4D, 0x0E89, 0x0F62] {
             assert_eq!(
-                Layer(terrain.item_layer(Graphic(graphic))),
+                Layer(terrain.tiles().static_tile(graphic).layer),
                 openshard_state::weapon::LAYER_TWO_HANDED,
                 "0x{graphic:04X} should be two-handed"
             );
         }
         for graphic in [0x13FF, 0x0F52, 0x0F61, 0x0F5C] {
             assert_eq!(
-                Layer(terrain.item_layer(Graphic(graphic))),
+                Layer(terrain.tiles().static_tile(graphic).layer),
                 openshard_state::weapon::LAYER_ONE_HANDED,
                 "0x{graphic:04X} should be one-handed"
             );

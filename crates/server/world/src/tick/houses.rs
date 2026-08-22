@@ -149,7 +149,7 @@ impl World {
             // The hull-and-deck split, recomputed. A shard with no client files
             // gets a ship that draws on every client and carries nobody — the
             // same bargain a house's walls make, and for the same reason.
-            match openshard_boats::planks_of(&self.state, entity, at, facet, record.multi) {
+            match openshard_boats::planks_of(&self.state, entity, at, record.multi) {
                 Ok(berth) => self.state.facet_state_mut(facet).boats.moor(entity, berth),
                 Err(_) => shapeless += 1,
             }
@@ -266,7 +266,7 @@ impl World {
             }
             let shape = design.as_ref().map(|(_, components)| components.as_slice());
 
-            match openshard_housing::footprint_of(&self.state, at, facet, record.multi, shape) {
+            match openshard_housing::footprint_of(&self.state, at, record.multi, shape) {
                 Ok(footprint) => {
                     openshard_housing::block(&mut self.state, entity, facet, &footprint);
                 }

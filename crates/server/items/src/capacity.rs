@@ -176,14 +176,9 @@ fn subtree_items(state: &WorldState, contents: &Contents, container: Serial) -> 
 
 /// What everything in a container weighs, in stones, the subtree included.
 fn subtree_weight(state: &WorldState, contents: &Contents, container: Serial) -> u16 {
-    let Some(entity) = state.registry.entity_of(container) else {
+    if state.registry.entity_of(container).is_none() {
         return 0;
-    };
-    let facet = state.facet_of(entity);
-    let terrain = state
-        .facets
-        .get(&facet)
-        .and_then(|facet| facet.terrain.as_deref());
+    }
     let mut hundredths: u32 = 0;
     let mut stack = vec![container];
     let mut visited: Vec<Serial> = Vec::new();
@@ -193,7 +188,7 @@ fn subtree_weight(state: &WorldState, contents: &Contents, container: Serial) ->
         }
         visited.push(serial);
         for &item in contents.get(&serial).into_iter().flatten() {
-            hundredths = hundredths.saturating_add(item_weight_hundredths(state, terrain, item));
+            hundredths = hundredths.saturating_add(item_weight_hundredths(state, item));
             if state.registry.has::<Container>(item) {
                 if let Some(inner) = state.registry.serial_of(item) {
                     stack.push(inner);
@@ -209,11 +204,7 @@ fn subtree_weight(state: &WorldState, contents: &Contents, container: Serial) ->
 /// Gold is the special case [`total_weight`](crate::total_weight) already makes,
 /// repeated rather than shared because that walk starts from a mobile and this one
 /// from a container.
-fn item_weight_hundredths(
-    state: &WorldState,
-    terrain: Option<&(dyn openshard_movement::Terrain + Send + Sync)>,
-    item: EntityId,
-) -> u32 {
+fn item_weight_hundredths(state: &WorldState, item: EntityId) -> u32 {
     let Some(&Drawn { id, .. }) = state.registry.get::<Drawn>(item) else {
         return 0;
     };
@@ -221,7 +212,9 @@ fn item_weight_hundredths(
     let each = if id == GOLD_GRAPHIC {
         GOLD_WEIGHT_HUNDREDTHS
     } else {
-        u32::from(terrain.map_or(0, |terrain| terrain.item_weight(id))) * 100
+        // No tiledata, no encumbrance — the same bargain a terrainless shard
+        // already makes with its step checks.
+        u32::from(state.tiles.as_deref().map_or(0, |tiles| tiles.item_weight(id.0))) * 100
     };
     each.saturating_mul(u32::from(amount))
 }
@@ -234,12 +227,7 @@ fn item_weight_hundredths(
 #[must_use]
 pub fn cost_of(state: &WorldState, item: EntityId) -> (usize, u16) {
     let contents = contents_index(state);
-    let facet = state.facet_of(item);
-    let terrain = state
-        .facets
-        .get(&facet)
-        .and_then(|facet| facet.terrain.as_deref());
-    let own_weight = item_weight_hundredths(state, terrain, item);
+    let own_weight = item_weight_hundredths(state, item);
     let Some(serial) = state.registry.serial_of(item) else {
         return (1, u16::try_from(own_weight / 100).unwrap_or(u16::MAX));
     };

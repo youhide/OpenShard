@@ -46,6 +46,46 @@ pub(super) fn world() -> World {
     World::new(START)
 }
 
+/// The flags a fixture wall carries: impassable, and a wall for the sight line.
+pub(super) const WALL_FLAGS: u64 =
+    openshard_uofiles::tiledata::TileFlags::WALL | openshard_uofiles::tiledata::TileFlags::BLOCK;
+
+/// A tiledata a fixture can hand a house or a ship: whichever graphics the test
+/// names, with the flags and heights it means them to have.
+///
+/// **A real table, not a double.** These used to be answered by a hand-written
+/// `Terrain` — `item_blocks` returning `graphic == WALL` — which meant the test
+/// agreed with itself about a question the shard asks `tiledata.mul`. One `.mul`
+/// row written here is the same indirection the real file has, so a fixture
+/// cannot test a shortcut the shard does not take.
+pub(super) fn tiles_with(
+    entries: &[(u16, u64, u8)],
+) -> std::sync::Arc<openshard_uofiles::tiledata::TileData> {
+    let mut tiles = openshard_uofiles::tiledata::TileData::empty();
+    for &(graphic, flags, height) in entries {
+        tiles.set_static_tile(
+            graphic,
+            openshard_uofiles::tiledata::StaticTile {
+                flags: openshard_uofiles::tiledata::TileFlags::new(flags),
+                height,
+                ..openshard_uofiles::tiledata::StaticTile::default()
+            },
+        );
+    }
+    std::sync::Arc::new(tiles)
+}
+
+/// A multi table holding one shape under one id — what a fixture house or ship
+/// is made of, read the way the shard reads it.
+pub(super) fn multis_with(
+    id: u16,
+    components: Vec<openshard_uofiles::multi::Component>,
+) -> std::sync::Arc<openshard_uofiles::multi::Multis> {
+    std::sync::Arc::new(openshard_uofiles::multi::Multis::of([
+        openshard_uofiles::multi::Multi::new(id, components),
+    ]))
+}
+
 /// The long-distance guide shares a facet's static-terrain lifetime, and it is
 /// *handed in* rather than built: sampling a whole facet costs minutes, so the
 /// shard bakes the graph to a file and loads it (`movement::bake`), which is
@@ -12102,29 +12142,29 @@ fn single_clicking_a_named_mobile_draws_its_name() {
     );
 }
 
-/// A terrain that knows one item's tiledata name — enough to test that a
-/// single-click on an item reads the name off the map's tiledata.
-struct NamedTerrain {
-    graphic: u16,
-    name: String,
-}
-impl Terrain for NamedTerrain {
-    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
-        Some(to)
-    }
-    fn item_name(&self, graphic: Graphic) -> Option<&str> {
-        (graphic.0 == self.graphic).then_some(self.name.as_str())
-    }
+/// A tiledata that names one graphic — enough to test that a single-click on an
+/// item reads its name off the shard's table.
+///
+/// A real `TileData` and not a hand-written `Terrain`: the name is a row in
+/// `tiledata.mul`, placeholders and all, and the reader that decides `"NoName"`
+/// means *no name* is the one under test.
+fn named(graphic: u16, name: &str) -> std::sync::Arc<openshard_uofiles::tiledata::TileData> {
+    let mut tiles = openshard_uofiles::tiledata::TileData::empty();
+    tiles.set_static_tile(
+        graphic,
+        openshard_uofiles::tiledata::StaticTile {
+            name: name.to_owned(),
+            ..openshard_uofiles::tiledata::StaticTile::default()
+        },
+    );
+    std::sync::Arc::new(tiles)
 }
 
 #[test]
 fn single_clicking_an_item_draws_its_tiledata_name() {
     let now = Instant::now();
     let mut world = world();
-    world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(NamedTerrain {
-        graphic: GOLD,
-        name: "gold coins".to_owned(),
-    }));
+    world.state.tiles = Some(named(GOLD, "gold coins"));
     let connection = enter(&mut world, now);
     // A stack of three on the player's tile, so it is drawn and clickable.
     let serial = spawn_gold(&mut world, Point::new(START.0, START.1, 0), 3, now);
@@ -15428,30 +15468,26 @@ fn a_deed_raises_the_house_cursor_and_answering_it_builds() {
         fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
             Some(to)
         }
-        fn multi_components(&self, id: u16) -> &[Component] {
-            const COMPONENTS: [Component; 1] = [Component {
-                graphic: WALL,
-                dx: 1,
-                dy: 0,
-                dz: 0,
-                flags: 1,
-            }];
-            if id == COTTAGE { &COMPONENTS } else { &[] }
-        }
-        fn item_blocks(&self, graphic: Graphic) -> bool {
-            graphic.0 == WALL
-        }
-        fn item_height(&self, graphic: Graphic) -> u8 {
-            if graphic.0 == WALL { 20 } else { 0 }
-        }
         fn can_fit(&self, _tile: openshard_movement::Tile, _z: i32, _height: i32) -> bool {
             true
         }
+    }
+    /// One wall, one tile east — the cottage the tables below describe.
+    fn cottage() -> Vec<Component> {
+        vec![Component {
+            graphic: WALL,
+            dx: 1,
+            dy: 0,
+            dz: 0,
+            flags: 1,
+        }]
     }
 
     let now = Instant::now();
     let mut world = world();
     world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Ground));
+    world.state.tiles = Some(tiles_with(&[(WALL, WALL_FLAGS, 20)]));
+    world.state.multis = Some(multis_with(COTTAGE, cottage()));
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];
 
@@ -15549,29 +15585,19 @@ fn a_designed_house_announces_its_revision_and_answers_the_ask() {
         fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
             Some(to)
         }
-        fn multi_components(&self, id: u16) -> &[Component] {
-            const COMPONENTS: [Component; 1] = [Component {
-                graphic: WALL,
-                dx: 1,
-                dy: 0,
-                dz: 0,
-                flags: 1,
-            }];
-            if id == COTTAGE { &COMPONENTS } else { &[] }
-        }
-        fn item_blocks(&self, graphic: Graphic) -> bool {
-            graphic.0 == WALL || graphic.0 == VILLA_WALL
-        }
-        fn item_height(&self, graphic: Graphic) -> u8 {
-            if graphic.0 == WALL || graphic.0 == VILLA_WALL {
-                20
-            } else {
-                0
-            }
-        }
         fn can_fit(&self, _tile: openshard_movement::Tile, _z: i32, _height: i32) -> bool {
             true
         }
+    }
+    /// One wall, one tile east — the cottage the tables below describe.
+    fn cottage() -> Vec<Component> {
+        vec![Component {
+            graphic: WALL,
+            dx: 1,
+            dy: 0,
+            dz: 0,
+            flags: 1,
+        }]
     }
 
     /// Every `0xBF` the connection was sent, by subcommand.
@@ -15586,6 +15612,11 @@ fn a_designed_house_announces_its_revision_and_answers_the_ask() {
     let now = Instant::now();
     let mut world = world();
     world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Ground));
+    world.state.tiles = Some(tiles_with(&[
+        (WALL, WALL_FLAGS, 20),
+        (VILLA_WALL, WALL_FLAGS, 20),
+    ]));
+    world.state.multis = Some(multis_with(COTTAGE, cottage()));
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];
 
@@ -15702,50 +15733,32 @@ fn a_deed_for_a_foundation_builds_a_house_with_a_design() {
         fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
             Some(to)
         }
-        /// A platform three tiles across. Width matters: the stair strip runs
-        /// `1..width`, so a one-tile platform gets none — which is the
-        /// reference's own arithmetic and not worth special-casing, but it does
-        /// make a degenerate fixture prove nothing.
-        fn multi_components(&self, id: u16) -> &[Component] {
-            const COMPONENTS: [Component; 3] = [
-                Component {
-                    graphic: WALL,
-                    dx: -1,
-                    dy: 0,
-                    dz: 0,
-                    flags: 1,
-                },
-                Component {
-                    graphic: WALL,
-                    dx: 0,
-                    dy: 0,
-                    dz: 0,
-                    flags: 1,
-                },
-                Component {
-                    graphic: WALL,
-                    dx: 1,
-                    dy: 0,
-                    dz: 0,
-                    flags: 1,
-                },
-            ];
-            if id == FOUNDATION { &COMPONENTS } else { &[] }
-        }
-        fn item_blocks(&self, graphic: Graphic) -> bool {
-            graphic.0 == WALL
-        }
-        fn item_height(&self, graphic: Graphic) -> u8 {
-            if graphic.0 == WALL { 20 } else { 0 }
-        }
         fn can_fit(&self, _tile: openshard_movement::Tile, _z: i32, _height: i32) -> bool {
             true
         }
     }
 
+    /// A platform three tiles across. Width matters: the stair strip runs
+    /// `1..width`, so a one-tile platform gets none — which is the reference's
+    /// own arithmetic and not worth special-casing, but it does make a degenerate
+    /// fixture prove nothing.
+    fn platform() -> Vec<Component> {
+        (-1..=1)
+            .map(|dx| Component {
+                graphic: WALL,
+                dx,
+                dy: 0,
+                dz: 0,
+                flags: 1,
+            })
+            .collect()
+    }
+
     let now = Instant::now();
     let mut world = world();
     world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Ground));
+    world.state.tiles = Some(tiles_with(&[(WALL, WALL_FLAGS, 20)]));
+    world.state.multis = Some(multis_with(FOUNDATION, platform()));
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];
     let owner = world.state.registry.serial_of(player).unwrap();

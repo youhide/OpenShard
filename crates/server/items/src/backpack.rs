@@ -105,16 +105,14 @@ fn room_for(
                         .get::<Drawn>(entity)
                         .is_some_and(|drawn| drawn.id == graphic && drawn.hue == hue)
             });
-    let facet = state.facet_of(owner);
     let each = if graphic == GOLD_GRAPHIC {
         crate::GOLD_WEIGHT_HUNDREDTHS
     } else {
         u32::from(
             state
-                .facets
-                .get(&facet)
-                .and_then(|facet| facet.terrain.as_deref())
-                .map_or(0, |terrain| terrain.item_weight(graphic)),
+                .tiles
+                .as_deref()
+                .map_or(0, |tiles| tiles.item_weight(graphic.0)),
         ) * 100
     };
     let stones = u16::try_from(each.saturating_mul(u32::from(amount)) / 100).unwrap_or(u16::MAX);

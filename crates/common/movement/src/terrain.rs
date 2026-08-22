@@ -63,13 +63,6 @@ pub struct MapTerrain<M = Map, T = TileData> {
     tiles: T,
     /// Whether water counts as ground. A boat or a fish says yes.
     swimming: bool,
-    /// Every multi the client knows, shared rather than copied per facet — the
-    /// table is a few hundred kilobytes and a facet's terrain is built per facet.
-    ///
-    /// `None` for a terrain built without one, which answers no components at
-    /// all: a shard with no multi table places no houses, the same bargain every
-    /// other client-file method here makes.
-    multis: Option<std::sync::Arc<openshard_uofiles::multi::Multis>>,
 }
 
 impl<M, T> MapTerrain<M, T>
@@ -83,19 +76,10 @@ where
             map,
             tiles,
             swimming: false,
-            multis: None,
         }
     }
 
     /// Let this terrain treat water as standable.
-    /// Give this terrain the client's multi table, so a house's components can
-    /// be resolved from an id.
-    #[must_use]
-    pub fn with_multis(mut self, multis: std::sync::Arc<openshard_uofiles::multi::Multis>) -> Self {
-        self.multis = Some(multis);
-        self
-    }
-
     pub const fn swimming(mut self, swimming: bool) -> Self {
         self.swimming = swimming;
         self
@@ -525,49 +509,10 @@ where
     M: AsRef<Map>,
     T: AsRef<TileData>,
 {
-    // `.0` throughout: `tiledata.mul` is indexed by a bare `u16`, and the ids in
-    // the map's own static blocks never went through a packet, so the newtype
-    // stops here — the client-file boundary — rather than inside the reader.
-    fn item_blocks(&self, graphic: Graphic) -> bool {
-        self.tiles().static_tile(graphic.0).flags.is_blocking()
-    }
-
-    fn item_height(&self, graphic: Graphic) -> u8 {
-        self.tiles().static_tile(graphic.0).height
-    }
-
-    fn multi_components(&self, id: u16) -> &[openshard_uofiles::multi::Component] {
-        self.multis
-            .as_ref()
-            .and_then(|multis| multis.get(id))
-            .map_or(&[], |multi| &multi.components)
-    }
-
     fn land_is_water(&self, tile: Tile) -> bool {
         self.map()
             .land(tile.x, tile.y)
             .is_some_and(|land| self.tiles().land(land.tile.0).flags.is_water())
-    }
-
-    fn item_name(&self, graphic: Graphic) -> Option<&str> {
-        // The tiledata placeholder is "NoName"; an unfilled short table pads with
-        // an empty string. Neither is worth drawing over a clicked item.
-        let name = self.tiles().static_tile(graphic.0).name.as_str();
-        (!name.is_empty() && name != "NoName").then_some(name)
-    }
-
-    fn item_weight(&self, graphic: Graphic) -> u8 {
-        // 255 is tiledata's "immovable" sentinel — a wall, a tree, a signpost —
-        // not a quarter-ton object. Nothing immovable can be in a pack, so it
-        // weighs nothing rather than instantly overloading whoever holds it.
-        match self.tiles().static_tile(graphic.0).weight {
-            255 => 0,
-            weight => weight,
-        }
-    }
-
-    fn item_layer(&self, graphic: Graphic) -> u8 {
-        self.tiles().static_tile(graphic.0).layer
     }
 
     fn can_step(&self, from: Point, to: Point) -> Option<Point> {

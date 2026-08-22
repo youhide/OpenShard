@@ -725,16 +725,11 @@ fn design_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     let multi = multi & !openshard_protocol::wire::MultiId::FLAG;
     // Straight out of the client files, which is the point: a design this shard
     // *invented* is C3's editor, and this one is a shape already known to draw.
-    let Some(components) = state
-        .facet_state(facet)
-        .terrain
-        .as_deref()
-        .map(|terrain| terrain.multi_components(multi).to_vec())
-        .filter(|components| !components.is_empty())
-    else {
+    let components = state.multi_components(multi).to_vec();
+    if components.is_empty() {
         notify(state, actor, "No multi by that id.");
         return;
-    };
+    }
     match openshard_housing::design::redesign(state, actor, house, components) {
         Ok(revision) => notify(
             state,

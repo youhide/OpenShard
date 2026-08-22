@@ -788,52 +788,37 @@ fn a_house_survives_a_restart_with_its_walls() {
     use openshard_movement::Terrain;
     use openshard_uofiles::multi::Component;
 
-    /// A terrain that knows one multi: two walls and a floor. The floor is here
-    /// so the restore is asserted to keep dropping it, not merely to add walls.
     struct Ground;
     const COTTAGE: u16 = 0x64;
     const WALL: u16 = 0x0006;
+    const FLOOR: u16 = 0x0007;
 
     impl Terrain for Ground {
         fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
             Some(to)
         }
-        fn multi_components(&self, id: u16) -> &[Component] {
-            const COMPONENTS: [Component; 3] = [
-                Component {
-                    graphic: WALL,
-                    dx: -1,
-                    dy: 0,
-                    dz: 0,
-                    flags: 1,
-                },
-                Component {
-                    graphic: WALL,
-                    dx: 1,
-                    dy: 0,
-                    dz: 0,
-                    flags: 1,
-                },
-                Component {
-                    graphic: 0x0007,
-                    dx: 0,
-                    dy: 0,
-                    dz: 0,
-                    flags: 1,
-                },
-            ];
-            if id == COTTAGE { &COMPONENTS } else { &[] }
-        }
-        fn item_blocks(&self, graphic: Graphic) -> bool {
-            graphic.0 == WALL
-        }
-        fn item_height(&self, graphic: Graphic) -> u8 {
-            if graphic.0 == WALL { 20 } else { 0 }
-        }
+    }
+
+    /// One multi: two walls and a floor. The floor is here so the restore is
+    /// asserted to keep dropping it, not merely to add walls — and it is the
+    /// tiledata below, not this list, that says which of the three is a wall.
+    fn cottage() -> Vec<Component> {
+        [(WALL, -1), (WALL, 1), (FLOOR, 0)]
+            .into_iter()
+            .map(|(graphic, dx)| Component {
+                graphic,
+                dx,
+                dy: 0,
+                dz: 0,
+                flags: 1,
+            })
+            .collect()
     }
 
     let mut world = World::new(START).with_save_every(0);
     world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Ground));
+    world.state.tiles = Some(super::tests::tiles_with(&[(WALL, super::tests::WALL_FLAGS, 20)]));
+    world.state.multis = Some(super::tests::multis_with(COTTAGE, cottage()));
     let now = Instant::now();
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];
@@ -856,6 +841,8 @@ fn a_house_survives_a_restart_with_its_walls() {
     // The shard comes back up on that save, with the same terrain.
     let mut restored = World::new(START);
     restored.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Ground));
+    restored.state.tiles = Some(super::tests::tiles_with(&[(WALL, super::tests::WALL_FLAGS, 20)]));
+    restored.state.multis = Some(super::tests::multis_with(COTTAGE, cottage()));
     restored.restore_houses(houses, Vec::new());
 
     let back = restored
@@ -1185,7 +1172,7 @@ fn a_boat_survives_a_restart_with_its_deck() {
     use openshard_movement::{Terrain, Tile};
     use openshard_uofiles::multi::Component;
 
-    /// A sea that knows one ship: a hull plank and a deck plank.
+    /// Open water. What a sloop is made of is the shard's multi table.
     struct Sea;
     const SLOOP: u16 = 0x0C;
     const HULL: u16 = 0x3E4E;
@@ -1198,39 +1185,34 @@ fn a_boat_survives_a_restart_with_its_deck() {
         fn land_is_water(&self, _tile: Tile) -> bool {
             true
         }
-        fn multi_components(&self, id: u16) -> &[Component] {
-            const COMPONENTS: [Component; 2] = [
-                Component {
-                    graphic: HULL,
-                    dx: -1,
-                    dy: 0,
-                    dz: 0,
-                    flags: 1,
-                },
-                Component {
-                    graphic: DECK,
-                    dx: 0,
-                    dy: 0,
-                    dz: 0,
-                    flags: 1,
-                },
-            ];
-            if id == SLOOP { &COMPONENTS } else { &[] }
-        }
-        fn item_blocks(&self, graphic: Graphic) -> bool {
-            graphic.0 == HULL
-        }
-        fn item_height(&self, graphic: Graphic) -> u8 {
-            match graphic.0 {
-                HULL => 10,
-                DECK => 3,
-                _ => 0,
-            }
-        }
+    }
+
+    /// A sloop: a hull plank and a deck plank. Which of the two is a wall and how
+    /// tall each stands is the tiledata's answer, not this list's.
+    fn sloop() -> Vec<Component> {
+        [(HULL, -1), (DECK, 0)]
+            .into_iter()
+            .map(|(graphic, dx)| Component {
+                graphic,
+                dx,
+                dy: 0,
+                dz: 0,
+                flags: 1,
+            })
+            .collect()
+    }
+
+    fn sea_tiles() -> std::sync::Arc<openshard_uofiles::tiledata::TileData> {
+        super::tests::tiles_with(&[
+            (HULL, super::tests::WALL_FLAGS, 10),
+            (DECK, openshard_uofiles::tiledata::TileFlags::PLATFORM, 3),
+        ])
     }
 
     let mut world = World::new(START).with_save_every(0);
     world.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Sea));
+    world.state.tiles = Some(sea_tiles());
+    world.state.multis = Some(super::tests::multis_with(SLOOP, sloop()));
     let now = Instant::now();
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];
@@ -1263,6 +1245,8 @@ fn a_boat_survives_a_restart_with_its_deck() {
     // The shard comes back up on that save, with the same sea.
     let mut restored = World::new(START);
     restored.state.facet_state_mut(Facet(0)).terrain = Some(Box::new(Sea));
+    restored.state.tiles = Some(sea_tiles());
+    restored.state.multis = Some(super::tests::multis_with(SLOOP, sloop()));
     restored.restore_boats(boats);
 
     let back = restored

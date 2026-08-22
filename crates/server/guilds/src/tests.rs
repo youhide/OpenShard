@@ -52,6 +52,8 @@ fn world() -> WorldState {
         bus: EventBus::new(),
         facets,
         default_facet: Facet(0),
+        tiles: None,
+        multis: None,
         players: HashMap::new(),
         connections: HashMap::new(),
         seen: HashMap::new(),

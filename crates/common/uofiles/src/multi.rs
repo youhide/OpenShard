@@ -414,6 +414,16 @@ impl Multis {
         self.multis.get(&id)
     }
 
+    /// What multi `id` is made of — the tiles a house draws as, at their offsets
+    /// from its own origin. Empty for an id no client knows.
+    ///
+    /// The whole list, undrawn components included: what a *renderer* skips and
+    /// what a *footprint* covers are two questions. See [`Component::drawn`].
+    #[must_use]
+    pub fn components(&self, id: u16) -> &[Component] {
+        self.get(id).map_or(&[], |multi| &multi.components)
+    }
+
     /// The multi a world item's graphic names, or `None` if the graphic is not a
     /// multi at all.
     ///

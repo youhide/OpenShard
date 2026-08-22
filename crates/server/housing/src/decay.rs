@@ -246,7 +246,7 @@ pub fn demolish(state: &mut WorldState, house: EntityId) -> Option<EntityId> {
     // unblocking the foundation's instead would leave every tile the two do not
     // share blocked by something that is no longer there.
     let shape = crate::design::shape_of_house(state, house);
-    let footprint = crate::footprint_of(state, at, facet, multi, shape.as_deref()).unwrap_or_default();
+    let footprint = crate::footprint_of(state, at, multi, shape.as_deref()).unwrap_or_default();
     crate::unblock(state, house, facet, &footprint);
     take_off_the_ground(state, house);
     crate_entity

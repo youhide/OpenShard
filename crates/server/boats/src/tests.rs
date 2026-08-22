@@ -17,7 +17,8 @@ use openshard_state::harvest::Banks;
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
 use openshard_state::{Boats, Dialogue, FacetState, Gameplay, Obstructions, QuestDefs, Regions};
-use openshard_uofiles::multi::Component;
+use openshard_uofiles::multi::{Component, Multi, Multis};
+use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
 use super::*;
 
@@ -33,9 +34,11 @@ const HULL: u16 = 0x3E4E;
 const DECK: u16 = 0x3E4A;
 
 /// A sea with one strip of shore along y = 0.
-struct Sea {
-    components: Vec<Component>,
-}
+///
+/// The ground only. What a sloop is made of and how tall a hull stands are the
+/// shard's tables — [`multis`] and [`tiledata`] below — because they are facts
+/// about the install rather than about this water.
+struct Sea;
 
 impl Terrain for Sea {
     fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
@@ -53,22 +56,34 @@ impl Terrain for Sea {
     fn can_fit(&self, tile: Tile, _z: i32, _height: i32) -> bool {
         tile.y == 0
     }
+}
 
-    fn multi_components(&self, id: u16) -> &[Component] {
-        if id == SLOOP { &self.components } else { &[] }
-    }
+/// A real tiledata: the hull is impassable and ten tall, the deck is walked on
+/// and three.
+fn tiledata() -> std::sync::Arc<TileData> {
+    let mut tiles = TileData::empty();
+    tiles.set_static_tile(
+        HULL,
+        StaticTile {
+            flags: TileFlags::new(TileFlags::WALL | TileFlags::BLOCK),
+            height: 10,
+            ..StaticTile::default()
+        },
+    );
+    tiles.set_static_tile(
+        DECK,
+        StaticTile {
+            flags: TileFlags::new(TileFlags::PLATFORM),
+            height: 3,
+            ..StaticTile::default()
+        },
+    );
+    std::sync::Arc::new(tiles)
+}
 
-    fn item_blocks(&self, graphic: Graphic) -> bool {
-        graphic.0 == HULL
-    }
-
-    fn item_height(&self, graphic: Graphic) -> u8 {
-        match graphic.0 {
-            HULL => 10,
-            DECK => 3,
-            _ => 0,
-        }
-    }
+/// A real multi table holding the sloop under the one id these tests place.
+fn multis() -> std::sync::Arc<Multis> {
+    std::sync::Arc::new(Multis::of([Multi::new(SLOOP, sloop())]))
 }
 
 fn component(graphic: u16, dx: i16, dy: i16, dz: i16, drawn: bool) -> Component {
@@ -100,7 +115,7 @@ fn a_sea() -> WorldState {
     facets.insert(
         Facet(0),
         FacetState {
-            terrain: Some(Box::new(Sea { components: sloop() })),
+            terrain: Some(Box::new(Sea)),
             coarse: None,
             width: SIZE,
             height: SIZE,
@@ -116,6 +131,8 @@ fn a_sea() -> WorldState {
         bus: EventBus::new(),
         facets,
         default_facet: Facet(0),
+        tiles: Some(tiledata()),
+        multis: Some(multis()),
         players: HashMap::new(),
         connections: HashMap::new(),
         seen: HashMap::new(),

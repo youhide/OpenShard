@@ -8,9 +8,10 @@ put in the way, a rectangle to stay inside, a memo table, and the absence of a
 map. Each was made a *kind of terrain* because the seam was a trait, and each
 one being a kind of terrain is then the argument for the seam being a trait.
 
-The other half of the trait is not terrain either. Six of its fifteen methods
-are a client-file lookup table wearing a terrain's coat: `item_weight(graphic)`
+The other half of the trait was not terrain either. Six of its fifteen methods
+were a client-file lookup table wearing a terrain's coat: `item_weight(graphic)`
 takes no coordinate, reads no cell, and cannot be changed by a placed crate.
+**Those six are gone** — node B below — and the trait is nine map questions.
 
 So this is not a plan to swap `dyn` for a generic. It is the plan to end up
 with `find_path(&MapTerrain, &Overlay, Doors)` — explicit types, imported by
@@ -27,8 +28,8 @@ The routing it feeds:
 
 ## The six, and what each one actually is
 
-Read off the workspace, not remembered. `impl Terrain for` appears at **38
-sites under 28 distinct names**; 32 of those sites are test doubles. These are
+Read off the workspace, not remembered. `impl Terrain for` appears at **37
+sites under 27 distinct names**; 31 of those sites are test doubles. These are
 the rest:
 
 | | | |
@@ -63,19 +64,24 @@ everything is flat, no static has a name or a weight, and no multi exists"*
 ([obstruct.rs:296](../../crates/server/state/src/obstruct.rs#L296)). It was
 fixed by writing seven forwarding methods by hand.
 
-**The client still has it.** `Cluttered` forwards thirteen of the fifteen;
-`multi_components` and `land_is_water` fall into the trait's defaults. Nothing
-on that end asks them yet — the same sentence the server's comment uses about
-its own version — so it is latent rather than live. It is not an argument *for*
-this plan so much as the plan's defect already filed twice.
+**The client had it too, and B is what removed it.** `Cluttered` forwarded
+thirteen of the fifteen; `multi_components` and `land_is_water` fell into the
+trait's defaults, so a caller asking that overlay about a multi was told there
+was none. Nothing on that end asked yet — the same sentence the server's comment
+uses about its own version — so it was latent rather than live.
 
-Two further silent holes on the same end, found in the same reading:
-[`Resources`](../../crates/client/app/src/resources.rs#L78) holds
+Two further silent holes were found in the same reading, and left with the same
+change: [`Resources`](../../crates/client/app/src/resources.rs#L78) holds
 `multis: Option<Arc<Multis>>`, and **not one of the client's four
-`MapTerrain::new` sites calls `with_multis`** — only
-[`boot.rs:662`](../../crates/server/server/src/boot.rs#L662) does. So a client
-`Terrain` answers "no such multi" twice over, by two independent omissions
-neither of which a compiler can see.
+`MapTerrain::new` sites called `with_multis`** — only `boot.rs` did. So a client
+`Terrain` answered "no such multi" twice over, by two independent omissions
+neither of which a compiler could see.
+
+Six of the fifteen no longer exist, so six of the fifteen can no longer be
+forgotten. The remaining nine still can: `Cluttered` writes eight forwards by
+hand and skips `land_is_water`, which is the same shape of hole one method
+wide. **Only E closes the class**, by making the overlay a value nobody has to
+forward at all.
 
 ## The two that are one
 
@@ -130,8 +136,10 @@ constant the shared crate already exports and leaves with the move.
 
 ## What each caller actually wants
 
-The census that the collapse is planned from. `FacetState.terrain` is read at
-**26 production sites in 16 files**, and what they ask for splits four ways:
+The census the collapse was planned from, taken **before B**. `FacetState.terrain`
+was read at **26 production sites in 16 files** — 27 with `runtime.rs`'s own
+design-detail encoder, which the first grep missed — and what they asked for
+split four ways:
 
 | what it wants | who |
 |---|---|
@@ -140,7 +148,12 @@ The census that the collapse is planned from. `FacetState.terrain` is read at
 | **both** | `housing/lib` (×4), `boats/lib` (×3), `world/gm` (×2) |
 | **neither** — only whether a map exists | [`tick/travel.rs:220`](../../crates/server/world/src/tick/travel.rs#L220), which calls `terrain.is_none()` |
 
-Seven files out of sixteen have never wanted a floor. One wants a boolean.
+Seven files out of sixteen had never wanted a floor. One wanted a boolean.
+
+**B settled the first row and half the third.** Those callers read
+`WorldState::tiles` and `WorldState::multi_components` now, and nine of them
+stopped taking a `facet` or a `near: EntityId` they only ever used to walk to
+the table. What is left on `FacetState.terrain` is the map, which is D's.
 
 ### The dependency argument for the seam is already spent
 
@@ -246,7 +259,7 @@ can be worked in either order, or at once:
 ```
  A. Scene grows what the doubles need ─┐
                                        ├─> C. the doubles become Scenes ─┐
- B. the table leaves the trait ────────┴──────────────────────────────────┼─> D. FacetState holds data
+ B. the table leaves the trait ✅ ─────┴──────────────────────────────────┼─> D. FacetState holds data
                                                                           │      MapTerrain is borrows
  0. the facet-0 oracle ───────────────────────────────────────────────────┴─> E. Overlay, and the search
                                                                                  takes explicit types
@@ -301,14 +314,50 @@ Four additions, read off what the doubles actually do:
 (`Ground` in three shapes, `Sea`, `Shop`, `BlindTerrain`, `FrameTerrain`,
 `NamedTerrain`, `RaisedFloorTerrain`) was written to say.
 
-## B — the table leaves the trait
+## B — the table leaves the trait ✅
 
-No incoming edges, and no benchmark: nothing here is on the A\* edge. The
-table's callers are picking an item up, placing decoration, labelling a click.
+**Done.** No incoming edges, and no benchmark: nothing here was on the A\* edge.
+The table's callers are picking an item up, placing decoration, labelling a
+click.
+
+What landed, and where it differs from what this section planned:
+
+- `WorldState` holds `tiles: Option<Arc<TileData>>` and
+  `multis: Option<Arc<Multis>>` — **one pair for the shard, not one per facet**,
+  which is what they always were. `boot.rs` used to *clone the whole tile table
+  into every facet's terrain*; it now reads it once behind an `Arc`.
+- The two methods with a rule in them moved to the file's own reader:
+  `TileData::item_weight` (tiledata's `255` is *immovable*, so it weighs
+  nothing) and `TileData::item_name` (`"NoName"` and the empty pad mean *no
+  name*). `Multis::components` answers the third. The other four are field
+  reads at the call site, which is what `Clutter::of` already did.
+- **Nine call sites stopped asking which facet an item was on.** `item_weight`,
+  `item_layer` and `item_name` were reached through `facet_of(entity)` →
+  `facets[facet]` → `terrain` → the table, so five functions carried a `facet`
+  or a `near: EntityId` parameter that existed only to complete that walk.
+  `sign_spot`, `tiles_of`, `footprint_of`, `doorstep`, `initial_foundation`,
+  `planks_of`, `appraise::item_name` and `tiledata_layer` all lost one.
+- `MapTerrain` lost its `multis` field and `with_multis`: nothing asks a
+  *terrain* what a house is made of any more. It is map, tiledata and
+  `swimming` — which is exactly what its name claims.
+- Eight test doubles stopped answering table questions. Five of them
+  (`housing`'s and `boats`' `Ground`/`Sea`, `world`'s three) now hand the state
+  a real `TileData` and a real `Multis`, built by hand — `TileData::empty()`
+  plus `set_static_tile`, `Multis::of`. `NamedTerrain` is gone outright.
+- Two housing tests that said "a shard with no client files" expressed it by
+  clearing `FacetState::terrain`. They clear `state.multis` and `state.tiles`
+  now, which is what they meant — and the fact that those are two different
+  clearings is the defect this node removes.
+
+515 insertions, 642 deletions across 32 files. `cargo test --workspace` and
+`cargo fmt --all` are clean, and `clippy` warns in the same ten places it warned
+in before.
+
+### What it was, for the record
 
 `item_blocks`, `item_height`, `item_weight`, `item_layer`, `item_name` and
 `multi_components` come off `Terrain`. Five of the six are one-liners over
-`TileData::static_tile` today; the two with policy in them (`item_weight`'s
+`TileData::static_tile`; the two with policy in them (`item_weight`'s
 `255 => 0`, `item_name`'s `"NoName" => None`) keep it, wherever they land.
 
 The consumers name `openshard-uofiles` directly, because [it is already in
@@ -317,8 +366,7 @@ minting a seam instead would be inventing a problem.
 
 What this alone removes: six methods from the trait, and therefore **eighteen
 forwarding method bodies** across `CachedTerrain`, `Cluttered` and
-`LiveTerrain` — including the two `Cluttered` never wrote. It also shrinks or
-retires the doubles that exist only to answer a table question.
+`LiveTerrain` — including the two `Cluttered` never wrote.
 
 **Done when:** no caller reaches a client-file table through `Terrain`, and the
 trait is nine methods.
@@ -470,11 +518,13 @@ each one removes implementors rather than re-typing callers.
 
 Small things this document is the only current record of:
 
-- `Cluttered` does not forward `multi_components` or `land_is_water`; both fall
-  into trait defaults. Latent — nothing on that end asks yet.
-- No client `MapTerrain` is ever given `with_multis`, though `Resources` holds
-  the table. A second, independent reason the client cannot answer about a
-  multi.
+- ~~`Cluttered` does not forward `multi_components` or `land_is_water`~~ — B
+  removed the first by removing the question; `land_is_water` is now forwarded
+  by nobody on that end, because `Cluttered` never wrote it and the map answers
+  for itself.
+- ~~No client `MapTerrain` is ever given `with_multis`~~ — `with_multis` is
+  gone. The client reads `Resources::multis` directly, which is what it did
+  anyway everywhere except through the terrain.
 - `MapTerrain::swimming` is dead in production and is a body's property on a
   world's object.
 - `obstruct.rs`'s `MOBILE_HEIGHT: i32 = 16` duplicates
@@ -509,7 +559,19 @@ Small things this document is the only current record of:
 
 ## Where a session starts
 
-**A or B.** They are the only two nodes with nothing before them, they touch
-disjoint files, and neither needs a client install. B is the one that makes the
-trait smaller by a third in a single mechanical pass; A is the one that unblocks
-everything after it.
+**A.** B is done; A is the only node left with nothing before it, and it is what
+unblocks C and therefore D. It needs no client install and breaks nothing while
+it lands: `Scene` grows four abilities, and only then do the fifteen boxed
+doubles have somewhere to go.
+
+Two of B's findings are worth carrying into A and D:
+
+- The doubles that were replaced in B were replaced by **real tables**, not by
+  `Scene`s — a `TileData::empty()` with three rows written into it. The ones
+  left are about *geometry*, which is what `Scene` is for, so the split between
+  the two fixtures is now clean rather than incidental.
+- `WorldState.tiles` being `Option` is load-bearing and should stay one: a shard
+  with no client files is a real configuration, and the callers differ on what
+  they do about it — no weight is harmless, no layer makes every weapon
+  one-handed, no multi table refuses to place a house. A default table would
+  have hidden all three.

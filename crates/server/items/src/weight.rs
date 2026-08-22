@@ -264,20 +264,20 @@ pub fn total_weight(state: &WorldState, mobile: EntityId, body_weight: u16) -> u
 /// The same against an index built once for several mobiles.
 #[must_use]
 pub fn total_weight_with(state: &WorldState, contents: &Contents, mobile: EntityId, body_weight: u16) -> u16 {
-    let facet = state.facet_of(mobile);
-    let terrain = state
-        .facets
-        .get(&facet)
-        .and_then(|facet| facet.terrain.as_deref());
     let hundredths: u32 = carried_with(state, contents, mobile)
         .into_iter()
         .map(|(graphic, amount)| {
             let each = if graphic == GOLD_GRAPHIC {
                 GOLD_WEIGHT_HUNDREDTHS
             } else {
-                // No map, no tiledata, no encumbrance — the same bargain a
-                // terrainless shard already makes with its step checks.
-                u32::from(terrain.map_or(0, |terrain| terrain.item_weight(graphic))) * 100
+                // No tiledata, no encumbrance — the same bargain a terrainless
+                // shard already makes with its step checks.
+                u32::from(
+                    state
+                        .tiles
+                        .as_deref()
+                        .map_or(0, |tiles| tiles.item_weight(graphic.0)),
+                ) * 100
             };
             each.saturating_mul(u32::from(amount))
         })
@@ -315,16 +315,14 @@ pub fn weight_of(state: &WorldState, item: EntityId) -> u16 {
         return 0;
     };
     let amount = u32::from(state.registry.get::<Amount>(item).map_or(1, |a| a.0.max(1)));
-    let facet = state.facet_of(item);
     let each = if graphic == GOLD_GRAPHIC {
         GOLD_WEIGHT_HUNDREDTHS
     } else {
         u32::from(
             state
-                .facets
-                .get(&facet)
-                .and_then(|facet| facet.terrain.as_deref())
-                .map_or(0, |terrain| terrain.item_weight(graphic)),
+                .tiles
+                .as_deref()
+                .map_or(0, |tiles| tiles.item_weight(graphic.0)),
         ) * 100
     };
     u16::try_from(each.saturating_mul(amount) / 100).unwrap_or(u16::MAX)

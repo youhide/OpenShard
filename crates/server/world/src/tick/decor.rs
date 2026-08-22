@@ -159,11 +159,11 @@ impl World {
         // beneath it (the Britain-library bug).
         let height = self
             .state
-            .facet_state(facet)
-            .terrain
+            .tiles
             .as_deref()
-            .filter(|t| t.item_blocks(graphic))
-            .map(|t| t.item_height(graphic));
+            .map(|tiles| tiles.static_tile(graphic.0))
+            .filter(|tile| tile.flags.is_blocking())
+            .map(|tile| tile.height);
         if let Some(height) = height {
             self.state
                 .facet_state_mut(facet)

@@ -96,7 +96,7 @@ pub fn equip_item(
         bounce(state, connection, held, DragCancelReason::Other);
         return;
     };
-    if hands_conflict(state, wearer_serial, wearer, drawn.id, layer) {
+    if hands_conflict(state, wearer_serial, drawn.id, layer) {
         bounce(state, connection, held, DragCancelReason::Other);
         return;
     }
@@ -116,23 +116,18 @@ pub fn equip_item(
 /// The two protocol hand layers are not two independent weapon slots. A
 /// one-handed weapon may share `TwoHanded` with a shield, but a weapon in that
 /// layer is two-handed and therefore excludes anything in `OneHanded`.
-fn hands_conflict(
-    state: &WorldState,
-    mobile: Serial,
-    wearer: EntityId,
-    graphic: Graphic,
-    layer: Layer,
-) -> bool {
+fn hands_conflict(state: &WorldState, mobile: Serial, graphic: Graphic, layer: Layer) -> bool {
     let Some(weapon) = weapon_data(graphic) else {
         return false;
     };
     // The client proposes a layer, but tiledata (and the handful of weapon
     // class overrides) decides where the weapon actually belongs.
+    // No tiledata, no layer, so every weapon is one-handed — the same bargain a
+    // terrainless shard makes by allowing every step.
     let tile_layer = state
-        .facets
-        .get(&state.facet_of(wearer))
-        .and_then(|facet| facet.terrain.as_deref())
-        .map_or(Layer(0), |terrain| Layer(terrain.item_layer(graphic)));
+        .tiles
+        .as_deref()
+        .map_or(Layer(0), |tiles| Layer(tiles.static_tile(graphic.0).layer));
     let expected = weapon_layer(weapon, tile_layer);
     if expected != Layer(0) && expected != layer {
         return true;

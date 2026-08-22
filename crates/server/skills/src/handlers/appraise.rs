@@ -85,7 +85,7 @@ pub(super) fn arms_lore(state: &mut WorldState, actor: EntityId, target: EntityI
         // weapon classes insist otherwise. `item_layer` needs the facet's terrain,
         // and a shard with no client files has none — there its weapons all read
         // one-handed, the same bargain its terrain makes by allowing every step.
-        let tiledata_layer = tiledata_layer(state, actor, graphic);
+        let tiledata_layer = tiledata_layer(state, graphic);
         let hand = u32::from(weapon_layer(weapon, tiledata_layer) == LAYER_TWO_HANDED);
         let line = match weapon.kind {
             // A bow's line does not distinguish the hands, so the offset is not
@@ -149,7 +149,7 @@ pub(super) fn item_id(state: &mut WorldState, actor: EntityId, target: EntityId)
         }
         return;
     }
-    let Some(name) = item_name(state, actor, target) else {
+    let Some(name) = item_name(state, target) else {
         state.private_overhead_cliloc(actor, actor, ITEM_ID_FAILED, "");
         return;
     };
@@ -163,31 +163,30 @@ pub(super) fn item_id(state: &mut WorldState, actor: EntityId, target: EntityId)
 
 /// What an item is called: its own label if it carries one (vendor stock, a named
 /// corpse), else the tiledata name the client would draw on a single click.
-pub(super) fn item_name(state: &WorldState, near: EntityId, item: EntityId) -> Option<String> {
+pub(super) fn item_name(state: &WorldState, item: EntityId) -> Option<String> {
     if let Some(name) = state.registry.get::<Name>(item) {
         return Some(name.0.clone());
     }
     let graphic = state.registry.get::<Drawn>(item)?.id;
-    let facet = state.facet_of(near);
+    // The shard's table, not the facet the looker stands on: what a graphic is
+    // called does not change when it is carried across a moongate.
     state
-        .facets
-        .get(&facet)
-        .and_then(|facet| facet.terrain.as_deref())
-        .and_then(|terrain| terrain.item_name(graphic))
+        .tiles
+        .as_deref()
+        .and_then(|tiles| tiles.item_name(graphic.0))
         .map(str::to_owned)
 }
 
 /// The paperdoll layer `graphic` carries in the client's own tiledata, or `0` on a
 /// shard with no client files.
 ///
-/// The wrap from `Terrain::item_layer`'s byte to a [`Layer`] happens here: the
-/// terrain trait lives in `openshard_movement`, below `protocol`, and reads the
-/// byte out of `tiledata.mul` — see `docs/protocol_newtypes.md` N4.
-fn tiledata_layer(state: &WorldState, near: EntityId, graphic: Graphic) -> Layer {
-    let facet = state.facet_of(near);
+/// The wrap from tiledata's *quality* byte to a [`Layer`] happens here:
+/// `openshard-uofiles` reads the client's files and is below `protocol`, so it
+/// hands out the byte and this is where it becomes a layer — see
+/// `docs/protocol_newtypes.md` N4.
+fn tiledata_layer(state: &WorldState, graphic: Graphic) -> Layer {
     state
-        .facets
-        .get(&facet)
-        .and_then(|facet| facet.terrain.as_deref())
-        .map_or(Layer(0), |terrain| Layer(terrain.item_layer(graphic)))
+        .tiles
+        .as_deref()
+        .map_or(Layer(0), |tiles| Layer(tiles.static_tile(graphic.0).layer))
 }

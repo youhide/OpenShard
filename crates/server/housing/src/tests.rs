@@ -22,7 +22,8 @@ use openshard_protocol::world::{Facet, Point};
 use openshard_state::harvest::Banks;
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
-use openshard_uofiles::multi::Component;
+use openshard_uofiles::multi::{Component, Multi, Multis};
+use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
 use super::*;
 use openshard_state::{Dialogue, FacetState, Gameplay, QuestDefs, Regions};
@@ -42,12 +43,14 @@ const WALL: u16 = 0x0006;
 /// be sealed shut from the inside.
 const FLOOR: u16 = 0x0007;
 
-/// A terrain that knows one multi and one impassable graphic.
+/// Ground that answers only about the ground.
 ///
 /// `can_step` allows everything, so a refused step in a test below is the
-/// obstruction index refusing it and never the ground.
+/// obstruction index refusing it and never the terrain. What a house is *made
+/// of* is no longer asked here: the multi table and the tiledata are the shard's,
+/// built by [`tiledata`] and [`multis`] below, and a real one of each is cheaper
+/// to write than a double that had to be trusted to agree with them.
 struct Ground {
-    components: Vec<Component>,
     /// What every tile's land id is. `0` is nothing in particular; a road id
     /// makes the whole facet a street.
     land: u16,
@@ -68,24 +71,38 @@ impl Terrain for Ground {
     fn can_fit(&self, _tile: Tile, _z: i32, _height: i32) -> bool {
         self.fits
     }
+}
 
-    fn multi_components(&self, id: u16) -> &[Component] {
-        // The same shape answers for the cottage and for the one foundation id
-        // the fixture knows, so a test can ask either without a second terrain.
-        if id == COTTAGE || id == FOUNDATION {
-            &self.components
-        } else {
-            &[]
-        }
-    }
+/// A real tiledata with the fixture's two graphics in it: the wall is impassable
+/// and twenty tall, the floor is neither.
+fn tiledata() -> std::sync::Arc<TileData> {
+    let mut tiles = TileData::empty();
+    tiles.set_static_tile(
+        WALL,
+        StaticTile {
+            flags: TileFlags::new(TileFlags::WALL | TileFlags::BLOCK),
+            height: 20,
+            ..StaticTile::default()
+        },
+    );
+    tiles.set_static_tile(
+        FLOOR,
+        StaticTile {
+            flags: TileFlags::new(TileFlags::FLOOR),
+            height: 0,
+            ..StaticTile::default()
+        },
+    );
+    std::sync::Arc::new(tiles)
+}
 
-    fn item_blocks(&self, graphic: Graphic) -> bool {
-        graphic.0 == WALL
-    }
-
-    fn item_height(&self, graphic: Graphic) -> u8 {
-        if graphic.0 == WALL { 20 } else { 0 }
-    }
+/// A real multi table holding `components` under both ids the fixture places, so
+/// a test can ask for the cottage or the foundation without a second table.
+fn multis(components: Vec<Component>) -> std::sync::Arc<Multis> {
+    std::sync::Arc::new(Multis::of([
+        Multi::new(COTTAGE, components.clone()),
+        Multi::new(FOUNDATION, components),
+    ]))
 }
 
 fn component(graphic: u16, dx: i16, dy: i16, dz: i16, drawn: bool) -> Component {
@@ -143,11 +160,7 @@ fn ground_of(components: Vec<Component>, land: u16, fits: bool) -> WorldState {
     facets.insert(
         Facet(0),
         FacetState {
-            terrain: Some(Box::new(Ground {
-                components,
-                land,
-                fits,
-            })),
+            terrain: Some(Box::new(Ground { land, fits })),
             coarse: None,
             width: SIZE,
             height: SIZE,
@@ -163,6 +176,8 @@ fn ground_of(components: Vec<Component>, land: u16, fits: bool) -> WorldState {
         bus: EventBus::new(),
         facets,
         default_facet: Facet(0),
+        tiles: Some(tiledata()),
+        multis: Some(multis(components)),
         players: HashMap::new(),
         connections: HashMap::new(),
         seen: HashMap::new(),
@@ -400,7 +415,7 @@ fn unblocking_gives_the_ground_back() {
     let (actor, owner) = an_actor(&mut state);
     let at = Point::new(10, 10, 0);
     let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
-    let footprint = footprint_of(&state, at, Facet(0), COTTAGE, None).expect("the same footprint");
+    let footprint = footprint_of(&state, at, COTTAGE, None).expect("the same footprint");
 
     unblock(&mut state, house, Facet(0), &footprint);
     assert!(
@@ -482,11 +497,17 @@ fn a_house_keeps_a_yard_clear_of_other_houses() {
 }
 
 /// A shard with no client files places nothing rather than placing something
-/// with no walls — the same bargain every other `Terrain` method makes.
+/// with no walls — the same bargain the terrain makes by allowing every step.
+///
+/// **The multi table and not the terrain.** This used to clear
+/// `FacetState::terrain`, back when a multi's components were asked of the
+/// ground it stood on. They are the shard's table now, so a facet with a map and
+/// no multi table is expressible — and it is this refusal, not the ground, that
+/// answers for it.
 #[test]
-fn a_world_with_no_terrain_has_no_houses() {
+fn a_world_with_no_multi_table_has_no_houses() {
     let mut state = world_with(cottage());
-    state.facet_state_mut(Facet(0)).terrain = None;
+    state.multis = None;
     let (actor, owner) = an_actor(&mut state);
     assert_eq!(
         place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner),
@@ -775,7 +796,7 @@ fn a_ban_puts_out_whoever_is_already_inside() {
     assert_eq!(where_of(friend), at, "a friend was put out");
     assert_ne!(where_of(unwelcome), at, "the banned player stayed inside");
     // Just outside the box's west edge, which is where the doorstep is.
-    assert_eq!(where_of(unwelcome), doorstep(&state, at, Facet(0), COTTAGE));
+    assert_eq!(where_of(unwelcome), doorstep(&state, at, COTTAGE));
 }
 
 /// The sign hangs on the box's west-south corner, seven above the house's z.
@@ -793,10 +814,7 @@ fn a_house_hangs_its_sign_on_the_corner_of_its_box() {
     let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
     let serial = state.registry.serial_of(house).expect("the house's serial");
 
-    assert_eq!(
-        sign_spot(&state, at, Facet(0), COTTAGE, None),
-        Some(Point::new(9, 11, 7))
-    );
+    assert_eq!(sign_spot(&state, at, COTTAGE, None), Some(Point::new(9, 11, 7)));
     let signs: Vec<_> = state
         .registry
         .query::<openshard_state::components::HouseSign>()
@@ -833,7 +851,7 @@ fn a_house_with_no_multi_table_hangs_no_sign() {
     let mut state = world_with(cottage());
     let owner = an_owner(&mut state);
     assert_eq!(
-        sign_spot(&state, Point::new(10, 10, 0), Facet(0), COTTAGE + 1, None),
+        sign_spot(&state, Point::new(10, 10, 0), COTTAGE + 1, None),
         None,
         "an id the table does not hold got a spot anyway"
     );
@@ -929,7 +947,7 @@ fn a_house_gets_its_allowance_from_its_own_footprint() {
     let at = Point::new(10, 10, 0);
     let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
 
-    let tiles = tiles_of(&state, at, Facet(0), COTTAGE, None).len();
+    let tiles = tiles_of(&state, at, COTTAGE, None).len();
     assert_eq!(tiles, 5, "the cottage draws five tiles");
     assert_eq!(
         state.registry.get::<House>(house).map(|entry| entry.lockdowns),
@@ -1829,7 +1847,8 @@ fn a_foundation_blocks_where_its_design_says_and_not_where_its_platform_does() {
 #[test]
 fn a_shard_with_no_client_files_still_refuses_a_foundation() {
     let mut state = world_with(cottage());
-    state.facet_state_mut(Facet(0)).terrain = None;
+    state.multis = None;
+    state.tiles = None;
     let (actor, owner) = an_actor(&mut state);
 
     assert_eq!(

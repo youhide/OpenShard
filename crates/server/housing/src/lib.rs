@@ -111,8 +111,9 @@ impl Refusal {
     }
 }
 
-/// Every tile a component list draws on, deduped — the shape `tiles_of` returns
-/// once it has a list, so the two branches cannot answer differently.
+/// Every tile a component list draws on, deduped — what [`tiles_of`] is once it
+/// has a list, kept apart from it so a caller that already holds a component list
+/// need not go back through the multi table to lay it on the ground.
 fn drawn_tiles(components: &[Component], at: Point) -> Vec<Tile> {
     let mut out: Vec<Tile> = components
         .iter()
@@ -135,19 +136,15 @@ fn drawn_tiles(components: &[Component], at: Point) -> Vec<Tile> {
 /// same choice — so it is written once rather than copied into each and left to
 /// drift apart. See `docs/customisation.md`'s C2.
 ///
-/// `None` is the terrain's fixed multi: every classic house, still a borrow, so
-/// the common path allocates nothing. `Some` is this house's own design.
+/// `None` is the shard's fixed multi table: every classic house, still a borrow,
+/// so the common path allocates nothing. `Some` is this house's own design.
 ///
 /// `Option` rather than a modelled state, and `style.md`'s rule that an `Option`
 /// means *absent* and not *unknown* is what makes that right: a classic house
 /// genuinely has no design. A foundation with no design is a different thing, and
 /// C3 makes it unrepresentable rather than letting it hide in here.
-fn shape_of<'a>(
-    design: Option<&'a [Component]>,
-    terrain: &'a (dyn openshard_movement::Terrain + Send + Sync),
-    multi: u16,
-) -> &'a [Component] {
-    design.unwrap_or_else(|| terrain.multi_components(multi))
+fn shape_of<'a>(design: Option<&'a [Component]>, state: &'a WorldState, multi: u16) -> &'a [Component] {
+    design.unwrap_or_else(|| state.multi_components(multi))
 }
 
 /// One tile of a house's footprint, already in world coordinates.
@@ -216,21 +213,21 @@ pub fn place(
     // stands only where the design cannot be built — a shard with no client
     // files has no platform to build one out of either.
     let design = if FOUNDATION_IDS.contains(&multi) {
-        match design::initial_foundation(state, facet, multi) {
+        match design::initial_foundation(state, multi) {
             Some(design) => Some(design),
             None => return Err(Refusal::NeedsCustomisation),
         }
     } else {
         None
     };
-    let footprint = footprint_of(state, at, facet, multi, design.as_deref())?;
+    let footprint = footprint_of(state, at, multi, design.as_deref())?;
     if footprint.is_empty() {
         return Err(Refusal::DrawsNothing);
     }
     // Every tile the house *covers*, hoisted: the region check walks it, and so
     // does the lockdown allowance below. One derivation, two readers — it was
     // already being computed here, one line further down.
-    let covered = tiles_of(state, at, facet, multi, design.as_deref());
+    let covered = tiles_of(state, at, multi, design.as_deref());
     // The four judgements about the plot, and the one row of D10's table staff
     // skip. Everything above this stays: those refusals are facts about the id
     // or a shard in trouble, and a bypass that reopened `NeedsCustomisation`
@@ -467,16 +464,9 @@ const SIGN_Z: i16 = 7;
 /// a bracket and does nothing, and one more entity per house is one more to
 /// save, restore and take down.
 #[must_use]
-pub fn sign_spot(
-    state: &WorldState,
-    at: Point,
-    facet: Facet,
-    multi: u16,
-    design: Option<&[Component]>,
-) -> Option<Point> {
+pub fn sign_spot(state: &WorldState, at: Point, multi: u16, design: Option<&[Component]>) -> Option<Point> {
     let multi = multi & !MULTI_FLAG;
-    let terrain = state.facet_state(facet).terrain.as_deref()?;
-    let box_ = openshard_uofiles::multi::bounds(shape_of(design, terrain, multi))?;
+    let box_ = openshard_uofiles::multi::bounds(shape_of(design, state, multi))?;
     let x = u16::try_from(i32::from(at.x) + i32::from(box_.min_x)).ok()?;
     let y = u16::try_from(i32::from(at.y) + i32::from(box_.max_y)).ok()?;
     let z = i8::try_from(i32::from(at.z) + i32::from(SIGN_Z)).ok()?;
@@ -500,7 +490,7 @@ pub fn hang_sign(
     // The house's own design if it has one: the sign hangs off the box's corner
     // and a designed house's box is not the foundation's.
     let shape = design::shape_of_house(state, house);
-    let spot = sign_spot(state, at, facet, multi, shape.as_deref())?;
+    let spot = sign_spot(state, at, multi, shape.as_deref())?;
     let (sign, _) = state
         .registry
         .spawn_with_serial(openshard_protocol::serial::SerialKind::Item)
@@ -546,13 +536,7 @@ pub fn adopt_doors(state: &mut WorldState, house: EntityId, facet: Facet, at: Po
     // *doorway*, which is by construction a gap in the walls — the one place the
     // footprint does not reach. Using it here adopted nothing, which a test
     // caught rather than a player.
-    let area = tiles_of(
-        state,
-        at,
-        facet,
-        multi,
-        design::shape_of_house(state, house).as_deref(),
-    );
+    let area = tiles_of(state, at, multi, design::shape_of_house(state, house).as_deref());
     let inside: Vec<EntityId> = state
         .registry
         .query::<openshard_state::components::Door>()
@@ -582,8 +566,8 @@ pub fn adopt_doors(state: &mut WorldState, house: EntityId, facet: Facet, at: Po
 /// hand-written table, alongside the doors and the sign offsets — and "just
 /// outside, on the side the box ends" is the same intent from data that exists.
 #[must_use]
-pub fn doorstep(state: &WorldState, at: Point, facet: Facet, multi: u16) -> Point {
-    let tiles = tiles_of(state, at, facet, multi, None);
+pub fn doorstep(state: &WorldState, at: Point, multi: u16) -> Point {
+    let tiles = tiles_of(state, at, multi, None);
     let west = tiles.iter().map(|tile| tile.x).min().unwrap_or(at.x);
     Point::new(west.saturating_sub(1), at.y, at.z)
 }
@@ -604,8 +588,8 @@ pub fn evict_the_banned(state: &mut WorldState, house: EntityId) -> Vec<EntityId
         return Vec::new();
     };
     let facet = state.facet_of(house);
-    let area = tiles_of(state, at, facet, entry.multi, None);
-    let out = doorstep(state, at, facet, entry.multi);
+    let area = tiles_of(state, at, entry.multi, None);
+    let out = doorstep(state, at, entry.multi);
 
     let caught: Vec<EntityId> = state
         .registry
@@ -634,32 +618,12 @@ pub fn evict_the_banned(state: &mut WorldState, house: EntityId) -> Vec<EntityId
 /// tile" and "does this house block this tile" are two questions with two
 /// answers.
 #[must_use]
-pub fn tiles_of(
-    state: &WorldState,
-    at: Point,
-    facet: Facet,
-    multi: u16,
-    design: Option<&[Component]>,
-) -> Vec<Tile> {
+pub fn tiles_of(state: &WorldState, at: Point, multi: u16, design: Option<&[Component]>) -> Vec<Tile> {
     let multi = multi & !MULTI_FLAG;
-    let Some(terrain) = state.facet_state(facet).terrain.as_deref() else {
-        // A designed house still has a shape without a terrain, but no caller
-        // has one to give yet — C1's `.hdesign` is what changes that, and it
-        // will read this branch again.
-        return design.map_or_else(Vec::new, |design| drawn_tiles(design, at));
-    };
-    let mut out: Vec<Tile> = shape_of(design, terrain, multi)
-        .iter()
-        .filter(|component| component.drawn())
-        .filter_map(|component| {
-            let x = u16::try_from(i32::from(at.x) + i32::from(component.dx)).ok()?;
-            let y = u16::try_from(i32::from(at.y) + i32::from(component.dy)).ok()?;
-            Some(Tile::new(x, y))
-        })
-        .collect();
-    out.sort_unstable_by_key(|tile| (tile.x, tile.y));
-    out.dedup();
-    out
+    // A designed house has a shape whether or not the shard has a multi table;
+    // one built from a classic multi has none without it. `shape_of` is what says
+    // which, so the two cases need no branch here.
+    drawn_tiles(shape_of(design, state, multi), at)
 }
 
 /// The house standing over `at`, if any.
@@ -679,7 +643,7 @@ pub fn house_at(state: &WorldState, at: Point, facet: Facet) -> Option<EntityId>
                 .registry
                 .get::<Position>(*entity)
                 .is_some_and(|&Position(origin)| {
-                    tiles_of(state, origin, facet, house.multi, None).contains(&Tile::new(at.x, at.y))
+                    tiles_of(state, origin, house.multi, None).contains(&Tile::new(at.x, at.y))
                 })
         })
         .map(|(entity, _)| entity)
@@ -715,24 +679,26 @@ pub fn unblock(state: &mut WorldState, entity: EntityId, facet: Facet, footprint
 pub fn footprint_of(
     state: &WorldState,
     at: Point,
-    facet: Facet,
     multi: u16,
     design: Option<&[Component]>,
 ) -> Result<Vec<Footprint>, Refusal> {
     let multi = multi & !MULTI_FLAG;
-    let Some(terrain) = state.facet_state(facet).terrain.as_deref() else {
-        return Err(Refusal::NoSuchMulti);
-    };
-    let components = shape_of(design, terrain, multi);
+    let components = shape_of(design, state, multi);
     if components.is_empty() {
+        // No multi table and no design: a shard with no client files knows about
+        // no houses, which is the refusal it used to reach by having no terrain.
         return Err(Refusal::NoSuchMulti);
     }
+    // A house's walls are tiledata's answer about each component's art, and that
+    // table is the shard's rather than the facet's — the ground a house stands on
+    // is asked about separately, in `ground_under`.
+    let tiledata = state.tiles.as_deref();
     let mut out = Vec::new();
     for component in components.iter().filter(|c| c.drawn()) {
         let graphic = Graphic(component.graphic);
         // Only what actually stops somebody. A floor tile and a roof are drawn and
         // walked over; folding them in would seal a house shut from the inside.
-        if !terrain.item_blocks(graphic) {
+        if !tiledata.is_some_and(|tiles| tiles.static_tile(graphic.0).flags.is_blocking()) {
             continue;
         }
         let x = i32::from(at.x) + i32::from(component.dx);
@@ -747,7 +713,9 @@ pub fn footprint_of(
         out.push(Footprint {
             tile: Tile::new(x, y),
             z,
-            height: terrain.item_height(graphic).max(1),
+            height: tiledata
+                .map_or(0, |tiles| tiles.static_tile(graphic.0).height)
+                .max(1),
         });
     }
     Ok(out)
@@ -861,7 +829,7 @@ fn check_yard(state: &WorldState, facet: Facet, footprint: &[Footprint]) -> Resu
         let Some(&Position(at)) = state.registry.get::<Position>(entity) else {
             continue;
         };
-        let Ok(theirs) = footprint_of(state, at, facet, house.multi, None) else {
+        let Ok(theirs) = footprint_of(state, at, house.multi, None) else {
             continue;
         };
         for other in &theirs {

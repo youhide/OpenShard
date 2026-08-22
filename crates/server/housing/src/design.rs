@@ -81,10 +81,9 @@ mod floor {
 /// a foundation whose own platform cannot be read is one there is nothing to
 /// build a design out of.
 #[must_use]
-pub fn initial_foundation(state: &WorldState, facet: Facet, multi: u16) -> Option<Vec<Component>> {
+pub fn initial_foundation(state: &WorldState, multi: u16) -> Option<Vec<Component>> {
     let multi = multi & !crate::MULTI_FLAG;
-    let terrain = state.facet_state(facet).terrain.as_deref()?;
-    let platform = terrain.multi_components(multi);
+    let platform = state.multi_components(multi);
     if platform.is_empty() {
         return None;
     }
@@ -215,8 +214,8 @@ pub fn redesign(
     let facet = state.facet_of(house);
 
     // First, and before anything comes down.
-    let footprint = crate::footprint_of(state, at, facet, multi, Some(&components))
-        .map_err(|_| DesignRefusal::DrawsNothing)?;
+    let footprint =
+        crate::footprint_of(state, at, multi, Some(&components)).map_err(|_| DesignRefusal::DrawsNothing)?;
     if footprint.is_empty() {
         return Err(DesignRefusal::DrawsNothing);
     }
@@ -226,7 +225,7 @@ pub fn redesign(
     // entity that no longer stands there — the sort of leak nothing reports and
     // a player finds by walking into thin air.
     let old = shape_of_house(state, house);
-    let old_footprint = crate::footprint_of(state, at, facet, multi, old.as_deref()).unwrap_or_default();
+    let old_footprint = crate::footprint_of(state, at, multi, old.as_deref()).unwrap_or_default();
     crate::unblock(state, house, facet, &old_footprint);
 
     let revision = revision(state, house).wrapping_add(1);
@@ -240,7 +239,7 @@ pub fn redesign(
 
     // The allowance is area, and the area changed. Recounted here for the same
     // reason `place` computes it once: this is the moment the shape is in hand.
-    let covered = crate::tiles_of(state, at, facet, multi, shape_of_house(state, house).as_deref());
+    let covered = crate::tiles_of(state, at, multi, shape_of_house(state, house).as_deref());
     let lockdowns = u32::try_from(crate::storage::allowance_for(covered.len()).lockdowns).unwrap_or(u32::MAX);
     if let Some(entry) = state.registry.get_mut::<House>(house) {
         entry.lockdowns = lockdowns;

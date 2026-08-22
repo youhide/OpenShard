@@ -262,6 +262,8 @@ impl World {
                 bus: EventBus::new(),
                 facets,
                 default_facet: Facet(DEFAULT_FACET),
+                tiles: None,
+                multis: None,
                 players: HashMap::new(),
                 connections: HashMap::new(),
                 seen: HashMap::new(),
@@ -376,6 +378,25 @@ impl World {
     #[must_use]
     pub const fn rng_state(&self) -> u64 {
         self.state.rng.state()
+    }
+
+    /// Give the shard the client's static tables: what every graphic is, and what
+    /// every multi is made of.
+    ///
+    /// One pair for the whole shard rather than one per facet, because that is
+    /// what they are — an install has one `tiledata.mul`, and a house does not
+    /// change shape between Felucca and Trammel. A shard left without them runs
+    /// with no encumbrance, no layers, no names and no houses, which is the same
+    /// bargain a shard with no map makes about walking.
+    #[must_use]
+    pub fn with_tiles(
+        mut self,
+        tiles: std::sync::Arc<openshard_uofiles::tiledata::TileData>,
+        multis: Option<std::sync::Arc<openshard_uofiles::multi::Multis>>,
+    ) -> Self {
+        self.state.tiles = Some(tiles);
+        self.state.multis = multis;
+        self
     }
 
     /// Give the default facet a map.

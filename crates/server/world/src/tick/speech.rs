@@ -178,13 +178,11 @@ impl World {
             let Some(&Drawn { id, .. }) = self.state.registry.get::<Drawn>(target) else {
                 return;
             };
-            let facet = self.state.facet_of(target);
             let Some(name) = self
                 .state
-                .facet_state(facet)
-                .terrain
+                .tiles
                 .as_deref()
-                .and_then(|terrain| terrain.item_name(id))
+                .and_then(|tiles| tiles.item_name(id.0))
             else {
                 return;
             };

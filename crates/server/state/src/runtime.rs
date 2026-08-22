@@ -13,6 +13,7 @@
 //! nothing about when it changes or how it is saved.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use openshard_commands::StaffCommand;
 use openshard_config::CombatEra;
@@ -570,6 +571,28 @@ pub struct WorldState {
     /// The facet a new character spawns on, and the one anything asking for a
     /// facet it does not have falls back to.
     pub default_facet: Facet,
+    /// What the client's `tiledata.mul` says about a graphic: whether it blocks,
+    /// how tall it is, what it weighs, which hand it is held in, what it is
+    /// called.
+    ///
+    /// **One table for the shard, not one per facet.** It used to be reached
+    /// through [`FacetState::terrain`], which meant an item's weight was found by
+    /// first asking which facet the item was standing on — a lookup with nothing
+    /// to do with the answer, and one that returned nothing at all for an item in
+    /// a pack on a mapless facet.
+    ///
+    /// `None` is a shard running with no client files: no encumbrance, no layers,
+    /// no names, the same bargain its terrain makes by allowing every step. The
+    /// callers say what they do about that where they look the table up, because
+    /// the answer differs — no weight is harmless, no layer makes every weapon
+    /// one-handed.
+    pub tiles: Option<Arc<openshard_uofiles::tiledata::TileData>>,
+    /// Every multi the client knows: what a house or a ship is made of.
+    ///
+    /// Beside [`tiles`](Self::tiles) and for the same reason — a multi's
+    /// components are a fact about the install, not about a facet. Read through
+    /// [`multi_components`](Self::multi_components).
+    pub multis: Option<Arc<openshard_uofiles::multi::Multis>>,
     /// Which entity a connection is driving.
     pub players: HashMap<ConnectionId, EntityId>,
     /// Every connection the world is holding, playing a character or not.
@@ -945,6 +968,18 @@ impl WorldState {
             .get::<Facet>(entity)
             .copied()
             .unwrap_or(self.default_facet)
+    }
+
+    /// What multi `id` is made of, or nothing at all for a shard with no multi
+    /// table.
+    ///
+    /// An accessor rather than a field read because the empty answer is a bargain
+    /// worth stating once — a shard with no client files places no houses — and
+    /// because borrowing a slice out of an `Option<Arc<_>>` is a dance no caller
+    /// should repeat. See [`multis`](Self::multis).
+    #[must_use]
+    pub fn multi_components(&self, id: u16) -> &[openshard_uofiles::multi::Component] {
+        self.multis.as_ref().map_or(&[], |multis| multis.components(id))
     }
 
     /// The state of a facet the world is known to have.
@@ -1937,8 +1972,10 @@ impl WorldState {
 
         let design = self.registry.get::<crate::components::HouseDesign>(house)?;
         let serial = self.registry.serial_of(house)?;
-        let facet = self.facet_of(house);
-        let terrain = self.facet_state(facet).terrain.as_deref()?;
+        // The table, not the facet the house stands on: how tall a graphic is has
+        // nothing to do with where it was placed. No tiledata, no picture — a
+        // design whose floors cannot be told from its walls is not worth sending.
+        let tiledata = self.tiles.as_deref()?;
 
         // Only what the client draws. An undrawn component is not part of the
         // picture, and the signature tile every multi opens with is one.
@@ -1967,8 +2004,8 @@ impl WorldState {
             }
             // A *floor* is a static with no height, which is `tiledata`'s answer
             // and the one thing `openshard-protocol` refused to guess — C1
-            // recorded the seam and this is the caller that holds a `Terrain`.
-            .encode(|graphic| terrain.item_height(graphic) == 0),
+            // recorded the seam and this is the caller that holds the table.
+            .encode(|graphic| tiledata.static_tile(graphic.0).height == 0),
         )
     }
 

@@ -36,10 +36,16 @@ pub enum Walk {
 
 /// Whether a mobile may stand somewhere.
 ///
-/// A trait because the answer needs the map, the statics, the multis and every
-/// other mobile, and this crate should know about none of them. `openshard-world`
-/// implements it over the client's files; [`OpenWorld`] is the answer when there
-/// are none.
+/// Every question here takes a **coordinate** and is answered by the map with
+/// whatever the live world has laid over it. That is the whole subject: what a
+/// graphic weighs, how tall it is or which hand it is held in used to be asked
+/// here too, and none of those could be changed by a placed crate — they were a
+/// `tiledata.mul` lookup wearing a terrain's coat, and they now go to the table
+/// directly (`WorldState::tiles`, `openshard_uofiles::tiledata::TileData`).
+///
+/// A trait for now, and not for much longer: five of its six implementors are an
+/// *action over* a terrain rather than a terrain — see `docs/map/terrain_seam.md`.
+/// [`OpenWorld`] is the answer when there is no map at all.
 pub trait Terrain {
     /// Can a mobile at `from` step to `to`?
     ///
@@ -114,41 +120,6 @@ pub trait Terrain {
         true
     }
 
-    /// Whether static art `graphic` is impassable by its tiledata flags — what
-    /// decides if a *placed* copy of it should block the tile it stands on. A
-    /// terrain with no tiledata blocks nothing.
-    fn item_blocks(&self, _graphic: Graphic) -> bool {
-        false
-    }
-
-    /// The height of static art `graphic` by its tiledata, so a *placed* copy
-    /// blocks only the vertical span it occupies — an upper-floor wall does not
-    /// seal the ground beneath it. A terrain with no tiledata reports zero.
-    fn item_height(&self, _graphic: Graphic) -> u8 {
-        0
-    }
-
-    /// What multi `id` is made of — the tiles a house draws as, at their offsets
-    /// from its own origin. Empty for a terrain that has no multi table, and for
-    /// an id no client knows.
-    ///
-    /// # Why this is on the terrain
-    ///
-    /// A multi's components are a *client-file* fact, exactly as
-    /// [`item_blocks`](Self::item_blocks) and [`item_height`](Self::item_height)
-    /// are, and this trait is the seam those already reach gameplay through. The
-    /// alternative — a table hung on world state — would put a reader for a
-    /// copyrighted file into the crate every gameplay system is built on, and
-    /// would need a second answer for "what if the shard has no client files",
-    /// which every method here already has.
-    ///
-    /// The whole list, undrawn components included: what a *renderer* skips and
-    /// what a *footprint* covers are two questions. See
-    /// [`Component::drawn`](openshard_uofiles::multi::Component::drawn).
-    fn multi_components(&self, _id: u16) -> &[openshard_uofiles::multi::Component] {
-        &[]
-    }
-
     /// Whether the land at `tile` is water — the tiledata flag, not a guess from
     /// the land id.
     ///
@@ -157,44 +128,16 @@ pub trait Terrain {
     /// has nowhere to moor a boat, and refusing every mooring is the safe half
     /// of that answer rather than the surprising one.
     ///
+    /// A *coordinate* and not a graphic, which is what keeps it here while the
+    /// tiledata questions have left: it cannot be answered without the map, since
+    /// the map is what says which land tile is at `tile` in the first place.
+    ///
     /// The step check already reads this flag — [`can_step`](Self::can_step)
     /// treats water as ground only for a swimming body — but it reads it *inside*
     /// a decision and never says so. A boat needs the fact on its own: not "may I
     /// walk here" but "is this the sea", and the two differ for a swimmer.
     fn land_is_water(&self, _tile: Tile) -> bool {
         false
-    }
-
-    /// The tiledata name of static art `graphic`, for a single-click label — the
-    /// same table as [`item_blocks`](Self::item_blocks), read for its name rather
-    /// than its flags. A terrain with no tiledata (an open world) has no names.
-    fn item_name(&self, _graphic: Graphic) -> Option<&str> {
-        None
-    }
-
-    /// The tiledata weight of `graphic` in stones, for what a mobile carries —
-    /// the same table again, read for its weight byte.
-    ///
-    /// A terrain with no tiledata reports zero, so a shard running without client
-    /// files has no encumbrance at all: the same bargain as its terrain allowing
-    /// every step. Tiledata's `255` means *immovable*, not "heavy", and an
-    /// implementation is expected to report zero for it — nothing immovable is
-    /// ever in a pack.
-    fn item_weight(&self, _graphic: Graphic) -> u8 {
-        0
-    }
-
-    /// The paperdoll layer `graphic` is worn on, by its tiledata — the field UO
-    /// documents as the *quality* byte and ServUO reads straight into `Layer`
-    /// (`BaseWeapon`: `Layer = (Layer)ItemData.Quality`).
-    ///
-    /// It is what makes a halberd two-handed and a katana not, and it is the
-    /// client's own answer, which is why it is read here rather than written into
-    /// the weapon table twice. A terrain with no tiledata reports `0` — no layer —
-    /// so a shard running without client files treats every weapon as one-handed,
-    /// the same bargain its terrain makes by allowing every step.
-    fn item_layer(&self, _graphic: Graphic) -> u8 {
-        0
     }
 
     /// Whether a straight sight line from `from` to `to` is clear of walls.

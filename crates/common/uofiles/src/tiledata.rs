@@ -497,6 +497,37 @@ impl TileData {
         &self.statics[id as usize]
     }
 
+    /// What a copy of static art `id` weighs, in stones.
+    ///
+    /// [`StaticTile::weight`] read through the one convention the file has about
+    /// it: `255` is tiledata's *immovable* sentinel — a wall, a tree, a signpost
+    /// — and not a quarter-ton object. Nothing immovable is ever in a pack, so it
+    /// weighs nothing rather than instantly overloading whoever picked it up.
+    ///
+    /// Here rather than in a gameplay crate because the sentinel is the file
+    /// talking, and every reader of that byte has to know it. The choice it
+    /// leaves — what a shard with no tiledata at all does about encumbrance — is
+    /// the caller's, and is made where the table is looked up.
+    #[must_use]
+    pub fn item_weight(&self, id: u16) -> u8 {
+        match self.static_tile(id).weight {
+            255 => 0,
+            weight => weight,
+        }
+    }
+
+    /// The name of static art `id`, or `None` where the file has not given it
+    /// one.
+    ///
+    /// [`StaticTile::name`] read through the file's two ways of saying nothing:
+    /// the placeholder `"NoName"`, and the empty string a table shorter than the
+    /// id space pads with. Neither is worth drawing over a clicked item.
+    #[must_use]
+    pub fn item_name(&self, id: u16) -> Option<&str> {
+        let name = self.static_tile(id).name.as_str();
+        (!name.is_empty() && name != "NoName").then_some(name)
+    }
+
     /// Put one entry into the table, replacing whatever was there.
     ///
     /// For tests that need a tiledata saying one specific thing — a graphic that

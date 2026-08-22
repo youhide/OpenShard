@@ -97,21 +97,16 @@ type Berth = ((u16, u16), Plank);
 ///
 /// Undrawn components are skipped, the way a house's footprint skips them: the
 /// signature tile every multi opens with is not part of the ship.
-pub fn planks_of(
-    state: &WorldState,
-    boat: EntityId,
-    at: Point,
-    facet: Facet,
-    multi: u16,
-) -> Result<Vec<Berth>, Refusal> {
+pub fn planks_of(state: &WorldState, boat: EntityId, at: Point, multi: u16) -> Result<Vec<Berth>, Refusal> {
     let multi = multi & !MULTI_FLAG;
-    let Some(terrain) = state.facet_state(facet).terrain.as_deref() else {
-        return Err(Refusal::NoSuchMulti);
-    };
-    let components = terrain.multi_components(multi);
+    // The shard's tables, not the facet's ground: what a ship is made of and how
+    // tall each piece of it is are facts about the install. Where it may float is
+    // the facet's business, and that is `check_berth`'s question.
+    let components = state.multi_components(multi);
     if components.is_empty() {
         return Err(Refusal::NoSuchMulti);
     }
+    let tiledata = state.tiles.as_deref();
     let mut out = Vec::new();
     for component in components.iter().filter(|c| c.drawn()) {
         let graphic = Graphic(component.graphic);
@@ -129,8 +124,8 @@ pub fn planks_of(
             Plank {
                 boat,
                 z,
-                height: terrain.item_height(graphic),
-                blocks: terrain.item_blocks(graphic),
+                height: tiledata.map_or(0, |tiles| tiles.static_tile(graphic.0).height),
+                blocks: tiledata.is_some_and(|tiles| tiles.static_tile(graphic.0).flags.is_blocking()),
             },
         ));
     }
@@ -167,7 +162,7 @@ pub fn place(
     // The shape is derived before anything is written, so a refusal below leaves
     // nothing behind but the serial — which is the one thing that cannot be
     // taken back, and is why this is the first fallible step after it.
-    let berth = match planks_of(state, entity, at, facet, multi) {
+    let berth = match planks_of(state, entity, at, multi) {
         Ok(berth) => berth,
         Err(refusal) => {
             state.registry.despawn(entity);
@@ -273,7 +268,7 @@ pub fn step(
     // against the water and against every *other* ship — a hull is not in
     // `Obstructions`, so nothing else in this engine would notice two of them in
     // one tile.
-    let berth = planks_of(state, boat, to, facet, multi)?;
+    let berth = planks_of(state, boat, to, multi)?;
     check_course(state, facet, boat, &berth)?;
     let manifest = aboard(state, boat, facet);
 
