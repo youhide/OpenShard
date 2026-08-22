@@ -735,6 +735,87 @@ measurement says delete it, and the only reason to keep the type at all is the
 reading, and it takes eight hand-written forwarding
 method bodies out of the workspace rather than moving them somewhere better.
 
+### 🚩 A\* is not what a search spends its time on
+
+The question this section exists to answer was put the other way round — *A\*
+should be faster than this; is it slow at walking the map?* — and it is, but not
+where the guess pointed.
+[`step_cost`](../../crates/common/movement/examples/step_cost.rs) splits one
+step on facet 0, over open ground, fastest of five passes:
+
+| | ns |
+|---|---:|
+| `WorldMap::land` | 1.6 |
+| `WorldMap::statics_at` — two `partition_point`s and a pointer chase | 15.4 |
+| `MapTerrain::ground_z` | 11.8 |
+| `MapTerrain::surface_at` — the *landing* half of a step | 52.4 |
+| **`MapTerrain::can_step`** | **86.1** |
+| **eight `step_allowed` — one whole node expansion** | **1462.3** |
+| the same eight answers, with the shared work hoisted | 509.4 |
+
+**601 nodes × 1462 ns is 0.88 ms, against a measured p50 of 0.79–0.89 ms.** The
+binary heap, the two `FxHashMap`s and the closed set are inside the noise of
+zero. There is no A\* to speed up: a search *is* its terrain queries, sixteen
+`can_step` per node — four cardinals, and four diagonals that each also pay for
+their two flanks.
+
+**And the binary searches are 2% of it.** `statics_at` is 15.4 ns and a
+`can_step` makes two of them, so 31 of 86 ns is finding the statics; the other
+55 is **deriving the step rule from them again** — walking the tile's statics,
+a `tiledata` lookup per static for its flags, the platform/climbable arithmetic,
+and four land corners. Making the lookup free would leave 84% of the cost
+standing. The rule is recomputed from raw statics on every query, and that is
+the expense.
+
+Two thirds of the rest is redundancy rather than work. `can_step(from, to)`
+recomputes `start_surface(from)` on every call and all sixteen calls in one
+expansion share `from`; the diagonals re-ask about flanks that are themselves
+neighbours already being asked about. Hoisting both is **2.87×** with a
+bit-identical checksum — which is what the last row measures, and is
+deliberately **not** proposed. It is a local repair to a query that should not
+be happening during a search at all.
+
+### The first storey was never built
+
+Both defects this node found are one omission seen from two sides. The graph
+[models one height per tile](#-the-coarse-graph-is-a-one-storey-model-of-a-two-storey-world);
+the search [re-derives the step rule per query](#-a-is-not-what-a-search-spends-its-time-on).
+What is missing between them is the thing every navigation stack has underneath:
+**a baked traversability representation that the search reads and never
+questions.**
+
+`NavigationGraph` is HPA\* — Botea, Müller and Schaeffer, cited by
+[`navigation_graph_efficiency_plan.md`](navigation_graph_efficiency_plan.md)'s
+own grounding section — and HPA\* is an abstraction *over a cheap grid*. It
+assumes the layer below is fast and already knows what a floor is. That layer
+does not exist here: the second storey was built on the ground.
+
+The reference implementation of the layer that is missing is **Recast &
+Detour** (zlib; Unreal's navigation is built on it, and Unity's NavMesh baking
+descends from it). What matters here is not the polygons but two of its stages:
+
+- **`rcCompactHeightfield`.** Each column `(x, y)` holds a *list of spans* —
+  open vertical intervals — rather than one height. That is the multi-storey
+  answer, and it is why a navmesh has never had our castle-plateau defect: a
+  raised courtyard is its own span, not a disagreement with the land under it.
+- **Off-mesh connections.** Explicit links for what the geometry does not imply:
+  ladders, jumps, doors, teleports. A stair between two spans falls out of the
+  spans themselves; anything that does not is *declared* rather than inferred.
+
+For a tile world the same shape is much smaller than a navmesh: per `(x, y)` a
+short list of standable surfaces, and per surface an **eight-bit neighbour mask**
+plus, where the neighbour sits on a different span, its index. A node expansion
+is then one record load and eight bit tests — single-digit nanoseconds against
+1462 — and it is *baked*, so the rule is evaluated once per surface instead of
+sixteen times per node forever.
+
+**This is not E's, and it is not a change to be folded into E.** E takes
+`find_path(&MapTerrain, &Overlay, Doors)`; what this says is that a search
+should not take a `MapTerrain` at all, and that `Overlay` — the live half — is
+exactly the part that must stay a query because it changes between ticks. The
+split survives; what it is layered over is what changes. It wants its own plan,
+and this section is the measurement that plan starts from.
+
 ### 🚩 The coarse graph is a one-storey model of a two-storey world
 
 `coarse_bench` now loads the shard's own baked artifact — facet 0 is **28,672
@@ -1061,6 +1142,18 @@ Small things this document is the only current record of:
   over a world of stacked surfaces — and they were found independently, a
   session apart, which is the argument for naming the class rather than the two
   cases.
+- 🚩 **The search's cost is entirely the terrain's, and mostly a rule being
+  re-derived.** One node expansion is 1,462 ns and A\*'s own machinery is
+  within noise of zero;
+  [the breakdown](#-a-is-not-what-a-search-spends-its-time-on) puts 2% on the
+  statics lookup's binary searches and the rest on evaluating the step rule from
+  raw statics, sixteen times per node. Two thirds of that is redundancy — the
+  tile stepped *off* is recomputed per call, and the diagonals re-ask about
+  their flanks — and hoisting both is 2.87× with an identical checksum. Left
+  unhoisted on purpose: it is a local repair to a query that should be a table
+  lookup. See [the first storey](#the-first-storey-was-never-built).
+- **`MapTerrain::start_surface` is public now**, because it is the other half of
+  the already-public `check` and a probe cannot split a step without it.
 - **A single `None` was hiding four repairs.** `find_long_path` answered
   every failure with `unreachable_or_live_refinement`, which is a deadline, a
   missing endpoint join, a missing corridor and exhausted refinement wearing one

@@ -220,7 +220,7 @@ impl<'a> MapTerrain<'a> {
     /// steps up a slope the client took: `start_top` is that place. Returns
     /// `(start_z, start_top)` — the base you stand on, and the top the next step
     /// reaches from.
-    fn start_surface(&self, x: u16, y: u16, loc_z: i32) -> (i32, i32) {
+    pub fn start_surface(&self, x: u16, y: u16, loc_z: i32) -> (i32, i32) {
         let (land_z, land_center, land_top) = self.land_heights(x, y);
         let mut z_low = loc_z;
         let mut z_top = loc_z;
