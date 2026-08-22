@@ -35,5 +35,5 @@ added a feature.
 The next move is direction B — our own chunk format and a UO importer. Where it
 stands in detail, what was decided along the way, and the smaller landable
 things left behind are in the newest
-[handoff](handoffs/2026-08-22-snapshot-built.md); the plan itself records
-intent, not progress.
+[handoff](handoffs/2026-08-22-transitions-first-caller.md); the plan itself
+records intent, not progress.
