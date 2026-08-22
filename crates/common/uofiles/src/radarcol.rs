@@ -35,8 +35,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::color::Color16;
-use crate::map::LandTile;
 use crate::tiledata::LAND_TILE_COUNT;
+use openshard_map::map::LandTile;
 use openshard_protocol::wire::Graphic;
 
 /// `radarcol.mul` could not be read.

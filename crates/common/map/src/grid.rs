@@ -140,9 +140,9 @@ impl CellIndex {
 /// Private to this module on purpose: no signature outside it names a cell
 /// array, so a public wrapper would be a type nobody could obtain and nobody
 /// needs.
-struct Cells(Vec<LandCell>);
+struct TerrainCells(Vec<LandCell>);
 
-impl Cells {
+impl TerrainCells {
     /// The one door in. `blocks` is what the caller says it is handing over.
     ///
     /// # Panics
@@ -193,7 +193,7 @@ pub struct LandGrid {
     height: u32,
     /// Blocks column-major, cells row-major within a block. See the module
     /// header — this is the only field in the workspace laid out that way.
-    cells: Cells,
+    cells: TerrainCells,
 }
 
 impl fmt::Debug for LandGrid {
@@ -249,7 +249,7 @@ impl LandGrid {
         Self {
             width,
             height,
-            cells: Cells::of(cells, blocks_wide * blocks_down),
+            cells: TerrainCells::of(cells, blocks_wide * blocks_down),
         }
     }
 
@@ -275,9 +275,9 @@ impl LandGrid {
         Self {
             width,
             height,
-            // The length check is `Cells::of`'s, and is the reason the loader
+            // The length check is `TerrainCells::of`'s, and is the reason the loader
             // hands over a count rather than a bare vector.
-            cells: Cells::of(cells.collect(), blocks),
+            cells: TerrainCells::of(cells.collect(), blocks),
         }
     }
 

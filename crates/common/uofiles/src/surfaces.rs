@@ -4,7 +4,8 @@
 //! this walk beside the file types means a floor that a body can stand on is
 //! not rediscovered with slightly different height arithmetic by each reader.
 
-use crate::map::Map;
+use openshard_map::map::Map;
+
 use crate::tiledata::TileData;
 
 /// Every height a body could stand at on one map tile.

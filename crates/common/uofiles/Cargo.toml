@@ -12,6 +12,9 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+# `surfaces` and `radarcol` read the world, and `map` is the importer that
+# builds one: the world type lives in `openshard-map` and nothing here owns it.
+openshard-map.workspace = true
 openshard-protocol.workspace = true
 # For gumpart: every entry in `gumpartLegacyMUL.uop` is zlib-compressed. See
 # the note on this dependency in the workspace `Cargo.toml`.

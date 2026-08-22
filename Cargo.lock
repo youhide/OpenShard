@@ -2792,7 +2792,6 @@ name = "openshard-map"
 version = "0.0.1"
 dependencies = [
  "openshard-protocol",
- "openshard-uofiles",
 ]
 
 [[package]]
@@ -2949,6 +2948,7 @@ version = "0.0.1"
 dependencies = [
  "fontdue",
  "miniz_oxide 0.9.1",
+ "openshard-map",
  "openshard-protocol",
 ]
 
