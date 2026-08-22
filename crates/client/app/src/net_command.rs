@@ -186,7 +186,7 @@ impl App {
                 self.windows.hand = None;
                 self.windows.world_press = None;
                 self.windows.prompt = None;
-                self.windows.dragging = None;
+                self.windows.grip.release();
                 self.tooltips.reset();
                 self.world.shard = crate::world::Shard::Lost(reason);
                 return false;

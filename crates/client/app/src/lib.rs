@@ -1017,7 +1017,7 @@ pub fn run<D: Dial + Send + 'static>(
             own_windows: Vec::new(),
             locally_closed: HashSet::new(),
             drawn_windows: Vec::new(),
-            dragging: None,
+            grip: windows::WindowGrip::Idle,
             hand: None,
             world_press: None,
             prompt: None,

@@ -530,9 +530,9 @@ impl ContainerPane {
     /// itself, which is the grip the window is moved by.
     fn press(&mut self, window: &Window, ctx: &PaneCtx<'_>) -> Response {
         let raised = Response::changed().with(Effect::Raise);
-        // `ctx.frame.cursor` is already local to this window — see
-        // `PaneFrame::cursor`'s doc — so it is the grab offset outright.
-        let grab = || Effect::Grab(ctx.frame.cursor);
+        // Where the press landed is the manager's to read — see `Effect::Grab`
+        // — so this says only that the press was the bag's own frame.
+        let grab = || Effect::Grab;
         if !self.ordinary(&ctx.frame) {
             return raised.with(grab());
         }

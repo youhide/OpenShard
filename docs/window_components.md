@@ -95,7 +95,7 @@ has grown by three in a year.
 
 **D2. Position, z-order and the drag that moves a window belong to the manager.**
 A pane reads `at` out of its context and **never writes it**: the cascade,
-`raise_window`, `dragging` and the close gesture are all the manager's, and a
+`raise_window`, `grip` and the close gesture are all the manager's, and a
 pane that wants to be moved simply declines the press.
 
 `OwnWindow` keeps `subject` and `at` and **gains the pane beside them** —
@@ -158,7 +158,10 @@ rest of `Effect` is what only the manager can do:
 enum Effect {
     Raise,                       // this pane to the top of the pile
     Close,                       // and off the list; overlay handled by the manager
-    Grab(GumpPixel),             // start dragging this window, grabbed here
+    Grab,                        // take hold of this window; *where* is the
+                                 // manager's to read — the `GumpPixel` this arm
+                                 // was sketched with is the Backlog's
+                                 // "two frames of reference in one field"
     Net(Outgoing),               // the shard's half — both halves of a transfer
                                  // among them, as two ordinary effects (D7)
     Open(LocalWindow),           // the skill sheet or the status frame
@@ -243,7 +246,7 @@ the cursor, which is the cursor's job and not a window's.
 **D9. An exclusive input device is the manager's, and what it lands on is the
 pane's.** Added by S4, and it is D2 and D7 stated once for all three: z-order,
 the hand and the keyboard are all *one of a kind on the screen*, so the manager
-owns which window has each — `dragging`, `item_drag`, `keyboard`, every one of
+owns which window has each — `grip`, `item_drag`, `keyboard`, every one of
 them a subject — and the pane owns what that means inside itself. A pane reads
 the manager's half out of its context (`under_pointer`, `hand`,
 `has_keyboard`) and never writes it, and asks for a change with an effect.
@@ -492,7 +495,7 @@ never a half-routed frame.
         disagreeing. It is deleted.
       - **`{ nomove }` is the one press that is taken and does not grab**, and
         it could not have stayed in the tail of `press_on_own_window`: that tail
-        ends every press it reaches with a `dragging`. It is one arm of
+        ends every press it reaches with a grab. It is one arm of
         `DialogPane::press` now, beside the arm that does grab.
 
       **One ordering changed, the same one S1 and S2 changed.** A press on a
@@ -948,7 +951,7 @@ never a half-routed frame.
   moved out of `windows.rs` into `crate::hand`, along with the tests that
   pinned them. `Windows::world_press` **stays a field of `Windows`**, and that
   is deliberate rather than left behind: it is one of three exclusive devices
-  the manager tracks (beside `hand` and `dragging`), and moving the *registry*
+  the manager tracks (beside `hand` and `grip`), and moving the *registry*
   would have been the bigger, unrequested change this entry never asked for —
   only the *type* `world_press` holds was window-shaped by accident, and that
   is what moved.
@@ -1081,6 +1084,57 @@ settle:
   windows themselves, so a tool's picture is the client's only at
   `WindowScale::MIN`. That is one more caller of the placement that is not
   `gump::place` — the shape `parity.md` exists to complain about.
+- ~~**Two frames of reference in one field: the window that teleports on a
+  click.**~~ **Closed (2026-08-22), and it was the scale entry above growing
+  teeth.** `Windows::dragging` was `Option<(WindowSubject, GumpPixel)>` — the
+  window and *where inside it* the player grabbed it — and `drag_own_window`
+  placed the window at `pointer - offset`. That arithmetic is right only if the
+  offset is in the same pixels as the pointer, and the two rungs that started a
+  drag disagreed about which those were: `press_on_own_window` measured
+  `pointer - window.at` (absolute surface pixels), while **every pane** answered
+  a press it had no use for with `Effect::Grab(ctx.frame.cursor)` — window-local,
+  which is `at` subtracted *and* divided by `WindowScale::factor`. Above the
+  art's own size, therefore, a press anywhere on a paperdoll, a bag, a shop, a
+  sheet or a dialog moved the window by `cursor * (factor - 1)` on the first
+  pointer movement after the click, by an amount that depended on where in the
+  frame it was clicked and with no mouse movement to account for it. The client
+  ships with `window_scale` on a knob, so this was every player above 1.0.
+
+  It is `Windows::grip: WindowGrip` now — `Idle | Held(WindowHold)`, with
+  `press` / `follow` / `release` and no other writer — and **a drag is a delta**:
+  the press freezes the pointer *and* the window's corner, both absolute, and
+  every move places the window at its frozen corner plus how far the pointer has
+  travelled. There is no space left to measure the offset in, so there is no
+  space to measure it in wrongly; the scale never enters the arithmetic, which
+  also makes the knob safe to turn mid-drag. `Effect::Grab` carries **nothing**:
+  a pane cannot say where a press landed in the manager's pixels, and it does
+  not have to — the manager reads the same pointer field on the press that it
+  will read on the move. `App::grab_window` is the one door both rungs go
+  through.
+
+  **Two more ways the hold outlived the gesture, found while writing the
+  machine and closed with it.** A left release that egui claims never reaches
+  `panes::route` (`Shell::on_window_event` returns before the `match`), so a
+  window let go over a panel stayed held and resumed following the pointer with
+  the button up; `window_event`'s consumed branch releases the grip now, beside
+  the keys it already let go of for the same reason. And `Focused(false)` did
+  the same for an alt-tab mid-drag — the release happens in another
+  application — so it releases the grip too. Five cases in
+  `windows.rs`'s `grip_tests`, one of which asserts its own fixture is a scale
+  the old convention got wrong.
+- **`DRAG_SLOP` is measured in whichever pixels its holder counts in, and the
+  three holders do not count in the same ones.** Found while writing the grip
+  above, and *not* folded into it: it is the item press, not the window drag.
+  `ItemPress::at` is stored in `PaneFrame::cursor` by a bag's pane and a doll's
+  pane — window-local, so divided by `WindowScale::factor` — and in absolute
+  surface pixels by the manager for `world_press`. `ItemPress::dragged` compares
+  each against a cursor from the same space, so neither is *wrong*; what differs
+  is how far the player's hand has to travel before a press becomes a lift. At
+  three times the art an icon in a bag lifts after `DRAG_SLOP * 3` real pixels
+  and one on the ground after `DRAG_SLOP`. Whether the slop is a distance on the
+  screen or a distance in the art is a decision nobody has made — the same
+  question `SPLIT_OFFSET` and the cascade constants answer in opposite
+  directions two entries up.
 
 ## Status
 
@@ -1146,7 +1200,7 @@ keyed-by-subject fields (S5), and S6 took the container's four —
 `item_drag`, and `split_pending`. What is left is what is true of the *layer*:
 which windows exist, in what order, where each sits, what the last frame drew,
 and who holds each of the three things there is one of on a screen — the
-pointer (`dragging`), the keyboard (`keyboard`) and the cursor (`hand`, with
+pointer (`grip`), the keyboard (`keyboard`) and the cursor (`hand`, with
 `prompt` for the press a modal is standing over). Plus one that is not about a
 window at all and says so: `world_press`, the press on an item lying on the
 ground.

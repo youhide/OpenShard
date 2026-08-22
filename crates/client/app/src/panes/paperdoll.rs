@@ -360,10 +360,12 @@ impl PaperdollPane {
             }
         }
         // The frame, the body, a stranger's shirt: nothing that answers, so
-        // the press moves the window. `ctx.frame.cursor` is already local to
-        // it, so it is the grab offset outright — see `PaneFrame::cursor`'s
-        // doc.
-        raised.with(Effect::Grab(ctx.frame.cursor))
+        // the press moves the window. Where in the frame it landed is not said
+        // — a window drag is a delta the manager measures against its own
+        // pointer, and a pane's window-local cursor in that arithmetic is what
+        // used to teleport this very window; see `Effect::Grab` and
+        // `windows::WindowGrip`.
+        raised.with(Effect::Grab)
     }
 
     /// The release that finishes whatever this window was in the middle of: a

@@ -480,8 +480,17 @@ pub enum Effect {
     /// `0xB1` for a dialog, nothing at all on the wire for a bag — stays with
     /// the manager: see `App::close_window`.
     Close,
-    /// Start moving this window, grabbed this far into it.
-    Grab(GumpPixel),
+    /// The pointer went down on this window's frame and nothing in the window
+    /// wanted it: take hold of the window, so that the moves after it carry it.
+    ///
+    /// **It says nothing about where.** A pane sees a window-local cursor
+    /// ([`PaneFrame::cursor`]) and the manager places windows in absolute
+    /// surface pixels, and this arm used to carry the former into the latter's
+    /// arithmetic — the phantom jump documented on
+    /// [`WindowGrip`](crate::windows::WindowGrip). What the manager needs is
+    /// the pointer, which it already has; all a pane can tell it is that the
+    /// press was the frame's.
+    Grab,
     /// The shard's half, for everything that is not the hand.
     ///
     /// A `0x07` and a `0x08` can travel through here too, and one pair does:

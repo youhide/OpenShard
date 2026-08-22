@@ -153,7 +153,7 @@ impl ConfirmPane {
             }
             // Already local to this window — see `PaneFrame::cursor`'s doc — so
             // it is the grab offset with nothing subtracted.
-            None => raised.with(Effect::Grab(ctx.frame.cursor)),
+            None => raised.with(Effect::Grab),
         }
     }
 
@@ -369,10 +369,7 @@ mod tests {
             Input::Press(Button::Left),
             &install.ctx(&view, Some(&drawn), GumpPixel::new(8, 8), true),
         );
-        assert!(matches!(
-            press.out.as_slice(),
-            [Effect::Raise, Effect::Grab(at)] if *at == GumpPixel::new(8, 8)
-        ));
+        assert!(matches!(press.out.as_slice(), [Effect::Raise, Effect::Grab]));
         assert_eq!(pane.held, None);
     }
 

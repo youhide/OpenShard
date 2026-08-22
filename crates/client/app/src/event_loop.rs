@@ -137,6 +137,23 @@ impl ApplicationHandler<()> for App {
                 self.input.aiming = false;
                 self.set_war_mode_held(false);
             }
+            // And the same argument one device over: a window taken hold of by
+            // a press this end *did* hear, let go over a panel egui claims, is
+            // a hold nothing ever ends — the button is up and the window still
+            // follows the pointer around. The UI is welcome to the click; what
+            // it must not do is leave this end believing the button is down.
+            // See `windows::WindowGrip`, which is where the rest of that
+            // gesture lives.
+            if matches!(
+                event,
+                WindowEvent::MouseInput {
+                    state: ElementState::Released,
+                    button: winit::event::MouseButton::Left,
+                    ..
+                }
+            ) {
+                self.windows.grip.release();
+            }
             self.ask_redraw();
             return;
         }
@@ -524,6 +541,14 @@ impl ApplicationHandler<()> for App {
                     self.input.aiming = false;
                     self.input.shift_held = false;
                     self.set_war_mode_held(false);
+                    // The mouse button is the keys' case exactly: a window
+                    // being carried when the focus goes elsewhere is let go of
+                    // in some other application, and the release never comes
+                    // back here. Held past that, it would resume dragging on
+                    // the first pointer move after the window is clicked back
+                    // into — with no button down and nothing on screen to say
+                    // why.
+                    self.windows.grip.release();
                 }
             }
             // Entirely covered by another window: the compositor will not show

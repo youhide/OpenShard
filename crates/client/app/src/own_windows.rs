@@ -28,7 +28,7 @@
 
 use std::time::Instant;
 
-use openshard_client_render::gump::{self as gump_art, GumpPixel};
+use openshard_client_render::gump as gump_art;
 use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::gump::GumpId;
 use openshard_protocol::gump::GumpPoint;
@@ -266,7 +266,7 @@ impl App {
             hand::Dragged::Lift(drag) => {
                 self.windows.world_press = None;
                 self.lift(drag);
-                self.windows.dragging = None;
+                self.windows.grip.release();
                 true
             }
         }
@@ -324,7 +324,7 @@ impl App {
         });
         // A window cannot be being dragged while a question about a press is
         // standing over it.
-        self.windows.dragging = None;
+        self.windows.grip.release();
     }
 
     /// The picker has been answered: take it down and hand the answer to
@@ -531,37 +531,67 @@ impl App {
             return false;
         };
         self.raise_window(subject);
-        let grab = self
-            .windows
-            .own_windows
-            .last()
-            .map(|window| {
-                GumpPixel::new(
-                    self.input.pointer_gump.x - window.at.x,
-                    self.input.pointer_gump.y - window.at.y,
-                )
-            })
-            .unwrap_or_default();
-        self.windows.dragging = Some((subject, grab));
+        self.grab_window(subject);
         true
     }
 
-    /// Move the window being dragged so that the point the player grabbed stays
-    /// under the cursor. Answers whether anything moved.
+    /// Take hold of one window: the press half of a drag, whoever asked for it.
+    ///
+    /// The one door, and it has two callers — this rung's
+    /// [`App::press_on_own_window`] above, and
+    /// [`Effect::Grab`](crate::panes::Effect::Grab) for the panes, which is
+    /// every window kind that answers its own press. They used to each work
+    /// out the grab for themselves, in two different pixel spaces, which is
+    /// the defect [`WindowGrip`] documents; now neither of them computes
+    /// anything at all — a grab is "the pointer went down on this window", and
+    /// where it went down is read here, once, from the same field the move
+    /// will read.
+    ///
+    /// A subject with no window on the list is not held: nothing to carry, and
+    /// a hold on a window that does not exist would swallow the next real
+    /// press. Unreachable today — both callers name a window they have just
+    /// found — and written down so the contract does not rest on that.
+    pub(crate) fn grab_window(&mut self, subject: WindowSubject) {
+        let Some(window) = self
+            .windows
+            .own_windows
+            .iter()
+            .find(|window| window.subject == subject)
+        else {
+            return;
+        };
+        self.windows
+            .grip
+            .press(subject, self.input.pointer_gump, window.at);
+    }
+
+    /// Carry the held window: it stands where it stood when the button went
+    /// down, moved by exactly as far as the pointer has travelled since. The
+    /// follow half of [`WindowGrip`], and the only writer of
+    /// [`OwnWindow::at`](crate::windows::OwnWindow::at) while a window is
+    /// held.
+    ///
+    /// Answers whether anything moved, which is the caller's redraw: a pointer
+    /// that has come back to where it went down puts the window back where it
+    /// started, and says nothing changed because nothing did.
     pub(crate) fn drag_own_window(&mut self) -> bool {
-        let Some((subject, grab)) = self.windows.dragging else {
+        let Some((subject, at)) = self.windows.grip.follow(self.input.pointer_gump) else {
             return false;
         };
-        let at = GumpPixel::new(
-            self.input.pointer_gump.x - grab.x,
-            self.input.pointer_gump.y - grab.y,
-        );
         let Some(window) = self
             .windows
             .own_windows
             .iter_mut()
             .find(|window| window.subject == subject)
         else {
+            // The window went away under the press — closed by a packet, or
+            // dropped by the reconcile because the view stopped naming what it
+            // was over. Let the grip go rather than holding a subject nothing
+            // answers to: the release that would have cleared it is about to
+            // arrive over some *other* window, and a stale hold is a second
+            // window that starts moving the moment the list gets that subject
+            // back.
+            self.windows.grip.release();
             return false;
         };
         let moved = window.at != at;
@@ -667,7 +697,7 @@ impl App {
             self.windows
                 .own_windows
                 .retain(|window| window.subject != subject);
-            self.windows.dragging = None;
+            self.windows.grip.release();
             return true;
         }
         // Closing the picker *is* dismissing the prompt, which is the same
@@ -678,7 +708,7 @@ impl App {
         // window nothing can take down.
         if let WindowSubject::Split { .. } = subject {
             self.answer_prompt(crate::panes::Answer::Cancelled);
-            self.windows.dragging = None;
+            self.windows.grip.release();
             return true;
         }
         if self.world.authoritative.view.is_none() {
@@ -751,7 +781,7 @@ impl App {
         self.windows
             .own_windows
             .retain(|window| window.subject != subject);
-        self.windows.dragging = None;
+        self.windows.grip.release();
         true
     }
 

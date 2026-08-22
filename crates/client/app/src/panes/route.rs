@@ -78,7 +78,7 @@ impl App {
                 }
             }
             Input::Release(Button::Left) => {
-                self.windows.dragging = None;
+                self.windows.grip.release();
                 Response::ignored()
             }
             // A press that landed on no window at all gives the keyboard back.
@@ -103,7 +103,7 @@ impl App {
             // state that had sent nothing left this enum for the panes at step
             // 6, so everything that is here owns the cursor by being here.
             Input::Press(Button::Left) if self.windows.hand.is_some() => {
-                self.windows.dragging = None;
+                self.windows.grip.release();
                 Response::changed()
             }
             // The answer to the client's own amount prompt, when the press it
@@ -292,7 +292,11 @@ impl App {
             Effect::Close => {
                 self.close_window(subject);
             }
-            Effect::Grab(grab) => self.windows.dragging = Some((subject, grab)),
+            // Nothing is carried in the effect: where the press landed is read
+            // from the pointer, in the same space the move will read it from —
+            // see `WindowGrip`, whose doc is the defect a `GumpPixel` in this
+            // arm used to be.
+            Effect::Grab => self.grab_window(subject),
             // A closed channel is not an error here, the same as everywhere else
             // this client sends: the shard thread has already said why it went.
             Effect::Net(action) => {

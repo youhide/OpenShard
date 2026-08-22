@@ -133,7 +133,7 @@ impl SkillsPane {
             }
             // `ctx.frame.cursor` is already local to this window, so it is
             // the grab offset outright — see `PaneFrame::cursor`'s doc.
-            None => raised.with(Effect::Grab(ctx.frame.cursor)),
+            None => raised.with(Effect::Grab),
         }
     }
 

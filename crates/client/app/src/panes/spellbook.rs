@@ -47,7 +47,7 @@ impl SpellbookPane {
             self.held = Some(hit);
             raised
         } else {
-            raised.with(Effect::Grab(ctx.frame.cursor))
+            raised.with(Effect::Grab)
         }
     }
 

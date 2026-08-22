@@ -404,7 +404,7 @@ impl DialogPane {
                 } else {
                     // Already local to this window — see `PaneFrame::cursor`'s
                     // doc — so it is the grab offset with nothing subtracted.
-                    raised.with(Effect::Grab(ctx.frame.cursor))
+                    raised.with(Effect::Grab)
                 }
             }
         }

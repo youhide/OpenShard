@@ -150,7 +150,7 @@ impl SplitPane {
             // Anywhere else on the picture picks the window up, which is how a
             // gump with no title bar is moved. Already window-local — see
             // `PaneFrame::cursor` — so the grab offset needs nothing subtracted.
-            None => raised.with(Effect::Grab(ctx.frame.cursor)),
+            None => raised.with(Effect::Grab),
         }
     }
 

@@ -74,7 +74,7 @@ impl PartyPane {
             // A name plate, a heading, the background: nothing that answers, so
             // the press moves the window instead. Already local to this window —
             // see `PaneFrame::cursor`'s doc.
-            None => raised.with(Effect::Grab(ctx.frame.cursor)),
+            None => raised.with(Effect::Grab),
         }
     }
 
@@ -276,7 +276,7 @@ mod tests {
             Input::Press(Button::Left),
             &install.ctx(&view, Some(&drawn), GumpPixel::new(80, 395), true),
         );
-        assert!(matches!(press.out.as_slice(), [Effect::Raise, Effect::Grab(_)]));
+        assert!(matches!(press.out.as_slice(), [Effect::Raise, Effect::Grab]));
         assert_eq!(pane.held, None);
     }
 }

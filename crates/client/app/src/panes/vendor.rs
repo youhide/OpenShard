@@ -299,7 +299,7 @@ impl VendorPane {
             // `ctx.frame.cursor` is already this window's own local pixels, so
             // the grab offset — how far into the window the press landed — is
             // that value directly, with no subtraction to do.
-            None => raised.with(Effect::Grab(ctx.frame.cursor)),
+            None => raised.with(Effect::Grab),
         }
     }
 }

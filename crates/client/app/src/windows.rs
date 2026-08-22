@@ -6,7 +6,7 @@
 //! last frame laid out for it, and which of the screen's one-of-a-kind
 //! devices each window holds. Pulled out of [`crate::App`] for the same reason
 //! [`crate::picking::Picking`] and [`crate::input::Input`] were, and unlike
-//! those two the fields here *are* read together — `dragging` and `hand` are
+//! those two the fields here *are* read together — `grip` and `hand` are
 //! checked side by side on every press, and `own_windows` and `drawn_windows`
 //! are asked in the same breath to decide which window a click landed on.
 //!
@@ -14,7 +14,7 @@
 //! took something from here into the window it belonged to, and what is left
 //! is what is true of the *layer* rather than of one window — which windows
 //! exist, in what order, where each sits, and who holds the three things there
-//! is one of: the pointer ([`Windows::dragging`]), the keyboard
+//! is one of: the pointer ([`Windows::grip`]), the keyboard
 //! ([`Windows::keyboard`]) and the cursor ([`Windows::hand`], and
 //! [`Windows::prompt`] for the press a modal is standing over).
 //!
@@ -23,7 +23,7 @@
 //! — but the *type* it holds moved to [`crate::hand`], because that is where
 //! the rest of a press's story lives regardless of which pane, if any, it
 //! started on. The field stays here deliberately, beside its two siblings
-//! `hand` and `dragging`: all three are exclusive devices the manager tracks,
+//! `hand` and `grip`: all three are exclusive devices the manager tracks,
 //! and that registry does not change shape just because one of the three
 //! types it names is not itself window-shaped.
 
@@ -112,6 +112,117 @@ impl OwnWindow {
             ((cursor.y - self.at.y) as f32 / factor).floor() as i32,
         )
     }
+}
+
+/// What the pointer is doing to a window's frame: the whole of a window drag,
+/// as the two states it has and the three transitions between them.
+///
+/// **Down, remember, follow, up.** The button going down on a frame freezes
+/// two positions ([`WindowHold`]) and nothing else; every pointer move while
+/// it is down puts the window back at *its own* frozen corner plus how far the
+/// pointer has travelled since; the button coming up forgets both. While a
+/// window is held, [`App::drag_own_window`](crate::App::drag_own_window) is
+/// the only writer of [`OwnWindow::at`].
+///
+/// # Why a delta, and not "where inside it the player grabbed it"
+///
+/// This was `Option<(WindowSubject, GumpPixel)>` — the window, and the offset
+/// from its corner to the cursor — and the mover placed the window at
+/// `pointer - offset`. That is the same arithmetic as the delta *only* if the
+/// offset is measured in the same pixels as the pointer, and the two places
+/// that started a drag disagreed about which those were:
+///
+/// * `App::press_on_own_window`, the fallback rung, subtracted the window's
+///   corner from the absolute pointer — surface gump pixels, the same space
+///   `at` is in.
+/// * Every pane answered a press it had no use for with `Effect::Grab`
+///   carrying its own [`PaneFrame::cursor`](crate::panes::PaneFrame::cursor),
+///   which is **window-local**: `at` subtracted *and* divided by
+///   [`WindowScale`](crate::desk::WindowScale) — see [`OwnWindow::local_cursor`].
+///
+/// So at any window scale above the art's own size, a press on a window whose
+/// pane answers it — a paperdoll, a bag, a shop, a dialog — jumped the window
+/// by `cursor * (factor - 1)` on the first pointer movement after the click,
+/// by an amount that depended on where in the frame it had been clicked and
+/// with no movement of the mouse to account for it. That is the phantom move:
+/// a stale-looking teleport with nothing stale in it, only two frames of
+/// reference sharing one field.
+///
+/// A delta cannot be measured in the wrong space. Both positions in a
+/// [`WindowHold`] are absolute — one read from the same pointer that will be
+/// read again on the move, one read from the window's own `at` — so the scale
+/// never enters the arithmetic and cannot be applied once or twice by mistake.
+/// It is also what makes the scale knob safe to turn mid-drag, and what makes
+/// the machine hold if a window is re-laid-out under the pointer while it is
+/// being carried.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum WindowGrip {
+    /// No button is down on any window's frame: nothing follows the pointer.
+    #[default]
+    Idle,
+    /// The button went down on a frame and has not come up.
+    Held(WindowHold),
+}
+
+impl WindowGrip {
+    /// The button went down on `subject`'s frame, with the pointer at
+    /// `pointer` and that window's corner at `window` — both in absolute
+    /// surface gump pixels, and both frozen here until the button comes up.
+    ///
+    /// A press while something is already held overwrites it rather than being
+    /// refused. Two presses with no release between them means the release was
+    /// lost — the window closed under the pointer, the client lost focus
+    /// mid-drag — and the press happening *now* is the truthful answer to which
+    /// frame the pointer has hold of. Refusing it would carry the old window
+    /// around under a press meant for another one, which is the shape of the
+    /// defect this type was written to end.
+    pub fn press(&mut self, subject: WindowSubject, pointer: GumpPixel, window: GumpPixel) {
+        *self = Self::Held(WindowHold {
+            subject,
+            pointer,
+            window,
+        });
+    }
+
+    /// The button came up, or the drag was called off some other way: a modal
+    /// standing over the window, the window closing, the world going away.
+    ///
+    /// Idempotent, and every caller may ask without knowing whether anything
+    /// was held — "nothing is being dragged now" is the whole of what it
+    /// promises.
+    pub fn release(&mut self) {
+        *self = Self::Idle;
+    }
+
+    /// Which window is being carried and where it belongs with the pointer at
+    /// `pointer`, or `None` when nothing is held.
+    ///
+    /// The delta this type exists for, and the one place it is computed.
+    pub fn follow(&self, pointer: GumpPixel) -> Option<(WindowSubject, GumpPixel)> {
+        let Self::Held(hold) = self else {
+            return None;
+        };
+        let travelled = GumpPixel::new(pointer.x - hold.pointer.x, pointer.y - hold.pointer.y);
+        Some((hold.subject, hold.window.offset(travelled)))
+    }
+}
+
+/// The two positions one press freezes: where the pointer went down, and where
+/// the window it went down on was standing at that moment.
+///
+/// The window is named by subject rather than by index or by a borrow, because
+/// the press that starts a drag also *raises* the window, and raising reorders
+/// [`Windows::own_windows`] — an index taken at the press names a different
+/// window by the time the pointer moves.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WindowHold {
+    /// The window the button went down on.
+    pub subject: WindowSubject,
+    /// Where the pointer was at that moment, in absolute surface gump pixels.
+    pub pointer: GumpPixel,
+    /// Where that window's top-left corner was at that same moment, in the
+    /// same pixels — [`OwnWindow::at`] as it stood before the drag.
+    pub window: GumpPixel,
 }
 
 /// What a window is over: a bag's contents, a body, or a dialog the shard
@@ -386,13 +497,10 @@ pub struct Windows {
     /// art is packed on and so the frame it first has any pixels to be
     /// picked by.
     pub drawn_windows: Vec<(WindowSubject, Drawn)>,
-    /// The window being dragged and where inside it the player grabbed it, or
-    /// `None` when nothing is being dragged.
-    ///
-    /// Keyed by subject rather than by index: raising a window on the press
-    /// reorders the list, so an index taken at the press names a different
-    /// window by the time the mouse moves.
-    pub dragging: Option<(WindowSubject, GumpPixel)>,
+    /// What the pointer is doing to a window's frame — see [`WindowGrip`],
+    /// which is the whole of a window drag and the reason this is a machine
+    /// with named states rather than a pair of numbers.
+    pub grip: WindowGrip,
     /// What is on the cursor, or `None` for an empty hand.
     ///
     /// **One resource with one owner**, decision 7 — the mirror of the shard's
@@ -760,5 +868,111 @@ pub fn reconcile_own_windows(
             ),
             pane: crate::panes::AnyPane::of(subject),
         });
+    }
+}
+
+#[cfg(test)]
+mod grip_tests {
+    use super::*;
+
+    /// Any window will do: the grip is about two positions and a subject, and
+    /// nothing it does depends on what the window is over.
+    const SUBJECT: WindowSubject = WindowSubject::Skills;
+
+    fn window_at(at: GumpPixel) -> OwnWindow {
+        OwnWindow {
+            subject: SUBJECT,
+            at,
+            pane: crate::panes::AnyPane::of(SUBJECT),
+        }
+    }
+
+    /// **The phantom move.** A click that does not move the mouse must not move
+    /// the window, and the scale the window is drawn at must not enter into it.
+    ///
+    /// The first assertion is about the *fixture* rather than about the code:
+    /// it says this pointer and this scale are a case the old convention —
+    /// `at = pointer - PaneFrame::cursor`, a window-local offset subtracted
+    /// from an absolute pointer — placed the window somewhere other than where
+    /// it already stood. Without it the test would pass just as happily on a
+    /// scale of 1, where the two conventions agree and there was never a
+    /// defect to catch.
+    #[test]
+    fn a_press_that_does_not_move_the_pointer_does_not_move_the_window() {
+        let scale = crate::desk::WindowScale::new(1.7);
+        let at = GumpPixel::new(120, 80);
+        let pointer = GumpPixel::new(200, 160);
+        let window = window_at(at);
+
+        let local = window.local_cursor(pointer, scale);
+        assert_ne!(
+            GumpPixel::new(pointer.x - local.x, pointer.y - local.y),
+            at,
+            "this fixture has to be one the window-local offset got wrong, \
+             or the case below proves nothing",
+        );
+
+        let mut grip = WindowGrip::default();
+        grip.press(SUBJECT, pointer, window.at);
+        assert_eq!(grip.follow(pointer), Some((SUBJECT, at)));
+    }
+
+    /// The window travels exactly as far as the pointer, whichever way it goes
+    /// and however many moves it takes — every one of them measured from the
+    /// press and not from the move before it, so nothing accumulates.
+    #[test]
+    fn the_window_travels_as_far_as_the_pointer_and_no_further() {
+        let at = GumpPixel::new(120, 80);
+        let pointer = GumpPixel::new(200, 160);
+        let mut grip = WindowGrip::default();
+        grip.press(SUBJECT, pointer, at);
+
+        assert_eq!(
+            grip.follow(GumpPixel::new(210, 155)),
+            Some((SUBJECT, GumpPixel::new(130, 75))),
+        );
+        assert_eq!(
+            grip.follow(GumpPixel::new(190, 200)),
+            Some((SUBJECT, GumpPixel::new(110, 120))),
+        );
+        assert_eq!(
+            grip.follow(pointer),
+            Some((SUBJECT, at)),
+            "a pointer back where it went down puts the window back where it was",
+        );
+    }
+
+    /// Up is the end of it: the moves after a release are nobody's.
+    #[test]
+    fn a_release_lets_the_window_go() {
+        let mut grip = WindowGrip::default();
+        grip.press(SUBJECT, GumpPixel::new(200, 160), GumpPixel::new(120, 80));
+        grip.release();
+        assert_eq!(grip, WindowGrip::Idle);
+        assert_eq!(grip.follow(GumpPixel::new(400, 400)), None);
+        grip.release();
+        assert_eq!(grip, WindowGrip::Idle, "letting go twice is letting go");
+    }
+
+    /// A press with no release before it re-anchors on the press that is
+    /// happening now — the lost-release case, and the one that used to carry
+    /// the *previous* gesture's numbers into this one.
+    #[test]
+    fn a_second_press_forgets_the_first() {
+        let mut grip = WindowGrip::default();
+        grip.press(SUBJECT, GumpPixel::new(200, 160), GumpPixel::new(120, 80));
+        grip.press(SUBJECT, GumpPixel::new(300, 300), GumpPixel::new(40, 40));
+        assert_eq!(
+            grip.follow(GumpPixel::new(310, 290)),
+            Some((SUBJECT, GumpPixel::new(50, 30))),
+        );
+    }
+
+    /// An idle grip answers no move at all — which is what stops a pointer
+    /// crossing a window from dragging it.
+    #[test]
+    fn an_idle_grip_carries_nothing() {
+        assert_eq!(WindowGrip::default(), WindowGrip::Idle);
+        assert_eq!(WindowGrip::Idle.follow(GumpPixel::new(10, 10)), None);
     }
 }
