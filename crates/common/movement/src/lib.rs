@@ -53,6 +53,7 @@ mod cache;
 mod detour;
 pub mod door_frames;
 mod navigation;
+mod overlay;
 mod pace;
 mod path;
 pub mod scene;
@@ -64,6 +65,7 @@ pub use cache::{CachedTerrain, TransitionCacheStats};
 pub use detour::{Around, Detour, Leeway, Step};
 pub use navigation::{NavigationGraph, find_long_path};
 pub use openshard_map::map::LandTile;
+pub use overlay::{Cover, CoverKind, Doors, Overlay};
 pub use pace::{
     Pace, RUN_HOLD, RUN_INTERVAL, WALK_BUFFER, WALK_HOLD, WALK_INTERVAL, WalkPace, step_hold, step_progress,
 };

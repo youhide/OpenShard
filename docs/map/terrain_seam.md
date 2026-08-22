@@ -950,20 +950,108 @@ it](#-cachedterrain-costs-about-5-and-buys-nothing) at a 50.6% hit rate and
 about 5% *slower* than the calls it memoises; `OpenWorld` becomes `None`.
 
 Three decisions this node takes, all of them from [the table
-above](#and-they-do-not-compute-the-same-set):
+above](#and-they-do-not-compute-the-same-set). **All three are taken**, by
+reading, and what each one turned on is below.
 
-- **Mobiles.** The client's index has them, the server's does not. Either they
-  are a category the shared type carries and the server leaves empty, or they
-  stay out and the client keeps a second pass. Whichever, the agreement test is
-  about *items*.
-- **Identity.** `Obstructions::block` is idempotent per entity *and* z and
-  things get unblocked; the client rebuilds whole. Either the shared type
-  carries an owner, or the server keeps its keyed index and *produces* an
-  `Overlay` from it. A third shape is worth measuring before either: the
-  server's index *owns* an `Overlay` and its `block`/`unblock` maintain it, so
-  nothing is rebuilt per tick.
-- **Blockers and surfaces are one type or two.** `aboard` is the only surface
-  source today (`Boats`), and it is the reason a bitmask is not the answer.
+### Blockers and surfaces are one type ✅
+
+One `Cover` per entry, and what it is is an enum rather than a flag pair:
+
+```rust
+pub struct Cover { pub z: i8, pub height: u8, pub kind: CoverKind }
+pub enum CoverKind {
+    /// In the way. `door`: a mobile that knows how may open it instead.
+    Blocks { door: bool },
+    /// Somewhere to stand the map does not have — a deck over open water.
+    Stands,
+}
+```
+
+The world already says so. `Plank` carries `blocks` and is read through two
+filters that partition it — `hull_blocks` takes the `true` half, `deck_at` the
+`false` half — so a plank is *already* one or the other and never both. An
+`Obstacle` and a client `Blocker` are the `Blocks` arm with a door flag, and a
+deck plank is the `Stands` arm. Two indexes would be two hash lookups on the
+hot path for one tile, and two places for the same tile to be described.
+
+### Mobiles are not a category the shared type names ✅
+
+Nothing reads them *as* mobiles. The client's `Blocker` carries `z`, `height`
+and `door` and no kind; a mobile enters `Clutter::of` as a blocker with a body
+height and `door: false`, and every reader downstream treats it as furniture.
+So the shared type carries no mobile arm and the server leaves nothing empty:
+a mobile is a `Blocks { door: false }` the client adds and the server does not.
+
+What that leaves visible — and it is worth saying, because the type no longer
+hides it — is that **the two ends disagree on purpose**: the client refuses to
+route through an NPC and the shard permits it. That is `clutter.rs`'s stated
+courtesy, and the agreement test is therefore about *items*, exactly as this
+section already said.
+
+### Identity: the third shape, and the client is why ✅
+
+**The shared type carries no owner, because the client has none to put in it.**
+`GroundItem` has a position, a graphic, a hue and an amount — no serial — so an
+owner field would be a hole the client fills with a lie. That refutes the first
+of the two options this section offered and settles the second in the third
+shape's favour.
+
+So: **`FacetState` owns the one `Overlay`, and the two server indexes project
+into it.** `Obstructions` keeps its `(entity, z)` key — identity and idempotence
+are genuinely the server's — and `Boats` keeps `covered`, because a ship has to
+answer *who is aboard*. Neither owns an overlay of its own; both are asked for
+one tile's covers, and a single `FacetState::refresh(tile)` writes
+`overlay[tile]` from both sources after any mutation of either.
+
+Three things fall out of putting the refresh in one place rather than in each
+index:
+
+- **A tile with a crate on a deck is one answer.** Two overlays, or a per-source
+  tag inside one, would each have had a rule for merging them; one refresh from
+  both sources has nothing to merge.
+- **Nothing is rebuilt per tick or per query.** A door flip rewrites one tile's
+  `Vec<Cover>`; mooring rewrites the ship's footprint, which is what `moor`
+  already does.
+- **The invariant cannot be forgotten**, which is the failure mode this whole
+  document is about: `obstructions` and `boats` go private and `FacetState`
+  grows `block`/`unblock`/`moor`/`cast_off`, so there is no way to mutate an
+  index without refreshing the overlay.
+
+The cost is that a cover's `z`, `height` and `kind` are stored twice on the
+server — once in the owner table, once in the projection. Four bytes an entry,
+and for the whole of a facet's doors and house walls that is well under a
+megabyte against the alternative of a hash lookup per tile per query.
+
+### And `hull_blocks` becomes a span, not a point
+
+Folding the hull into `Cover` changes one rule by accident, so it is named here:
+`Boats::hull_blocks` tests whether the body's **feet** are inside the plank's
+span, and every other blocker tests whether the body's **span** meets it. The
+span test is the stricter one and the two agree on every case the hull is
+actually written for — a gunwale at deck height seals neither the deck nor the
+water — because a plank's span ends exactly where its own deck surface begins.
+It is a change, so it gets a test rather than a sentence.
+
+### The order it lands in
+
+Five commits, and the compiler leads only the last two:
+
+1. **`Overlay`, `Cover`, `Doors`** in `common/movement`, with their own tests.
+   Pure addition; `Doors` replaces `LiveTerrain::through_doors` and
+   `clutter.rs`'s private enum of the same name, which are the same two readings
+   under two spellings.
+2. **The server projects.** `FacetState` owns the overlay, `Obstructions` and
+   `Boats` go private behind it, `LiveTerrain` reads the overlay instead of the
+   two indexes. Behaviour unchanged, trait still standing.
+3. **The client projects.** `Clutter` builds an `Overlay` and `Cluttered` reads
+   it.
+4. **The search takes explicit types.** `find_path`, `find_path_toward`,
+   `search`, `search_path`, `step_allowed`, `corner_open`, `Around::read`,
+   `Walker::request` and the whole of `navigation.rs`; `InRegion` becomes a
+   `Region` argument rather than a decorator; `CachedTerrain` and its
+   `TransitionCacheStats` are deleted; `OpenWorld` becomes `None`.
+5. **The trait goes**, with `LiveTerrain` and `Cluttered`, and the agreement
+   test lands.
 
 **Done when:** `grep -rn "dyn Terrain" crates` is empty, `Terrain` is gone, and
 one test asserts the two ends produce the same blockers for the same items —
