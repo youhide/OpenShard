@@ -69,6 +69,16 @@ Metadata/length stamps are sufficient initially, matching `artscan`'s policy:
 they reliably distinguish an install revision without making every startup hash
 hundreds of megabytes. A stale or unrecognised artifact is never used.
 
+**A facet from a base set stamps different inputs.** When the world comes out of
+`openshard-basemap` rather than out of the install, the map and statics files
+are no longer what the graph was built from — and they are still sitting there
+with their old lengths and mtimes, so stamping them would *pass* and hand a
+player a graph of a world it has never seen. `bake::stamp_of_base_set` names the
+base set and `tiledata.mul` instead. The `Stamp` also carries the source
+revision either way, which is `docs/map/new_map_representation/plan.md`'s
+direction D arriving one caller early; D is where the file stamps go away and
+the revision becomes the whole key.
+
 ## Bake command
 
 Provide a dedicated native CLI, initially in `openshard-movement`:
@@ -83,6 +93,10 @@ Options:
 - `--client DIR` (also `OPENSHARD_CLIENT`);
 - repeatable `--facet N`, defaulting to `0`;
 - `--out FILE` for a one-facet explicit destination;
+- `--base-set FILE` for a one-facet build over an OpenShard base set instead of
+  the install's map and statics (`--client` is still required, for
+  `tiledata.mul`). The artifact defaults to *beside the base set*, and the stamp
+  names the base set — see below;
 - `--dry-run`, which builds and reports but writes nothing.
 
 The command loads the same `MapTerrain` that runtime used, prints each build

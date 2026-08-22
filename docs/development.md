@@ -115,6 +115,26 @@ cargo run --release -p openshard-movement --bin openshard-navigation-bake -- --f
 client install is read-only. The bake command also accepts `--out FILE` (for a
 single facet), repeatable `--facet N`, and `--dry-run`.
 
+### A facet that comes from a base set
+
+A shard can read a facet out of OpenShard's own map format instead of out of the
+install — `world.base_sets` in `openshard.toml`, one entry per facet. Import it
+once, then bake a navigation graph **over the base set**, which is what the
+shard will check its artifact against:
+
+```sh
+cargo run --release -p openshard-uofiles --bin openshard-map-import -- \
+    --facet 0 --out felucca.osbase --verify
+cargo run --release -p openshard-movement --bin openshard-navigation-bake -- \
+    --facet 0 --base-set felucca.osbase
+```
+
+The graph lands beside the base set rather than beside the install, because that
+is where a shard reading a base set looks for it. `--client` is still required
+for both commands: a base set holds the map, and `tiledata.mul` still holds what
+a tile is. A shard configured with a base set and no `client_files` is refused
+at startup for that reason.
+
 The two ends are joined by a pair of in-memory pipes. Everything above the
 transport is the code that runs against ClassicUO — the transport itself is a
 parameter on both sides, `transport::Dial` for the client and any stream for
