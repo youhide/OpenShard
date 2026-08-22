@@ -160,6 +160,66 @@ project into one, and `Doors` is the enum at both. What this plan substitutes is
 the *other* argument, and it substitutes it into a signature that already has one
 shape.
 
+## What this is worth, and the ceiling it runs into
+
+A ratio quoted without its limit is a ratio that ignores its own arithmetic, so
+the floor was measured before the estimate was made.
+[`step_cost`](../../crates/common/movement/examples/step_cost.rs) runs a search
+over open ground walled off from its goal — the budget is spent in full and
+`can_step` is one integer compare — leaving nothing on the clock but the binary
+heap, the two `FxHashMap`s and the closed set:
+
+| | ns/node |
+|---|---:|
+| a real search on facet 0 today (601 nodes, `budget/far` p50, three origins) | **1,213 – 1,477** |
+| …of which **pure A\***, terrain taken away | **222 – 234** |
+| …so terrain is | **~85%** |
+| what a span read should cost (8 neighbours, one land read each) | ~100 – 150 |
+
+**So the honest expectation is ×3.5 to ×4 on the search, and the ceiling is
+×5.3 to ×6.4.** No amount of work on terrain can pass that, because at the limit
+every node still costs 230 ns of A\* machinery. What lands is roughly
+
+```
+   now   1,477 = 1,247 terrain +   230 A*
+after N3   ~380 =   ~150 terrain +   230 A*
+   limit   230 =      0 terrain +   230 A*
+```
+
+Two things follow, and the second matters more than the first.
+
+**The hoist is not the plan's competitor.** Computing `start_surface` once per
+expansion instead of sixteen times is 1,372 → 523 ns on a node, measured — ×2.6
+on the terrain half, ×1.9 on a whole search. It is most of what a span grid
+gets, for a day's work and no new structure. It is still not taken, for the
+reason [terrain_seam](terrain_seam.md#-a-is-not-what-a-search-spends-its-time-on)
+gives: it repairs a query that should be a table lookup, and it does nothing at
+all for [N4](#n4--regions-over-spans), which is the node with a defect behind it.
+
+**Speed is not the capability.** A faster node makes a *refusal* cheaper; it does
+not turn one into a route. Four destinations in five from a town street are
+refused today at budget 600, every one of them by the budget rather than by the
+map — and ×4 on the clock leaves that number exactly where it is. What changes it
+is the coarse router answering the long routes flat A\* cannot, which is N4, and
+which is currently wrong on raised ground. **The user-visible win of this plan is
+N4; N1–N3 are what make N4 correct and affordable.**
+
+### Past the ceiling, if it is ever worth it
+
+Both moves are standard and both are out of scope here, named so the ceiling is
+not mistaken for a wall:
+
+- **The hash maps are the 230 ns.** `cost`, `came_from` and `closed` take about
+  seventeen hash operations per node. A search bounded to 600 nodes has a bounded
+  window, so a generation-stamped dense array over its own bounding box replaces
+  all three — the textbook move, and worth perhaps 30–50 ns/node, which would put
+  the ceiling near ×20 instead of ×6.
+- **JPS** (Harabor & Grastien, *Online Graph Pruning for Pathfinding on Grid
+  Maps*) attacks the **number** of nodes rather than their cost, which is the
+  other axis entirely. It wants a uniform-cost grid with cheap neighbour queries
+  — which is precisely what this plan builds, and precisely what does not exist
+  today. It is the move *after* N3, never before it.
+
 ## The live half, and what it does not carry
 
 The overlay is the half a bake can never hold, so what it holds decides what the

@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use openshard_movement::{MapTerrain, Terrain, Tile, step_allowed};
+use openshard_movement::{MapTerrain, SearchExit, Terrain, Tile, search_path, step_allowed};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 use openshard_uofiles::tiledata::TileData;
@@ -141,7 +141,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     measure(cli.repeat, n, "the same, landings computed once", || {
         standing.iter().map(|&p| hoisted_expand(&terrain, p)).sum()
     });
+    println!("what the search itself costs, with terrain taken away:");
+    let plain = Plain { wall_x: 3000 };
+    let from = Point::new(2000, 2000, 0);
+    let to = Point::new(4000, 2000, 0);
+    for budget in [400_usize, 600] {
+        let mut fastest = Duration::MAX;
+        let mut explored = 0;
+        for _ in 0..cli.repeat.max(1) {
+            let started = Instant::now();
+            let search = search_path(black_box(&plain), black_box(from), black_box(to), budget);
+            fastest = fastest.min(started.elapsed());
+            explored = search.explored;
+            assert!(
+                matches!(search.exit, SearchExit::Budget),
+                "the goal must stay walled off"
+            );
+        }
+        println!(
+            "  budget {budget}: {explored} nodes in {:8.1} ns  =>  {:6.1} ns/node of pure A*",
+            fastest.as_secs_f64() * 1e9,
+            fastest.as_secs_f64() * 1e9 / explored as f64,
+        );
+    }
     Ok(())
+}
+
+/// Open ground with one impassable half-plane, and a step that costs nothing.
+///
+/// The floor under every measurement above. A search over this pops its whole
+/// budget — the goal is walled off, so nothing arrives — while `can_step` is one
+/// integer compare, so what is left on the clock is the *search*: a binary heap,
+/// two `FxHashMap`s and a closed set. Terrain work is what a span grid shrinks;
+/// this is what it shrinks it **towards**, and a ratio quoted without it is a
+/// ratio that ignores its own limit.
+struct Plain {
+    wall_x: u16,
+}
+
+impl Terrain for Plain {
+    fn can_step(&self, _from: Point, to: Point) -> Option<Point> {
+        (to.x < self.wall_x).then_some(to)
+    }
 }
 
 const fn step_from_east(point: Point) -> Option<Point> {
