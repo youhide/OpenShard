@@ -1,0 +1,611 @@
+# The radar raster, and every window that draws it
+
+One pixel per tile is the cheapest picture of a world this engine makes, and
+three different windows want it at three different scales. Today one of them —
+the minimap — has a chunked, revisioned, LOD-capable cache built for it over
+five phases, and the other — the facet map — reaches past that cache's whole
+point and asks for the entire world at full resolution, every frame.
+
+This document is the inventory of what exists, the measurement of what it
+costs, and the design that makes one raster serve both. It does not replace
+[`minimap_lod_plan.md`](minimap_lod_plan.md), which is still the contract the
+cache is built to, or [`minimap_lod_handoff.md`](minimap_lod_handoff.md),
+which is still the record of what landed. It is the layer those two never
+reached: **nothing chooses an LOD.**
+
+---
+
+## 1. The inventory: there are two LOD systems, and they are not the same one
+
+| | **scene LOD** | **radar LOD** |
+|---|---|---|
+| lives in | [`render/src/lod.rs`](../../crates/client/render/src/lod.rs), [`composite.rs`](../../crates/client/render/src/composite.rs) | [`render/src/radar.rs`](../../crates/client/render/src/radar.rs), [`radar_pass.rs`](../../crates/client/render/src/radar_pass.rs) |
+| what a product **is** | one 8×8 map block, drawn in the isometric projection: RGBA plus its deferred planes | one 64×64-tile square, one texel a tile, categorical `radarcol.mul` colour |
+| levels | `BlockLod::{Lod0, Lod1, Lod2}`, where `Lod0` means *no composite at all* | `RadarLod(u8)`, a true quadtree, `0..=MAX_LOD` (4) |
+| **who picks the level** | `LodThresholds::next` from the block's projected screen footprint, **with hysteresis**, held in `BlockLodSelector` | **nobody. `RadarLod::BASE` is hard-coded at all four call sites.** |
+| identity | `CompositeKey { block, tier, revision }` | `RadarChunkKey { facet, lod, chunk, revision }` |
+| producer queue | `CompositeWorkQueue { max_pending, builds_per_frame, BTreeMap<key, order> }` | `RadarWorkQueue { max_queued: 512, builds_per_turn: 8, BTreeSet pending + in_flight }` |
+| GPU residency | `CompositeCache`, LRU over a 128 MiB byte budget | `RadarChunkRenderer`, a texture array of 1024 pages × 16 KiB = 16 MiB, LRU |
+| CPU residency | — (a composite lives on the GPU) | `RadarCache`, a `BTreeMap`, **unbounded, no eviction, `evicted` is always 0** |
+| where a build runs | `composite_producer::produce`, GPU encoder work | `build_base_chunk`, pure CPU, **synchronously inside `App::draw_from`** |
+
+**The products are different in kind and must stay apart.** A composite is a
+picture of the world as the camera sees it — heights, art, projection. A radar
+texel is a *category*, which is why `reduce_lod_pixel` votes instead of
+averaging. Merging them would be the mistake `radar_pass.rs`'s own module doc
+already refuses one level down, when it explains why a generated raster is not
+a `GumpArt`.
+
+**The machinery around them is the same thing written twice.** Five pieces,
+each implemented independently in both columns:
+
+1. a revisioned chunk key whose revision cannot be omitted;
+2. a coalescing producer queue with a total bound and a per-turn bound;
+3. publish-only-complete, so a partial product is never a cache value;
+4. LRU GPU residency against a byte budget, evicting only recreatable data;
+5. select-ready-with-fallback, so a miss is never a hole.
+
+That is the extraction this repo would benefit from, and it is *not* what makes
+the facet map wrong — so it is section 6, not section 4.
+
+### The third and fourth readers, named in docs and not built
+
+- **`client.md`'s M3b facet map** — the multi-session overview, one marker per
+  logged-in body. It is described there as an egui image, which is a third
+  placement of the same raster.
+- **`radar::bake` and `radar::mark`** — the whole-facet CPU path. No caller but
+  their own tests, the same shape the retired `RadarRenderer` had before it was
+  removed. See the handoff's "next work" item 5.
+
+---
+
+## 2. The numbers, for the shipped Britannia facet
+
+`map0` post-ML is **7168 × 4096** tiles. `BASE_CHUNK_TILES` is 64, so the level-
+zero grid is exactly **112 × 64 = 7168 chunks**. A CPU chunk is
+64·64·`Color16` = **8 KiB**; a GPU page is RGBA8 = **16 KiB**.
+
+| level | tiles a texel covers | chunks in the facet | CPU bytes for the whole level |
+|---|---|---|---|
+| 0 | 1 | 7168 | 57 MiB |
+| 1 | 2 | 1792 | 14 MiB |
+| 2 | 4 | 448 | 3.6 MiB |
+| 3 | 8 | 112 | 0.9 MiB |
+| 4 | 16 | 28 | 224 KiB |
+| 5 | 32 | 8 | 64 KiB |
+| 6 | 64 | 2 | 16 KiB |
+| 7 | 128 | 1 | 8 KiB |
+
+Two consequences fall straight out of that table.
+
+- **Levels 2 and coarser, for the entire world, cost 4.8 MiB and 599 chunks.**
+  The whole facet, complete, at every scale the map window can usefully show,
+  is smaller than the GPU page cache already is.
+- **Level 0 for the entire world cannot be held and must never be asked for.**
+  57 MiB of CPU products, 112 MiB of GPU pages, against a 16 MiB page cache.
+
+The facet map's zoom range is `1.25^steps`, `steps ∈ -8..=12`, over a fit-to-
+window base scale of ~0.089 screen pixels per tile for a 640×458 canvas. So it
+spans **0.015 px/tile at full zoom-out** (the facet drawn 107 px wide, wanting
+level 6) **to 1.3 px/tile at full zoom-in** (wanting level 0, but only for the
+~500×350 tiles actually on screen — 48 base chunks). The minimap's own
+`zoom_steps ∈ -6..=12` reaches 0.26, i.e. ~4× the tiles per axis, 16× the
+chunks — still, today, all at level 0.
+
+---
+
+## 3. What is wrong, ranked
+
+### 3.1 Nothing selects an LOD. This is the root cause of everything below it.
+
+`RadarLod::BASE` is hard-coded in all four places that name a level: the
+requester in [`presentation.rs:2113`](../../crates/client/app/src/presentation.rs#L2113),
+the minimap draw in [`render_passes.rs:475`](../../crates/client/app/src/render_passes.rs#L475),
+the facet-map draw in [`render_passes.rs:641`](../../crates/client/app/src/render_passes.rs#L641),
+and `region_base_chunks`, whose own doc says level zero "is the only chunk grid
+a rectangle of world tiles maps onto directly".
+
+Coarse levels exist, are correct, are tested, and are *only ever produced as a
+side effect*: `build_ready_ancestors` reduces a parent when the fourth child of
+its family lands. Nothing ever schedules one. So a level-4 picture of the facet
+requires all 7168 level-zero chunks to have been built first — which is the one
+thing that cannot happen.
+
+**The three defects section 3 of the handoff documents — the hemisphere wedge,
+the page-cache truncation, the corner ring — are all the same defect seen from
+three floors of the building.** A window zooms out; its tile demand grows with
+the square of the zoom; the level stays at 0; a bound is exceeded; something
+gets dropped, and the shape of the dropping is the symptom. Every one of those
+fixes made the *shortfall* radial instead of directional. None of them removed
+the shortfall, because the shortfall is asking for a level the window cannot
+display anyway.
+
+**The invariant this design exists to establish:** *a window's chunk demand is
+a function of its own pixel area, never of the world's size or its own zoom.*
+At the correct level a 640×480 canvas needs ~80 chunks and a 200×200 minimap
+~16, at every zoom either of them has.
+
+### 3.2 The facet map asks for the whole world at level zero, twice per frame
+
+[`presentation.rs:2080`](../../crates/client/app/src/presentation.rs#L2080)
+builds a `RadarRegion` spanning the entire facet whenever the world map is
+open, and then walks `region_base_chunks_near` over it — 7168 coordinates
+collected into a `Vec` and sorted, **every frame**. Then
+[`render_passes.rs:641`](../../crates/client/app/src/render_passes.rs#L641)
+walks `region_base_chunks` over the same 7168 and calls `select_ready` on each.
+
+At 8 builds a frame it fills the 512-key queue's worth in ~15 s and then keeps
+going, publishing into an unbounded CPU cache, while the 1024-page GPU cache
+can only ever show 14% of the level-zero facet. What a person sees is a disc of
+terrain around the window's centre and black everywhere else, permanently.
+
+### 3.3 The facet map replaces the minimap's region instead of adding its own
+
+The `if world_map_open` at
+[`presentation.rs:2080`](../../crates/client/app/src/presentation.rs#L2080) is
+an `if/else`: while the facet map is open, **the minimap requests nothing of its
+own**. It draws whatever the facet map's demand happened to build. Two open
+windows are two demands; the producer must serve a list, not a branch.
+
+### 3.4 `select_ready`'s ancestor search is a linear scan of the whole cache
+
+[`radar.rs:650`](../../crates/client/render/src/radar.rs#L650) filters
+`self.ready.iter()` to find a coarser ancestor, and the stale-exact fallback
+below it scans again. `ready` is a `BTreeMap` keyed
+`(facet, lod, chunk, revision)` — in that order — so an ancestor is at most
+`MAX_LOD` direct `get`s and the stale fallback is one bounded range query.
+
+Cost today with the facet map open: 7168 calls a frame, each scanning every
+retained product. This is a straight defect fix, independent of the design.
+
+### 3.5 The GPU page cache is shared by both windows and thrashes between them
+
+`Screen::radar_chunks` is one `RadarChunkRenderer`. Two windows whose combined
+working sets exceed 1024 pages evict each other's pages *within one frame*, and
+then again next frame, forever. `render_region` also `eprintln!`s on every
+over-capacity frame ([`radar_pass.rs:911`](../../crates/client/render/src/radar_pass.rs#L911)),
+so an open facet map spams stderr at frame rate. It also allocates a fresh
+instance buffer per window per frame
+([`radar_pass.rs:965`](../../crates/client/render/src/radar_pass.rs#L965)).
+
+With correct LOD selection the combined working set is ~100 pages and the
+thrash disappears; the shared-cache hazard should still be named and measured
+rather than assumed gone.
+
+### 3.6 The CPU cache never evicts anything
+
+`RadarCache::evicted` is a counter nothing increments. `ready` grows for the
+life of the process — walking a character across a facet publishes chunks that
+are never reclaimed. There is no byte budget, no LRU, no pinning rule.
+
+### 3.7 `MAX_LOD` is a constant where it should be a property of the facet
+
+`MAX_LOD = 4` covers 1024 tiles across, which its own doc justifies against the
+*minimap's* needs. The facet map at full zoom-out needs level 6, and the level
+at which the whole facet is a single chunk is 7. A larger facet needs a deeper
+ladder, which the constant cannot express.
+
+### 3.8 The facet map's window is not a window
+
+- **No art at all.** `WorldMapPane::art` returns `Vec::new()` and
+  [`windows.rs:333`](../../crates/client/app/src/windows.rs#L333) answers
+  `Drawn::WorldMap(_) => &[]`. There is no frame, no title bar, no close
+  button; `TITLE_HEIGHT: 22` reserves an invisible drag strip.
+- **The canvas drag is broken.** `Input::Move` is deliberately *unbounded* —
+  [`route.rs:180`](../../crates/client/app/src/panes/route.rs#L180) marks only
+  `Press` and `Wheel` as located, so every pane sees every move. The pane's
+  `Move` arm at
+  [`world_map.rs:77`](../../crates/client/app/src/panes/world_map.rs#L77)
+  does `self.drag_from.replace(ctx.frame.cursor)` **before** testing whether a
+  drag was in progress. After the first mouse movement anywhere on screen,
+  `drag_from` is `Some` forever and the map pans with every pointer motion,
+  with no button held and the pointer nowhere near the window.
+- **Pan is unclamped and in the wrong unit.** `pan: (i32, i32)` accumulates
+  gump pixels with `saturating_add`, so the map can be dragged entirely out of
+  its own frame and never comes back. Storing a *world centre* instead makes
+  the same drag mean the same ground at every zoom, and makes clamping a
+  statement about the facet rather than about a pixel offset.
+
+### 3.9 What is *not* wrong, contrary to the premise
+
+The minimap does **not** rewrite a texture per step: it uploads immutable
+chunk pages once and a step changes only uniforms and one overlay instance. It
+**is** drawn in a gump — `SMALL_FRAME` (5010) / `LARGE_FRAME` (5011), circular
+clip, 45° rotation, rim art layered over the generated terrain. It **is**
+dragged, raised, hit-tested and closed by `Windows` like any other window. Its
+one real defect is 3.1, which it shares with everything else.
+
+---
+
+## 4. The design
+
+### 4.1 One view, two windows
+
+Introduce the type both windows are already an instance of:
+
+```
+RadarView {
+    facet, 
+    centre:   RadarTile,     // what the window is looking at
+    tiles_per_pixel: f32,    // the whole of "zoom", in one honest unit
+    placement: Placement,    // where it lands, its rotation, its clip shape
+}
+```
+
+with two derived answers — `region()` (the world rectangle it needs) and
+`lod()` (the level that rectangle should be fetched at). The minimap
+constructs one with `centre = player`, `rotation = π/4`, `circle = true`; the
+facet map with `centre = its own panned centre`, `rotation = 0`,
+`circle = false`. `radar_native_extent`'s hard-won arithmetic — no `sqrt(2)`,
+`ceil` not `round`, a tangent margin that scales with the window and with zoom
+but not with HiDPI — becomes `region()`'s body, unchanged and still the one
+copy.
+
+This deletes the two near-duplicate ~100-line arms in `render_passes.rs` and
+the `if world_map_open` fork in `presentation.rs`. **Demand becomes a list of
+open views**, walked in turn, which is what fixes 3.3.
+
+### 4.2 The level is chosen from tiles-per-pixel, with hysteresis
+
+`lod = clamp(floor(log2(tiles_per_pixel)), 0, max_lod(facet))`, and the
+threshold gets the same hysteresis `lod.rs` already implements for the scene —
+a view sitting on a boundary must not rebuild its whole working set every
+frame the wheel jitters. `lod.rs`'s `LodThresholds`/`BlockLodSelector` shape is
+the model; whether it is literally reused is section 6's question.
+
+`max_lod` becomes a function of the facet's own extent: the level at which the
+facet is one chunk, `ceil(log2(max(w, h) / BASE_CHUNK_TILES))` — 7 for
+Britannia.
+
+### 4.3 A chunk can be built at any level, directly from the map
+
+`build_base_chunk` becomes `build_chunk(map, colors, key)` for any LOD: raster
+the chunk's full tile span into a scratch buffer with the existing block-major
+`fill`, then reduce it `lod` times with the existing `reduce_lod_pixel`. The
+reduction rule is unchanged, so a chunk built directly is **bit-identical** to
+one reduced from four children — which is a test, not a hope.
+
+`build_lod_parent` stays as the cheap path for when a family happens to be
+complete. `build_ready_ancestors` stays as the opportunistic climb.
+
+Cost is `4^lod · 4096` tile colours. A level-2 chunk is 256×256 tiles ≈ 1024
+blocks ≈ a few milliseconds; a level-4 chunk is 16× that again.
+
+### 4.4 The producer's budget is time, not a count
+
+`builds_per_turn: 8` is a count, and it was right while every build cost the
+same. Once a build's cost is `4^lod`, a count is a budget that varies by 256×
+between levels. Replace it with a **cost budget in base-chunk units**, spent
+per frame: a level-2 chunk costs 16 units, a level-4 chunk 256, and the frame
+spends, say, 32.
+
+### 4.5 The coarse pyramid is swept once and then simply exists
+
+The whole facet at levels 2 and coarser is 599 chunks and 4.8 MiB (section 2).
+Its total build cost is one walk of the facet — 29.4 M tile colours,
+~1 s of CPU — and under 4.4's budget it is a **few seconds of wall clock,
+spread over frames, once per session**, with no thread and no disk artifact.
+
+So: when a facet map opens (or, cheaper for the player, eagerly at idle), the
+requester enqueues the facet's level-2-and-coarser chunks at low priority.
+Once they land, *every* zoom of the facet map has a complete picture, and the
+minimap gains a real fallback ladder for ground it has never visited — which
+the handoff's "known limits" names as the thing today's design cannot give it.
+
+Levels 0 and 1 stay strictly demand-driven around each open view, nearest-
+first, exactly as today. They are the only levels a byte budget has to bound.
+
+**Persisting the swept pyramid to disk, keyed by the source revision, is
+deliberately out of scope here.** It is an optimisation of a cost the player
+pays once per session, and it belongs with the other bakes in
+[`new_map_representation/plan.md`](new_map_representation/plan.md)'s section D
+when derived data gets its revision key. Naming it now so it is not
+re-invented later.
+
+### 4.6 Budgets, and what may be evicted
+
+- **CPU (`RadarCache`)**: a byte budget with LRU eviction, which
+  `RadarCacheCounters::evicted` finally reports. Two pinning rules: a chunk at
+  or above the sweep level is never evicted (it is 4.8 MiB and it is the
+  fallback floor), and a chunk in any open view's current draw list is never
+  evicted.
+- **GPU (`RadarChunkRenderer`)**: unchanged 16 MiB / 1024 pages, but now
+  reached only by a pathological view. The over-capacity `eprintln!` becomes a
+  counter in the frame report; `cap_draws_by_distance` stays as the backstop it
+  was written to be.
+- The per-frame instance-buffer allocation becomes a reused, grown-on-demand
+  buffer.
+
+### 4.7 `select_ready` becomes O(levels)
+
+Direct `get` per ancestor level, bounded range query for the stale fallback.
+Independent of everything else and worth doing first.
+
+### 4.8 The facet map becomes an actual window
+
+- A frame, a title strip that is visible, and a close affordance — the same
+  furniture every other local window has.
+- The drag defect: guard the `Move` arm on `drag_from.is_some()`, and start
+  the drag only on a press that is `under_pointer`. Add the interaction test
+  the pane does not have.
+- State becomes `centre: RadarTile` + `tiles_per_pixel`, clamped so the facet
+  cannot be dragged out of its own frame.
+- Its markers are the player today and, per M3b, one per logged-in body later —
+  the same overlay, already built.
+
+---
+
+## 5. What the design does *not* change
+
+- The colour rule (`tile_color`, highest static, `>=` against the land,
+  `UNKNOWN` for absent) — untouched.
+- `reduce_lod_pixel`'s categorical vote — untouched, and now load-bearing in
+  one more place.
+- The key's identity and the publish-only-complete contract — untouched; this
+  is `minimap_lod_plan.md`'s first non-negotiable and it holds.
+- Markers as overlays that never touch cached terrain pixels — untouched.
+- `nearest` sampling, no blending, `UNKNOWN` backdrop under everything —
+  untouched.
+
+---
+
+## 6. Decisions taken
+
+Three questions this document opened with, answered before the plan below was
+written, so nothing in it is provisional.
+
+1. **The shared machinery is extracted now, under both subsystems.** Section
+   1's five pieces are duplicated between the radar and the scene composites,
+   and the extraction happens as its own phase (R1) rather than as a later
+   track. What is generalised and what is deliberately *not* is pinned in R1
+   itself — the boundary is the whole point of the phase.
+2. **The coarse pyramid is swept lazily, on the first facet-map open.** A
+   player who never opens the map pays nothing. The first open fills in over a
+   few seconds, coarsest level first, over the `UNKNOWN` backdrop that already
+   exists. Persisting it to disk stays out of scope, for
+   [`new_map_representation/plan.md`](new_map_representation/plan.md)'s section
+   D to pick up when derived data gets its revision key.
+3. **The facet map wears the stretched plate.** `gump::resize` already draws a
+   nine-slice `resizepic` from `0x0A28`, and the party manifest already uses it
+   at 450×480 with the `0x00F3`/`0x00F2` close button. No new window-manager
+   feature; in particular **no resizable windows** — that is a manager
+   capability nothing else here has, and inventing it for one window is the
+   half-measure this repo keeps refusing.
+
+---
+
+## 7. The plan
+
+Seven phases. R0 is independent of every other and can land first; R1 through
+R6 are ordered by what each one's successor needs. Each names the micro-
+decisions it settles, so a later session does not get to re-open them.
+
+### R0 — the four fixes with no design in them
+
+Independent of the rest, safe to land alone, and each one repairs something
+measurable today.
+
+1. **`select_ready` becomes O(levels).** `ready` is a `BTreeMap` keyed
+   `(facet, lod, chunk, revision)` in that order, so an ancestor is at most
+   `max_lod` direct `get`s and the stale-exact fallback is one bounded range
+   query over `(facet, lod, chunk, 0..=current)`.
+2. **The facet map's canvas drag.** `Input::Move` is unbounded *by design*
+   ([`route.rs:180`](../../crates/client/app/src/panes/route.rs#L180)) — the
+   pane is what must be guarded, not the router. Test the `drag_from.is_some()`
+   guard before touching it, and start a drag only on a press that is
+   `under_pointer`.
+3. **The over-capacity `eprintln!`** at
+   [`radar_pass.rs:911`](../../crates/client/render/src/radar_pass.rs#L911)
+   fires every frame an open facet map is over budget. It becomes a counter on
+   the renderer, read by R7.
+4. **The per-frame instance buffer** at
+   [`radar_pass.rs:965`](../../crates/client/render/src/radar_pass.rs#L965)
+   becomes a reused, grown-on-demand buffer, in both `RadarChunkRenderer` and
+   `RadarOverlayRenderer`.
+
+**Micro-decisions.** The old exhaustive-scan `select_ready` is kept as a
+`#[cfg(test)]` reference implementation, and the new one is tested against it
+over a generated cache — that is the oracle, rather than asserting the three
+`RadarReadyKind`s by hand a fourth time.
+
+**Done when** a generated cache of a thousand mixed-revision, mixed-level
+products gives byte-identical answers from the fast path and the reference for
+every key in a covering sample; a pointer moved across the screen with no
+button held leaves `WorldMapPane::pan` untouched, as an
+`openshard-client-app` test; and no radar draw allocates a buffer per frame.
+
+### R1 — the shared chunk machinery
+
+A new module in `client/render` — `chunk_cache` — holding exactly the two
+pieces that are genuinely the same code twice, and nothing else.
+
+**`WorkQueue<K: Copy + Ord>`** — bounded, coalescing producer scheduling.
+`request`, `reconcile(is_still_wanted)`, `take_for_producer(order)`, `finish`,
+`abandon`, `pending_len`, `in_flight_len`, counters. `RadarWorkQueue` and
+`CompositeWorkQueue` become thin newtypes over it, each keeping its own key
+type and its own `reconcile` predicate.
+
+**`LruBudget<K: Copy + Ord>`** — a use clock, byte accounting, a protected set
+and `evict_to_budget` returning a report. It owns the *decision*, never the
+storage: `CompositeCache`, `RadarChunkRenderer` and (in R5) `RadarCache` each
+keep their own entries and ask it what to drop.
+
+**Deliberately not generalised, and this is the phase's real content:**
+
+- **The product.** A `CompositeTexture` is GPU-side with eight planes; a
+  `RadarChunk` is a CPU `Vec<Color16>`. One trait over both would exist only to
+  be downcast.
+- **The fallback ladder.** The radar's is *coarser ancestor, then stale-exact*;
+  the composite's is *more detailed, then draw LOD 0 geometry instead*. These
+  are opposite directions with opposite meanings.
+- **The quarantine.** `CompositeQuarantine` is the scene renderer's answer to a
+  known-bad composite. The radar has no such failure mode.
+- **The builders.** `build_chunk` walks a `Map`; `composite_producer::produce`
+  records an encoder. Nothing shared.
+
+**Micro-decisions.** No `Box<dyn>` and no trait objects on any path a frame
+touches — `WorkQueue` and `LruBudget` are generic over the key only, and the
+callers keep monomorphic wrappers. The counters keep their existing field
+names, so the existing tests of both subsystems do not change their
+expectations.
+
+**Done when** both queues and all byte-budget eviction is one implementation;
+`cargo test -p openshard-client-render` and `-p openshard-client-app` pass with
+no test's *expectations* edited, only its imports.
+
+### R2 — the ladder becomes something you can ask for
+
+1. **`max_lod` is a property of the facet, not a constant.** `MAX_LOD = 4`
+   becomes `max_lod(extent) = ceil(log2(max(w, h) / BASE_CHUNK_TILES))` — 7 for
+   Britannia's 7168×4096, the level at which the facet is a single chunk.
+2. **`build_chunk(map, colors, key)` builds any level directly.** Raster the
+   chunk's full tile span with the existing block-major `fill` into a scratch
+   buffer, then reduce `lod` times with the existing `reduce_lod_pixel`.
+   `build_base_chunk` becomes its `lod == 0` case.
+3. **`region_chunks(region, lod)` and `region_chunks_near(region, lod, centre)`**
+   join `region_base_chunks`, which stays for the invalidation path and its
+   tests.
+4. **The producer's budget becomes a cost, not a count.** A level-`n` chunk
+   costs `4^n` base-chunk units; the frame spends a fixed number of units.
+   `builds_per_turn: 8` becomes `units_per_turn: 8`, which is the same thing at
+   level zero and stops being a 256× lie at level four.
+
+**Micro-decisions.** The scratch buffer is allocated once per producer turn and
+reused across the turn's chunks, sized for the largest level the turn will
+build. A level-`n` build over `4^n · 4096` tiles is a single `fill` call over a
+`2^n · 64`-square region, so the block-major walk is unchanged and
+`Map::statics_in_block`'s one-fetch-per-block property still holds.
+
+**Done when** a test asserts `build_chunk(key at lod n)` is **bit-identical**
+to `build_lod_parent` climbed from its `4^n` level-zero children, for `n` up to
+3 on a fixture map — this is what makes the two production paths one product
+rather than two pictures that resemble each other. And `max_lod` for
+7168×4096 is 7, with a test.
+
+### R3 — one view, two windows
+
+The type both windows already are an instance of:
+
+```
+RadarView { facet, centre: RadarTile, tiles_per_pixel: f32, placement: Placement }
+```
+
+with `region()` — `radar_native_extent`'s arithmetic moved in whole, no
+`sqrt(2)`, `ceil` not `round`, the tangent margin unchanged — and `lod()`:
+
+```
+lod = clamp(floor(log2(tiles_per_pixel)), 0, max_lod(facet))
+```
+
+with a **10% dead band** on each boundary. Ten percent because one wheel notch
+is 25%: a dead band under a notch means a notch always moves the level, and
+jitter from a window resize or a device-scale change never does.
+
+1. The minimap constructs one with `centre = player`, `rotation = π/4`,
+   `circle = true`; the facet map with its own centre, `rotation = 0`,
+   `circle = false`.
+2. **`presentation.rs`'s `if world_map_open` becomes a list.** The requester
+   walks every open view in turn, nearest-first within each — which is what
+   ends the facet map starving the minimap (defect 3.3).
+3. **`render_passes.rs`'s two ~100-line arms become one**, taking a
+   `RadarView`.
+
+**Micro-decisions.** `tiles_per_pixel` is the single honest unit and replaces
+every separate `magnify` / `device_scale` / `zoom` factor at the seam — the
+three keep their own meanings on the way in and are multiplied exactly once,
+in the constructor. The tangent margin keeps its existing rule of scaling with
+the window and with zoom but *not* with HiDPI or desk scale; the handoff
+records three measured reports for why, and none of them is re-opened here.
+
+**Done when** an offscreen test shows the minimap at `zoom = 1` drawing
+pixel-for-pixel what it draws today; a test shows an open facet map changing
+not one of the minimap's requested keys; and a test shows a view over a region
+a hundred times larger requesting **the same number of chunks** — which is the
+invariant this whole document exists for.
+
+### R4 — the sweep
+
+On the **first** open of a facet map, enqueue that facet's chunks at
+`SWEEP_LOD` and coarser, at a priority below every open view's own demand.
+
+**`SWEEP_LOD = 2`.** Levels 2 and coarser are 599 chunks and 4.8 MiB — smaller
+than the GPU page cache already is, and covering the facet map from fit-zoom
+down to about four tiles a pixel. Level 1 for the whole facet is 14 MiB and no
+window ever wants the whole facet at that scale; levels 0 and 1 stay strictly
+demand-driven around each open view.
+
+**Micro-decisions.** Coarsest level first, so the map has a complete (blocky)
+picture within a fraction of a second and sharpens; the fallback ladder already
+paints a coarse stand-in under a finer product, so this needs no new drawing
+rule. Enqueued once per facet per session, guarded by a flag on the cache, not
+by "is the queue empty" — an emptied queue is not evidence the sweep ran.
+
+**Done when** opening the facet map and waiting leaves every level ≥ 2 complete
+for the facet, at 4.8 MiB; closing and reopening builds nothing; and the
+minimap, walked onto ground it has never visited, now falls back to a coarse
+ancestor instead of the backdrop — which is the "known limit" the handoff
+records as unfixable under today's design.
+
+### R5 — the CPU cache gets a budget
+
+`RadarCache` takes an `LruBudget` from R1 and finally increments
+`RadarCacheCounters::evicted`. Two pinning rules:
+
+- a chunk at `SWEEP_LOD` or coarser is **never** evicted — it is 4.8 MiB and it
+  is the fallback floor;
+- a chunk in any open view's current draw list is never evicted.
+
+**Micro-decisions.** The budget is bytes, not entries, and it counts only the
+unpinned tail — the same shape `CompositeCacheLimits` already states for the
+scene, so the two read alike. Superseded-revision products are the first
+candidates, ahead of any current-revision one, whatever the use clock says.
+
+**Done when** a scripted walk across a facet leaves the unpinned tail at or
+under its budget with `evicted` non-zero, and every level ≥ 2 still resident.
+
+### R6 — the facet map becomes a window
+
+1. **The plate.** `gump::resize(atlas, Graphic(0x0A28), at, width, height)`,
+   the same nine-slice the party manifest uses, with the `0x00F3`/`0x00F2`
+   close button and a visible title. The content rectangle is inset by the
+   plate's own measured corner sizes, falling back to a constant when the art
+   is absent — the discipline `SMALL_EXTENT`/`LARGE_EXTENT` already set for the
+   minimap.
+2. **The state becomes world-space.** `pan: (i32, i32)` in gump pixels becomes
+   `centre: RadarTile` plus `tiles_per_pixel`, clamped to the facet. The same
+   drag then means the same ground at every zoom, and the clamp is a statement
+   about the world rather than about a pixel offset.
+3. **Zoom is about the pointer**, not about the window's centre — the standard
+   map gesture, and the one that makes a clamped centre feel right.
+4. **Markers.** The player today; per `client.md`'s M3b, one per logged-in body
+   later. Same overlay, already built.
+
+**Done when** the facet map drags, raises, closes and z-orders like every other
+local window under `Windows`, with interaction tests for each; the canvas
+cannot be dragged out of its own frame at any zoom; and `Drawn::WorldMap` no
+longer answers `pictures()` with an empty slice.
+
+### R7 — measure, and then soak
+
+`RadarCacheCounters` and `RadarWorkCounters` exist and nobody reads them; R0
+adds a third on the page cache. Putting them in the frame report **is a UI
+addition and wants asking first** — the handoff already flags this, and it
+stays flagged.
+
+What must be measured once they are readable: chosen level per view, chunks
+requested/ready/fallen-back, CPU raster milliseconds, GPU pages resident and
+evicted, and the two bounds' headroom on a HiDPI, desk-scaled, fully-zoomed-out
+worst case. "Walking costs no raster work" is still an argument rather than a
+measurement.
+
+---
+
+## 8. What this retires
+
+When R3 lands, [`minimap_lod_handoff.md`](minimap_lod_handoff.md)'s three wedge
+defects stop being live entries and become history: the hemisphere wedge, the
+page-cache truncation and the corner ring are one defect — a window asking for
+a level it cannot display — and their three fixes (`region_base_chunks_near`,
+`cap_draws_by_distance`, the `sqrt(2)` removal) all stay, as the backstops they
+were written to be. None of them is undone here. They simply stop being
+reachable in ordinary play.
