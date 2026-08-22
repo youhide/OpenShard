@@ -13,12 +13,14 @@ cache is built to, or [`minimap_lod_handoff.md`](minimap_lod_handoff.md),
 which is still the record of what landed. It is the layer those two never
 reached: **nothing chooses an LOD.**
 
-> **Status: R0–R6 are built and their loose ends are closed; R7 is not built.**
+> **Status: R0–R7 are built and their loose ends are closed; the soak R7 asks
+> for has not been run.**
 > A window picks its own level from its own pixels, both windows are one
 > `RadarView` — one construction, handed to the draw — the queue and the byte
 > budget are one implementation under both subsystems, the pyramid is swept
-> until it exists, the CPU cache evicts, and the facet map wears a plate with a
-> close button. Sections 1–3 below are therefore **the record of what was
+> until it exists, the CPU cache evicts, the facet map wears a plate with a
+> close button, and every counter the build wrote is now readable in the
+> development HUD. Sections 1–3 below are therefore **the record of what was
 > wrong**, not a description of the code — read them for the reasoning, not for
 > the current shape. Section 9 is now the record of the eight things the build
 > left open and what closed each; **section 10 is what is open now**, and that
@@ -597,18 +599,43 @@ local window under `Windows`, with interaction tests for each; the canvas
 cannot be dragged out of its own frame at any zoom; and `Drawn::WorldMap` no
 longer answers `pictures()` with an empty slice.
 
-### R7 — measure, and then soak — **not built**
+### R7 — measure, and then soak — **the instrument is built; the soak is not run**
 
-`RadarCacheCounters` and `RadarWorkCounters` exist and nobody reads them; R0
-adds a third on the page cache. Putting them in the frame report **is a UI
-addition and wants asking first** — the handoff already flags this, and it
-stays flagged.
+`RadarCacheCounters` and `RadarWorkCounters` existed and nobody read them; R0
+added a third on the page cache. Putting them in the frame report **was a UI
+addition and was asked for first** — it was asked, and the answer was the frame
+report, which is `shell::radar_report` under the perf panel's map-composite
+grid.
 
-What must be measured once they are readable: chosen level per view, chunks
-requested/ready/fallen-back, CPU raster milliseconds, GPU pages resident and
-evicted, and the two bounds' headroom on a HiDPI, desk-scaled, fully-zoomed-out
-worst case. "Walking costs no raster work" is still an argument rather than a
-measurement.
+Everything this phase asked to be measurable now is. Chosen level per view,
+with the `tiles_per_pixel` it was chosen from beside it, because the selection
+has a 10% dead band and a level without its input cannot be told from a
+selector that has stopped responding. Chunks requested and how each was
+answered — `radar::resolve_demand` returns the `RadarReadyKind` tally along
+with the keys the draw will use, one walk for both, because the three fallback
+modes and the no-answer case all look like missing terrain on screen and mean
+four different things. CPU raster milliseconds, timed around the producer loop
+itself. GPU pages resident, evicted, and truncated — the three page numbers,
+with the third said in words and in yellow when it is not zero. And the three
+bounds are each reported beside what they bound: the CPU cache's retained bytes
+against its tail budget, the queue's outstanding work against `max_queued`, the
+resident pages against the array's capacity.
+
+Two decisions inside that are worth keeping. There is deliberately **no
+refusal counter** on the work queue: `request_sweep` being refused is ordinary
+— `drain_sweep` offers every owed key again next frame precisely because it is
+— so a refusal total would climb through a healthy session and read as an
+alarm; the headroom is the honest form of that question. And the per-frame
+sample is **a frame behind on purpose**: the HUD is assembled near the top of
+`draw_from`, before the views are built and long before the producer runs, so
+`App::radar_frame` carries the last frame's levels, tally and cost rather than
+reporting a frame's worth of nothing. The three counter sets beside it are
+live.
+
+**What is still owed is the reading, not the instrument.** Nobody has yet sat
+in front of a HiDPI, desk-scaled, fully-zoomed-out worst case and written the
+numbers down. "Walking costs no raster work" is still an argument rather than a
+measurement — but `raster` in the panel is now the one number that settles it.
 
 ---
 
@@ -768,13 +795,19 @@ reason it is deliberate written beside it.
 
 ## 10. What is open now
 
-### 10.1 R7, which is section 7's own entry and is still not built
+### 10.1 The soak R7 asks for, which is now a person and not a build
 
-`RadarCacheCounters`, `RadarWorkCounters` and `RadarPageCounters` exist and
-nobody reads them. Putting them in the frame report **is a UI addition and
-wants asking first** — the handoff already flags this, and it stays flagged.
-`over_capacity_draws` is the one that makes this more than a measurement phase:
-a truncated draw is completely invisible until something reads it.
+The panel is there and every number in it is written. What has not happened is
+somebody opening both windows on a HiDPI, desk-scaled, fully-zoomed-out worst
+case and recording: the chosen level per view, the fallback tally as the floor
+fills in, `raster` while walking, and how close each of the three bounds gets.
+
+Two of those readings would settle a question this document has been carrying
+as an argument. `raster` while walking is "walking costs no raster work".
+`over_capacity_draws` staying at zero through a session is the claim in 4.6
+that the GPU page cache is now "reached only by a pathological view" — and if
+it is ever not zero, the panel says so in yellow, which is the whole reason it
+was worth reading a counter that had been written since R0.
 
 ### 10.2 The coarse floor is swept once, and a terrain edit does not re-sweep
 

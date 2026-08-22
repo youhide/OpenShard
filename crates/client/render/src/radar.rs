@@ -739,9 +739,81 @@ impl<'a> RadarReadyChunk<'a> {
     }
 }
 
+/// How one frame's demand was answered, by fallback mode.
+///
+/// The three arms of [`RadarReadyKind`] plus the case it cannot express:
+/// nothing ready at all, which is the backdrop a player actually sees. The
+/// four are a partition of the requested set, so [`Self::total`] is that set's
+/// size.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct RadarDemand {
+    /// Ready at the requested key, under the current source revision.
+    pub exact: usize,
+    /// Stood in for by a ready coarser parent — correct terrain, drawn blurry.
+    pub coarser: usize,
+    /// Stood in for by the newest retained revision of the same chunk — sharp
+    /// terrain that is out of date.
+    pub stale: usize,
+    /// Nothing ready: this chunk's area is backdrop this frame.
+    pub missing: usize,
+}
+
+impl RadarDemand {
+    /// Every chunk the request set named.
+    #[must_use]
+    pub const fn total(self) -> usize {
+        self.exact + self.coarser + self.stale + self.missing
+    }
+}
+
+/// What a frame's requested keys resolve to: the picture, and the reading.
+#[derive(Clone, Default, Debug)]
+pub struct RadarResolved {
+    /// How the cache answered each request.
+    pub demand: RadarDemand,
+    /// The key each answered request will actually be drawn from. A coarse
+    /// ancestor standing in for four requests appears once per request, which
+    /// is harmless — eviction only needs the set — and is what keeps this a
+    /// single walk.
+    pub drawn: Vec<RadarChunkKey>,
+}
+
+/// Ask the cache what every requested key will be drawn from, and how it
+/// answered.
+///
+/// One walk answering both questions, because they have the same body: a draw
+/// looks each key up to find its chunk, and eviction must not take the chunk a
+/// draw found. Counting the *kinds* on the way is free, and it is the only
+/// thing that distinguishes a radar filling in from a radar starved — both of
+/// which look like missing terrain on screen.
+///
+/// A free function beside [`request_views`] and for its reason: while this
+/// loop lived inside `App::draw_from` it needed a window, a device and a
+/// shell, none of which is part of *what the cache holds for these keys*.
+#[must_use]
+pub fn resolve_demand(
+    cache: &RadarCache,
+    requested: impl IntoIterator<Item = RadarChunkKey>,
+) -> RadarResolved {
+    let mut resolved = RadarResolved::default();
+    for key in requested {
+        let Some(ready) = cache.select_ready(key) else {
+            resolved.demand.missing += 1;
+            continue;
+        };
+        match ready.kind() {
+            RadarReadyKind::Exact => resolved.demand.exact += 1,
+            RadarReadyKind::CoarserAncestor => resolved.demand.coarser += 1,
+            RadarReadyKind::StaleExact => resolved.demand.stale += 1,
+        }
+        resolved.drawn.push(ready.chunk().key());
+    }
+    resolved
+}
+
 /// Frame-diagnostic counters for retained CPU terrain products.
 ///
-/// `requested` and `rebuilt` are lifetime event counters; `ready` and `stale`
+/// `requested`, `rebuilt` and `evicted` are lifetime event counters; the rest
 /// are snapshots. Queue-owned counters are exposed by `RadarWorkQueue`, since
 /// a cache does not dispatch or retain pending work.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
@@ -751,6 +823,15 @@ pub struct RadarCacheCounters {
     pub stale: usize,
     pub rebuilt: u64,
     pub evicted: u64,
+    /// What every retained product weighs, current and stale together.
+    pub retained_bytes: u64,
+    /// The tail budget [`RadarCache::evict_to_budget`] measures that weight
+    /// against. Reported beside it rather than left as a constant a reader has
+    /// to go and look up, because the pair *is* the headroom: a ceiling that
+    /// pinned chunks raise cannot be read off `retained_bytes` alone, and
+    /// `retained_bytes` above `tail_budget` is the only state in which this
+    /// cache evicts at all.
+    pub tail_budget: u64,
 }
 
 /// The sole owner of ready radar terrain products and their source revisions.
@@ -1041,6 +1122,8 @@ impl RadarCache {
             stale: self.ready.len() - current,
             rebuilt: self.rebuilt,
             evicted: self.evicted,
+            retained_bytes: self.budget.retained_bytes(),
+            tail_budget: self.tail_budget,
         }
     }
 
@@ -1181,12 +1264,21 @@ enum RadarWorkPriority {
 }
 
 /// Queue-owned frame diagnostics, separate from retained cache products.
+///
+/// There is deliberately no *refused* counter here. [`RadarWorkQueue::request`]
+/// answering `false` is an ordinary event for sweep work — [`RadarCache::drain_sweep`]
+/// offers every owed key again the next frame precisely because a refusal is
+/// expected — so a refusal total would climb through a healthy session and read
+/// as an alarm. What a reader needs is the headroom, and that is `max_queued`
+/// against the two lengths above.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct RadarWorkCounters {
     /// Work waiting to be handed to a producer.
     pub queued: usize,
     /// Work a producer has accepted but not yet returned.
     pub in_flight: usize,
+    /// The bound `queued + in_flight` is refused at.
+    pub max_queued: usize,
 }
 
 impl Default for RadarWorkQueue {
@@ -1225,12 +1317,19 @@ impl RadarWorkQueue {
         self.queue.in_flight_len()
     }
 
+    /// The total outstanding bound [`Self::request`] refuses at.
+    #[must_use]
+    pub const fn max_queued(&self) -> usize {
+        self.queue.max_outstanding()
+    }
+
     /// Queue state suitable for a frame diagnostic report.
     #[must_use]
     pub fn counters(&self) -> RadarWorkCounters {
         RadarWorkCounters {
             queued: self.pending_len(),
             in_flight: self.in_flight_len(),
+            max_queued: self.max_queued(),
         }
     }
 
@@ -2473,6 +2572,148 @@ mod tests {
         assert_eq!(counters.evicted, 0, "eviction is not implemented yet");
     }
 
+    /// **The four ways a frame's demand can be answered, in one walk.**
+    ///
+    /// R7's "chunks requested/ready/fallen-back" is not one number: a chunk
+    /// drawn from a coarse ancestor is the ladder working, a chunk drawn from
+    /// a superseded revision is terrain that has since changed, and a chunk
+    /// with nothing ready is backdrop. All three look alike on screen, which
+    /// is why they are counted apart here.
+    #[test]
+    fn resolved_demand_partitions_the_request_by_how_the_cache_answered() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::default();
+        // Stale first: a product under the old revision, and nothing else for
+        // its chunk afterwards. The bump is per facet, so everything else in
+        // this test is published *after* it.
+        let stale_coord = RadarChunkCoord::new(40, 40);
+        let old = cache.key(facet, 0, stale_coord);
+        assert!(
+            cache.publish(RadarChunk::new(old, vec![RED; chunk_pixel_count()]).expect("a complete product"))
+        );
+        assert!(cache.set_revision(facet, RadarRevision(1)));
+        let stale = cache.key(facet, 0, stale_coord);
+        // Exact: the requested key itself, at the current revision.
+        let exact = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        assert!(
+            cache.publish(
+                RadarChunk::new(exact, vec![GREEN; chunk_pixel_count()]).expect("a complete product")
+            )
+        );
+        // Coarser: only a level-2 parent of (7, 5) is ready. The stale ladder
+        // is exact-key only, which is why this arm needs a *current* ancestor
+        // and a stale one would count as missing instead.
+        let ancestor = cache.key(facet, 2, RadarChunkCoord::new(1, 1));
+        assert!(cache.publish(
+            RadarChunk::new(ancestor, vec![WHITE; chunk_pixel_count()]).expect("a complete ancestor")
+        ));
+        let coarser = cache.key(facet, 0, RadarChunkCoord::new(7, 5));
+        // Missing: never asked for, never built.
+        let missing = cache.key(facet, 0, RadarChunkCoord::new(99, 99));
+
+        let resolved = resolve_demand(&cache, [exact, coarser, stale, missing]);
+        assert_eq!(
+            resolved.demand,
+            RadarDemand {
+                exact: 1,
+                coarser: 1,
+                stale: 1,
+                missing: 1,
+            }
+        );
+        assert_eq!(resolved.demand.total(), 4, "the four arms partition the request");
+        assert_eq!(
+            resolved.drawn.len(),
+            3,
+            "only an answered request names a chunk eviction must keep"
+        );
+        assert!(!resolved.drawn.contains(&missing));
+    }
+
+    /// The same walk against a cache nothing has invalidated, which is the
+    /// ordinary frame: exact where a product landed, coarser where only a
+    /// parent has, missing where neither.
+    #[test]
+    fn resolved_demand_reports_the_ladder_on_an_undisturbed_cache() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::default();
+        let exact = cache.key(facet, 0, RadarChunkCoord::new(0, 0));
+        assert!(
+            cache.publish(
+                RadarChunk::new(exact, vec![GREEN; chunk_pixel_count()]).expect("a complete product")
+            )
+        );
+        let ancestor = cache.key(facet, 2, RadarChunkCoord::new(1, 1));
+        assert!(cache.publish(
+            RadarChunk::new(ancestor, vec![WHITE; chunk_pixel_count()]).expect("a complete ancestor")
+        ));
+        let coarser = cache.key(facet, 0, RadarChunkCoord::new(7, 5));
+        let missing = cache.key(facet, 0, RadarChunkCoord::new(99, 99));
+
+        let resolved = resolve_demand(&cache, [exact, coarser, missing]);
+        assert_eq!(
+            resolved.demand,
+            RadarDemand {
+                exact: 1,
+                coarser: 1,
+                stale: 0,
+                missing: 1,
+            }
+        );
+        assert_eq!(
+            resolved.drawn,
+            vec![exact, ancestor],
+            "the coarse request draws from the parent, not from itself"
+        );
+    }
+
+    /// **The CPU budget's headroom is two numbers, and both are reported.**
+    ///
+    /// `retained_bytes` alone cannot be read: this cache evicts only above
+    /// `tail_budget`, and pinned chunks raise the ceiling above that, so a
+    /// reader with one number and a constant in another file would conclude
+    /// the wrong thing about a cache sitting over its tail.
+    #[test]
+    fn cache_counters_report_the_weight_and_the_budget_it_is_measured_against() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::with_tail_budget(RADAR_CHUNK_CPU_BYTES * 2).expect("a budget");
+        assert_eq!(cache.counters().retained_bytes, 0);
+        assert_eq!(cache.counters().tail_budget, RADAR_CHUNK_CPU_BYTES * 2);
+        for x in 0..3 {
+            let key = cache.key(facet, 0, RadarChunkCoord::new(x, 0));
+            assert!(cache.publish(
+                RadarChunk::new(key, vec![GREEN; chunk_pixel_count()]).expect("a complete product")
+            ));
+        }
+        assert_eq!(
+            cache.counters().retained_bytes,
+            RADAR_CHUNK_CPU_BYTES * 3,
+            "every retained product weighs, whether or not it is pinned"
+        );
+        // Nothing protected and nothing at or above `SWEEP_LOD`, so the walk
+        // is free to take the cache back down to its tail.
+        assert_eq!(cache.evict_to_budget([]), 1);
+        assert_eq!(cache.counters().retained_bytes, RADAR_CHUNK_CPU_BYTES * 2);
+        assert_eq!(cache.counters().evicted, 1);
+    }
+
+    /// The queue reports the bound it refuses at, because the two lengths
+    /// beside it are meaningless without it.
+    #[test]
+    fn queue_counters_report_the_bound_they_are_measured_against() {
+        let queue = RadarWorkQueue::default();
+        let counters = queue.counters();
+        assert_eq!(counters.max_queued, queue.max_queued());
+        assert_eq!(counters.queued + counters.in_flight, 0);
+        assert_eq!(
+            RadarWorkQueue::new(7, 1)
+                .expect("non-zero limits")
+                .counters()
+                .max_queued,
+            7
+        );
+    }
+
     #[test]
     fn indexed_ready_selection_matches_the_exhaustive_oracle() {
         let mut cache = RadarCache::default();
@@ -2774,7 +3015,8 @@ mod tests {
             queue.counters(),
             RadarWorkCounters {
                 queued: 2,
-                in_flight: 0
+                in_flight: 0,
+                max_queued: 2
             }
         );
 
@@ -2783,7 +3025,8 @@ mod tests {
             queue.counters(),
             RadarWorkCounters {
                 queued: 1,
-                in_flight: 1
+                in_flight: 1,
+                max_queued: 2
             }
         );
         assert!(queue.request(first), "an in-flight request is also coalesced");
@@ -2803,7 +3046,14 @@ mod tests {
         let complete = RadarChunk::new(key, vec![GREEN; chunk_pixel_count()]).expect("complete product");
         assert!(queue.finish(&mut cache, complete));
         assert!(cache.get(key).is_some());
-        assert_eq!(queue.counters(), RadarWorkCounters::default());
+        assert_eq!(
+            queue.counters(),
+            RadarWorkCounters {
+                queued: 0,
+                in_flight: 0,
+                max_queued: 4
+            }
+        );
 
         let undispatched = RadarChunk::new(key, vec![RED; chunk_pixel_count()]).expect("complete product");
         assert!(!queue.finish(&mut cache, undispatched));
@@ -2820,7 +3070,11 @@ mod tests {
         );
         assert_eq!(
             queue.counters(),
-            RadarWorkCounters::default(),
+            RadarWorkCounters {
+                queued: 0,
+                in_flight: 0,
+                max_queued: 4
+            },
             "the rejected job released its slot"
         );
 

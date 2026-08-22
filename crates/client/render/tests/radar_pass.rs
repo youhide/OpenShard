@@ -14,7 +14,9 @@ use openshard_client_render::radar::{
     BASE_CHUNK_TILES, PLAYER_MARKER, RadarCache, RadarChunk, RadarChunkCoord, RadarExtent, RadarRegion,
     RadarTile, UNKNOWN,
 };
-use openshard_client_render::radar_pass::{Placement, RadarChunkRenderer, RadarMarker, RadarOverlayRenderer};
+use openshard_client_render::radar_pass::{
+    Placement, RADAR_CHUNK_PAGE_BYTES, RadarChunkRenderer, RadarMarker, RadarOverlayRenderer,
+};
 use openshard_protocol::world::Facet;
 use openshard_uofiles::color::Color16;
 
@@ -176,6 +178,94 @@ fn two_identical_draws_grow_the_instance_buffer_once() {
     assert!(first >= 2, "two chunks were drawn");
     assert_eq!(draw(), first, "the same two chunks reuse the same buffer");
     assert_eq!(draw(), first);
+}
+
+/// **The page cache says what it did, and what it could not do.**
+///
+/// R7 of `docs/map/radar.md`: three of these numbers were written and none was
+/// readable. `evicted` and `over_capacity_draws` look identical on screen —
+/// terrain that is not there — and mean opposite things. An eviction is this
+/// cache working, since a page is only a copy and the chunk is still on the
+/// CPU; an over-capacity draw is chunks dropped from a region wider than the
+/// whole array, which no amount of waiting will fill in.
+///
+/// Driven at one page, because that is the only size at which a two-chunk
+/// region is pathological. `cap_draws_by_distance` is what keeps the truncated
+/// draw correct rather than corrupt, and it has its own unit tests; what this
+/// asserts is that it can no longer happen silently.
+#[test]
+fn the_page_cache_counts_its_evictions_apart_from_its_truncated_draws() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU: skipping");
+        return;
+    };
+    let cache = RadarCache::default();
+    let facet = Facet(0);
+    let chunk = |x: u32| {
+        RadarChunk::new(
+            cache.key(facet, 0, RadarChunkCoord::new(x, 0)),
+            vec![Color16(0x03E0); usize::from(BASE_CHUNK_TILES) * usize::from(BASE_CHUNK_TILES)],
+        )
+        .expect("a complete chunk")
+    };
+    let west = chunk(0);
+    let east = chunk(1);
+
+    let (width, height) = (u32::from(BASE_CHUNK_TILES) * 2, u32::from(BASE_CHUNK_TILES));
+    let whole = Placement {
+        origin: (0.0, 0.0),
+        extent: (width as f32, height as f32),
+        circle: false,
+        rotation: 0.0,
+    };
+    // Exactly one layer: `RadarChunkRenderer::new` clamps the budget to at
+    // least one page, and one is what makes the second chunk an eviction and
+    // the pair a truncation.
+    let mut chunks = RadarChunkRenderer::new(&device, FORMAT, RADAR_CHUNK_PAGE_BYTES);
+    assert_eq!(chunks.counters().capacity, 1);
+    let draw = |chunks: &mut RadarChunkRenderer, ready: Vec<&RadarChunk>| {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let (_target, view) = cleared_target(&device, &mut encoder, width, height);
+        chunks.render_region(
+            &device,
+            &queue,
+            &mut encoder,
+            Frame {
+                target: &view,
+                width,
+                height,
+                scale: 1.0,
+            },
+            region(facet, (0, 0), (BASE_CHUNK_TILES * 2, BASE_CHUNK_TILES)),
+            whole,
+            whole,
+            ready,
+        );
+        queue.submit([encoder.finish()]);
+    };
+
+    draw(&mut chunks, vec![&west]);
+    let first = chunks.counters();
+    assert_eq!(first.resident, 1, "the one page holds the one chunk drawn");
+    assert_eq!(first.evicted, 0);
+    assert_eq!(first.over_capacity_draws, 0, "one chunk fits in one page");
+
+    draw(&mut chunks, vec![&east]);
+    let second = chunks.counters();
+    assert_eq!(second.resident, 1);
+    assert_eq!(second.evicted, 1, "the second chunk took the first chunk's page");
+    assert_eq!(
+        second.over_capacity_draws, 0,
+        "an eviction between draws is this cache working, not failing"
+    );
+
+    draw(&mut chunks, vec![&west, &east]);
+    let third = chunks.counters();
+    assert_eq!(
+        third.over_capacity_draws, 1,
+        "a two-chunk region against a one-page array is a truncated draw, and it now says so"
+    );
+    assert_eq!(third.resident, 1);
 }
 
 /// **The body's marker is drawn over the terrain, not into it.** The overlay's

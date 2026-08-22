@@ -266,10 +266,60 @@ pub struct Hud {
     pub goal: Option<PickedTile>,
     /// Producer queue and immutable map-composite cache pressure.
     pub composites: CompositeTelemetry,
+    /// The radar's chosen levels, fallback tally and three budgets.
+    pub radar: RadarTelemetry,
     /// Whether `App::ttf_font` is set — which of the Chat tab's two size
     /// sliders, `ChatScale`'s or `TtfScale`'s, is the one actually drawing
     /// anything this run. See `desk::TtfScale`'s own doc.
     pub ttf_active: bool,
+}
+
+/// What one frame's radar demand and production resolved to.
+///
+/// Written by the radar block of `App::draw_from` and read by `App::hud` on
+/// the **next** frame: the HUD is assembled near the top of a frame, before
+/// the views are built and long before the producer runs, so reading these
+/// live would report a frame's worth of nothing. Kept whole rather than as
+/// parallel fields on `App` so that the level, the tally and the cost a reader
+/// compares are all from the same frame.
+#[derive(Clone, Default)]
+pub struct RadarFrame {
+    /// The level each open radar window chose, and the `tiles_per_pixel` it
+    /// chose it from. The input is reported beside the output because the
+    /// selection has a 10% dead band on each boundary: without it, a view
+    /// sitting one notch inside a band is indistinguishable from a selector
+    /// that has stopped responding.
+    pub levels: Vec<(
+        crate::windows::WindowSubject,
+        openshard_client_render::radar::RadarLod,
+        f32,
+    )>,
+    /// How every requested chunk was answered. Counted over the *protected*
+    /// set — every key every open view's region names at that view's chosen
+    /// level — which is the set `draw_radar_view` looks up a moment later, so
+    /// this tallies the picture rather than a second opinion about it.
+    pub demand: openshard_client_render::radar::RadarDemand,
+    /// What this frame's producer turn spent walking the map and colouring
+    /// tiles. The whole of the radar's synchronous CPU cost.
+    pub raster: std::time::Duration,
+    /// Chunks that turn actually published.
+    pub built: usize,
+}
+
+/// Every radar counter the development HUD reads, gathered in one place.
+///
+/// Three of the four come from live state and one — [`Self::frame`] — is the
+/// previous frame's, for the reason that type's own doc gives. They are
+/// presented together anyway: the question this panel exists to answer is
+/// whether a level, a fallback tally and a budget are consistent with one
+/// another, and a frame's lag does not move any of them far enough to change
+/// that reading.
+#[derive(Clone, Default)]
+pub struct RadarTelemetry {
+    pub frame: RadarFrame,
+    pub cache: openshard_client_render::radar::RadarCacheCounters,
+    pub queue: openshard_client_render::radar::RadarWorkCounters,
+    pub pages: openshard_client_render::radar_pass::RadarPageCounters,
 }
 
 /// Read-only map-composite producer and cache counters for the development HUD.

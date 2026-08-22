@@ -30,8 +30,8 @@ use crate::app::App;
 use crate::crowd::Who;
 use crate::diagnostics::{
     CompositeTelemetry, HealthBar, HealthPoints, Height, Hud, InteriorCell, InteriorDoor, InteriorOverlay,
-    OccluderSurface, Pick, PickedItem, PickedMobile, PickedTile, PriorityZ, Route, Selection, TerrainOverlay,
-    TileDepth,
+    OccluderSurface, Pick, PickedItem, PickedMobile, PickedTile, PriorityZ, RadarTelemetry, Route, Selection,
+    TerrainOverlay, TileDepth,
 };
 use crate::graphics::HighlightTarget;
 use crate::picking::SelectedIdentity;
@@ -1060,6 +1060,20 @@ impl App {
                     quarantined: window.composites.quarantined_len(),
                     latest_quarantine: window.composites.latest_quarantine(),
                 }),
+            radar: RadarTelemetry {
+                // A frame behind, and the only part of this that is — see
+                // `RadarFrame`. The three counter sets below are live.
+                frame: self.radar_frame.clone(),
+                cache: self.radar_cache.counters(),
+                queue: self.radar_queue.counters(),
+                // No window is no GPU page cache, and a zeroed snapshot is the
+                // truthful answer for it: there is nothing resident because
+                // there is nothing to be resident in.
+                pages: self
+                    .window
+                    .as_ref()
+                    .map_or_else(Default::default, |window| window.radar_chunks.counters()),
+            },
         };
         let picking_cost = picking_started.elapsed();
 

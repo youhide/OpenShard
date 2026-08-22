@@ -2068,6 +2068,17 @@ impl App {
                 radar_views.push((*subject, view, lod));
             }
         }
+        // The levels alone, published before anything can fail. Everything else
+        // in this frame's sample needs a colour table, and a run without one
+        // draws no radar at all — so the tally, the cost and the built count
+        // are reset here rather than left showing whichever frame last had one.
+        self.radar_frame = crate::diagnostics::RadarFrame {
+            levels: radar_views
+                .iter()
+                .map(|(subject, view, lod)| (*subject, *lod, view.tiles_per_pixel))
+                .collect(),
+            ..crate::diagnostics::RadarFrame::default()
+        };
         let Some(window) = self.window.as_mut() else {
             return;
         };
@@ -2168,24 +2179,38 @@ impl App {
                 .map(|(chunk, _)| chunk)
                 .unwrap_or_else(|| radar::RadarChunkCoord::new(0, 0));
             let mut scratch = RadarBuildScratch::default();
+            // The radar's whole synchronous cost, measured where it is spent:
+            // this loop is the map walk and the colour table, and everything
+            // else in this block is bookkeeping over keys. R7 asks for it in
+            // milliseconds because "walking costs no raster work" has always
+            // been an argument rather than a reading.
+            let raster_started = Instant::now();
+            let mut built = 0_usize;
             for key in self.radar_queue.take_for_producer_near(producer_centre) {
-                let built = build_chunk_reusing(self.resources.map.map(), colors, key, &mut scratch);
-                let Some(chunk) = built else {
+                let chunk = build_chunk_reusing(self.resources.map.map(), colors, key, &mut scratch);
+                let Some(chunk) = chunk else {
                     // The slot goes back rather than being lost — see
                     // `RadarWorkQueue::abandon`.
                     self.radar_queue.abandon(key);
                     continue;
                 };
                 if self.radar_queue.finish(&mut self.radar_cache, chunk) {
+                    built += 1;
                     build_ready_ancestors(&mut self.radar_cache, key, radar::max_lod(radar_facet_extent));
                 }
             }
-            let selected_for_draw: Vec<_> = protected
-                .iter()
-                .filter_map(|key| self.radar_cache.select_ready(*key))
-                .map(|ready| ready.chunk().key())
-                .collect();
-            protected.extend(selected_for_draw);
+            let raster = raster_started.elapsed();
+            // One walk of the demand, answering both questions it can answer:
+            // which chunk each view will actually draw (so eviction cannot take
+            // it), and *how* the cache answered (so the HUD can say whether the
+            // picture is exact, blurry, stale or absent). The second used to be
+            // discarded, which is why a minimap filling in and a minimap
+            // starved looked identical.
+            let resolved = radar::resolve_demand(&self.radar_cache, protected.iter().copied());
+            self.radar_frame.demand = resolved.demand;
+            self.radar_frame.raster = raster;
+            self.radar_frame.built = built;
+            protected.extend(resolved.drawn);
             self.radar_cache.evict_to_budget(protected);
         }
         // Three time-varying halves of a mobile, filled in per frame rather

@@ -2322,6 +2322,7 @@ fn frames_panel(ui: &mut egui::Ui, hud: &Hud) {
         });
         ui.end_row();
     });
+    radar_report(ui, hud, mib);
     // The counter `docs/camera.md` asks for: without it, a full atlas repack
     // is indistinguishable from an ordinary heavy frame, both being a large
     // number in `world` above. `repacked` marks which frame in the window
@@ -2399,6 +2400,122 @@ fn frames_panel(ui: &mut egui::Ui, hud: &Hud) {
         ],
         span,
     );
+}
+
+/// The radar's own rows: what each open view chose, how its demand was
+/// answered, and how much room the three bounds have left.
+///
+/// Its own function rather than more rows inside [`frames_panel`] because the
+/// three counter sets it reads are one subsystem's and are only comparable to
+/// one another. `mib` is handed in so this and the composite grid above spell
+/// a byte count the same way.
+///
+/// R7 of `docs/map/radar.md`. Every number here was already being written and
+/// none of it was readable, which for `over_capacity_draws` in particular means
+/// a truncated draw — chunks silently dropped from a region wider than the page
+/// array — looked exactly like terrain that had not finished loading.
+fn radar_report(ui: &mut egui::Ui, hud: &Hud, mib: impl Fn(u64) -> f64) {
+    let radar = &hud.radar;
+    ui.separator();
+    ui.label("radar");
+    // A closed window is absent from this list rather than shown at some
+    // default level: a selector's remembered level means nothing while nothing
+    // is asking it, and printing one would invite reading it as a live choice.
+    if radar.frame.levels.is_empty() {
+        ui.label(
+            egui::RichText::new("no radar window is open: nothing below is being asked for")
+                .weak()
+                .small(),
+        );
+    }
+    egui::Grid::new("radar").num_columns(4).show(ui, |ui| {
+        for (subject, lod, tiles_per_pixel) in &radar.frame.levels {
+            ui.label(match subject {
+                crate::windows::WindowSubject::Minimap => "minimap",
+                crate::windows::WindowSubject::WorldMap => "facet map",
+                // Unreachable while `radar_views` builds only those two, and
+                // written out anyway: a third radar window would otherwise
+                // appear here as one of the other two.
+                _ => "radar window",
+            });
+            ui.label(format!("level {}", lod.value()));
+            ui.label("tiles/px");
+            ui.label(format!("{tiles_per_pixel:.2}"));
+            ui.end_row();
+        }
+        let demand = radar.frame.demand;
+        ui.label("chunks asked for");
+        ui.label(demand.total().to_string());
+        ui.label("answered");
+        ui.label(format!(
+            "{} exact, {} coarser, {} stale, {} missing",
+            demand.exact, demand.coarser, demand.stale, demand.missing
+        ));
+        ui.end_row();
+        ui.label("raster");
+        ui.label(format!("{:.2} ms", radar.frame.raster.as_secs_f64() * 1_000.0));
+        ui.label("built");
+        ui.label(format!("{} chunks", radar.frame.built));
+        ui.end_row();
+        ui.label("cpu cache");
+        ui.label(format!(
+            "{:.1} / {:.1} MiB",
+            mib(radar.cache.retained_bytes),
+            mib(radar.cache.tail_budget)
+        ));
+        ui.label("chunks");
+        ui.label(format!(
+            "{} ready, {} stale, {} rebuilt, {} evicted",
+            radar.cache.ready, radar.cache.stale, radar.cache.rebuilt, radar.cache.evicted
+        ));
+        ui.end_row();
+        ui.label("queue");
+        ui.label(format!(
+            "{} of {}",
+            radar.queue.queued + radar.queue.in_flight,
+            radar.queue.max_queued
+        ));
+        ui.label("split");
+        ui.label(format!(
+            "{} queued, {} in flight, {} requested this session",
+            radar.queue.queued, radar.queue.in_flight, radar.cache.requested
+        ));
+        ui.end_row();
+        ui.label("gpu pages");
+        ui.label(format!("{} of {}", radar.pages.resident, radar.pages.capacity));
+        ui.label("evicted");
+        ui.label(radar.pages.evicted.to_string());
+        ui.end_row();
+    });
+    // The one line in this block that is a defect rather than a reading. A
+    // truncated draw is chunks the region named and the page array could not
+    // hold, dropped by `cap_draws_by_distance` — and what it looks like on
+    // screen is terrain that has not arrived, which is also what an ordinary
+    // filling-in minimap looks like. Said in words, and only when it has
+    // happened, because a zero here is the whole of the good news.
+    if radar.pages.over_capacity_draws > 0 {
+        ui.label(
+            egui::RichText::new(format!(
+                "{} draws exceeded the page array and were truncated by distance: chunks were dropped, not late",
+                radar.pages.over_capacity_draws
+            ))
+            .color(egui::Color32::YELLOW),
+        );
+    }
+    // The stale-fallback reading, which is the one a number alone gets wrong.
+    // Coarser is the ladder working as designed and clears as the family
+    // completes; stale is the *revision* ladder, and it means the picture on
+    // screen is of terrain that has since changed.
+    if radar.frame.demand.stale > 0 {
+        ui.label(
+            egui::RichText::new(format!(
+                "{} chunks are drawn from a superseded revision: this terrain has changed since it was rastered",
+                radar.frame.demand.stale
+            ))
+            .weak()
+            .small(),
+        );
+    }
 }
 
 /// A rig as the source line it would be, for pasting into `follow.rs`.

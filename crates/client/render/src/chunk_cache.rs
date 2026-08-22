@@ -43,6 +43,16 @@ impl<K: Copy + Ord> WorkQueue<K> {
         self.work_per_turn
     }
 
+    /// The total-outstanding bound this queue refuses at.
+    ///
+    /// Reported rather than inferred: `pending_len() + in_flight_len()` says
+    /// how much work is outstanding, and only this says how much room is
+    /// left before [`Self::request`] starts answering `false`.
+    #[must_use]
+    pub const fn max_outstanding(&self) -> usize {
+        self.max_outstanding
+    }
+
     #[must_use]
     pub fn contains_pending(&self, key: K) -> bool {
         self.pending.contains(&key)

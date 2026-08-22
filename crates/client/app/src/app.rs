@@ -169,6 +169,11 @@ pub(crate) struct App {
     /// sides of an LOD boundary without changing one another's selection.
     pub(crate) minimap_radar_lod: RadarLodSelector,
     pub(crate) world_map_radar_lod: RadarLodSelector,
+    /// What the last frame's radar demand and production came to, for the
+    /// development HUD. Carried across the frame boundary rather than read
+    /// live because the HUD is assembled before any of it happens — see
+    /// [`crate::diagnostics::RadarFrame`].
+    pub(crate) radar_frame: crate::diagnostics::RadarFrame,
     /// Bounded requests for immutable map-block composites.  It is updated
     /// from the camera snapshot; a future idle producer takes jobs from it,
     /// never from the camera frame itself.

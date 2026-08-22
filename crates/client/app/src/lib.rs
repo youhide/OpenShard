@@ -990,6 +990,7 @@ pub fn run<D: Dial + Send + 'static>(
         radar_queue: openshard_client_render::radar::RadarWorkQueue::default(),
         minimap_radar_lod: openshard_client_render::radar::RadarLodSelector::default(),
         world_map_radar_lod: openshard_client_render::radar::RadarLodSelector::default(),
+        radar_frame: crate::diagnostics::RadarFrame::default(),
         composite_work: openshard_client_render::composite::CompositeWorkQueue::default(),
         composite_lod: openshard_client_render::lod::BlockLodSelector::new(
             openshard_client_render::lod::LodThresholds::DEFAULT,

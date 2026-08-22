@@ -582,10 +582,28 @@ pub struct RadarChunkRenderer {
     instances: wgpu::Buffer,
     instance_capacity: u64,
     over_capacity_draws: u64,
+    evicted: u64,
 }
 
+/// Frame-diagnostic counters for the GPU page cache.
+///
+/// `resident` and `capacity` are the snapshot the budget's headroom is read
+/// from; `evicted` and `over_capacity_draws` are lifetime event counters, and
+/// they say two different things. Eviction is this cache working — a page is
+/// only a copy, and its chunk is still on the CPU. An over-capacity draw is
+/// this cache *failing*: a region wider than the whole array had chunks
+/// dropped from it, and without this number that is completely invisible,
+/// since what the player sees is terrain that has simply not arrived yet.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct RadarPageCounters {
+    /// Pages holding a chunk right now.
+    pub resident: usize,
+    /// Texture-array layers this renderer was built with.
+    pub capacity: usize,
+    /// Pages taken by the residency budget over the session.
+    pub evicted: u64,
+    /// Draws that named more chunks than `capacity` and were truncated by
+    /// `cap_draws_by_distance`.
     pub over_capacity_draws: u64,
 }
 
@@ -799,6 +817,7 @@ impl RadarChunkRenderer {
             instances,
             instance_capacity: 1,
             over_capacity_draws: 0,
+            evicted: 0,
         }
     }
 
@@ -813,8 +832,11 @@ impl RadarChunkRenderer {
     }
 
     #[must_use]
-    pub const fn counters(&self) -> RadarPageCounters {
+    pub fn counters(&self) -> RadarPageCounters {
         RadarPageCounters {
+            resident: self.pages.len(),
+            capacity: self.capacity as usize,
+            evicted: self.evicted,
             over_capacity_draws: self.over_capacity_draws,
         }
     }
@@ -855,6 +877,7 @@ impl RadarChunkRenderer {
         }
         self.residency.insert(key, RADAR_CHUNK_PAGE_BYTES);
         let eviction = self.residency.evict_to_budget();
+        self.evicted = self.evicted.saturating_add(eviction.keys.len() as u64);
         let layer = eviction.keys.first().map_or(self.pages.len() as u32, |evict| {
             self.pages
                 .remove(evict)
