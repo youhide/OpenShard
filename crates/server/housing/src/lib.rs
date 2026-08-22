@@ -242,7 +242,7 @@ pub fn place(
         if occupied_tile(state, facet, &footprint).is_some() {
             return Err(Refusal::Occupied);
         }
-        check_ground(state, facet, &footprint)?;
+        check_ground(state, facet, at, &footprint)?;
         check_yard(state, facet, &footprint)?;
     }
 
@@ -797,7 +797,28 @@ fn check_region(state: &WorldState, facet: Facet, at: Point, covered: &[Tile]) -
     Ok(())
 }
 
-fn check_ground(state: &WorldState, facet: Facet, footprint: &[Footprint]) -> Result<(), Refusal> {
+/// ServUO's rules two and four: the ground will take this house, and it is not a
+/// street.
+///
+/// **The ground is asked about the components that stand on it, and no others.**
+/// `can_fit` requires a *surface* at the z it is asked about, so asking it at each
+/// component's own z refuses every house with an upper storey — a wall twenty
+/// units up has nothing under it but the house's own floor, which is not on the
+/// map yet and never will be. ServUO gates the same question the same way: its
+/// `hasSurface` is only ever set for a component at `addTile.Z == 0`
+/// (`HousePlacement.cs:174`), and the higher tiles are checked against the land
+/// alone. This is [`check_region`]'s doctrine one field over — a house is sited
+/// at one height, and everything above that height stands on the house.
+///
+/// The road question has no z in it, so it is asked of every tile the house
+/// covers, which is what makes a roof overhanging a street a refusal.
+///
+/// What this deliberately does not do is ServUO's rule two for the *upper*
+/// components — a roof driven into a hillside over a tile whose ground level is
+/// empty. `can_fit` at the house's z already refuses the hill wherever the house
+/// has a wall, and the remaining case needs a terrain question this seam does not
+/// have; see `docs/map/terrain_seam.md`.
+fn check_ground(state: &WorldState, facet: Facet, at: Point, footprint: &[Footprint]) -> Result<(), Refusal> {
     let Some(terrain) = state.facet_state(facet).terrain.as_deref() else {
         return Ok(()); // no map, no opinion — every other check here says the same
     };
@@ -805,7 +826,7 @@ fn check_ground(state: &WorldState, facet: Facet, footprint: &[Footprint]) -> Re
         if terrain.land_tile(spot.tile).is_some_and(|land| is_road(land.0)) {
             return Err(Refusal::OnARoad);
         }
-        if !terrain.can_fit(spot.tile, i32::from(spot.z), i32::from(spot.height).max(1)) {
+        if spot.z == at.z && !terrain.can_fit(spot.tile, i32::from(spot.z), i32::from(spot.height).max(1)) {
             return Err(Refusal::BadGround);
         }
     }
