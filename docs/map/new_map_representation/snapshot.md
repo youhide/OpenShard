@@ -301,12 +301,22 @@ Written down as it was found. None of it blocks the track's next direction.
   kind instead, which is exact for the four kinds `Walk::on_packet` answers and
   over-counts a swallowed ack. Named here because it is a real, if small, loss
   of resolution in a tool.
-- **`link::connect`'s `Command::Send` takes bytes, and nothing stops a caller
-  sending the wrong ones.** The step is encoded by the owner now, which is the
-  point; what the thread receives is a `Vec<u8>` with no type saying which
-  packet it is. `Link::step` and `Link::resync` are the only two constructors of
-  one, so the seam is narrow, but a newtype for "bytes already framed for the
-  wire" would say it.
+- **`link::connect`'s `Command::Send` took bytes — it takes a checked packet
+  now.** The step is encoded by the owner, which is the point; what the thread
+  received was a `Vec<u8>` with no type saying which packet it was.
+  [`FramedClientPacket`](../../../crates/common/protocol/src/packet.rs) is the
+  record that `frame_client_packet` already found *exactly* one whole packet
+  in those bytes — not half of one, not two end to end, not an id nobody
+  registered. Its constructor takes the connection's `ClientVersion` because
+  framing is version-dependent for one id: `0x08` grew a grid-index byte in
+  6.0.1.7, so the same id is fourteen bytes from an old client and fifteen from
+  a new one, and a check that ignored the version would get both wrong in
+  opposite directions. `Link::step` takes one and `Link::resync` builds one;
+  `link::play` unwraps it back to bytes at the single point before the socket
+  write. **`Walk::step` still returns `Vec<u8>`** — it is the producer and the
+  cleaner place for the type, but its bytes are also read by `dst.rs`'s
+  simulated queue and by four `crates/e2e/shard` tests that index into them, so
+  moving it there is a wider diff than this seam, and it is left open.
 - **The `facet: u8` gate had been red since 2026-08-20.**
   `crates/common/protocol/tests/facet_bare_fields.rs` compares an allowlist with
   what is in the workspace, and the two interiors binaries added their `--facet`

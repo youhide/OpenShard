@@ -30,6 +30,7 @@ use openshard_protocol::feedback::{Animation, NewAnimation};
 use openshard_protocol::gump::GumpId;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::items::ItemAmount;
+use openshard_protocol::packet::FramedClientPacket;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::TalkMode;
 use openshard_protocol::target::TargetResponse;
@@ -300,7 +301,7 @@ pub use openshard_client_net::action::GumpReply;
 /// never touches the wire.
 #[derive(Clone, Debug)]
 pub enum Command {
-    /// Bytes to put on the wire exactly as given.
+    /// A packet to put on the wire exactly as given.
     ///
     /// The one command that arrives already encoded, and the reason is the map:
     /// a `0x02` names the tile a step is asking for, which only a terrain
@@ -308,7 +309,14 @@ pub enum Command {
     /// `MapSnapshot`. A resync request rides the same variant — it is what the
     /// owner sends when its [`Walk`] loses track, and it carries no fields at
     /// all.
-    Send(Vec<u8>),
+    ///
+    /// [`FramedClientPacket`] rather than a bare `Vec<u8>`: this thread no
+    /// longer knows *which* packet it is about to write, so nothing here can
+    /// notice a caller handing over half of one, two end to end, or bytes for
+    /// an id nobody registered. [`Link::step`] and [`Link::resync`] are the
+    /// only two constructors of one, which is what keeps that check narrow
+    /// instead of duplicated at every call site.
+    Send(FramedClientPacket),
     /// An ordinary network action. Its packet mapping is owned by `client-net`.
     ///
     /// Still encoded on the thread: an action needs the player's serial and the
@@ -370,15 +378,19 @@ impl Link {
         }
     }
 
-    /// Put one already-encoded step on the wire.
+    /// Put one already-encoded, already-checked step on the wire.
     ///
-    /// The bytes come from the owner's own [`Walk`], which is where the
-    /// prediction and its terrain lookup live — see [`Command::Send`].
+    /// The packet comes from the owner's own [`Walk`], which is where the
+    /// prediction and its terrain lookup live — see [`Command::Send`]. Taking
+    /// [`FramedClientPacket`] rather than raw bytes moves the "is this really
+    /// one whole packet" check to the caller, who is the one holding the
+    /// connection's [`ClientVersion`] — this thread never learns it, because
+    /// nothing it does needs to.
     ///
     /// A closed channel is ignored rather than reported: it means the shard
     /// thread has already ended, and it has already said why. The same holds
     /// for everything below.
-    pub fn step(&self, packet: Vec<u8>) {
+    pub fn step(&self, packet: FramedClientPacket) {
         self.send(Command::Send(packet));
     }
 
@@ -389,7 +401,14 @@ impl Link {
     /// by then; this is the other half, and without it the walk never starts
     /// again.
     pub fn resync(&self) {
-        self.send(Command::Send(ResyncRequest.encode()));
+        // `0x22` (resynchronise) does not vary with the client version — see
+        // `client_packet_length` — so `None` costs nothing here, and it is
+        // the honest answer besides: a `Link` never learns the connection's
+        // version at all, this being the one command it builds by itself.
+        let bytes = ResyncRequest.encode();
+        let packet = FramedClientPacket::new(bytes, None)
+            .expect("ResyncRequest::encode always writes exactly one whole 0x22 packet");
+        self.send(Command::Send(packet));
     }
 
     /// Send one action the caller has already chosen.
@@ -645,11 +664,13 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                 let Some(command) = command else {
                     return "the window closed".to_owned();
                 };
-                // An action becomes bytes here; a step already is bytes. What
-                // this thread will not do is decide *which* tile a step asks
-                // for — that needs the terrain, and the terrain is the owner's.
+                // An action becomes bytes here; a step is already a checked
+                // packet and is only unwrapped back to bytes at this one
+                // point, immediately before the socket write. What this
+                // thread will not do is decide *which* tile a step asks for —
+                // that needs the terrain, and the terrain is the owner's.
                 let bytes = match command {
-                    Command::Send(bytes) => bytes,
+                    Command::Send(packet) => packet.into_bytes(),
                     Command::Outgoing(action) => action.encode(player_serial, version),
                 };
                 if let Err(error) = socket.send(&bytes).await {

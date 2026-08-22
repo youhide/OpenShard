@@ -19,6 +19,7 @@ use openshard_client_render::camera::{self, Camera};
 use openshard_client_render::{doors, items, mobiles};
 use openshard_movement::{Heading, Lean};
 use openshard_protocol::direction::{Direction, Facing};
+use openshard_protocol::packet::FramedClientPacket;
 use openshard_protocol::target::{TargetKind, TargetResponse};
 use openshard_protocol::wire::Layer;
 use openshard_protocol::world::Point;
@@ -262,11 +263,17 @@ impl App {
         let sequence = walk
             .newest_pending_sequence()
             .expect("an accepted step is pending");
+        // `Walk::step` just encoded these bytes as one `WalkRequest`, and
+        // `0x02` is a fixed seven bytes for every client version — see
+        // `client_packet_length` — so this cannot fail; it is the invariant
+        // `FramedClientPacket` exists to state, not to enforce here.
+        let packet = FramedClientPacket::new(bytes, Some(crate::VERSION))
+            .expect("Walk::step encodes exactly one whole 0x02 packet");
         self.world
             .shard
             .link()
             .expect("the link was there a moment ago")
-            .step(bytes);
+            .step(packet);
         // The body moves *now*, on this end's own prediction, rather than a
         // round trip later when the `0x22` says it may. That is the whole of
         // the lag compensation: the ack changes nothing on screen, and only a

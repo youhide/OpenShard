@@ -264,6 +264,132 @@ pub fn frame_client_packet(buffer: &[u8], version: Option<ClientVersion>) -> Res
     frame_packet(buffer, |id| client_packet_length(id, version))
 }
 
+/// Bytes already checked to be exactly one whole client-to-server packet.
+///
+/// # What this buys over a bare `Vec<u8>`
+///
+/// `Command::Send` in `client/app`'s `link` module carries a payload the owner
+/// encoded itself — a `0x02` step or a `0x22` resync — straight to the socket,
+/// with nothing in between that reads it. A `Vec<u8>` says nothing about what
+/// is inside it: a caller could send half a packet, two packets end to end, or
+/// a length nobody registered, and the compiler would not object. This type is
+/// the record that [`frame_client_packet`] has already looked at the bytes and
+/// found *exactly* one packet in them — no more, no less — so the one place
+/// that finally writes to the socket does not have to trust its caller.
+///
+/// # Why `version` is a constructor argument
+///
+/// Framing is version-independent for every id but one: `0x08` (drop) grew a
+/// grid-index byte in 6.0.1.7 (`Feature::ItemGrid`), so the same id is fourteen
+/// bytes from an old client and fifteen from a new one — see
+/// [`client_packet_length`]. A checked constructor that ignored the version
+/// would accept a fifteen-byte `0x08` as "one packet plus a trailing byte" on
+/// an old connection, or a fourteen-byte one as "incomplete" on a new one,
+/// which is exactly backwards. `None` is a real, documented state, not a
+/// fallback: it is what a connection has before a game login resolves a
+/// version, and `client_packet_length` already treats it as the pre-`0x08`-era
+/// shape for the same reason a real `0x08` cannot arrive that early.
+///
+/// # Why trailing bytes are refused rather than truncated
+///
+/// A buffer holding a complete packet followed by the start of a second one is
+/// not "one packet with junk after it" — it is a framing bug at the call site,
+/// because nothing that builds one of these ever has a reason to hand over more
+/// than it just encoded. Accepting the first packet and silently dropping the
+/// rest would throw away bytes that belong to a *different* packet without
+/// telling anyone; refusing the whole buffer makes the caller fix the framing
+/// instead of the byte loss being someone else's bug later.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct FramedClientPacket(Vec<u8>);
+
+/// Why [`FramedClientPacket::new`] refused a buffer.
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[non_exhaustive]
+pub enum FramedClientPacketError {
+    /// Framing itself failed: an unknown id, or a variable-length packet
+    /// claiming an impossible length. See [`FrameError`].
+    Framing(FrameError),
+    /// Fewer bytes than the packet this id names needs.
+    Incomplete {
+        /// How many bytes the packet needs in total.
+        needed: usize,
+        /// How many bytes the buffer actually held.
+        got: usize,
+    },
+    /// The buffer held a complete packet, but more bytes followed it. This
+    /// type names exactly one packet, so a caller with a whole TCP read must
+    /// split it with [`frame_client_packet`] first and wrap one piece at a
+    /// time.
+    TrailingBytes {
+        /// The length of the one complete packet at the front of the buffer.
+        packet_len: usize,
+        /// How many bytes the buffer actually held.
+        buffer_len: usize,
+    },
+}
+
+impl fmt::Display for FramedClientPacketError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Framing(error) => write!(f, "{error}"),
+            Self::Incomplete { needed, got } => {
+                write!(f, "packet needs {needed} bytes, buffer holds {got}")
+            }
+            Self::TrailingBytes {
+                packet_len,
+                buffer_len,
+            } => write!(
+                f,
+                "buffer holds {buffer_len} bytes but the packet at its front is only {packet_len}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for FramedClientPacketError {}
+
+impl FramedClientPacket {
+    /// Check that `bytes` is exactly one whole client-to-server packet under
+    /// `version`, and wrap it.
+    ///
+    /// Delegates the actual framing decision to [`frame_client_packet`], the
+    /// one place that rule is written down, and adds exactly one more check
+    /// on top: that the packet it found accounts for the *entire* buffer.
+    /// Everything else — an unknown id, a short buffer, a claimed length past
+    /// [`MAX_PACKET_SIZE`] — is already [`FrameError`] and is carried through
+    /// unchanged.
+    pub fn new(bytes: Vec<u8>, version: Option<ClientVersion>) -> Result<Self, FramedClientPacketError> {
+        match frame_client_packet(&bytes, version) {
+            Ok(Frame::Complete(len)) if len == bytes.len() => Ok(Self(bytes)),
+            Ok(Frame::Complete(len)) => Err(FramedClientPacketError::TrailingBytes {
+                packet_len: len,
+                buffer_len: bytes.len(),
+            }),
+            Ok(Frame::Incomplete { needed }) => Err(FramedClientPacketError::Incomplete {
+                needed,
+                got: bytes.len(),
+            }),
+            Err(error) => Err(FramedClientPacketError::Framing(error)),
+        }
+    }
+
+    /// Borrow the framed bytes, to hand to a socket that only needs to read
+    /// them.
+    pub fn bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    /// Take the framed bytes, consuming the wrapper.
+    ///
+    /// The one place this should be called from production code is where the
+    /// bytes finally leave the process — see `client/app`'s `link::play`,
+    /// where a `Command::Send` is unwrapped immediately before the socket
+    /// write and nowhere else.
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.0
+    }
+}
+
 /// The framing rule, with the length table left to the caller.
 ///
 /// Both directions of the wire are framed the same way — an id, then either a
@@ -678,6 +804,84 @@ mod tests {
         assert_eq!(
             frame_client_packet(&buffer, None),
             Ok(Frame::Complete(MAX_PACKET_SIZE))
+        );
+    }
+
+    #[test]
+    fn a_framed_client_packet_accepts_exactly_one_whole_packet() {
+        let ping = vec![0x73, 0x00];
+        let framed = FramedClientPacket::new(ping.clone(), None).expect("0x73 is a whole ping");
+        assert_eq!(framed.bytes(), ping.as_slice());
+        assert_eq!(framed.into_bytes(), ping, "into_bytes hands back the same bytes");
+    }
+
+    #[test]
+    fn a_framed_client_packet_refuses_an_unknown_id() {
+        assert_eq!(
+            FramedClientPacket::new(vec![0x01, 0x00, 0x00], None),
+            Err(FramedClientPacketError::Framing(FrameError::UnknownPacket(0x01)))
+        );
+    }
+
+    #[test]
+    fn a_framed_client_packet_refuses_a_short_buffer() {
+        // A lone id byte for a fixed 2-byte ping: one byte present, two needed.
+        assert_eq!(
+            FramedClientPacket::new(vec![0x73], None),
+            Err(FramedClientPacketError::Incomplete { needed: 2, got: 1 })
+        );
+    }
+
+    #[test]
+    fn a_framed_client_packet_refuses_trailing_bytes() {
+        // Two pings back to back: the first is a whole packet, but the buffer
+        // does not end there, and this type may only ever name one packet.
+        assert_eq!(
+            FramedClientPacket::new(vec![0x73, 0x00, 0x73, 0x00], None),
+            Err(FramedClientPacketError::TrailingBytes {
+                packet_len: 2,
+                buffer_len: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn a_framed_client_packet_follows_the_drop_packets_version_split() {
+        // The same case `the_drop_packet_length_follows_the_client_version`
+        // guards at the table level, checked through the newtype's own
+        // constructor: wrong here would accept the wrong client's 0x08, or
+        // reject the right one as incomplete or trailing.
+        let modern = ClientVersion::new(7, 0, 45, 65);
+        let ancient = ClientVersion::new(5, 0, 0, 0); // before ItemGrid (6.0.1.7)
+
+        let fourteen = vec![0x08; 14];
+        let fifteen = vec![0x08; 15];
+
+        assert!(
+            FramedClientPacket::new(fourteen.clone(), None).is_ok(),
+            "before a version is known, fourteen bytes is the whole packet"
+        );
+        assert!(
+            FramedClientPacket::new(fourteen.clone(), Some(ancient)).is_ok(),
+            "a pre-grid client's 0x08 is fourteen bytes"
+        );
+        assert_eq!(
+            FramedClientPacket::new(fifteen.clone(), Some(ancient)),
+            Err(FramedClientPacketError::TrailingBytes {
+                packet_len: 14,
+                buffer_len: 15,
+            }),
+            "a pre-grid client never sends the fifteenth byte"
+        );
+
+        assert!(
+            FramedClientPacket::new(fifteen, Some(modern)).is_ok(),
+            "a grid-capable client's 0x08 is fifteen bytes"
+        );
+        assert_eq!(
+            FramedClientPacket::new(fourteen, Some(modern)),
+            Err(FramedClientPacketError::Incomplete { needed: 15, got: 14 }),
+            "a grid-capable client's 0x08 is never just fourteen"
         );
     }
 
