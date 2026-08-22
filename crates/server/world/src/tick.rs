@@ -262,8 +262,12 @@ impl World {
                 bus: EventBus::new(),
                 facets,
                 default_facet: Facet(DEFAULT_FACET),
-                tiles: None,
-                multis: None,
+                // An empty table rather than no table: a shard with no client
+                // files is one whose tiledata says nothing about every graphic,
+                // and saying it once here is what keeps every reader from having
+                // to decide what "no table" means. `with_tiles` replaces both.
+                tiles: std::sync::Arc::new(openshard_uofiles::tiledata::TileData::empty()),
+                multis: openshard_uofiles::multi::Multis::default(),
                 players: HashMap::new(),
                 connections: HashMap::new(),
                 seen: HashMap::new(),
@@ -385,16 +389,24 @@ impl World {
     ///
     /// One pair for the whole shard rather than one per facet, because that is
     /// what they are — an install has one `tiledata.mul`, and a house does not
-    /// change shape between Felucca and Trammel. A shard left without them runs
-    /// with no encumbrance, no layers, no names and no houses, which is the same
-    /// bargain a shard with no map makes about walking.
+    /// change shape between Felucca and Trammel. A shard left without them keeps
+    /// the empty pair [`World::new`] gave it and runs with no encumbrance, no
+    /// layers, no names and no houses, which is the same bargain a shard with no
+    /// map makes about walking.
+    ///
+    /// Both are taken by value and neither is an `Option`: an install whose
+    /// multis could not be read hands over [`Multis::default`], which is a table
+    /// that knows about no houses — the same thing said as data instead of as an
+    /// absence.
+    ///
+    /// [`Multis::default`]: openshard_uofiles::multi::Multis::default
     #[must_use]
     pub fn with_tiles(
         mut self,
         tiles: std::sync::Arc<openshard_uofiles::tiledata::TileData>,
-        multis: Option<openshard_uofiles::multi::Multis>,
+        multis: openshard_uofiles::multi::Multis,
     ) -> Self {
-        self.state.tiles = Some(tiles);
+        self.state.tiles = tiles;
         self.state.multis = multis;
         self
     }

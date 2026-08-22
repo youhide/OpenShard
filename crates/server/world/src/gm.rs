@@ -725,7 +725,7 @@ fn design_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     let multi = multi & !openshard_protocol::wire::MultiId::FLAG;
     // Straight out of the client files, which is the point: a design this shard
     // *invented* is C3's editor, and this one is a shape already known to draw.
-    let components = state.multi_components(multi).to_vec();
+    let components = state.multis.components(multi).to_vec();
     if components.is_empty() {
         notify(state, actor, "No multi by that id.");
         return;

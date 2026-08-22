@@ -52,8 +52,9 @@ fn world() -> WorldState {
         bus: EventBus::new(),
         facets,
         default_facet: Facet(0),
-        tiles: None,
-        multis: None,
+        // A shard with no client files: an empty tiledata, not a missing one.
+        tiles: std::sync::Arc::new(openshard_uofiles::tiledata::TileData::empty()),
+        multis: openshard_uofiles::multi::Multis::default(),
         players: HashMap::new(),
         connections: HashMap::new(),
         seen: HashMap::new(),

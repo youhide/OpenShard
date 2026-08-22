@@ -593,11 +593,11 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
                 started.elapsed().as_secs_f64(),
                 multis.len()
             );
-            Some(multis)
+            multis
         }
         Err(error) => {
             warn!(%error, "could not read the client's multis; no house can be placed");
-            None
+            openshard_uofiles::multi::Multis::default()
         }
     };
 

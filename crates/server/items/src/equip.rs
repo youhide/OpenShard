@@ -122,12 +122,10 @@ fn hands_conflict(state: &WorldState, mobile: Serial, graphic: Graphic, layer: L
     };
     // The client proposes a layer, but tiledata (and the handful of weapon
     // class overrides) decides where the weapon actually belongs.
-    // No tiledata, no layer, so every weapon is one-handed — the same bargain a
-    // terrainless shard makes by allowing every step.
-    let tile_layer = state
-        .tiles
-        .as_deref()
-        .map_or(Layer(0), |tiles| Layer(tiles.static_tile(graphic.0).layer));
+    // An empty table — a shard with no client files — gives every graphic layer
+    // zero, so every weapon is one-handed: the same bargain a terrainless shard
+    // makes by allowing every step.
+    let tile_layer = Layer(state.tiles.static_tile(graphic.0).layer);
     let expected = weapon_layer(weapon, tile_layer);
     if expected != Layer(0) && expected != layer {
         return true;

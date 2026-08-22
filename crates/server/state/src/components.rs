@@ -2155,7 +2155,7 @@ pub struct Sailing {
 ///
 /// The **components are not here**. They are a pure function of the multi id and
 /// they live in the client's files, which is where they are read from at
-/// placement — see `openshard_movement::Terrain::multi_components`. Copying them
+/// placement — see [`WorldState::multis`](crate::WorldState::multis). Copying them
 /// onto the entity would be storing a copy of a file every client already has,
 /// and the copy would go stale the day the operator updates their install.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -2345,8 +2345,8 @@ pub struct HouseDoor {
 /// # Why it cannot live where every other house's shape lives
 ///
 /// A classic house's components come from
-/// [`Terrain::multi_components`](openshard_movement::Terrain::multi_components),
-/// keyed by a `u16` and borrowed out of a table fixed at boot. A design is per
+/// [`WorldState::multis`](crate::WorldState::multis), keyed by a `u16` and
+/// borrowed out of a table fixed at boot. A design is per
 /// *house* — two houses on one foundation id have two designs and one key — and
 /// it is world state, which that seam is documented as deliberately not being.
 /// So it is a component, and the three readers of a house's shape take it as a

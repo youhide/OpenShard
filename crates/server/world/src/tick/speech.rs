@@ -178,12 +178,7 @@ impl World {
             let Some(&Drawn { id, .. }) = self.state.registry.get::<Drawn>(target) else {
                 return;
             };
-            let Some(name) = self
-                .state
-                .tiles
-                .as_deref()
-                .and_then(|tiles| tiles.item_name(id.0))
-            else {
+            let Some(name) = self.state.tiles.item_name(id.0) else {
                 return;
             };
             // Resolve the tiledata name's `%s%` pluralisation markers, then read

@@ -157,11 +157,7 @@ impl World {
         // obstacle right after. It blocks only its own z-span — its base z and
         // tiledata height — so an upper-floor wall does not seal the ground floor
         // beneath it (the Britain-library bug).
-        let height = self
-            .state
-            .tiles
-            .as_deref()
-            .map(|tiles| tiles.static_tile(graphic.0))
+        let height = Some(self.state.tiles.static_tile(graphic.0))
             .filter(|tile| tile.flags.is_blocking())
             .map(|tile| tile.height);
         if let Some(height) = height {

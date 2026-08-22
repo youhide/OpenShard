@@ -2737,6 +2737,7 @@ dependencies = [
  "openshard-gateway",
  "openshard-protocol",
  "openshard-state",
+ "openshard-uofiles",
 ]
 
 [[package]]
@@ -2836,6 +2837,7 @@ dependencies = [
  "openshard-gateway",
  "openshard-protocol",
  "openshard-state",
+ "openshard-uofiles",
 ]
 
 [[package]]

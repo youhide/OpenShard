@@ -212,9 +212,10 @@ fn item_weight_hundredths(state: &WorldState, item: EntityId) -> u32 {
     let each = if id == GOLD_GRAPHIC {
         GOLD_WEIGHT_HUNDREDTHS
     } else {
-        // No tiledata, no encumbrance — the same bargain a terrainless shard
+        // A shard with no client files holds an empty table, where every graphic
+        // weighs nothing — no encumbrance, the same bargain a terrainless shard
         // already makes with its step checks.
-        u32::from(state.tiles.as_deref().map_or(0, |tiles| tiles.item_weight(id.0))) * 100
+        u32::from(state.tiles.item_weight(id.0)) * 100
     };
     each.saturating_mul(u32::from(amount))
 }

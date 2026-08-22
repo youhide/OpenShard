@@ -12162,7 +12162,7 @@ fn named(graphic: u16, name: &str) -> std::sync::Arc<openshard_uofiles::tiledata
 fn single_clicking_an_item_draws_its_tiledata_name() {
     let now = Instant::now();
     let mut world = world();
-    world.state.tiles = Some(named(GOLD, "gold coins"));
+    world.state.tiles = named(GOLD, "gold coins");
     let connection = enter(&mut world, now);
     // A stack of three on the player's tile, so it is drawn and clickable.
     let serial = spawn_gold(&mut world, Point::new(START.0, START.1, 0), 3, now);
@@ -15473,8 +15473,8 @@ fn a_deed_raises_the_house_cursor_and_answering_it_builds() {
 
     let now = Instant::now();
     let mut world = world();
-    world.state.tiles = Some(tiles_with(&[(WALL, WALL_FLAGS, 20)]));
-    world.state.multis = Some(multis_with(COTTAGE, cottage()));
+    world.state.tiles = tiles_with(&[(WALL, WALL_FLAGS, 20)]);
+    world.state.multis = multis_with(COTTAGE, cottage());
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];
 
@@ -15588,11 +15588,8 @@ fn a_designed_house_announces_its_revision_and_answers_the_ask() {
 
     let now = Instant::now();
     let mut world = world();
-    world.state.tiles = Some(tiles_with(&[
-        (WALL, WALL_FLAGS, 20),
-        (VILLA_WALL, WALL_FLAGS, 20),
-    ]));
-    world.state.multis = Some(multis_with(COTTAGE, cottage()));
+    world.state.tiles = tiles_with(&[(WALL, WALL_FLAGS, 20), (VILLA_WALL, WALL_FLAGS, 20)]);
+    world.state.multis = multis_with(COTTAGE, cottage());
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];
 
@@ -15722,8 +15719,8 @@ fn a_deed_for_a_foundation_builds_a_house_with_a_design() {
 
     let now = Instant::now();
     let mut world = world();
-    world.state.tiles = Some(tiles_with(&[(WALL, WALL_FLAGS, 20)]));
-    world.state.multis = Some(multis_with(FOUNDATION, platform()));
+    world.state.tiles = tiles_with(&[(WALL, WALL_FLAGS, 20)]);
+    world.state.multis = multis_with(FOUNDATION, platform());
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];
     let owner = world.state.registry.serial_of(player).unwrap();

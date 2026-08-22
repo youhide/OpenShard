@@ -21,3 +21,6 @@ openshard-state.workspace = true
 # A bare `WorldState`, as in `openshard-guilds`: everything a party rule needs
 # is in `openshard-state` except the bus.
 openshard-events.workspace = true
+# The shard's tile and multi tables are typed by the file reader, so a bare
+# `WorldState` literal names them even when it wants both empty.
+openshard-uofiles.workspace = true

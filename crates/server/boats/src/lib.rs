@@ -12,10 +12,10 @@
 //! # What is different from a house, and it is only two things
 //!
 //! **It goes on water, and a house may not.** [`place`] refuses a berth whose
-//! tiles are not sea, through `Terrain::land_is_water` — the seam
-//! `item_blocks`, `item_height` and `multi_components` all came through, rather
-//! than a third notion of "water" beside the client's tile flags and fishing's
-//! id ranges.
+//! tiles are not sea, through `Terrain::land_is_water` — the client's own tile
+//! flags, rather than a third notion of "water" beside them and fishing's id
+//! ranges. What a ship is *made of* is not asked of the ground at all: it is the
+//! shard's multi table, beside its tiledata.
 //!
 //! **Its tiles go in [`Boats`] and not in `Obstructions`.** That index only
 //! subtracts, and a deck is somewhere to stand over water that is otherwise not
@@ -102,11 +102,11 @@ pub fn planks_of(state: &WorldState, boat: EntityId, at: Point, multi: u16) -> R
     // The shard's tables, not the facet's ground: what a ship is made of and how
     // tall each piece of it is are facts about the install. Where it may float is
     // the facet's business, and that is `check_berth`'s question.
-    let components = state.multi_components(multi);
+    let components = state.multis.components(multi);
     if components.is_empty() {
         return Err(Refusal::NoSuchMulti);
     }
-    let tiledata = state.tiles.as_deref();
+    let tiledata = &state.tiles;
     let mut out = Vec::new();
     for component in components.iter().filter(|c| c.drawn()) {
         let graphic = Graphic(component.graphic);
@@ -124,8 +124,8 @@ pub fn planks_of(state: &WorldState, boat: EntityId, at: Point, multi: u16) -> R
             Plank {
                 boat,
                 z,
-                height: tiledata.map_or(0, |tiles| tiles.static_tile(graphic.0).height),
-                blocks: tiledata.is_some_and(|tiles| tiles.static_tile(graphic.0).flags.is_blocking()),
+                height: tiledata.static_tile(graphic.0).height,
+                blocks: tiledata.static_tile(graphic.0).flags.is_blocking(),
             },
         ));
     }

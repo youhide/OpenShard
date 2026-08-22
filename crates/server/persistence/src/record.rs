@@ -346,7 +346,8 @@ mod optional_serial {
 ///   bumps were about stopping an older writer; this one is about an older
 ///   reader being confidently wrong. A v30 build opens the database, does not
 ///   know the `house_designs` table so does not drop it, reads a house, sees a
-///   foundation multi id, and computes the footprint from `multi_components` —
+///   foundation multi id, and computes the footprint from the shard's multi
+///   table —
 ///   which for a foundation is a bare platform. The shard comes up with a
 ///   customised house wearing the foundation's walls, and nothing says so. That
 ///   is worse than a house with no walls, which is at least visible.

@@ -176,8 +176,8 @@ fn ground_of(components: Vec<Component>, land: u16, fits: bool) -> WorldState {
         bus: EventBus::new(),
         facets,
         default_facet: Facet(0),
-        tiles: Some(tiledata()),
-        multis: Some(multis(components)),
+        tiles: tiledata(),
+        multis: multis(components),
         players: HashMap::new(),
         connections: HashMap::new(),
         seen: HashMap::new(),
@@ -507,7 +507,7 @@ fn a_house_keeps_a_yard_clear_of_other_houses() {
 #[test]
 fn a_world_with_no_multi_table_has_no_houses() {
     let mut state = world_with(cottage());
-    state.multis = None;
+    state.multis = Multis::default();
     let (actor, owner) = an_actor(&mut state);
     assert_eq!(
         place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner),
@@ -1847,8 +1847,8 @@ fn a_foundation_blocks_where_its_design_says_and_not_where_its_platform_does() {
 #[test]
 fn a_shard_with_no_client_files_still_refuses_a_foundation() {
     let mut state = world_with(cottage());
-    state.multis = None;
-    state.tiles = None;
+    state.multis = Multis::default();
+    state.tiles = std::sync::Arc::new(TileData::empty());
     let (actor, owner) = an_actor(&mut state);
 
     assert_eq!(

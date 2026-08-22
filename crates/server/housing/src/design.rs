@@ -83,7 +83,7 @@ mod floor {
 #[must_use]
 pub fn initial_foundation(state: &WorldState, multi: u16) -> Option<Vec<Component>> {
     let multi = multi & !crate::MULTI_FLAG;
-    let platform = state.multi_components(multi);
+    let platform = state.multis.components(multi);
     if platform.is_empty() {
         return None;
     }

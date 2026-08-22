@@ -581,23 +581,27 @@ pub struct WorldState {
     /// to do with the answer, and one that returned nothing at all for an item in
     /// a pack on a mapless facet.
     ///
-    /// `None` is a shard running with no client files: no encumbrance, no layers,
-    /// no names, the same bargain its terrain makes by allowing every step. The
-    /// callers say what they do about that where they look the table up, because
-    /// the answer differs — no weight is harmless, no layer makes every weapon
-    /// one-handed.
-    pub tiles: Option<Arc<openshard_uofiles::tiledata::TileData>>,
+    /// **There is always a table.** A shard with no client files gets
+    /// [`TileData::empty`](openshard_uofiles::tiledata::TileData::empty), which is
+    /// not a stand-in for the file but the file saying nothing: every graphic
+    /// defined, unremarkable and weightless. That is the same answer every caller
+    /// used to reach for itself when the field was `None`, written once here
+    /// instead of a dozen times at the lookups — and it makes "no client files"
+    /// one state rather than one per reader, which is exactly the defect that
+    /// two different ways of blanking a shard turned out to be.
+    pub tiles: Arc<openshard_uofiles::tiledata::TileData>,
     /// Every multi the client knows: what a house or a ship is made of.
     ///
     /// Beside [`tiles`](Self::tiles) and for the same reason — a multi's
-    /// components are a fact about the install, not about a facet. Read through
-    /// [`multi_components`](Self::multi_components).
+    /// components are a fact about the install, not about a facet — and total for
+    /// the same reason too: an empty table knows about no houses, which is what a
+    /// shard whose install has no `multi.mul` in fact knows.
     ///
     /// Owned outright, where [`tiles`](Self::tiles) is behind an `Arc`: this is
     /// the only thing on the shard that holds a multi table, so there is nothing
     /// to share it with. The tile table has a second holder — every facet's boxed
     /// terrain — and that box is what the `Arc` is paying for.
-    pub multis: Option<openshard_uofiles::multi::Multis>,
+    pub multis: openshard_uofiles::multi::Multis,
     /// Which entity a connection is driving.
     pub players: HashMap<ConnectionId, EntityId>,
     /// Every connection the world is holding, playing a character or not.
@@ -973,18 +977,6 @@ impl WorldState {
             .get::<Facet>(entity)
             .copied()
             .unwrap_or(self.default_facet)
-    }
-
-    /// What multi `id` is made of, or nothing at all for a shard with no multi
-    /// table.
-    ///
-    /// An accessor rather than a field read because the empty answer is a bargain
-    /// worth stating once — a shard with no client files places no houses — and
-    /// because borrowing a slice out of an `Option<Arc<_>>` is a dance no caller
-    /// should repeat. See [`multis`](Self::multis).
-    #[must_use]
-    pub fn multi_components(&self, id: u16) -> &[openshard_uofiles::multi::Component] {
-        self.multis.as_ref().map_or(&[], |multis| multis.components(id))
     }
 
     /// The state of a facet the world is known to have.
@@ -1978,9 +1970,10 @@ impl WorldState {
         let design = self.registry.get::<crate::components::HouseDesign>(house)?;
         let serial = self.registry.serial_of(house)?;
         // The table, not the facet the house stands on: how tall a graphic is has
-        // nothing to do with where it was placed. No tiledata, no picture — a
-        // design whose floors cannot be told from its walls is not worth sending.
-        let tiledata = self.tiles.as_deref()?;
+        // nothing to do with where it was placed. A shard with no client files
+        // holds an empty one, and every component in it is a floor — the picture
+        // an install that cannot tell a wall from a floor deserves.
+        let tiledata = &self.tiles;
 
         // Only what the client draws. An undrawn component is not part of the
         // picture, and the signature tile every multi opens with is one.

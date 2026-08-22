@@ -1661,11 +1661,7 @@ impl World {
                 None => {
                     // Plain art blocks over its tiledata z-span, exactly as
                     // `place_decoration` registered it the first time.
-                    let height = self
-                        .state
-                        .tiles
-                        .as_deref()
-                        .map(|tiles| tiles.static_tile(record.graphic))
+                    let height = Some(self.state.tiles.static_tile(record.graphic))
                         .filter(|tile| tile.flags.is_blocking())
                         .map(|tile| tile.height);
                     if let Some(height) = height {

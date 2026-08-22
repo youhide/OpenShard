@@ -170,23 +170,16 @@ pub(super) fn item_name(state: &WorldState, item: EntityId) -> Option<String> {
     let graphic = state.registry.get::<Drawn>(item)?.id;
     // The shard's table, not the facet the looker stands on: what a graphic is
     // called does not change when it is carried across a moongate.
-    state
-        .tiles
-        .as_deref()
-        .and_then(|tiles| tiles.item_name(graphic.0))
-        .map(str::to_owned)
+    state.tiles.item_name(graphic.0).map(str::to_owned)
 }
 
-/// The paperdoll layer `graphic` carries in the client's own tiledata, or `0` on a
-/// shard with no client files.
+/// The paperdoll layer `graphic` carries in the client's own tiledata — `0` on a
+/// shard with no client files, whose table is empty rather than absent.
 ///
 /// The wrap from tiledata's *quality* byte to a [`Layer`] happens here:
 /// `openshard-uofiles` reads the client's files and is below `protocol`, so it
 /// hands out the byte and this is where it becomes a layer — see
 /// `docs/protocol_newtypes.md` N4.
 fn tiledata_layer(state: &WorldState, graphic: Graphic) -> Layer {
-    state
-        .tiles
-        .as_deref()
-        .map_or(Layer(0), |tiles| Layer(tiles.static_tile(graphic.0).layer))
+    Layer(state.tiles.static_tile(graphic.0).layer)
 }

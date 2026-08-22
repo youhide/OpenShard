@@ -108,12 +108,7 @@ fn room_for(
     let each = if graphic == GOLD_GRAPHIC {
         crate::GOLD_WEIGHT_HUNDREDTHS
     } else {
-        u32::from(
-            state
-                .tiles
-                .as_deref()
-                .map_or(0, |tiles| tiles.item_weight(graphic.0)),
-        ) * 100
+        u32::from(state.tiles.item_weight(graphic.0)) * 100
     };
     let stones = u16::try_from(each.saturating_mul(u32::from(amount)) / 100).unwrap_or(u16::MAX);
     crate::check_hold(state, owner, backpack, usize::from(!merges), stones).is_none()

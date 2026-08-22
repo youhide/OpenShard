@@ -351,9 +351,9 @@ What landed, and where it differs from what this section planned:
   a real `TileData` and a real `Multis`, built by hand — `TileData::empty()`
   plus `set_static_tile`, `Multis::of`. `NamedTerrain` is gone outright.
 - Two housing tests that said "a shard with no client files" expressed it by
-  clearing `FacetState::terrain`. They clear `state.multis` and `state.tiles`
-  now, which is what they meant — and the fact that those are two different
-  clearings is the defect this node removes.
+  clearing `FacetState::terrain`. They set `state.multis` and `state.tiles` to
+  empty tables now, which is what they meant — and the fact that those were two
+  different clearings is the defect this node removes.
 
 - Four of the fifteen boxed doubles became **exactly the trait defaults** and
   were deleted rather than rewritten: once `item_blocks` and friends were gone,
@@ -538,6 +538,21 @@ it. The server's `through_doors: bool` is what changes.
 caller box it with no lifetime, and that caller is `FacetState`, which stops
 boxing in D. Both ends already hold the three fields.
 
+**There is always a table.** `WorldState.tiles` and `.multis` are total:
+`Arc<TileData>` and `Multis`, never `Option`. A shard with no client files holds
+`TileData::empty()` and `Multis::default()` — which is not a stand-in for the
+file but *the file saying nothing*, and it gives every caller back exactly the
+answer it used to compute for itself: weight nothing, layer zero, no name, no
+components. An earlier draft of this document argued the opposite, that the
+`Option` was load-bearing because the three callers differ in what they do about
+it. They do differ — and each still says so, at its own lookup, in one line
+instead of a `map_or` around it. What the `Option` actually bought was a second
+way to say "no client files", which is the very defect B removed at the other
+end: two spellings of one state that nobody keeps in step. One consequence is
+visible and intended: `design_detail_packet` used to send nothing at all with no
+tiledata and now sends a house whose every component is a floor, because that is
+what a table saying nothing says about heights.
+
 **The order is the graph, not the phase number.** A and B have nothing before
 them; C needs A; D needs B and C; E needs D and the oracle; F needs nothing.
 
@@ -604,8 +619,11 @@ Two of B's findings are worth carrying into A and D:
   `Scene`s — a `TileData::empty()` with three rows written into it. The ones
   left are about *geometry*, which is what `Scene` is for, so the split between
   the two fixtures is now clean rather than incidental.
-- `WorldState.tiles` being `Option` is load-bearing and should stay one: a shard
-  with no client files is a real configuration, and the callers differ on what
-  they do about it — no weight is harmless, no layer makes every weapon
-  one-handed, no multi table refuses to place a house. A default table would
-  have hidden all three.
+- ~~`WorldState.tiles` being `Option` is load-bearing and should stay one~~ —
+  reversed and done. Both tables are total; see [There is always a
+  table](#decisions-taken-here). A shard with no client files is still a real
+  configuration, and it is now spelled the same way everywhere: empty tables,
+  not absent ones. The twelve lookups lost their `as_deref().map_or(...)` and
+  `WorldState::multi_components` lost its reason to exist — with a total field
+  it was a pass-through to `Multis::components`, so its four callers now say
+  that.

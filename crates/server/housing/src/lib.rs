@@ -15,11 +15,11 @@
 //!
 //! # Where the components come from
 //!
-//! [`Terrain::multi_components`](openshard_movement::Terrain::multi_components),
-//! the same seam `item_blocks` and `item_height` already reach gameplay through.
-//! A multi's shape is a client-file fact, and this crate reads it the way every
-//! other gameplay crate reads one: by asking the terrain, which answers nothing
-//! at all on a shard with no client files.
+//! [`WorldState::multis`](openshard_state::WorldState::multis), the shard's own
+//! table. A multi's shape is a fact about the *install* and not about a facet, so
+//! it is not reached through the ground a house happens to stand on — an install
+//! with no `multi.mul` holds an empty table, which knows about no houses and
+//! refuses every placement by name.
 //!
 //! # The footprint is stored, not recomputed
 //!
@@ -144,7 +144,7 @@ fn drawn_tiles(components: &[Component], at: Point) -> Vec<Tile> {
 /// genuinely has no design. A foundation with no design is a different thing, and
 /// C3 makes it unrepresentable rather than letting it hide in here.
 fn shape_of<'a>(design: Option<&'a [Component]>, state: &'a WorldState, multi: u16) -> &'a [Component] {
-    design.unwrap_or_else(|| state.multi_components(multi))
+    design.unwrap_or_else(|| state.multis.components(multi))
 }
 
 /// One tile of a house's footprint, already in world coordinates.
@@ -692,13 +692,13 @@ pub fn footprint_of(
     // A house's walls are tiledata's answer about each component's art, and that
     // table is the shard's rather than the facet's — the ground a house stands on
     // is asked about separately, in `ground_under`.
-    let tiledata = state.tiles.as_deref();
+    let tiledata = &state.tiles;
     let mut out = Vec::new();
     for component in components.iter().filter(|c| c.drawn()) {
         let graphic = Graphic(component.graphic);
         // Only what actually stops somebody. A floor tile and a roof are drawn and
         // walked over; folding them in would seal a house shut from the inside.
-        if !tiledata.is_some_and(|tiles| tiles.static_tile(graphic.0).flags.is_blocking()) {
+        if !tiledata.static_tile(graphic.0).flags.is_blocking() {
             continue;
         }
         let x = i32::from(at.x) + i32::from(component.dx);
@@ -713,9 +713,7 @@ pub fn footprint_of(
         out.push(Footprint {
             tile: Tile::new(x, y),
             z,
-            height: tiledata
-                .map_or(0, |tiles| tiles.static_tile(graphic.0).height)
-                .max(1),
+            height: tiledata.static_tile(graphic.0).height.max(1),
         });
     }
     Ok(out)

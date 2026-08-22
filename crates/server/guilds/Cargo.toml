@@ -21,3 +21,6 @@ openshard-state.workspace = true
 # The tests build a bare `WorldState` — no map, no clients, just a registry and
 # the guild table. Every part of one is in `openshard-state` except the bus.
 openshard-events.workspace = true
+# The shard's tile and multi tables are typed by the file reader, so a bare
+# `WorldState` literal names them even when it wants both empty.
+openshard-uofiles.workspace = true
