@@ -382,6 +382,10 @@ Written down because each is a thing a session might reasonably drift into.
 
 ## Where a session starts
 
-Phase 1, in `crates/common/uofiles/src/map.rs`. It touches one crate, no
-reader outside it, and the five spellings of the block order are listed with
-line numbers in [`plan.md`'s A0 table](plan.md#a0--the-cell-array-becomes-a-type-that-owns-the-order).
+Not here: both phases of this plan are built, and what each of them left behind
+is in the two lists above. The track's next direction is
+[B](plan.md#b--our-own-chunk-format-and-a-uo-importer), and the state it starts
+from — what was decided, and which of the left-behind items are still open — is
+in the newest [handoff](handoffs/). This document is kept for its decisions,
+which B inherits: the block order belongs to `LandGrid`, a facet is a snapshot
+with a revision, and a bake records which revision it was built from.
