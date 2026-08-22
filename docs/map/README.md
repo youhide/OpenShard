@@ -16,6 +16,7 @@ reader takes a handle to. Start at its
 
 | | |
 |---|---|
+| [`terrain_dispatch.md`](terrain_dispatch.md) | 🚩 **What it costs to get from the map to a step, and who checked.** `Terrain` is reached through `dyn` in all 39 places that name it — three virtual calls on every A* edge, for three production terrain stacks. The plan to remove it everywhere, storage included, plus the navigation graph the server loads and never reads and the hot path with no facet-0 measurement. |
 | [`coarse_pathfinding.md`](coarse_pathfinding.md) | Long routes over static terrain, and what a route is allowed to assume. |
 | [`navigation_graph.md`](navigation_graph.md) | The graph itself: regions, components, portals. |
 | [`navigation_graph_bake.md`](navigation_graph_bake.md) | The baked artifact, its stamp and its validation. |
