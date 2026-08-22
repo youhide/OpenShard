@@ -320,16 +320,19 @@ Written down as it was found. None of it blocks the track's next direction.
 
 Written down as it was found, and none of it blocks phase 2.
 
-- **The `BlockCoord` collapse is decided, not done.** Phase 1's decision stands
-  — [`interiors::BlockId`](../../../crates/client/render/src/interiors.rs#L18)
-  and [`composite::MapBlock`](../../../crates/client/render/src/composite.rs#L45)
-  are the same value under two names and become
-  [`BlockCoord`](../../../crates/common/uofiles/src/grid.rs) — but converting
-  them is a reader change, and [`plan.md`'s A0](plan.md#a0--the-cell-array-becomes-a-type-that-owns-the-order)
-  says in as many words that nothing outside `uofiles` changes there. They are
-  still two types, still `u32` and `u16` respectively. Whoever collapses them
-  should take `RadarChunkCoord` off the table in the same breath, because the
-  reason it stays separate is the one thing a reader of that diff will ask.
+- **The `BlockCoord` collapse is done.** `interiors::BlockId` and
+  `composite::MapBlock` — the same value under two names, and disagreeing about
+  its width — are both
+  [`BlockCoord`](../../../crates/common/uofiles/src/grid.rs) now.
+  `RadarChunkCoord` stayed, for the reason phase 1 gave. `MapBlockBounds`
+  widened to `u32` with the coordinate it holds, so a block column has one
+  width in `client/render` rather than two, and five more open-coded spellings
+  of the block order went with the two structs. What the collapse cost is one
+  narrowing: `BlockCoord::origin` answers in `u32` because a block coordinate
+  is not promised to be on any facet, so a caller that needs a *tile* asks
+  `composite::tile_origin`, which is the single place that says "this block is
+  one a composite exists for" — and `FlatGroundBlock::inspect`, the function
+  that decides that, narrows it itself and returns `None`.
 - **The land and the statics share an index that is still two arrays.**
   `Map::statics` is now documented as being addressed by the same `BlockIndex`
   as the cells, and every subscript of it goes through

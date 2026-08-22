@@ -88,11 +88,12 @@ layout:
   already been red since 2026-08-20 for exactly this reason, on a file this
   track never touched.
 
-Smaller things worth doing first, each landable alone and each already decided
-in [`snapshot.md`](../snapshot.md)'s left-behind lists: collapse
-`interiors::BlockId` and `composite::MapBlock` into `BlockCoord` — taking
-`RadarChunkCoord` off the table in the same diff, because that is what a reader
-will ask; give `LandGrid`'s transitions their first caller, which is what turns
+The first of the smaller things is done in the same session: `interiors::BlockId`
+and `composite::MapBlock` are one `BlockCoord`, `RadarChunkCoord` stayed
+separate, and `MapBlockBounds` widened to `u32` behind it.
+
+What is left of that list, each landable alone and each already decided
+in [`snapshot.md`](../snapshot.md)'s left-behind lists: give `LandGrid`'s transitions their first caller, which is what turns
 the walk order into a property of one iterator and is the half of A0's point
 [`depth::Order`](../../../../crates/client/render/src/depth.rs)'s anti-diagonal
 tie is waiting on; give `Map::from_blocks` a typed extent; and give
