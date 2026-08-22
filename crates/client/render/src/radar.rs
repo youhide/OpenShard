@@ -42,6 +42,9 @@ use openshard_uofiles::grid::BlockCoord;
 use openshard_uofiles::map::{BLOCK_SIZE, Map};
 use openshard_uofiles::radarcol::RadarColors;
 
+use crate::chunk_cache::{LruBudget, WorkQueue};
+use crate::radar_pass::Placement;
+
 /// Domain values that name radar space.
 ///
 /// Keeping these distinct is deliberately more than documentation: a chunk
@@ -308,6 +311,144 @@ pub const BASE_CHUNK_TILES: u16 = BLOCK_TILES * 8;
 
 /// The number of map blocks along a base chunk edge.
 pub const BASE_CHUNK_BLOCKS: u16 = BASE_CHUNK_TILES / BLOCK_TILES;
+pub const SWEEP_LOD: RadarLod = RadarLod::new(2);
+pub const RADAR_CPU_TAIL_BUDGET: u64 = 32 * 1024 * 1024;
+const RADAR_CHUNK_CPU_BYTES: u64 = (BASE_CHUNK_TILES as u64) * (BASE_CHUNK_TILES as u64) * 2;
+
+/// One placement of the shared radar raster.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct RadarView {
+    pub facet: Facet,
+    pub centre: RadarTile,
+    pub tiles_per_pixel: f32,
+    pub placement: Placement,
+    facet_extent: RadarExtent,
+    device_scale: f32,
+    tangent_margin: (u16, u16),
+}
+
+impl RadarView {
+    #[must_use]
+    pub fn new(
+        facet: Facet,
+        centre: RadarTile,
+        facet_extent: RadarExtent,
+        tiles_per_pixel: f32,
+        placement: Placement,
+        device_scale: f32,
+    ) -> Self {
+        Self {
+            facet,
+            centre,
+            tiles_per_pixel: tiles_per_pixel.max(f32::EPSILON),
+            placement,
+            facet_extent,
+            device_scale: device_scale.max(f32::EPSILON),
+            tangent_margin: (0, 0),
+        }
+    }
+
+    /// Add the minimap's measured tangent slack, expressed in world tiles.
+    #[must_use]
+    pub fn with_tangent_margin(self, logical_extent: (i32, i32), zoom: f32) -> Self {
+        self.with_tangent_margin_fraction(logical_extent, zoom, 0.21)
+    }
+
+    #[must_use]
+    pub fn with_tangent_margin_fraction(
+        mut self,
+        logical_extent: (i32, i32),
+        zoom: f32,
+        fraction: f32,
+    ) -> Self {
+        self.tangent_margin = (
+            (2.0 * (logical_extent.0 as f32 * fraction / zoom).ceil()).clamp(0.0, f32::from(u16::MAX)) as u16,
+            (2.0 * (logical_extent.1 as f32 * fraction / zoom).ceil()).clamp(0.0, f32::from(u16::MAX)) as u16,
+        );
+        self
+    }
+
+    #[must_use]
+    pub fn region(self) -> RadarRegion {
+        let width = (self.placement.extent.0 * self.device_scale * self.tiles_per_pixel)
+            .ceil()
+            .max(1.0) as u32
+            + u32::from(self.tangent_margin.0);
+        let height = (self.placement.extent.1 * self.device_scale * self.tiles_per_pixel)
+            .ceil()
+            .max(1.0) as u32
+            + u32::from(self.tangent_margin.1);
+        let width = width.min(u32::from(self.facet_extent.width())).max(1) as u16;
+        let height = height.min(u32::from(self.facet_extent.height())).max(1) as u16;
+        let extent = RadarExtent::new(width, height).expect("a view has a non-empty region");
+        let max_x = u32::from(self.facet_extent.width() - width);
+        let max_y = u32::from(self.facet_extent.height() - height);
+        let origin = RadarTile::new(
+            self.centre.x().saturating_sub(u32::from(width) / 2).min(max_x),
+            self.centre.y().saturating_sub(u32::from(height) / 2).min(max_y),
+        );
+        RadarRegion::new(self.facet, origin, extent)
+    }
+
+    #[must_use]
+    pub fn lod(self) -> RadarLod {
+        let raw = self.tiles_per_pixel.log2().floor().max(0.0) as u8;
+        RadarLod::new(raw.min(max_lod(self.facet_extent).value()))
+    }
+
+    /// Screen placement of the fetched region under the view's clip.
+    #[must_use]
+    pub fn map_placement(self) -> Placement {
+        let region = self.region();
+        let pixels_per_logical = self.tiles_per_pixel * self.device_scale;
+        let extent = (
+            f32::from(region.extent().width()) / pixels_per_logical,
+            f32::from(region.extent().height()) / pixels_per_logical,
+        );
+        Placement {
+            origin: (
+                self.placement.origin.0 + (self.placement.extent.0 - extent.0) / 2.0,
+                self.placement.origin.1 + (self.placement.extent.1 - extent.1) / 2.0,
+            ),
+            extent,
+            ..self.placement
+        }
+    }
+}
+
+/// Per-window radar LOD hysteresis.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct RadarLodSelector {
+    selected: Option<RadarLod>,
+}
+
+impl RadarLodSelector {
+    #[must_use]
+    pub fn update(&mut self, view: RadarView) -> RadarLod {
+        let ideal = view.lod();
+        let max = max_lod(view.facet_extent).value();
+        let Some(mut selected) = self.selected else {
+            self.selected = Some(ideal);
+            return ideal;
+        };
+        while selected.value() < max {
+            let boundary = 2_f32.powi(i32::from(selected.value() + 1));
+            if view.tiles_per_pixel < boundary * 1.1 {
+                break;
+            }
+            selected = RadarLod::new(selected.value() + 1);
+        }
+        while selected.value() > 0 {
+            let boundary = 2_f32.powi(i32::from(selected.value()));
+            if view.tiles_per_pixel >= boundary * 0.9 {
+                break;
+            }
+            selected = RadarLod::new(selected.value() - 1);
+        }
+        self.selected = Some(selected);
+        selected
+    }
+}
 
 /// Convert a world tile to the level-zero chunk and local tile that contain it.
 ///
@@ -332,11 +473,24 @@ pub fn world_tile_to_base_chunk(world: impl Into<RadarTile>) -> (RadarChunkCoord
 /// content pass, which reads back exactly the ones that are ready — the two
 /// must agree on what "the visible chunks" are, or a chunk the queue never
 /// saw requested would sit ready and undrawn, or one the pass never asks for
-/// would build forever. `region.lod` is not consulted: level zero is the
-/// only chunk grid a rectangle of world tiles maps onto directly.
+/// would build forever. Invalidation retains this spelling; views use
+/// [`region_chunks`] at their selected level.
 pub fn region_base_chunks(region: RadarRegion) -> impl Iterator<Item = RadarChunkCoord> {
-    let (first_chunk, _) = world_tile_to_base_chunk(region.origin());
-    let (last_chunk, _) = world_tile_to_base_chunk(region.extent().last_tile(region.origin()));
+    region_chunks(region, RadarLod::BASE)
+}
+
+/// Every chunk at `lod` whose world rectangle touches `region`.
+pub fn region_chunks(region: RadarRegion, lod: impl Into<RadarLod>) -> impl Iterator<Item = RadarChunkCoord> {
+    let lod = lod.into();
+    let chunk_world = u32::from(BASE_CHUNK_TILES)
+        .checked_shl(u32::from(lod.value()))
+        .unwrap_or(u32::MAX);
+    let last = region.extent().last_tile(region.origin());
+    let first_chunk = RadarChunkCoord::new(
+        region.origin().x() / chunk_world,
+        region.origin().y() / chunk_world,
+    );
+    let last_chunk = RadarChunkCoord::new(last.x() / chunk_world, last.y() / chunk_world);
     (first_chunk.y()..=last_chunk.y())
         .flat_map(move |y| (first_chunk.x()..=last_chunk.x()).map(move |x| RadarChunkCoord::new(x, y)))
 }
@@ -359,7 +513,16 @@ pub fn region_base_chunks_near(
     region: RadarRegion,
     centre: RadarChunkCoord,
 ) -> impl Iterator<Item = RadarChunkCoord> {
-    let mut chunks: Vec<_> = region_base_chunks(region).collect();
+    region_chunks_near(region, RadarLod::BASE, centre)
+}
+
+/// [`region_chunks`] in nearest-first producer order.
+pub fn region_chunks_near(
+    region: RadarRegion,
+    lod: impl Into<RadarLod>,
+    centre: RadarChunkCoord,
+) -> impl Iterator<Item = RadarChunkCoord> {
+    let mut chunks: Vec<_> = region_chunks(region, lod).collect();
     chunks.sort_by_key(|chunk| {
         (
             chunk
@@ -513,13 +676,17 @@ pub struct RadarCacheCounters {
 /// makes them unreachable without any player movement or UI event. Production
 /// and dirty-parent tracking deliberately arrive in the next cache phase; this
 /// type establishes the one authoritative identity they operate on.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RadarCache {
     revisions: BTreeMap<Facet, RadarRevision>,
     ready: BTreeMap<RadarChunkKey, RadarChunk>,
+    highest_ready_lod: BTreeMap<(Facet, RadarRevision), RadarLod>,
     requested: Cell<u64>,
     rebuilt: u64,
     evicted: u64,
+    budget: LruBudget<RadarChunkKey>,
+    tail_budget: u64,
+    swept_facets: BTreeSet<Facet>,
     /// Current-source products which a terrain/static mutation made unsafe to
     /// reuse.  A producer consumes these keys in a later phase; keeping the
     /// work here makes the content owner, rather than a minimap window, the
@@ -527,7 +694,34 @@ pub struct RadarCache {
     dirty: BTreeSet<RadarChunkKey>,
 }
 
+impl Default for RadarCache {
+    fn default() -> Self {
+        Self {
+            revisions: BTreeMap::new(),
+            ready: BTreeMap::new(),
+            highest_ready_lod: BTreeMap::new(),
+            requested: Cell::new(0),
+            rebuilt: 0,
+            evicted: 0,
+            budget: LruBudget::new(RADAR_CPU_TAIL_BUDGET).expect("the shipped radar CPU budget is non-zero"),
+            tail_budget: RADAR_CPU_TAIL_BUDGET,
+            swept_facets: BTreeSet::new(),
+            dirty: BTreeSet::new(),
+        }
+    }
+}
+
 impl RadarCache {
+    #[must_use]
+    pub fn with_tail_budget(bytes: u64) -> Option<Self> {
+        let budget = LruBudget::new(bytes)?;
+        Some(Self {
+            budget,
+            tail_budget: bytes,
+            ..Self::default()
+        })
+    }
+
     /// The source revision currently authoritative for a facet.
     #[must_use]
     pub fn revision(&self, facet: Facet) -> RadarRevision {
@@ -615,6 +809,11 @@ impl RadarCache {
             return false;
         }
         self.ready.insert(key, chunk);
+        self.highest_ready_lod
+            .entry((key.facet, key.revision))
+            .and_modify(|lod| *lod = (*lod).max(key.lod))
+            .or_insert(key.lod);
+        self.budget.insert(key, RADAR_CHUNK_CPU_BYTES);
         self.dirty.remove(&key);
         self.rebuilt = self.rebuilt.saturating_add(1);
         true
@@ -623,9 +822,13 @@ impl RadarCache {
     /// The complete product ready for a current cache key.
     #[must_use]
     pub fn get(&self, key: RadarChunkKey) -> Option<&RadarChunk> {
-        (key.revision == self.revision(key.facet))
+        let ready = (key.revision == self.revision(key.facet))
             .then(|| self.ready.get(&key))
-            .flatten()
+            .flatten();
+        if ready.is_some() {
+            self.budget.touch(key);
+        }
+        ready
     }
 
     /// Select complete terrain for a draw request without exposing a hole.
@@ -641,13 +844,64 @@ impl RadarCache {
         let current_revision = self.revision(key.facet);
         if key.revision == current_revision {
             if let Some(chunk) = self.ready.get(&key) {
+                self.budget.touch(key);
                 return Some(RadarReadyChunk {
                     chunk,
                     kind: RadarReadyKind::Exact,
                 });
             }
 
-            let ancestor = self
+            let highest = self
+                .highest_ready_lod
+                .get(&(key.facet, current_revision))
+                .copied()
+                .unwrap_or(key.lod);
+            for ancestor_lod in key.lod.value().saturating_add(1)..=highest.value() {
+                let ancestor_key = RadarChunkKey::new(
+                    key.facet,
+                    RadarLod::new(ancestor_lod),
+                    key.chunk.ancestor_at(ancestor_lod - key.lod.value()),
+                    current_revision,
+                );
+                if let Some(chunk) = self.ready.get(&ancestor_key) {
+                    self.budget.touch(ancestor_key);
+                    return Some(RadarReadyChunk {
+                        chunk,
+                        kind: RadarReadyKind::CoarserAncestor,
+                    });
+                }
+            }
+        }
+
+        let first = RadarChunkKey::new(key.facet, key.lod, key.chunk, RadarRevision(0));
+        let last = RadarChunkKey::new(key.facet, key.lod, key.chunk, current_revision);
+        let selected = self.ready.range(first..=last).next_back().map(|(key, chunk)| {
+            (
+                *key,
+                RadarReadyChunk {
+                    chunk,
+                    kind: RadarReadyKind::StaleExact,
+                },
+            )
+        });
+        if let Some((key, _)) = selected {
+            self.budget.touch(key);
+        }
+        selected.map(|(_, ready)| ready)
+    }
+
+    /// Exhaustive oracle retained for checking the indexed selection path.
+    #[cfg(test)]
+    fn select_ready_reference(&self, key: RadarChunkKey) -> Option<RadarReadyChunk<'_>> {
+        let current_revision = self.revision(key.facet);
+        if key.revision == current_revision {
+            if let Some(chunk) = self.ready.get(&key) {
+                return Some(RadarReadyChunk {
+                    chunk,
+                    kind: RadarReadyKind::Exact,
+                });
+            }
+            if let Some((_, chunk)) = self
                 .ready
                 .iter()
                 .filter(|(candidate, _)| {
@@ -657,15 +911,13 @@ impl RadarCache {
                         && key.chunk.ancestor_at(candidate.lod.value() - key.lod.value()) == candidate.chunk
                 })
                 .min_by_key(|(candidate, _)| candidate.lod)
-                .map(|(_, chunk)| chunk);
-            if let Some(chunk) = ancestor {
+            {
                 return Some(RadarReadyChunk {
                     chunk,
                     kind: RadarReadyKind::CoarserAncestor,
                 });
             }
         }
-
         self.ready
             .iter()
             .filter(|(candidate, _)| {
@@ -704,6 +956,57 @@ impl RadarCache {
     pub fn retained_len(&self) -> usize {
         self.ready.len()
     }
+
+    /// Mark the first facet-map open in this session.
+    pub fn begin_sweep(&mut self, facet: Facet) -> bool {
+        self.swept_facets.insert(facet)
+    }
+
+    #[must_use]
+    pub fn sweep_started(&self, facet: Facet) -> bool {
+        self.swept_facets.contains(&facet)
+    }
+
+    /// Bound the demand-driven tail while retaining the coarse fallback floor
+    /// and every key an open view is about to draw.
+    pub fn evict_to_budget(&mut self, protected: impl IntoIterator<Item = RadarChunkKey>) -> usize {
+        let mut pinned: BTreeSet<_> = self
+            .ready
+            .keys()
+            .copied()
+            .filter(|key| key.lod >= SWEEP_LOD && key.revision == self.revision(key.facet))
+            .collect();
+        pinned.extend(protected.into_iter().filter(|key| self.ready.contains_key(key)));
+        let pinned_bytes = pinned.len() as u64 * RADAR_CHUNK_CPU_BYTES;
+        self.budget
+            .set_max_bytes(self.tail_budget.saturating_add(pinned_bytes));
+        self.budget.set_protected(pinned);
+        let revisions = &self.revisions;
+        let report = self.budget.evict_to_budget_by(|key| {
+            let current = revisions.get(&key.facet).copied().unwrap_or(RadarRevision(0));
+            key.revision == current
+        });
+        for key in &report.keys {
+            self.ready
+                .remove(key)
+                .expect("the CPU LRU decision names a ready radar chunk");
+        }
+        if !report.keys.is_empty() {
+            self.rebuild_highest_ready_lods();
+        }
+        self.evicted = self.evicted.saturating_add(report.keys.len() as u64);
+        report.keys.len()
+    }
+
+    fn rebuild_highest_ready_lods(&mut self) {
+        self.highest_ready_lod.clear();
+        for key in self.ready.keys() {
+            self.highest_ready_lod
+                .entry((key.facet, key.revision))
+                .and_modify(|lod| *lod = (*lod).max(key.lod))
+                .or_insert(key.lod);
+        }
+    }
 }
 
 /// A bounded hand-off from cache invalidation to a radar chunk producer.
@@ -711,15 +1014,19 @@ impl RadarCache {
 /// This queue deliberately owns scheduling only: it never walks a [`Map`],
 /// allocates pixels, or uploads a texture.  A presentation frame may refresh
 /// its dirty view cheaply, while an idle worker takes at most
-/// `builds_per_turn` keys and returns a complete [`RadarChunk`] through
+/// a fixed cost in base-chunk units and returns complete [`RadarChunk`]s through
 /// [`Self::finish`].  Keeping those paths separate is what prevents a newly
 /// exposed minimap area from becoming a synchronous rasterisation burst.
 #[derive(Debug)]
 pub struct RadarWorkQueue {
-    max_queued: usize,
-    builds_per_turn: usize,
-    pending: BTreeSet<RadarChunkKey>,
-    in_flight: BTreeSet<RadarChunkKey>,
+    queue: WorkQueue<RadarChunkKey>,
+    priorities: BTreeMap<RadarChunkKey, RadarWorkPriority>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum RadarWorkPriority {
+    View,
+    Sweep,
 }
 
 /// Queue-owned frame diagnostics, separate from retained cache products.
@@ -733,11 +1040,10 @@ pub struct RadarWorkCounters {
 
 impl Default for RadarWorkQueue {
     fn default() -> Self {
-        // A zoomed-out, rotated minimap can expose hundreds of base chunks at
-        // once. One build per frame leaves a conspicuous patchwork of UNKNOWN
-        // while their LOD parents wait for all four children; eight keeps the
-        // work bounded without making the radar take seconds to fill.
-        Self::new(512, 8).expect("the shipped radar queue limits are non-zero")
+        // Eight level-zero units preserve the original production rate. A
+        // coarse product spends 4^lod units, so zoom cannot silently multiply
+        // the synchronous map walk by hundreds.
+        Self::new(1024, 8).expect("the shipped radar queue limits are non-zero")
     }
 }
 
@@ -748,25 +1054,24 @@ impl RadarWorkQueue {
     /// producer therefore cannot make the amount of outstanding map work grow
     /// without bound.
     #[must_use]
-    pub fn new(max_queued: usize, builds_per_turn: usize) -> Option<Self> {
-        (max_queued != 0 && builds_per_turn != 0).then_some(Self {
-            max_queued,
-            builds_per_turn,
-            pending: BTreeSet::new(),
-            in_flight: BTreeSet::new(),
+    pub fn new(max_queued: usize, units_per_turn: usize) -> Option<Self> {
+        (max_queued != 0 && units_per_turn != 0).then_some(Self {
+            queue: WorkQueue::new(max_queued, units_per_turn)
+                .expect("the radar wrapper has checked its limits"),
+            priorities: BTreeMap::new(),
         })
     }
 
     /// Number of requests waiting for a producer.
     #[must_use]
     pub fn pending_len(&self) -> usize {
-        self.pending.len()
+        self.queue.pending_len()
     }
 
     /// Number of requests currently owned by a producer.
     #[must_use]
     pub fn in_flight_len(&self) -> usize {
-        self.in_flight.len()
+        self.queue.in_flight_len()
     }
 
     /// Queue state suitable for a frame diagnostic report.
@@ -784,14 +1089,24 @@ impl RadarWorkQueue {
     /// work is at its explicit bound.  Re-requesting pending or in-flight work
     /// always succeeds without consuming another slot.
     pub fn request(&mut self, key: RadarChunkKey) -> bool {
-        if self.pending.contains(&key) || self.in_flight.contains(&key) {
-            return true;
+        self.request_with_priority(key, RadarWorkPriority::View)
+    }
+
+    /// Enqueue background pyramid work below every open view's demand.
+    pub fn request_sweep(&mut self, key: RadarChunkKey) -> bool {
+        self.request_with_priority(key, RadarWorkPriority::Sweep)
+    }
+
+    fn request_with_priority(&mut self, key: RadarChunkKey, priority: RadarWorkPriority) -> bool {
+        if self.queue.request(key) {
+            self.priorities
+                .entry(key)
+                .and_modify(|was| *was = (*was).min(priority))
+                .or_insert(priority);
+            true
+        } else {
+            false
         }
-        if self.pending.len() + self.in_flight.len() == self.max_queued {
-            return false;
-        }
-        self.pending.insert(key);
-        true
     }
 
     /// Reconcile pending work with what the cache already holds.
@@ -817,8 +1132,9 @@ impl RadarWorkQueue {
         // `get` answers `None` for a superseded revision as well as for a key
         // never built, so the revision is tested on its own: a stale pending
         // key has to go, not be kept because no product answers to it.
-        self.pending
-            .retain(|key| key.revision == cache.revision(key.facet) && cache.get(*key).is_none());
+        self.queue
+            .reconcile(|key| key.revision == cache.revision(key.facet) && cache.get(key).is_none());
+        self.priorities.retain(|key, _| self.queue.contains_pending(*key));
         for key in cache.dirty_keys() {
             self.request(key);
         }
@@ -830,10 +1146,13 @@ impl RadarWorkQueue {
     /// pixels and is consequently safe to call from presentation bookkeeping.
     #[must_use]
     pub fn take_for_producer(&mut self) -> Vec<RadarChunkKey> {
-        let keys: Vec<_> = self.pending.iter().copied().take(self.builds_per_turn).collect();
+        let priorities = &self.priorities;
+        let keys = self.queue.take_for_producer_by_cost(
+            |left, right| (priorities[left], *left).cmp(&(priorities[right], *right)),
+            |key| lod_cost(key.lod()),
+        );
         for key in &keys {
-            self.pending.remove(key);
-            self.in_flight.insert(*key);
+            self.priorities.remove(key);
         }
         keys
     }
@@ -844,22 +1163,28 @@ impl RadarWorkQueue {
     /// corner first, which becomes a visibly displaced wedge after rotation.
     #[must_use]
     pub fn take_for_producer_near(&mut self, centre: RadarChunkCoord) -> Vec<RadarChunkKey> {
-        let mut keys: Vec<_> = self.pending.iter().copied().collect();
-        keys.sort_by_key(|key| {
-            let chunk = key.chunk();
-            (
-                chunk
-                    .x()
-                    .abs_diff(centre.x())
-                    .saturating_add(chunk.y().abs_diff(centre.y())),
-                chunk.y(),
-                chunk.x(),
-            )
-        });
-        keys.truncate(self.builds_per_turn);
+        let priorities = &self.priorities;
+        let keys = self.queue.take_for_producer_by_cost(
+            |left, right| {
+                let distance_key = |key: &RadarChunkKey| {
+                    let chunk = key.chunk();
+                    (
+                        priorities[key],
+                        std::cmp::Reverse(key.lod().value()),
+                        chunk
+                            .x()
+                            .abs_diff(centre.x())
+                            .saturating_add(chunk.y().abs_diff(centre.y())),
+                        chunk.y(),
+                        chunk.x(),
+                    )
+                };
+                distance_key(left).cmp(&distance_key(right))
+            },
+            |key| lod_cost(key.lod()),
+        );
         for key in &keys {
-            self.pending.remove(key);
-            self.in_flight.insert(*key);
+            self.priorities.remove(key);
         }
         keys
     }
@@ -872,7 +1197,7 @@ impl RadarWorkQueue {
     /// source key.
     pub fn finish(&mut self, cache: &mut RadarCache, chunk: RadarChunk) -> bool {
         let key = chunk.key();
-        if !self.in_flight.remove(&key) {
+        if !self.queue.finish(key) {
             return false;
         }
         cache.publish(chunk)
@@ -888,7 +1213,7 @@ impl RadarWorkQueue {
     /// A key still named by the cache's dirty set is re-queued by the next
     /// [`Self::reconcile`].
     pub fn abandon(&mut self, key: RadarChunkKey) -> bool {
-        self.in_flight.remove(&key)
+        self.queue.abandon(key)
     }
 }
 
@@ -911,23 +1236,59 @@ impl RadarChunk {
     }
 }
 
-/// Build a level-zero chunk from the authoritative terrain-colour rule.
-///
-/// `key.lod` must be zero.  Out-of-facet cells, including the fixed-size map
-/// border, are [`UNKNOWN`], exactly as [`fill`] specifies.
+/// Reusable storage for a producer turn that builds differently-sized LODs.
+#[derive(Debug, Default)]
+pub struct RadarBuildScratch {
+    pixels: Vec<Color16>,
+}
+
+/// Build any LOD directly from the authoritative map and colour table.
+#[must_use]
+pub fn build_chunk(map: &Map, colors: &RadarColors, key: RadarChunkKey) -> Option<RadarChunk> {
+    build_chunk_reusing(map, colors, key, &mut RadarBuildScratch::default())
+}
+
+/// [`build_chunk`] with storage shared by all jobs in one producer turn.
+#[must_use]
+pub fn build_chunk_reusing(
+    map: &Map,
+    colors: &RadarColors,
+    key: RadarChunkKey,
+    scratch: &mut RadarBuildScratch,
+) -> Option<RadarChunk> {
+    let scale = 1_u32.checked_shl(u32::from(key.lod.value()))?;
+    let side_u32 = u32::from(BASE_CHUNK_TILES).checked_mul(scale)?;
+    let side = u16::try_from(side_u32).ok()?;
+    let origin_x = key.chunk.x().checked_mul(side_u32)?;
+    let origin_y = key.chunk.y().checked_mul(side_u32)?;
+    let origin = (u16::try_from(origin_x).ok()?, u16::try_from(origin_y).ok()?);
+    let len = usize::from(side).checked_mul(usize::from(side))?;
+    scratch.pixels.resize(len, UNKNOWN);
+    fill(map, colors, origin, side, side, &mut scratch.pixels[..len]);
+
+    let mut source_side = usize::from(side);
+    for _ in 0..key.lod.value() {
+        let target_side = source_side / 2;
+        for y in 0..target_side {
+            for x in 0..target_side {
+                let source = (y * 2) * source_side + x * 2;
+                scratch.pixels[y * target_side + x] = reduce_lod_pixel([
+                    scratch.pixels[source],
+                    scratch.pixels[source + 1],
+                    scratch.pixels[source + source_side],
+                    scratch.pixels[source + source_side + 1],
+                ]);
+            }
+        }
+        source_side = target_side;
+    }
+    RadarChunk::new(key, scratch.pixels[..chunk_pixel_count()].to_vec())
+}
+
+/// The level-zero compatibility spelling used by invalidation tests/callers.
 #[must_use]
 pub fn build_base_chunk(map: &Map, colors: &RadarColors, key: RadarChunkKey) -> Option<RadarChunk> {
-    let origin = key.base_origin()?;
-    let mut pixels = vec![UNKNOWN; chunk_pixel_count()];
-    fill(
-        map,
-        colors,
-        (origin.x() as u16, origin.y() as u16),
-        BASE_CHUNK_TILES,
-        BASE_CHUNK_TILES,
-        &mut pixels,
-    );
-    RadarChunk::new(key, pixels)
+    key.lod.is_base().then(|| build_chunk(map, colors, key)).flatten()
 }
 
 /// Reduce four categorical colours to one categorical parent pixel.
@@ -1041,14 +1402,21 @@ pub fn child_keys(key: RadarChunkKey) -> Option<[RadarChunkKey; 4]> {
     ])
 }
 
-/// How many coarser levels the fallback ladder is built to.
-///
-/// Four, because a level-four product covers 1,024 world tiles across: enough
-/// for the facet map to fall back to a few products while it fills, while the
-/// minimap still selects an exact or nearby product as before. It is the
-/// ladder's depth rather than a property of the map; a larger facet only needs
-/// a deeper ladder, not a second cache keyed by zoom.
-pub const MAX_LOD: RadarLod = RadarLod::new(4);
+/// The level at which one chunk covers the facet's longer axis.
+#[must_use]
+pub fn max_lod(extent: RadarExtent) -> RadarLod {
+    let longest = u32::from(extent.width().max(extent.height()));
+    let chunks = longest.div_ceil(u32::from(BASE_CHUNK_TILES)).max(1);
+    RadarLod::new((u32::BITS - (chunks - 1).leading_zeros()) as u8)
+}
+
+/// Producer cost in level-zero chunk units.
+#[must_use]
+pub fn lod_cost(lod: RadarLod) -> usize {
+    1usize
+        .checked_shl(u32::from(lod.value()) * 2)
+        .unwrap_or(usize::MAX)
+}
 
 /// Build every ancestor that publishing one chunk has just completed, and
 /// publish them too.  Returns how many were built.
@@ -1059,7 +1427,7 @@ pub const MAX_LOD: RadarLod = RadarLod::new(4);
 /// no ancestor is ever requested, and none is ever built from terrain that is
 /// partly missing.
 ///
-/// Work is bounded by [`MAX_LOD`] and by the arithmetic: one reduction is four
+/// Work is bounded by the facet's [`max_lod`] and by the arithmetic: one reduction is four
 /// complete children into one product of the same pixel count, and it happens
 /// on one child in four.
 pub fn build_ready_ancestors(
@@ -1455,6 +1823,131 @@ mod tests {
     }
 
     #[test]
+    fn a_direct_lod_build_is_identical_to_climbing_complete_child_families() {
+        let map = a_field();
+        let colors = colors();
+        for target_lod in 0..=3_u8 {
+            let revision = RadarRevision(9);
+            let direct_key = RadarChunkKey::new(
+                Facet(0),
+                RadarLod::new(target_lod),
+                RadarChunkCoord::new(0, 0),
+                revision,
+            );
+            let direct = build_chunk(&map, &colors, direct_key).expect("the direct product is addressable");
+            let side = 1_u32 << target_lod;
+            let mut level: BTreeMap<RadarChunkCoord, RadarChunk> = (0..side)
+                .flat_map(|y| (0..side).map(move |x| RadarChunkCoord::new(x, y)))
+                .map(|coord| {
+                    let key = RadarChunkKey::new(Facet(0), RadarLod::BASE, coord, revision);
+                    (coord, build_chunk(&map, &colors, key).expect("a base child"))
+                })
+                .collect();
+            for lod in 1..=target_lod {
+                let parent_side = 1_u32 << (target_lod - lod);
+                let mut parents = BTreeMap::new();
+                for y in 0..parent_side {
+                    for x in 0..parent_side {
+                        let child = |dx, dy| &level[&RadarChunkCoord::new(x * 2 + dx, y * 2 + dy)];
+                        let key = RadarChunkKey::new(
+                            Facet(0),
+                            RadarLod::new(lod),
+                            RadarChunkCoord::new(x, y),
+                            revision,
+                        );
+                        parents.insert(
+                            RadarChunkCoord::new(x, y),
+                            build_lod_parent(key, [child(0, 0), child(1, 0), child(0, 1), child(1, 1)])
+                                .expect("a complete family"),
+                        );
+                    }
+                }
+                level = parents;
+            }
+            assert_eq!(direct, level.remove(&RadarChunkCoord::new(0, 0)).unwrap());
+        }
+    }
+
+    #[test]
+    fn britannias_extent_owns_a_seven_level_ladder() {
+        let extent = RadarExtent::new(7168, 4096).unwrap();
+        assert_eq!(max_lod(extent), RadarLod::new(7));
+        assert_eq!(max_lod(RadarExtent::new(64, 64).unwrap()), RadarLod::BASE);
+    }
+
+    fn test_view(tiles_per_pixel: f32) -> RadarView {
+        RadarView::new(
+            Facet(0),
+            RadarTile::new(32_500, 32_500),
+            RadarExtent::new(65_000, 65_000).unwrap(),
+            tiles_per_pixel,
+            Placement {
+                origin: (0.0, 0.0),
+                extent: (640.0, 480.0),
+                circle: false,
+                rotation: 0.0,
+            },
+            1.0,
+        )
+    }
+
+    #[test]
+    fn view_chunk_demand_is_bounded_by_pixels_not_zoom() {
+        let fine = test_view(1.0);
+        let coarse = test_view(64.0);
+        assert_eq!(fine.lod(), RadarLod::BASE);
+        assert_eq!(coarse.lod(), RadarLod::new(6));
+        assert_eq!(
+            region_chunks(fine.region(), fine.lod()).count(),
+            region_chunks(coarse.region(), coarse.lod()).count(),
+        );
+    }
+
+    #[test]
+    fn radar_lod_has_a_ten_percent_dead_band() {
+        let mut selector = RadarLodSelector::default();
+        assert_eq!(selector.update(test_view(1.9)), RadarLod::BASE);
+        assert_eq!(selector.update(test_view(2.05)), RadarLod::BASE);
+        assert_eq!(selector.update(test_view(2.21)), RadarLod::new(1));
+        assert_eq!(selector.update(test_view(1.85)), RadarLod::new(1));
+        assert_eq!(selector.update(test_view(1.79)), RadarLod::BASE);
+    }
+
+    #[test]
+    fn cpu_budget_evicts_the_unpinned_tail_and_keeps_the_sweep_floor() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::with_tail_budget(RADAR_CHUNK_CPU_BYTES * 2).unwrap();
+        for x in 0..4 {
+            let key = cache.key(facet, RadarLod::BASE, RadarChunkCoord::new(x, 0));
+            assert!(cache.publish(RadarChunk::new(key, vec![GREEN; chunk_pixel_count()]).unwrap()));
+        }
+        let coarse = cache.key(facet, SWEEP_LOD, RadarChunkCoord::new(0, 0));
+        assert!(cache.publish(RadarChunk::new(coarse, vec![BLUE; chunk_pixel_count()]).unwrap()));
+        assert_eq!(cache.evict_to_budget([]), 2);
+        assert!(cache.get(coarse).is_some(), "the sweep floor is pinned");
+        assert_eq!(cache.counters().evicted, 2);
+    }
+
+    #[test]
+    fn sweep_is_once_per_facet_and_never_outranks_view_work() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::default();
+        assert!(cache.begin_sweep(facet));
+        assert!(!cache.begin_sweep(facet));
+        assert!(cache.sweep_started(facet));
+
+        let mut queue = RadarWorkQueue::new(8, 1).unwrap();
+        let sweep = cache.key(facet, RadarLod::new(7), RadarChunkCoord::new(0, 0));
+        let visible = cache.key(facet, RadarLod::BASE, RadarChunkCoord::new(20, 20));
+        assert!(queue.request_sweep(sweep));
+        assert!(queue.request(visible));
+        assert_eq!(
+            queue.take_for_producer_near(RadarChunkCoord::new(0, 0)),
+            vec![visible],
+        );
+    }
+
+    #[test]
     fn a_lod_parent_reduces_its_four_children_without_blending_colours() {
         let revision = RadarRevision(11);
         let child = |x, y, colour| {
@@ -1509,7 +2002,7 @@ mod tests {
         for (x, y) in [(0, 0), (1, 0), (0, 1)] {
             let key = child(&cache, x, y).key();
             assert!(cache.publish(child(&cache, x, y)));
-            assert_eq!(build_ready_ancestors(&mut cache, key, MAX_LOD), 0);
+            assert_eq!(build_ready_ancestors(&mut cache, key, RadarLod::new(4)), 0);
         }
         assert!(cache.get(parent).is_none());
 
@@ -1517,7 +2010,7 @@ mod tests {
         let key = last.key();
         assert!(cache.publish(last));
         assert_eq!(
-            build_ready_ancestors(&mut cache, key, MAX_LOD),
+            build_ready_ancestors(&mut cache, key, RadarLod::new(4)),
             1,
             "the fourth child completes exactly one level — the level above it \
              still has three quarters missing"
@@ -1665,6 +2158,46 @@ mod tests {
         assert_eq!(counters.stale, 1);
         assert_eq!(counters.rebuilt, 1);
         assert_eq!(counters.evicted, 0, "eviction is not implemented yet");
+    }
+
+    #[test]
+    fn indexed_ready_selection_matches_the_exhaustive_oracle() {
+        let mut cache = RadarCache::default();
+        for facet in 0..2 {
+            cache.revisions.insert(Facet(facet), RadarRevision(7));
+            for index in 0..500_u32 {
+                let lod = RadarLod::new((index % 8) as u8);
+                let coord = RadarChunkCoord::new(index % 31, (index / 31) % 19);
+                let revision = RadarRevision(u64::from(index % 8));
+                let key = RadarChunkKey::new(Facet(facet), lod, coord, revision);
+                cache.ready.insert(
+                    key,
+                    RadarChunk::new(key, vec![Color16(index as u16); chunk_pixel_count()])
+                        .expect("a complete generated product"),
+                );
+            }
+        }
+        cache.rebuild_highest_ready_lods();
+
+        for facet in 0..2 {
+            for lod in 0..8 {
+                for x in 0..35 {
+                    let key = RadarChunkKey::new(
+                        Facet(facet),
+                        RadarLod::new(lod),
+                        RadarChunkCoord::new(x, (x * 7) % 23),
+                        RadarRevision(7),
+                    );
+                    let fast = cache
+                        .select_ready(key)
+                        .map(|ready| (ready.chunk().key(), ready.kind()));
+                    let reference = cache
+                        .select_ready_reference(key)
+                        .map(|ready| (ready.chunk().key(), ready.kind()));
+                    assert_eq!(fast, reference, "selection differs for {key:?}");
+                }
+            }
+        }
     }
 
     #[test]

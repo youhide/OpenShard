@@ -393,7 +393,7 @@ pub enum Drawn {
     Party(openshard_client_render::party::Window),
     /// The radar content bounds; it has no gump pictures to pick.
     Minimap(crate::panes::minimap::Window),
-    /// The rectangular facet-map bounds; it intentionally has no gump art.
+    /// The rectangular facet-map plate, content and controls.
     WorldMap(crate::panes::world_map::Window),
     /// The spell list on an opened book.
     Spellbook(openshard_client_render::spellbook::Window),
@@ -441,7 +441,7 @@ impl Drawn {
             Self::Confirm(question) => &question.pictures,
             Self::Party(manifest) => &manifest.pictures,
             Self::Minimap(minimap) => std::slice::from_ref(&minimap.frame),
-            Self::WorldMap(_) => &[],
+            Self::WorldMap(map) => &map.pictures,
             Self::Spellbook(book) => &book.pictures,
         }
     }

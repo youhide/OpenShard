@@ -9,8 +9,10 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use openshard_client_render::gump::{GumpArt, GumpPixel, Picture};
+#[cfg(test)]
 use openshard_client_render::radar::{RadarExtent, RadarRegion, RadarTile};
 use openshard_protocol::wire::Graphic;
+#[cfg(test)]
 use openshard_protocol::world::{Facet, Point};
 
 use crate::panes::{Input, Pane, PaneCtx, PaneFrame, Response};
@@ -36,6 +38,7 @@ pub const LARGE_EXTENT: (i32, i32) = (200, 200);
 /// own edge shows a region clipped to it instead of one that reads from the
 /// far side.
 #[must_use]
+#[cfg(test)]
 pub(crate) fn radar_region_for(player: Point, extent: RadarExtent) -> RadarRegion {
     RadarRegion::new(
         Facet(crate::FACET),
@@ -109,6 +112,7 @@ pub(crate) fn radar_region_for(player: Point, extent: RadarExtent) -> RadarRegio
 /// round clip in every direction.  The slight rounding up makes the circle
 /// clip, rather than a missing edge tile, decide the visible boundary.
 #[must_use]
+#[cfg(test)]
 pub(crate) fn radar_native_extent(
     content_extent: (i32, i32),
     magnify: f32,
@@ -147,7 +151,7 @@ const TANGENT_MARGIN_FRACTION: f32 = 0.21;
 /// Set `OPENSHARD_MINIMAP_MARGIN_FRACTION=0.50` for an intentionally excessive
 /// margin. Invalid values, and values outside `0.0..=1.0`, keep the ordinary
 /// 21% default.
-fn tangent_margin_fraction() -> f32 {
+pub(crate) fn tangent_margin_fraction() -> f32 {
     static VALUE: OnceLock<f32> = OnceLock::new();
     *VALUE.get_or_init(|| {
         std::env::var("OPENSHARD_MINIMAP_MARGIN_FRACTION")

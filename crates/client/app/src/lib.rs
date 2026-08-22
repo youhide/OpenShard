@@ -988,6 +988,8 @@ pub fn run<D: Dial + Send + 'static>(
         occluder_cache: None,
         radar_cache: openshard_client_render::radar::RadarCache::default(),
         radar_queue: openshard_client_render::radar::RadarWorkQueue::default(),
+        minimap_radar_lod: openshard_client_render::radar::RadarLodSelector::default(),
+        world_map_radar_lod: openshard_client_render::radar::RadarLodSelector::default(),
         composite_work: openshard_client_render::composite::CompositeWorkQueue::default(),
         composite_lod: openshard_client_render::lod::BlockLodSelector::new(
             openshard_client_render::lod::LodThresholds::DEFAULT,

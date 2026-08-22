@@ -37,7 +37,8 @@ use openshard_client_render::items::{self};
 use openshard_client_render::lod::BlockLod;
 use openshard_client_render::mobiles::{self, Mobile};
 use openshard_client_render::outline::{self};
-use openshard_client_render::radar::{self, build_base_chunk, build_ready_ancestors};
+use openshard_client_render::radar::{self, RadarBuildScratch, build_chunk_reusing, build_ready_ancestors};
+use openshard_client_render::radar_pass::Placement;
 use openshard_client_render::renderer::{self, Target};
 use openshard_client_render::sprite::SpriteQuad;
 use openshard_client_render::text::{self, Label};
@@ -54,7 +55,6 @@ use crate::crowd::{Crowd, Who};
 use crate::diagnostics::Pick;
 use crate::frame_geometry::{FrameFacts, assemble_geometry};
 use crate::graphics::HighlightTarget;
-use crate::panes::minimap::radar_region_for;
 use crate::picking::SelectedIdentity;
 use crate::profile;
 use crate::render_passes::{WorldPassAudit, draw_gump_windows, encode_world_passes};
@@ -1971,23 +1971,75 @@ impl App {
         // `self` — which the `&mut self.window` on the next line would refuse.
         let window_scale = self.window_scale();
         let gump_scale = self.gump_scale();
-        let minimap_extent = self.windows.drawn_windows.iter().find_map(|(subject, drawn)| {
-            matches!(subject, crate::windows::WindowSubject::Minimap)
-                .then(|| match drawn {
-                    crate::windows::Drawn::Minimap(bounds) => Some((bounds.content().1, bounds.zoom())),
-                    _ => None,
-                })
-                .flatten()
-        });
-        let world_map_open = self.windows.drawn_windows.iter().any(|(subject, drawn)| {
-            matches!(
-                (subject, drawn),
-                (
-                    crate::windows::WindowSubject::WorldMap,
-                    crate::windows::Drawn::WorldMap(_),
-                )
+        let radar_facet_extent = radar::RadarExtent::new(
+            u16::try_from(self.resources.map.map().width()).expect("a UO map width fits u16"),
+            u16::try_from(self.resources.map.map().height()).expect("a UO map height fits u16"),
+        )
+        .expect("a map has an extent");
+        let player_tile = self.world.authoritative.view.as_ref().map(|view| {
+            radar::RadarTile::new(
+                u32::from(view.player.position.x),
+                u32::from(view.player.position.y),
             )
         });
+        let mut radar_views = Vec::new();
+        if let Some(player_tile) = player_tile {
+            for (subject, drawn) in &self.windows.drawn_windows {
+                let view = match drawn {
+                    crate::windows::Drawn::Minimap(bounds) => {
+                        let (content_at, content_extent) = bounds.content();
+                        let placement = Placement {
+                            origin: (content_at.x as f32, content_at.y as f32),
+                            extent: (
+                                content_extent.0 as f32 * window_scale.factor(),
+                                content_extent.1 as f32 * window_scale.factor(),
+                            ),
+                            circle: true,
+                            rotation: std::f32::consts::FRAC_PI_4,
+                        };
+                        radar::RadarView::new(
+                            openshard_protocol::world::Facet(crate::FACET),
+                            player_tile,
+                            radar_facet_extent,
+                            1.0 / bounds.zoom(),
+                            placement,
+                            gump_scale,
+                        )
+                        .with_tangent_margin_fraction(
+                            content_extent,
+                            bounds.zoom(),
+                            crate::panes::minimap::tangent_margin_fraction(),
+                        )
+                    }
+                    crate::windows::Drawn::WorldMap(bounds) => {
+                        let (content_at, content_extent) = bounds.content();
+                        radar::RadarView::new(
+                            openshard_protocol::world::Facet(crate::FACET),
+                            bounds.centre,
+                            radar_facet_extent,
+                            bounds.tiles_per_pixel / (window_scale.factor() * gump_scale),
+                            Placement {
+                                origin: (content_at.x as f32, content_at.y as f32),
+                                extent: (
+                                    content_extent.0 as f32 * window_scale.factor(),
+                                    content_extent.1 as f32 * window_scale.factor(),
+                                ),
+                                circle: false,
+                                rotation: 0.0,
+                            },
+                            gump_scale,
+                        )
+                    }
+                    _ => continue,
+                };
+                let lod = match subject {
+                    crate::windows::WindowSubject::Minimap => self.minimap_radar_lod.update(view),
+                    crate::windows::WindowSubject::WorldMap => self.world_map_radar_lod.update(view),
+                    _ => continue,
+                };
+                radar_views.push((*subject, view, lod));
+            }
+        }
         let Some(window) = self.window.as_mut() else {
             return;
         };
@@ -2056,78 +2108,49 @@ impl App {
                 composite_producer::produce(&self.resources, window, &mut self.composite_work, work);
             }
         }
-        // The minimap's terrain, produced off this frame's hot path the same
-        // way the block above is: `radar_queue` only requests and hands out
-        // bounded batches, never builds a pixel itself. Unlike a composite,
-        // `build_base_chunk` is pure CPU — map and colour-table lookups, no
-        // encoder — so publishing a complete chunk needs no GPU step here at
-        // all; `Screen::radar_chunks` uploads one only once the content pass
-        // asks to draw it.
-        if let (Some(player), Some(colors)) = (
-            self.world
-                .authoritative
-                .view
-                .as_ref()
-                .map(|view| view.player.position),
-            self.resources.radar_colors.as_ref(),
-        ) {
-            // Match the region the current minimap draw will ask for.  A
-            // physical-pixel radar may be larger than its logical frame on a
-            // HiDPI monitor; preparing only the old fixed 200×200 region is
-            // what left a black moat around the ready centre. `radar_native_extent`
-            // is the one source of truth for this arithmetic — the draw path
-            // reads the same function rather than carrying its own copy.
-            let region = if world_map_open {
-                let width = u16::try_from(self.resources.map.map().width())
-                    .expect("UO map width fits radar coordinates");
-                let height = u16::try_from(self.resources.map.map().height())
-                    .expect("UO map height fits radar coordinates");
-                radar::RadarRegion::new(
-                    openshard_protocol::world::Facet(crate::FACET),
-                    radar::RadarTile::new(0, 0),
-                    radar::RadarExtent::new(width, height).expect("a map has an extent"),
-                )
-            } else {
-                let (logical_extent, zoom) =
-                    minimap_extent.unwrap_or((crate::panes::minimap::LARGE_EXTENT, 1.0));
-                let native_extent = crate::panes::minimap::radar_native_extent(
-                    logical_extent,
-                    window_scale.factor(),
-                    gump_scale,
-                    zoom,
-                );
-                radar_region_for(player, native_extent)
-            };
-            let (player_chunk, _) = radar::world_tile_to_base_chunk(radar::RadarTile::new(
-                u32::from(player.x),
-                u32::from(player.y),
-            ));
-            // Nearest-first, not `region_base_chunks`' raster order: a region
-            // wider than `RadarWorkQueue::request`'s `max_queued` bound fills
-            // that bound from wherever enumeration starts, and raster order
-            // starts at the north-west corner. That reads as terrain ending at
-            // some latitude and never resuming south of it — the same wedge
-            // `take_for_producer_near` was written to keep off the *dequeue*
-            // side; the enqueue side needs it just as much. Already-ready keys
-            // are skipped rather than re-requested: `reconcile` would prune
-            // them again below, but not before they had spent a slot a chunk
-            // that still needs building could have used instead.
-            for coord in radar::region_base_chunks_near(region, player_chunk) {
-                let key = self.radar_cache.key(region.facet(), radar::RadarLod::BASE, coord);
-                if self.radar_cache.get(key).is_none() {
-                    self.radar_queue.request(key);
+        // Radar terrain for every open view. `radar_queue` bounds the pure-CPU
+        // map/colour-table work in base-chunk units; publishing needs no GPU
+        // step, and `Screen::radar_chunks` uploads a product only when a
+        // content pass first draws it.
+        if let Some(colors) = self.resources.radar_colors.as_ref() {
+            let mut protected = Vec::new();
+            for (_, view, lod) in &radar_views {
+                let region = view.region();
+                let (base_centre, _) = radar::world_tile_to_base_chunk(view.centre);
+                let centre = base_centre.ancestor_at(lod.value());
+                for coord in radar::region_chunks_near(region, *lod, centre) {
+                    let key = self.radar_cache.key(region.facet(), *lod, coord);
+                    protected.push(key);
+                    if self.radar_cache.get(key).is_none() {
+                        self.radar_queue.request(key);
+                    }
+                }
+            }
+            let facet = openshard_protocol::world::Facet(crate::FACET);
+            let world_map_open = radar_views
+                .iter()
+                .any(|(subject, _, _)| *subject == crate::windows::WindowSubject::WorldMap);
+            if world_map_open && self.radar_cache.begin_sweep(facet) {
+                let whole_facet =
+                    radar::RadarRegion::new(facet, radar::RadarTile::new(0, 0), radar_facet_extent);
+                for lod in (radar::SWEEP_LOD.value()..=radar::max_lod(radar_facet_extent).value()).rev() {
+                    let lod = radar::RadarLod::new(lod);
+                    for coord in radar::region_chunks(whole_facet, lod) {
+                        let key = self.radar_cache.key(facet, lod, coord);
+                        if self.radar_cache.get(key).is_none() {
+                            self.radar_queue.request_sweep(key);
+                        }
+                    }
                 }
             }
             self.radar_queue.reconcile(&self.radar_cache);
-            for key in self.radar_queue.take_for_producer_near(player_chunk) {
-                // A derived level is never dispatched: it is reduced from its
-                // four children the moment the last of them lands, below. What
-                // a producer builds is the one thing only the map can answer.
-                let built = key
-                    .lod()
-                    .is_base()
-                    .then(|| build_base_chunk(self.resources.map.map(), colors, key))
-                    .flatten();
+            let producer_centre = player_tile
+                .map(radar::world_tile_to_base_chunk)
+                .map(|(chunk, _)| chunk)
+                .unwrap_or_else(|| radar::RadarChunkCoord::new(0, 0));
+            let mut scratch = RadarBuildScratch::default();
+            for key in self.radar_queue.take_for_producer_near(producer_centre) {
+                let built = build_chunk_reusing(self.resources.map.map(), colors, key, &mut scratch);
                 let Some(chunk) = built else {
                     // The slot goes back rather than being lost — see
                     // `RadarWorkQueue::abandon`.
@@ -2135,11 +2158,16 @@ impl App {
                     continue;
                 };
                 if self.radar_queue.finish(&mut self.radar_cache, chunk) {
-                    // The coarse pictures a fallback stands in with, built
-                    // here because this is where a family becomes complete.
-                    build_ready_ancestors(&mut self.radar_cache, key, radar::MAX_LOD);
+                    build_ready_ancestors(&mut self.radar_cache, key, radar::max_lod(radar_facet_extent));
                 }
             }
+            let selected_for_draw: Vec<_> = protected
+                .iter()
+                .filter_map(|key| self.radar_cache.select_ready(*key))
+                .map(|ready| ready.chunk().key())
+                .collect();
+            protected.extend(selected_for_draw);
+            self.radar_cache.evict_to_budget(protected);
         }
         // Three time-varying halves of a mobile, filled in per frame rather
         // than per packet: the crowd is the only thing that knows what a
@@ -2535,6 +2563,10 @@ impl App {
             &self.world,
             &mut self.windows,
             &self.radar_cache,
+            &radar_views
+                .iter()
+                .map(|(subject, _, lod)| (*subject, *lod))
+                .collect::<Vec<_>>(),
             self.input.pointer_gump,
             &hover,
             window_scale,

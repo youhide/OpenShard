@@ -159,7 +159,7 @@ fn a_marker_lands_on_its_tile_over_the_terrain() {
 
     let mut chunks = RadarChunkRenderer::new(&device, FORMAT, 16 * 1024 * 1024);
     chunks.render_region(&device, &queue, &mut encoder, frame, region, at, at, [&ground]);
-    let overlay = RadarOverlayRenderer::new(&device, FORMAT);
+    let mut overlay = RadarOverlayRenderer::new(&device, FORMAT);
     overlay.render_markers(
         &device,
         &queue,
@@ -209,7 +209,7 @@ fn an_unmapped_window_is_filled_rather_than_left_transparent() {
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     let (target, view) = cleared_target(&device, &mut encoder, width, height);
 
-    let overlay = RadarOverlayRenderer::new(&device, FORMAT);
+    let mut overlay = RadarOverlayRenderer::new(&device, FORMAT);
     overlay.render_backdrop(
         &device,
         &queue,

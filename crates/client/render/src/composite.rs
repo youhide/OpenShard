@@ -13,8 +13,9 @@
 //! asynchronously and a visible block can be drawn without rebuilding its
 //! constituent ground/static quads.
 
-use std::cell::Cell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(test)]
+use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 use openshard_uofiles::grid::BlockCoord;
@@ -22,6 +23,7 @@ use openshard_uofiles::map::BLOCK_SIZE;
 
 use crate::blit::WORLD_FORMAT;
 use crate::camera::{Camera, TILE_HEIGHT, TILE_WIDTH, TileBounds, WorldPixel, project};
+use crate::chunk_cache::{LruBudget, WorkQueue};
 use crate::geometry::Rect;
 use crate::lod::BlockLod;
 
@@ -582,9 +584,6 @@ pub struct CompositeTexture {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
     deferred: Option<DeferredTextures>,
-    /// Monotonic cache-local use stamp.  It uses interior mutability so the
-    /// hot rendering lookup can remain `&self` and still feed the LRU policy.
-    last_used: Cell<u64>,
 }
 
 /// GPU planes for a completed deferred composite.  Keeping the owning textures
@@ -651,7 +650,6 @@ impl CompositeTexture {
             texture,
             view,
             deferred,
-            last_used: Cell::new(0),
         }
     }
 
@@ -697,7 +695,6 @@ impl CompositeTexture {
             texture,
             view,
             deferred: Some(DeferredTextures::capture(device, size)),
-            last_used: Cell::new(0),
         }
     }
 
@@ -779,14 +776,6 @@ impl CompositeTexture {
     pub fn gpu_bytes(&self) -> u64 {
         let rgba = self.size.rgba_bytes().unwrap_or(0) as u64;
         rgba + self.deferred.as_ref().map_or(0, |_| rgba * 7)
-    }
-
-    fn mark_used(&self, stamp: u64) {
-        self.last_used.set(stamp);
-    }
-
-    fn last_used(&self) -> u64 {
-        self.last_used.get()
     }
 }
 
@@ -984,7 +973,7 @@ pub struct CompositeCache {
     rejected: BTreeMap<BlockCoord, CompositeQuarantine>,
     latest_quarantine: Option<CompositeQuarantine>,
     limits: CompositeCacheLimits,
-    use_clock: Cell<u64>,
+    budget: LruBudget<CompositeKey>,
 }
 
 impl Default for CompositeCache {
@@ -1001,7 +990,8 @@ impl CompositeCache {
             rejected: BTreeMap::new(),
             latest_quarantine: None,
             limits,
-            use_clock: Cell::new(0),
+            budget: LruBudget::new(limits.max_gpu_bytes)
+                .expect("composite cache limits require a non-zero budget"),
         }
     }
 
@@ -1026,9 +1016,7 @@ impl CompositeCache {
             return None;
         }
         let entry = self.entries.get(&key)?;
-        let stamp = self.use_clock.get().wrapping_add(1);
-        self.use_clock.set(stamp);
-        entry.mark_used(stamp);
+        self.budget.touch(key);
         Some(entry)
     }
 
@@ -1075,7 +1063,9 @@ impl CompositeCache {
         pixels: CompositePixels,
     ) -> &CompositeTexture {
         let composite = CompositeTexture::new(device, queue, key, pixels);
+        let bytes = composite.gpu_bytes();
         self.entries.insert(key, composite);
+        self.budget.insert(key, bytes);
         self.get(key).expect("the cache has just inserted this key")
     }
 
@@ -1100,14 +1090,20 @@ impl CompositeCache {
         )
         .expect("a non-empty capture rectangle has a non-empty tier");
         let composite = CompositeTexture::capture(device, key, size, source.depth_base, ground);
+        let bytes = composite.gpu_bytes();
         self.entries.insert(key, composite);
+        self.budget.insert(key, bytes);
         self.get(key).expect("the captured entry was just inserted")
     }
 
     /// Forget one exact entry.  This is intentionally narrow: mutation code
     /// can invalidate affected block/tier pairs without a global cache clear.
     pub fn remove(&mut self, key: CompositeKey) -> Option<CompositeTexture> {
-        self.entries.remove(&key)
+        let removed = self.entries.remove(&key);
+        if removed.is_some() {
+            self.budget.remove(key);
+        }
+        removed
     }
 
     /// Permanently fall back to direct LOD0 rendering for one block after a
@@ -1187,13 +1183,17 @@ impl CompositeCache {
     pub fn clear(&mut self) -> usize {
         let removed = self.entries.len();
         self.entries.clear();
+        self.budget.clear();
         removed
     }
 
     fn invalidate_matching(&mut self, mut stale: impl FnMut(&CompositeKey) -> bool) -> usize {
-        let before = self.entries.len();
-        self.entries.retain(|key, _| !stale(key));
-        before - self.entries.len()
+        let keys: Vec<_> = self.entries.keys().copied().filter(|key| stale(key)).collect();
+        for key in &keys {
+            self.entries.remove(key);
+            self.budget.remove(*key);
+        }
+        keys.len()
     }
 
     /// Enforce the configured GPU-tail budget by evicting LRU entries outside
@@ -1201,45 +1201,29 @@ impl CompositeCache {
     /// the cache's completed captures have been accepted.
     pub fn evict_lru_outside_viewport(&mut self, visible: Option<MapBlockBounds>) -> CompositeEviction {
         let protected = visible.map(|bounds| bounds.expanded_by(self.limits.viewport_margin_blocks));
-        let mut retained = self.gpu_bytes();
-        let mut result = CompositeEviction {
-            retained_gpu_bytes: retained,
-            ..CompositeEviction::default()
-        };
-        if retained <= self.limits.max_gpu_bytes {
-            return result;
+        self.budget.set_protected(
+            self.entries
+                .keys()
+                .copied()
+                .filter(|key| protected.is_some_and(|bounds| bounds.contains(key.block))),
+        );
+        let report = self.budget.evict_to_budget();
+        for key in &report.keys {
+            self.entries
+                .remove(key)
+                .expect("the LRU decision names a composite cache entry");
         }
-
-        let mut candidates: Vec<_> = self
-            .entries
-            .iter()
-            .filter_map(|(key, entry)| {
-                (!protected.is_some_and(|bounds| bounds.contains(key.block)))
-                    .then_some((entry.last_used(), *key))
-            })
-            .collect();
-        candidates.sort_unstable();
-        for (_, key) in candidates {
-            if retained <= self.limits.max_gpu_bytes {
-                break;
-            }
-            let removed = self
-                .entries
-                .remove(&key)
-                .expect("LRU candidate still belongs to the cache");
-            let bytes = removed.gpu_bytes();
-            retained = retained.saturating_sub(bytes);
-            result.entries += 1;
-            result.freed_gpu_bytes += bytes;
+        CompositeEviction {
+            entries: report.keys.len(),
+            freed_gpu_bytes: report.freed_bytes,
+            retained_gpu_bytes: report.retained_bytes,
+            protected_over_budget_bytes: report.protected_over_budget_bytes,
         }
-        result.retained_gpu_bytes = retained;
-        result.protected_over_budget_bytes = retained.saturating_sub(self.limits.max_gpu_bytes);
-        result
     }
 
     /// Total retained RGBA8 texture bytes.
     pub fn gpu_bytes(&self) -> u64 {
-        self.entries.values().map(CompositeTexture::gpu_bytes).sum()
+        self.budget.retained_bytes()
     }
 }
 
@@ -1303,11 +1287,9 @@ struct QueueOrder {
 /// newly exposed large block never becomes a synchronous camera-frame build.
 #[derive(Debug)]
 pub struct CompositeWorkQueue {
-    max_pending: usize,
-    builds_per_frame: usize,
-    pending: BTreeMap<CompositeKey, QueueOrder>,
+    queue: WorkQueue<CompositeKey>,
+    orders: BTreeMap<CompositeKey, QueueOrder>,
     prepared: BTreeMap<CompositeKey, FlatGroundBlock>,
-    in_flight: BTreeSet<CompositeKey>,
     previous_visible: Option<MapBlockBounds>,
 }
 
@@ -1321,23 +1303,22 @@ impl CompositeWorkQueue {
     /// Construct a queue with explicit pending and per-frame bounds.
     pub fn new(max_pending: usize, builds_per_frame: usize) -> Option<Self> {
         (max_pending != 0 && builds_per_frame != 0).then_some(Self {
-            max_pending,
-            builds_per_frame,
-            pending: BTreeMap::new(),
+            queue: WorkQueue::new(max_pending, builds_per_frame)
+                .expect("the composite wrapper has checked its limits"),
+            orders: BTreeMap::new(),
             prepared: BTreeMap::new(),
-            in_flight: BTreeSet::new(),
             previous_visible: None,
         })
     }
 
     /// Requests waiting to be handed to a producer.
     pub fn pending_len(&self) -> usize {
-        self.pending.len()
+        self.queue.pending_len()
     }
 
     /// Requests a producer currently owns.
     pub fn in_flight_len(&self) -> usize {
-        self.in_flight.len()
+        self.queue.in_flight_len()
     }
 
     /// Pending jobs whose immutable atlas inputs are ready for the producer.
@@ -1355,7 +1336,7 @@ impl CompositeWorkQueue {
             ground.block(),
             "a composite job may only carry the source proof for its own block"
         );
-        if !self.pending.contains_key(&key) {
+        if !self.queue.contains_pending(key) {
             return false;
         }
         match self.prepared.entry(key) {
@@ -1383,15 +1364,16 @@ impl CompositeWorkQueue {
     /// preparation leaves the exact request pending for a later retry.
     pub fn preparation_candidates(&self) -> Vec<CompositeWork> {
         let mut ordered: Vec<_> = self
-            .pending
+            .orders
             .values()
             .copied()
+            .filter(|order| self.queue.contains_pending(order.key))
             .filter(|order| !self.prepared.contains_key(&order.key))
             .collect();
         ordered.sort();
         ordered
             .into_iter()
-            .take(self.builds_per_frame)
+            .take(self.queue.work_per_turn())
             .map(|order| CompositeWork {
                 key: order.key,
                 priority: order.priority,
@@ -1414,7 +1396,8 @@ impl CompositeWorkQueue {
         mut ready: impl FnMut(CompositeKey) -> bool,
     ) {
         let Some(tier) = CompositeTier::from_lod(selected) else {
-            self.pending.clear();
+            self.queue.reconcile(|_| false);
+            self.orders.clear();
             self.prepared.clear();
             self.previous_visible = Some(visible);
             return;
@@ -1426,7 +1409,7 @@ impl CompositeWorkQueue {
         // it would let stale prefetch starve the entered blocks.  In-flight
         // work is left to its producer: completion is cheap and cannot be
         // cancelled safely after it has begun.
-        self.pending.retain(|key, _| {
+        self.queue.reconcile(|key| {
             key.tier == tier
                 && key.revision == revision
                 && (visible.contains(key.block) || ahead.is_some_and(|bounds| bounds.contains(key.block)))
@@ -1435,9 +1418,10 @@ impl CompositeWorkQueue {
                 // slope). Drop the existing pending record as well as refusing
                 // a new request below, otherwise that conclusion would leave
                 // a never-preparable entry resident forever.
-                && !ready(*key)
+                && !ready(key)
         });
-        self.prepared.retain(|key, _| self.pending.contains_key(key));
+        self.orders.retain(|key, _| self.queue.contains_pending(*key));
+        self.prepared.retain(|key, _| self.queue.contains_pending(*key));
         for block in visible.blocks() {
             self.request(
                 block,
@@ -1477,7 +1461,7 @@ impl CompositeWorkQueue {
             tier,
             revision,
         };
-        if ready(key) || self.in_flight.contains(&key) {
+        if ready(key) || self.queue.contains_in_flight(key) {
             return;
         }
         let distance =
@@ -1487,19 +1471,24 @@ impl CompositeWorkQueue {
             distance,
             key,
         };
-        self.pending
-            .entry(key)
-            .and_modify(|was| *was = (*was).min(order))
-            .or_insert(order);
-        while self.pending.len() > self.max_pending {
-            let drop = self
-                .pending
-                .values()
-                .max()
-                .expect("the queue is non-empty while enforcing its bound")
-                .key;
-            self.pending.remove(&drop);
-            self.prepared.remove(&drop);
+        if let Some(existing) = self.orders.get_mut(&key) {
+            *existing = (*existing).min(order);
+            return;
+        }
+        if self.queue.request(key) {
+            self.orders.insert(key, order);
+            return;
+        }
+        let Some(worst) = self.orders.values().copied().max() else {
+            return;
+        };
+        if order >= worst || !self.queue.drop_pending(worst.key) {
+            return;
+        }
+        self.orders.remove(&worst.key);
+        self.prepared.remove(&worst.key);
+        if self.queue.request(key) {
+            self.orders.insert(key, order);
         }
     }
 
@@ -1519,25 +1508,23 @@ impl CompositeWorkQueue {
     /// move the job into `in_flight`, so the visible renderer has only its LOD0
     /// fallback for that block.
     pub fn take_marked_prepared_for_frame(&mut self) -> Vec<PreparedCompositeWork> {
-        let mut ordered: Vec<_> = self
-            .pending
-            .values()
-            .copied()
-            .filter(|order| self.prepared.contains_key(&order.key))
-            .collect();
-        ordered.sort();
-        ordered.truncate(self.builds_per_frame);
-        let mut work = Vec::with_capacity(ordered.len());
-        for order in ordered {
-            self.pending.remove(&order.key);
+        let queue = &mut self.queue;
+        let orders = &self.orders;
+        let prepared = &self.prepared;
+        let keys = queue.take_for_producer_if(
+            |key| prepared.contains_key(&key),
+            |left, right| orders[left].cmp(&orders[right]),
+        );
+        let mut work = Vec::with_capacity(keys.len());
+        for key in keys {
+            let order = self.orders.remove(&key).expect("a queued key has an order");
             let ground = self
                 .prepared
-                .remove(&order.key)
+                .remove(&key)
                 .expect("selected prepared job retains its source proof");
-            self.in_flight.insert(order.key);
             work.push(PreparedCompositeWork {
                 work: CompositeWork {
-                    key: order.key,
+                    key,
                     priority: order.priority,
                 },
                 ground,
@@ -1560,33 +1547,35 @@ impl CompositeWorkQueue {
         &mut self,
         mut prepared: impl FnMut(CompositeWork) -> bool,
     ) -> Vec<CompositeWork> {
-        let mut ordered: Vec<_> = self.pending.values().copied().collect();
-        ordered.sort();
-        let mut work = Vec::with_capacity(self.builds_per_frame);
-        for order in ordered {
-            if work.len() == self.builds_per_frame {
-                break;
-            }
-            let candidate = CompositeWork {
-                key: order.key,
-                priority: order.priority,
-            };
-            if !prepared(candidate) {
-                continue;
-            }
-            self.pending.remove(&order.key);
-            self.prepared.remove(&order.key);
-            self.in_flight.insert(order.key);
-            work.push(candidate);
-        }
-        work
+        let queue = &mut self.queue;
+        let orders = &self.orders;
+        let keys = queue.take_for_producer_if(
+            |key| {
+                let order = orders[&key];
+                prepared(CompositeWork {
+                    key,
+                    priority: order.priority,
+                })
+            },
+            |left, right| orders[left].cmp(&orders[right]),
+        );
+        keys.into_iter()
+            .map(|key| {
+                let order = self.orders.remove(&key).expect("a queued key has an order");
+                self.prepared.remove(&key);
+                CompositeWork {
+                    key,
+                    priority: order.priority,
+                }
+            })
+            .collect()
     }
 
     /// Releases an asynchronous job after its result has been accepted or
     /// discarded.  The next `refresh` can request a retry if its exact key is
     /// still not in the cache.
     pub fn finished(&mut self, key: CompositeKey) {
-        self.in_flight.remove(&key);
+        self.queue.finish(key);
     }
 
     /// Cancel all pending and dispatched work for one changed map block.
@@ -1617,20 +1606,17 @@ impl CompositeWorkQueue {
     /// Cancel every queued and dispatched job, for a global source change such
     /// as a world-output-format reconfiguration.
     pub fn clear(&mut self) -> usize {
-        let removed = self.pending.len() + self.in_flight.len();
-        self.pending.clear();
+        let removed = self.queue.clear();
+        self.orders.clear();
         self.prepared.clear();
-        self.in_flight.clear();
         removed
     }
 
     fn invalidate_matching(&mut self, mut stale: impl FnMut(&CompositeKey) -> bool) -> usize {
-        let pending_before = self.pending.len();
-        let flight_before = self.in_flight.len();
-        self.pending.retain(|key, _| !stale(key));
+        let removed = self.queue.invalidate_matching(|key| stale(key));
+        self.orders.retain(|key, _| !stale(key));
         self.prepared.retain(|key, _| !stale(key));
-        self.in_flight.retain(|key| !stale(key));
-        pending_before - self.pending.len() + flight_before - self.in_flight.len()
+        removed
     }
 
     /// Accept a completed asynchronous image into the cache and release its
@@ -1649,8 +1635,8 @@ impl CompositeWorkQueue {
         key: CompositeKey,
         pixels: CompositePixels,
     ) -> Option<&'a CompositeTexture> {
-        self.in_flight
-            .remove(&key)
+        self.queue
+            .finish(key)
             .then(|| cache.insert(device, queue, key, pixels))
     }
 
@@ -1670,7 +1656,7 @@ impl CompositeWorkQueue {
         source: CaptureSource<'_>,
         ground: FlatGroundBlock,
     ) -> Option<&'a CompositeTexture> {
-        if !self.in_flight.remove(&key) {
+        if !self.queue.finish(key) {
             return None;
         }
         if cache.is_rejected(key.block) {
@@ -4300,11 +4286,11 @@ mod tests {
         let changed = dispatched[0].key.block;
         assert!(queue.invalidate_block(changed) >= 1);
         assert!(
-            !queue.in_flight.contains(&dispatched[0].key),
+            !queue.queue.contains_in_flight(dispatched[0].key),
             "a late result for a changed block must no longer own a cache slot"
         );
-        assert!(queue.in_flight.iter().all(|key| key.block != changed));
-        assert!(queue.pending.keys().all(|key| key.block != changed));
+        assert!(queue.queue.in_flight_keys().all(|key| key.block != changed));
+        assert!(queue.queue.pending_keys().all(|key| key.block != changed));
     }
 
     #[test]

@@ -7,7 +7,7 @@
 
 use openshard_client_render::blit::{self, ViewportRect};
 use std::collections::BTreeSet;
-use std::sync::{Once, OnceLock};
+use std::sync::OnceLock;
 
 use openshard_client_render::camera::Camera;
 use openshard_client_render::composite::{
@@ -17,8 +17,8 @@ use openshard_client_render::geometry::Rect;
 use openshard_client_render::gump::{self as gump_art};
 use openshard_client_render::lod::BlockLod;
 use openshard_client_render::outline::{self, Ring};
-use openshard_client_render::radar::{self, RadarCache, region_base_chunks};
-use openshard_client_render::radar_pass::{Placement, RadarMarker};
+use openshard_client_render::radar::{self, RadarCache, RadarLod, RadarView};
+use openshard_client_render::radar_pass::{Placement, RadarChunkRenderer, RadarMarker, RadarOverlayRenderer};
 use openshard_client_render::renderer::Target;
 use openshard_client_render::select::{self, Selection};
 use openshard_client_render::sprite::SpriteQuad;
@@ -70,6 +70,44 @@ fn minimap_diagnostics() -> bool {
     *ENABLED.get_or_init(|| std::env::var_os("OPENSHARD_MINIMAP_DIAGNOSTIC").is_some())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn draw_radar_view(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    chunks: &mut RadarChunkRenderer,
+    overlay: &mut RadarOverlayRenderer,
+    encoder: &mut wgpu::CommandEncoder,
+    frame: gump_art::Frame<'_>,
+    cache: &RadarCache,
+    view: RadarView,
+    lod: RadarLod,
+    player: Option<openshard_protocol::world::Point>,
+) {
+    let region = view.region();
+    let ready: Vec<_> = radar::region_chunks(region, lod)
+        .filter_map(|chunk| cache.select_ready(cache.key(region.facet(), lod, chunk)))
+        .map(|ready| ready.chunk())
+        .collect();
+    let map = view.map_placement();
+    overlay.render_backdrop(device, queue, encoder, frame, view.placement, radar::UNKNOWN);
+    chunks.render_region(device, queue, encoder, frame, region, map, view.placement, ready);
+    if let Some(player) = player {
+        overlay.render_markers(
+            device,
+            queue,
+            encoder,
+            frame,
+            region,
+            map,
+            view.placement,
+            &[RadarMarker {
+                tile: radar::RadarTile::new(u32::from(player.x), u32::from(player.y)),
+                color: radar::PLAYER_MARKER,
+            }],
+        );
+    }
+}
+
 /// The shard's dialogs, in the client's own art, packed and drawn — a
 /// container, a paperdoll, the skill sheet, all three through one machinery.
 /// None of them is an egui window: their position, their drag, their
@@ -104,6 +142,7 @@ pub(crate) fn draw_gump_windows(
     world: &world::WorldState,
     windows: &mut windows::Windows,
     radar_cache: &RadarCache,
+    radar_lods: &[(WindowSubject, RadarLod)],
     cursor: gump_art::GumpPixel,
     hover: &[String],
     scale: crate::desk::WindowScale,
@@ -450,163 +489,76 @@ pub(crate) fn draw_gump_windows(
                 (WindowSubject::Minimap, Drawn::Minimap(bounds)) => {
                     if let Some(player) = world.authoritative.view.as_ref().map(|view| view.player.position) {
                         let (content_at, content_extent) = bounds.content();
-                        // How much world this window needs fetched, and why
-                        // there is no `sqrt(2)` margin for the rotation — see
-                        // `radar_native_extent`, the one source of truth this
-                        // and the producer's own preparation both read.
-                        let native_extent = panes::minimap::radar_native_extent(
-                            content_extent,
-                            magnify,
-                            frame.scale,
-                            bounds.zoom(),
-                        );
-                        let region = panes::minimap::radar_region_for(player, native_extent);
-                        // `select_ready` and not `get`: a chunk the producer
-                        // has not reached yet is answered with the coarse
-                        // ancestor that covers it, and a chunk whose facet has
-                        // been edited since is answered with its own last
-                        // complete picture. Only ground no product has ever
-                        // covered is left to the backdrop below.
-                        // Always address the world through the level-zero
-                        // grid. `select_ready` may still return a complete
-                        // LOD ancestor while a base product is unavailable,
-                        // but asking for parent coordinates directly made the
-                        // rotated edge region skip base cells altogether.
-                        let ready: Vec<_> = region_base_chunks(region)
-                            .filter_map(|chunk| {
-                                radar_cache.select_ready(radar_cache.key(
-                                    region.facet(),
-                                    radar::RadarLod::BASE,
-                                    chunk,
-                                ))
-                            })
-                            .map(|ready| ready.chunk())
-                            .collect();
-                        // The visible circle is deliberately distinct from the
-                        // map rectangle behind it.  The latter includes the
-                        // fetch margin and must stay at one screen pixel per
-                        // world tile; mapping the larger region back into the
-                        // visible rectangle would instead shrink the map into
-                        // the diamond visible before the sprite's own circular
-                        // clip had a chance to cut it off.
-                        // The one window whose picture is not gump art: its own
-                        // pass draws the radar chunks straight into this
-                        // rectangle, so the magnification has to be applied to
-                        // the rectangle rather than to quads. The *region* is
-                        // untouched by it — how much world the minimap shows is
-                        // the pane's answer (`radar_region_for`, asked with the
-                        // window's own unmagnified extent), and a bigger window
-                        // at the same scale would be a different window rather
-                        // than the same one drawn larger.
-                        let clip = Placement {
+                        let facet_extent = radar::RadarExtent::new(
+                            u16::try_from(resources.map.map().width()).expect("a UO map width fits u16"),
+                            u16::try_from(resources.map.map().height()).expect("a UO map height fits u16"),
+                        )
+                        .expect("a map has an extent");
+                        let placement = Placement {
                             origin: (
                                 at.x as f32 + content_at.x as f32 * magnify,
                                 at.y as f32 + content_at.y as f32 * magnify,
                             ),
                             extent: (
-                                (content_extent.0 * magnify as i32) as f32,
-                                (content_extent.1 * magnify as i32) as f32,
+                                content_extent.0 as f32 * magnify,
+                                content_extent.1 as f32 * magnify,
                             ),
                             circle: true,
                             rotation: std::f32::consts::FRAC_PI_4,
                         };
-                        let map_extent = (
-                            f32::from(native_extent.width()) * bounds.zoom() / frame.scale,
-                            f32::from(native_extent.height()) * bounds.zoom() / frame.scale,
+                        let view = RadarView::new(
+                            openshard_protocol::world::Facet(crate::FACET),
+                            radar::RadarTile::new(u32::from(player.x), u32::from(player.y)),
+                            facet_extent,
+                            1.0 / bounds.zoom(),
+                            placement,
+                            frame.scale,
+                        )
+                        .with_tangent_margin_fraction(
+                            content_extent,
+                            bounds.zoom(),
+                            panes::minimap::tangent_margin_fraction(),
                         );
-                        let map = Placement {
-                            origin: (
-                                clip.origin.0 + (clip.extent.0 - map_extent.0) / 2.0,
-                                clip.origin.1 + (clip.extent.1 - map_extent.1) / 2.0,
-                            ),
-                            extent: map_extent,
-                            ..clip
-                        };
-                        // Under everything, so the window is a window even
-                        // before its first chunk is built: unmapped ground
-                        // reads as unmapped rather than as the world showing
-                        // through a hole in the interface.
-                        window.radar_overlay.render_backdrop(
+                        let lod = radar_lods
+                            .iter()
+                            .find_map(|(subject, lod)| (*subject == WindowSubject::Minimap).then_some(*lod))
+                            .unwrap_or_else(|| view.lod());
+                        draw_radar_view(
                             &window.device,
                             &window.queue,
+                            &mut window.radar_chunks,
+                            &mut window.radar_overlay,
                             encoder,
                             frame,
-                            clip,
-                            radar::UNKNOWN,
-                        );
-                        window.radar_chunks.render_region(
-                            &window.device,
-                            &window.queue,
-                            encoder,
-                            frame,
-                            region,
-                            map,
-                            clip,
-                            ready,
-                        );
-                        // After the terrain and into the same window: where the
-                        // body stands. It is an overlay rather than a pixel in
-                        // a cached chunk, so a step costs this one instance and
-                        // no raster work at all.
-                        window.radar_overlay.render_markers(
-                            &window.device,
-                            &window.queue,
-                            encoder,
-                            frame,
-                            region,
-                            map,
-                            clip,
-                            &[RadarMarker {
-                                tile: radar::RadarTile::new(u32::from(player.x), u32::from(player.y)),
-                                color: radar::PLAYER_MARKER,
-                            }],
+                            radar_cache,
+                            view,
+                            lod,
+                            Some(player),
                         );
                         if minimap_diagnostics() {
-                            static REPORT: Once = Once::new();
-                            REPORT.call_once(|| {
-                                eprintln!(
-                                    "minimap diagnostic: content={content_extent:?}, native={native_extent:?}, \
-                                     map_origin={:?}, map_extent={:?}, clip_origin={:?}, clip_extent={:?}, \
-                                     zoom={}, surface_scale={}",
-                                    map.origin,
-                                    map.extent,
-                                    clip.origin,
-                                    clip.extent,
-                                    bounds.zoom(),
-                                    frame.scale,
-                                );
-                            });
                             window.radar_overlay.render_debug_map_bounds(
                                 &window.device,
                                 &window.queue,
                                 encoder,
                                 frame,
-                                map,
-                                clip,
+                                view.map_placement(),
+                                placement,
                             );
                         }
-                        // The keyed centre is transparent, so this second
-                        // draw puts the classic rim and its ornaments above
-                        // the generated terrain without blacking it out.
                         let mut rim = gump_art::collect(&[bounds.frame], &resources.gump_atlas);
                         gump_art::place(&mut rim, at, magnify);
                         pass.render_layer(&window.device, &window.queue, encoder, frame, &rim);
                     }
                 }
                 (WindowSubject::WorldMap, Drawn::WorldMap(bounds)) => {
-                    let (Ok(width), Ok(height)) = (
-                        u16::try_from(resources.map.map().width()),
-                        u16::try_from(resources.map.map().height()),
-                    ) else {
-                        continue;
-                    };
-                    let region = radar::RadarRegion::new(
-                        openshard_protocol::world::Facet(crate::FACET),
-                        radar::RadarTile::new(0, 0),
-                        radar::RadarExtent::new(width, height).expect("a map has an extent"),
-                    );
+                    labels.extend(bounds.lines.iter().map(|line| (line.label(), None)));
+                    let facet_extent = radar::RadarExtent::new(
+                        u16::try_from(resources.map.map().width()).expect("a UO map width fits u16"),
+                        u16::try_from(resources.map.map().height()).expect("a UO map height fits u16"),
+                    )
+                    .expect("a map has an extent");
                     let (content_at, content_extent) = bounds.content();
-                    let clip = Placement {
+                    let placement = Placement {
                         origin: (
                             at.x as f32 + content_at.x as f32 * magnify,
                             at.y as f32 + content_at.y as f32 * magnify,
@@ -618,69 +570,31 @@ pub(crate) fn draw_gump_windows(
                         circle: false,
                         rotation: 0.0,
                     };
-                    // Fit the whole facet at zoom 1.0.  A canvas drag offsets
-                    // the enlarged picture; the clip remains the window's
-                    // rectangle, so it can never paint over another gump.
-                    let fit = (clip.extent.0 / f32::from(width)).min(clip.extent.1 / f32::from(height));
-                    let map_extent = (
-                        f32::from(width) * fit * bounds.zoom(),
-                        f32::from(height) * fit * bounds.zoom(),
+                    let view = RadarView::new(
+                        openshard_protocol::world::Facet(crate::FACET),
+                        bounds.centre,
+                        facet_extent,
+                        bounds.tiles_per_pixel / (magnify * frame.scale),
+                        placement,
+                        frame.scale,
                     );
-                    let map = Placement {
-                        origin: (
-                            clip.origin.0
-                                + (clip.extent.0 - map_extent.0) / 2.0
-                                + bounds.pan.0 as f32 * magnify,
-                            clip.origin.1
-                                + (clip.extent.1 - map_extent.1) / 2.0
-                                + bounds.pan.1 as f32 * magnify,
-                        ),
-                        extent: map_extent,
-                        ..clip
-                    };
-                    let ready: Vec<_> = region_base_chunks(region)
-                        .filter_map(|chunk| {
-                            radar_cache.select_ready(radar_cache.key(
-                                region.facet(),
-                                radar::RadarLod::BASE,
-                                chunk,
-                            ))
-                        })
-                        .map(|ready| ready.chunk())
-                        .collect();
-                    window.radar_overlay.render_backdrop(
+                    let lod = radar_lods
+                        .iter()
+                        .find_map(|(subject, lod)| (*subject == WindowSubject::WorldMap).then_some(*lod))
+                        .unwrap_or_else(|| view.lod());
+                    let player = world.authoritative.view.as_ref().map(|view| view.player.position);
+                    draw_radar_view(
                         &window.device,
                         &window.queue,
+                        &mut window.radar_chunks,
+                        &mut window.radar_overlay,
                         encoder,
                         frame,
-                        clip,
-                        radar::UNKNOWN,
+                        radar_cache,
+                        view,
+                        lod,
+                        player,
                     );
-                    window.radar_chunks.render_region(
-                        &window.device,
-                        &window.queue,
-                        encoder,
-                        frame,
-                        region,
-                        map,
-                        clip,
-                        ready,
-                    );
-                    if let Some(player) = world.authoritative.view.as_ref().map(|view| view.player.position) {
-                        window.radar_overlay.render_markers(
-                            &window.device,
-                            &window.queue,
-                            encoder,
-                            frame,
-                            region,
-                            map,
-                            clip,
-                            &[RadarMarker {
-                                tile: radar::RadarTile::new(u32::from(player.x), u32::from(player.y)),
-                                color: radar::PLAYER_MARKER,
-                            }],
-                        );
-                    }
                 }
                 _ => {}
             }

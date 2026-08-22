@@ -40,6 +40,7 @@ pub mod bench;
 pub mod blit;
 pub mod camera;
 pub mod chart;
+pub mod chunk_cache;
 pub mod composite;
 pub mod confirm;
 pub mod container;

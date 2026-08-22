@@ -28,7 +28,7 @@ use openshard_client_render::control::Control;
 use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::lod::BlockLodSelector;
 use openshard_client_render::mobiles;
-use openshard_client_render::radar::{RadarCache, RadarWorkQueue};
+use openshard_client_render::radar::{RadarCache, RadarLodSelector, RadarWorkQueue};
 use openshard_movement::Tile;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::serial::Serial;
@@ -165,6 +165,10 @@ pub(crate) struct App {
     /// survives a closed minimap window, and production only ever removes a
     /// key once [`RadarCache::publish`] has a complete chunk for it.
     pub(crate) radar_queue: RadarWorkQueue,
+    /// Independent hysteresis state: two open windows may sit on opposite
+    /// sides of an LOD boundary without changing one another's selection.
+    pub(crate) minimap_radar_lod: RadarLodSelector,
+    pub(crate) world_map_radar_lod: RadarLodSelector,
     /// Bounded requests for immutable map-block composites.  It is updated
     /// from the camera snapshot; a future idle producer takes jobs from it,
     /// never from the camera frame itself.

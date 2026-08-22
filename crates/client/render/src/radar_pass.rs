@@ -39,6 +39,7 @@
 use openshard_uofiles::color::Color16;
 use std::collections::BTreeMap;
 
+use crate::chunk_cache::LruBudget;
 use crate::gump::Frame;
 use crate::radar::{
     BASE_CHUNK_TILES, MARKER_ARMS, RadarChunk, RadarChunkKey, RadarRegion, RadarRevision, RadarTile,
@@ -576,14 +577,21 @@ pub struct RadarChunkRenderer {
     quad: wgpu::Buffer,
     texture: wgpu::Texture,
     pages: BTreeMap<RadarChunkKey, ResidentPage>,
+    residency: LruBudget<RadarChunkKey>,
     capacity: u32,
-    clock: u64,
+    instances: wgpu::Buffer,
+    instance_capacity: u64,
+    over_capacity_draws: u64,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct RadarPageCounters {
+    pub over_capacity_draws: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct ResidentPage {
     layer: u32,
-    last_used: u64,
 }
 
 /// Surface size, and the scale it is drawn at: the whole of what every chunk in
@@ -777,6 +785,7 @@ impl RadarChunkRenderer {
             .expect("fresh quad is mapped")
             .copy_from_slice(&bytes);
         quad.unmap();
+        let instances = radar_instance_buffer(device, "radar chunk instances", CHUNK_INSTANCE_STRIDE);
         Self {
             pipeline,
             bind_group,
@@ -784,8 +793,12 @@ impl RadarChunkRenderer {
             quad,
             texture,
             pages: BTreeMap::new(),
+            residency: LruBudget::new(u64::from(capacity) * RADAR_CHUNK_PAGE_BYTES)
+                .expect("a radar renderer retains at least one page"),
             capacity,
-            clock: 0,
+            instances,
+            instance_capacity: 1,
+            over_capacity_draws: 0,
         }
     }
 
@@ -799,6 +812,25 @@ impl RadarChunkRenderer {
         self.pages.len()
     }
 
+    #[must_use]
+    pub const fn counters(&self) -> RadarPageCounters {
+        RadarPageCounters {
+            over_capacity_draws: self.over_capacity_draws,
+        }
+    }
+
+    fn ensure_instance_capacity(&mut self, device: &wgpu::Device, needed: u64) {
+        if needed <= self.instance_capacity {
+            return;
+        }
+        self.instance_capacity = needed.next_power_of_two();
+        self.instances = radar_instance_buffer(
+            device,
+            "radar chunk instances",
+            self.instance_capacity * CHUNK_INSTANCE_STRIDE,
+        );
+    }
+
     fn resident_layer(
         &mut self,
         device: &wgpu::Device,
@@ -806,24 +838,19 @@ impl RadarChunkRenderer {
         encoder: &mut wgpu::CommandEncoder,
         chunk: &RadarChunk,
     ) -> u32 {
-        self.clock = self.clock.wrapping_add(1);
         let key = chunk.key();
-        if let Some(page) = self.pages.get_mut(&key) {
-            page.last_used = self.clock;
+        if let Some(page) = self.pages.get(&key) {
+            self.residency.touch(key);
             return page.layer;
         }
-        let layer = if self.pages.len() < self.capacity as usize {
-            self.pages.len() as u32
-        } else {
-            let (&evict, page) = self
-                .pages
-                .iter()
-                .min_by_key(|(_, page)| page.last_used)
-                .expect("non-empty when full");
-            let layer = page.layer;
-            self.pages.remove(&evict);
-            layer
-        };
+        self.residency.insert(key, RADAR_CHUNK_PAGE_BYTES);
+        let eviction = self.residency.evict_to_budget();
+        let layer = eviction.keys.first().map_or(self.pages.len() as u32, |evict| {
+            self.pages
+                .remove(evict)
+                .expect("the residency key belongs to the page cache")
+                .layer
+        });
         let mut bytes = Vec::with_capacity(RADAR_CHUNK_PAGE_BYTES as usize);
         for colour in chunk.pixels() {
             let rgb = colour.rgb8();
@@ -860,13 +887,7 @@ impl RadarChunkRenderer {
                 depth_or_array_layers: 1,
             },
         );
-        self.pages.insert(
-            key,
-            ResidentPage {
-                layer,
-                last_used: self.clock,
-            },
-        );
+        self.pages.insert(key, ResidentPage { layer });
         layer
     }
 
@@ -908,11 +929,7 @@ impl RadarChunkRenderer {
         // distance from the window's own centre rather than by truncating
         // whatever `select_region_chunks`' paint order happens to end with.
         if draws.len() > self.capacity as usize {
-            eprintln!(
-                "radar page cache holds {} of {} chunks this region needs: keeping the ones nearest the window's centre",
-                self.capacity,
-                draws.len()
-            );
+            self.over_capacity_draws = self.over_capacity_draws.saturating_add(1);
             draws = cap_draws_by_distance(draws, self.capacity as usize, clip);
         }
         let Some(scissor) = window_scissor(frame, clip) else {
@@ -962,13 +979,8 @@ impl RadarChunkRenderer {
             }
             instance_bytes.extend_from_slice(&layer.to_le_bytes());
         }
-        let instances = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("radar chunk instances"),
-            size: draws.len() as u64 * CHUNK_INSTANCE_STRIDE,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        queue.write_buffer(&instances, 0, &instance_bytes);
+        self.ensure_instance_capacity(device, draws.len() as u64);
+        queue.write_buffer(&self.instances, 0, &instance_bytes);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("radar chunk"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -988,7 +1000,7 @@ impl RadarChunkRenderer {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.quad.slice(..));
-        pass.set_vertex_buffer(1, instances.slice(..));
+        pass.set_vertex_buffer(1, self.instances.slice(..));
         pass.set_scissor_rect(scissor.0, scissor.1, scissor.2, scissor.3);
         pass.draw(0..4, 0..draws.len() as u32);
     }
@@ -1088,16 +1100,17 @@ pub fn select_marker_quads<'a>(
 /// The pass that draws a radar's solid rectangles: the backdrop under the
 /// terrain, and the markers over it.
 ///
-/// It owns a pipeline and nothing else. There is no residency here and there is
-/// nothing to evict — the whole of a frame's overlay is a handful of rectangles
-/// written into a fresh instance buffer, which is why a walking player uploads
-/// no texture at all.
+/// There is no residency here and nothing to evict. Its small instance buffer
+/// is reused and grown on demand; a walking player rewrites only those few
+/// rectangles and uploads no texture at all.
 #[derive(Debug)]
 pub struct RadarOverlayRenderer {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniforms: wgpu::Buffer,
     quad: wgpu::Buffer,
+    instances: wgpu::Buffer,
+    instance_capacity: u64,
 }
 
 impl RadarOverlayRenderer {
@@ -1216,11 +1229,14 @@ impl RadarOverlayRenderer {
             .expect("fresh quad is mapped")
             .copy_from_slice(&bytes);
         quad.unmap();
+        let instances = radar_instance_buffer(device, "radar overlay instances", MARKER_INSTANCE_STRIDE);
         Self {
             pipeline,
             bind_group,
             uniforms,
             quad,
+            instances,
+            instance_capacity: 1,
         }
     }
 
@@ -1231,7 +1247,7 @@ impl RadarOverlayRenderer {
     /// clipped by the same rectangle, painted on top.
     #[allow(clippy::too_many_arguments)]
     pub fn render_markers<'a>(
-        &self,
+        &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
@@ -1262,7 +1278,7 @@ impl RadarOverlayRenderer {
     /// It is a floor rather than a fallback — a ready coarser ancestor is still
     /// the better picture wherever one exists.
     pub fn render_backdrop(
-        &self,
+        &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
@@ -1281,7 +1297,7 @@ impl RadarOverlayRenderer {
     /// past the frame and any remaining black area is missing content instead.
     #[allow(clippy::too_many_arguments)]
     pub fn render_debug_map_bounds(
-        &self,
+        &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
@@ -1323,8 +1339,9 @@ impl RadarOverlayRenderer {
     ///
     /// Both of this pass's callers come through here, so a marker and the
     /// backdrop under it cannot end up clipped by two different rectangles.
+    #[allow(clippy::too_many_arguments)]
     fn draw_quads(
-        &self,
+        &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
@@ -1379,13 +1396,16 @@ impl RadarOverlayRenderer {
                 instance_bytes.extend_from_slice(&value.to_le_bytes());
             }
         }
-        let instances = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("radar overlay instances"),
-            size: quads.len() as u64 * MARKER_INSTANCE_STRIDE,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        queue.write_buffer(&instances, 0, &instance_bytes);
+        let needed = quads.len() as u64;
+        if needed > self.instance_capacity {
+            self.instance_capacity = needed.next_power_of_two();
+            self.instances = radar_instance_buffer(
+                device,
+                "radar overlay instances",
+                self.instance_capacity * MARKER_INSTANCE_STRIDE,
+            );
+        }
+        queue.write_buffer(&self.instances, 0, &instance_bytes);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("radar overlay"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1405,8 +1425,17 @@ impl RadarOverlayRenderer {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.quad.slice(..));
-        pass.set_vertex_buffer(1, instances.slice(..));
+        pass.set_vertex_buffer(1, self.instances.slice(..));
         pass.set_scissor_rect(scissor.0, scissor.1, scissor.2, scissor.3);
         pass.draw(0..4, 0..quads.len() as u32);
     }
+}
+
+fn radar_instance_buffer(device: &wgpu::Device, label: &'static str, size: u64) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
 }
