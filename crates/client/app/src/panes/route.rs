@@ -237,6 +237,12 @@ impl App {
         };
         let now = Instant::now();
         let hand = self.windows.hand;
+        // How far the hand has moved since the button went down, asked once
+        // per event of the pointer itself rather than of any window — see
+        // `PaneCtx::past_slop`. It is `under_pointer`'s shape for the last
+        // device that was measuring for itself: a fact no pane can state
+        // better than the manager, so no pane states it at all.
+        let past_slop = self.input.past_slop();
 
         let mut response = Response::ignored();
         // Collected rather than performed inside the loop: an effect needs
@@ -264,6 +270,7 @@ impl App {
                 under_pointer,
                 modifiers,
                 now,
+                past_slop,
             };
             let answer = open.pane.handle(input, &ctx);
             let taken = answer.taken;

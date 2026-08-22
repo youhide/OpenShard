@@ -61,6 +61,28 @@ pub struct Input {
     /// viewport at all. Converting one into the other at each use is the
     /// arithmetic the two pixel types exist to stop being done wrong once.
     pub pointer_gump: GumpPixel,
+    /// Where the left button went down, or `None` while it is up.
+    ///
+    /// **The anchor every press-that-may-become-a-drag is measured from**, and
+    /// the reason it is one field here rather than one per presser: a press on
+    /// an icon in a bag, on a worn item and on an item lying on the ground are
+    /// three holders of the same gesture ([`crate::hand::ItemPress`]), and the
+    /// distance the *hand* has travelled since the button went down is a fact
+    /// about the mouse that none of the three can state better than this. When
+    /// each of them remembered its own start instead, they remembered it in
+    /// their own pixels — two of them window-local, divided by
+    /// [`WindowScale`](crate::desk::WindowScale) — and the same movement of the
+    /// mouse lifted one item and not another. See
+    /// [`hand::past_slop`](crate::hand::past_slop).
+    ///
+    /// Cleared wherever the button is known to be up, which is three places
+    /// and not one: the ordinary release, a release egui claims before this
+    /// end hears it, and the focus loss of an alt-tab whose release happens in
+    /// another application. Those are the same three
+    /// [`WindowGrip`](crate::windows::WindowGrip) is let go in, for the same
+    /// reason — a gesture that outlives its button acts on a hand that is no
+    /// longer there.
+    pub left_press: Option<GumpPixel>,
     /// Whether the window has the keyboard.
     ///
     /// Half of [`watched`](crate::App::watched), and true at construction: a
@@ -74,4 +96,18 @@ pub struct Input {
     /// events in an order nothing promises, and one `bool` written by both
     /// would read the second one's answer to the first one's question.
     pub occluded: bool,
+}
+
+impl Input {
+    /// Whether the pointer has left the press it is carrying — the manager's
+    /// half of [`hand::ItemPress::dragged`](crate::hand::ItemPress::dragged),
+    /// asked once per event and handed to every holder.
+    ///
+    /// `false` while no button is down: a press that has somehow outlived its
+    /// button is one that can no longer become a lift, which is the safe way
+    /// round for a gesture whose end this end may have missed.
+    pub fn past_slop(&self) -> bool {
+        self.left_press
+            .is_some_and(|down_at| crate::hand::past_slop(down_at, self.pointer_gump))
+    }
 }

@@ -117,6 +117,11 @@ impl Install {
     /// elsewhere would pass an assertion about `taken` by never being asked.
     /// A test about the gate itself passes `false` and expects
     /// [`Response::ignored`](crate::panes::Response).
+    ///
+    /// `past_slop` is `false`, which is what a press that has just landed is
+    /// answered against. A test that is about the *move* out of a press sets
+    /// the field on the context it got back — the manager's answer is a
+    /// `bool` a test states, exactly as `now` is an instant a test names.
     pub(crate) fn ctx<'a>(
         &'a self,
         view: &'a WorldView,
@@ -142,6 +147,7 @@ impl Install {
             // builds two of these and names both instants; this is the one a
             // test that has no pair in it takes.
             now: std::time::Instant::now(),
+            past_slop: false,
         }
     }
 }

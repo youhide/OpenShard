@@ -379,6 +379,25 @@ pub struct PaneCtx<'a> {
     /// is a *timing* rule, and a rule that reads an ambient clock cannot be
     /// exercised by a test.
     pub now: Instant,
+    /// The pointer has left the press it is carrying: far enough from where
+    /// the button went down that a press is no longer a click.
+    ///
+    /// **The manager's answer, for the same reason [`PaneCtx::under_pointer`]
+    /// is one**, and this field is decision 9 arriving at the last device that
+    /// was measuring for itself. How far the hand has moved is a fact about
+    /// the *mouse* — like [`PaneCtx::now`], and like the double-click interval
+    /// it exists to protect — so it is measured once, in the pixels the hand
+    /// actually moves in, and handed to whichever pane is holding a press.
+    ///
+    /// A pane therefore keeps no position in its [`ItemPress`](crate::hand::ItemPress)
+    /// at all: it used to keep [`PaneFrame::cursor`], which is window-local
+    /// and so divided by [`WindowScale`](crate::desk::WindowScale), and
+    /// comparing a later window-local cursor against it was *self-consistent
+    /// and still wrong* — an icon in a bag drawn at three times the art asked
+    /// for three times the hand movement that the same icon on the ground
+    /// did. See [`hand::past_slop`](crate::hand::past_slop) and
+    /// `docs/window_components.md`'s Backlog entry of that name.
+    pub past_slop: bool,
 }
 
 /// What a pane says about one input.

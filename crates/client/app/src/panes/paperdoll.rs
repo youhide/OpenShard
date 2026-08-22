@@ -346,7 +346,6 @@ impl PaperdollPane {
                                 mobile: self.mobile,
                                 layer,
                             },
-                            at: ctx.frame.cursor,
                             // A doll's sprite has no gump-local grab point:
                             // what is drawn there is the *paperdoll* art, and
                             // what goes on the cursor is the item's own icon.
@@ -460,7 +459,7 @@ impl PaperdollPane {
         let Some(press) = self.pressed else {
             return answer;
         };
-        if let Dragged::Lift(drag) = press.dragged(ctx.frame.cursor, ctx.modifiers.shift) {
+        if let Dragged::Lift(drag) = press.dragged(ctx.past_slop, ctx.modifiers.shift) {
             self.pressed = None;
             answer.absorb(Response::stale().with(Effect::Lift(drag)));
         }
@@ -912,9 +911,12 @@ mod tests {
         );
         assert!(pane.pressed.is_some());
 
-        // Past the slop, so the held press has become a drag.
+        // Past the slop, so the held press has become a drag — the manager's
+        // answer, handed in, not measured against a position this press kept
+        // (`PaneCtx::past_slop`).
         let dragged = cursor.offset(GumpPixel::new(10, 0));
-        let ctx = files.ctx(&view, Some(&drawn), dragged, true);
+        let mut ctx = files.ctx(&view, Some(&drawn), dragged, true);
+        ctx.past_slop = true;
         let answer = pane.handle(Input::Move, &ctx);
         assert!(
             matches!(answer.out.as_slice(), [Effect::Lift(_)]),

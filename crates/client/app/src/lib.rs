@@ -1004,6 +1004,8 @@ pub fn run<D: Dial + Send + 'static>(
             // under a resting cursor hears `CursorEntered` on the first move.
             pointer_inside: false,
             pointer_gump: GumpPixel::new(0, 0),
+            // No button is down on a client that has not been clicked.
+            left_press: None,
             focused: true,
             occluded: false,
         },

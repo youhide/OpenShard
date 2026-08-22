@@ -153,6 +153,7 @@ impl ApplicationHandler<()> for App {
                 }
             ) {
                 self.windows.grip.release();
+                self.input.left_press = None;
             }
             self.ask_redraw();
             return;
@@ -549,6 +550,12 @@ impl ApplicationHandler<()> for App {
                     // into — with no button down and nothing on screen to say
                     // why.
                     self.windows.grip.release();
+                    // And the item press the same button may have started:
+                    // its slop is measured from where the button went down,
+                    // so a press whose release happened elsewhere would turn
+                    // into a lift on the first move after the window comes
+                    // back. See `Input::left_press`.
+                    self.input.left_press = None;
                 }
             }
             // Entirely covered by another window: the compositor will not show
@@ -609,6 +616,19 @@ impl ApplicationHandler<()> for App {
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == winit::event::MouseButton::Middle {
                     self.control.set_panning(state == ElementState::Pressed);
+                }
+                // Where the left button went down, remembered before anything
+                // is told that it did: it is the anchor every press that may
+                // become a drag is measured from, whichever of the three
+                // holders ends up with that press. Written here and nowhere
+                // else, the way `WindowGrip`'s own frozen pointer is — one
+                // gesture, one place that says where it started. See
+                // `Input::left_press` and `hand::past_slop`.
+                if button == winit::event::MouseButton::Left {
+                    self.input.left_press = match state {
+                        ElementState::Pressed => Some(self.input.pointer_gump),
+                        ElementState::Released => None,
+                    };
                 }
                 // A left click selects the tile under the cursor for the Tile
                 // panel — reached here and not through egui, because `consumed`

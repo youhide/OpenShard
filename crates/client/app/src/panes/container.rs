@@ -561,11 +561,15 @@ impl ContainerPane {
         // window's own local coordinate (the wire's own, measured from the
         // background's top-left) and so is `ctx.frame.cursor`, so no window
         // placement has to be added in to compare the two.
+        //
+        // This offset *is* the art's own, and stays so: it is applied to the
+        // icon by `gump::place`, at the same magnification the bag was drawn
+        // with. It is the press's *start* that is nobody's business here — see
+        // `PaneCtx::past_slop`.
         let icon = GumpPixel::new(item.at.x, item.at.y);
         self.pressed = Some(ItemPress {
             item,
             origin: DragOrigin::Container(self.container),
-            at: ctx.frame.cursor,
             grab: GumpPixel::new(ctx.frame.cursor.x - icon.x, ctx.frame.cursor.y - icon.y),
         });
         raised
@@ -658,7 +662,7 @@ impl ContainerPane {
         let Some(press) = self.pressed else {
             return answer;
         };
-        match press.dragged(ctx.frame.cursor, ctx.modifiers.shift) {
+        match press.dragged(ctx.past_slop, ctx.modifiers.shift) {
             Dragged::Still => answer,
             // The prompt goes up once and the press waits under it. `Still` is
             // what every following move answers, because `has_prompt` above is
@@ -1307,12 +1311,16 @@ mod tests {
         );
         assert!(pane.pressed.is_some());
 
-        // Past the slop, so the held press has become a drag.
+        // Past the slop, so the held press has become a drag. The slop itself
+        // is the manager's answer and not this pane's — the cursor below moves
+        // because the *hover* follows it, and `past_slop` is what says the
+        // hand has left the press. See `PaneCtx::past_slop`.
         let dragged = icon.offset(GumpPixel::new(10, 0));
         let laid_out = pane
             .layout(&files.ctx(&view, None, dragged, true).frame)
             .expect("the bag still lays out the same way");
-        let ctx = files.ctx(&view, Some(&laid_out), dragged, true);
+        let mut ctx = files.ctx(&view, Some(&laid_out), dragged, true);
+        ctx.past_slop = true;
         let answer = pane.handle(Input::Move, &ctx);
         assert!(
             matches!(answer.out.as_slice(), [Effect::Lift(_)]),

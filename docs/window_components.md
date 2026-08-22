@@ -1122,7 +1122,7 @@ settle:
   application — so it releases the grip too. Five cases in
   `windows.rs`'s `grip_tests`, one of which asserts its own fixture is a scale
   the old convention got wrong.
-- **`DRAG_SLOP` is measured in whichever pixels its holder counts in, and the
+- ~~**`DRAG_SLOP` is measured in whichever pixels its holder counts in, and the
   three holders do not count in the same ones.** Found while writing the grip
   above, and *not* folded into it: it is the item press, not the window drag.
   `ItemPress::at` is stored in `PaneFrame::cursor` by a bag's pane and a doll's
@@ -1134,7 +1134,66 @@ settle:
   and one on the ground after `DRAG_SLOP`. Whether the slop is a distance on the
   screen or a distance in the art is a decision nobody has made — the same
   question `SPLIT_OFFSET` and the cascade constants answer in opposite
-  directions two entries up.
+  directions two entries up.~~
+  **Closed (2026-08-22). The slop is a distance on the screen, and the way it
+  is now spelled is the grip's own answer one device over.**
+
+  *The decision first, because the entry asked for one.* `DRAG_SLOP` is a
+  **gesture** threshold and belongs with `DOUBLE_CLICK`, not with the layout:
+  its own doc says what it is for — "so that the hand shaking on a double click
+  does not lift the item out from under the second one" — and a shaking hand
+  shakes the same three pixels whether the bag under it is drawn at the art's
+  size or at three times it. That is the third kind of constant in the argument
+  this entry ended on: `SPLIT_OFFSET` is magnified because it is half the
+  picker's *own art*, the cascade constants are not because they are *screen
+  placement*, and this one is not because it is *the hand*. So the answer
+  matches the second, and each of the three now says in its own doc which kind
+  it is rather than leaving the reader to infer it from whether a `factor`
+  happens to be in scope.
+
+  *And then there was nowhere to put the wrong pixels.* Deciding "screen" is
+  not the same as being able to state it: every holder had the press's start in
+  its own space, so the fix could only be a rule about which space each of them
+  converts from — one more thing three call sites have to keep in step, which is
+  the shape this whole document exists to complain about. **So the position
+  went instead.** `ItemPress` has no `at` field any more. `Input::left_press`
+  is where the left button went down, in absolute surface pixels, written by
+  the one `MouseInput` arm that hears the button and read by
+  `Input::past_slop()` against the same `pointer_gump` field the move will read
+  — one space, so no second one to be wrong in. `ItemPress::dragged` takes that
+  answer as a `bool` and measures nothing, `PaneCtx::past_slop` is the field a
+  pane reads it out of, and `hand::past_slop` is the rule itself, which takes
+  two absolute positions and **has no parameter a scale could enter through**.
+
+  *And the space that leaves it in is the right one, which is worth saying
+  because it was not chosen for this.* `Input::pointer_gump` is measured in
+  gump pixels — surface pixels divided by `App::gump_scale`, which is egui's
+  `pixels_per_point`, the display's own DPI factor. So the slop is three
+  DPI-independent points: the same physical distance on a laptop panel and on
+  a 4K monitor, which is what every toolkit's drag threshold is measured in
+  and what "the hand shakes three pixels" was always trying to say.
+
+  This is `Effect::Grab` losing its payload, exactly: a pane cannot say how far
+  the hand has travelled, and does not have to, because the manager reads the
+  pointer for it. It is also decision 9 reaching the last device that was
+  measuring for itself — z-order, the keyboard, the modal and the hand were
+  already the manager's; the *travel* was three private copies of a
+  subtraction.
+
+  **What the anchor cost, and it is the grip's bill again.** A gesture with a
+  frozen start has to be let go of wherever the button is known to be up, and
+  that is three places rather than one: the ordinary release, a release egui
+  claims before this end hears it, and the `Focused(false)` of an alt-tab whose
+  release happens in another application. Those are the same three
+  `WindowGrip` is released in, and `Input::left_press` is cleared beside it in
+  each — with `past_slop()` answering `false` while no button is down, so a
+  press that has somehow outlived its button can no longer become a lift.
+
+  One thing deliberately **kept** in the art's own pixels: `ItemPress::grab`,
+  where inside the icon the player took hold of it. That one is applied to the
+  picture by `gump::place`, at the same magnification the bag was drawn with,
+  so it is the art's distance and is magnified with the art — the same
+  distinction `SPLIT_OFFSET` is on the other side of the cascade constants for.
 
 ## Status
 

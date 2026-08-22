@@ -199,7 +199,6 @@ impl App {
                 hue: item.hue,
             },
             origin: hand::DragOrigin::Ground,
-            at: self.input.pointer_gump,
             // A ground sprite has no gump-local grab point — see `centre_of`,
             // which a worn item's press asks the same question of.
             grab: hand::centre_of(item.graphic, &self.resources.art),
@@ -251,7 +250,7 @@ impl App {
         if self.windows.prompt.is_some() {
             return false;
         }
-        match press.dragged(self.input.pointer_gump, self.input.shift_held) {
+        match press.dragged(self.input.past_slop(), self.input.shift_held) {
             hand::Dragged::Still => false,
             hand::Dragged::Ask(most) => {
                 self.open_split_prompt(

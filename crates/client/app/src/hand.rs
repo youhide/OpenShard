@@ -17,7 +17,7 @@
 //! the shard decides), [`ItemDrag`] (what is on the cursor) and [`Hand`]
 //! itself (held, or dropped and waiting). It is not the *manager* for any of
 //! them: `docs/window_components.md`'s D2 and D7 still decide who is allowed
-//! to write `Windows::hand`, `Windows::dragging` and `Windows::world_press`,
+//! to write `Windows::hand`, `Windows::grip` and `Windows::world_press`,
 //! and that stays [`crate::windows::Windows`] — this module only names what
 //! those fields hold and the one rule for turning a press into a drag.
 
@@ -44,7 +44,6 @@ pub struct ItemPress {
     pub item: ContainedItem,
     /// The authoritative place the item is currently projected from.
     pub origin: DragOrigin,
-    pub at: GumpPixel,
     pub grab: GumpPixel,
 }
 
@@ -52,7 +51,35 @@ pub struct ItemPress {
 ///
 /// Three pixels, so that the hand shaking on a double click does not lift the
 /// item out from under the second one.
+///
+/// **Screen pixels — the ones the player's hand moves in**, and that is a
+/// decision rather than an accident of where the number is read. The slop is a
+/// *gesture* threshold and belongs with [`DOUBLE_CLICK`](crate::DOUBLE_CLICK):
+/// both of them describe the hand and the mouse, not the picture underneath,
+/// so neither may change when a window is drawn bigger. `SPLIT_OFFSET` is
+/// magnified because it is half the picker's *own art*, and the cascade
+/// constants are not because they are screen placement — this is the third
+/// kind of constant in that argument, and it answers the way the second does.
+/// See `docs/window_components.md`'s Backlog entry of this name.
 const DRAG_SLOP: i32 = 3;
+
+/// Whether the pointer has travelled far enough from where the button went
+/// down for the press to stop being a click.
+///
+/// **Both positions absolute, and there is nowhere to put a scale.** This is
+/// [`crate::windows::WindowGrip`]'s argument one device over: the pointer that
+/// went down and the pointer now are read from the same field
+/// ([`Input::pointer_gump`](crate::input::Input::pointer_gump)), so the
+/// question "how far has the hand moved" is asked in one space and cannot be
+/// asked in two. It used to be asked against
+/// [`ItemPress`]'s own remembered position, which each of the three holders
+/// stored in whichever pixels *it* counted in — a bag's pane and a doll's pane
+/// in window-local ones, divided by [`WindowScale`](crate::desk::WindowScale),
+/// the manager in surface ones — so an icon in a bag drawn at three times the
+/// art needed three times the hand movement of one lying on the ground.
+pub fn past_slop(down_at: GumpPixel, cursor: GumpPixel) -> bool {
+    (cursor.x - down_at.x).abs() > DRAG_SLOP || (cursor.y - down_at.y).abs() > DRAG_SLOP
+}
 
 /// Where the pointer takes hold of an item that has no gump position of its
 /// own.
@@ -93,13 +120,19 @@ pub enum Dragged {
 }
 
 impl ItemPress {
-    /// What this press has become, now that the pointer is at `cursor`.
+    /// What this press has become, now that the pointer has moved.
+    ///
+    /// `past_slop` is the manager's answer and not this press's own — see
+    /// [`past_slop`], and [`PaneCtx::past_slop`](crate::panes::PaneCtx::past_slop)
+    /// for the field a pane reads it out of. A press holds no position at all,
+    /// which is what leaves no space for its holder to measure the travel in
+    /// the wrong one.
     ///
     /// Shift is asked *after* the slop, in that order and not the other way
     /// round: a Shift-click that never moved is still a click, and putting the
     /// prompt in front of the slop would open one on every press of a stack.
-    pub fn dragged(self, cursor: GumpPixel, shift: bool) -> Dragged {
-        if (cursor.x - self.at.x).abs() <= DRAG_SLOP && (cursor.y - self.at.y).abs() <= DRAG_SLOP {
+    pub fn dragged(self, past_slop: bool, shift: bool) -> Dragged {
+        if !past_slop {
             return Dragged::Still;
         }
         if shift && self.item.amount.0 > 1 {
@@ -260,7 +293,6 @@ mod tests {
                 hue: Hue::NONE,
             },
             origin: DragOrigin::Container(Serial::new(0x4000_0100).expect("a bag serial")),
-            at: GumpPixel::new(100, 100),
             grab: GumpPixel::new(4, 4),
         }
     }
@@ -268,18 +300,32 @@ mod tests {
     /// The slop is what keeps a double click from lifting the item out from
     /// under its own second half: a hand that shakes three pixels is still
     /// clicking.
+    ///
+    /// A square and not a circle, which the first case pins: three pixels in
+    /// both directions at once is a diagonal further than three and is still
+    /// inside the slop.
     #[test]
-    fn a_press_becomes_a_lift_only_once_the_pointer_has_really_moved() {
-        let press = press(1);
-        assert_eq!(press.dragged(GumpPixel::new(103, 97), false), Dragged::Still);
-        assert!(matches!(
-            press.dragged(GumpPixel::new(104, 100), false),
-            Dragged::Lift(_)
-        ));
-        assert!(matches!(
-            press.dragged(GumpPixel::new(100, 96), false),
-            Dragged::Lift(_)
-        ));
+    fn the_pointer_has_to_leave_the_press_before_it_stops_being_a_click() {
+        let down = GumpPixel::new(100, 100);
+        assert!(!past_slop(down, GumpPixel::new(103, 97)));
+        assert!(!past_slop(down, down));
+        assert!(past_slop(down, GumpPixel::new(104, 100)));
+        assert!(past_slop(down, GumpPixel::new(100, 96)));
+    }
+
+    /// A press remembers no position, so there is no scale to apply to one:
+    /// the travel is measured by the manager, in the pixels the hand moves
+    /// in, and handed to every holder as the same answer.
+    ///
+    /// This is the whole of `docs/window_components.md`'s "`DRAG_SLOP` is
+    /// measured in whichever pixels its holder counts in" — an icon in a
+    /// magnified bag and one lying on the ground now lift after the same
+    /// movement of the mouse, because neither of them is what is being
+    /// measured.
+    #[test]
+    fn a_press_becomes_a_lift_on_the_answer_it_is_handed() {
+        assert_eq!(press(1).dragged(false, false), Dragged::Still);
+        assert!(matches!(press(1).dragged(true, false), Dragged::Lift(_)));
     }
 
     /// Shift divides a pile and nothing else: a single item has nothing to
@@ -287,16 +333,13 @@ mod tests {
     #[test]
     fn shift_asks_for_an_amount_only_when_there_is_a_pile_to_divide() {
         assert_eq!(
-            press(20).dragged(GumpPixel::new(200, 200), true),
+            press(20).dragged(true, true),
             Dragged::Ask(19),
             "the most that can be taken is the pile less the one left behind"
         );
-        assert!(matches!(
-            press(1).dragged(GumpPixel::new(200, 200), true),
-            Dragged::Lift(_)
-        ));
+        assert!(matches!(press(1).dragged(true, true), Dragged::Lift(_)));
         assert_eq!(
-            press(20).dragged(GumpPixel::new(101, 101), true),
+            press(20).dragged(false, true),
             Dragged::Still,
             "the slop is asked first, so a Shift-click is a click"
         );
