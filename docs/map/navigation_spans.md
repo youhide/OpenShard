@@ -154,11 +154,34 @@ and it is the right split for the same reason it always was: the overlay is the
 part that changes between ticks and therefore cannot be baked. What changes is
 what the static half *is*.
 
-**E has landed**, so N3 is unblocked from the day N2 closes.
-[`Overlay`](../../crates/common/movement/src/overlay.rs) exists, both ends
-project into one, and `Doors` is the enum at both. What this plan substitutes is
-the *other* argument, and it substitutes it into a signature that already has one
-shape.
+**Nothing here starts until [`terrain_seam.md`](terrain_seam.md) closes**, and
+that is a decision rather than a dependency graph falling out that way. What this
+plan substitutes is *one argument* of a call that terrain_seam's E is in the
+middle of creating:
+
+```rust
+find_path(&MapTerrain, &Overlay, doors, …)   // where the seam ends
+find_path(&Spans,      &Overlay, doors, …)   // where this plan ends
+```
+
+Written against the tree as it stands, a span search would be written against
+`&dyn Terrain` — the thing E deletes — and then rewritten by hand against the
+API it should have had from the start. Written after, it is a type substitution
+into a signature with exactly one shape, and the `&Overlay` half it composes
+with is finished rather than moving.
+
+**The measuring did not wait and should not have.** Every decision this document
+takes — the three tiers, the four-byte span, water as a flag, the ×4 expectation
+and its ×6.4 ceiling — was settled before E began, by
+[terrain_seam's node 0](terrain_seam.md#0--the-oracle-) and by
+[the census](#what-the-facet-actually-holds). Deciding early and building late is
+the whole shape of this: the cost of waiting is a few weeks of a slow search, and
+the cost of not waiting is writing the same file twice.
+
+**What this plan inherits when the seam closes**, by name: `MapTerrain` as two
+borrows built per question, `Overlay` and `Doors` as the one live-world type both
+ends build, `WorldState` owning the tile table outright, no trait on the search,
+and `CachedTerrain` already deleted rather than left to be measured again.
 
 ## What this is worth, and the ceiling it runs into
 
@@ -281,13 +304,19 @@ a house floor is the general case of what `aboard` does for one ship, and
 ## The nodes
 
 ```
+ terrain_seam.md closes ──┐
+                          ▼
  N0. the census ✅ ──> N1. three tiers ──> N2. the step rule reads them ──┬─> N3. the search takes Spans
-                                                    (the agreement oracle) │      (needs terrain_seam's E)
+                                                    (the agreement oracle) │
                                                                            │
-                                                                           └─> N4. regions over spans ──> N5. off-mesh links
-                                                                                        │
-                                                                                        └─> N6. an artifact, if measured
+                                                                           └─> N4. regions over spans ──┬─> N5. off-mesh links
+                                                                                        │               │
+                                                                                        │               └─> N7. the server reads the graph
+                                                                                        └─> N6. an artifact, if measured        (inherited from F)
 ```
+
+N0 is done, and it is the one node that ran before the gate — a census reads the
+map and writes nothing, so it could not be written against the wrong API.
 
 ### N0 — the census ✅
 
@@ -427,6 +456,25 @@ revisions of one world.
 
 **Done when:** the load time is recorded here and the node is closed either way.
 
+### N7 — the server reads the graph
+
+Needs N4. **Inherited from [`terrain_seam.md`](terrain_seam.md)'s F**, which
+asked whether the baked navigation graph should be wired up or stopped being
+paid for, answered *wire it up*, and handed the action here because the repair
+that has to come first is N4's.
+
+Server AI plans with flat [`find_path`](../../crates/server/ai/src/lib.rs#L79)
+at a budget of 400 explored tiles, so a creature cannot route across a town
+while the artifact that would let it sits loaded and validated in
+`FacetState.coarse`, read by nothing but a test. The client already falls back
+past 8 tiles through `steer::Ground::path`; `step_toward` gains the same
+fall-back, and the two ends stop disagreeing about how far a body can plan.
+
+**Done when:** a test walks a creature a distance flat A\* at budget 400 cannot
+— over ground the flood says is walkable, from a raised origin as well as a flat
+one. The raised origin is the half that would have passed for the wrong reason
+before N4.
+
 ## Decisions, taken here
 
 **Three tiers, because the map has three populations.** 73.7% of blocks and
@@ -453,6 +501,10 @@ looks right. N1 asserts against `stand_surfaces` over the whole facet, N2
 against `step_allowed` and against a whole-facet flood, N3 against bit-identical
 node counts, N4 against `refused_but_walkable = 0`. Every one of those tools
 exists already.
+
+**This plan waits for the seam; the measuring did not.** Every number it is
+built on was taken before E began, and none of the code is written until E ends.
+An optimisation is not urgent enough to be worth writing twice.
 
 **No hoisting.** The 2.87× available from computing `start_surface(from)` once
 per node expansion instead of sixteen times
@@ -505,9 +557,16 @@ and its oracle, and neither touches the trait E is collapsing.
 
 ## Where a session starts
 
+**Not here yet — [`terrain_seam.md`](terrain_seam.md) first.** Its E is the last
+node of that plan and the one that gives `find_path` the shape this plan
+substitutes into. A session that wants to work on movement should be finishing E,
+not starting N1.
+
+When it closes:
+
 **N1, and it needs no client install to write** — only to test, which this
-machine can do. The census is done and the tier boundaries are decided; N1 is
-the structure and one whole-facet equivalence test.
+machine can do. The census is done and the tier boundaries are decided; N1 is the
+structure and one whole-facet equivalence test.
 
 **N2 is where the risk is**, and it is worth reading its own section before
 starting N1, because what N1 must store is decided by what N2 has to prove. If
@@ -515,5 +574,7 @@ starting N1, because what N1 must store is decided by what N2 has to prove. If
 `start_top`, the span record grows a field, and it is cheaper to find that out
 before the builder is written.
 
-**N4 is the one a player would notice.** Everything before it is a structure and
-an oracle; N4 is the node where a creature can route out of Britain's castle.
+**N4 is the one a player would notice**, and N7 is where they notice it.
+Everything before N4 is a structure and an oracle; N4 is the node where a
+creature can route out of Britain's castle, and N7 is the node where it actually
+does, because until then nothing on the server asks.

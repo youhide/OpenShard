@@ -277,12 +277,17 @@ anything:
                                                                                │      MapTerrain is borrows
  0. the facet-0 oracle ✅ ─────────────────────────────────────────────────────┴─> E. Overlay, and the search
                                                                                       takes explicit types
- F. the coarse graph nobody reads ─── needs the one-storey defect 0 found
+                                                                                        │
+ F. the coarse graph nobody reads ── answered by 0, and its repair handed on ──────────> │
+                                                                                        ▼
+                                              navigation_spans.md — the whole plan, after this one closes
 ```
 
 F had no edges at all when this was written. It has one now, and 0 is what put
 it there: the graph the server would be wired to
 [disagrees with its own map on raised ground](#-the-coarse-graph-is-a-one-storey-model-of-a-two-storey-world).
+That is a defect in a structure **this** plan does not build, so F is answered
+here and repaired there — see [what comes after](#what-comes-after-the-seam-and-why-it-waits).
 
 `Box<dyn Terrain>` **was** held up in `FacetState` by tests rather than by
 production: fifteen `= Some(Box::new(...))` substitutions across four files when
@@ -1104,9 +1109,76 @@ having *one* answer — a gallery over a street is two places — which is a cha
 to what a graph node **is**, and is why this is filed rather than done in
 passing.
 
-**Done when:** either a test walks a creature a distance flat A\* at budget 400
-cannot — over ground the flood says is walkable, from a raised origin as well as
-a flat one — or `FacetState.coarse` is gone.
+### Which arm, and who swings it
+
+F asked *either wire it up or stop paying for it*, and the oracle answered:
+**wire it up** — a router that answers 24 of 28 long destinations where flat
+A\* answers 3 is not a load to stop paying for. So `FacetState.coarse` stays,
+and it stays **deliberately unread for now**, which is a different state from the
+one this node opened in: it is no longer *paid for, validated and unread by
+nobody's decision*.
+
+The repair is not this plan's to make. Sampling the surfaces rather than the
+land changes what a graph node **is**, and that is the whole subject of
+[`navigation_spans.md`](navigation_spans.md) — its
+[N4](navigation_spans.md#n4--regions-over-spans) is this fix, and the wiring of
+`step_toward` is the node after it. Holding F open here would make the seam wait
+on a structure the seam does not build, and starting that structure early would
+mean writing it against the API E is in the middle of deleting. Both are the
+same mistake with the arrow reversed.
+
+**Done when:** ~~either a test walks a creature a distance flat A\* at budget 400
+cannot, or `FacetState.coarse` is gone~~ — **answered, not acted on.** The
+decision is recorded above, the graph stays, and the two halves of the action are
+[N4](navigation_spans.md#n4--regions-over-spans) and the node after it. Nothing
+in this document is waiting on either.
+
+## What comes after the seam, and why it waits
+
+There is a second plan, and it is deliberately **not** started yet:
+[`navigation_spans.md`](navigation_spans.md) — the layer HPA\* assumes
+underneath it and this engine never built. A column becomes a *list* of
+standable surfaces instead of one height, the step rule stops being re-derived
+from raw statics on every query, and the region graph is rebuilt over surfaces
+so that F's defect goes away.
+
+It is entirely built out of what [0](#0--the-oracle-) measured here: 1,462 ns a
+node expansion of which A\*'s own machinery is 230, 92.1% of facet 0's columns
+holding no statics at all, and 29 of 29 walkable destinations refused from a
+raised origin.
+
+**It starts when this document closes, and not before.** The reason is the
+signature. What that plan substitutes is one argument of a call that E is in the
+middle of creating:
+
+```rust
+find_path(&MapTerrain, &Overlay, doors, …)   // E's, and where the seam ends
+find_path(&Spans,      &Overlay, doors, …)   // the plan after it
+```
+
+Written against today's tree, the span search would be written against
+`&dyn Terrain` — the very thing E deletes — and would then be rewritten by hand
+against the API it should have been written against in the first place. Written
+after, it is a type substitution in a signature that already has exactly one
+shape, and the `&Overlay` half it must compose with is finished rather than
+moving. **The optimisation is not urgent enough to be worth doing twice**, and
+the seam is close enough to done to be worth waiting for.
+
+Two consequences, both already taken:
+
+- **F is answered here and repaired there**, so neither plan waits on the other.
+  See [which arm, and who swings it](#which-arm-and-who-swings-it).
+- **The measurements do not wait.** 0 is done, and everything the next plan
+  needs to decide its own shape — the census, the step-cost split, the A\*
+  floor, the connectivity flood — was taken before E started and is recorded in
+  this document and in `navigation_spans.md`'s. Deciding early and building late
+  is the point: the cost of waiting is a few weeks of the search being slow, and
+  the cost of not waiting is writing the same file twice.
+
+**What the next plan inherits, by name:** `MapTerrain` as two borrows built per
+question, `Overlay` and `Doors` as the one live-world type both ends build,
+`WorldState` owning the tile table outright, no trait on the search, and
+`CachedTerrain` already deleted rather than left to be measured again.
 
 ## Decisions, taken here
 
@@ -1190,6 +1262,14 @@ sites had already routed around it by hand. Both are now `(tile, z, height)`.
 D is what made this load-bearing rather than cosmetic: it converted every
 `&dyn Terrain` on the server into a `MapTerrain`, which is exactly the switch
 that flips which one a caller gets.
+
+**The optimisation waits for the seam, not the other way round.** The span grid
+that follows this plan substitutes one argument of `find_path`, and E is what
+gives that call its shape. Starting it early means writing it against a trait
+being deleted and then rewriting it; starting it late costs a few weeks of a
+slow search. See [what comes after](#what-comes-after-the-seam-and-why-it-waits).
+The *measuring* did not wait and should not have: every decision that plan takes
+was settled by [0](#0--the-oracle-) before E began.
 
 **No flag day.** An earlier draft proposed migrating through
 `&T where T: Terrain + ?Sized`, which `dyn Terrain` satisfies and so breaks no
@@ -1289,25 +1369,26 @@ Small things this document is the only current record of:
 
 ## Where a session starts
 
-**E — because it is the last node of the seam and nothing is in front of it any
-more.**
+**E, and nothing else in this document.**
 
-0, A, B, C and D are done. E's four decisions are answered by reading rather
-than by the compiler, and [the oracle](#0--the-oracle-) has since answered a
-fifth that the [section on E](#e--one-overlay-and-a-search-that-takes-explicit-types)
-used to carry as a move rather than a choice: `CachedTerrain` is deleted, not
-relocated. What is left to decide there is mobiles, identity, and whether
-blockers and surfaces are one type or two.
+0, A, B, C and D are done, and E's decisions are all taken by reading — blockers
+and surfaces are one `Cover`, mobiles are not a category the shared type names,
+identity stays with the server, and `CachedTerrain` is deleted rather than
+relocated. What is left is
+[the order it lands in](#the-order-it-lands-in): five commits, of which the
+compiler leads the last two. `grep -rn "dyn Terrain" crates` is the running
+count, and E is done when it is empty and the agreement test stands.
 
-**F is the other node a session can take, and it is no longer the free one.**
-The coarse graph the server loads, validates and never reads is still
-independent of the seam — but 0 found that
-[the artifact is wrong before anyone reads it](#-and-the-artifact-is-wrong-before-anyone-reads-it),
-so the node now has a defect in front of its feature. Fixing what height the
-graph is built from is the first half of it; wiring `step_toward` to the result
-is the second.
+**F is answered and needs no session.** The oracle picked its arm — the graph
+stays, because it routes 24 of 28 long destinations where flat A\* routes 3 —
+and its repair belongs to the plan after this one. Nothing here is waiting on it.
 
-**Both measurements this section used to owe are paid.** The probes have their
+**And the plan after this one waits for E.**
+[`navigation_spans.md`](navigation_spans.md) is written, decided and measured;
+it is not started, because it substitutes one argument of the call E is still
+shaping. [Why](#what-comes-after-the-seam-and-why-it-waits).
+
+**Every measurement this section used to owe is paid.** The probes have their
 facet-0 runs, above; `boat_step_cost`'s 15ns/55ns — measured against a double D
 deleted — has been re-run against a real `MapTerrain` and reads **110ns/123ns**,
 which is the correction its own doc comment predicted.
