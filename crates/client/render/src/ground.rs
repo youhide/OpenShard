@@ -336,18 +336,37 @@ impl LandWindow {
         let height = (max_y - min_y + 2).max(0) as usize;
         let mut cells = Vec::with_capacity(width * height);
         for y in 0..height {
-            let map_y = min_y + y as i32;
-            for x in 0..width {
-                let map_x = min_x + x as i32;
-                // `u16::try_from` rather than a cast: the bounds may be
-                // negative (the camera does not know where the map ends) and a
-                // wrapping cast would fetch a tile from the far side of it.
-                let cell = match (u16::try_from(map_x), u16::try_from(map_y)) {
-                    (Ok(map_x), Ok(map_y)) => map.land(map_x, map_y),
-                    _ => None,
-                };
-                cells.push(cell);
+            let start = cells.len();
+            // The tiles left of the facet's first column. The camera does not
+            // know where the map ends, so the bounds may be negative; `resize`
+            // is what puts the `None`s there, and the same call pads the far
+            // end of the row below.
+            let leading = (-min_x).clamp(0, width as i32) as usize;
+            cells.resize(start + leading, None);
+            // `u16::try_from` rather than a cast, and once per row rather than
+            // once per tile: a wrapping cast would fetch a row from the far
+            // side of the map. Past the coordinate space either way, there is
+            // no cell — which is what a row past the facet's southern edge
+            // gets from `land_in_row` too.
+            let row = u16::try_from(min_y + y as i32).ok();
+            // `leading == width` is a row that ends before the map begins.
+            // There is nothing left of it to ask about, and the ask would not
+            // be free: `from_x` would be the map's own first column and the
+            // walk would run a whole facet row for cells the `resize` below
+            // drops.
+            let from_x = match leading < width {
+                true => u16::try_from(min_x + leading as i32).ok(),
+                false => None,
+            };
+            if let (Some(row), Some(from_x)) = (row, from_x) {
+                // One step east per tile rather than a block index derived per
+                // tile, and it stops at the facet's eastern edge on its own.
+                let to_x = u16::try_from(min_x.saturating_add(width as i32) - 1).unwrap_or(u16::MAX);
+                cells.extend(map.land_in_row(row, from_x, to_x).map(Some));
             }
+            // Whatever the row did not reach: the eastern edge of the facet,
+            // or the whole row when it had none at all.
+            cells.resize(start + width, None);
         }
         Self {
             min_x,
@@ -412,11 +431,13 @@ fn for_each_cell_in(
         return;
     };
 
+    // The clamp already put both ranges inside the facet, so one stepped row
+    // hands back exactly one cell per column of `xs` — see [`Map::land_in_row`],
+    // which is where the walk order lives now.
+    let (from_x, to_x) = (*xs.start(), *xs.end());
     for y in ys {
-        for x in xs.clone() {
-            if let Some(cell) = map.land(x, y) {
-                each(x, y, cell);
-            }
+        for (x, cell) in xs.clone().zip(map.land_in_row(y, from_x, to_x)) {
+            each(x, y, cell);
         }
     }
 }
@@ -820,6 +841,28 @@ mod tests {
             ],
             "the two corners past the edge stand in; the one south of it does not"
         );
+    }
+
+    /// A window with no map under it at all, which is the row walk's other end.
+    ///
+    /// The rectangle ends before the map begins, so every row is padding: the
+    /// leading fallback already fills it, and the walk is skipped rather than
+    /// run from the map's own first column for cells the padding would drop.
+    /// The answer is the same either way — this is what says so, and what
+    /// would catch a later rewrite that filled the row from the wrong end.
+    #[test]
+    fn a_window_that_ends_before_the_map_begins_is_all_fallback() {
+        let map = hillside();
+        // `gather` widens by one to reach the fringe, so `max_x = -2` is the
+        // last rectangle whose every column is still west of the map.
+        for (min_x, min_y, max_x, max_y) in [(-9, 3, -2, 9), (3, -9, 9, -2), (-9, -9, -2, -2)] {
+            let window = LandWindow::gather(&map, min_x, min_y, max_x, max_y);
+            for y in min_y..=max_y {
+                for x in min_x..=max_x {
+                    assert_eq!(window.at(x, y), None, "({x}, {y}) of a window off the map");
+                }
+            }
+        }
     }
 
     /// [`LandWindow`] is a copy made for speed, so the only thing that makes it
