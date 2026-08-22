@@ -486,11 +486,57 @@ names: a column with two standing places stops collapsing into one slot in
 `closed`, so a route may pass over a bridge and later under it, and a body on a
 house's first floor is not the same node as one on the ground beneath.
 
+**🚩 And the same-column case is not merely refused today — it is answered with a
+lie.** [`search`](../../crates/common/movement/src/path.rs#L210) flattens both
+endpoints to tiles and compares them:
+
+```rust
+let goal  = Tile::new(to.x, to.y);
+let start = Tile::new(from.x, from.y);
+if start == goal { return PathSearch { arrived: true, route: Vec::new(), … } }
+```
+
+So *"from the ground floor to the first floor of this column"* returns **success
+with an empty route**, and the caller walks nowhere believing it has arrived.
+Two more places say the same thing more quietly: `if tile == goal` compares
+tiles, so reaching the column at any height is an arrival, and the start's own
+column is closed by the first `closed.insert`, so it can never be re-entered at
+another height. The z of both endpoints reaches only the
+[heuristic](../../crates/common/movement/src/path.rs#L408), which ignores it.
+
+It is not a pathfinding curiosity: server AI told to walk to a mobile standing on
+a bridge over it is told it is already there.
+
+**There is no vertical edge, and there must not be one.** Nothing in UO moves up
+in place — the eight neighbours are horizontal and the step rule changes height
+as a *consequence* of moving. A route from one floor to another over one column
+is a **loop**: out of the column, up whatever tiles rise, and back over the same
+`(x, y)` at a different span. Which is exactly why the key has to be the node:
+without it the return is forbidden by the closed set rather than by the world.
+
+Four things this node therefore owns, beyond widening the key:
+
+- **The goal is a node**, `(tile, span)`, with the caller's z resolved to the
+  nearest surface the way `Overlay::surface_at` already resolves one.
+- **The `start == goal` early return compares nodes**, so the empty-route answer
+  above stops being reachable.
+- **`cost`, `came_from` and `closed` are keyed by the node**, which is what lets
+  the loop come home.
+- **The heuristic stays planar, and it goes flat in exactly this case.** Chebyshev
+  over `(x, y)` is admissible — every step moves one tile, so it is a lower bound
+  — but with the goal one storey up in the same column it is zero at the start,
+  and the search fans out until it meets a stair. Inside a house that is nothing;
+  inside a castle it can spend the 400- or 600-node budget. The real answer for a
+  long climb is [N4](#n4--regions-over-spans), where spans are the graph's nodes
+  and a staircase is a portal — which is one more reason the coarse layer is the
+  user-visible half of this plan.
+
 **Done when:** a search that must use both heights of one column arrives where it
-previously refused, and node counts change on **exactly** the searches that touch
-a multi-span column — enumerated, not asserted in bulk, because a count that
-moved anywhere else means the key change altered something it had no business
-altering.
+previously refused; **a request from one floor of a column to another no longer
+returns an empty route**; and node counts change on **exactly** the searches that
+touch a multi-span column — enumerated, not asserted in bulk, because a count
+that moved anywhere else means the key change altered something it had no
+business altering.
 
 ### N4 — regions over spans
 

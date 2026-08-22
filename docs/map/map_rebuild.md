@@ -325,7 +325,11 @@ measurements and DoDs stand as written. Three things this consolidation adds:
   closed set, so a bridge and the ground under it are one node. The one-storey
   defect has a twin in the fine search. It is N3b, and the census makes it nearly
   free: the node becomes `(x, y, span)` with the index zero for 99.4% of the
-  facet, twenty-nine bits of the `u32` the key already is.
+  facet, twenty-nine bits of the `u32` the key already is. **The sharpest form of
+  it is a wrong answer rather than a refusal**: asked to path from one floor of a
+  column to another, the search compares flattened tiles, finds them equal, and
+  returns *arrived* with an empty route — so an NPC told to walk to a mobile on
+  the bridge above it believes it is already there.
 
 [`navigation_graph_efficiency_plan.md`](navigation_graph_efficiency_plan.md)'s
 phases 1, 2 and 4 are built; its phase 3 — a second hierarchy level — stays shut
