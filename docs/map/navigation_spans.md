@@ -1474,14 +1474,30 @@ graph over spans names neither.
     ~231 ns of A\* — that is **6% and 17%**. Nothing asks for 6%, and the 17%
     is the case the coarse graph already routes around.
 
-  **What the floor turned up instead is worth more than the entry was.** The
+  **The floor raised a fourth idea, and the same run refuses that too.** The
   landing half is ~165 ns for eight neighbours — ~21 ns each — where
-  `surface_at` measured *alone* on one column is 12.4 ns. The gap is not
-  arithmetic: it is that eight neighbours are eight walks of the addressing
-  chain — `extent().index_of`, `blocks`, `tables`, the occupancy word, the
-  prefix sum — for tiles that share a block in the ordinary case. **That is
-  N3's `Stance` hoist again** (1,105 → 171 ns), one tier down, and it costs no
-  bytes at all. Filed below as *the addressing is walked eight times*.
+  `surface_at` measured *alone* on one column is 12.4 ns. The obvious reading of
+  that gap is locality: eight neighbours are eight walks of the same addressing
+  chain — `extent().index_of`, `blocks`, `tables`, the occupancy word, the prefix
+  sum — for tiles that share a block whenever the node is not on a block edge,
+  which would be N3's `Stance` hoist one tier down, at no cost in bytes.
+
+  **It is not.** The row *all eight on one column* is those eight lookups aimed
+  at one column: the same `check`, the same tier, the same arithmetic, with only
+  the addressing made hot and shared. It is **141.9 ns against 159.4** in open
+  country and **154.0 against 173.6** at the castle. So the addressing is ~20 ns
+  of the ~165 — one eighth — and a hoist threading a resolved block through
+  `MapTerrain::check` into `Spans::check` would buy ~9% of an expansion and ~4%
+  of a node, for a change across the seam N3 and the terrain work spent two
+  sessions making narrow. **The landing half is not addressing: it is ~18 ns of
+  rule, eight times**, which is what N1 already brought it down to.
+
+  **So the whole of this entry closes the same way, and it closes the question
+  above it as well.** A node is ~215 ns of terrain against ~223 ns of A\*, and
+  after four attempts on the terrain half — a mask, a rejection mask, a full
+  record, a locality hoist — none of them moves a node by a tenth. The lever
+  that is left is not a cheaper node. It is **fewer nodes**, which is the coarse
+  graph, and that is built and read.
 - **`sight_clear`'s own height blindness.** The same class of defect — a sight
   line reads the tiles it crosses and not the endpoints' columns, so two mobiles
   on one tile at different z see each other through a floor. It is
@@ -1514,8 +1530,23 @@ left in that section is filed observations with no defect under them — **and o
 of those has now been taken as well**: N1's count tables, which the mask cut
 from 8.2 MB to 3.3 and the bake from 15.8 MiB to 11.2 without the answers
 moving. It was the one the plan named as *the next thing to try if a node
-expansion has to get cheaper again*, so what it leaves behind is the same
-sentence pointing at the packed static record instead.
+expansion has to get cheaper again*, and what it handed on — **baked
+adjacency** — has now been measured and **declined**, along with the two
+smaller ideas around it.
+
+**🚩 That closes the node-expansion question itself, and a session should not
+re-open it without a new reason.** A node is ~215 ns of terrain against ~223 ns
+of A\*'s own heap and hash. Four separate attacks on the terrain half were
+priced in one run of `step_cost` — a full per-span record (~15 MB, 6% of a node
+in open country and 17% at the castle), a rejection mask (1.6 MB, under 2%), a
+locality hoist across the `MapTerrain`/`Spans` seam (no bytes, ~4%), and the
+dense `average_land_z` before them — and **none of them moves a node by a
+tenth**. The terrain half is ~18 ns of rule eight times, which is what N1's
+three tiers already reduced it to. The lever that is left is not a cheaper node
+but **fewer nodes**, and that is the coarse graph, which is built and which the
+shard reads. What the entry leaves standing is the packed static record, under
+[direction B](new_map_representation/plan.md#b--our-own-chunk-format-and-a-uo-importer)'s
+own gate and not this plan's.
 
 **Rebake before running anything.** `ROUTING_VERSION` is 4, so every artifact
 baked before N4 is refused — and refused *loudly*: the shard does not boot.

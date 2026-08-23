@@ -285,6 +285,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     measure(cli.repeat, n, "the same, landings off the bake", || {
         standing.iter().map(|&p| span_expand(&terrain, &spans, p)).sum()
     });
+    // The same eight lookups aimed at *one* column instead of eight. Identical
+    // work per call — the same `check`, the same tier, the same arithmetic — and
+    // the only thing taken away is that each neighbour resolves its own block:
+    // `extent().index_of`, `blocks`, `tables`, the occupancy word and the prefix
+    // sum, walked eight times for tiles that share a block whenever the node is
+    // not on a block edge. The gap between this row and the one above is what a
+    // hoist could recover, and it costs no bytes to recover.
+    //
+    // A different checksum, necessarily: eight answers about one column are one
+    // answer eight times. This prices the *addressing*, not the rule.
+    measure(cli.repeat, n, "the same, all eight on one column", || {
+        standing
+            .iter()
+            .map(|&p| {
+                expand(
+                    p,
+                    |to, start_z, start_top| {
+                        let _ = black_box(to);
+                        spans.check(p.x, p.y, start_z, start_top)
+                    },
+                    terrain.start_surface(p.x, p.y, i32::from(p.z)).1,
+                )
+            })
+            .sum()
+    });
     println!("what the search itself costs, with terrain taken away:");
     // Open ground with no map at all and nothing on it: the floor under every
     // measurement above. A search here pops its whole budget — the goal is two
