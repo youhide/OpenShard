@@ -3886,10 +3886,11 @@ mod tests {
 
     #[test]
     fn flat_ground_block_accepts_only_one_common_surface_height() {
-        use openshard_map::map::{LandCell, LandTile, WorldMap};
+        use openshard_map::map::{LandCell, WorldMap};
+        use openshard_tiles::LandTileId;
 
         let mut map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
-            tile: LandTile(7),
+            tile: LandTileId(7),
             z: 20,
         });
         let block = BlockCoord { x: 0, y: 0 };
@@ -3904,7 +3905,7 @@ mod tests {
             4,
             4,
             LandCell {
-                tile: LandTile(7),
+                tile: LandTileId(7),
                 z: 21,
             },
         );
@@ -3913,10 +3914,11 @@ mod tests {
 
     #[test]
     fn prepared_work_preserves_the_verified_plateau_for_producer_and_restore() {
-        use openshard_map::map::{LandCell, LandTile, WorldMap};
+        use openshard_map::map::{LandCell, WorldMap};
+        use openshard_tiles::LandTileId;
 
         let map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
-            tile: LandTile(7),
+            tile: LandTileId(7),
             z: 20,
         });
         let key = CompositeKey {

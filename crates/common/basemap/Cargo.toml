@@ -19,4 +19,5 @@ clap.workspace = true
 # is where our own format meets a path, and `openshard-uofiles` is the separate
 # thing that turns a client's files into a facet in the first place.
 openshard-map.workspace = true
+openshard-tiles.workspace = true
 openshard-protocol.workspace = true

@@ -11,9 +11,10 @@
 //! entity registry a client does not have.
 
 use crate::Tile;
-use openshard_map::map::{LandTile, WorldMap};
+use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
+use openshard_tiles::LandTileId;
 use openshard_tiles::{TileData, TileFlags};
 
 /// How far a walking human can step up.
@@ -552,7 +553,7 @@ impl MapTerrain<'_> {
         i8::try_from(self.average_land_z(tile.x, tile.y)).ok()
     }
 
-    pub fn land_tile(&self, tile: Tile) -> Option<LandTile> {
+    pub fn land_tile(&self, tile: Tile) -> Option<LandTileId> {
         self.map().land(tile.x, tile.y).map(|cell| cell.tile)
     }
 

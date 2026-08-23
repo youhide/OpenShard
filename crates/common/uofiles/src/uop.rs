@@ -170,7 +170,7 @@ impl Uop {
     /// A container with no entries at all.
     ///
     /// For a caller that needs the *shape* of a container and not an install's
-    /// — [`TileData::empty`](crate::tiledata::TileData::empty)'s reason, one
+    /// — [`TileData::empty`](openshard_tiles::TileData::empty)'s reason, one
     /// file over. Every name resolves to `Ok(None)`, which is the answer this
     /// reader already gives for an index a real container does not ship, so
     /// nothing here is a guess at what a file says: it says nothing at all.

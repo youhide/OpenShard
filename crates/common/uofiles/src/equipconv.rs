@@ -3,7 +3,7 @@
 //!
 //! A worn item is not drawn from its own art. Its *default* picture is its
 //! tiledata entry's `AnimID` field
-//! ([`crate::tiledata::StaticTile::anim_id`]) — a plain shirt needs nothing
+//! ([`openshard_tiles::StaticTile::anim_id`]) — a plain shirt needs nothing
 //! more, which is why an ordinary outfit has no entries here at all. This
 //! table only overrides that default for the pairs where a body needs a
 //! *different* picture — chiefly a race or gender variant of the same

@@ -467,15 +467,15 @@ mod tests {
 
     use super::*;
     use crate::grid::BlockExtent;
-    use crate::map::LandTile;
     use crate::snapshot::MapSnapshot;
+    use openshard_tiles::LandTileId;
 
     /// A facet of two chunks by two chunks, all of it one flat land tile.
     fn flat() -> MapSnapshot {
         MapSnapshot::new(
             Facet(0),
             WorldMap::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
-                tile: LandTile(3),
+                tile: LandTileId(3),
                 z: 0,
             }),
         )
@@ -500,7 +500,7 @@ mod tests {
         let mut world = flat();
         let was = world.map().land(10, 10).expect("on the map");
         let now = LandCell {
-            tile: LandTile(9),
+            tile: LandTileId(9),
             z: 40,
         };
         let revision = world
@@ -637,7 +637,7 @@ mod tests {
                     y: 2,
                     was,
                     now: LandCell {
-                        tile: LandTile(1),
+                        tile: LandTileId(1),
                         z: 20,
                     },
                 },
@@ -670,7 +670,7 @@ mod tests {
     fn an_op_whose_recorded_value_is_not_there_is_refused() {
         let mut world = flat();
         let elsewhere = LandCell {
-            tile: LandTile(77),
+            tile: LandTileId(77),
             z: -3,
         };
         assert_eq!(
@@ -681,7 +681,7 @@ mod tests {
                     y: 5,
                     was: elsewhere,
                     now: LandCell {
-                        tile: LandTile(1),
+                        tile: LandTileId(1),
                         z: 0,
                     },
                 }],
@@ -691,7 +691,7 @@ mod tests {
                 y: 5,
                 recorded: elsewhere,
                 found: LandCell {
-                    tile: LandTile(3),
+                    tile: LandTileId(3),
                     z: 0,
                 },
             })
@@ -716,11 +716,11 @@ mod tests {
     #[test]
     fn touched_chunks_are_the_chunks_the_ops_are_in_each_once() {
         let was = LandCell {
-            tile: LandTile(3),
+            tile: LandTileId(3),
             z: 0,
         };
         let now = LandCell {
-            tile: LandTile(4),
+            tile: LandTileId(4),
             z: 0,
         };
         let ops = vec![

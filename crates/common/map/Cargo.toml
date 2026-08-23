@@ -13,3 +13,7 @@ workspace = true
 
 [dependencies]
 openshard-protocol.workspace = true
+# The id a cell of ground holds: `LandTileId`, which indexes the land table. The
+# table is not here and neither is a file -- the crate that declares it opens
+# none, so a world made of tiles can name what it is made of.
+openshard-tiles.workspace = true

@@ -1208,8 +1208,9 @@ mod tests {
     use crate::atlas::StaticAtlasPages;
 
     use openshard_map::grid::BlockExtent;
-    use openshard_map::map::{LandCell, LandTile, StaticItem};
+    use openshard_map::map::{LandCell, StaticItem};
     use openshard_protocol::wire::Hue;
+    use openshard_tiles::LandTileId;
     use openshard_uofiles::color::Color16;
     use openshard_uofiles::image::Image;
 
@@ -1219,7 +1220,7 @@ mod tests {
     /// standing on it. Statics are placed by the tests that want them.
     fn field() -> WorldMap {
         WorldMap::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
-            tile: LandTile(3),
+            tile: LandTileId(3),
             z: 0,
         })
     }

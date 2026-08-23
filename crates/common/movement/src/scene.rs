@@ -44,11 +44,12 @@
 use std::collections::BTreeMap;
 
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, LandTile, StaticItem, WorldMap};
+use openshard_map::map::{LandCell, StaticItem, WorldMap};
 use openshard_map::snapshot::MapSnapshot;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
+use openshard_tiles::LandTileId;
 use openshard_tiles::{StaticTile, TileData, TileFlags};
 
 use crate::footing::Footing;
@@ -110,7 +111,10 @@ impl Scene {
     pub fn flat_over(extent: BlockExtent, z: i8) -> Self {
         // Land tile 0 with the default (empty) tiledata: not water, not
         // blocking, so it is ordinary walkable ground.
-        let map = WorldMap::from_blocks(extent, |_, _| LandCell { tile: LandTile(0), z });
+        let map = WorldMap::from_blocks(extent, |_, _| LandCell {
+            tile: LandTileId(0),
+            z,
+        });
         Self {
             map,
             tiles: TileData::empty(),
@@ -173,7 +177,7 @@ impl Scene {
             x,
             y,
             LandCell {
-                tile: LandTile(tile),
+                tile: LandTileId(tile),
                 ..cell
             },
         );
@@ -252,7 +256,7 @@ impl Scene {
     /// which is what `set_land` will ignore anyway.
     fn cell(&self, x: u16, y: u16) -> LandCell {
         self.map.land(x, y).unwrap_or(LandCell {
-            tile: LandTile(0),
+            tile: LandTileId(0),
             z: 0,
         })
     }
@@ -504,8 +508,8 @@ mod tests {
         scene.land_everywhere(ROAD);
         scene.land(3, 3, 0x0003);
         let terrain = scene.terrain();
-        assert_eq!(terrain.land_tile(Tile::new(0, 0)), Some(LandTile(ROAD)));
-        assert_eq!(terrain.land_tile(Tile::new(3, 3)), Some(LandTile(0x0003)));
+        assert_eq!(terrain.land_tile(Tile::new(0, 0)), Some(LandTileId(ROAD)));
+        assert_eq!(terrain.land_tile(Tile::new(3, 3)), Some(LandTileId(0x0003)));
         // Naming a tile did not move it: the heights are still the flat scene's.
         assert_eq!(terrain.ground_z(Tile::new(3, 3)), Some(0));
     }

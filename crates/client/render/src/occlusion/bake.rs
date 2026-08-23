@@ -491,9 +491,10 @@ fn collect_ring(
 #[cfg(test)]
 mod tests {
     use openshard_map::grid::BlockExtent;
-    use openshard_map::map::{LandCell, LandTile, StaticItem};
+    use openshard_map::map::{LandCell, StaticItem};
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_protocol::world::Point;
+    use openshard_tiles::LandTileId;
     use openshard_tiles::{StaticTile, TileFlags};
 
     use super::*;
@@ -517,7 +518,7 @@ mod tests {
     /// coordinate in Britain.
     fn town() -> (WorldMap, TileData) {
         let mut map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
-            tile: LandTile(3),
+            tile: LandTileId(3),
             z: 0,
         });
         // A run of wall along one row, crossing the boundary between the two
@@ -789,7 +790,7 @@ mod tests {
     #[test]
     fn a_solid_anchored_outside_the_frame_still_occludes_through_the_ring() {
         let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 1 }, |_, _| LandCell {
-            tile: LandTile(3),
+            tile: LandTileId(3),
             z: 0,
         });
         let tiledata = TileData::empty();
@@ -838,7 +839,7 @@ mod tests {
     #[test]
     fn a_wider_reach_needs_a_wider_ring() {
         let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 1 }, |_, _| LandCell {
-            tile: LandTile(3),
+            tile: LandTileId(3),
             z: 0,
         });
         let tiledata = TileData::empty();

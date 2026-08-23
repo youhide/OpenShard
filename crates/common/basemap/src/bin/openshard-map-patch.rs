@@ -30,10 +30,11 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use openshard_basemap::{Loaded, load, patches};
-use openshard_map::map::{LandCell, LandTile, StaticItem};
+use openshard_map::map::{LandCell, StaticItem};
 use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime, StaticId};
 use openshard_map::snapshot::{MapRevision, MapSnapshot};
 use openshard_protocol::wire::{Graphic, Hue};
+use openshard_tiles::LandTileId;
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Commit one change to a base set's world")]
@@ -204,7 +205,7 @@ fn build(world: &MapSnapshot, what: &What) -> Result<PatchOp, Box<dyn std::error
                 y,
                 was,
                 now: LandCell {
-                    tile: LandTile(tile),
+                    tile: LandTileId(tile),
                     z,
                 },
             }

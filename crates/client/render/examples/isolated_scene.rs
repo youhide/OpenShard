@@ -656,13 +656,13 @@ fn main() {
         |sx, sy| {
             if !want_ground {
                 return LandCell {
-                    tile: openshard_map::map::LandTile(0),
+                    tile: openshard_tiles::LandTileId(0),
                     z: at.z,
                 };
             }
             let (rx, ry) = unshift(anchor, (sx, sy));
             real_map.land(rx, ry).unwrap_or(LandCell {
-                tile: openshard_map::map::LandTile(0),
+                tile: openshard_tiles::LandTileId(0),
                 z: at.z,
             })
         },

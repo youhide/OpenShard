@@ -6,10 +6,11 @@
 
 use openshard_basemap::{BaseError, read, write};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, LandTile, StaticItem, WorldMap};
+use openshard_map::map::{LandCell, StaticItem, WorldMap};
 use openshard_map::snapshot::{MapRevision, MapSnapshot};
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Facet;
+use openshard_tiles::LandTileId;
 
 const FACET: Facet = Facet(0);
 const BLOCKS: u32 = 9;
@@ -29,7 +30,7 @@ fn snapshot() -> MapSnapshot {
             down: BLOCKS,
         },
         |x, y| LandCell {
-            tile: LandTile(u16::try_from(u32::from(x) * TILES + u32::from(y)).unwrap()),
+            tile: LandTileId(u16::try_from(u32::from(x) * TILES + u32::from(y)).unwrap()),
             z: (i32::from(x) - i32::from(y)) as i8,
         },
     );

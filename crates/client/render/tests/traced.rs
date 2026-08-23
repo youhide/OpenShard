@@ -554,7 +554,7 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, shot: Shot<'_>) -> Rendere
             down: blocks,
         },
         |_x, _y| openshard_map::map::LandCell {
-            tile: openshard_map::map::LandTile(FLOOR.0),
+            tile: openshard_tiles::LandTileId(FLOOR.0),
             z: 0,
         },
     );

@@ -9,7 +9,7 @@
 //! # Which texture belongs to which tile
 //!
 //! Not the land graphic — a separate id, held in `tiledata.mul`'s land entry as
-//! [`crate::tiledata::LandTile::texture`]. Nothing relates the two numbers, so
+//! [`openshard_tiles::LandTile::texture`]. Nothing relates the two numbers, so
 //! reading that field at the wrong offset produces a picture rather than an
 //! error: the ground is textured with somebody else's terrain and looks like a
 //! seasonal variant. That is what the shipped-file test compares against the

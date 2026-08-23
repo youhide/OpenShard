@@ -145,7 +145,7 @@ impl Art {
     /// Art that ships nothing: every graphic answers `Ok(None)`.
     ///
     /// [`Uop::empty`]'s reason, one layer up, and
-    /// [`TileData::empty`](crate::tiledata::TileData::empty)'s: a caller that
+    /// [`TileData::empty`](openshard_tiles::TileData::empty)'s: a caller that
     /// needs an `Art` to *exist* without needing what an install put in it.
     /// `None` is already what a graphic the client does not ship answers, so
     /// this is the shape of the file and not an invention about its contents —

@@ -16,9 +16,8 @@
 //!
 //! # The ids live here too
 //!
-//! [`LandTileId`] indexes the land table, and [`Graphic`](openshard_protocol)
-//! — which is on the wire, so it lives in the protocol — indexes the static
-//! one. Two more are ids into *other* clients' tables that these entries name:
+//! [`LandTileId`] indexes the land table, and `Graphic` — which is on the wire,
+//! so it lives in `openshard-protocol` — indexes the static one. Two more are ids into *other* clients' tables that these entries name:
 //! [`TextureId`], which [`LandTile::texture`] points at, and [`AnimId`], which
 //! [`StaticTile::anim_id`] does. They are here because the entry that carries
 //! one is here; the readers of those two files take them as arguments.

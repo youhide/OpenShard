@@ -43,10 +43,11 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use openshard_map::grid::LandGrid;
-use openshard_map::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell, LandTile, StaticItem, WorldMap};
+use openshard_map::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell, StaticItem, WorldMap};
 use openshard_map::snapshot::MapSnapshot;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Facet;
+use openshard_tiles::LandTileId;
 
 /// A cell: `u16` tile id and an `i8` height. Sphere's `CUOMapMeter`.
 const CELL_BYTES: usize = 3;
@@ -325,7 +326,7 @@ fn cells_of(bytes: &[u8]) -> impl Iterator<Item = LandCell> + '_ {
             .chunks_exact(CELL_BYTES)
             .map(|cell| LandCell {
                 // Little-endian: the files are, the network is not.
-                tile: LandTile(u16::from_le_bytes([cell[0], cell[1]])),
+                tile: LandTileId(u16::from_le_bytes([cell[0], cell[1]])),
                 z: cell[2] as i8,
             })
     })
@@ -543,13 +544,13 @@ mod tests {
         assert_eq!(
             map.land(2 * 8 + 5, 3 * 8 + 6),
             Some(LandCell {
-                tile: LandTile(0xBEEF),
+                tile: LandTileId(0xBEEF),
                 z: -3,
             }),
         );
         // And a facet read with the two orders swapped would have found it at
         // the transposed tile instead.
-        assert_eq!(map.land(3 * 8 + 6, 2 * 8 + 5).unwrap().tile, LandTile(0));
+        assert_eq!(map.land(3 * 8 + 6, 2 * 8 + 5).unwrap().tile, LandTileId(0));
         assert_eq!(map.static_count(), 0);
     }
 

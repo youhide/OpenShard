@@ -144,7 +144,7 @@ fn synthetic_map_covering(real: &WorldMap, places: &[Point], tuning: &Tuning) ->
         },
         |x, y| {
             real.land(x, y).unwrap_or(LandCell {
-                tile: openshard_map::map::LandTile(0),
+                tile: openshard_tiles::LandTileId(0),
                 z: 0,
             })
         },

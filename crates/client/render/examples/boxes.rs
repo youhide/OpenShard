@@ -856,7 +856,7 @@ fn main() {
             down: blocks,
         },
         |_x, _y| openshard_map::map::LandCell {
-            tile: openshard_map::map::LandTile(FLOOR_GRAPHIC.0),
+            tile: openshard_tiles::LandTileId(FLOOR_GRAPHIC.0),
             z: 0,
         },
     );

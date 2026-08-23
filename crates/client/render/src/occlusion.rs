@@ -4809,7 +4809,7 @@ mod tests {
     #[test]
     fn the_cutaway_takes_a_roof_from_the_eye_and_not_from_the_sky() {
         let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: openshard_movement::LandTile(0),
+            tile: openshard_tiles::LandTileId(0),
             z: 0,
         });
         let graphic = Graphic(0x000A);
@@ -4881,7 +4881,7 @@ mod tests {
     #[test]
     fn a_hidden_wall_occludes_nothing() {
         let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: openshard_movement::LandTile(0),
+            tile: openshard_tiles::LandTileId(0),
             z: 0,
         });
         let graphic = Graphic(0x0006);

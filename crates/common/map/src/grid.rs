@@ -140,7 +140,7 @@ impl BlockCoord {
 ///
 /// Derived, never built by a caller: [`LandGrid::index_of`] is the only way to
 /// make one, which is the point. The field is private where
-/// [`LandTile`](crate::map::LandTile)'s is not, and the difference is where the
+/// [`LandTileId`](openshard_tiles::LandTileId)'s is not, and the difference is where the
 /// value comes from — a land tile is read straight off the wire or the file and
 /// has to be constructible, whereas a caller writing out `block_x * blocks_down
 /// + block_y` for itself is the precise bug this type exists to prevent.
@@ -529,7 +529,7 @@ impl LandGrid {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map::LandTile;
+    use openshard_tiles::LandTileId;
 
     /// A 2x2-block grid (16x16 tiles) whose cells number themselves straight
     /// down the file — cell `n` of the array carries tile id `n`.
@@ -541,7 +541,7 @@ mod tests {
             16,
             16,
             (0..4 * CELLS_PER_BLOCK).map(|at| LandCell {
-                tile: LandTile(at as u16),
+                tile: LandTileId(at as u16),
                 z: 0,
             }),
         )
@@ -555,17 +555,17 @@ mod tests {
 
         assert_eq!(
             grid.get(0, 0).unwrap().tile,
-            LandTile(0),
+            LandTileId(0),
             "(0,0) is block 0, cell 0"
         );
         assert_eq!(
             grid.get(8, 0).unwrap().tile,
-            LandTile((2 * CELLS_PER_BLOCK) as u16),
+            LandTileId((2 * CELLS_PER_BLOCK) as u16),
             "(8,0) is block *2*: bx=1, by=0, blocks_down=2 -> 1*2+0",
         );
         assert_eq!(
             grid.get(0, 8).unwrap().tile,
-            LandTile(CELLS_PER_BLOCK as u16),
+            LandTileId(CELLS_PER_BLOCK as u16),
             "(0,8) is block 1: bx=0, by=1 -> 0*2+1",
         );
 
@@ -589,11 +589,11 @@ mod tests {
         // Sphere: `m_Meter[yo * UO_BLOCK_SIZE + xo]`. The opposite of the block
         // order, which is exactly why it is worth a test.
         let grid = grid_16x16();
-        assert_eq!(grid.get(1, 0).unwrap().tile, LandTile(1), "x moves by one");
-        assert_eq!(grid.get(0, 1).unwrap().tile, LandTile(8), "y moves by a row");
+        assert_eq!(grid.get(1, 0).unwrap().tile, LandTileId(1), "x moves by one");
+        assert_eq!(grid.get(0, 1).unwrap().tile, LandTileId(8), "y moves by a row");
         assert_eq!(
             grid.get(7, 7).unwrap().tile,
-            LandTile(63),
+            LandTileId(63),
             "the block's far corner"
         );
     }
@@ -758,7 +758,7 @@ mod tests {
         }
         // The fixture's tiles are all distinct, so the comparison above could
         // not have passed on a grid that happens to be uniform.
-        let distinct: std::collections::HashSet<LandTile> = (0..16u16)
+        let distinct: std::collections::HashSet<LandTileId> = (0..16u16)
             .flat_map(|y| (0..16u16).map(move |x| (x, y)))
             .map(|(x, y)| built.get(x, y).unwrap().tile)
             .collect();
@@ -811,7 +811,7 @@ mod tests {
     fn a_written_cell_is_the_one_read_back() {
         let mut grid = grid_16x16();
         let cell = LandCell {
-            tile: LandTile(999),
+            tile: LandTileId(999),
             z: -12,
         };
         grid.set(9, 3, cell);
@@ -820,9 +820,9 @@ mod tests {
         // one in the block column next door.
         assert_eq!(
             grid.get(8, 3).unwrap().tile,
-            LandTile((2 * CELLS_PER_BLOCK + 3 * 8) as u16)
+            LandTileId((2 * CELLS_PER_BLOCK + 3 * 8) as u16)
         );
-        assert_eq!(grid.get(1, 3).unwrap().tile, LandTile(3 * 8 + 1));
+        assert_eq!(grid.get(1, 3).unwrap().tile, LandTileId(3 * 8 + 1));
 
         grid.set(16, 0, cell);
         assert_eq!(grid.get(16, 0), None, "off the facet writes nothing");

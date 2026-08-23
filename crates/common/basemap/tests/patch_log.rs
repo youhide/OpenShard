@@ -9,18 +9,19 @@ use std::path::{Path, PathBuf};
 
 use openshard_basemap::{BaseError, Loaded, load, patches, write};
 use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, LandTile, StaticItem, WorldMap};
+use openshard_map::map::{LandCell, StaticItem, WorldMap};
 use openshard_map::patch::{Patch, PatchAuthor, PatchError, PatchOp, PatchTime, StaticId};
 use openshard_map::snapshot::{MapRevision, MapSnapshot};
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Facet;
+use openshard_tiles::LandTileId;
 
 const FACET: Facet = Facet(0);
 const BLOCKS: u32 = 9;
 
 /// The ground the fixture starts as, so a test can say what a patch replaced.
 const GROUND: LandCell = LandCell {
-    tile: LandTile(3),
+    tile: LandTileId(3),
     z: 0,
 };
 
@@ -77,7 +78,7 @@ fn patch(parent: MapRevision, ops: Vec<PatchOp>) -> Patch {
 fn a_world_is_its_base_set_plus_its_log() {
     let (base_set, log) = world("resolves");
     let hill = LandCell {
-        tile: LandTile(9),
+        tile: LandTileId(9),
         z: 40,
     };
 
@@ -170,7 +171,7 @@ fn a_patch_that_does_not_follow_the_one_before_it_is_refused() {
 fn a_patch_against_a_world_that_is_not_there_is_refused() {
     let (base_set, log) = world("elsewhere");
     let elsewhere = LandCell {
-        tile: LandTile(200),
+        tile: LandTileId(200),
         z: -12,
     };
     let stray = patch(

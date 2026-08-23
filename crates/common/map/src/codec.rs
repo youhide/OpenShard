@@ -104,9 +104,10 @@ use openshard_protocol::world::Facet;
 
 use crate::chunk::{BLOCKS_PER_CHUNK, Chunk, ChunkCoord, ChunkKey};
 use crate::grid::BlockExtent;
-use crate::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell, LandTile, StaticItem};
+use crate::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell, StaticItem};
 use crate::patch::{Patch, PatchAuthor, PatchOp, PatchTime, StaticId};
 use crate::snapshot::MapRevision;
+use openshard_tiles::LandTileId;
 
 /// What every chunk starts with, so a blob that is not one says so in four
 /// bytes rather than in a plausible facet.
@@ -335,7 +336,7 @@ pub fn decode(bytes: &[u8]) -> Result<Chunk, DecodeError> {
     let land: Vec<LandCell> = bytes[land_from..counts_from]
         .chunks_exact(CELL_BYTES)
         .map(|cell| LandCell {
-            tile: LandTile(u16::from_le_bytes([cell[0], cell[1]])),
+            tile: LandTileId(u16::from_le_bytes([cell[0], cell[1]])),
             z: cell[2] as i8,
         })
         .collect();
@@ -670,7 +671,7 @@ impl<'a> Cursor<'a> {
 
     fn cell(&mut self) -> Result<LandCell, PatchDecodeError> {
         Ok(LandCell {
-            tile: LandTile(self.u16()?),
+            tile: LandTileId(self.u16()?),
             z: self.byte()? as i8,
         })
     }
@@ -903,7 +904,7 @@ mod tests {
     /// One patch of every kind of op, through its bytes and back.
     fn a_patch_of_everything() -> Patch {
         let cell = |tile, z| LandCell {
-            tile: LandTile(tile),
+            tile: LandTileId(tile),
             z,
         };
         let rock = StaticItem {

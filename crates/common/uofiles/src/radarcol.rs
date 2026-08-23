@@ -1,7 +1,7 @@
 //! `radarcol.mul` — one colour per tile, which is the whole of a minimap.
 //!
 //! A flat table of 16-bit colours in two halves: the first
-//! [`LAND_TILE_COUNT`](crate::tiledata::LAND_TILE_COUNT) are land tiles, keyed
+//! [`LAND_TILE_COUNT`](openshard_tiles::LAND_TILE_COUNT) are land tiles, keyed
 //! by land id, and everything after is statics, keyed by `LAND_TILE_COUNT +
 //! graphic`. There is no header, no index and no compression — the offset *is*
 //! the key.
@@ -35,9 +35,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::color::Color16;
-use openshard_map::map::LandTile;
 use openshard_protocol::wire::Graphic;
 use openshard_tiles::LAND_TILE_COUNT;
+use openshard_tiles::LandTileId;
 
 /// `radarcol.mul` could not be read.
 #[derive(Debug)]
@@ -145,7 +145,7 @@ impl RadarColors {
     /// passed where a land id belongs — they are different spaces and the file
     /// keeps them in one array, which is exactly the confusion a newtype is for.
     #[must_use]
-    pub fn land(&self, tile: LandTile) -> Color16 {
+    pub fn land(&self, tile: LandTileId) -> Color16 {
         self.colors
             .get(usize::from(tile.0))
             .copied()
@@ -184,10 +184,10 @@ mod tests {
     fn the_split_is_the_land_table_count() {
         let colors = RadarColors::parse(&table(LAND_TILE_COUNT, 16)).expect("a whole table");
 
-        assert_eq!(colors.land(LandTile(0)), Color16(0));
-        assert_eq!(colors.land(LandTile(3)), Color16(3));
+        assert_eq!(colors.land(LandTileId(0)), Color16(0));
+        assert_eq!(colors.land(LandTileId(3)), Color16(3));
         assert_eq!(
-            colors.land(LandTile(0x3FFF)),
+            colors.land(LandTileId(0x3FFF)),
             Color16(0x3FFF),
             "the last land tile"
         );
@@ -247,6 +247,6 @@ mod tests {
         bytes[0] = 0x34;
         bytes[1] = 0x12;
         let colors = RadarColors::parse(&bytes).expect("a whole table");
-        assert_eq!(colors.land(LandTile(0)), Color16(0x1234));
+        assert_eq!(colors.land(LandTileId(0)), Color16(0x1234));
     }
 }

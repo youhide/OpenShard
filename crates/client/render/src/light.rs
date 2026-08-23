@@ -3707,7 +3707,7 @@ mod tests {
     /// client install.
     fn bare() -> WorldMap {
         WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: openshard_movement::LandTile(0),
+            tile: openshard_tiles::LandTileId(0),
             z: 0,
         })
     }

@@ -97,13 +97,14 @@ fn a_facet_keeps_the_coarse_router_it_was_given_and_no_other() {
     use openshard_map::grid::BlockExtent;
     use openshard_map::map::{LandCell, WorldMap};
     use openshard_map::snapshot::MapSnapshot;
-    use openshard_movement::{LandTile, MapTerrain, NavigationGraph};
+    use openshard_movement::{MapTerrain, NavigationGraph};
     use openshard_protocol::world::Facet;
+    use openshard_tiles::LandTileId;
     use openshard_tiles::TileData;
 
     let flat = || {
         WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
-            tile: LandTile(0),
+            tile: LandTileId(0),
             z: 0,
         })
     };

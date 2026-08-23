@@ -121,7 +121,7 @@ fn draw(
             down: BLOCKS,
         },
         |_, _| LandCell {
-            tile: openshard_map::map::LandTile(LAND),
+            tile: openshard_tiles::LandTileId(LAND),
             z: 0,
         },
     );

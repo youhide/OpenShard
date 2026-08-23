@@ -465,7 +465,7 @@ mod tests {
     /// changed between runs would make every count below a different number.
     fn hillside() -> WorldMap {
         WorldMap::from_blocks(BlockExtent { wide: 8, down: 8 }, |x, y| LandCell {
-            tile: openshard_movement::LandTile(if (x + y).is_multiple_of(17) {
+            tile: openshard_tiles::LandTileId(if (x + y).is_multiple_of(17) {
                 MISSING.0
             } else {
                 GRASS.0
@@ -523,7 +523,7 @@ mod tests {
         let mut dropped = 0;
         for y in ys {
             for x in xs.clone() {
-                if map.land(x, y).unwrap().tile == openshard_movement::LandTile(MISSING.0) {
+                if map.land(x, y).unwrap().tile == openshard_tiles::LandTileId(MISSING.0) {
                     dropped += 1;
                     continue;
                 }

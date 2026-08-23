@@ -295,7 +295,7 @@ impl Scene {
 /// ground itself neither burns nor stops anything.
 fn ground() -> WorldMap {
     WorldMap::from_blocks(BlockExtent { wide: 16, down: 16 }, |_, _| LandCell {
-        tile: openshard_map::map::LandTile(0),
+        tile: openshard_tiles::LandTileId(0),
         z: 0,
     })
 }

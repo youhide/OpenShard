@@ -1159,10 +1159,10 @@ fn radar_colours_are_the_colours_the_things_are() {
         }
     }
 
-    let grass = colors.land(openshard_map::map::LandTile(0x0003));
+    let grass = colors.land(openshard_tiles::LandTileId(0x0003));
     assert_eq!(dominant(grass), "green", "land 0x0003 is grass and is not green");
 
-    let water = colors.land(openshard_map::map::LandTile(0x00A8));
+    let water = colors.land(openshard_tiles::LandTileId(0x00A8));
     assert_eq!(
         dominant(water),
         "blue",
@@ -1179,7 +1179,7 @@ fn radar_colours_are_the_colours_the_things_are() {
     );
     assert_ne!(
         wall,
-        colors.land(openshard_map::map::LandTile(0x0006)),
+        colors.land(openshard_tiles::LandTileId(0x0006)),
         "a static read the land half, so the split is in the wrong place"
     );
 }

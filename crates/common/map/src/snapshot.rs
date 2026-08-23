@@ -185,13 +185,14 @@ impl MapSnapshot {
 mod tests {
     use super::*;
     use crate::grid::BlockExtent;
-    use crate::map::{LandCell, LandTile};
+    use crate::map::LandCell;
+    use openshard_tiles::LandTileId;
 
     #[test]
     fn snapshots_keep_the_facet_that_resolved_an_ambiguous_size() {
         let map = || {
             WorldMap::from_blocks(BlockExtent { wide: 320, down: 256 }, |_, _| LandCell {
-                tile: LandTile(0),
+                tile: LandTileId(0),
                 z: 0,
             })
         };

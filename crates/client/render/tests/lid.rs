@@ -176,7 +176,7 @@ fn draw(
     items: &[GroundItem],
 ) -> Drawn {
     let map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |_, _| LandCell {
-        tile: openshard_map::map::LandTile(0),
+        tile: openshard_tiles::LandTileId(0),
         z: 27,
     });
     let camera = Camera::new(at, VIEWPORT.0, VIEWPORT.1);

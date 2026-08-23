@@ -2541,6 +2541,7 @@ dependencies = [
  "clap",
  "openshard-map",
  "openshard-protocol",
+ "openshard-tiles",
 ]
 
 [[package]]
@@ -2808,6 +2809,7 @@ name = "openshard-map"
 version = "0.0.1"
 dependencies = [
  "openshard-protocol",
+ "openshard-tiles",
 ]
 
 [[package]]

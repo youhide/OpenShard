@@ -570,7 +570,8 @@ pub(crate) mod fixture {
     use openshard_protocol::wire::{Graphic, Hue};
 
     use crate::grid::BlockExtent;
-    use crate::map::{LandCell, LandTile, StaticItem, WorldMap};
+    use crate::map::{LandCell, StaticItem, WorldMap};
+    use openshard_tiles::LandTileId;
 
     /// A facet that is **not** a whole number of chunks on either axis.
     ///
@@ -587,7 +588,7 @@ pub(crate) mod fixture {
     /// read lands on a cell that names where it should have been.
     pub fn cell(x: u16, y: u16) -> LandCell {
         LandCell {
-            tile: LandTile(u16::try_from(u32::from(x) * TILES + u32::from(y)).unwrap()),
+            tile: LandTileId(u16::try_from(u32::from(x) * TILES + u32::from(y)).unwrap()),
             z: (i32::from(x) - i32::from(y)) as i8,
         }
     }
@@ -646,8 +647,8 @@ pub(crate) mod fixture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map::LandTile;
     use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_tiles::LandTileId;
 
     const FACET: Facet = Facet(0);
 
@@ -872,7 +873,7 @@ mod tests {
         let first = chunk.land_in_block(chunk.blocks().next().expect("a block"))[0];
         assert_eq!(
             first.tile,
-            LandTile(u16::try_from(origin_x * fixture::TILES + origin_y).unwrap())
+            LandTileId(u16::try_from(origin_x * fixture::TILES + origin_y).unwrap())
         );
     }
 }

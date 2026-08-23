@@ -13,6 +13,7 @@ use std::fmt;
 
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
+use openshard_tiles::LandTileId;
 
 use crate::grid::{BlockCoord, BlockExtent, BlockIndex, LandGrid};
 
@@ -25,18 +26,10 @@ pub const CELLS_PER_BLOCK: usize = (BLOCK_SIZE * BLOCK_SIZE) as usize;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct LandCell {
     /// Index into the land table of `tiledata.mul`.
-    pub tile: LandTile,
+    pub tile: LandTileId,
     /// The ground's height here.
     pub z: i8,
 }
-
-/// An index into `tiledata.mul`'s land table.
-///
-/// Land and static entries both look like `u16` in the files, but are indexed
-/// into different halves of tiledata. Keeping them distinct prevents a static
-/// art graphic from quietly becoming a mountain, or the reverse.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default)]
-pub struct LandTile(pub u16);
 
 /// One thing standing on the ground.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -539,7 +532,7 @@ mod tests {
     #[test]
     fn off_the_map_is_none_not_a_panic() {
         let map = WorldMap::from_blocks(BlockExtent { wide: 2, down: 2 }, |x, y| LandCell {
-            tile: LandTile(x + y),
+            tile: LandTileId(x + y),
             z: 0,
         });
         assert_eq!(map.land(16, 0), None);
@@ -561,7 +554,7 @@ mod tests {
         // Three blocks across, two down, and every tile carries its own
         // position — so a cell that came from the wrong tile says which.
         let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 2 }, |x, y| LandCell {
-            tile: LandTile(x),
+            tile: LandTileId(x),
             z: y as i8,
         });
 
@@ -586,7 +579,7 @@ mod tests {
     fn a_tiles_corners_are_its_neighbours_own_heights() {
         // A ramp running south-east: z is x + y.
         let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, y| LandCell {
-            tile: LandTile(3),
+            tile: LandTileId(3),
             z: (x + y) as i8,
         });
         assert_eq!(map.land_corners(2, 3), Some([5, 6, 6, 7]));
@@ -624,7 +617,7 @@ mod tests {
     #[test]
     fn the_maps_average_is_the_average_of_its_corners() {
         let map = WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |x, y| LandCell {
-            tile: LandTile(3),
+            tile: LandTileId(3),
             z: ((x * 3) as i8).wrapping_sub((y * 2) as i8),
         });
         for y in 0..8u16 {
