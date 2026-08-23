@@ -1020,19 +1020,33 @@ graph over spans names neither.
   problem does not arise. Residency is
   [direction G](new_map_representation/plan.md#g--residency-and-size-deferred-on-purpose)'s
   either way.
-- **N1 found: the count tables are bigger than the spans they address.** 8.2 MB
-  of `[u8; 64]` against 6.5 MB of spans, because only 2.3 M of the 7.7 M columns
-  in a static-bearing block are exceptions and the other 71% of every table is a
-  zero. A per-block `u64` occupancy mask with counts for the occupied columns
-  only is about 3.3 MB, and it replaces a 64-byte prefix sum with a
-  `count_ones` — smaller *and* fewer bytes read. Not taken: it is a layout
-  change with a query change in it, and N3 was the measurement that would say
-  whether the query is on a hot path at all. **N3 says it is**: the landing half
-  is 167 of a 208 ns expansion and `SpanIndex::stored` — a block lookup and that
-  64-byte prefix sum — is inside every one of its eight. Still not taken here,
-  because the gain is now against a number that is already the size of A\*'s own
-  machinery; it is the next thing to try if a node expansion has to get cheaper
-  again. The same gate the packed static record is under.
+- **N1 found: the count tables are bigger than the spans they address.
+  ✅ Fixed.** 8.2 MB of `[u8; 64]` against 6.5 MB of spans, because a block with
+  any static in it carried sixty-four bytes whether or not sixty-four of its
+  columns held anything. N1 estimated the emptiness at 71% from the census; the
+  bake counts it exactly, and it is worse: **1,388,743 of the 7,727,616 cells
+  those 120,744 tables address own a run, so 82% of every table was a zero.**
+  It was filed twice as *not taken* — first because N3 had not yet said whether
+  the query is on a hot path, then because the gain was against a number already
+  the size of A\*'s own machinery.
+  **The occupancy mask is what it proposed and what was built**: a `u64` bit per
+  cell beside the base, counts packed one byte per *set* bit in a facet-wide
+  run, and the prefix sum taken over the occupied columns before this one rather
+  than over all sixty-four cells — reached with a `count_ones` on a word the
+  lookup has already loaded. A column with nothing stored — 82% of them —
+  returns on the bit test without touching the counts at all.
+  Measured on facet 0, release: the addressing is **3.3 MB where it was 8.2**,
+  the whole bake **11,713,607 B (11.2 MiB) where it was 16,603,552 (15.8)**, and
+  a landing off the bake **158 ns where it was 180** — two runs of each agreeing
+  to the tenth, with `steps_out_of` 200 ns against 218. Smaller *and* fewer bytes
+  read, which is what the finding predicted.
+  **The answers did not move**: 1,635,392 spans as before, and `span_index`'s
+  whole-facet oracle agrees with `stand_surfaces` on all 29,360,128 columns for
+  both abilities. Nothing is serialised, so `ROUTING_VERSION` is untouched and
+  no rebake is owed. The control for the addressing is
+  `the_rank_is_over_occupied_columns_and_not_over_cells`, where a rank taken over
+  cells sends the block's last cell sixty-one bytes past the end of its run.
+  The packed static record stays under its own gate.
 - **N1 found: the map and the overlay disagree about a platform of no
   thickness.** `MapTerrain::is_obstructed` gives one a body from `base` to
   `base`, so it is in the way of anything *below* it whose head passes the
@@ -1386,7 +1400,12 @@ first made the join cheap (a flood over the endpoint's region instead of one
 exact search per node of it: p50 3.70 → 0.53 ms at 32 tiles on facet 0, and the
 worst reading of any band 6.50 → 2.89), the second made it rare (a refusal is
 written on the body and the graph is not asked again for two seconds). What is
-left in that section is filed observations with no defect under them.
+left in that section is filed observations with no defect under them — **and one
+of those has now been taken as well**: N1's count tables, which the mask cut
+from 8.2 MB to 3.3 and the bake from 15.8 MiB to 11.2 without the answers
+moving. It was the one the plan named as *the next thing to try if a node
+expansion has to get cheaper again*, so what it leaves behind is the same
+sentence pointing at the packed static record instead.
 
 **Rebake before running anything.** `ROUTING_VERSION` is 4, so every artifact
 baked before N4 is refused — and refused *loudly*: the shard does not boot.

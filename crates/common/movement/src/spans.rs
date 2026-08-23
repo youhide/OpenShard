@@ -201,19 +201,52 @@ enum LandKind {
 
 /// One block's column index into the span run.
 ///
-/// The `[u8; 64]` is the plan's own choice and it is a cache line: a column's
-/// spans start at `base` plus the counts of the columns before it in the block,
-/// which is a byte-wise prefix sum over one line rather than a 256-byte table of
-/// offsets. The census caps a column at twelve spans, so a count is a byte —
-/// but the builder asserts that rather than truncating, because a base set is a
-/// world nobody has counted.
+/// **Sixteen bytes, and a count only where there is something to count.** The
+/// plan's first choice was a `[u8; 64]` per block — one cache line, addressed by
+/// a byte-wise prefix sum — and N1 measured what that costs: 8.2 MB of tables
+/// against 6.5 MB of spans, because a block with any static at all carries
+/// sixty-four bytes whether or not sixty-four of its columns hold anything, and
+/// on facet 0 most of them do not. The mask is that finding taken: one bit per
+/// cell says whether the column owns a run, and the counts live packed in
+/// [`SpanIndex::counts`], one byte per *set* bit.
+///
+/// So the prefix sum is over the occupied columns of the block rather than over
+/// all sixty-four of them, and it is reached through a `count_ones` on a word
+/// the lookup has already loaded. The census caps a column at twelve spans, so
+/// a count is still a byte — but the builder asserts that rather than
+/// truncating, because a base set is a world nobody has counted.
+///
+/// **Measured on facet 0:** the addressing is 3.3 MB where it was 8.2 MB, the
+/// whole bake 11.2 MiB where it was 15.8, and a landing off the bake 158 ns
+/// where it was 180 — smaller *and* fewer bytes read, which is what the finding
+/// predicted. The spans it addresses did not move: 1,635,392 of them, and the
+/// whole-facet oracle in `span_index` agrees with the walk on all 29,360,128
+/// columns for both abilities.
 struct BlockTable {
     /// Where this block's columns begin in [`SpanIndex::spans`].
     base: u32,
-    /// How many spans each of the block's sixty-four columns owns, in the
+    /// Which of the block's sixty-four columns own a run, bit per cell in the
     /// block's own row-major cell order.
-    counts: [u8; CELLS_PER_BLOCK],
+    ///
+    /// A column with statics over it can still own nothing — a wall standing on
+    /// a mountainside is a block with a table and a cell with no bit — so this
+    /// is not "has statics"; it is "has spans stored", which is the question
+    /// [`SpanIndex::stored`] is asking.
+    occupied: u64,
+    /// Where this block's counts begin in [`SpanIndex::counts`]: one byte per
+    /// set bit of [`occupied`](Self::occupied), in ascending cell.
+    counts: u32,
 }
+
+/// The occupancy mask is one bit per cell, so a block's cells must fit a word.
+///
+/// Pinned at compile time rather than assumed: [`BLOCK_SIZE`] is the map's to
+/// choose, and a map that widened its block would otherwise index spans by a
+/// mask that had quietly stopped covering it.
+const _: () = assert!(
+    CELLS_PER_BLOCK == u64::BITS as usize,
+    "a block's cells must fit the occupancy mask"
+);
 
 /// A block with no statics at all: every column of it is bare ground.
 ///
@@ -240,6 +273,15 @@ pub struct SpanIndex {
     blocks: Vec<u32>,
     /// One per block that holds any static — 120,744 of 458,752 on facet 0.
     tables: Vec<BlockTable>,
+    /// How many spans each *occupied* column owns: one byte per set bit of the
+    /// tables' masks, tables in [`tables`](Self::tables) order and columns in
+    /// each block's row-major cell order.
+    ///
+    /// Packed rather than sixty-four bytes a block because the occupancy is
+    /// what the map turned out to be: 1,388,743 columns of facet 0 own a run,
+    /// against the 7,727,616 cells the 120,744 dense tables addressed — so 82%
+    /// of every table was a zero, and the tables were half the bake.
+    counts: Vec<u8>,
     /// Every stored span, blocks in [`blocks`](Self::blocks) order and columns
     /// in each block's row-major cell order.
     spans: Vec<Span>,
@@ -253,6 +295,7 @@ impl fmt::Debug for SpanIndex {
         f.debug_struct("SpanIndex")
             .field("blocks", &self.blocks.len())
             .field("tables", &self.tables.len())
+            .field("columns", &self.counts.len())
             .field("spans", &self.spans.len())
             .field("bytes", &self.resident_bytes())
             .finish()
@@ -279,6 +322,7 @@ impl SpanIndex {
         let mut index = Self {
             blocks: vec![BARE; extent.count() as usize],
             tables: Vec::new(),
+            counts: Vec::new(),
             spans: Vec::new(),
             land: land_kinds(tiles),
         };
@@ -293,15 +337,19 @@ impl SpanIndex {
             }
             let mut table = BlockTable {
                 base: u32::try_from(index.spans.len()).expect("a facet's spans fit a u32"),
-                counts: [0; CELLS_PER_BLOCK],
+                occupied: 0,
+                counts: u32::try_from(index.counts.len()).expect("a facet's columns fit a u32"),
             };
             let (origin_x, origin_y) = coord.origin();
             // A block's items are sorted by `(y, x)`, which *is* its row-major
             // cell order — so grouping them by tile walks the block's columns in
             // ascending cell, and the counts can be laid down in one pass with
-            // no second sort. The assertion below is what says so out loud: get
-            // this wrong and every column after the first reads a run belonging
-            // to somebody else, silently.
+            // no second sort. It is what the packed counts are addressed by as
+            // well as the spans: a count belongs to the `n`th set bit of the
+            // mask, so laying them down in any other order would hand a column
+            // its neighbour's length. The assertion below is what says so out
+            // loud: get this wrong and every column after the first reads a run
+            // belonging to somebody else, silently.
             let mut at = 0;
             let mut last_cell = None;
             while at < items.len() {
@@ -317,12 +365,22 @@ impl SpanIndex {
                 );
                 last_cell = Some(cell);
                 surfaces_of(map, tiles, &index.land, x, y, &items[at..at + run], &mut column);
-                table.counts[cell] = u8::try_from(column.len()).unwrap_or_else(|_| {
+                let held = u8::try_from(column.len()).unwrap_or_else(|_| {
                     panic!(
                         "({x}, {y}) holds {} standable surfaces; a count is a byte",
                         column.len()
                     )
                 });
+                // A column whose statics leave nothing to stand on gets no bit
+                // and no count. Not for correctness — a stored zero would sum
+                // to the same offsets and hand back the same empty slice — but
+                // because it is the population the packed counts are sized by,
+                // and a byte spent saying "nothing" is what the dense table was
+                // spending 82% of itself on.
+                if held > 0 {
+                    table.occupied |= 1 << cell;
+                    index.counts.push(held);
+                }
                 index.spans.append(&mut column);
                 at += run;
             }
@@ -332,6 +390,7 @@ impl SpanIndex {
         }
         index.spans.shrink_to_fit();
         index.tables.shrink_to_fit();
+        index.counts.shrink_to_fit();
         index
     }
 
@@ -341,6 +400,7 @@ impl SpanIndex {
     pub fn resident_bytes(&self) -> usize {
         self.blocks.capacity() * size_of::<u32>()
             + self.tables.capacity() * size_of::<BlockTable>()
+            + self.counts.capacity()
             + self.spans.capacity() * size_of::<Span>()
             + self.land.capacity() * size_of::<LandKind>()
     }
@@ -357,6 +417,14 @@ impl SpanIndex {
         self.tables.len()
     }
 
+    /// How many columns own a stored run — the population the packed counts are
+    /// sized by, and the one the dense tables paid sixty-four bytes a block to
+    /// address.
+    #[must_use]
+    pub fn column_count(&self) -> usize {
+        self.counts.len()
+    }
+
     /// One column's stored spans, empty for a column with no statics — which
     /// is not the same as a column with nothing to stand on. See
     /// [`Spans::surfaces`], which is where the land answers for the empty case.
@@ -371,15 +439,27 @@ impl SpanIndex {
         let table = &self.tables[table as usize];
         let cell = (usize::from(y) % BLOCK_SIZE as usize) * BLOCK_SIZE as usize
             + (usize::from(x) % BLOCK_SIZE as usize);
-        // The prefix sum is over one cache line, and it is the price of storing
-        // counts rather than offsets — 64 bytes a block instead of 256.
+        let bit = 1_u64 << cell;
+        if table.occupied & bit == 0 {
+            // The column tier, reached without touching the counts at all: the
+            // mask is in the same sixteen bytes as the base, so a column with
+            // nothing stored costs one word and one test. That is 82% of the
+            // columns of a block with statics in it.
+            return &[];
+        }
+        // Which of the block's occupied columns this one is. The prefix sum is
+        // still a prefix sum — a count is a length, not an offset — but it runs
+        // over the occupied columns before this one rather than over all
+        // sixty-four cells, and `count_ones` finds where they start.
+        let at = table.counts as usize;
+        let rank = (table.occupied & (bit - 1)).count_ones() as usize;
         let from = table.base as usize
-            + table.counts[..cell]
+            + self.counts[at..at + rank]
                 .iter()
                 .copied()
                 .map(usize::from)
                 .sum::<usize>();
-        &self.spans[from..from + usize::from(table.counts[cell])]
+        &self.spans[from..from + usize::from(self.counts[at + rank])]
     }
 }
 
@@ -1114,9 +1194,10 @@ mod tests {
     #[test]
     fn each_column_of_a_block_reads_its_own_run() {
         // Four columns of one block, each with a different number of surfaces
-        // over it. The CSR addressing is a prefix sum of the counts before the
-        // column, so a run read one item out of place is a floor at the wrong
-        // height rather than a panic — which is what this pins.
+        // over it. The CSR addressing is a prefix sum of the counts of the
+        // occupied columns before this one, so a run read one item out of place
+        // is a floor at the wrong height rather than a panic — which is what
+        // this pins.
         let mut scene = Scene::flat(0);
         scene
             .floor(1, 0, 10, 4)
@@ -1134,6 +1215,57 @@ mod tests {
             vec![0],
             "and a column of its own between them"
         );
+    }
+
+    #[test]
+    fn the_rank_is_over_occupied_columns_and_not_over_cells() {
+        // The counts are packed one byte per occupied column, so a column finds
+        // its own by how many *set bits* stand before it — not by how many
+        // cells do. Three columns spread across one block, the last of them in
+        // the block's last cell, is the shape that tells the two apart: a rank
+        // taken over cells would send cell 63 sixty-one bytes past the end of a
+        // three-byte run.
+        let mut scene = Scene::flat(0);
+        scene
+            .floor(0, 0, 10, 4)
+            .floor(4, 3, 20, 4)
+            .floor(7, 7, 30, 4)
+            .floor(7, 7, 40, 4);
+        let index = bake(&scene);
+        let spans = view(&scene, &index);
+        assert_eq!(index.table_count(), 1, "one block holds all three");
+        assert_eq!(
+            index.column_count(),
+            3,
+            "and three of its sixty-four columns own a run"
+        );
+        assert_eq!(heights(&spans, 0, 0), vec![14, 0], "the first cell");
+        assert_eq!(heights(&spans, 4, 3), vec![24, 0], "one in the middle");
+        assert_eq!(heights(&spans, 7, 7), vec![44, 34, 0], "and the last");
+    }
+
+    #[test]
+    fn a_column_whose_statics_leave_nothing_to_stand_on_owns_no_run() {
+        // The mask says "has spans stored", not "has statics": a wall on a
+        // mountainside is a cell with items and no surface. What it asserts is
+        // the *size* rather than the addressing — a stored zero would answer
+        // the same, since it sums to the same offset and yields the same empty
+        // slice — and the size is the whole point of the packing.
+        let mut scene = Scene::flat(30);
+        scene
+            .land_everywhere(OTHER_GROUND)
+            .land_art(OTHER_GROUND, TileFlags::BLOCK)
+            .wall(0, 0, 30, 20)
+            .floor(5, 5, 40, 4);
+        let index = bake(&scene);
+        let spans = view(&scene, &index);
+        assert!(
+            heights(&spans, 0, 0).is_empty(),
+            "the wall stands on ground nobody stands on"
+        );
+        assert_eq!(index.table_count(), 1, "the block holds both statics");
+        assert_eq!(index.column_count(), 1, "and one of them is a surface");
+        assert_eq!(heights(&spans, 5, 5), vec![44], "which is the floor's top");
     }
 
     #[test]

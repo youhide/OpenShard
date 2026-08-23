@@ -58,9 +58,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let bytes = index.resident_bytes();
     println!(
-        "  {} spans over {} blocks with statics",
+        "  {} spans over {} columns of {} blocks with statics",
         index.span_count(),
+        index.column_count(),
         index.table_count(),
+    );
+    // What the occupancy mask is worth, printed rather than argued: a dense
+    // table addresses every cell of every block that holds a static, and this
+    // is how many of those cells actually own a run.
+    println!(
+        "  {:.1}% of the cells those blocks address own a run",
+        100.0 * index.column_count() as f64 / (index.table_count() * 64) as f64,
     );
     println!(
         "  resident {bytes} B ({:.1} MiB), {:.2} bytes per column of the facet",
