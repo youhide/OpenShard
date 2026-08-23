@@ -576,6 +576,19 @@ fn base_set_of(config: &Config, facet: Facet) -> Option<&Path> {
         .map(std::path::PathBuf::as_path)
 }
 
+/// The ruleset `facet` runs under: the operator's answer where there is one, and
+/// the answer the facet's number meant in retail where there is not.
+///
+/// The fall-back is [`FacetRules::classic`] rather than any value spelled here,
+/// because the same default has to be the one the *client* assumes — see its
+/// doc, which is where that argument lives.
+fn rules_of(config: &Config, facet: Facet) -> FacetRules {
+    match config.world.free_movement.get(&openshard_config::FacetKey(facet)) {
+        Some(&free_movement) => FacetRules { free_movement },
+        None => FacetRules::classic(facet),
+    }
+}
+
 /// Read one facet, from whichever source the config named for it.
 ///
 /// The stamp is the half that matters. Before base sets there was one source,
@@ -789,7 +802,7 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
             ),
             "facet loaded"
         );
-        world = world.with_facet(facet, map, Some(coarse));
+        world = world.with_facet(facet, map, Some(coarse), rules_of(config, facet));
     }
     info!(
         facets = config.world.facets.len(),

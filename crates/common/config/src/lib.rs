@@ -533,6 +533,32 @@ pub struct WorldConfig {
     #[serde(default)]
     pub base_sets: BTreeMap<FacetKey, PathBuf>,
 
+    /// Which facets let bodies walk through each other, where that is not what
+    /// the facet's number meant in retail.
+    ///
+    /// ServUO's `MapRules.FreeMovement`. Keyed by facet like
+    /// [`base_sets`](WorldConfig::base_sets), and a facet not named here keeps
+    /// the retail answer for its number: off on facet 0 (Felucca, where a body
+    /// in the way costs ten stamina to get past) and on everywhere else.
+    ///
+    /// # Setting it is choosing a stutter
+    ///
+    /// The stock client decides the same question for itself, hardcoded, with
+    /// `_world.Map.Index == 0` — it is not told. So a facet whose answer here
+    /// disagrees with its number is a facet where the client predicts one thing
+    /// and the shard answers another, which a player feels as being snapped
+    /// back a tile. That is a legitimate thing to want (a Felucca-ruleset shard
+    /// running its world in slot 3) and it is not free; hence a setting, and not
+    /// a guess.
+    ///
+    /// A table of its own rather than one entry in a per-facet rules table,
+    /// because `FreeMovement` is the only one of `MapRules`' four flags this
+    /// engine has a reader for. The other three are named in
+    /// `openshard_state::facet_rules`, where the second one to grow a reader is
+    /// what decides whether these become one table.
+    #[serde(default)]
+    pub free_movement: BTreeMap<FacetKey, bool>,
+
     /// The seed the world's roll generator starts a *fresh* world from.
     ///
     /// Absent means the engine's own default seed stands — this is an override,
@@ -557,6 +583,7 @@ impl Default for WorldConfig {
             start: StartConfig::default(),
             facets: default_facets(),
             base_sets: BTreeMap::new(),
+            free_movement: BTreeMap::new(),
             seed: None,
         }
     }

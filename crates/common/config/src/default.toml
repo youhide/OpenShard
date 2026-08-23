@@ -55,6 +55,21 @@ facets = [0]
 # [world.base_sets]
 # 0 = "felucca.osbase"
 
+# Which facets let bodies walk through each other -- ServUO's
+# MapRules.FreeMovement, and the first thing a shove asks about.
+#
+# One line per facet, keyed like `base_sets`. A facet not named here keeps the
+# answer its number meant in retail: off on facet 0 (Felucca, where getting past
+# somebody standing in a doorway costs 10 stamina) and on everywhere else.
+#
+# Setting it against the number is a real choice with a real cost. The stock
+# client decides this for itself, hardcoded, from the facet number alone -- it is
+# never told -- so a facet that disagrees is one where the client draws a step
+# the shard then refuses, and a player feels it as being snapped back a tile.
+#
+# [world.free_movement]
+# 3 = false
+
 # The seed the world's rolls start from, on a world that has never been saved.
 #
 # Leave it out and the engine's own default seed stands. Set it to reproduce a

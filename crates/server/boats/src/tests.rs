@@ -142,7 +142,17 @@ fn a_sea() -> WorldState {
     // the terrain is looking at.
     let (map, tiles) = sea().into_shard(Facet(0));
     let mut facets = BTreeMap::new();
-    facets.insert(Facet(0), FacetState::new(Some(map), None, SIZE, SIZE, &tiles));
+    facets.insert(
+        Facet(0),
+        FacetState::new(
+            Some(map),
+            None,
+            SIZE,
+            SIZE,
+            openshard_state::facet_rules::FacetRules::classic(Facet(0)),
+            &tiles,
+        ),
+    );
     WorldState::new(facets, Facet(0), tiles, multis(), (0, 0), 1)
 }
 

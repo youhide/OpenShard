@@ -1,4 +1,4 @@
-use openshard_protocol::world::RawFastwalkKey;
+use openshard_protocol::world::{RawFastwalkKey, RawStepSequence};
 
 use super::tests::*;
 use super::*;

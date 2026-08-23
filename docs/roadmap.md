@@ -801,50 +801,117 @@ has not been read. Note what the wording settles: the line goes to the **mover**
 and the reveal is the mover's too — shoving a hidden player does not reveal
 *them*.
 
-#### What is ours to decide, and it is one thing
+The staff pair *has* been read now, off the same table:
+`1019040` is "You shove them out of the way." and `1019041` its invisible form.
+All four are in `protocol/src/localized.rs`'s catalogue.
 
-**This engine has no facet rulesets.** `Facet` is an id and nothing else; there
-is no `MapRules`, no Trammel/Felucca split, and nothing anywhere that says a
-facet is a ruleset. So the first row of that table has nowhere to come from, and
-the choice is:
+#### What was ours to decide, and the ruleset it grew
 
-- **Shove everywhere.** One rule, no new concept, and the client's own
-  `_world.Map.Index == 0` clause then disagrees on every facet but the first —
-  the client would predict a free walk-through where the shard charges stamina.
-  Cheap, and wrong in a way a player feels as a stutter.
-- **Grow a facet ruleset.** Honest, and it is a thing this engine will want
-  anyway: `BeneficialRestrictions` and `HarmfulRestrictions` live in the same
-  ServUO enum and are the same question asked about spells. It is a component or
-  a field on `FacetState`, not a plan.
+**This engine had no facet rulesets.** `Facet` was an id and nothing else, so the
+rule's first row had nowhere to come from. The choice was between shoving
+everywhere — cheap, and wrong wherever the client's hardcoded
+`_world.Map.Index == 0` disagrees — and growing the ruleset. **The ruleset was
+grown**, as this entry predicted it would have to be:
+[`FacetRules`](../crates/server/state/src/facet_rules.rs), one field, read
+through `FacetState::rules()`.
 
-The second is almost certainly right, and it is worth deciding **before** the
-shove rather than during it — a shove built on "everywhere" has the facet test
-missing rather than wrong, which is the kind of gap nothing fails on.
+Three decisions inside it are worth having written down.
 
-#### The seams it would use
+**The default is derived from the facet number, which is the one place this
+engine reads meaning into one.** That looks like exactly the guess a config is
+supposed to replace, and it is not: the *client* decides this question for
+itself, hardcoded, and is never told. A default that disagreed with the client
+would be a stutter on every step near a body. So `FacetRules::classic` is a
+statement about what the other end already believes, and `world.free_movement`
+is the operator's way to overrule it — while knowingly buying the stutter.
 
-All of them exist:
+**Only the flag with a reader.** `MapRules` has four; `Internal` names a map this
+engine does not have, and `BeneficialRestrictions`/`HarmfulRestrictions` are the
+same question asked of a *spell*. They are named in the module doc and not built,
+because a flag nothing asks about is a flag nothing keeps honest — and the second
+one to grow a reader is what decides whether the config's table becomes a
+per-facet rules table.
 
-- `Stamina { current, max }` (`state/src/components.rs:2076`), and
-  `combat::spend_step_stamina`, which is already the one place a step charges
-  stamina.
-- `WorldState::reveal` (`state/src/runtime.rs:3376`) — ServUO's
-  `RevealingAction`.
-- `WorldState::localized_message`, plus four entries in
-  `protocol/src/localized.rs`'s catalogue, which `localized::contains`
-  debug-asserts against.
-- `WorldState::crowd_near` already finds who is in the way; what the shove needs
-  and it does not have is *which entity*, since `Bodies` deliberately carries
-  feet and no identity. The shove wants the shoved mobile (is it hidden? is it
-  staff?), so it is a second, server-side lookup at the moment a step is
-  refused — not a change to `Bodies`.
-- And the wire is already right: `StatusFlags::IGNORE_MOBILES`.
+**The ruleset is read one layer above where ServUO reads it.** `CheckShove` asks
+about `FreeMovement` first; `crowd_near` asks instead, so a facet with free
+movement has no crowd at all. That is the same answer for a step and a *different*
+one for a route: on a Trammel-ruleset facet a path across a market no longer
+detours round the shoppers, which is what "people are not obstacles here" means
+when said once instead of twice.
 
-**Done when** a rested player walks through a standing NPC and arrives ten
-stamina poorer, a tired one is stopped, neither is a rubber-band on a stock
-client, and a staff member does it for free. Its natural companion is the
-client's own end — `steer.rs` still plans through a crowd, which is the entry
-above.
+#### How it is built
+
+- **The refusal names itself.** `Walk::Refused` carried no reason, and `motion.rs`
+  guessed one — which is why `RefusedReason::TooFast` was a variant nothing ever
+  sent, and a speedhack and a wall were one number in the metrics.
+  `movement::Refusal` has the four `Walker::request` actually distinguishes, in
+  the order it asks them.
+- **A refusal by a body is told from a refusal by ground by asking again.** The
+  same step, the same doors, with `Bodies::nobody`: `None` is the ground, and
+  ground does not move for ten stamina. Only then is the identity fetched —
+  `WorldState::body_standing_at`, which is `crowd_near`'s identity half and is
+  paid for only on the steps a body has already refused.
+- **The rule itself is `WorldState::shove`**, beside `crowd_near`,
+  `walks_through_bodies` and `body_blocks` — the family that already answers "who
+  is in whose way". Three of ServUO's eight branches are absent because they are
+  decided before anything reaches it, and its doc says which is where.
+- **One shove per step**, which is `m_Pushing`: a paid shove re-asks the step with
+  the whole crowd gone, so two overlapping bodies cost one shove, not two.
+- **Both step paths ask it** — the client's `0x02` and the server's decree — so
+  the rule is a property of the engine rather than of the packet. On the decree
+  path it almost never fires, because a shove is paid in stamina and a creature
+  carries no pool; that is deliberate and its own paragraph in `shove`'s doc.
+
+**Done**: a rested player walks through a standing body and arrives ten stamina
+poorer, a tired one is stopped, a wall stops both, a facet with free movement
+charges nobody anything, and the decreed step obeys the same rule. Five tests in
+`tick/tests.rs`, and the wall one is the control that keeps the shove from being
+"retry the step without its crowd".
+
+#### Found while closing it
+
+- 🚩 **The unnamed full-suite flake has a name, and it is wider than a test.**
+  The previous entry recorded "one full-suite run reported a single failure with
+  no name captured". It is
+  `a_creature_routes_past_its_exact_budget_over_the_coarse_graph`, and three
+  `movement::navigation` tests join it — all four green in isolation, all four
+  red under a loaded full-suite run:
+
+  ```
+  left:  Point { x: 37, y: 31, z: 0 }
+  right: Point { x: 2, y: 48, z: 0 }
+  ```
+
+  The cause is `MAX_SEARCH_TIME: Duration::from_millis(50)`
+  (`movement/src/path.rs:43`): the path search is bounded by **wall-clock**, so a
+  loaded machine gives up sooner and the creature turns somewhere else. The flake
+  is the small half. The large half is that this timer sits inside the tick, and
+  `docs/architecture.md` says the tick is deterministic and a world replays roll
+  for roll — a search that answers differently by how busy the box is breaks
+  that, silently, in production and not only in a test. What would close it is a
+  budget the search counts rather than measures; `ai::PATH_BUDGET` is already
+  that shape, so the timer may simply be a second limiter that no longer has a
+  job.
+- **`occupy_chair` never reserved the seat**, though its doc said it did — "this
+  tiny server-side marker reserves that occupied seat". Nothing checked whether
+  another mobile was already `Seated` on that chair. It was unreachable rather
+  than harmless: the only route onto an occupied chair's tile was through the
+  occupant's own body, and a body was a wall. The shove made it a route and the
+  next thing through seated them both. Fixed here, with the test that found it —
+  and it is the shape to expect more of, since every rule written against "a
+  body is a wall" now has a way past.
+- **The crowd blocks flanks and ServUO's shove does not.** `steps_out_of` asks
+  `Bodies::blocks` about a diagonal's two flanks as well as its landing, which is
+  this engine's own choice and predates the shove. ServUO checks `OnMoveOver`
+  only for the tile being *entered*. So a diagonal squeezed between two bodies is
+  refused by a body and has nobody in its landing to shove: `shove_target`
+  answers `None` and the step stays refused. Conservative, and possibly right —
+  but it is a divergence nobody has weighed, and the place to weigh it is the
+  flank rule rather than the shove.
+- **A shove does not disturb the shoved.** ServUO's `CheckShove` writes nothing
+  to `shoved` at all — no reveal, no message, no interruption — and this matches
+  it. Worth recording because it reads like an omission: being walked through
+  while meditating, hidden or casting costs the person standing there nothing.
 
 ### ~~Backlog: `can_step` does not check the corner, and two obstruct tests are red~~ — closed
 

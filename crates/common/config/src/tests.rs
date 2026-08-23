@@ -672,3 +672,43 @@ fn a_base_set_table_survives_being_written_back_out() {
     let back: Config = toml::from_str(&text).expect("and parse again");
     assert_eq!(back.world.base_sets, config.world.base_sets);
 }
+
+/// The free-movement table, read and written like the base-set one beside it.
+///
+/// **`false` is the value worth carrying**, and it is the one a table keyed by
+/// facet makes easy to lose: absence means "whatever this number meant in
+/// retail", so an operator turning the rule *on* for facet 0 and an operator
+/// saying nothing about facet 0 must not round-trip to the same config. Serde
+/// would drop a `false` written as a bare `bool` field with `skip_serializing_if`
+/// on it; here the distinction is the key's presence, which is why both a `true`
+/// and a `false` entry are asserted.
+#[test]
+fn a_free_movement_table_survives_being_written_back_out() {
+    let mut config = Config::default();
+    config.world.client_files = "/uo".into();
+    // Felucca's rules in slot 3, and Trammel's in slot 0 — the two overrides
+    // that exist, one each way round.
+    config.world.free_movement.insert(FacetKey(Facet(3)), false);
+    config.world.free_movement.insert(FacetKey(Facet(0)), true);
+    let text = toml::to_string(&config).expect("a config should serialise");
+    let back: Config = toml::from_str(&text).expect("and parse again");
+    assert_eq!(back.world.free_movement, config.world.free_movement);
+    assert_eq!(
+        back.world.free_movement.get(&FacetKey(Facet(3))),
+        Some(&false),
+        "a facet turned off survived as an entry rather than as an absence"
+    );
+}
+
+/// A config from before the setting existed loads, and says nothing about any
+/// facet — which is what leaves every facet on [`FacetRules::classic`].
+///
+/// [`FacetRules::classic`]: openshard_state::facet_rules::FacetRules::classic
+#[test]
+fn free_movement_defaults_to_saying_nothing() {
+    let config = config(MINIMAL);
+    assert!(
+        config.world.free_movement.is_empty(),
+        "an unset table is empty, not a table of answers"
+    );
+}

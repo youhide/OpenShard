@@ -44,11 +44,12 @@ use openshard_tiles::TileData;
 use crate::boat::Plank;
 use crate::components::{
     Access, Amount, Body, Client, Combat, Contained, CorpseBody, CraftedBy, Drawn, Equipped, Ghost, Heading,
-    HearsGhosts, Hidden, Hitpoints, InRegion, Meditating, Movement, Name, Position, Quality, Staff,
+    HearsGhosts, Hidden, Hitpoints, InRegion, Meditating, Movement, Name, Position, Quality, Staff, Stamina,
     Stealthing, TradeWindow, body_opens_doors,
 };
 use crate::connection::Connection;
 use crate::dialogue::Dialogue;
+use crate::facet_rules::FacetRules;
 use crate::harvest::Banks;
 use crate::obstruct::Obstructions;
 use crate::quest::QuestDefs;
@@ -62,6 +63,38 @@ const Z_WITHOUT_A_MAP: i8 = 0;
 
 /// "You stop meditating." — the line a broken trance says, ServUO's 500134.
 const STOP_MEDITATING: ClilocId = ClilocId(500_134);
+
+/// What a shove says, by who is doing it and whether they can see who they
+/// pushed. ServUO's `Mobile.CheckShove` picks from exactly this square
+/// (`Server/Mobile.cs:3535`), and the four lines are read off the client's own
+/// `Cliloc.enu`:
+///
+/// | | visible | hidden |
+/// |---|---|---|
+/// | staff | "You shove them out of the way." | "You shove something invisible out of the way." |
+/// | player | "Being perfectly rested, you shove them out of the way." | "Being perfectly rested, you shove something invisible out of the way." |
+///
+/// Two things the wording settles, and both are rules rather than flavour: the
+/// line goes to the **mover**, so nobody is told they were shoved; and the
+/// hidden form deliberately does not name who, so a shove is a way to learn
+/// somebody is there and never a way to learn who.
+///
+/// The staff pair says nothing about resting because staff pay nothing — the
+/// text is the branch, written out.
+const SHOVE_BY_STAFF: ClilocId = ClilocId(1_019_040);
+/// See [`SHOVE_BY_STAFF`].
+const SHOVE_BY_STAFF_HIDDEN: ClilocId = ClilocId(1_019_041);
+/// See [`SHOVE_BY_STAFF`].
+const SHOVE_WHILE_RESTED: ClilocId = ClilocId(1_019_042);
+/// See [`SHOVE_BY_STAFF`].
+const SHOVE_WHILE_RESTED_HIDDEN: ClilocId = ClilocId(1_019_043);
+
+/// What getting past a body costs a player who is not staff.
+///
+/// ServUO's `Stam -= 10` (`Server/Mobile.cs:3544`), and the whole throttle: a
+/// player shoving their way across a crowded bank arrives with nothing left to
+/// run with, which is what makes the rule a cost rather than a permission.
+pub const SHOVE_STAMINA: u16 = 10;
 
 /// The hue and font a private system line is drawn in — the client's usual muted
 /// grey, so it reads as the server talking rather than as a mobile speaking.
@@ -478,6 +511,17 @@ pub struct FacetState {
     /// kind of thing — a fact about *this ground*, keyed by coordinates, that no
     /// entity owns. Not persisted; see [`Banks`].
     pub banks: Banks,
+    /// What this facet allows: the ruleset, as against the ground.
+    ///
+    /// The odd field out here, and deliberately so — every other one is a place
+    /// or an index over a place, and this is a *policy*. It is set by
+    /// [`new`](Self::new) and never written again, because a facet does not
+    /// change its mind about whether people are obstacles while players are
+    /// standing on it; read through [`rules()`](Self::rules).
+    ///
+    /// See [`FacetRules`], and in particular why its default is derived from a
+    /// facet number this crate otherwise treats as opaque.
+    rules: FacetRules,
 }
 
 impl FacetState {
@@ -490,6 +534,13 @@ impl FacetState {
     /// — see [`obstructions`](Self::obstructions), and the live layer of
     /// [`world`](Self::world), which is a projection of the other two.
     ///
+    /// `rules` is passed rather than derived, even though
+    /// [`FacetRules::classic`] would derive it from a number the caller has in
+    /// hand: this type never learns which facet it *is*, and giving it the
+    /// number so it could look up its own policy would be handing it a second
+    /// identity to disagree with the key it is filed under. The caller knows
+    /// both and says one.
+    ///
     /// The tile table is the one argument that is not a fact about this facet:
     /// it is the install's, and it is here because the span bake inside
     /// [`Ground`] is built from the pair.
@@ -499,6 +550,7 @@ impl FacetState {
         coarse: Option<NavigationGraph>,
         width: u32,
         height: u32,
+        rules: FacetRules,
         tiles: &TileData,
     ) -> Self {
         Self {
@@ -511,7 +563,14 @@ impl FacetState {
             boats: crate::boat::Boats::default(),
             regions: Regions::new(width, height),
             banks: Banks::default(),
+            rules,
         }
+    }
+
+    /// What this facet allows. See [`FacetRules`].
+    #[must_use]
+    pub const fn rules(&self) -> FacetRules {
+        self.rules
     }
 
     /// The facet's static long-distance guide, when it has a map in movement's
@@ -1319,7 +1378,18 @@ impl WorldState {
     /// street outside it, and this runs on every step by anyone.
     #[must_use]
     pub fn crowd_near(&self, facet: Facet, mover: EntityId, centre: Point, reach: u32) -> Vec<Point> {
-        if self.walks_through_bodies(mover) {
+        // A facet with free movement has no crowd, for anybody. ServUO asks this
+        // inside `CheckShove` — the first of its branches — but asking it here
+        // is the same rule one layer earlier, and the layer matters: a crowd
+        // that is empty is a crowd a *route* is not planned around either, and a
+        // Trammel-ruleset facet where people are not obstacles is one where a
+        // path through a market should not detour round the shoppers.
+        //
+        // It is also what keeps this end and the client's agreeing, which is the
+        // whole reason the ruleset's default is the facet's number: the stock
+        // client's own crowd is empty on the same facets, decided the same way.
+        // See [`FacetRules::free_movement`].
+        if self.facet_state(facet).rules().free_movement || self.walks_through_bodies(mover) {
             return Vec::new();
         }
         let mut crowd: Vec<Point> = self
@@ -1397,6 +1467,122 @@ impl WorldState {
         self.registry.has::<Body>(entity)
             && self.is_alive(entity)
             && !(self.registry.has::<Hidden>(entity) && self.registry.has::<Staff>(entity))
+    }
+
+    /// The body standing at `at` that a step onto that tile would walk into.
+    ///
+    /// **The identity half of [`crowd_near`](Self::crowd_near)**, and the reason
+    /// it is a second lookup rather than a wider return type there:
+    /// [`Bodies`](openshard_movement::Bodies) carries feet and no identity on
+    /// purpose, and a step needs a crowd on every step while a shove needs a
+    /// *name* only on the steps a body has already refused. One is the hot path
+    /// and the other is a rule about a refusal — so the identity is fetched
+    /// where it is wanted, once, and never carried through the plan.
+    ///
+    /// The vertical test is [`Bodies::blocks`](openshard_movement::Bodies::blocks)
+    /// asked of one body rather than a copy of its arithmetic, so a mezzanine
+    /// that is walkable for the step is walkable for the shove: whichever way
+    /// that rule is written, it is written once.
+    ///
+    /// `None` where the tile is empty of anyone in the way, which for a caller
+    /// that has just been refused *by* a body means the refusal came from a
+    /// flank rather than from the landing. See [`shove`](Self::shove)'s caller.
+    #[must_use]
+    pub fn body_standing_at(&self, facet: Facet, at: Point) -> Option<EntityId> {
+        self.facet_state(facet)
+            .sectors()
+            .mobiles_near(at, 0)
+            .find(|&(entity, feet)| {
+                self.body_blocks(entity) && openshard_movement::Bodies::standing(&[feet]).blocks(at)
+            })
+            .map(|(entity, _)| entity)
+    }
+
+    /// `mover` walks into `shoved`: whether the step goes through, and what it
+    /// costs.
+    ///
+    /// **A body in the way is not a wall.** ServUO's `Mobile.CheckShove`
+    /// (`Server/Mobile.cs:3516`): a player at exactly full stamina pushes past
+    /// for ten stamina, a line and a reveal, and only a player already one point
+    /// down is stopped. That is what keeps a doorway from being griefable by
+    /// standing in it, and it prices walking through people in the currency a
+    /// fight already cares about.
+    ///
+    /// # Three of ServUO's branches are missing, and none of them is skipped
+    ///
+    /// `CheckShove` opens with four conditions that all mean "allowed, silently
+    /// and free", and every one of them is already decided before anything can
+    /// reach here:
+    ///
+    /// - *the facet has `FreeMovement`* and *the mover has `IgnoreMobiles`* are
+    ///   both [`crowd_near`](Self::crowd_near)'s first line — a mover exempt
+    ///   either way has an empty crowd, so no step of theirs is ever refused by
+    ///   a body;
+    /// - *either party is dead* is [`walks_through_bodies`](Self::walks_through_bodies)
+    ///   for the mover and [`body_blocks`](Self::body_blocks) for the shoved;
+    /// - *the shoved is hidden staff* is the rest of `body_blocks`.
+    ///
+    /// So this is called only where the answer is genuinely in doubt, and the
+    /// caller's evidence that it is in doubt is that a body **refused a step**.
+    /// The fifth, `m_Pushing`, is the caller's too and for the same reason: it
+    /// means "one shove per `Move`", and a step here is one `Move`.
+    ///
+    /// # A mobile with no stamina pool cannot shove
+    ///
+    /// The reverse of [`combat::spend_step_stamina`]'s reading of the same
+    /// absence, and deliberately: there a missing pool means walking costs
+    /// nothing, because the pool is what a step draws *down*. Here it is a
+    /// price, and "perfectly rested" is not a state something without a notion
+    /// of rest can be in. In practice the pool is a player's — it is written at
+    /// entry — so this is also the conservative answer: a creature that is
+    /// stopped by a body today goes on being stopped by one.
+    ///
+    /// [`combat::spend_step_stamina`]: https://docs.rs/openshard-combat
+    pub fn shove(&mut self, mover: EntityId, shoved: EntityId) -> bool {
+        // Hidden decides which of the pair is sent, and it is asked of the
+        // *shoved* without the staff clause `body_blocks` pairs it with: a
+        // hidden game master never gets this far, and a hidden player does.
+        let hidden = self.registry.has::<Hidden>(shoved);
+        if self.registry.has::<Staff>(mover) {
+            // Staff shove for free — a message and nothing else. No stamina, and
+            // no reveal either: a game master walking through a crowd would
+            // otherwise undo their own `.hide` one bystander at a time.
+            let line = if hidden {
+                SHOVE_BY_STAFF_HIDDEN
+            } else {
+                SHOVE_BY_STAFF
+            };
+            self.localized_message(mover, line, "");
+            return true;
+        }
+        let Some(&Stamina { current, max }) = self.registry.get::<Stamina>(mover) else {
+            return false;
+        };
+        // **Exactly** full, which is ServUO's `Stam == StamMax` and not "enough
+        // to pay". One point down is refused, and that asymmetry is the
+        // mechanic: shoving is something a rested player does once, not
+        // something a tired one does repeatedly.
+        if current != max {
+            return false;
+        }
+        self.registry.insert(
+            mover,
+            Stamina {
+                current: current.saturating_sub(SHOVE_STAMINA),
+                max,
+            },
+        );
+        // The mover is revealed, never the shoved. Barging through a crowd is a
+        // loud thing to do; being barged into is not, and a hidden player found
+        // by being walked into stays hidden.
+        self.reveal(mover);
+        let line = if hidden {
+            SHOVE_WHILE_RESTED_HIDDEN
+        } else {
+            SHOVE_WHILE_RESTED
+        };
+        self.localized_message(mover, line, "");
+        true
     }
 
     /// Whether a mobile is alive for the purpose of getting in somebody's way: a
@@ -3628,7 +3814,10 @@ mod tests {
     fn a_shard() -> WorldState {
         let (map, tiles) = Scene::flat_holding(16, 16, 0).into_shard(Facet(0));
         let mut facets = BTreeMap::new();
-        facets.insert(Facet(0), FacetState::new(Some(map), None, 16, 16, &tiles));
+        facets.insert(
+            Facet(0),
+            FacetState::new(Some(map), None, 16, 16, FacetRules::classic(Facet(0)), &tiles),
+        );
         WorldState::new(
             facets,
             Facet(0),
@@ -3813,11 +4002,25 @@ mod tests {
         let mut facets = BTreeMap::new();
         facets.insert(
             Facet(0),
-            FacetState::new(Some(first), None, 8, 8, &TileData::empty()),
+            FacetState::new(
+                Some(first),
+                None,
+                8,
+                8,
+                FacetRules::classic(Facet(0)),
+                &TileData::empty(),
+            ),
         );
         facets.insert(
             Facet(1),
-            FacetState::new(Some(second), None, 8, 8, &TileData::empty()),
+            FacetState::new(
+                Some(second),
+                None,
+                8,
+                8,
+                FacetRules::classic(Facet(1)),
+                &TileData::empty(),
+            ),
         );
         let mut state = WorldState::new(
             facets,

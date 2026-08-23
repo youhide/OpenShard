@@ -41,6 +41,7 @@ pub mod components;
 pub mod connection;
 pub mod craft;
 pub mod dialogue;
+pub mod facet_rules;
 pub mod guild;
 pub mod harvest;
 pub mod instrument;

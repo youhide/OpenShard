@@ -39,10 +39,24 @@ pub fn occupy_chair(state: &mut WorldState, mobile: EntityId) {
         .then_some(entity)
     });
     match chair {
-        Some(chair) => {
+        // **One chair, one occupant**, and this used to be unwritten rather than
+        // enforced: the only route onto an occupied chair's tile was through the
+        // occupant's own body, and a body was a wall. The shove made it a route
+        // — a rested player pushes past for ten stamina — and the first thing
+        // that reached this line twice for one chair seated them both, so the
+        // second sitter's client drew them in a chair somebody else was in.
+        //
+        // Reaching the tile and taking the seat are different things, which is
+        // what the marker was always for.
+        Some(chair)
+            if !state
+                .registry
+                .query::<Seated>()
+                .any(|(other, seat)| other != mobile && seat.chair == chair) =>
+        {
             state.registry.insert(mobile, Seated { chair });
         }
-        None => {
+        Some(_) | None => {
             state.registry.remove::<Seated>(mobile);
         }
     }

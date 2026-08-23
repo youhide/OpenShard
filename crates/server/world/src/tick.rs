@@ -50,7 +50,7 @@ use openshard_protocol::speech::{Font, RawFont, RawTalkMode, SpokenMessage, Talk
 use openshard_protocol::wire::{Graphic, Hue, Layer, RawHue, RawLayer};
 use openshard_protocol::world::{
     DeathStatus, Facet, Light, LightLevel, LoginComplete, LogoutAck, MapChange, MapSize, PlayerStart,
-    PlayerUpdate, Point, RawStepSequence, SeasonChange, Sight, WalkAck, WalkReject, WalkRequest,
+    PlayerUpdate, Point, SeasonChange, Sight, WalkAck, WalkReject, WalkRequest,
 };
 use openshard_protocol::{
     access::{AccessLevel, AuthorityNotice},
@@ -65,6 +65,7 @@ use openshard_state::components::{
     Drawn, Equipped, Ghost, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name, Position, Resistance,
     Ridden, Riding, SpawnedBy, Spellbook, Stackable, Stamina, Stats, Vendor,
 };
+use openshard_state::facet_rules::FacetRules;
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
 use openshard_state::{FacetState, Gameplay, Outbound, TICKS_PER_SECOND, TooltipMode, WorldState};
@@ -245,6 +246,7 @@ impl World {
                 None,
                 FACET_WITHOUT_A_MAP.0,
                 FACET_WITHOUT_A_MAP.1,
+                FacetRules::classic(Facet(DEFAULT_FACET)),
                 // No map, so nothing to bake — the table this would be baked
                 // over is the empty one `WorldState` starts with, and
                 // `with_tiles` rebakes every facet that has ground when the
@@ -395,22 +397,27 @@ impl World {
         self
     }
 
-    /// Give the default facet a map.
+    /// Give the default facet a map, under the ruleset its number ran in retail.
     pub fn with_map(self, map: MapSnapshot) -> Self {
         let facet = self.state.default_facet;
-        self.with_facet(facet, map, None)
+        self.with_facet(facet, map, None, FacetRules::classic(facet))
     }
 
-    /// Load `map` and its already-baked coarse router as facet `facet`.
+    /// Load `map` and its already-baked coarse router as facet `facet`, under
+    /// `rules`.
     ///
     /// The facet is named here as well as carried by the snapshot, because this
     /// is the key the world files it under and a caller loading Malas into slot
-    /// three should say so once, out loud.
+    /// three should say so once, out loud. The ruleset is named for the same
+    /// reason and not folded into that: a caller doing exactly that — Malas into
+    /// slot three — is precisely the one whose facet number no longer says what
+    /// its rules are, so [`FacetRules::classic`] is offered rather than applied.
     pub fn with_facet(
         mut self,
         facet: Facet,
         map: MapSnapshot,
         coarse: Option<openshard_movement::NavigationGraph>,
+        rules: FacetRules,
     ) -> Self {
         debug_assert_eq!(map.facet(), facet, "a snapshot loaded into another facet's slot");
         let (width, height) = (map.map().width(), map.map().height());
@@ -421,7 +428,7 @@ impl World {
         );
         self.state.facets.insert(
             facet,
-            FacetState::new(Some(map), coarse, width, height, self.state.tiles()),
+            FacetState::new(Some(map), coarse, width, height, rules, self.state.tiles()),
         );
         self
     }

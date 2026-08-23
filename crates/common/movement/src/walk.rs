@@ -35,7 +35,40 @@ pub enum Walk {
         facing: Facing,
     },
     /// The step is refused. The client snaps back and resets its sequence.
-    Refused,
+    Refused(Refusal),
+}
+
+/// Why a walk request was refused.
+///
+/// [`Walker::request`] has four ways to say no and used to say all four the same
+/// way, on the argument that the caller only has to send a `0x21` either way.
+/// That was true until something wanted to *act* on the difference: a shove is a
+/// rule about the one refusal that has a body behind it, and there is no way to
+/// spot that one from the outside without asking the terrain the same question a
+/// second time.
+///
+/// The variants are in the order `request` asks them in, and that order is the
+/// rule: a request that is out of sequence is never charged against the pace,
+/// and a request refused by the pace never reaches the ground. So this names the
+/// **first** thing that said no, not the only one that would have.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Refusal {
+    /// The client's walk sequence was out of step with the server's.
+    OutOfSequence,
+    /// Faster than a body moves. What a speedhack looks like from here, and also
+    /// what a lagged client catching up on a queue of held steps looks like.
+    TooFast,
+    /// The step leaves the coordinate space — there is no tile to allow.
+    OffTheMap,
+    /// The ground said no, or something standing on it did.
+    ///
+    /// **The two are not told apart here**, and deliberately: this crate is
+    /// handed a [`Footing`] and cannot see who is in it. A caller that needs the
+    /// difference — the shove does — asks the same footing again without its
+    /// [`Bodies`](crate::footing::Bodies), which is one lookup on the one path
+    /// that has already refused a step rather than a widened return type on the
+    /// path every step takes.
+    Blocked,
 }
 
 /// The tiles a straight line from `from` to `to` crosses, endpoints excluded —
@@ -166,7 +199,7 @@ impl Walker {
         // `openshard_protocol::world::RawStepSequence::interpret`.
         if self.sequence.accept(request.sequence).is_err() {
             self.sequence.reset();
-            return Walk::Refused;
+            return Walk::Refused(Refusal::OutOfSequence);
         }
 
         // The geometry, decided by the same function the client predicts with —
@@ -187,14 +220,14 @@ impl Walker {
             // the connection: the client snaps back, which is what a legitimate
             // one needs and what an illegitimate one deserves.
             self.sequence.reset();
-            return Walk::Refused;
+            return Walk::Refused(Refusal::TooFast);
         }
 
         let Intent::Stepped { .. } = intent else {
             // Walked off the edge of the coordinate space. The client cannot
             // express where it wanted to go, so there is nowhere to allow.
             self.sequence.reset();
-            return Walk::Refused;
+            return Walk::Refused(Refusal::OffTheMap);
         };
 
         // `step_allowed` and not `can_step`: the corner rule is half of what a
@@ -203,7 +236,7 @@ impl Walker {
         // cannot disagree about where the step is going.
         let Some(landed) = step_allowed(footing, self.position, request.facing.direction) else {
             self.sequence.reset();
-            return Walk::Refused;
+            return Walk::Refused(Refusal::Blocked);
         };
 
         self.position = landed;
@@ -958,7 +991,7 @@ mod tests {
                 now(),
                 false
             ),
-            Walk::Refused
+            Walk::Refused(Refusal::OutOfSequence)
         );
         assert_eq!(walker.position, Point::new(100, 100, 0), "did not move");
         assert!(walker.sequence.is_fresh(), "and stays fresh");
@@ -991,7 +1024,7 @@ mod tests {
                 now(),
                 false
             ),
-            Walk::Refused
+            Walk::Refused(Refusal::Blocked)
         );
         assert!(
             walker.sequence.is_fresh(),
@@ -1192,7 +1225,7 @@ mod tests {
                 now(),
                 false
             ),
-            Walk::Refused
+            Walk::Refused(Refusal::OffTheMap)
         );
         assert_eq!(walker.position, Point::new(0, 0, 0));
 
@@ -1207,7 +1240,7 @@ mod tests {
                 now(),
                 false
             ),
-            Walk::Refused
+            Walk::Refused(Refusal::OffTheMap)
         );
     }
 

@@ -584,6 +584,22 @@ pub const SERVER_MESSAGES: &[Message] = &[
         fallback: "EXIT",
     },
     Message {
+        id: ClilocId(1019040),
+        fallback: "You shove them out of the way.",
+    },
+    Message {
+        id: ClilocId(1019041),
+        fallback: "You shove something invisible out of the way.",
+    },
+    Message {
+        id: ClilocId(1019042),
+        fallback: "Being perfectly rested, you shove them out of the way.",
+    },
+    Message {
+        id: ClilocId(1019043),
+        fallback: "Being perfectly rested, you shove something invisible out of the way.",
+    },
+    Message {
         id: ClilocId(1028335),
         fallback: "Strength",
     },

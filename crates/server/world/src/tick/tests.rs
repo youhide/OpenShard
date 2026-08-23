@@ -15,7 +15,7 @@ use openshard_protocol::packet::encode_packet;
 use openshard_protocol::serial::RawSerial;
 use openshard_protocol::skill::SkillLock;
 use openshard_protocol::wire::{Graphic, Hue, RawSkillId};
-use openshard_protocol::world::{Aggression, RangedRange};
+use openshard_protocol::world::{Aggression, RangedRange, RawStepSequence};
 use openshard_skills::SkillUsed;
 use openshard_state::components::Riding;
 use openshard_state::components::{
@@ -134,7 +134,8 @@ fn a_facet_keeps_the_coarse_router_it_was_given_and_no_other() {
     let spans = openshard_movement::spans::SpanIndex::build(&map, &empty);
     let baked =
         NavigationGraph::build(&nothing_over(&map, &empty, &spans), 8, 8).expect("an 8x8 facet has a graph");
-    let loaded = World::new(START).with_facet(Facet(0), snapshot(), Some(baked));
+    let loaded =
+        World::new(START).with_facet(Facet(0), snapshot(), Some(baked), FacetRules::classic(Facet(0)));
     assert_eq!(
         loaded
             .state
@@ -518,15 +519,89 @@ fn a_server_step_turns_first_then_moves() {
     );
 }
 
+/// Take `entity` one point off a full stamina pool, which is the whole of the
+/// difference between shoving and being stopped.
+///
+/// One point, and not "empty": ServUO's test is `Stam == StamMax`, so the
+/// interesting case is the player who is *almost* rested. A test that drained
+/// the pool would pass against a `>= 10` rule this one refuses.
+fn tire(world: &mut World, entity: EntityId) {
+    let &openshard_state::components::Stamina { current, max } = world
+        .state
+        .registry
+        .get::<openshard_state::components::Stamina>(entity)
+        .expect("a player carries a stamina pool");
+    assert_eq!(current, max, "a player enters the world rested");
+    world.state.registry.insert(
+        entity,
+        openshard_state::components::Stamina {
+            current: current - 1,
+            max,
+        },
+    );
+}
+
+/// **A rested player shoves past a body rather than stopping at it** —
+/// `Mobile.CheckShove`, and the rule this engine used to contradict the stock
+/// client about on every facet.
+///
+/// The three halves of the claim are asserted together because separating them
+/// would let a shove that costs nothing, or one that says nothing, pass: the
+/// step goes through, ten stamina are gone, and the mover is told which of the
+/// four lines applies.
 #[test]
-fn a_walk_into_another_mobile_is_refused() {
+fn a_rested_player_shoves_past_a_body() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
     let entity = world.state.players[&connection];
     let from = world.state.registry.get::<Position>(entity).unwrap().0;
     // The player begins facing south, so this is a real step rather than a turn.
+    let onto = Point::new(from.x, from.y + 1, from.z);
+    spawn_mobile_at(&mut world, onto, 50, now);
+    let _ = world.drain_outbound().count();
+
+    world.queue(Command::Walk {
+        connection,
+        request: walk(0, Direction::South),
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world.state.registry.get::<Position>(entity).unwrap().0,
+        onto,
+        "a rested player walks through the body rather than into it"
+    );
+    let stamina = world
+        .state
+        .registry
+        .get::<openshard_state::components::Stamina>(entity)
+        .copied()
+        .expect("a player carries a stamina pool");
+    assert_eq!(
+        stamina.max - stamina.current,
+        openshard_state::runtime::SHOVE_STAMINA,
+        "and arrives ten stamina poorer"
+    );
+    assert!(
+        world
+            .drain_outbound()
+            .any(|out| out.packet.first() == Some(&0xC1)),
+        "the mover is told they shoved somebody"
+    );
+}
+
+/// The other side of the same rule, and the only branch that stops anybody: one
+/// point below full is refused, exactly as it was before the shove existed.
+#[test]
+fn a_tired_player_is_stopped_by_a_body() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let from = world.state.registry.get::<Position>(entity).unwrap().0;
     spawn_mobile_at(&mut world, Point::new(from.x, from.y + 1, from.z), 50, now);
+    tire(&mut world, entity);
     let _ = world.drain_outbound().count();
 
     let mut refused: Cursor<StepRefused> = world.bus().cursor();
@@ -553,15 +628,60 @@ fn a_walk_into_another_mobile_is_refused() {
     );
 }
 
+/// A wall is still a wall, and it is what keeps the shove from being "a refused
+/// step is retried without its crowd".
+///
+/// The control the pair above cannot be: a rested player is exactly the case
+/// that shoves, so if the ground were re-asked without its bodies this one would
+/// walk into a wall for ten stamina.
 #[test]
-fn a_server_step_into_another_mobile_is_refused() {
+fn a_rested_player_does_not_shove_past_a_wall() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let from = world.state.registry.get::<Position>(entity).unwrap().0;
+    // A closed door is the live world's own way of being in the way, and it is
+    // in the overlay rather than in the crowd.
+    let (_, _) = place_door(&mut world, Point::new(from.x, from.y + 1, from.z), now);
+    let _ = world.drain_outbound().count();
+
+    world.queue(Command::Walk {
+        connection,
+        request: walk(0, Direction::South),
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world.state.registry.get::<Position>(entity).unwrap().0,
+        from,
+        "the ground refused, and ground does not move for ten stamina"
+    );
+    let stamina = world
+        .state
+        .registry
+        .get::<openshard_state::components::Stamina>(entity)
+        .copied()
+        .expect("a player carries a stamina pool");
+    assert_eq!(
+        stamina.current, stamina.max,
+        "and nothing was charged for the refusal"
+    );
+}
+
+/// The decreed step is held to the same rule, which is what keeps the shove from
+/// being a property of the `0x02` path rather than of the engine.
+#[test]
+fn a_server_step_shoves_and_a_tired_one_does_not() {
     let now = Instant::now();
     let mut world = world();
     let connection = enter(&mut world, now);
     let entity = world.state.players[&connection];
     let serial = serial_of(&world, connection);
     let from = world.state.registry.get::<Position>(entity).unwrap().0;
-    spawn_mobile_at(&mut world, Point::new(from.x, from.y + 1, from.z), 50, now);
+    let onto = Point::new(from.x, from.y + 1, from.z);
+    spawn_mobile_at(&mut world, onto, 50, now);
+    tire(&mut world, entity);
 
     let mut refused: Cursor<StepRefused> = world.bus().cursor();
     world.queue(Command::Step {
@@ -573,11 +693,83 @@ fn a_server_step_into_another_mobile_is_refused() {
     assert_eq!(
         world.state.registry.get::<Position>(entity).unwrap().0,
         from,
-        "a server-directed mobile also stays off the occupied tile"
+        "a tired server-directed mobile also stays off the occupied tile"
     );
     assert!(
         world.bus().read(&mut refused).any(|event| event.entity == entity),
         "the blocked server step is observable"
+    );
+
+    // Rested, the same decree goes through.
+    let &openshard_state::components::Stamina { max, .. } = world
+        .state
+        .registry
+        .get::<openshard_state::components::Stamina>(entity)
+        .expect("a player carries a stamina pool");
+    world
+        .state
+        .registry
+        .insert(entity, openshard_state::components::Stamina { current: max, max });
+    world.queue(Command::Step {
+        serial,
+        direction: Direction::South.to_bits(),
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world.state.registry.get::<Position>(entity).unwrap().0,
+        onto,
+        "and a rested one shoves through"
+    );
+}
+
+/// **A facet with free movement has no crowd at all**, so nobody is in anybody's
+/// way and nothing is charged for walking past them.
+///
+/// The first branch of `CheckShove`, asked one layer earlier than ServUO asks
+/// it — in `crowd_near` — which is what makes it true of a *route* as well as of
+/// a step. Facet 1 is Trammel's number, and the client decides the same question
+/// the same way from the number alone.
+#[test]
+fn a_facet_with_free_movement_has_nobody_in_the_way() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    add_empty_facet(&mut world, Facet(1));
+    assert!(
+        world.state.facet_state(Facet(1)).rules().free_movement,
+        "facet 1 runs Trammel rules"
+    );
+
+    let at = Point::new(START.0, START.1, 0);
+    world.state.move_to(entity, Facet(1), at);
+    let onto = Point::new(at.x, at.y + 1, at.z);
+    let other = spawn_mobile_at(&mut world, onto, 50, now);
+    let other = world.state.registry.entity_of(other).expect("a spawned mobile");
+    world.state.move_to(other, Facet(1), onto);
+    let _ = world.drain_outbound().count();
+
+    world.queue(Command::Walk {
+        connection,
+        request: walk(0, Direction::South),
+    });
+    world.tick(now);
+
+    assert_eq!(
+        world.state.registry.get::<Position>(entity).unwrap().0,
+        onto,
+        "the body was never in the way here"
+    );
+    let stamina = world
+        .state
+        .registry
+        .get::<openshard_state::components::Stamina>(entity)
+        .copied()
+        .expect("a player carries a stamina pool");
+    assert_eq!(
+        stamina.current, stamina.max,
+        "and walking past somebody cost nothing, because there was no shove"
     );
 }
 
@@ -1202,12 +1394,24 @@ fn an_occupied_chair_does_not_move_a_second_player() {
     });
     world.tick(now + WALK_INTERVAL + WALK_INTERVAL + WALK_INTERVAL);
 
+    // The seat, not the tile. A body in a chair is a body, so a rested second
+    // player shoves past it and stands on the same tile for ten stamina — which
+    // is what the shove rule says everywhere else and there is no reason a chair
+    // would be the exception. What a chair *does* have is one occupant, and that
+    // is the assertion: reaching the tile is not taking the seat.
     assert_eq!(
         world.state.registry.get::<Position>(second_entity),
-        Some(&Position(Point::new(START.0 + 2, START.1, 0))),
+        Some(&Position(chair_at)),
+        "the second player shoved onto the chair's tile"
+    );
+    assert!(
+        world.registry().has::<openshard_state::Seated>(first_entity),
+        "and the occupant is still sitting in it"
+    );
+    assert!(
+        !world.registry().has::<openshard_state::Seated>(second_entity),
         "a second character cannot overwrite the seat occupant"
     );
-    assert!(!world.registry().has::<openshard_state::Seated>(second_entity));
 }
 
 /// A bottle graphic — the engine has no built-in double-click behaviour for it,
@@ -13106,7 +13310,14 @@ pub(super) fn add_empty_facet_sized(world: &mut World, facet: Facet, width: u32,
         facet,
         // No map, so there is nothing to bake a span index over: the table
         // is only along for the signature.
-        FacetState::new(None, None, width, height, &openshard_tiles::TileData::empty()),
+        FacetState::new(
+            None,
+            None,
+            width,
+            height,
+            FacetRules::classic(facet),
+            &openshard_tiles::TileData::empty(),
+        ),
     );
 }
 
@@ -13665,6 +13876,111 @@ fn a_closed_door_blocks_a_walk() {
         world.registry().get::<Position>(entity).unwrap().0,
         Point::new(START.0, START.1, Z_WITHOUT_A_MAP),
         "and nobody moved"
+    );
+}
+
+/// **The other half of being dead, beside walking through bodies.**
+///
+/// ServUO's `MovementImpl.Check` sets `ignoreDoors` for anything not alive
+/// (`Scripts/Services/Pathing/Movement.cs:173`) and `IsOk` then steps past
+/// anything carrying `TileFlag.Door`. Without it a player who died behind a
+/// shut door is sealed in: the living cannot see a ghost, so nobody is coming
+/// to open it, and the ghost has no hands to open it with either.
+///
+/// The same player, alive and then dead, on the same leaf — because the rule is
+/// a fact about the walker and not about the door.
+#[test]
+fn a_ghost_walks_through_a_shut_door_and_the_living_do_not() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = serial_of(&world, connection);
+    let doorway = Point::new(START.0, START.1 + 1, Z_WITHOUT_A_MAP);
+    place_door(&mut world, doorway, now);
+
+    let mut refused: Cursor<StepRefused> = world.bus().cursor();
+    world.queue(Command::Walk {
+        connection,
+        request: walk(0, Direction::South),
+    });
+    world.tick(now);
+    assert_eq!(
+        world.bus().read(&mut refused).count(),
+        1,
+        "alive, the leaf is in the way"
+    );
+    assert_eq!(
+        world.registry().get::<Position>(entity).unwrap().0,
+        Point::new(START.0, START.1, Z_WITHOUT_A_MAP),
+    );
+
+    world.queue(Command::Damage {
+        serial,
+        amount: 500,
+        damage_type: 0,
+        by: None,
+    });
+    world.tick(now);
+    assert!(
+        world.state.registry.has::<Ghost>(entity),
+        "the player is a ghost now"
+    );
+
+    // The refusal reset the sequence, so the ghost's first step is a fresh one.
+    world.queue(Command::Walk {
+        connection,
+        request: walk(0, Direction::South),
+    });
+    world.tick(now);
+    assert_eq!(
+        world.registry().get::<Position>(entity).unwrap().0,
+        doorway,
+        "the ghost drifts through the shut leaf"
+    );
+    assert!(
+        !world.registry().query::<Door>().next().unwrap().1.is_open,
+        "and the door is still shut behind it — nothing was opened to get through"
+    );
+}
+
+/// A ghost has no hands, so the leaf it walks through is one it cannot work.
+///
+/// ServUO gates every double-click on `CheckAlive` before the item is asked
+/// (`Server/Mobile.cs:4402`). Here it matters more than as a refusal for its own
+/// sake: the dead are invisible to the living, so a ghost that could swing a
+/// door would be opening the town's shopfronts with nobody to blame.
+#[test]
+fn a_ghost_cannot_work_a_door() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let serial = serial_of(&world, connection);
+    let (door, door_serial) = place_door(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+
+    world.queue(Command::Damage {
+        serial,
+        amount: 500,
+        damage_type: 0,
+        by: None,
+    });
+    world.tick(now);
+    let _ = packets_for(&mut world, connection); // drain the death burst
+
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(door_serial.raw())),
+    });
+    world.tick(now);
+    assert!(
+        !world.registry().get::<Door>(door).unwrap().is_open,
+        "the door did not budge for the dead"
+    );
+    assert!(
+        packets_for(&mut world, connection)
+            .iter()
+            .any(|p| { (p[0] == 0x1C || p[0] == 0xAE) && String::from_utf8_lossy(p).contains("I am dead") }),
+        "and it says why"
     );
 }
 
@@ -14285,7 +14601,7 @@ fn shard_over(scene: Scene, coarse: Option<openshard_movement::NavigationGraph>)
     let (map, tiles) = scene.into_shard(Facet(0));
     world()
         .with_tiles(tiles, openshard_uofiles::multi::Multis::default())
-        .with_facet(Facet(0), map, coarse)
+        .with_facet(Facet(0), map, coarse, FacetRules::classic(Facet(0)))
 }
 
 /// How many beats the walk below is given. The route is 168 steps; this is

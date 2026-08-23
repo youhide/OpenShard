@@ -576,7 +576,10 @@ impl Sim {
                     sequence,
                     notoriety: Notoriety::Innocent,
                 }),
-                Handled::Refused => {
+                // Every refusal is one `0x21`, whichever of the four it was:
+                // this stands in for the shard's wire behaviour, and the wire
+                // has one packet for all of them.
+                Handled::Refused(_) => {
                     self.refused += 1;
                     ServerPacket::WalkReject(WalkReject {
                         sequence,

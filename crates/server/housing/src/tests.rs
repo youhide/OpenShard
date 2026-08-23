@@ -159,7 +159,17 @@ fn ground_sized(components: Vec<Component>, land: u16, fits: bool, width: u32, h
     // disagree with the tiledata the terrain is looking at.
     let (map, tiles) = ground_scene(land, fits).into_shard(Facet(0));
     let mut facets = BTreeMap::new();
-    facets.insert(Facet(0), FacetState::new(Some(map), None, width, height, &tiles));
+    facets.insert(
+        Facet(0),
+        FacetState::new(
+            Some(map),
+            None,
+            width,
+            height,
+            openshard_state::facet_rules::FacetRules::classic(Facet(0)),
+            &tiles,
+        ),
+    );
     WorldState::new(facets, Facet(0), tiles, multis(components), (0, 0), 1)
 }
 

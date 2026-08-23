@@ -27,7 +27,14 @@ fn world() -> WorldState {
     let mut facets = BTreeMap::new();
     facets.insert(
         Facet(0),
-        FacetState::new(None, None, SIZE, SIZE, &openshard_tiles::TileData::empty()),
+        FacetState::new(
+            None,
+            None,
+            SIZE,
+            SIZE,
+            openshard_state::facet_rules::FacetRules::classic(Facet(0)),
+            &openshard_tiles::TileData::empty(),
+        ),
     );
     WorldState::new(
         facets,
