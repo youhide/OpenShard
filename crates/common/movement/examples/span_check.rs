@@ -29,13 +29,13 @@
 //! oracle over a box of Britain, which is what a machine with an install runs on
 //! every `cargo test`.
 
-use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::Parser;
 use openshard_map::grid::Tile;
 use openshard_map::map::WorldMap;
+use openshard_movement::reach::Reach;
 use openshard_movement::spans::{SpanIndex, Spans};
 use openshard_movement::{MapTerrain, step_from};
 use openshard_protocol::direction::Direction;
@@ -71,28 +71,6 @@ fn neighbour(x: u16, y: u16, direction: Direction) -> Option<(u16, u16)> {
     Some((x, y))
 }
 
-/// The whole step rule, with the landing half answered by the *map* — which is
-/// [`MapTerrain::check`], and no longer what `step_allowed` asks.
-///
-/// **Both sides of this oracle are written out here, and since N3 that is
-/// forced rather than stylistic.** The flood below used to walk one side
-/// through the shipped `step_allowed`; that now reads the bake, so a flood
-/// through it would be the bake compared against itself. Writing both out keeps
-/// the corner rule identical on both sides and leaves exactly one difference:
-/// which `check` answers the landing.
-fn map_step(terrain: &MapTerrain<'_>, from: Point, direction: Direction) -> Option<Point> {
-    if direction.is_diagonal() {
-        let bits = direction.to_bits();
-        for flank in [
-            Direction::from_bits((bits + 7) % 8),
-            Direction::from_bits((bits + 1) % 8),
-        ] {
-            map_land(terrain, from, flank)?;
-        }
-    }
-    map_land(terrain, from, direction)
-}
-
 /// Where one step onto the neighbouring tile lands, over the map — the mirror
 /// of [`span_land`], differing in one call.
 fn map_land(terrain: &MapTerrain<'_>, from: Point, direction: Direction) -> Option<Point> {
@@ -101,25 +79,6 @@ fn map_land(terrain: &MapTerrain<'_>, from: Point, direction: Direction) -> Opti
     let (_, start_top) = terrain.start_surface(from.x, from.y, start_z);
     let z = i8::try_from(terrain.check(to.x, to.y, start_z, start_top)?).ok()?;
     Some(Point::new(to.x, to.y, z))
-}
-
-/// The same rule with the landing half answered by the bake.
-fn span_step(
-    terrain: &MapTerrain<'_>,
-    spans: &Spans<'_>,
-    from: Point,
-    direction: Direction,
-) -> Option<Point> {
-    if direction.is_diagonal() {
-        let bits = direction.to_bits();
-        for flank in [
-            Direction::from_bits((bits + 7) % 8),
-            Direction::from_bits((bits + 1) % 8),
-        ] {
-            span_land(terrain, spans, from, flank)?;
-        }
-    }
-    span_land(terrain, spans, from, direction)
 }
 
 /// Where one step onto the neighbouring tile lands, over the bake.
@@ -141,39 +100,39 @@ fn span_land(
     Some(Point::new(to.x, to.y, z))
 }
 
-/// Every tile the origin can walk to, flooded once over the whole facet.
+/// One place's whole expansion under the landing rule handed in: eight landings
+/// by [`Direction::to_bits`], which is the order [`Reach::by`] wants and the
+/// order `steps_out_of` answers in.
 ///
-/// `coarse_bench`'s `land_component`, with the step rule handed in. Keyed by
-/// `(x, y)` and not by the whole point, for that function's own reason: a tile
-/// first reached at one height is not explored again at another, which
-/// under-counts a gallery over a street and never over-counts. Both rules are
-/// flooded the same way, so the under-count is common to them and a difference
-/// is a difference in the rule.
-fn flood(
-    width: u32,
-    height: u32,
-    origin: Point,
-    mut step: impl FnMut(Point, Direction) -> Option<Point>,
-) -> Vec<bool> {
-    let mut reached = vec![false; (width as usize) * (height as usize)];
-    let index = |x: u16, y: u16| (y as usize) * (width as usize) + (x as usize);
-    let mut queue = VecDeque::new();
-    reached[index(origin.x, origin.y)] = true;
-    queue.push_back(origin);
-    while let Some(at) = queue.pop_front() {
-        for direction in Direction::ALL {
-            let Some(next) = step(at, direction) else {
-                continue;
-            };
-            let slot = index(next.x, next.y);
-            if reached[slot] {
-                continue;
-            }
-            reached[slot] = true;
-            queue.push_back(next);
+/// **The landing half is this example's and nothing else is.** Both sides of
+/// the oracle have to be written out — since N3 the shipped `step_allowed`
+/// reads the bake, so a flood through it would be the bake compared against
+/// itself — but *only* the landing half is a difference between them. The
+/// corner rule is written once here rather than once per side, in the shape
+/// `steps_out_of` gives it: every neighbour resolved once, and a diagonal
+/// refused where either flank has no landing, read off the answers already in
+/// hand instead of asked for again. The traversal underneath is
+/// [`openshard_movement::reach`]'s, which is what the scene fixture and
+/// `coarse_bench` walk too — so a difference between these two bitmaps is a
+/// difference in `check` and cannot be a difference in how the rule or the
+/// facet was walked.
+fn expansion<F: FnMut(Point, Direction) -> Option<Point>>(at: Point, mut land: F) -> [Option<Point>; 8] {
+    let mut landings = [None; 8];
+    for direction in Direction::ALL {
+        landings[usize::from(direction.to_bits())] = land(at, direction);
+    }
+    let mut allowed = landings;
+    for direction in Direction::ALL {
+        let bits = usize::from(direction.to_bits());
+        if direction.is_diagonal()
+            && [(bits + 7) % 8, (bits + 1) % 8]
+                .iter()
+                .any(|&flank| landings[flank].is_none())
+        {
+            allowed[bits] = None;
         }
     }
-    reached
+    allowed
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -248,18 +207,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|point| terrain.can_step(point, point))
         .ok_or_else(|| format!("nothing stands at ({}, {})", cli.x, cli.y))?;
     let flooding = Instant::now();
-    let by_map = flood(width, height, origin, |at, direction| {
-        map_step(&terrain, at, direction)
+    let by_map = Reach::by(origin, width, height, |at| {
+        expansion(at, |at, direction| map_land(&terrain, at, direction))
     });
     let map_time = flooding.elapsed();
     let spans = Spans::new(&map, &index);
     let flooding = Instant::now();
-    let by_spans = flood(width, height, origin, |at, direction| {
-        span_step(&terrain, &spans, at, direction)
+    let by_spans = Reach::by(origin, width, height, |at| {
+        expansion(at, |at, direction| span_land(&terrain, &spans, at, direction))
     });
     let span_time = flooding.elapsed();
-    let map_count = by_map.iter().filter(|reached| **reached).count();
-    let span_count = by_spans.iter().filter(|reached| **reached).count();
+    let (map_count, span_count) = (by_map.count(), by_spans.count());
     println!(
         "  flood from ({}, {}, {}): map {map_count} tiles in {:.1}s, \
          bake {span_count} tiles in {:.1}s",
@@ -270,14 +228,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         span_time.as_secs_f64(),
     );
     let mut differed = 0_u64;
-    for (slot, (one, other)) in by_map.iter().zip(by_spans.iter()).enumerate() {
-        if one == other {
-            continue;
-        }
-        differed += 1;
-        if differed <= cli.report as u64 {
-            let (x, y) = ((slot % width as usize) as u16, (slot / width as usize) as u16);
-            println!("  ({x}, {y}): map reached {one}, bake reached {other}");
+    for y in 0..height as u16 {
+        for x in 0..width as u16 {
+            let (one, other) = (by_map.holds(x, y), by_spans.holds(x, y));
+            if one == other {
+                continue;
+            }
+            differed += 1;
+            if differed <= cli.report as u64 {
+                println!("  ({x}, {y}): map reached {one}, bake reached {other}");
+            }
         }
     }
     println!("  {differed} tiles reached by one flood and not the other");

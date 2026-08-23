@@ -46,13 +46,13 @@ use std::collections::BTreeMap;
 use openshard_map::grid::BlockExtent;
 use openshard_map::map::{LandCell, StaticItem, WorldMap};
 use openshard_map::snapshot::MapSnapshot;
-use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
 use openshard_tiles::LandTileId;
 use openshard_tiles::{StaticTile, TileData, TileFlags};
 
 use crate::footing::Footing;
+use crate::reach::Reach;
 use crate::spans::SpanIndex;
 use crate::terrain::MapTerrain;
 use openshard_map::overlay::{Doors, Overlay};
@@ -374,25 +374,30 @@ impl Scene {
     }
 
     /// Every tile a body at `from` can walk to, and the height it stands at
-    /// there — a flood fill over [`step_allowed`](crate::step_allowed), so it is
-    /// the *whole* step rule including the corner rule a diagonal has to pass.
+    /// there — [`Reach`], which is the *whole* step rule including the corner
+    /// rule a diagonal has to pass.
     ///
     /// `from` itself is always in the answer, at its own `z`: a body is standing
     /// where it is standing. Whether it *could* have got there is a different
     /// question, and one [`Scene::terrain`]'s `surface_at` answers.
+    ///
+    /// **A map rather than the flood's own dense rectangle**, because that is
+    /// what a fixture asserts against — the tiles that are in it, listed, and
+    /// small enough to print. The traversal is not this fixture's: it is
+    /// [`crate::reach`]'s, along with the reason it is one traversal.
     #[must_use]
     pub fn reachable(&self, from: Point) -> BTreeMap<(u16, u16), i8> {
-        let footing = self.footing();
+        let reach = Reach::of(
+            &self.footing(),
+            from,
+            u32::from(self.width()),
+            u32::from(self.height()),
+        );
         let mut found = BTreeMap::new();
-        found.insert((from.x, from.y), from.z);
-        let mut queue = vec![from];
-        while let Some(here) = queue.pop() {
-            for direction in Direction::ALL {
-                let Some(next) = crate::step_allowed(&footing, here, direction) else {
-                    continue;
-                };
-                if found.insert((next.x, next.y), next.z).is_none() {
-                    queue.push(next);
+        for y in 0..self.height() {
+            for x in 0..self.width() {
+                if let Some(z) = reach.stands_at(x, y) {
+                    found.insert((x, y), z);
                 }
             }
         }

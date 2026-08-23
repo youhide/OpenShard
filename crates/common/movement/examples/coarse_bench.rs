@@ -29,10 +29,10 @@ use clap::Parser;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::{Doors, Overlay};
 use openshard_map::snapshot::MapSnapshot;
+use openshard_movement::reach::Reach;
 use openshard_movement::{
-    Footing, MapTerrain, NavigationGraph, bake, find_long_path, find_path, search_path, step_allowed,
+    Footing, MapTerrain, NavigationGraph, bake, find_long_path, find_path, search_path,
 };
-use openshard_protocol::direction::Direction;
 use openshard_protocol::world::{Facet, Point};
 
 /// Chebyshev distances the sampler aims at, in tiles.
@@ -165,35 +165,6 @@ fn sample_ring(terrain: &MapTerrain<'_>, origin: Point, radius: u32, width: u32,
     found
 }
 
-/// Every tile the origin can walk to, flooded once over the whole facet.
-///
-/// The ground truth a refusal is read against. Keyed by `(x, y)` and not by
-/// the whole point: a tile first reached at one height is marked reached, and a
-/// second route arriving at another height is not explored again. That
-/// under-counts — a gallery over a street is one entry, not two — so a tile it
-/// calls reachable really is, which is the direction that matters here.
-fn land_component(footing: &Footing<'_>, origin: Point, width: u32, height: u32) -> Vec<bool> {
-    let mut reached = vec![false; (width as usize) * (height as usize)];
-    let index = |x: u16, y: u16| (y as usize) * (width as usize) + (x as usize);
-    let mut queue = std::collections::VecDeque::new();
-    reached[index(origin.x, origin.y)] = true;
-    queue.push_back(origin);
-    while let Some(at) = queue.pop_front() {
-        for direction in Direction::ALL {
-            let Some(next) = step_allowed(footing, at, direction) else {
-                continue;
-            };
-            let slot = index(next.x, next.y);
-            if reached[slot] {
-                continue;
-            }
-            reached[slot] = true;
-            queue.push_back(next);
-        }
-    }
-    reached
-}
-
 fn synthetic() {
     const WIDTH: u16 = 1024;
     const HEIGHT: u16 = 1024;
@@ -262,13 +233,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         origin.x, origin.y, origin.z, cli.budget, cli.repeat,
     );
 
+    // The ground truth a refusal is read against: whatever a router says about
+    // finding the way, this is ground a body can walk. `Reach` is the crate's
+    // one flood over the step rule — this example wrote its own until the
+    // hygiene pass, and what that copy paid for was the whole expansion eight
+    // times over per tile.
     let component = cli.component.then(|| {
         let started = Instant::now();
-        let reached = land_component(&footing, origin, width, height);
-        let count = reached.iter().filter(|&&flag| flag).count();
+        let reached = Reach::of(&footing, origin, width, height);
         println!(
-            "  flood: {count} tiles walkable from the origin ({:.1}% of the facet) in {:.1}s",
-            100.0 * count as f64 / reached.len() as f64,
+            "  flood: {} tiles walkable from the origin ({:.1}% of the facet) in {:.1}s",
+            reached.count(),
+            100.0 * reached.count() as f64 / reached.tiles() as f64,
             started.elapsed().as_secs_f64(),
         );
         reached
@@ -309,9 +285,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 flat_arrived: search.arrived,
                 coarse,
                 coarse_steps: coarse_route.expect("at least one repeat").map(|r| r.len()),
-                walkable_from_origin: component
-                    .as_ref()
-                    .map(|reached| reached[(to.y as usize) * (width as usize) + (to.x as usize)]),
+                walkable_from_origin: component.as_ref().map(|reached| reached.holds(to.x, to.y)),
             });
         }
         if readings.is_empty() {

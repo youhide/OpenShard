@@ -1249,10 +1249,12 @@ const LIVE_REROUTES: usize = 8;
 /// The shortest failed search worth asking the graph about, in tiles.
 ///
 /// A coarse graph is counterproductive for a short failed search: joining an
-/// endpoint to the graph is `local_costs` — one exact search per node of the
+/// endpoint to the graph is [`NavigationGraph::local_costs`] — a flood over the
 /// endpoint's own region, at *both* ends — and that costs more than the local
 /// answer the caller has already been refused, especially around a house with
-/// several doors.
+/// several doors. It used to be one exact search per node of that region, which
+/// is what made the distance worth drawing at all; a flood is cheaper and the
+/// threshold is still a real one, since the region is walked either way.
 ///
 /// A property of this router rather than of any one caller, which is why it
 /// lives beside [`find_long_path`] and not beside the budgets: the client's

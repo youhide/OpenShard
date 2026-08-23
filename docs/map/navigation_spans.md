@@ -658,12 +658,13 @@ this one.** `span_check`'s coarse half flooded the facet twice — once through
 the shipped `step_allowed` and once through a written-out span rule. The moment
 `step_allowed` reads the bake, that flood compares the bake against itself and
 reports zero differences for the wrong reason. Both sides are now written out in
-the example — `map_step`/`map_land` beside `span_step`/`span_land`, identical
-but for which `check` answers the landing — and the oracle still holds over the
-whole facet: **248,268,125 steps, 0 disagreements; both floods reach 3,747,934
-tiles, 0 tiles differing** (the map flood 4.0 s, the bake flood 2.9 s). A test
-that calls the shipped rule stops being a test of the shipped rule the moment
-the rule moves under it.
+the example — `map_land` beside `span_land`, identical but for which `check`
+answers the landing — and the oracle still holds over the whole facet:
+**248,268,125 steps, 0 disagreements; both floods reach 3,747,934 tiles, 0 tiles
+differing** (the map flood 4.0 s, the bake flood 2.9 s when this was written;
+2.8 s and 1.5 s since the flood hygiene pass folded the corner rule into one
+`expansion` over both). A test that calls the shipped rule stops being a test of
+the shipped rule the moment the rule moves under it.
 
 **And the composition is asserted, not assumed.**
 `the_live_world_adds_takes_away_and_hangs_a_door_over_baked_spans` in
@@ -933,10 +934,10 @@ is `openshard_movement`'s now, beside `find_long_path`, because it is a property
 of the *router* — joining an endpoint walks its whole region, at both ends —
 and not of either caller. (It cost one exact search *per node* of that region
 when N7 was written, which is what made the threshold worth drawing; the join is
-one flood now and the threshold is still a real one, since the region is walked
-either way.) A fall-back the two ends drew at
-different distances would be two answers to "how far can a body plan", which is
-the disagreement this node closes.
+one flood now, and the threshold is still a real one because the region is
+walked either way.) A fall-back the two ends drew at different distances would
+be two answers to "how far can a body plan", which is the disagreement this node
+closes.
 
 **The bare map is one value now too.** The graph is baked over the bare map, so
 the corridor it proposes has to be read over the bare map: each end used to
@@ -1187,13 +1188,25 @@ graph over spans names neither.
   band that N4's regression was measured in is now *below* the 1.29 ms it
   regressed from.
 - **N4 found: the bake was paying eight times over for every neighbour, and so
-  is every other flood in the tree.** `component_labels` and `region_costs` asked
-  `step_allowed` once per direction, and `step_allowed` is *defined* as one slot
-  of `steps_out_of` — so each asked for the whole expansion eight times and used
-  one answer of it. Repaired here, and it is most of 96 s → 11.7 s. The same
-  shape is still in `coarse_bench`'s own `land_component` (6 s a flood, 12.8% of
-  the facet) and in `Scene::reachable`, which is every scene fixture's oracle.
-  Neither is on a hot path; both are one line.
+  is every other flood in the tree. ✅ Fixed.** `component_labels` and
+  `region_costs` asked `step_allowed` once per direction, and `step_allowed` is
+  *defined* as one slot of `steps_out_of` — so each asked for the whole
+  expansion eight times and used one answer of it. Repaired in N4 for the bake,
+  and it is most of 96 s → 11.7 s; the rest of the tree was left filed, because
+  neither remaining copy is on a hot path and both were one line.
+  **The repair that landed is not that line.** Three floods had been written
+  independently — `coarse_bench`'s `land_component`, `Scene::reachable`, and
+  `span_check`'s two-rule comparison — and fixing the expansion in three places
+  leaves three places for a fourth copy to be written beside. There is one flood
+  now, [`reach::Reach`](../../crates/common/movement/src/reach.rs), and the
+  diagnostics and the fixture ask it: `Reach::of` walks the shipped rule and
+  `Reach::by` takes an expansion handed in, which is what an oracle comparing
+  two rules needs. On facet 0 from the castle, release, A/B on one tree:
+  **the whole-facet flood is 5.1 s → 0.9 s** and reaches the same 3,747,934
+  tiles. `span_check`'s pair is 4.4 → 2.8 s and 2.6 → 1.5 s, from the same pass
+  folding its corner rule — written once per side before — into the shape
+  `steps_out_of` gives it, and its oracle still reports 248,268,125 steps, 0
+  disagreements, 0 tiles differing.
 - **N4 found: in-degree over places is not bounded by the eight directions.**
   Out-degree is — one landing per direction — and the builder's fixed `[_; 8]`
   neighbour arrays assumed the same of the other side. It is false as soon as a

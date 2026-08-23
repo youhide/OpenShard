@@ -62,6 +62,7 @@ pub mod ground;
 mod navigation;
 mod pace;
 mod path;
+pub mod reach;
 pub mod scene;
 mod sequence;
 pub mod spans;
