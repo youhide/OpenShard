@@ -559,7 +559,7 @@ to read the live layer's surfaces
 ### Backlog from R4, the statics becoming one run
 
 Found while making a facet's statics one run with a per-block offset array
-([`realtime_map.md`](map/realtime_map.md)'s R4). Neither blocks R5 or era P.
+([`realtime_map.md`](map/realtime_map.md)'s R4). Nothing here blocks era P.
 
 - **A patch of many ops is now quadratic in the facet.** `place_static` and
   `remove_static` move the tail of the run and every offset past it, where they
@@ -579,6 +579,34 @@ Found while making a facet's statics one run with a per-block offset array
   round trip and the client-files import), so this is about the third one: a
   debug-only check that every item's coordinates fall in the block its count
   claims would cost one pass over the run at load.
+
+### Backlog: the land's fourth byte is 29.4 MB of alignment
+
+**Bigger than everything R4 saved, and nobody had written it down.** A
+[`LandCell`](../crates/common/map/src/map.rs) is a `LandTileId` (`u16`) and a
+`z` (`i8`) — three bytes of fields in four of storage. Felucca is 29,360,128
+cells, so the land is **117.4 MiB of which 29.4 MB is the padding byte**; the
+statics layer, after R4, is 29.5 MiB in total. The arithmetic is corroborated by
+the measured peak of a facet load: 257 MiB is land 117.4 + statics 29.5 + the
+file buffers it was read from, which only adds up with a four-byte cell.
+
+**It is gated on the access staying cheap, and that gate is the point rather
+than a caveat.** The land is read as a slice —
+[`WorldMap::land_in_block`](../crates/common/map/src/map.rs) hands back
+`&[LandCell]` and `land_in_row` steps one cell east at a time — and a three-byte
+cell cannot be a slice of anything. Every read becomes an unaligned load and a
+shift, on the path that draws every frame: the ground walk is the *one* part of
+this map whose cache behaviour [`client_today.md`](map/new_map_representation/client_today.md)
+measured as already good ("a block is 64 cells × 4 B = exactly four cache lines
+… the 1997 tiling picked the cache line's size"). **If the unpack costs more
+than the 25% of footprint it saves, the answer is no** — the size is worth
+having only at unchanged read speed.
+
+So what this finding asks for is a *measurement*, not a change: the ground walk
+of a widest-zoom frame over a packed cell against the same walk over the cell we
+have. The same gate governs the packed four-byte static record in
+[R4](map/realtime_map.md#r4--statics-become-one-run), which until now was gated
+only on whether the statics are still hot.
 
 ### Backlog: a sector lookup is linear in a bucket, and a house makes the bucket fat
 

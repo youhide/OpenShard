@@ -128,7 +128,7 @@ Read off the workspace and the plans, so a session does not re-derive it:
 | the live layer is not in the map | ✅ R2 — one `World` on both ends |
 | a house has walls and no floors | ✅ R3 — a platform lays two covers, and `can_step` climbs onto them |
 | the statics are 120,745 vectors | ✅ R4 — one run, two allocations, 38.2 → 29.5 MiB |
-| **both ends load the same install separately** | ⬜ R5 |
+| both ends load the same install separately | ✂ R5 struck — a shard and a client *are* two processes; only the test harness is one |
 | spans, regions over spans, the server reading the graph | ⬜ era P |
 | live publish, revisioned bakes, chunks to the client, the editor | ⬜ era S |
 
@@ -318,7 +318,11 @@ Take the layout, and take the property under it:
   use one — is 38.2 → ~13.5 MiB and 16 items to a cache line instead of 6.4. It
   also changes accessors from handing back a reference to handing back a value,
   which is visible outside the type. It goes after N3's node-expansion
-  measurement says whether the statics are still on anybody's hot path.
+  measurement says whether the statics are still on anybody's hot path — **and
+  after a second measurement that is the harder gate: whether the shift and the
+  unaligned load cost less than the cache lines they save.** Size alone does not
+  buy a packing. The land's own padding byte is 29.4 MB under exactly the same
+  gate, and is filed in [`../roadmap.md`](../roadmap.md).
 
 **Done when:** `WorldMap` holds two allocations of statics; the base is built
 rather than inserted into; the resident size is recorded here; every statics test
@@ -326,9 +330,20 @@ and the base-set round trip pass unchanged. **Met**, with the second clause read
 as it is written above: a facet is assembled by `from_parts` and never by
 insertion, and the pair that inserts is the patch path alone.
 
-### R5 — one install, one load
+### R5 — one install, one load ✂ struck
 
 **Goal.** A process holds one facet, once.
+
+**Struck, and the era ends at R4.** A shard and a client are two processes —
+that is how the game is played, the client opening the install on the player's
+machine and the shard opening its own world. The node's whole memory argument is
+about `openshard-playground`, which is a *test harness* running both ends in one
+process; optimising it means giving the two ends a shared handle they must not
+have anywhere else. The correctness half — the two ends matching because they
+opened the same install — is answered by the shard *telling* the client what the
+world is, which is [direction E](new_map_representation/plan.md#e--to-the-client)
+of era S and not a node here. The paragraphs below are kept as the reasoning
+that was struck, not as work.
 
 [`boot.rs`](../../crates/server/server/src/boot.rs) and
 [`client/app/src/lib.rs`](../../crates/client/app/src/lib.rs) each load a facet
@@ -518,7 +533,7 @@ waits for a measurement that says the statics are still on a hot path.
 | [`mechanics.md`](new_map_representation/mechanics.md) | **live**, minus one row: the house question is answered above |
 | [`plan.md`](new_map_representation/plan.md) | **live** for C–G; its Order section is superseded by the eras here |
 | [`snapshot.md`](new_map_representation/snapshot.md) | **the record** of A0 and A, plus the crate rule this document strikes |
-| [`client_today.md`](new_map_representation/client_today.md) | **live** — the measured backlog era R spends. Findings 6, 7 and 10 are R4, R5 and the readers |
+| [`client_today.md`](new_map_representation/client_today.md) | **live** — the measured backlog era R spent. Finding 6 is R4 and is spent, finding 7 was R5 and is withdrawn, finding 10 is the readers' |
 | [`terrain_seam.md`](terrain_seam.md) | **closed.** The record of how the seam went, and where the facet-0 oracle's numbers live |
 | [`navigation_spans.md`](navigation_spans.md) | **live** — era P in full, N0 done |
 | [`navigation_graph*.md`](navigation_graph.md) | **live** — the graph, its artifact, and its efficiency phases 1/2/4 built, 3 gated on N4 |
@@ -539,21 +554,25 @@ waits for a measurement that says the statics are still on a hot path.
 
 ## Where a session starts
 
-**R5, or era P — and the plan to run R5 from is
-[`realtime_map.md`](realtime_map.md).** R1 to R4 are built: the tile table is
+**Era P — era R is over.** R1 to R4 are built: the tile table is
 `openshard-tiles`, a crate with no dependencies at all; one `World` is the map on
 both ends of the wire; a house has floors a body can stand on, which was the
-first thing here a player would notice; and a facet's statics are one run. What
-is left of era R is the last node about *how much* rather than *what*: one load
-per install.
+first thing here a player would notice; and a facet's statics are one run. R5 is
+struck, for the reason in its node, so there is no fifth.
+
+What era R leaves behind is measurement rather than structure, and it is in
+[`../roadmap.md`](../roadmap.md): the land's fourth byte is 29.4 MB of padding,
+which is more than R4 saved. It is gated on the read staying as fast, and so is
+the packed static record — a packing that costs a shift per read on the ground
+walk is not an improvement, whatever it weighs.
 
 **Where the work stands is [`handoffs/`](handoffs/)**, newest last — not here,
 and not in the plan.
 
 **Era P is no longer gated.** The gate was R2 for the *type*, and after that the
 shape of the layers `Spans` is a projection of: what a house contributes to a
-surface (R3) and how the statics are held (R4). Both have landed, and R5 changes
-neither — it changes how many copies of a facet a process holds.
+surface (R3) and how the statics are held (R4). Both have landed, and R5 — the
+only node that was left — is struck.
 
 **Era S is resumed, not restarted.** Its first half is built and running; the
 handoffs in [`handoffs/`](new_map_representation/handoffs/) are where its state

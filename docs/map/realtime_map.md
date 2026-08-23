@@ -1,10 +1,11 @@
 # The map you hold — era R, in order
 
-> **Status: R1, R2, R3 and R4 built; R5 is what is left.** The tile table has
-> its own crate, `openshard-uofiles` is readers, formats and errors, one `World`
-> is the map on both ends of the wire, a house has floors you can stand on, and
-> a facet's statics are one run of 2,906,871 items in two allocations. R5 is
-> still a plan.
+> **Status: the era is over. R1 to R4 built, R5 struck.** The tile table has its
+> own crate, `openshard-uofiles` is readers, formats and errors, one `World` is
+> the map on both ends of the wire, a house has floors you can stand on, and a
+> facet's statics are one run of 2,906,871 items in two allocations. R5 —
+> one load per process — is struck: a shard and a client are two processes, and
+> the only place they are not is a test harness. See its node.
 
 The executable half of [`map_rebuild.md`](map_rebuild.md)'s era R. That document
 holds the model and the decisions — three layers, what may be baked, why a house
@@ -49,7 +50,7 @@ other and can land in any order once R2 has.
 ```
 R1. the table leaves the file reader ✔ ──> R2. the third layer joins the type ✔ ──┬─> R3. a house has floors ✔
                                                                                  ├─> R4. statics become one run ✔
-                                                                                 └─> R5. one install, one load
+                                                                                 └─> R5. one install, one load ✂
 ```
 
 ## R1 — the table leaves the file reader ✔
@@ -360,7 +361,11 @@ into `WorldMap`.
 - The **packed four-byte record** is not in this node. It changes accessors from
   handing back a reference to handing back a value, and it waits for
   [N3](navigation_spans.md#n3--the-search-takes-spans)'s measurement to say
-  whether the statics are still on a hot path.
+  whether the statics are still on a hot path. **It has a second gate now, and
+  it is the harder one:** a packed record is read with a shift and an unaligned
+  load, so it is only an improvement if the unpack costs less than the cache
+  lines it saves. Size alone does not buy it. The same gate governs the land's
+  own padding byte — 29.4 MB, filed in [`roadmap.md`](../roadmap.md).
 
 **Done when:** two allocations; the base-set round trip is byte-identical and
 `openshard-map-import --verify` still compares all 29,360,128 tiles clean; the
@@ -419,7 +424,7 @@ with itself.
 blocks that share a row — `from_parts_sorts_each_blocks_own_part_of_the_run` is
 two blocks of one row for that reason.
 
-## R5 — one install, one load
+## R5 — one install, one load ✂
 
 **Goal.** A process holds one facet, once.
 
@@ -432,6 +437,32 @@ what the world is.
 
 **Done when:** the playground loads a facet once and both ends read that value;
 the shard's loader is the only production `load_facet` call.
+
+### Why it is struck
+
+**A shard and a client are two processes, and the double load is what that
+looks like.** That is how the game is played: the client opens the install on
+the player's own machine and the shard opens its own world, an ocean away. The
+node's memory argument is entirely about `openshard-playground`, which is a
+*test harness* — one process running both ends over in-memory pipes so a person
+can play without a port. Making a test harness hold one copy optimises the one
+configuration nobody ships, and it would do it by giving the two ends a shared
+handle they must not have in production.
+
+**And the correctness half is not this node's to fix either.** "The two ends
+match because they opened the same install" is a real complaint, and its answer
+is the shard *telling* the client what the world is — chunks over the wire,
+which is [direction E](new_map_representation/plan.md#e--to-the-client)
+of era S. A shared `Arc` inside the playground would make the complaint
+invisible in the one place it cannot bite, and leave it exactly as it is
+everywhere else.
+
+What is left is a tidiness question with no era attached: whether two crates
+should each have their *own* spelling of "load a facet", or one loader with two
+callers. That is not a node, it is a refactor somebody can do the day it gets in
+the way.
+
+**So era R ends at R4.**
 
 ## What none of this may break
 
@@ -446,13 +477,18 @@ The oracles that already exist, and which every node above runs:
 
 ## Where a session starts
 
-**R5**, and it is the last of the era. The smallest of the five, and the only one
-that changes what a process *holds* rather than what a type is: a playground
-holding two ~150 MiB copies of one world holds one.
+**[Era P](map_rebuild.md)**, because era R is over. R5 is struck — the reasoning
+is in its node — so R1 to R4 are the whole of it, and `Spans` now has both
+halves of the argument it was waiting for: what a house contributes to a surface
+(R3) and how the statics are held (R4).
 
-With R4 landed, nothing is left waiting on era R's shape — [era
-P](map_rebuild.md) may start, and `Spans` now has both halves of the argument it
-was waiting for: what a house contributes to a surface (R3) and how the statics
-are held (R4).
+What era R leaves behind is measurement rather than structure, and it is filed
+in [`roadmap.md`](../roadmap.md): the land's fourth byte is 29.4 MB of padding —
+bigger than everything R4 saved — and the packed four-byte static record is
+still worth having. **Both are gated on the same thing, and it is not size:** the
+land is read as a slice and the ground walk is the one part of this map whose
+cache behaviour was measured as already good, so a packing that costs a shift
+per read is not an improvement. Measure first, and take neither if the read gets
+slower.
 
 Progress goes in [`handoffs/`](handoffs/), not here.

@@ -90,7 +90,8 @@ so the base layer is that number times a count, and a field added to
 ## What was found
 
 Two things, filed in [`roadmap.md`](../../roadmap.md) under *Backlog from R4*.
-Neither blocks R5 or era P.
+Neither blocks era P. A third — the land's padding byte — came out of the
+conversation after the node and is at the end of this file.
 
 - **A patch of many ops is now quadratic in the facet.** Each op moves the tail
   of the run; nothing today publishes more than a handful, and the editor
@@ -100,16 +101,44 @@ Neither blocks R5 or era P.
   getting it wrong sorts them into the wrong span and is silent everywhere
   after.
 
+## What was decided after the node
+
+Two rulings from the owner, taken after R4 landed, and both change a plan rather
+than a line of code.
+
+**[R5](../realtime_map.md#r5--one-install-one-load) is struck, and era R ends at
+R4.** A shard and a client are *two processes* — that is how the game is played,
+the client opening the install on the player's own machine and the shard opening
+its own world. R5's memory argument was entirely about `openshard-playground`,
+which is a test harness running both ends in one process over in-memory pipes;
+making it hold one copy optimises the configuration nobody ships, and does it by
+giving the two ends a shared handle they must not have in production. The
+correctness half — *"the two ends match because they opened the same install"* —
+stands, and its answer is the shard **telling** the client what the world is:
+[direction E](../new_map_representation/plan.md#e--to-the-client) of era S. What
+is left of the node is a tidiness question with no era attached, and
+`client_today.md`'s finding 7 is marked withdrawn where it is measured.
+
+**A packing is gated on the read, not on the weight.** Both remaining size
+levers — the packed four-byte static record and the land's own padding byte —
+turn a slice of aligned values into a shift and an unaligned load. The ground
+walk is the one part of this map whose cache behaviour was *measured as already
+good*, so a layout that costs a read to save a byte is not an improvement.
+Measure the walk first; take neither if it gets slower. Written into R4's third
+bullet and into the finding below.
+
 ## What is next
 
-**R5 — one install, one load**, the last node of era R and the smallest, or
-**era P**, which R4 was the last thing gating.
+**[Era P](../map_rebuild.md)** — the map you search. `Spans` waited on the shape
+of the two layers it is a projection of: what a house contributes to a surface
+(R3) and how the statics are held (R4). Both have landed, and with R5 struck
+there is nothing else in era R to wait for.
 
-- [**R5**](../realtime_map.md#r5--one-install-one-load) changes what a process
-  *holds* rather than what a type is: `openshard-playground` holds two ~150 MiB
-  copies of one facet and should hold one.
-- [**Era P**](../map_rebuild.md) may start. `Spans` waited on the shape of the
-  two layers it is a projection of — what a house contributes to a surface (R3)
-  and how the statics are held (R4) — and both have landed. R5 changes neither.
+**What would block it:** nothing.
 
-**What would block them:** nothing.
+**What era R leaves behind** is measurement rather than structure, and it is in
+[`roadmap.md`](../../roadmap.md): **the land's fourth byte is 29.4 MB of
+alignment** — a `LandCell` is a `u16` and an `i8` in four bytes, over 29,360,128
+cells — which is more than everything R4 saved. Under the gate above, and the
+gate is the interesting half: the land is read as a slice, and a three-byte cell
+cannot be one.

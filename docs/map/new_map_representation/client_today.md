@@ -1,7 +1,9 @@
 # The client's map today, measured
 
-> **Status: live — the measured backlog era R spends.** Findings 6, 7 and 10 are
-> [`realtime_map.md`](../realtime_map.md)'s R4, R5 and the readers.
+> **Status: live — the measured backlog era R spent.** Finding 6 is
+> [`realtime_map.md`](../realtime_map.md)'s R4 and is **spent**; finding 7 was
+> its R5 and is **withdrawn** — a shard and a client are two processes; finding
+> 10 is the readers' and stands.
 
 What direction A takes a handle to, stated as facts about the code and numbers
 off a real Felucca install (7168×4096, `statics0.mul` = 2,906,871 statics in
@@ -70,6 +72,13 @@ Ranked by what a person would notice first.
    `openshard-playground` that is one process holding ~300 MiB of facet twice.
    The handoff already names the correctness half of this; the memory half is
    the same fix.
+
+   > **Withdrawn.** [R5](../realtime_map.md#r5--one-install-one-load)
+   > is struck: a shard and a client are two processes and each opens its own
+   > world, so the double load is not a defect — it is the shipped shape, and
+   > the only place it looks like waste is the test harness. The correctness
+   > half stands and belongs to [direction E](plan.md#e--to-the-client): the
+   > shard telling the client what the world is.
 8. **`WorldMap` does not know its own facet.** `describe_size` names a *size*;
    `Facet` travels separately in every bake stamp and radar key, and the client
    pins [`FACET: u8 = 0`](../../../crates/client/app/src/lib.rs#L245) with a
