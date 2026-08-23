@@ -267,11 +267,6 @@ impl ApplicationHandler<()> for App {
                     let step = match event.state {
                         ElementState::Pressed => {
                             let motion = self.world.motion.planning_state();
-                            // The bodies in the way of this press. A held arrow
-                            // never plans, but it does ask `Detour` for a way
-                            // past whatever is ahead — and somebody standing
-                            // there is one of the things it has to get past.
-                            let crowd = crate::clutter::crowd(self.world.authoritative.view.as_ref());
                             self.steer.press(
                                 direction,
                                 motion.position,
@@ -281,8 +276,14 @@ impl ApplicationHandler<()> for App {
                                     // An enabled auto-door mode turns a shut
                                     // leaf into a usable next step; `walk`
                                     // sends its use before this step.
+                                    //
+                                    // The bodies in the way of this press. A
+                                    // held arrow never plans, but it does ask
+                                    // `Detour` for a way past whatever is ahead
+                                    // — and somebody standing there is one of
+                                    // the things it has to get past.
                                     live: footing(&self.resources, self.walking_doors())
-                                        .among(Bodies::standing(&crowd)),
+                                        .among(Bodies::standing(&self.world.bodies)),
                                     guide: guide(&self.resources),
                                     coarse: self.resources.coarse.as_ref(),
                                 },
@@ -832,10 +833,10 @@ impl ApplicationHandler<()> for App {
             // Both halves of the ground, because this is where a destination
             // replans: see `steer::Readings`. Built here rather than held, for the
             // reason the single terrain always was — they borrow the map and the
-            // view, and the walk borrows `steer` mutably beside them.
-            let crowd = crate::clutter::crowd(self.world.authoritative.view.as_ref());
+            // crowd, and the walk borrows `steer` mutably beside them.
             let ground = steer::Readings {
-                live: footing(&self.resources, self.walking_doors()).among(Bodies::standing(&crowd)),
+                live: footing(&self.resources, self.walking_doors())
+                    .among(Bodies::standing(&self.world.bodies)),
                 guide: guide(&self.resources),
                 coarse: self.resources.coarse.as_ref(),
             };

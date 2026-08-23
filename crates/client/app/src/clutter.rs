@@ -66,6 +66,8 @@
 //! at the height the body would arrive at. [`crowd`] is what builds one at this
 //! end, and it is in this module because it answers the same question `fill`
 //! does — what refuses a step here, before one is sent — off the same view.
+//! [`project`] writes both halves in one call, which is where the argument for
+//! that pairing lives.
 //!
 //! Two things were wrong with a body in the overlay, and neither is a matter of
 //! taste:
@@ -86,10 +88,44 @@ use openshard_client_render::doors;
 use openshard_client_render::items::GroundItem;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::{Cover, Overlay};
-use openshard_protocol::mobile::StatusFlags;
 use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
-use openshard_uofiles::anim::is_ghost;
+
+/// Both halves of what refuses a step here, written from one view.
+///
+/// The furniture goes into `live` and the bodies into `bodies`, and it is one
+/// call because it is one question asked of one snapshot.
+///
+/// **Two halves used to be built on two clocks.** [`fill`] was called here, once
+/// per view, and [`crowd`] was built afresh at each of the four places a step is
+/// decided — and only the item half had a reason for a clock of its own. The
+/// overlay is written *into* the [`Ground`](openshard_movement::ground::Ground)
+/// that a [`Footing`](openshard_movement::Footing) borrows, so it cannot be
+/// handed back at the question; and a route over hundreds of tiles asks it once
+/// per tile, which would be a rescan of everything on screen per tile. The body
+/// half has neither property, and what it had instead was `Steering::steer` on
+/// the input path: a `Vec` and a sort per raw mouse-move for as long as the
+/// right button is held.
+///
+/// **One call and not two**, for [`Ground::set_base`](openshard_movement::ground::Ground::set_base)'s
+/// reason: a view change that refills the furniture and forgets the bodies is a
+/// client planning through a crowd, and the way to make that unspellable is to
+/// leave nowhere to write one half without the other.
+///
+/// `view` and `items` are the same snapshot reached two ways. The bodies come
+/// straight off the view; the furniture comes off the *projected* item list,
+/// which is the view's items with a house expanded into its pieces and a
+/// dragged item shown at the tile it is being dropped on — see `App::entered`.
+pub fn project(
+    live: &mut Overlay,
+    bodies: &mut Vec<Point>,
+    view: Option<&WorldView>,
+    items: &[GroundItem],
+    tiles: &TileData,
+) {
+    fill(live, items, tiles);
+    *bodies = crowd(view);
+}
 
 /// Index whatever in `items` is in the way, and say of each placed item whether
 /// it is a door.
@@ -158,25 +194,41 @@ pub fn fill(live: &mut Overlay, items: &[GroundItem], tiles: &TileData) {
 /// The route the HUD draws is the same plan, so the green line was drawn through
 /// a body too.
 ///
-/// # The rule, and the half of it that cannot be seen from here
+/// # The rule, and the halves of it that cannot be seen from here
 ///
 /// The shard's is two questions (`WorldState::walks_through_bodies` and
-/// `WorldState::body_blocks`), and this is both of them read off the wire:
+/// `WorldState::body_blocks`), and this is both of them:
 ///
-/// - **Does this body walk through others?** [`StatusFlags::IGNORE_MOBILES`],
-///   which the shard sets from exactly that rule — staff, and the dead. Not a
-///   second reading of it here either: the bit *is* the answer, and the whole
-///   point of the shard setting it is that this end does not have to guess.
-///   An empty crowd is what a mover exempt from the rule gets, the same
-///   `Vec::new()` the shard's own answer is for one.
-/// - **Is this body in the way?** Everything the shard shows us except a ghost,
-///   which is `is_ghost` on the body id — the same pair the drawing decides
-///   translucency by, since nothing on the wire says a *stranger* is dead.
+/// - **Does this body walk through others?** The wire says so —
+///   [`Player::walks_through_bodies`](openshard_client_net::view::Player::walks_through_bodies),
+///   which is `IGNORE_MOBILES` off the flag byte, which the shard sets from
+///   exactly that rule: staff, and the dead. Not a second reading of it here
+///   either: the bit *is* the answer, and the whole point of the shard sending
+///   it is that this end does not have to guess. An empty crowd is what a mover
+///   exempt from the rule gets, the same `Vec::new()` the shard's own answer is
+///   for one.
+/// - **Is this body in the way?** Everything the shard shows us, with no
+///   predicate at all — and the two clauses left off are proofs rather than
+///   omissions.
 ///
-/// The shard's remaining clause — a hidden game master is in nobody's way — has
-/// no counterpart here and needs none. A hidden mobile is drawn only to a staff
-/// viewer (`WorldState::visible_to`), and a staff viewer's own crowd is empty by
-/// the first rule above, so the case cannot arise at this end.
+/// **A ghost is not filtered out, because one cannot get here.** The shard lets
+/// the dead through (`body_blocks` is false for a ghost), so this end would seem
+/// to owe the same answer — but a client with a ghost in its view is a client
+/// that is itself dead or staff: a ghost is drawn only to another ghost and to
+/// staff (`WorldState::can_see_mobile`, and `show` is the one draw path), and
+/// both of those are exempt by the rule above, so the answer for such a client
+/// is the empty crowd two lines up. A filter here could therefore never fire for
+/// a ghost. It *did* fire for the only body that can reach here wearing a
+/// ghost's graphic: a living mobile a shard gave one to — a spectral NPC — which
+/// the shard blocks on and which this end walked straight through. `is_ghost`
+/// stays where a body id is genuinely the fact, which is the drawing (its
+/// translucency, and the sword it is not holding); a step is decided against
+/// what the shard says, and it says nothing about a stranger's death.
+///
+/// **A hidden game master is in nobody's way, and cannot get here either.** A
+/// hidden mobile is drawn only to a staff viewer (`can_see_mobile` again), and a
+/// staff viewer's own crowd is empty by the first rule, so the case cannot
+/// arise at this end.
 ///
 /// One sliver of the shard's rule is deliberately not reproduced: it also lets a
 /// creature worn down to no hit points out of the way, because such a body stands
@@ -194,10 +246,11 @@ pub fn fill(live: &mut Overlay, items: &[GroundItem], tiles: &TileData) {
 /// re-plan when the route reaches it and never a wrong step — the same bargain,
 /// with the bound arriving from the shard rather than being chosen.
 ///
-/// The list is small for the same reason: a screenful, rebuilt at the question
-/// rather than kept, which is the bargain the shard makes too. There is nothing
-/// to hold in step with the view and no removal anybody can forget — the whole
-/// of the argument against a body in an index, made here as well.
+/// The list is small for the same reason: a screenful, built whole and thrown
+/// away whole every time the view moves. There is no removal anybody can forget
+/// — the whole of the argument against a body in an *index*, made here as well —
+/// and it is written where the furniture is, by the one call that writes both
+/// (see [`project`]).
 ///
 /// Positions are the shard's last word and not the glide `crowd.rs` draws them
 /// along, because the shard's last word is what the shard will decide the step
@@ -213,15 +266,10 @@ pub fn crowd(view: Option<&WorldView>) -> Vec<Point> {
     let Some(view) = view else {
         return Vec::new();
     };
-    if view.player.flags.has(StatusFlags::IGNORE_MOBILES) {
+    if view.player.walks_through_bodies {
         return Vec::new();
     }
-    let mut crowd: Vec<Point> = view
-        .mobiles
-        .values()
-        .filter(|mobile| !is_ghost(mobile.body))
-        .map(|mobile| mobile.position)
-        .collect();
+    let mut crowd: Vec<Point> = view.mobiles.values().map(|mobile| mobile.position).collect();
     // `Bodies::standing` looks a tile up by binary search and debug-asserts this
     // order rather than imposing it, for the reason its own doc gives: the
     // caller has just built the storage and knows whether it is sorted.
@@ -270,6 +318,7 @@ mod tests {
     use openshard_movement::{Around, Detour, Footing, Heading, Lean, Leeway, Step, step_allowed};
     use openshard_protocol::direction::{Direction, Facing};
     use openshard_protocol::items::ItemAmount;
+    use openshard_protocol::mobile::StatusFlags;
     use openshard_protocol::serial::Serial;
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_protocol::world::Point;
@@ -380,16 +429,24 @@ mod tests {
         );
     }
 
-    /// **The dead do not block.** Nothing on the wire says a stranger died —
-    /// their body id does, and it is the same pair the drawing reads.
+    /// **A body wearing a ghost's graphic is still in the way**, because a body
+    /// this client can see is a body the shard let it see — and the shard shows
+    /// a ghost to nobody but another ghost and staff, both of which are exempt
+    /// and hold no crowd at all (the test below). So the only thing that can
+    /// reach here in a ghost's skin is a living one wearing it, and the shard
+    /// blocks on that: a spectral NPC used to be walked into a hold at a time.
+    ///
+    /// This is the whole of the proof `crowd`'s doc states — the filter it
+    /// replaces could never fire for a real ghost, and fired only for this.
     #[test]
-    fn a_ghost_is_in_nobody_s_way() {
+    fn a_living_body_in_a_ghost_s_skin_is_in_the_way() {
         let mut view = viewed();
         seen(&mut view, 2, Point::new(HERE.x + 1, HERE.y, 0), GHOST);
         let crowd = crowd(Some(&view));
+        assert_eq!(crowd.len(), 1, "a body the shard drew for us was left out");
         assert!(
-            crowd.is_empty(),
-            "a ghost was put in the way of the living, who cannot even see it"
+            step_allowed(&among(&crowd), HERE, Direction::East).is_none(),
+            "a spectral NPC the shard blocks on was walked into"
         );
     }
 
@@ -398,6 +455,9 @@ mod tests {
     /// through bodies — staff, or dead — so there is no crowd to get past. A
     /// client that ignored the bit would refuse steps the shard allows, which is
     /// the rubber-band with the ends swapped.
+    ///
+    /// It is also the other half of the test above: the viewer who *can* see a
+    /// ghost is a ghost or is staff, and this is what such a viewer's crowd is.
     #[test]
     fn a_mover_the_shard_exempted_has_no_crowd_at_all() {
         let mut view = viewed();
@@ -407,7 +467,7 @@ mod tests {
             1,
             "the body is in the way to begin with"
         );
-        view.player.flags = StatusFlags::IGNORE_MOBILES;
+        view.player.walks_through_bodies = true;
         assert!(
             crowd(Some(&view)).is_empty(),
             "a mover the shard exempted was still held to the rule"
@@ -436,6 +496,39 @@ mod tests {
     #[test]
     fn a_client_with_no_shard_has_no_crowd() {
         assert!(crowd(None).is_empty());
+    }
+
+    /// **One view, both halves, replaced together** — which is the whole reason
+    /// [`project`] is one call. What it is written against is the half-refresh:
+    /// a view that moved the furniture and left the bodies where the last one
+    /// had them (or the other way round) is this client planning against two
+    /// different moments, and the symptom is a step refused by a shard that can
+    /// see nobody there.
+    ///
+    /// Both stale halves are put in first, so a call that quietly wrote only one
+    /// of them fails here rather than in a walk somebody is watching.
+    #[test]
+    fn one_call_replaces_the_furniture_and_the_crowd_together() {
+        let tiles = TileData::empty();
+        let stale = Tile::new(1, 1);
+        let mut live = Overlay::default();
+        live.set(stale, vec![Cover::blocking(0, BARREL_HEIGHT)]);
+        let mut bodies = vec![Point::new(1, 1, 0)];
+
+        let mut view = viewed();
+        let standing = Point::new(HERE.x + 1, HERE.y, 0);
+        seen(&mut view, 2, standing, LIVING);
+        project(&mut live, &mut bodies, Some(&view), &[], &tiles);
+
+        assert!(
+            live.at(stale).is_empty(),
+            "the last view's furniture outlived the view that placed it"
+        );
+        assert_eq!(
+            bodies,
+            vec![standing],
+            "the last view's crowd outlived the view that stood in it"
+        );
     }
 
     /// The bug as it was reported: a body walking at a barrel diagonally went

@@ -633,12 +633,11 @@ impl App {
         // is the plan itself and not a second opinion about it (`docs/parity.md`),
         // so a route drawn through a bystander would be a picture of a walk this
         // client is not going to take.
-        let crowd = crate::clutter::crowd(self.world.authoritative.view.as_ref());
         let ground = steer::Readings {
             // The route the HUD draws is the one a step would take, so it reads
             // the doors as they stand whatever the auto-door setting is.
             live: footing(&self.resources, openshard_map::overlay::Doors::AsTheyStand)
-                .among(openshard_movement::Bodies::standing(&crowd)),
+                .among(openshard_movement::Bodies::standing(&self.world.bodies)),
             guide: guide(&self.resources),
             coarse: self.resources.coarse.as_ref(),
         };

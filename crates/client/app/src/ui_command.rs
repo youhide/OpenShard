@@ -449,12 +449,13 @@ impl App {
         let Some(tile) = self.pick_tile(*self.control.camera()) else {
             return false;
         };
-        // Who else is standing on it — built here and thrown away with the
-        // answer, which is the bargain `clutter::crowd` documents. A route
-        // planned through a body is one the shard refuses a step at a time.
-        let crowd = crate::clutter::crowd(self.world.authoritative.view.as_ref());
+        // Who else is standing on it — the projection the last view left, which
+        // is what keeps this off the mouse's clock: a heading restates itself on
+        // every raw move (see `steer.rs`), and building the crowd here made a
+        // `Vec` and a sort per move. A route planned through a body is one the
+        // shard refuses a step at a time.
         let ground = steer::Readings {
-            live: footing(&self.resources, self.walking_doors()).among(Bodies::standing(&crowd)),
+            live: footing(&self.resources, self.walking_doors()).among(Bodies::standing(&self.world.bodies)),
             guide: guide(&self.resources),
             coarse: self.resources.coarse.as_ref(),
         };

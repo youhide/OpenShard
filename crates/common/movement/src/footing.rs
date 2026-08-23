@@ -65,14 +65,14 @@ const MOBILE_OVERLAP: i32 = 15;
 
 /// The other bodies a step has to get past.
 ///
-/// # Built at the question, and never kept
+/// # Borrowed for the question, and never an index
 ///
-/// The same bargain [`MapTerrain`] makes: a value assembled where the question
-/// is asked, living exactly as long as the asking, owned by nobody. The shard
-/// builds one out of its sector grid — which is already the authority from tile
-/// to entity, and is already kept honest by the step itself — so there is no
-/// second copy of `Position` to fall out of step, and no `unblock` anybody can
-/// forget. That was the whole of the argument against registering mobiles in
+/// The same bargain [`MapTerrain`] makes: a slice the caller owns for the length
+/// of one answer, with no identity in it and nothing here to keep in step. The
+/// shard builds one out of its sector grid — which is already the authority from
+/// tile to entity, and is already kept honest by the step itself — so there is
+/// no second copy of `Position` to fall out of step, and no `unblock` anybody
+/// can forget. That was the whole of the argument against registering mobiles in
 /// the obstruction index; see `docs/roadmap.md`'s *a mobile is not an
 /// obstacle*.
 ///
@@ -84,6 +84,16 @@ const MOBILE_OVERLAP: i32 = 15;
 /// hold at a time — so the two answers are held to each other on purpose, and
 /// the exemptions the client cannot derive for itself are sent to it in
 /// `StatusFlags::IGNORE_MOBILES`.
+///
+/// **When each end builds it is not the same, and the reason is in the
+/// arguments.** `crowd_near` takes a mover, a centre and a reach, so its answer
+/// is different for every asker and cannot be anything but built at the
+/// question. The client's is a function of the *view* alone — the mover is
+/// always this connection's own body and the reach is whatever the shard has
+/// shown it — so it is projected once when the view moves, beside the two other
+/// projections that view already feeds (`clutter::project`). Neither is an
+/// index: both are built whole and thrown away whole, which is the property this
+/// section is actually about.
 ///
 /// # What is not in here
 ///

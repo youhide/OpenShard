@@ -865,6 +865,10 @@ pub fn run<D: Dial + Send + 'static>(
                     crowd
                 },
             },
+            // Nobody is in the way of a world nobody has described yet. The
+            // first `entered` fills this, beside the clutter — see
+            // `clutter::project`.
+            bodies: Vec::new(),
             render_ready: !connected,
             connection: String::from("offline"),
             // No dial, no shard, and that is the *viewer* — the one state in

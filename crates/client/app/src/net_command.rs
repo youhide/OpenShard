@@ -687,15 +687,23 @@ impl App {
             });
             self.world.presentation.item_serials.push(drag.item.serial);
         }
-        // The same list read for a second question — not what to draw, but what
+        // The same view read for a second question — not what to draw, but what
         // a step cannot go through. Rebuilt here rather than per decision: one
         // click plans a route over hundreds of tiles, and each of them would
         // otherwise rescan everything on screen. See `clutter.rs`.
-        // Items only: a body is not clutter and does not go in the overlay —
-        // `clutter::crowd` is where the mobiles in this same view are read, and
-        // its docs say what a cover could not express about one.
-        clutter::fill(
+        //
+        // Both halves in one call, and that is the point of the call: the
+        // furniture goes into the facet's live layer and the bodies into
+        // `world.bodies`, because a body is not clutter and cannot go in an
+        // overlay that has no idea who is asking. Refreshing one without the
+        // other is a client planning through a crowd, so there is nowhere to.
+        clutter::project(
             self.resources.ground.live_mut(),
+            &mut self.world.bodies,
+            // The view being folded, not the one still in `authoritative`: that
+            // one is replaced at the end of this function, and a crowd taken
+            // from it would be a packet behind the furniture beside it.
+            Some(&view),
             &self.world.presentation.items,
             &self.resources.tiledata,
         );

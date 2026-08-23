@@ -87,9 +87,30 @@ pub struct Player {
     /// Its hue. `0x1B` never carries one — see [`WorldView::entered`] — so this
     /// reads [`Hue::NONE`] until the first `0x20`.
     pub hue: Hue,
-    /// Poisoned, invisible, war mode. Same absence as `hue` until the first
-    /// `0x20`.
-    pub flags: StatusFlags,
+    /// Whether this body walks through others rather than round them.
+    ///
+    /// [`StatusFlags::IGNORE_MOBILES`] off the flag byte a `0x20` or our own
+    /// `0x78` carries, and the whole of what this end reads that byte for. The
+    /// shard sets the bit from its own body-blocking rule — staff, and the dead
+    /// — so `clutter::crowd` does not have to re-derive who is exempt from a
+    /// rule it can only guess at. `false` until the first packet that carries
+    /// the byte, which is the same absence as `hue`.
+    ///
+    /// **A `bool` and not the byte**, which is what this was. Of the eight bits
+    /// this one is the only one anything at this end answers from, and one of
+    /// the other seven is [`WARMODE`](StatusFlags::WARMODE) — a second copy of
+    /// [`war`](Self::war) that no packet updates in step with it, sitting in a
+    /// field named `flags` where the next reader would find it first. A `0x72`
+    /// moves the stance without a `0x20` behind it, so that copy is not merely
+    /// unread: it is wrong for as long as the body stands still. Keeping a byte
+    /// for the sake of the bits nobody reads is how a fact ends up with two
+    /// homes; the day one of the seven is wanted it can be folded out the same
+    /// way this one is.
+    ///
+    /// [`Mobile::flags`] does keep the byte, and the asymmetry is the point:
+    /// *there* the byte is the stance's one home, because no `0x72` ever
+    /// describes somebody else.
+    pub walks_through_bodies: bool,
     /// Whether this character stands in war mode.
     ///
     /// **The one home for that fact.** It arrives two ways — a `0x72`, which is
@@ -100,9 +121,11 @@ pub struct Player {
     /// stale toggle: the window would answer from the flag byte it opened with
     /// while the stance had moved on.
     ///
-    /// Not read off [`flags`](Self::flags): [`StatusFlags`]' bits are not
-    /// modelled — see its docs — and guessing one here would be a second
-    /// answer to the same question.
+    /// **Not the `0x20`'s own war bit**, which the shard does send and this end
+    /// does not keep — see [`walks_through_bodies`](Self::walks_through_bodies).
+    /// The same split the reference client makes: ClassicUO reads
+    /// `Flags & WarMode` for [`Mobile`] and gives `PlayerMobile.InWarMode` a
+    /// field of its own that only the `0x72` writes.
     pub war: bool,
     /// Whether this character is a ghost.
     ///
@@ -656,7 +679,10 @@ impl WorldView {
                 serial: start.serial,
                 body: start.body,
                 hue: Hue::NONE,
-                flags: StatusFlags::NONE,
+                // A `0x1B` carries no flag byte. Staff learn they walk through
+                // bodies from the `0x78` the shard sends them about themselves,
+                // which is right behind it — see `enter.rs`.
+                walks_through_bodies: false,
                 // At peace until something says otherwise, which is what a
                 // `0x1B` means: a session starts out of war, and a shard that
                 // logs a character back in fighting says so with a `0x72`.
@@ -951,11 +977,16 @@ impl WorldView {
                     serial: self.player.serial,
                     body: update.body,
                     hue: update.hue,
-                    flags: update.flags,
-                    // The stance is nobody's business but `0x72`'s: `0x20`
-                    // carries a flag byte whose war bit this engine does not
-                    // model, and reading one out of it would be a second answer
-                    // to `war`'s question — see `Player::war`.
+                    // The one bit of the byte this end answers from. The rest of
+                    // it is dropped at the door rather than kept unread — see
+                    // `Player::walks_through_bodies`.
+                    walks_through_bodies: update.flags.has(StatusFlags::IGNORE_MOBILES),
+                    // The stance is nobody's business but `0x72`'s. The byte
+                    // above does carry a war bit — the shard sets it, and a
+                    // stock client reads it — but it moves only when a `0x20`
+                    // does, while the stance moves the moment the toggle is
+                    // answered, so taking it here would be a second answer to
+                    // `war`'s question and a stale one. See `Player::war`.
                     war: self.player.war,
                     // `0x20`'s reason again: this is a position and an
                     // appearance, and death is neither — it has its own
@@ -1023,7 +1054,8 @@ impl WorldView {
                     serial: self.player.serial,
                     body: incoming.body,
                     hue: incoming.hue,
-                    flags: incoming.flags,
+                    // The same bit off the same byte, for `0x20`'s reason above.
+                    walks_through_bodies: incoming.flags.has(StatusFlags::IGNORE_MOBILES),
                     // Kept, for `0x20`'s reason above: a `0x78` describes a body
                     // and what hangs on it, and the stance is not one of those.
                     war: self.player.war,
@@ -1848,7 +1880,7 @@ mod tests {
             serial: view.player.serial,
             body: view.player.body,
             hue: view.player.hue,
-            flags: view.player.flags,
+            flags: StatusFlags::NONE,
             position: view.player.position,
             facing: Facing::walking(Direction::East),
         };
@@ -2149,6 +2181,46 @@ mod tests {
         assert!(
             !view.apply(&ServerPacket::WarMode(WarMode { war: false })),
             "the same stance twice is not a change"
+        );
+    }
+
+    /// The flag byte a `0x20` carries about our own body: one bit is kept and
+    /// the war bit is not.
+    ///
+    /// Both halves matter. `IGNORE_MOBILES` has to land, because it is the
+    /// shard telling this end that its own body-blocking rule does not apply to
+    /// this mover (`clutter::crowd`). And the byte's war bit has to *stay* out
+    /// of the stance: it moves only when a `0x20` does, so a client that took it
+    /// would put a body that toggled war while standing still back at peace on
+    /// its next relocation — the reference client keeps the two apart for the
+    /// same reason (`PlayerMobile.InWarMode` is its own field there).
+    #[test]
+    fn a_player_update_carries_the_body_blocking_exemption_and_not_the_stance() {
+        let mut view = WorldView::entered(start());
+        assert!(!view.player.walks_through_bodies, "nothing has said so yet");
+
+        assert!(view.apply(&ServerPacket::WarMode(WarMode { war: true })));
+        assert!(view.player.war);
+
+        let relocated = PlayerUpdate {
+            serial: view.player.serial,
+            body: view.player.body,
+            hue: view.player.hue,
+            // A `.gm` at peace, as the shard's `stance_of` would state it — and
+            // the war bit deliberately clear, which is the disagreement this
+            // test is about.
+            flags: StatusFlags::IGNORE_MOBILES,
+            position: Point::new(1480, 1770, 20),
+            facing: view.player.facing,
+        };
+        assert!(view.apply(&ServerPacket::PlayerUpdate(relocated)));
+        assert!(
+            view.player.walks_through_bodies,
+            "the shard said this mover walks through bodies and the client did not hear it"
+        );
+        assert!(
+            view.player.war,
+            "a `0x20` took the stance away from the `0x72` that set it"
         );
     }
 

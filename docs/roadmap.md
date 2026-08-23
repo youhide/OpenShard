@@ -613,23 +613,63 @@ Left open, and none of it blocks anything:
   the two back in step with their own contract — a diagnostic about the *ground*
   no longer flickers as people walk about. Written down because it is a visible
   change nobody asked for, not because it wants undoing.
-- **The client's crowd is built per ask, not per view.** `clutter::fill` is a
-  projection rebuilt when the view changes; `clutter::crowd` is rebuilt at every
-  question, and `Steering::steer` is called on *every raw mouse-move*. It is a
-  screenful of points and a sort, so it does not matter yet — but the two
-  neighbouring functions read the same list on two different clocks, and only one
-  of them has a reason to.
-- **`is_ghost` is the client's whole answer to "is that one dead".** Nothing on
-  the wire says a stranger died; the body id does. That is fine for the crowd,
-  and it is the same pair the drawing reads — but it means a shard that gave a
-  living mobile a ghost body graphic would have it walked through. Worth knowing
-  before anybody writes a spectral NPC.
-- **The `0x20`'s flag byte is now sent and still half-ignored.** The client keeps
-  `Player::war` out of it deliberately (`0x72` is the one home for the stance), so
-  the byte now arrives carrying a war bit that is read from nowhere. That is the
-  honest arrangement — the packet says what the shard sent — but it is the second
-  place `WARMODE` travels, and the note in `view.rs` is the only thing saying
-  which one wins.
+- ~~**The client's crowd is built per ask, not per view.**~~ **Closed.** It is a
+  projection now, written by `clutter::project` — one call that replaces the
+  furniture in the facet's live layer *and* the bodies in `WorldState::bodies`,
+  because a view change that refreshes one and not the other is a step decided
+  against two different moments. The four call sites read the field. The clocks
+  differ at the two ends of the wire and the reason is in the arguments, which
+  is now written on `Bodies`: `crowd_near` takes a mover, a centre and a reach,
+  so its answer is per asker and cannot be projected; the client's is a function
+  of the view alone.
+- ~~**`is_ghost` is the client's whole answer to "is that one dead".**~~
+  **Closed, by deleting the filter.** A ghost could never reach that filter: the
+  shard draws one only to another ghost and to staff (`can_see_mobile`, and
+  `show` is the one draw path), and both of those hold `IGNORE_MOBILES`, so
+  their crowd is empty two lines earlier. The only body it *did* filter was the
+  living one wearing a ghost's graphic — the spectral NPC, which the shard
+  blocks on and this end walked through. `is_ghost` stays where a body id is
+  genuinely the fact, which is the drawing.
+- ~~**The `0x20`'s flag byte is now sent and still half-ignored.**~~ **Closed.**
+  The player's `flags: StatusFlags` is now `walks_through_bodies: bool`: the one
+  bit this end answers from, folded at the door, and no second home for the
+  stance sitting in a field where the next reader would find it first. `0x72`
+  keeps `Player::war` — the same split the reference client makes
+  (`PlayerMobile.InWarMode` is its own field there, while `Mobile.InWarMode`
+  reads the byte). A `0x72` moves the stance with no `0x20` behind it, so the
+  byte's war bit is not merely unread: it is wrong for as long as the body
+  stands still.
+
+#### Found while closing those three
+
+- **A stranger's `IGNORE_MOBILES` is not "this one is out of the way", and the
+  crowd must never read it as one.** The bit is `walks_through_bodies` — staff
+  *or* dead — while what the crowd wants is `body_blocks`, which a living,
+  visible game master satisfies. Filtering the crowd on the bit would let this
+  end walk into a game master standing in a doorway and be refused by the shard
+  a hold at a time. It reads like an easy improvement on the deleted `is_ghost`
+  and it is the same bug with better manners; the two questions are separate
+  functions on `WorldState` for exactly this reason.
+- **Nothing tests that `App::entered` calls `clutter::project`.** The seam has
+  its own test (both halves replaced from one view) and the four readers have
+  theirs, but the wiring between them is untested because an `App` needs a
+  window and a GPU to exist. The gap is one line wide and it is the line that
+  would make every step decision a packet stale.
+- **A lost shard puts the world out of the view and leaves every projection
+  standing.** `WorldView::shard_lost` clears the mobiles, the items and the
+  containers — and `entered` is not called afterwards, so the live overlay, the
+  presentation's draw lists and now `WorldState::bodies` all keep the dead
+  shard's world. Nothing walks over it (`App::walk` refuses once the shard is
+  lost) and the last frame is deliberately left on screen, but that is the
+  opposite of what `shard_lost`'s own doc argues for: it exists so that a
+  picture which goes on looking right cannot outlive the connection, and the
+  picture is precisely what does. One call to the projection in the `Lost` arm
+  would settle it, and it is a change to what a disconnect *looks like*, so it
+  wants its own decision rather than a quiet fix.
+- **`clutter.rs` cited `WorldState::visible_to`, which has never existed.** The
+  function is `can_see_mobile`. Fixed in passing; noted because the citation was
+  load-bearing — it is the proof that a ghost cannot reach the client's crowd,
+  and a proof resting on a function nobody can find is a proof nobody can check.
 
 ### Backlog: the shove — a rested player pushes past a body rather than stopping at it
 

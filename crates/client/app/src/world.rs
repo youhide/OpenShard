@@ -107,6 +107,27 @@ pub struct WorldState {
     /// The renderer-facing projection rebuilt from authoritative state and
     /// prediction before a frame is drawn.
     pub presentation: PresentationWorld,
+    /// The other bodies a step of ours has to get past, as the shard last
+    /// stated their tiles — [`crate::clutter::crowd`]'s answer, kept.
+    ///
+    /// The third projection of the view, and the only one that is neither a
+    /// picture nor a record: the other two are [`presentation`](Self::presentation),
+    /// which is what a frame draws, and the live layer of
+    /// [`Resources::ground`](crate::resources::Resources::ground), which is what
+    /// the shard has stood on the floor. This is who is standing on it. All
+    /// three are written from one view and thrown away whole — see
+    /// [`crate::clutter::project`], which writes this one and the live layer in
+    /// the same call so that neither can be refreshed without the other.
+    ///
+    /// Not in [`PresentationWorld`], for the reason that type's own doc gives:
+    /// nothing in a frame reads this. Empty for the offline map viewer, and
+    /// empty for a mover the shard has exempted from the rule — see
+    /// [`crate::clutter::crowd`], which is where both of those are decided.
+    ///
+    /// It stops being refreshed when the shard is lost, along with every other
+    /// projection here: `App::walk` is what stops the body from moving over a
+    /// world nobody is describing any more, and nothing plans a step once it has.
+    pub bodies: Vec<Point>,
     /// Whether a world picture is safe to show. The offline viewer starts
     /// ready; a connected client becomes ready only when the shard has sent its
     /// first complete [`WorldView`]. Until then the presentation's placeholder
@@ -945,8 +966,14 @@ pub(crate) fn guide(resources: &resources::Resources) -> openshard_movement::Foo
 /// shard has laid over it, and which way the shut doors are being read.
 ///
 /// One argument's worth of world, because since era R's second node the two
-/// layers are one value — see [`crate::clutter::fill`], which is what puts the
-/// live half there.
+/// layers are one value — see [`crate::clutter::project`], which is what puts
+/// the live half there.
+///
+/// **The bodies are not in it**, and no caller of this may forget them: a
+/// footing that decides a *step* wants `.among(Bodies::standing(&world.bodies))`
+/// over the top, because an overlay has no idea who is asking and cannot say
+/// that staff and the dead walk through people. See [`WorldState::bodies`] and
+/// `clutter::crowd`.
 pub(crate) fn footing(
     resources: &resources::Resources,
     doors: openshard_map::overlay::Doors,
