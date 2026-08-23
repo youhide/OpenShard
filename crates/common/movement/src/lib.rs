@@ -67,7 +67,6 @@ mod walk;
 pub use detour::{Around, Detour, Leeway, Step};
 pub use footing::Footing;
 pub use navigation::{NavigationGraph, find_long_path};
-pub use openshard_tiles::LandTileId;
 pub use overlay::{Cover, CoverKind, Doors, Overlay};
 pub use pace::{
     Pace, RUN_HOLD, RUN_INTERVAL, WALK_BUFFER, WALK_HOLD, WALK_INTERVAL, WalkPace, step_hold, step_progress,
