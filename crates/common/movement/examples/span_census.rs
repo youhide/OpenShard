@@ -21,7 +21,7 @@ use std::time::Instant;
 
 use clap::Parser;
 use openshard_map::map::WorldMap;
-use openshard_uofiles::surfaces::stand_surfaces;
+use openshard_movement::surfaces::stand_surfaces;
 
 #[derive(Debug, Parser)]
 struct Cli {

@@ -12,8 +12,8 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
-# `surfaces` and `radarcol` read the world, and `map` is the importer that
-# builds one: the world type lives in `openshard-map` and nothing here owns it.
+# `radarcol` reads the world and `map` is the importer that builds one: the
+# world type lives in `openshard-map` and nothing here owns it.
 openshard-map.workspace = true
 openshard-protocol.workspace = true
 # What `tiledata` reads *into*: the two tables, the flags on them and the ids

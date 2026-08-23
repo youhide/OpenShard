@@ -150,7 +150,7 @@ impl<'a> MapTerrain<'a> {
     /// body *fits* — that is [`can_fit`](crate::Terrain::can_fit), and the
     /// callers that care apply it. Unordered, and the tile's own order at that.
     pub fn surfaces(&self, x: u16, y: u16) -> Vec<i32> {
-        openshard_uofiles::surfaces::stand_surfaces(self.map(), self.tiles(), x, y, self.swimming)
+        crate::surfaces::stand_surfaces(self.map(), self.tiles(), x, y, self.swimming)
     }
 
     /// How high the tile's contents reach — the top of the tallest static on it,

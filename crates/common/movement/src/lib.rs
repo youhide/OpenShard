@@ -61,6 +61,7 @@ mod pace;
 mod path;
 pub mod scene;
 mod sequence;
+pub mod surfaces;
 mod terrain;
 mod walk;
 
