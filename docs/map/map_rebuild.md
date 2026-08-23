@@ -134,7 +134,7 @@ Read off the workspace and the plans, so a session does not re-derive it:
 | the search stops asking the map | ✅ [N3](navigation_spans.md#n3--the-search-takes-spans) — 208 ns a node against 1,105, arrivals bit-identical |
 | a column with two floors is two nodes | ✅ [N3b](navigation_spans.md#n3b--the-node-stops-being-a-tile) — the node is a place to stand, and 178 arrivals round Britain were lies |
 | regions over spans | ✅ [N4](navigation_spans.md#n4--regions-over-spans) — the coarse graph refuses nothing the flood says is walkable, from any of five origins |
-| the server reading the graph | ⬜ era P, [N7](navigation_spans.md#n7--the-server-reads-the-graph) |
+| the server reading the graph | ✅ [N7](navigation_spans.md#n7--the-server-reads-the-graph) — a creature walks a route flat A\* at budget 400 refuses, from a raised origin as well as a flat one |
 | live publish, revisioned bakes, chunks to the client, the editor | ⬜ era S |
 
 ## Era R — the map you hold
@@ -379,13 +379,13 @@ is where a session starts. Three things this consolidation adds:
   construction* rather than by each builder remembering. R3's house floors are
   therefore the overlay's answer at query time, not the span grid's — a route
   onto a second storey comes from `surface_at`, and the graph never claims one.
-- **N4 is the node a player notices**, and N7 is where they notice it: the
-  server plans with flat `find_path` at a budget of 400 while the graph that
-  would route it across a town sits loaded and unread. Both were gated on N2's
-  oracles; those ran and passed, and **N4 is built** — the graph samples places
-  and its portals are directed, and `coarse_bench` refuses nothing the flood
-  reaches from any of the five recorded origins. N7 is what is left, and it is
-  the one that reaches a player.
+- **N4 is the node a player notices**, and N7 is where they notice it. Both were
+  gated on N2's oracles; those ran and passed, and **both are built** — the
+  graph samples places and its portals are directed, so `coarse_bench` refuses
+  nothing the flood reaches from any of the five recorded origins, and
+  `ai::step_toward` asks that graph when its own exact search is refused past
+  eight tiles. The shard's planner and the client's now fall back at the same
+  distance, off the same constant.
 - **The search's node has no z, and that turned out to be half a defect.** Asked
   in the session that wrote this document, answered in
   [what a node is](navigation_spans.md#what-a-node-is-and-the-z-that-is-already-gone):
@@ -547,7 +547,7 @@ waits for a measurement that says the statics are still on a hot path.
 | [`snapshot.md`](new_map_representation/snapshot.md) | **the record** of A0 and A, plus the crate rule this document strikes |
 | [`client_today.md`](new_map_representation/client_today.md) | **live** — the measured backlog era R spent. Finding 6 is R4 and is spent, finding 7 was R5 and is withdrawn, finding 10 is the readers' |
 | [`terrain_seam.md`](terrain_seam.md) | **closed.** The record of how the seam went, and where the facet-0 oracle's numbers live |
-| [`navigation_spans.md`](navigation_spans.md) | **live** — era P in full, N0–N4 done |
+| [`navigation_spans.md`](navigation_spans.md) | **live** — era P in full, N0–N4 and N7 done; N5 and N6 gated |
 | [`navigation_graph*.md`](navigation_graph.md) | **live** — the graph, its artifact, and its efficiency phases 1/2/4 built; 3 was gated on N4 and is now gated only on its own measurement |
 | [`coarse_pathfinding.md`](coarse_pathfinding.md) | **superseded**, by its own first line |
 | [`interiors.md`](interiors.md) · [`cutaway.md`](cutaway.md) · [`radar.md`](radar.md) · [`minimap_lod_*.md`](minimap_lod_plan.md) | **live**, and not in the eras: readers, repaired when they break |

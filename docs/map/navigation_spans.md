@@ -895,24 +895,46 @@ revisions of one world.
 
 **Done when:** the load time is recorded here and the node is closed either way.
 
-### N7 — the server reads the graph
+### N7 — the server reads the graph ✅
 
-Needs N4. **Inherited from [`terrain_seam.md`](terrain_seam.md)'s F**, which
-asked whether the baked navigation graph should be wired up or stopped being
-paid for, answered *wire it up*, and handed the action here because the repair
-that has to come first is N4's.
+**Built**, and with it [`terrain_seam.md`](terrain_seam.md)'s F is answered: the
+baked navigation graph was to be wired up rather than stopped being paid for,
+and the repair that had to come first was N4's. `FacetState.coarse` now has a
+reader on the shard that is not a test.
 
-Server AI plans with flat [`find_path`](../../crates/server/ai/src/lib.rs#L79)
-at a budget of 400 explored tiles, so a creature cannot route across a town
-while the artifact that would let it sits loaded and validated in
-`FacetState.coarse`, read by nothing but a test. The client already falls back
-past 8 tiles through `steer::Ground::path`; `step_toward` gains the same
-fall-back, and the two ends stop disagreeing about how far a body can plan.
+`openshard_ai::step_toward` asked flat
+[`find_path`](../../crates/server/ai/src/lib.rs) at a budget of 400 and, when it
+was refused, walked the straight-line direction — so a pet, an escort or a
+townsperson could not route across a town while the artifact that would let it
+sat loaded and validated in the facet beside it. A refused exact search is asked
+of the graph now, past `COARSE_MIN_DISTANCE` tiles, which is **the same
+fall-back the client walks a click by**: the two ends no longer disagree about
+how far a body can plan.
 
-**Done when:** a test walks a creature a distance flat A\* at budget 400 cannot
-— over ground the flood says is walkable, from a raised origin as well as a flat
-one. The raised origin is the half that would have passed for the wrong reason
-before N4.
+**Its done-when is met, in
+`a_creature_routes_past_its_exact_budget_over_the_coarse_graph`.** Two corridors
+that meet a map away from where the walk starts, so the way through is
+eighty-odd tiles *away from* a goal thirty-two tiles off: the exact search
+refuses at the budget from both origins — the flat one and one on a walkway of
+statics five units up — and the walk arrives from both. The flood is the oracle
+that the ground is walkable at all, and the control is **the same facet with no
+graph**, where a body walks south and stands at the divider for the rest of the
+walk. That control is what the shard was.
+
+**One number, and one shared threshold.** `COARSE_MIN_DISTANCE` was a private
+constant in the client's `steer.rs`, with the argument for it written there; it
+is `openshard_movement`'s now, beside `find_long_path`, because it is a property
+of the *router* — joining an endpoint costs one exact search per node of its
+region at both ends — and not of either caller. A fall-back the two ends drew at
+different distances would be two answers to "how far can a body plan", which is
+the disagreement this node closes.
+
+**The bare map is one value now too.** The graph is baked over the bare map, so
+the corridor it proposes has to be read over the bare map: each end used to
+build that reading itself out of an empty overlay it kept alive somewhere. It is
+[`Footing::guide`](../../crates/common/movement/src/footing.rs) — one empty
+overlay for the process — with `world::guide` on the client and
+`WorldState::guide` on the shard as its two callers.
 
 ## Decisions, taken here
 
@@ -1164,6 +1186,38 @@ graph over spans names neither.
   its facets are rebaked. That is the right loudness for a graph that would
   otherwise answer with a one-storey world — it is recorded because it is a
   *deployment* step, not a defect.
+- **🚩 N7 found: the coarse router refuses outright when both endpoints share a
+  region.** `find_long_path` special-cases `from_region == to_region` into
+  `region_route`, which is *confined to that 32×32 rectangle* — so two points
+  twenty tiles apart whose only connection leaves the region and comes back get
+  `LongExit::NoLocalRoute` and the graph is never consulted. Measured while
+  sizing N7's fixture: a first shape put both ends in region 0 and the router
+  answered `None` at every width tried, while the flood said the ground was
+  walkable. It is not the *shard's* worst case — a body and its goal in one
+  region are what the exact search is for — but it is a refusal the graph could
+  answer, and the repair is to let the corridor leave the region when the local
+  route fails rather than instead of trying it.
+- **N7 found: the aggressive chase does not go through `step_toward`.**
+  `ai::chase_step` plans its own route with a bare `find_path` at
+  `PATH_BUDGET`, caches it as a `ChasePath` and, when it is refused, calls
+  `give_up` — guard for ten seconds, then wander. So the fall-back N7 added
+  reaches pets, escorts and townspeople going about their business, and not a
+  creature chasing a player. Deliberate here, and the argument is that a chase
+  is already bounded to twice a creature's sight (`CHASE_RANGE_FACTOR`,
+  `CHASE_RANGE_MIN`), so a quarry it may legitimately follow is rarely further
+  than the exact search reaches — but the plan named `step_toward` and only
+  `step_toward`, and whoever wants a creature to round a town block should know
+  the second planner is there.
+- **🚩 N7 found: a refused coarse query pays the whole join, and nothing behind
+  `step_toward` remembers it.** A goal that is walkable-looking but sealed off
+  costs `local_costs` at both ends in full — every node of both regions, each to
+  its own budget — plus up to `LIVE_REROUTES` abstract retries: **17.4 ms on a
+  96×64 fixture with twenty nodes, in a debug build**, repeatable to the tenth.
+  `chase_step` has `give_up`'s ten-second guard behind its refusal; `step_toward`
+  is a pure function of the world and has nowhere to put one, so an escort whose
+  goal is unreachable and more than `COARSE_MIN_DISTANCE` away pays that on
+  every beat. The 50 ms deadline bounds it and nothing here is on a tick's
+  critical path, but the cost is new and it is per beat per body.
 - **A second `Ground` now exists in `client/app`, and it is the misnamed one.**
   [`steer::Ground`](../../crates/client/app/src/steer.rs) is a pair of
   `Footing`s — the same map read twice, once with the doors shut and once open —
@@ -1199,14 +1253,17 @@ graph over spans names neither.
 
 ## Where a session starts
 
-**N7 — the server reads the graph.** N4 retired the defect this plan was written
-for: the coarse graph refuses **nothing** the flood says is walkable, from any of
-the five recorded origins, where the castle plateau alone used to refuse 37 of
-44. And nothing on the shard reads it. Server AI plans with flat `find_path` at a
-budget of 400, so a creature still cannot route across a town while a correct
-artifact sits loaded and validated in `FacetState.coarse` with a test for its
-only reader. N7's section says what to change and what to assert; its raised
-origin is the half that would have passed for the wrong reason before N4.
+**Nothing in this plan is open, and nothing forces what is left.** N0–N4, N3b
+and N7 are built: the coarse graph refuses nothing the flood says is walkable
+from any of the five recorded origins, and since N7 the shard reads it. What
+remains is N5 and N6, and both are gated rather than queued — see below.
+
+**What a session that wants work here should read first** is *Out of scope,
+named*, which is where six nodes filed what they saw and did not fix. The three
+with a defect behind them are N4's `local_costs` fan-out (the routing cost
+roughly doubled and the mechanism is measured), N7's same-region refusal (the
+graph is not consulted at all when both endpoints share a region), and N7's
+unremembered refusal (a sealed goal costs the whole join, every beat).
 
 **Rebake before running anything.** `ROUTING_VERSION` is 4, so every artifact
 baked before N4 is refused — and refused *loudly*: the shard does not boot.

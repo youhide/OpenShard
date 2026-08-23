@@ -1133,7 +1133,7 @@ with `OpenWorld`, `CachedTerrain`, `TransitionCacheStats`, `InRegion`,
 **Left:** the two door divergences above, and where a test that can see both
 ends is allowed to live.
 
-## F — the graph nobody reads
+## F — the graph nobody reads ✅
 
 Unrelated to the seam, found in the same reading, here so it is not lost. It had
 no edges at all until [the oracle](#0--the-oracle-) gave it one.
@@ -1200,12 +1200,14 @@ mean writing it against the API E is in the middle of deleting. Both are the
 same mistake with the arrow reversed.
 
 **Done when:** ~~either a test walks a creature a distance flat A\* at budget 400
-cannot, or `FacetState.coarse` is gone~~ — **answered, not acted on.** The
-decision is recorded above, the graph stays, and the two halves of the action are
-[N4](navigation_spans.md#n4--regions-over-spans) and the node after it. Nothing
-in this document is waiting on either. **N4 is built**, so the first half is
-spent and the second is
-[N7](navigation_spans.md#n7--the-server-reads-the-graph).
+cannot, or `FacetState.coarse` is gone~~ — **done, by the arm the oracle
+picked.** The graph stays and it is read: **N4 and N7 are both built**, so both
+halves of the action are spent. `ai::step_toward` asks the graph when the exact
+search is refused past eight tiles, and
+`a_creature_routes_past_its_exact_budget_over_the_coarse_graph` is the test this
+line asked for — a creature walking a route flat A\* at budget 400 refuses, from
+a raised origin as well as a flat one, with a facet holding no graph as the
+control. F is closed.
 
 ## What comes after the seam, and why it waits
 
@@ -1472,9 +1474,11 @@ this plan feeds: its era R is the runtime map — the tile table out of the file
 reader, the live layer this plan's E built joining the type that holds the
 ground and the statics, and a house that gets floors.
 
-**F is answered and needs no session.** The oracle picked its arm — the graph
+**F is closed and needs no session.** The oracle picked its arm — the graph
 stays, because it routes 24 of 28 long destinations where flat A\* routes 3 —
-and its repair belongs to the plan after this one. Nothing here is waiting on it.
+and its repair belonged to the plan after this one, which has made it:
+[`navigation_spans.md`](navigation_spans.md)'s N4 fixed the artifact and its N7
+gave `step_toward` the fall-back. Nothing here is waiting on it.
 
 **And the plan after this one no longer waits for E — it waits for the map.**
 [`navigation_spans.md`](navigation_spans.md) is written, decided and measured,

@@ -25,13 +25,15 @@ what moves where, in which commit, with a done-when and a risk per node. R1 the
 tile table leaves the file reader ✔ · R2 the live layer joins the type ✔ · R3 a
 house has floors ✔ · R4 the statics become one immutable run ✔ · R5 one install,
 one load ✂ struck. A session starts at **era P**, in
-[`navigation_spans.md`](navigation_spans.md): era R is over, N1 to N4 are
-built — the shard walks on the span layer at 208 ns a node instead of 1,105, a
-node is a *place to stand* rather than a tile, and the coarse graph refuses
+[`navigation_spans.md`](navigation_spans.md): era R is over, and N1 to N4 and
+N7 are built — the shard walks on the span layer at 208 ns a node instead of
+1,105, a node is a *place to stand* rather than a tile, the coarse graph refuses
 nothing the flood says is walkable where the castle plateau alone used to refuse
-37 of 44. **N7** (the server reads the graph) is next, and it is where a player
-meets any of it. **Rebake first** — `ROUTING_VERSION` is 4 and a shard with an
-older artifact does not boot.
+37 of 44, and **the shard reads it**: `ai::step_toward` asks the graph when the
+exact search runs out of budget, which is where a player meets any of it.
+Nothing in era P is open — N5 and N6 are both gated on a measurement nobody has
+asked for. **Rebake first** — `ROUTING_VERSION` is 4 and a shard with an older
+artifact does not boot.
 
 [`handoffs/`](handoffs/) — where the work stands, one file per session. The
 plans hold intent; a handoff holds state.
@@ -55,7 +57,7 @@ backlog era R spends.
 | | |
 |---|---|
 | [`terrain_seam.md`](terrain_seam.md) | **Closed, and the record of how.** Six terrains, five of which were not terrains: a mask of what the live world put in the way, a rectangle, a memo table, the absence of a map. It ends at a search that takes explicit types with no trait on it, one `Overlay` both ends build, and a shard that owns its tile table. Its node 0 is the facet-0 oracle every number in the two plans beside it comes from — including the one-storey defect and `CachedTerrain`'s deletion. |
-| [`navigation_spans.md`](navigation_spans.md) | 🚩 **The first storey — era P in full.** The layer HPA\* assumes underneath it and this engine never built: a column is a *list* of standable surfaces rather than one height, so a castle plateau is its own span instead of an island. Measured first — 1,462 ns a node expansion, of which A\*'s own machinery is noise, and 92.1% of columns hold no statics at all. Three tiers, an oracle per node, a measured ×4 against a ×6.4 ceiling. **N0–N4 are built** — the layer is 16.5 MiB, bakes in 0.07 s, equals `stand_surfaces` on all 29.4 M columns, answers what the map answers on 248,268,125 steps, and **the shard walks on it**: a node expansion is 208 ns where it was 1,105 and a search from Britain's castle 0.168 ms where it was 0.793. N3b spent that on the answer — a node is a place to stand, so 178 destinations that used to report an arrival are now refusals and a route between two floors of one column exists — and **N4 spent it on the coarse graph**: it samples places and its portals are directed, so `refused_but_walkable` is 0 from all five origins where the castle used to refuse 37 of 44, and the bake fell from 96 s to 11.7 s. **N7 is next**, the server reading what N4 fixed. |
+| [`navigation_spans.md`](navigation_spans.md) | 🚩 **The first storey — era P in full.** The layer HPA\* assumes underneath it and this engine never built: a column is a *list* of standable surfaces rather than one height, so a castle plateau is its own span instead of an island. Measured first — 1,462 ns a node expansion, of which A\*'s own machinery is noise, and 92.1% of columns hold no statics at all. Three tiers, an oracle per node, a measured ×4 against a ×6.4 ceiling. **N0–N4 are built** — the layer is 16.5 MiB, bakes in 0.07 s, equals `stand_surfaces` on all 29.4 M columns, answers what the map answers on 248,268,125 steps, and **the shard walks on it**: a node expansion is 208 ns where it was 1,105 and a search from Britain's castle 0.168 ms where it was 0.793. N3b spent that on the answer — a node is a place to stand, so 178 destinations that used to report an arrival are now refusals and a route between two floors of one column exists — and **N4 spent it on the coarse graph**: it samples places and its portals are directed, so `refused_but_walkable` is 0 from all five origins where the castle used to refuse 37 of 44, and the bake fell from 96 s to 11.7 s. **N7 spent it where a player is**: `ai::step_toward` asks the graph when its exact search is refused past eight tiles, so a body plans the same distance on both ends of the wire. Nothing in era P is open. |
 | [`coarse_pathfinding.md`](coarse_pathfinding.md) | Long routes over static terrain, and what a route is allowed to assume. Superseded, by its own first line. |
 | [`navigation_graph.md`](navigation_graph.md) | The graph itself: regions, components, portals. |
 | [`navigation_graph_bake.md`](navigation_graph_bake.md) | The baked artifact, its stamp and its validation. |
