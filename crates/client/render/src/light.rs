@@ -943,7 +943,7 @@ pub fn collect(
     ambient: Ambient,
     tuning: &Tuning,
     time: f32,
-    atlas: Option<&dyn crate::atlas::StaticArt>,
+    atlas: Option<crate::atlas::StaticArt<'_>>,
     bake: Option<&mut crate::occlusion::bake::Bake>,
 ) -> Lighting {
     collect_with_interior(
@@ -966,7 +966,7 @@ pub fn collect_with_interior(
     ambient: Ambient,
     tuning: &Tuning,
     time: f32,
-    atlas: Option<&dyn crate::atlas::StaticArt>,
+    atlas: Option<crate::atlas::StaticArt<'_>>,
     bake: Option<&mut crate::occlusion::bake::Bake>,
     interior: Option<&crate::interiors::InteriorFrame>,
 ) -> Lighting {

@@ -15,7 +15,7 @@
 //! every client-to-server wire struct in [`crate::login`] and [`crate::world`]
 //! carries the `Raw` type, and the only way to a trusted [`AccountName`] or
 //! [`CharacterName`] is through the check that makes one, in
-//! `openshard_login::Accounts::verify`/`create_character`. This is the same
+//! `openshard_login::DevAccounts` lookup and character creation. This is the same
 //! shape as `openshard_config`'s `RawAccessLevel` vs. `AccessLevel`.
 //!
 //! `PlaintextPassword` and `RawPlaintextPassword` differ only for this
@@ -83,7 +83,7 @@ impl PartialEq<&str> for AccountName {
 
 /// An account name exactly as a `0x80`/`0x91` packet carried it: whatever sat
 /// in the fixed-width field, not yet checked for length or emptiness. See the
-/// module docs — `Accounts::verify` is the only place this becomes a real
+/// module docs — the login account lookup is the only place this becomes a real
 /// [`AccountName`].
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct RawAccountName(pub String);
@@ -153,7 +153,7 @@ impl PartialEq<&str> for CharacterName {
 /// A character name exactly as a `0x00`/`0xF8` create-character packet
 /// carried it: not yet trimmed, checked for length, or checked for
 /// emptiness/duplication against the account. See the module docs —
-/// `Accounts::create_character` is the only place this becomes a real
+/// character-creation code is the only place this becomes a real
 /// [`CharacterName`].
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
 pub struct RawCharacterName(pub String);

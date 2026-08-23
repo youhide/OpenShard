@@ -159,7 +159,14 @@ fn what_the_lighting_knows_about_a_place() {
         min_y: i32::from(at_y) - AROUND - 8,
         max_y: i32::from(at_y) + AROUND + 8,
     };
-    let grid = occlusion::collect(&map, &lamp, bounds, &tiledata, &Cutaway::OPEN, Some(&atlas));
+    let grid = occlusion::collect(
+        &map,
+        &lamp,
+        bounds,
+        &tiledata,
+        &Cutaway::OPEN,
+        Some(openshard_client_render::atlas::StaticArt::Single(&atlas)),
+    );
     println!("\n=== the grid ===");
     for y in at_y as i32 - AROUND..=at_y as i32 + AROUND {
         for x in at_x as i32 - AROUND..=at_x as i32 + AROUND {
@@ -185,7 +192,7 @@ fn what_the_lighting_knows_about_a_place() {
         light::NIGHT,
         &light::Tuning::DEFAULT,
         0.0,
-        Some(&atlas),
+        Some(openshard_client_render::atlas::StaticArt::Single(&atlas)),
         // No bake: one frame, and the instrument reports what the plain walk
         // built.
         None,

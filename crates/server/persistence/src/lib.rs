@@ -21,9 +21,8 @@
 //!
 //! - [`Journal`] tracks what changed and hands it over exactly once.
 //! - [`Snapshot`] is that handover: owned, consistent, taken at one tick.
-//! - [`Store`] is a database, and [`MemoryStore`] is the one that cannot fail.
-//!   [`SqliteStore`] and [`PgStore`] are the two real backends; which a shard
-//!   runs is the operator's choice, and neither is a tier.
+//! - [`Store`] makes the database choice explicit. [`MemoryStore`],
+//!   [`SqliteStore`], and [`PgStore`] are its three backends.
 //! - [`record`] is what the shapes look like on disk, which is deliberately
 //!   *not* what the components look like in memory.
 //!

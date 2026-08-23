@@ -164,7 +164,7 @@ pub struct Inputs<'a> {
     /// because they go through one pass. It is also where an occluder's *facing*
     /// comes from, which is why a frame drawn from one atlas and lit from
     /// another would be two different sets of walls.
-    pub statics: &'a dyn StaticArt,
+    pub statics: StaticArt<'a>,
     /// The sky, already flattened or not by whoever knows whether the field is
     /// wanted.
     ///

@@ -135,7 +135,10 @@ fn grid(
         for y in at.1 - radius..=at.1 + radius {
             for item in map.statics_at(x as u16, y as u16) {
                 let graphic = item.tile;
-                let shape = occlusion::shape_of(Some(atlas), graphic);
+                let shape = occlusion::shape_of(
+                    Some(openshard_client_render::atlas::StaticArt::Single(atlas)),
+                    graphic,
+                );
                 let shape = match footprints {
                     true => shape,
                     false => Shape {
@@ -735,7 +738,10 @@ fn main() {
                     continue;
                 };
                 let tile = tiledata.static_tile(graphic.0);
-                let shape = occlusion::shape_of(Some(&atlas), graphic);
+                let shape = occlusion::shape_of(
+                    Some(openshard_client_render::atlas::StaticArt::Single(&atlas)),
+                    graphic,
+                );
                 // The whole-tile fallback S3 replaced, stated by taking the
                 // measurement away and changing nothing else: `boxes_of` reads
                 // a footprint in exactly one branch, so a `None` here is the

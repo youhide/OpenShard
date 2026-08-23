@@ -680,7 +680,7 @@ impl App {
             cutaway,
             self.window
                 .as_ref()
-                .map(|window| &window.atlases.statics as &dyn openshard_client_render::atlas::StaticArt),
+                .map(|window| openshard_client_render::atlas::StaticArt::Pages(&window.atlases.statics)),
         );
         let bounds = occlusion.bounds();
         let mut surfaces = Vec::new();

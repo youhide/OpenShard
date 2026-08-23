@@ -37,7 +37,7 @@ pub(crate) fn lord_british() -> CharacterName {
 /// characters an account has is the world's roster since S5 of
 /// `docs/connection_state.md`, and an account store that still answered would be
 /// the second list this whole plan deletes.
-pub(crate) fn login_server() -> LoginServer<DevAccounts> {
+pub(crate) fn login_server() -> LoginServer {
     LoginServer::new(
         DevAccounts::new().with_account(&admin(), &PlaintextPassword::new("hunter2")),
         "OpenShard",
@@ -58,7 +58,7 @@ fn pkt(bytes: &[u8]) -> LoginStagePacket {
 /// stall and no channel to wait on, and what it wants is the conversation's end
 /// state.
 fn drive(
-    login: &mut LoginServer<DevAccounts>,
+    login: &mut LoginServer,
     session: &mut LoginSession,
     packet: LoginStagePacket,
     now: Instant,
@@ -77,7 +77,7 @@ fn drive(
 /// [`admin`]. The returned outbox is empty: `LoginServer::handle` gives back a
 /// `Response` and it is `Session::apply` that writes, which this does not call,
 /// so the first thing on that channel is whatever the test provokes.
-pub(crate) fn at_character_screen(login: &mut LoginServer<DevAccounts>, now: Instant) -> (Session, OutboxRx) {
+pub(crate) fn at_character_screen(login: &mut LoginServer, now: Instant) -> (Session, OutboxRx) {
     let mut auth = LoginSession::new();
     let account_login = AccountLogin {
         account: RawAccountName::new("admin"),

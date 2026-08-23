@@ -2,12 +2,12 @@
 //!
 //! # A second backend, not a better one
 //!
-//! `PgStore` sits behind the same [`Store`] trait as
-//! [`SqliteStore`](crate::SqliteStore), and which a shard runs is the operator's
+//! `PgStore` is one [`Store`](crate::Store) variant, alongside
+//! [`SqliteStore`](crate::SqliteStore). Which a shard runs is the operator's
 //! choice, not a tier. SQLite keeps a live shard on one disk with no server to
 //! run; PostgreSQL puts the same world on a database another machine can reach,
-//! shared by more than one process. The simulation cannot tell them apart — the
-//! trait is the seam that makes the choice a config line rather than a rewrite.
+//! shared by more than one process. The simulation makes that closed choice
+//! explicitly from configuration.
 //!
 //! # Async all the way down, so no `spawn_blocking`
 //!
@@ -49,7 +49,7 @@ use crate::record::{
     AccountRecord, CharacterRecord, DecorationRecord, GuildRecord, ItemLocation, ItemRecord, MobileRecord,
     RegionRecord, SCHEMA_VERSION, SpawnerRecord, WorldRecord,
 };
-use crate::store::{Store, StoreError};
+use crate::store::{Backend, StoreError};
 
 /// The tables, created on connect. `IF NOT EXISTS` so connecting to a database
 /// that already has them is a no-op rather than an error.
@@ -264,10 +264,10 @@ CREATE TABLE IF NOT EXISTS spawners (
     creatures      TEXT NOT NULL
 );";
 
-/// A `Store` kept in a PostgreSQL database.
+/// The PostgreSQL variant of [`Store`](crate::Store).
 ///
-/// One of the two backends behind the [`Store`] trait; SQLite is the other, and
-/// which a shard runs is the operator's choice, not a tier. The character's
+/// One of the persistent backends; SQLite is the other, and which a shard runs
+/// is the operator's choice, not a tier. The character's
 /// [`serial`](CharacterRecord::serial) is the primary key, because that is the
 /// identity that has to survive a restart.
 pub struct PgStore {
@@ -343,7 +343,7 @@ impl PgStore {
 }
 
 #[async_trait]
-impl Store for PgStore {
+impl Backend for PgStore {
     async fn save(&self, snapshot: &Snapshot) -> Result<(), StoreError> {
         // Refuse before touching the database, exactly as the other backends do:
         // a snapshot from a future schema must not be half-written.

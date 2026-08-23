@@ -13,7 +13,7 @@ use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::{seed::Seed, version::ClientVersion};
 use tracing::{debug, warn};
 
-use crate::accounts::{Accounts, CredentialCheck, PasswordVerdict};
+use crate::accounts::{CredentialCheck, DevAccounts, PasswordVerdict};
 use crate::auth::AuthKeys;
 
 /// Why a connection is closing, carried from the failure site to whoever logs
@@ -244,9 +244,9 @@ impl LoginSession {
 ///
 /// A plain value the caller owns. Nothing here is a static.
 #[derive(Debug)]
-pub struct LoginServer<A: Accounts> {
+pub struct LoginServer {
     /// Where accounts live.
-    pub accounts: A,
+    pub accounts: DevAccounts,
     /// Keys issued at relay, redeemed at game login.
     pub keys: AuthKeys,
     /// The shard list to advertise.
@@ -255,9 +255,9 @@ pub struct LoginServer<A: Accounts> {
     pub game_address: SocketAddrV4,
 }
 
-impl<A: Accounts> LoginServer<A> {
+impl LoginServer {
     /// A server with one shard and no starting cities.
-    pub fn new(accounts: A, shard_name: &str, game_address: SocketAddrV4) -> Self {
+    pub fn new(accounts: DevAccounts, shard_name: &str, game_address: SocketAddrV4) -> Self {
         Self {
             accounts,
             keys: AuthKeys::new(),
@@ -592,7 +592,7 @@ mod tests {
     use openshard_protocol::seed::RawSeedValue;
     use openshard_protocol::wire::AuthKey;
 
-    fn server() -> LoginServer<DevAccounts> {
+    fn server() -> LoginServer {
         let accounts = DevAccounts::new()
             .with_account(&AccountName::new("admin"), &PlaintextPassword::new("hunter2"))
             .with_account(&AccountName::new("banned"), &PlaintextPassword::new("x"))
@@ -613,7 +613,7 @@ mod tests {
     /// [`a_login_waits_for_a_verdict_before_it_is_anybody`] and, over a real
     /// channel and a real blocking task, by the server crate's `verify` module.
     fn drive(
-        server: &mut LoginServer<DevAccounts>,
+        server: &mut LoginServer,
         session: &mut LoginSession,
         packet: LoginStagePacket,
         now: Instant,
@@ -660,11 +660,7 @@ mod tests {
     }
 
     /// Take an already-authenticated session through shard select to the relay.
-    fn relay_key_from(
-        server: &mut LoginServer<DevAccounts>,
-        session: &mut LoginSession,
-        now: Instant,
-    ) -> AuthKey {
+    fn relay_key_from(server: &mut LoginServer, session: &mut LoginSession, now: Instant) -> AuthKey {
         let Response::SendThenClose(relay) = drive(
             server,
             session,
@@ -680,7 +676,7 @@ mod tests {
     }
 
     /// Run the whole conversation and return the auth key from the relay.
-    fn relay_key(server: &mut LoginServer<DevAccounts>, now: Instant) -> AuthKey {
+    fn relay_key(server: &mut LoginServer, now: Instant) -> AuthKey {
         let mut session = modern_session();
         assert!(matches!(
             drive(server, &mut session, pkt(&login("admin", "hunter2")), now),

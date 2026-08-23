@@ -15,10 +15,10 @@
 //! state with the shard that wrote it. The character has to be there, at the tile
 //! it walked to.
 //!
-//! The reader is `SqliteStore` directly rather than `boot::open_store`, which is
-//! deliberate: the point is that the bytes are on the disk, and going back in
-//! through the shard's own opener would make the assertion partly about the
-//! shard's own code path.
+//! The reader opens `SqliteStore` directly rather than using `boot::open_store`,
+//! which is deliberate: the point is that the bytes are on the disk, and going
+//! back in through the shard's own opener would make the assertion partly about
+//! the shard's own code path.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -141,7 +141,7 @@ async fn a_stop_leaves_the_world_on_disk_before_it_returns() {
     // or the test is about to say so.
     shard.stop();
 
-    let store = SqliteStore::open(scratch.path()).expect("the shard left a database behind");
+    let store = Store::sqlite(SqliteStore::open(scratch.path()).expect("the shard left a database behind"));
     let characters = store.characters().await.expect("the database can be read");
     let saved = characters
         .iter()

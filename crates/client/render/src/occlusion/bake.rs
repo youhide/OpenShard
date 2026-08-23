@@ -119,7 +119,7 @@ impl Baked {
     fn of(
         map: &WorldMap,
         tiledata: &TileData,
-        atlas: Option<&dyn StaticArt>,
+        atlas: Option<StaticArt<'_>>,
         block_x: u32,
         block_y: u32,
     ) -> Self {
@@ -271,7 +271,7 @@ impl Builder {
 struct Stamp(Option<u64>);
 
 impl Stamp {
-    fn of(atlas: Option<&dyn StaticArt>) -> Self {
+    fn of(atlas: Option<StaticArt<'_>>) -> Self {
         Self(atlas.map(StaticArt::revision))
     }
 }
@@ -336,7 +336,7 @@ impl Bake {
     }
 
     /// Start a frame: let go of everything if the art has moved under us.
-    fn begin(&mut self, atlas: Option<&dyn StaticArt>) {
+    fn begin(&mut self, atlas: Option<StaticArt<'_>>) {
         let stamp = Stamp::of(atlas);
         if stamp != self.stamp {
             self.blocks.clear();
@@ -350,7 +350,7 @@ impl Bake {
         &mut self,
         map: &WorldMap,
         tiledata: &TileData,
-        atlas: Option<&dyn StaticArt>,
+        atlas: Option<StaticArt<'_>>,
         block_x: u32,
         block_y: u32,
     ) -> &Baked {
@@ -410,7 +410,7 @@ pub fn collect(
     bounds: TileBounds,
     tiledata: &TileData,
     cutaway: &Cutaway,
-    atlas: Option<&dyn StaticArt>,
+    atlas: Option<StaticArt<'_>>,
 ) -> Occlusion {
     collect_ring(
         bake,
@@ -437,7 +437,7 @@ pub fn collect(
 /// anyway: the day a graphic's box can reach past its tile, this is the one
 /// place that reads the widest one, before the first block is baked, and
 /// nothing above it has to change.
-fn ring_radius(_atlas: Option<&dyn StaticArt>) -> u32 {
+fn ring_radius(_atlas: Option<StaticArt<'_>>) -> u32 {
     0
 }
 
@@ -453,7 +453,7 @@ fn collect_ring(
     bounds: TileBounds,
     tiledata: &TileData,
     cutaway: &Cutaway,
-    atlas: Option<&dyn StaticArt>,
+    atlas: Option<StaticArt<'_>>,
     radius: u32,
 ) -> Occlusion {
     bake.begin(atlas);
@@ -702,7 +702,7 @@ mod tests {
             bounds(),
             &tiledata,
             &Cutaway::OPEN,
-            Some(&atlas),
+            Some(StaticArt::Single(&atlas)),
         );
         assert_eq!(bake.len(), 4);
 
@@ -722,7 +722,7 @@ mod tests {
             bounds(),
             &tiledata,
             &Cutaway::OPEN,
-            Some(&atlas),
+            Some(StaticArt::Single(&atlas)),
         );
         assert_eq!(
             bake.served(),
@@ -747,7 +747,7 @@ mod tests {
             bounds(),
             &tiledata,
             &Cutaway::OPEN,
-            Some(&atlas),
+            Some(StaticArt::Single(&atlas)),
         );
         assert_eq!(bake.served(), (0, 8));
     }
@@ -891,6 +891,6 @@ mod tests {
     fn the_measured_radius_is_zero_until_something_authors_a_reach() {
         assert_eq!(ring_radius(None), 0);
         let atlas = StaticAtlas::pack(Vec::new()).expect("an empty atlas");
-        assert_eq!(ring_radius(Some(&atlas)), 0);
+        assert_eq!(ring_radius(Some(StaticArt::Single(&atlas))), 0);
     }
 }

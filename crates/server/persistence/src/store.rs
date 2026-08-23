@@ -1,13 +1,8 @@
-//! The database, as an interface.
+//! The database, as a concrete choice.
 //!
-//! # Why a trait and not just SQLite
-//!
-//! A shard runs on SQLite or on PostgreSQL, whichever the operator prefers —
-//! neither is "the real one", and SQLite is a fine choice for a live shard. But
-//! the reason for the trait is narrower than "swappable backends": it is that the
-//! *tests* need a store that cannot fail, and every backend can fail.
-//! [`MemoryStore`] is what lets a test assert what the world hands to persistence
-//! without a database anywhere near it.
+//! A shard has one of three known stores: memory, SQLite, or PostgreSQL.  That
+//! choice is represented by [`Store`], rather than erased behind a trait object:
+//! callers can see the closed set of backends they are choosing between.
 //!
 //! # Errors are for the caller to decide about
 //!
@@ -26,10 +21,12 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::world::{Aggression, DamageType};
 
 use crate::journal::Snapshot;
+use crate::pg::PgStore;
 use crate::record::{
     AccountRecord, CharacterRecord, DecorationRecord, GuildRecord, ItemRecord, MobileRecord, RegionRecord,
     SCHEMA_VERSION, SpawnerRecord, WorldRecord,
 };
+use crate::sqlite::SqliteStore;
 
 /// What a store could not do.
 #[derive(Debug, thiserror::Error)]
@@ -55,12 +52,12 @@ pub enum StoreError {
     Corrupt(String),
 }
 
-/// Somewhere the world can be kept.
+/// Operations every built-in persistence backend supports.
 ///
-/// `Send + Sync` and by-reference: a store is shared, and the drain task holds
-/// it for the life of the shard.
+/// This is an implementation detail: the shard deals in the concrete [`Store`]
+/// enum, while the three backend implementations share these operations here.
 #[async_trait]
-pub trait Store: Send + Sync {
+pub(crate) trait Backend: Send + Sync {
     /// Write a snapshot.
     ///
     /// # Must be atomic
@@ -175,6 +172,102 @@ pub trait Store: Send + Sync {
     async fn put_account(&self, account: &AccountRecord) -> Result<(), StoreError>;
 }
 
+/// Where the world is kept.
+///
+/// The set is deliberately closed. Adding a persistence backend is an explicit
+/// change to this enum, rather than an implicit new implementation hidden from
+/// the shard behind dynamic dispatch.
+#[derive(Debug)]
+pub enum Store {
+    Memory(MemoryStore),
+    Sqlite(SqliteStore),
+    Postgres(PgStore),
+}
+
+macro_rules! delegate {
+    ($store:expr, $method:ident($($argument:expr),* $(,)?)) => {
+        match $store {
+            Self::Memory(store) => store.$method($($argument),*).await,
+            Self::Sqlite(store) => store.$method($($argument),*).await,
+            Self::Postgres(store) => store.$method($($argument),*).await,
+        }
+    };
+}
+
+impl Store {
+    pub fn memory() -> Self {
+        Self::Memory(MemoryStore::new())
+    }
+
+    pub fn sqlite(store: SqliteStore) -> Self {
+        Self::Sqlite(store)
+    }
+
+    pub fn postgres(store: PgStore) -> Self {
+        Self::Postgres(store)
+    }
+
+    pub async fn save(&self, snapshot: &Snapshot) -> Result<(), StoreError> {
+        delegate!(self, save(snapshot))
+    }
+
+    pub async fn characters(&self) -> Result<Vec<CharacterRecord>, StoreError> {
+        delegate!(self, characters())
+    }
+
+    pub async fn items(&self) -> Result<Vec<ItemRecord>, StoreError> {
+        delegate!(self, items())
+    }
+
+    pub async fn spawners(&self) -> Result<Vec<SpawnerRecord>, StoreError> {
+        delegate!(self, spawners())
+    }
+
+    pub async fn mobiles(&self) -> Result<Vec<MobileRecord>, StoreError> {
+        delegate!(self, mobiles())
+    }
+
+    pub async fn decorations(&self) -> Result<Vec<DecorationRecord>, StoreError> {
+        delegate!(self, decorations())
+    }
+
+    pub async fn regions(&self) -> Result<Vec<RegionRecord>, StoreError> {
+        delegate!(self, regions())
+    }
+
+    pub async fn guilds(&self) -> Result<Vec<GuildRecord>, StoreError> {
+        delegate!(self, guilds())
+    }
+
+    pub async fn alliances(&self) -> Result<Vec<crate::record::AllianceRecord>, StoreError> {
+        delegate!(self, alliances())
+    }
+
+    pub async fn houses(&self) -> Result<Vec<crate::record::HouseRecord>, StoreError> {
+        delegate!(self, houses())
+    }
+
+    pub async fn designs(&self) -> Result<Vec<crate::record::HouseDesignRecord>, StoreError> {
+        delegate!(self, designs())
+    }
+
+    pub async fn boats(&self) -> Result<Vec<crate::record::BoatRecord>, StoreError> {
+        delegate!(self, boats())
+    }
+
+    pub async fn world(&self) -> Result<Option<WorldRecord>, StoreError> {
+        delegate!(self, world())
+    }
+
+    pub async fn accounts(&self) -> Result<Vec<AccountRecord>, StoreError> {
+        delegate!(self, accounts())
+    }
+
+    pub async fn put_account(&self, account: &AccountRecord) -> Result<(), StoreError> {
+        delegate!(self, put_account(account))
+    }
+}
+
 /// A store that keeps everything in memory and never fails.
 ///
 /// For tests, and for a shard started with no database at all — which is a real
@@ -228,7 +321,7 @@ impl MemoryStore {
 }
 
 #[async_trait]
-impl Store for MemoryStore {
+impl Backend for MemoryStore {
     async fn save(&self, snapshot: &Snapshot) -> Result<(), StoreError> {
         if snapshot.schema != SCHEMA_VERSION {
             return Err(StoreError::SchemaMismatch {

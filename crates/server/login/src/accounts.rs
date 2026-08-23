@@ -9,65 +9,6 @@ use openshard_protocol::login::{ACCOUNT_NAME_LENGTH, DenyReason, PASSWORD_LENGTH
 
 use crate::password;
 
-/// Somewhere accounts live.
-///
-/// A trait because the in-memory store below is a placeholder: real shards keep
-/// accounts in a database — SQLite or PostgreSQL — and the login state machine
-/// must not care which.
-///
-/// # Implementors must hash
-///
-/// The UO protocol sends passwords in plaintext — there is no challenge, no
-/// nonce, nothing. That is the client's fault and cannot be fixed server-side.
-/// What *can* be fixed is what happens next: an implementation of this trait
-/// must compare against a slow password hash (argon2, bcrypt, scrypt) and must
-/// never persist the plaintext. [`CredentialCheck::run`] taking the plaintext is
-/// unavoidable; storing it is not.
-///
-/// # Parameters borrow the typed newtype
-///
-/// Not `&str`: an account name, a character name and a password are three
-/// different things, and threading bare strings through this trait is exactly
-/// how a caller ends up passing one where another belongs. Taking `&AccountName`
-/// etc. keeps that impossible — a caller (test fixtures included) names the
-/// type explicitly at the call site instead of leaning on an implicit `Into`.
-pub trait Accounts {
-    /// Everything about a login that is a *lookup*: whether the account exists,
-    /// whether it is blocked, and whether the name and password are even shapes
-    /// a client could have sent. On success it hands back the credential the
-    /// offered password still has to match.
-    ///
-    /// Takes the *raw*, not-yet-validated wire types — see
-    /// `openshard_protocol::identity`'s module docs — and the account name it
-    /// resolves rides in the returned [`Credential`]: the only way to a
-    /// validated [`AccountName`] is through this check (or trusted config
-    /// seeding via [`DevAccounts::with_account`]).
-    ///
-    /// The password comes in for its *length* alone. A field wider than the
-    /// wire's is a forged packet rather than a wrong password, and it is a
-    /// different refusal; nothing here compares it. That comparison is
-    /// [`CredentialCheck::run`], and it is split off because it is thousands of
-    /// times more expensive than everything above — see [`Credential`].
-    ///
-    /// Returns the reason on failure so the caller can log it. What the client
-    /// is told is a separate decision — see [`DenyReason::wire_code`].
-    fn credential(
-        &self,
-        account: &RawAccountName,
-        password: &RawPlaintextPassword,
-    ) -> Result<Credential, DenyReason>;
-
-    /// The authority the account's characters play with — what staff commands
-    /// they may run. Defaults to [`AccessLevel::Player`] so a store that has no
-    /// notion of staff grants none, which is the safe direction to be wrong in.
-    /// An unknown account is a player, not an error: this is asked after login,
-    /// about an account already verified, and the answer only ever *withholds*
-    /// authority.
-    fn access_level(&self, _account: &AccountName) -> AccessLevel {
-        AccessLevel::Player
-    }
-}
-
 /// What a login still has to prove, once the store has had its say: which
 /// account the raw name turned out to name, and the hash the offered password
 /// must match.
@@ -93,8 +34,8 @@ pub struct Credential {
 
 impl Credential {
     /// The credential of `account`: an argon2 PHC string, as
-    /// [`DevAccount::credential`] holds it. For implementors of [`Accounts`] —
-    /// everybody else receives one.
+    /// [`DevAccount::credential`] holds it. Login code receives one after a
+    /// successful account lookup.
     pub fn new(account: AccountName, phc: &str) -> Self {
         Self {
             account,
@@ -255,8 +196,10 @@ impl DevAccounts {
     }
 }
 
-impl Accounts for DevAccounts {
-    fn credential(
+impl DevAccounts {
+    /// Look up a login and validate the raw wire fields before returning the
+    /// credential whose password still has to be checked.
+    pub fn credential(
         &self,
         account: &RawAccountName,
         password: &RawPlaintextPassword,
@@ -289,7 +232,8 @@ impl Accounts for DevAccounts {
         Ok(Credential::new(AccountName(account.0.clone()), &entry.credential))
     }
 
-    fn access_level(&self, account: &AccountName) -> AccessLevel {
+    /// The authority an authenticated account's characters play with.
+    pub fn access_level(&self, account: &AccountName) -> AccessLevel {
         self.accounts
             .get(&account.normalized())
             .map_or(AccessLevel::Player, |entry| entry.access)
@@ -302,7 +246,7 @@ mod tests {
 
     /// Both halves of a login, run here, on this thread.
     ///
-    /// This was a provided method on [`Accounts`] until the backlog of
+    /// This used to be a method on the account abstraction until the backlog of
     /// `docs/connection_state.md` caught up with it: it is precisely the call the
     /// shard must never make — argon2 on the caller's thread, tens of a 50 ms
     /// tick — and a doc comment saying so was all that stood in the way. Nothing

@@ -30,7 +30,7 @@ pub fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
 /// Opening the database can fail, and that is fatal: a shard told to persist that
 /// cannot is not a shard anyone wants started in memory by surprise, losing
 /// everything at the next stop.
-pub async fn open_store(config: &Config) -> Result<Arc<dyn Store>, Box<dyn std::error::Error>> {
+pub async fn open_store(config: &Config) -> Result<Arc<Store>, Box<dyn std::error::Error>> {
     let target = config.persistence.database.trim();
     if target.is_empty() {
         warn!(
@@ -38,7 +38,7 @@ pub async fn open_store(config: &Config) -> Result<Arc<dyn Store>, Box<dyn std::
              Set persistence.database to a file (SQLite) or a postgres:// URL to keep \
              characters across a restart."
         );
-        return Ok(Arc::new(MemoryStore::new()));
+        return Ok(Arc::new(Store::memory()));
     }
     if is_postgres_url(target) {
         // The URL can carry a password, so it is never logged — only that this is
@@ -47,12 +47,12 @@ pub async fn open_store(config: &Config) -> Result<Arc<dyn Store>, Box<dyn std::
             .await
             .map_err(|error| format!("could not connect to PostgreSQL: {error}"))?;
         info!("persisting to PostgreSQL");
-        return Ok(Arc::new(store));
+        return Ok(Arc::new(Store::postgres(store)));
     }
     let store = SqliteStore::open(target)
         .map_err(|error| format!("could not open the database at {target:?}: {error}"))?;
     info!(path = target, "persisting to SQLite");
-    Ok(Arc::new(store))
+    Ok(Arc::new(Store::sqlite(store)))
 }
 
 /// Whether `persistence.database` names a PostgreSQL server rather than a SQLite
@@ -254,7 +254,7 @@ pub(crate) struct Restored {
 /// the shard comes up with whatever it did get: a shard that refuses to start
 /// because one table is unreadable helps nobody, and the alternative to a
 /// partially restored world is no world at all.
-pub(crate) async fn restore(store: &dyn Store, config: &Config, world: World) -> Restored {
+pub(crate) async fn restore(store: &Store, config: &Config, world: World) -> Restored {
     let accounts = load_accounts(store, config).await;
     let mut world = world;
     // Before the characters, whose records name a guild by id. Nothing at boot
@@ -277,7 +277,7 @@ pub(crate) async fn restore(store: &dyn Store, config: &Config, world: World) ->
 /// for a password once it has one, so a config `[[accounts]]` line only
 /// creates an account the store has never seen; changing a config password
 /// after the first boot does nothing (the shard says as much in the docs).
-async fn load_accounts(store: &dyn Store, config: &Config) -> DevAccounts {
+async fn load_accounts(store: &Store, config: &Config) -> DevAccounts {
     let mut accounts = DevAccounts::new();
     match store.accounts().await {
         Ok(stored) => {
@@ -330,7 +330,7 @@ async fn load_accounts(store: &dyn Store, config: &Config) -> DevAccounts {
 /// still ran, with nothing in it, and the token says so. Returning an `Option`
 /// here would put the ordering rule back in prose — the caller would have to know
 /// that "no characters" still permits items.
-async fn restore_characters(store: &dyn Store, world: &mut World) -> RestoredCharacters {
+async fn restore_characters(store: &Store, world: &mut World) -> RestoredCharacters {
     match store.characters().await {
         Ok(characters) => {
             let restored = world.restore_characters(characters);
@@ -379,11 +379,7 @@ fn seed_configured_characters(config: &Config, world: &mut World) {
 /// A store that cannot be read restores nothing and still returns the token, for
 /// the reason [`restore_characters`] does: an `Option` here would make the caller
 /// decide what "no items" permits, which is the ordering rule back in prose.
-async fn restore_items(
-    store: &dyn Store,
-    world: &mut World,
-    characters: &RestoredCharacters,
-) -> RestoredItems {
+async fn restore_items(store: &Store, world: &mut World, characters: &RestoredCharacters) -> RestoredItems {
     match store.items().await {
         Ok(items) => {
             if !items.is_empty() {
@@ -404,7 +400,7 @@ async fn restore_items(
 /// `World::restore_mobiles` to equip, and the token is what says so. This is the
 /// whole-world model: the pack seeds a fresh world once (a staff Populate), and
 /// from then on the save is the truth — nothing respawns at boot.
-async fn restore_mobiles(store: &dyn Store, world: &mut World, items: &RestoredItems) {
+async fn restore_mobiles(store: &Store, world: &mut World, items: &RestoredItems) {
     match store.mobiles().await {
         Ok(mobiles) => {
             if !mobiles.is_empty() {
@@ -417,7 +413,7 @@ async fn restore_mobiles(store: &dyn Store, world: &mut World, items: &RestoredI
 }
 
 /// Bring back the placed decoration, door state and all.
-async fn restore_decorations(store: &dyn Store, world: &mut World) {
+async fn restore_decorations(store: &Store, world: &mut World) {
     match store.decorations().await {
         Ok(decorations) => {
             if !decorations.is_empty() {
@@ -432,7 +428,7 @@ async fn restore_decorations(store: &dyn Store, world: &mut World) {
 /// Bring back the spawn regions with their respawn timers, so a populated area
 /// stays populated across a restart and a rare spawn keeps its remaining wait
 /// rather than popping again the moment the shard comes up.
-async fn restore_spawners(store: &dyn Store, world: &mut World) {
+async fn restore_spawners(store: &Store, world: &mut World) {
     match store.spawners().await {
         Ok(spawners) => {
             if !spawners.is_empty() {
@@ -447,7 +443,7 @@ async fn restore_spawners(store: &dyn Store, world: &mut World) {
 /// Bring back the guilds. Only the guilds: who is *in* one rides with the
 /// character records, so a roster is derived from who names the guild and there
 /// is no second list to fall out of step with it.
-async fn restore_guilds(store: &dyn Store, world: &mut World) {
+async fn restore_guilds(store: &Store, world: &mut World) {
     match store.guilds().await {
         Ok(guilds) => world.restore_guilds(guilds),
         Err(error) => error!(%error, "could not read saved guilds; starting with none"),
@@ -492,7 +488,7 @@ async fn restore_guilds(store: &dyn Store, world: &mut World) {
 /// Bring back the named regions — towns, dungeons, guarded zones. Saved like
 /// everything else, so a restart keeps its guards, its music and the dark in
 /// its caves without waiting for a staff `.admin`.
-async fn restore_regions(store: &dyn Store, world: &mut World) {
+async fn restore_regions(store: &Store, world: &mut World) {
     match store.regions().await {
         Ok(regions) => {
             if !regions.is_empty() {
@@ -523,7 +519,7 @@ async fn restore_regions(store: &dyn Store, world: &mut World) {
 /// stream, so a `world.seed` set on a shard that has saved does nothing, and a knob
 /// that silently does nothing is the failure this whole config crate exists to
 /// prevent. The operator hears it once, at boot.
-async fn restore_world(store: &dyn Store, world: World, pinned_seed: Option<u64>) -> World {
+async fn restore_world(store: &Store, world: World, pinned_seed: Option<u64>) -> World {
     match store.world().await {
         Ok(Some(record)) => {
             if pinned_seed.is_some() {

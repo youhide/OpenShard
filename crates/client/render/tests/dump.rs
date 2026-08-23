@@ -169,7 +169,7 @@ fn draw_britain(
         interior: None,
         land: &land,
         texmaps: &texmaps,
-        statics: &static_atlas,
+        statics: openshard_client_render::atlas::StaticArt::Single(&static_atlas),
         // Night and flat, which is what the client draws with F10 on: a lit
         // frame is the one whose planes disagree with each other, and a daylight
         // frame's blit is a copy.

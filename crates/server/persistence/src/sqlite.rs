@@ -1,6 +1,6 @@
 //! The SQLite backend.
 //!
-//! # Why SQLite is sync behind an async trait
+//! # Why SQLite is sync behind an async interface
 //!
 //! [`Store`] is async because one of its backends, PostgreSQL, is a network
 //! server whose every call is a round-trip. SQLite is a file on the same disk,
@@ -32,7 +32,7 @@ use crate::record::{
     AccountRecord, CharacterRecord, DecorationRecord, GuildRecord, ItemLocation, ItemRecord, MobileRecord,
     RegionRecord, SCHEMA_VERSION, SpawnerRecord, StatLockRecord, WorldRecord,
 };
-use crate::store::{Store, StoreError};
+use crate::store::{Backend, StoreError};
 
 /// The flat form of an [`ItemLocation`] for the `items` table: a kind tag and the
 /// union of every variant's parameters, the fields not used by a kind left zero.
@@ -360,12 +360,12 @@ CREATE TABLE IF NOT EXISTS spawners (
     creatures     TEXT NOT NULL
 );";
 
-/// A `Store` kept in a SQLite database.
+/// The SQLite variant of [`Store`](crate::Store).
 ///
-/// One of the two backends behind the [`Store`] trait; PostgreSQL is the other,
-/// and which a shard runs is the operator's choice, not a tier — SQLite handles
-/// a live shard perfectly well. The character's [`serial`](CharacterRecord::serial)
-/// is the primary key, because that is the identity that has to survive a restart.
+/// One of the persistent backends; PostgreSQL is the other, and which a shard
+/// runs is the operator's choice, not a tier — SQLite handles a live shard
+/// perfectly well. The character's [`serial`](CharacterRecord::serial) is the
+/// primary key, because that is the identity that has to survive a restart.
 #[derive(Debug)]
 pub struct SqliteStore {
     connection: Arc<Mutex<Connection>>,
@@ -427,7 +427,7 @@ impl SqliteStore {
 }
 
 #[async_trait]
-impl Store for SqliteStore {
+impl Backend for SqliteStore {
     async fn save(&self, snapshot: &Snapshot) -> Result<(), StoreError> {
         // Refuse before touching the database, exactly as `MemoryStore` does: a
         // snapshot from a future schema must not be half-written.

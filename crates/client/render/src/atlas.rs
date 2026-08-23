@@ -819,35 +819,102 @@ pub struct PagedSprite {
     pub sprite: Sprite,
 }
 
-/// The static-art facts every world consumer needs, independent of whether
-/// the pixels live in one atlas or a bounded family of pages.
+/// The concrete source of static art for a world operation.
 ///
-/// `StaticAtlas` remains the baseline implementation and always reports page
-/// zero.  `StaticAtlasPages` adds the page identity a renderer needs while
-/// leaving picking, occlusion and placement keyed by the original graphic.
-pub trait StaticArt: fmt::Debug {
+/// The renderer has exactly two sources: an ordinary single-page atlas in
+/// tests and tools, and the bounded page family the client owns.  Keeping that
+/// choice visible avoids a trait object that suggests third-party atlas
+/// implementations are a supported extension point.
+#[derive(Clone, Copy, Debug)]
+pub enum StaticArt<'a> {
+    /// One atlas page. Its sprites all belong to page zero.
+    Single(&'a StaticAtlas),
+    /// The client's bounded family of texture pages.
+    Pages(&'a StaticAtlasPages),
+}
+
+impl<'a> From<&'a StaticAtlas> for StaticArt<'a> {
+    fn from(atlas: &'a StaticAtlas) -> Self {
+        Self::Single(atlas)
+    }
+}
+
+impl<'a> From<&'a StaticAtlasPages> for StaticArt<'a> {
+    fn from(atlas: &'a StaticAtlasPages) -> Self {
+        Self::Pages(atlas)
+    }
+}
+
+impl StaticArt<'_> {
     /// The page-local sprite to draw for `graphic`.
-    fn paged_sprite(&self, graphic: Graphic) -> Option<PagedSprite>;
+    pub fn paged_sprite(self, graphic: Graphic) -> Option<PagedSprite> {
+        match self {
+            Self::Single(atlas) => atlas.sprite(graphic).map(|sprite| PagedSprite {
+                page: StaticAtlasPage(0),
+                sprite,
+            }),
+            Self::Pages(atlas) => atlas.sprite(graphic),
+        }
+    }
+
     /// Whether an image texel is opaque.
-    fn opaque_at(&self, graphic: Graphic, x: u16, y: u16) -> bool;
+    pub fn opaque_at(self, graphic: Graphic, x: u16, y: u16) -> bool {
+        match self {
+            Self::Single(atlas) => atlas.opaque_at(graphic, x, y),
+            Self::Pages(atlas) => atlas.opaque_at(graphic, x, y),
+        }
+    }
+
     /// The measured hole in a graphic, if any.
-    fn hole(&self, graphic: Graphic) -> Option<crate::facing::Hole>;
+    pub fn hole(self, graphic: Graphic) -> Option<crate::facing::Hole> {
+        match self {
+            Self::Single(atlas) => atlas.hole(graphic),
+            Self::Pages(atlas) => atlas.hole(graphic),
+        }
+    }
+
     /// The measured prism in a graphic, if any.
-    fn prism(&self, graphic: Graphic) -> Option<crate::facing::Prism>;
+    pub fn prism(self, graphic: Graphic) -> Option<crate::facing::Prism> {
+        match self {
+            Self::Single(atlas) => atlas.prism(graphic),
+            Self::Pages(atlas) => atlas.prism(graphic),
+        }
+    }
+
     /// The measured footprint in a graphic, if any.
-    fn footprint(&self, graphic: Graphic) -> Option<crate::facing::Footprint>;
+    pub fn footprint(self, graphic: Graphic) -> Option<crate::facing::Footprint> {
+        match self {
+            Self::Single(atlas) => atlas.footprint(graphic),
+            Self::Pages(atlas) => atlas.footprint(graphic),
+        }
+    }
+
     /// The revision consumers cache their shape facts under.
-    fn revision(&self) -> u64;
+    pub fn revision(self) -> u64 {
+        match self {
+            Self::Single(atlas) => atlas.revision(),
+            Self::Pages(atlas) => atlas.revision(),
+        }
+    }
+
     /// Largest sprite dimensions across the source.
-    fn max_sprite_size(&self) -> (u16, u16);
+    pub fn max_sprite_size(self) -> (u16, u16) {
+        match self {
+            Self::Single(atlas) => atlas.max_sprite_size(),
+            Self::Pages(atlas) => atlas.max_sprite_size(),
+        }
+    }
+
     /// Total packed graphics across all pages.
-    fn len(&self) -> usize;
+    pub fn len(self) -> usize {
+        match self {
+            Self::Single(atlas) => atlas.len(),
+            Self::Pages(atlas) => atlas.len(),
+        }
+    }
+
     /// Whether the source packed no graphics at all.
-    ///
-    /// Provided, because every implementation answers it the same way from
-    /// [`len`](Self::len) — it exists so a caller asking the question does not
-    /// have to compare a count against zero.
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(self) -> bool {
         self.len() == 0
     }
 }
@@ -1692,77 +1759,6 @@ impl StaticAtlasPages {
         self.page_of[graphic.0 as usize]
             .and_then(|page| self.page(page))
             .and_then(|page| page.footprint(graphic))
-    }
-}
-
-impl StaticArt for StaticAtlas {
-    fn paged_sprite(&self, graphic: Graphic) -> Option<PagedSprite> {
-        self.sprite(graphic).map(|sprite| PagedSprite {
-            page: StaticAtlasPage(0),
-            sprite,
-        })
-    }
-
-    fn opaque_at(&self, graphic: Graphic, x: u16, y: u16) -> bool {
-        Self::opaque_at(self, graphic, x, y)
-    }
-
-    fn hole(&self, graphic: Graphic) -> Option<crate::facing::Hole> {
-        Self::hole(self, graphic)
-    }
-
-    fn prism(&self, graphic: Graphic) -> Option<crate::facing::Prism> {
-        Self::prism(self, graphic)
-    }
-
-    fn footprint(&self, graphic: Graphic) -> Option<crate::facing::Footprint> {
-        Self::footprint(self, graphic)
-    }
-
-    fn revision(&self) -> u64 {
-        Self::revision(self)
-    }
-
-    fn max_sprite_size(&self) -> (u16, u16) {
-        Self::max_sprite_size(self)
-    }
-
-    fn len(&self) -> usize {
-        Self::len(self)
-    }
-}
-
-impl StaticArt for StaticAtlasPages {
-    fn paged_sprite(&self, graphic: Graphic) -> Option<PagedSprite> {
-        self.sprite(graphic)
-    }
-
-    fn opaque_at(&self, graphic: Graphic, x: u16, y: u16) -> bool {
-        Self::opaque_at(self, graphic, x, y)
-    }
-
-    fn hole(&self, graphic: Graphic) -> Option<crate::facing::Hole> {
-        Self::hole(self, graphic)
-    }
-
-    fn prism(&self, graphic: Graphic) -> Option<crate::facing::Prism> {
-        Self::prism(self, graphic)
-    }
-
-    fn footprint(&self, graphic: Graphic) -> Option<crate::facing::Footprint> {
-        Self::footprint(self, graphic)
-    }
-
-    fn revision(&self) -> u64 {
-        Self::revision(self)
-    }
-
-    fn max_sprite_size(&self) -> (u16, u16) {
-        Self::max_sprite_size(self)
-    }
-
-    fn len(&self) -> usize {
-        Self::len(self)
     }
 }
 

@@ -122,7 +122,7 @@ impl Verifier {
 
 #[cfg(test)]
 mod tests {
-    use openshard_login::{Accounts, DevAccounts};
+    use openshard_login::DevAccounts;
     use openshard_protocol::identity::{
         AccountName, PlaintextPassword, RawAccountName, RawPlaintextPassword,
     };

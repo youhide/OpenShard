@@ -52,8 +52,8 @@ use openshard_gateway::{
     ClientGatewayServer, ConnectionId, Event, OutboxTx, Packet, PacketError, ServerEvent, ServerEventRx,
     Shutdown, VersionTx,
 };
-use openshard_login::{Accounts, DevAccounts, LoginServer, LoginSession, Outcome, Response};
-use openshard_persistence::{AccountRecord, MemoryStore, PgStore, Snapshot, SqliteStore, Store};
+use openshard_login::{DevAccounts, LoginServer, LoginSession, Outcome, Response};
+use openshard_persistence::{AccountRecord, PgStore, Snapshot, SqliteStore, Store};
 use openshard_protocol::client_packet::ClientPacket;
 use openshard_protocol::encoded::EncodedSubcommand;
 use openshard_protocol::extended::ExtendedRequest;

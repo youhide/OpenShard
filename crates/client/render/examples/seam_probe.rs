@@ -58,7 +58,10 @@ fn main() {
             for item in map.statics_at(x as u16, y as u16) {
                 let graphic = item.tile;
                 let tile = tiledata.static_tile(graphic.0);
-                let shape = occlusion::shape_of(Some(&atlas), graphic);
+                let shape = occlusion::shape_of(
+                    Some(openshard_client_render::atlas::StaticArt::Single(&atlas)),
+                    graphic,
+                );
                 print!(
                     "  0x{:04X} z {:>3} {:?} facing {:?} prism {}",
                     graphic.0,

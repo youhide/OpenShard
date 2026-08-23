@@ -149,7 +149,7 @@ fn draw(
         interior: None,
         land: &land,
         texmaps: &texmaps,
-        statics: static_atlas,
+        statics: openshard_client_render::atlas::StaticArt::Single(static_atlas),
         sky: Some(light::NIGHT.flattened()),
         sun: None,
         carried: None,

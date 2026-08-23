@@ -48,8 +48,8 @@ struct Enrolled {
 /// # It is the account's character list
 ///
 /// Since S5 it is, and that is the change: this used to hold only the characters
-/// something had *saved*, while which characters *existed* lived on `Accounts` in
-/// the login crate, outside the world. Two lists that had to agree, with the
+/// something had *saved*, while which characters *existed* lived in the login
+/// crate, outside the world. Two lists that had to agree, with the
 /// world's half unable to see the other — the arrangement this whole plan exists
 /// to delete. A character is on this list from the moment it is created, whether
 /// or not anything has described it yet; see [`Enrolled`].

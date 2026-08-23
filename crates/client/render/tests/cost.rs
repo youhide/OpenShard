@@ -344,7 +344,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
         light::lit_tiles(&camera, &light::Tuning::DEFAULT),
         &tiledata,
         &Cutaway::OPEN,
-        Some(&static_atlas),
+        Some(openshard_client_render::atlas::StaticArt::Single(&static_atlas)),
     );
     let static_geometry = statics::collect(
         &map,
@@ -459,7 +459,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
             light::NIGHT.flattened(),
             &light::Tuning::DEFAULT,
             time,
-            Some(&static_atlas),
+            Some(openshard_client_render::atlas::StaticArt::Single(&static_atlas)),
             // Uncached on purpose: `cpu` below is the frame this pass costs
             // without a bake, and the bake is timed against it a few lines down.
             None,
@@ -489,7 +489,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
             light::lit_tiles(&camera, &light::Tuning::DEFAULT),
             &tiledata,
             &Cutaway::OPEN,
-            Some(&static_atlas),
+            Some(openshard_client_render::atlas::StaticArt::Single(&static_atlas)),
         );
         cpu_grid = cpu_grid.min(start.elapsed());
 
@@ -501,7 +501,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
             light::lit_tiles(&camera, &light::Tuning::DEFAULT),
             &tiledata,
             &Cutaway::OPEN,
-            Some(&static_atlas),
+            Some(openshard_client_render::atlas::StaticArt::Single(&static_atlas)),
         );
         cpu_baked = cpu_baked.min(start.elapsed());
         // The oracle, on the real map rather than on a built town: the cache is

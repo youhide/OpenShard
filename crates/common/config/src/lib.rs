@@ -812,8 +812,8 @@ pub struct RawAccessLevel(pub String);
 ///
 /// The password sits in a file on disk. That is what a dev config is; it is not
 /// a model for production. The binary hashes it (argon2) on the way into the
-/// store, and never keeps the plaintext. See `openshard-login`'s `Accounts`
-/// trait and its `password` module.
+/// store, and never keeps the plaintext. See `openshard-login`'s `DevAccounts`
+/// type and its `password` module.
 ///
 /// # It seeds, it does not override
 ///

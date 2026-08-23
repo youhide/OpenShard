@@ -2740,7 +2740,7 @@ pub fn collect(
     bounds: TileBounds,
     tiledata: &TileData,
     cutaway: &Cutaway,
-    atlas: Option<&dyn crate::atlas::StaticArt>,
+    atlas: Option<crate::atlas::StaticArt<'_>>,
 ) -> Occlusion {
     collect_with_interior(map, items, bounds, tiledata, cutaway, atlas, None)
 }
@@ -2757,7 +2757,7 @@ pub fn collect_with_interior(
     bounds: TileBounds,
     tiledata: &TileData,
     cutaway: &Cutaway,
-    atlas: Option<&dyn crate::atlas::StaticArt>,
+    atlas: Option<crate::atlas::StaticArt<'_>>,
     interior: Option<&crate::interiors::InteriorFrame>,
 ) -> Occlusion {
     let mut occlusion = Builder::new(bounds);
@@ -2811,7 +2811,7 @@ fn place(
     grid: &mut Builder,
     map: &WorldMap,
     tiledata: &TileData,
-    atlas: Option<&dyn crate::atlas::StaticArt>,
+    atlas: Option<crate::atlas::StaticArt<'_>>,
     x: u16,
     y: u16,
     z: i8,
@@ -2845,7 +2845,7 @@ fn place(
 /// `pub` since `docs/lighting_rebuild.md` phase 6c: the impostor asks the same
 /// question of the same atlas, because a fragment's own shape is what
 /// [`boxes_of`] needs and this is where the art's answer to it lives.
-pub fn shape_of(atlas: Option<&dyn crate::atlas::StaticArt>, graphic: Graphic) -> Shape {
+pub fn shape_of(atlas: Option<crate::atlas::StaticArt<'_>>, graphic: Graphic) -> Shape {
     Shape {
         facing: atlas
             .and_then(|atlas| atlas.paged_sprite(graphic))
@@ -2872,7 +2872,7 @@ fn put_items(
     map: &WorldMap,
     items: &[GroundItem],
     tiledata: &TileData,
-    atlas: Option<&dyn crate::atlas::StaticArt>,
+    atlas: Option<crate::atlas::StaticArt<'_>>,
 ) {
     for item in items {
         place(
@@ -5164,7 +5164,15 @@ mod tests {
         }));
         let whole = fastest(Box::new(|| {
             std::hint::black_box(
-                collect(&map, &[], bounds, &tiledata, &Cutaway::OPEN, Some(&atlas)).dropped(),
+                collect(
+                    &map,
+                    &[],
+                    bounds,
+                    &tiledata,
+                    &Cutaway::OPEN,
+                    Some(crate::atlas::StaticArt::Single(&atlas)),
+                )
+                .dropped(),
             );
         }));
 
@@ -5215,8 +5223,16 @@ mod tests {
                 };
                 let start = std::time::Instant::now();
                 std::hint::black_box(
-                    bake::collect(&mut bake, &map, &[], at, &tiledata, &Cutaway::OPEN, Some(&atlas))
-                        .solid_count(),
+                    bake::collect(
+                        &mut bake,
+                        &map,
+                        &[],
+                        at,
+                        &tiledata,
+                        &Cutaway::OPEN,
+                        Some(crate::atlas::StaticArt::Single(&atlas)),
+                    )
+                    .solid_count(),
                 );
                 best = best.min(start.elapsed());
             }
@@ -5225,7 +5241,14 @@ mod tests {
         let (still, still_served, still_held) = cached(0);
         let (panning, panning_served, _) = cached(1);
 
-        let grid = collect(&map, &[], bounds, &tiledata, &Cutaway::OPEN, Some(&atlas));
+        let grid = collect(
+            &map,
+            &[],
+            bounds,
+            &tiledata,
+            &Cutaway::OPEN,
+            Some(crate::atlas::StaticArt::Single(&atlas)),
+        );
         let mut statics = 0_usize;
         crate::statics::for_each_static_in(&map, bounds, |_| statics += 1);
         let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;

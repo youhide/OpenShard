@@ -263,7 +263,7 @@ fn assemble_and_draw(
         interior: None,
         land: &land,
         texmaps: &texmaps,
-        statics: &static_atlas,
+        statics: openshard_client_render::atlas::StaticArt::Single(&static_atlas),
         // Night and flat, the client's F10-on picture — a lit frame is the one
         // whose planes disagree with each other.
         sky: Some(light::NIGHT.flattened()),

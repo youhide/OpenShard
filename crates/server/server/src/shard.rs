@@ -245,7 +245,7 @@ fn failure_channel() -> (FailureTx, FailureRx) {
 /// moved on. The failure goes back to the shard loop, which asks the world for a
 /// full sweep — see `World::resweep`. The cost of a failure is a fat save, and
 /// the recovery reads the world as it is now rather than as it was.
-async fn save_loop(store: Arc<dyn Store>, mut snapshots: SnapshotRx, failures: FailureTx) {
+async fn save_loop(store: Arc<Store>, mut snapshots: SnapshotRx, failures: FailureTx) {
     while let Some(snapshot) = snapshots.recv().await {
         let rows = snapshot.len();
         let started = Instant::now();
@@ -316,7 +316,7 @@ struct Shard {
     phases: PhaseSync,
     /// Credentials, keys and the relay. Everything after the `0x91` is the
     /// world's.
-    login: LoginServer<DevAccounts>,
+    login: LoginServer,
     /// Where the shard's own content reads the staff menu's buttons from — the
     /// tree's half of what a pack answers in `onEvent`. See [`content::verb`].
     verbs: Cursor<AdminMenuAction>,
@@ -445,7 +445,7 @@ pub async fn run_shard(
     mut events: ServerEventRx,
     config: &Config,
     world: World,
-    store: Arc<dyn Store>,
+    store: Arc<Store>,
     reins: Reins,
     seed: &[String],
 ) {
@@ -464,7 +464,7 @@ pub async fn run_shard(
     // Everything that comes off a disk, in the one order that works — see
     // `boot::restore`. It borrows the store; the save task takes ownership
     // afterwards, so this has to come first.
-    let boot::Restored { accounts, world } = boot::restore(store.as_ref(), config, world).await;
+    let boot::Restored { accounts, world } = boot::restore(&store, config, world).await;
 
     // Kept, not detached: shutdown hands it a final snapshot, closes the channel,
     // and awaits this task so every queued write lands before the process exits.
@@ -665,7 +665,7 @@ pub(crate) fn relay_is_unreachable(client: SocketAddr, advertised: SocketAddrV4)
 /// channel rather than out of this call. See `verify`.
 fn handle_login_packet(
     session: &mut Session,
-    login: &mut LoginServer<DevAccounts>,
+    login: &mut LoginServer,
     world: &mut World,
     verifier: &Verifier,
     packet: LoginStagePacket,
@@ -1107,7 +1107,7 @@ mod tests {
         // Dropping the sender is what ends `save_loop`, so awaiting it here
         // runs it to the end of the queue rather than forever.
         drop(saves);
-        let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
+        let store = Arc::new(Store::memory());
         save_loop(store, snapshots, failed).await;
 
         assert_eq!(unwritten.writes(), 0, "nothing is owed once the store answered");

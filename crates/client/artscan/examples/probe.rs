@@ -48,7 +48,7 @@ fn main() {
         light::NIGHT,
         &light::Tuning::DEFAULT,
         0.0,
-        Some(&atlas),
+        Some(openshard_client_render::atlas::StaticArt::Single(&atlas)),
         None,
     );
     println!("{} flames in the frame", lighting.lights.len());

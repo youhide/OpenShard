@@ -66,7 +66,7 @@
 //!
 //! The UO protocol sends them in plaintext. There is no challenge and no nonce,
 //! and no server can fix that. What a server *can* do is refuse to store them —
-//! see the note on [`Accounts`]. [`DevAccounts`] does store them, and is for
+//! see [`DevAccounts`]. It stores password hashes and is for
 //! development only.
 
 mod accounts;
@@ -74,6 +74,6 @@ pub mod auth;
 pub mod password;
 mod session;
 
-pub use accounts::{Accounts, Credential, CredentialCheck, DevAccount, DevAccounts, PasswordVerdict};
+pub use accounts::{Credential, CredentialCheck, DevAccount, DevAccounts, PasswordVerdict};
 pub use auth::{AuthKeys, PendingLogin};
 pub use session::{LoginServer, LoginSession, Outcome, Response, single_shard};

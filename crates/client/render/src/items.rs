@@ -253,12 +253,12 @@ pub fn needed_graphics(items: &[GroundItem], animations: &StaticAnimations) -> B
 // the same inputs off the map instead of off a list — so a grouping here would be
 // a bag named after the argument count rather than after anything.
 #[allow(clippy::too_many_arguments)]
-pub fn collect(
+pub fn collect<'a>(
     items: &[GroundItem],
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     highlight: Option<ItemIndex>,
     occlusion: &crate::occlusion::Occlusion,
@@ -280,12 +280,12 @@ pub fn collect(
 
 /// [`collect`] with opacity state retained across frames by the caller.
 #[allow(clippy::too_many_arguments)]
-pub fn collect_with_fades(
+pub fn collect_with_fades<'a>(
     items: &[GroundItem],
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     highlight: Option<ItemIndex>,
     occlusion: &crate::occlusion::Occlusion,
@@ -309,12 +309,12 @@ pub fn collect_with_fades(
 
 /// [`collect_with_fades`] with the current building-cell picture gate.
 #[allow(clippy::too_many_arguments)]
-pub fn collect_with_fades_with_interior(
+pub fn collect_with_fades_with_interior<'a>(
     items: &[GroundItem],
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     highlight: Option<ItemIndex>,
     occlusion: &crate::occlusion::Occlusion,
@@ -322,6 +322,7 @@ pub fn collect_with_fades_with_interior(
     fades: &mut crate::cutaway::Fades,
     interior: Option<&crate::interiors::InteriorFrame>,
 ) -> crate::statics::StaticGeometry {
+    let atlas = atlas.into();
     let (eye_x, eye_y) = camera.eye_tile();
     let base = depth::base_for(eye_x, eye_y);
     let mut quads: Vec<(depth::Order, SpriteQuad)> = Vec::new();
@@ -457,15 +458,16 @@ pub fn collect_with_fades_with_interior(
 ///
 /// `highlight` is what [`pick`] answered. `None` is the ordinary frame, and it
 /// comes back empty rather than being a case the caller has to handle.
-pub fn outlined(
+pub fn outlined<'a>(
     items: &[GroundItem],
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     highlight: Option<ItemIndex>,
 ) -> Vec<SpriteQuad> {
+    let atlas = atlas.into();
     let (eye_x, eye_y) = camera.eye_tile();
     let base = depth::base_for(eye_x, eye_y);
     highlight
@@ -500,12 +502,12 @@ pub fn outlined(
 /// floor and a wall built into the map sort alike — so the placement is that one
 /// rather than a second copy of it. See [`Placed`](crate::statics::Placed) for
 /// why there is only one.
-fn place(
+fn place<'a>(
     item: &GroundItem,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
 ) -> Option<Placed> {
     // A dropped item is never a tree: foliage stands in the map's own
@@ -544,14 +546,15 @@ fn place(
 /// against the *static* atlas, and a glyph comes out of the font atlas, which
 /// this crate's item pass has never heard of. The caller hangs these on the
 /// same overhead list a mobile's speech goes on.
-pub fn labels(
+pub fn labels<'a>(
     items: &[GroundItem],
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
 ) -> Vec<(ViewPixel, String)> {
+    let atlas = atlas.into();
     items
         .iter()
         .filter_map(|item| {
@@ -592,12 +595,12 @@ pub fn labels(
 /// `cursor` is a viewport pixel, the same pair `winit` reports and
 /// [`Camera::pick`] takes; the zoom is undone here, once.
 #[must_use]
-pub fn pick(
+pub fn pick<'a>(
     items: &[GroundItem],
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     cursor: RealPixel,
 ) -> Option<ItemIndex> {
@@ -607,16 +610,17 @@ pub fn pick(
 /// [`pick`] under the same building policy that collected this frame's items.
 #[must_use]
 #[allow(clippy::too_many_arguments)] // Rendering inputs intentionally mirror `pick` plus interior visibility.
-pub fn pick_with_interior(
+pub fn pick_with_interior<'a>(
     items: &[GroundItem],
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     cursor: RealPixel,
     interior: Option<&crate::interiors::InteriorFrame>,
 ) -> Option<ItemIndex> {
+    let atlas = atlas.into();
     let in_view = camera.to_view(camera.pick(cursor));
     let mut hit: Option<(depth::Order, ItemIndex)> = None;
     for (index, item) in items.iter().enumerate() {

@@ -30,7 +30,14 @@ fn main() {
         }
     }
     let atlas = StaticAtlas::build(&art, wanted).expect("atlas");
-    let grid = occlusion::collect(&map, &[], bounds, &tiledata, &Cutaway::OPEN, Some(&atlas));
+    let grid = occlusion::collect(
+        &map,
+        &[],
+        bounds,
+        &tiledata,
+        &Cutaway::OPEN,
+        Some(openshard_client_render::atlas::StaticArt::Single(&atlas)),
+    );
 
     let (mut lids, mut panels, mut bodies) = (0usize, 0usize, 0usize);
     let mut opacities: std::collections::BTreeMap<u8, usize> = std::collections::BTreeMap::new();

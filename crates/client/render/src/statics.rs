@@ -294,12 +294,12 @@ impl StaticGeometry {
 /// join `docs/lighting_height.md` phase 3 pays for. A frame that collected its
 /// statics first would be stamping numbers from the frame before it.
 #[allow(clippy::too_many_arguments)]
-pub fn collect(
+pub fn collect<'a>(
     map: &WorldMap,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     occlusion: &crate::occlusion::Occlusion,
     player_rect: Option<Rect>,
@@ -327,13 +327,13 @@ pub fn collect(
 /// Server items have their separate [`crate::items`] collector and cannot enter
 /// this result.
 #[allow(clippy::too_many_arguments)]
-pub fn collect_in(
+pub fn collect_in<'a>(
     map: &WorldMap,
     camera: &Camera,
     bounds: TileBounds,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     occlusion: &crate::occlusion::Occlusion,
     player_rect: Option<Rect>,
@@ -356,12 +356,12 @@ pub fn collect_in(
 
 /// [`collect`] with opacity state retained across frames by the caller.
 #[allow(clippy::too_many_arguments)]
-pub fn collect_with_fades(
+pub fn collect_with_fades<'a>(
     map: &WorldMap,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     occlusion: &crate::occlusion::Occlusion,
     player_rect: Option<Rect>,
@@ -385,13 +385,13 @@ pub fn collect_with_fades(
 
 /// [`collect_in`] retaining the caller's cutaway fade state.
 #[allow(clippy::too_many_arguments)]
-pub fn collect_in_with_fades(
+pub fn collect_in_with_fades<'a>(
     map: &WorldMap,
     camera: &Camera,
     bounds: TileBounds,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     occlusion: &crate::occlusion::Occlusion,
     player_rect: Option<Rect>,
@@ -418,12 +418,12 @@ pub fn collect_in_with_fades(
 /// the app's jank log.
 #[allow(clippy::too_many_arguments)]
 #[allow(dead_code)]
-pub(crate) fn collect_with_fades_profiled(
+pub(crate) fn collect_with_fades_profiled<'a>(
     map: &WorldMap,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     occlusion: &crate::occlusion::Occlusion,
     player_rect: Option<Rect>,
@@ -449,12 +449,12 @@ pub(crate) fn collect_with_fades_profiled(
 /// frame. Kept separate so the tools' ordinary assembly retains its exact
 /// historical inputs.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn collect_with_fades_profiled_with_interior(
+pub(crate) fn collect_with_fades_profiled_with_interior<'a>(
     map: &WorldMap,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     occlusion: &crate::occlusion::Occlusion,
     player_rect: Option<Rect>,
@@ -480,13 +480,13 @@ pub(crate) fn collect_with_fades_profiled_with_interior(
 
 /// [`collect_in_with_fades`], with map-static costs kept for the jank log.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn collect_in_with_fades_profiled(
+pub(crate) fn collect_in_with_fades_profiled<'a>(
     map: &WorldMap,
     camera: &Camera,
     bounds: TileBounds,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     occlusion: &crate::occlusion::Occlusion,
     player_rect: Option<Rect>,
@@ -510,13 +510,13 @@ pub(crate) fn collect_in_with_fades_profiled(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn collect_in_with_fades_profiled_with_interior(
+fn collect_in_with_fades_profiled_with_interior<'a>(
     map: &WorldMap,
     camera: &Camera,
     bounds: TileBounds,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     occlusion: &crate::occlusion::Occlusion,
     player_rect: Option<Rect>,
@@ -524,6 +524,7 @@ fn collect_in_with_fades_profiled_with_interior(
     fades: &mut crate::cutaway::Fades,
     interior: Option<&crate::interiors::InteriorFrame>,
 ) -> (StaticGeometry, CollectCosts) {
+    let atlas = atlas.into();
     let (eye_x, eye_y) = camera.eye_tile();
     let base = depth::base_for(eye_x, eye_y);
     let mut quads: Vec<(depth::Order, SpriteQuad)> = Vec::new();
@@ -852,16 +853,17 @@ pub(crate) struct Placed {
 /// standing in the same place, and ordering by whichever one is showing would let
 /// a stack reshuffle itself every hundred milliseconds.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn place(
+pub(crate) fn place<'a>(
     at: Point,
     graphic: Graphic,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     _player_rect: Option<Rect>,
 ) -> Option<Placed> {
+    let atlas = atlas.into();
     let tile = tiledata.static_tile(graphic.0);
     if !cutaway::shows(cutaway, at.z, tile) {
         return None;
@@ -901,15 +903,16 @@ pub(crate) fn place(
 /// visible. The late cutaway pass consumes the returned placement after bodies
 /// are drawn and blends it over that already settled picture instead.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn place_cutaway(
+pub(crate) fn place_cutaway<'a>(
     at: Point,
     graphic: Graphic,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
 ) -> Option<Placed> {
+    let atlas = atlas.into();
     let tile = tiledata.static_tile(graphic.0);
     // The drawing ceiling and the internal flag are absolute rejects. Only a
     // thing this frame's cutaway hid belongs in the translucent list.
@@ -1008,12 +1011,12 @@ pub(crate) fn quad_of(
 /// `cursor` is a viewport pixel, the pair `winit` reports and [`Camera::pick`]
 /// takes; the zoom is undone here, once.
 #[must_use]
-pub fn pick(
+pub fn pick<'a>(
     map: &WorldMap,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     cursor: RealPixel,
 ) -> Option<PickedStatic> {
@@ -1023,16 +1026,17 @@ pub fn pick(
 /// [`pick`] with the same building-cell gate as the static collector.
 #[must_use]
 #[allow(clippy::too_many_arguments)] // Rendering inputs intentionally mirror `pick` plus interior visibility.
-pub fn pick_with_interior(
+pub fn pick_with_interior<'a>(
     map: &WorldMap,
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     cursor: RealPixel,
     interior: Option<&crate::interiors::InteriorFrame>,
 ) -> Option<PickedStatic> {
+    let atlas = atlas.into();
     let in_view = camera.to_view(camera.pick(cursor));
     let mut hit: Option<(depth::Order, PickedStatic)> = None;
     for_each_static_in(map, pick_bounds(camera, atlas, cursor), |item| {
@@ -1077,7 +1081,8 @@ pub fn pick_with_interior(
 /// through both ends of the signed height range. The small extra tile is for
 /// rounding in [`camera::unproject`], so this may inspect a few more statics but
 /// can never reject one whose pixels contain the cursor.
-fn pick_bounds(camera: &Camera, atlas: &dyn StaticArt, cursor: RealPixel) -> TileBounds {
+fn pick_bounds<'a>(camera: &Camera, atlas: impl Into<StaticArt<'a>>, cursor: RealPixel) -> TileBounds {
+    let atlas = atlas.into();
     let cursor = camera.pick(cursor);
     let (width, height) = atlas.max_sprite_size();
     let half_width = (i32::from(width) + 1) / 2;
@@ -1127,14 +1132,15 @@ fn pick_bounds(camera: &Camera, atlas: &dyn StaticArt, cursor: RealPixel) -> Til
 /// `None` comes back empty rather than being a case the caller has to handle.
 ///
 /// The hue is nought: a mask is a shape, and the shape is the alpha.
-pub fn selected(
+pub fn selected<'a>(
     camera: &Camera,
     tiledata: &TileData,
     animations: &StaticAnimations,
-    atlas: &dyn StaticArt,
+    atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     selection: Option<PickedStatic>,
 ) -> Vec<SpriteQuad> {
+    let atlas = atlas.into();
     let (eye_x, eye_y) = camera.eye_tile();
     let base = depth::base_for(eye_x, eye_y);
     selection

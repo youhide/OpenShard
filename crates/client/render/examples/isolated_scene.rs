@@ -871,7 +871,7 @@ fn main() {
         cutaway: &cutaway,
         land: &land_atlas,
         texmaps: &texmaps,
-        statics: &static_atlas,
+        statics: openshard_client_render::atlas::StaticArt::Single(&static_atlas),
         // Flat by default, as the client is: what a roof does to the light under
         // it is a second thing changing every tile of the picture. The client's
         // own F6 is `OPENSHARD_SCENE_SKY_FIELD=1` here, and it is a knob because

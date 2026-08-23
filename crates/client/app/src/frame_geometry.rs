@@ -333,7 +333,7 @@ pub(crate) fn assemble_geometry(
         // stands on, and only the art says which side that is. One atlas for
         // the grid and for both sprite passes, so they cannot be about two
         // different sets of sprites.
-        statics: &window.atlases.statics,
+        statics: openshard_client_render::atlas::StaticArt::Pages(&window.atlases.statics),
         sky,
         // The sun is a property of the sky and not of the tiles, so it is an
         // input to the frame rather than something walked with them — and
