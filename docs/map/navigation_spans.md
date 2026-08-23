@@ -1,14 +1,15 @@
 # The first storey
 
-> **Status: live — era P, started. N0, N1, N2 and N3 are built.** The gate is
-> gone: [`realtime_map.md`](realtime_map.md)'s era R is over, the span layer is
-> built and measured against the whole facet, and **the shard now walks on it**
-> — a node expansion is 208 ns where it was 1,105, a search from the castle is
-> 0.168 ms where it was 0.793, and every arrival count is bit-identical to the
-> run [`terrain_seam.md`](terrain_seam.md#what-one-search-costs) recorded. The
-> risk this plan was carrying is retired and the win is banked. **N3b is next**
-> — the node stops being a tile — and it is the one node that *must* change the
-> routes. See [`map_rebuild.md`](map_rebuild.md) for the order and
+> **Status: live — era P, started. N0, N1, N2, N3 and N3b are built.** The gate
+> is gone: [`realtime_map.md`](realtime_map.md)'s era R is over, the span layer
+> is built and measured against the whole facet, and **the shard now walks on
+> it** — a node expansion is 208 ns where it was 1,105 and a search from the
+> castle is 0.168 ms where it was 0.793. N3b then spent that on the answer:
+> **a node is a place to stand rather than a tile**, so a route may pass over a
+> bridge and later under it, and *"from this house's ground floor to its first
+> floor"* is a route round the staircase instead of success with an empty route.
+> **N4 is next** — regions over spans, the repair a player would notice. See
+> [`map_rebuild.md`](map_rebuild.md) for the order and
 > [`handoffs/`](handoffs/) for where the work stands.
 
 Two defects were found in one session and they are the same omission seen from
@@ -403,7 +404,7 @@ declared by hand.
                                                 ▼
  N0. the census ✅ ──> N1. three tiers ✅ ──> N2. the step rule reads them ✅ ─┬─> N3. the search takes Spans ✅
                                                     (the agreement oracle)   │        └─> N3b. the node stops
-                                                                             │              being a tile
+                                                                             │              being a tile ✅
                                                                              │
                                                                              └─> N4. regions over spans ──┬─> N5. off-mesh links
                                                                                           │               │
@@ -653,69 +654,109 @@ mutations of `walk.rs` run one at a time: dropping the overlay's floor, dropping
 its veto, and ignoring the door reading each fail exactly the claim they should.
 
 
-### N3b — the node stops being a tile
+### N3b — the node stops being a tile ✅
 
-Needs N3, and it is deliberately **not** part of it: N3's oracle is that nothing
-about the routes changed, and this is the one change that must alter them.
-
-The key widens from a planar tile to `(x, y, span)` — twenty-nine bits of the
-`u32` it already uses, since the index is zero for 99.4% of the facet. What that
-buys is the thing [a node is](#what-a-node-is-and-the-z-that-is-already-gone)
-names: a column with two standing places stops collapsing into one slot in
-`closed`, so a route may pass over a bridge and later under it, and a body on a
+**Built.** Needed N3, and it was deliberately not part of it: N3's oracle is
+that nothing about the routes changed, and this is the one change that must
+alter them. The key is now a **standing place** — the tile *and* the height a
+body's feet are at on it — so a column with two floors gets two slots in
+`closed`, a route may pass over a bridge and later under it, and a body on a
 house's first floor is not the same node as one on the ground beneath.
 
-**🚩 And the same-column case is not merely refused today — it is answered with a
-lie.** [`search`](../../crates/common/movement/src/path.rs#L210) flattens both
-endpoints to tiles and compares them:
+**The key is `(x, y, z)`, not `(x, y, span)`.** The section below asked for a
+span index in the twenty-nine spare bits of the `u32` the search already used,
+and that cannot be the key: **the surfaces a search lands on are not all the
+map's.** A house's storey, a ship's deck and a placed stair are the
+[`Overlay`](../../crates/common/map/src/overlay.rs)'s, `walk::climbed` picks
+them, and none of them has a span to be indexed by — a span is a fact about the
+map file. What both layers do speak in is the height, because a *landing is* a
+height; so the key is `x`, `y` and `z` in forty bits of a `u64`, which also
+means no coordinate has to be truncated to fit. Two surfaces of one column at
+one height are one place to stand, which is the identity a walk wants anyway.
+The `u32` and its span index are not a smaller version of this; they are a
+different, narrower answer.
 
-```rust
-let goal  = Tile::new(to.x, to.y);
-let start = Tile::new(from.x, from.y);
-if start == goal { return PathSearch { arrived: true, route: Vec::new(), … } }
-```
+**A destination is a point and a node is a place, and resolving between them is
+half the node.** Comparing nodes without it would have swapped one wrong answer
+for another: almost no caller has the exact z of the surface it means — the
+coarse graph's nodes carry the land's height under the bridge they mean the deck
+of, `map_path_probe` sweeps a neighbourhood at the height its *origin* stands
+at, a client's click carries whatever the tile it hit was drawn at — and every
+one of them arrived before, because arrival threw the height away.
+`path::goal_node` resolves the caller's z against what is actually there, the
+map's spans and the live world's surfaces together, the way
+`Overlay::surface_at` resolves one; ties go to the lower surface so the answer
+does not depend on which layer was read first. **The start's own column offers
+the start's own height**, because a body standing somewhere is proof that there
+is somewhere to stand — without it a search from a place to itself would go
+hunting for a surface the world does not list.
 
-So *"from the ground floor to the first floor of this column"* returns **success
-with an empty route**, and the caller walks nowhere believing it has arrived.
-Two more places say the same thing more quietly: `if tile == goal` compares
-tiles, so reaching the column at any height is an arrival, and the start's own
-column is closed by the first `closed.insert`, so it can never be re-entered at
-another height. The z of both endpoints reaches only the
-[heuristic](../../crates/common/movement/src/path.rs#L408), which ignores it.
+**What it changed, enumerated.** The same three origins and 37,248 destinations
+each, run before and after in one tree:
 
-It is not a pathfinding curiosity: server AI told to walk to a mobile standing on
-a bridge over it is told it is already there.
+| origin | arrived @400 | @600 | destinations that changed |
+|---|---:|---:|---:|
+| (1363, 1600, 30) the castle plateau | 4,036 → **4,010** | 4,436 → **4,405** | 26 and 31 |
+| (1434, 1699, 2) the bank | 6,138 → **6,091** | 7,389 → **7,315** | 47 and 74 |
+| (1500, 1900, 0) open country | 17,458 → **17,458** | 18,093 → **18,093** | **none** |
 
-**There is no vertical edge, and there must not be one.** Nothing in UO moves up
+**Open country is bit-identical**, which is the control: nothing there stands on
+anything. Of the 178 answers that did move, **176 are columns with more than one
+place to stand on them** — the probe prints that attribution itself now, and it
+is a count of a set rather than a count. The two that are not are named, because
+a plan that says "exactly the multi-span columns" has to account for them:
+(1403, 1718) and (1402, 1719) from the bank at budget 400, single-surface both,
+whose goal used to be found on the **400th node** and now falls one node outside
+the budget — the search spent a node or two on the second height of a column on
+the way. Neither is lost at 600, and every one of the 74 that is lost at 600 is
+multi-span. **That is the budget being spent differently, not the rule
+answering differently**, and it is filed below as what a node budget now counts.
+
+**A refusal replaced a lie, which is what the arithmetic above is.** Every one
+of those 176 is a destination the search reached the *column* of and could not
+reach the *place* on — a bridge whose deck it got to when the ground was asked
+for, or the reverse. Before this node each one was reported as an arrival with a
+route that ends somewhere else, and the worst of them was the same column the
+body already stood on: `start == goal` compared tiles, so *"from this house's
+ground floor to its first floor"* returned **success with an empty route** and
+the caller stood still believing it had arrived. Server AI told to walk to a
+mobile standing on a bridge over it was told it was already there.
+
+**And the route that could not exist before now does.** Nothing in UO moves up
 in place — the eight neighbours are horizontal and the step rule changes height
-as a *consequence* of moving. A route from one floor to another over one column
+as a *consequence* of moving — so a route from one floor of a column to another
 is a **loop**: out of the column, up whatever tiles rise, and back over the same
-`(x, y)` at a different span. Which is exactly why the key has to be the node:
-without it the return is forbidden by the closed set rather than by the world.
+`(x, y)`. `a_route_climbs_from_a_villas_ground_floor_to_its_first_floor` in
+[`walk_scenes.rs`](../../crates/common/movement/tests/walk_scenes.rs) plans one
+over the same two-storey villa the step rule's own test climbs by hand, and
+walks it back through `step_allowed` so the search cannot invent a step nobody
+may take. **No tile-keyed search could have produced it**: the first visit closed
+the column for good, so the return was forbidden by the search's bookkeeping
+rather than by the world.
 
-Four things this node therefore owns, beyond widening the key:
+**The sweep over the facet finds none of those loops, and that is a property of
+the sweep.** `map_path_probe` counts them — 0 from every origin — because it
+runs over the bare map with an empty overlay, and the map's own multi-span
+columns are bridges and piers you walk *along* rather than staircases you double
+back on. A house is exactly the shape that produces one, and a house is the
+overlay's. The count stays in the probe so that a shard-side sweep can be
+compared against it, not because zero is the answer.
 
-- **The goal is a node**, `(tile, span)`, with the caller's z resolved to the
-  nearest surface the way `Overlay::surface_at` already resolves one.
-- **The `start == goal` early return compares nodes**, so the empty-route answer
-  above stops being reachable.
-- **`cost`, `came_from` and `closed` are keyed by the node**, which is what lets
-  the loop come home.
-- **The heuristic stays planar, and it goes flat in exactly this case.** Chebyshev
-  over `(x, y)` is admissible — every step moves one tile, so it is a lower bound
-  — but with the goal one storey up in the same column it is zero at the start,
-  and the search fans out until it meets a stair. Inside a house that is nothing;
-  inside a castle it can spend the 400- or 600-node budget. The real answer for a
-  long climb is [N4](#n4--regions-over-spans), where spans are the graph's nodes
-  and a staircase is a portal — which is one more reason the coarse layer is the
-  user-visible half of this plan.
+**The coarse router is untouched, and it was checked rather than assumed.**
+`find_path_until` refining a hop now has to arrive at the graph node's own
+height, which is `ground_z` — the land alone — so a hop onto a bridge deck could
+have started refusing. It does not: `coarse_bench` reproduces every recorded
+number to the unit, **37 of 44 from the castle, 5 of 43 from the bank, 0 of 38
+from open country**. What was already broken there is [N4](#n4--regions-over-spans)'s
+and is unchanged by this.
 
-**Done when:** a search that must use both heights of one column arrives where it
-previously refused; **a request from one floor of a column to another no longer
-returns an empty route**; and node counts change on **exactly** the searches that
-touch a multi-span column — enumerated, not asserted in bulk, because a count
-that moved anywhere else means the key change altered something it had no
-business altering.
+**The heuristic stays planar, and it goes flat in exactly the case this node
+opens.** Chebyshev over `(x, y)` is admissible — every step moves one tile — but
+with the goal one storey up in the same column it is zero at the start, and the
+search fans out until it meets a stair. Inside a house that is nothing; inside a
+castle it can spend the whole budget. The real answer for a long climb is
+[N4](#n4--regions-over-spans), where spans are the graph's nodes and a staircase
+is a portal.
 
 ### N4 — regions over spans
 
@@ -958,6 +999,44 @@ graph over spans names neither.
   — but a fixture that grows will notice. It is the price of `Scene::terrain`
   taking `&self`: there is nowhere to notice staleness later, and a bake one
   static behind its map is a fixture testing the wrong world.
+- **N3b corrected the key: a node cannot be a span index.** This plan wrote the
+  key as `(x, y, span)` in twenty-nine bits of a `u32`, twice, and the code says
+  otherwise: `walk::climbed` lands a body on the *overlay's* surfaces — a
+  house's storey, a deck, a placed stair — and none of those has a span, because
+  a span is a fact about the map file. The height is what both layers speak, so
+  it is what the key is. The general shape is worth carrying to N4, which is
+  about to key a graph by spans: **the map's own surfaces are not all the
+  surfaces**, and anything keyed by span alone is a graph the live world cannot
+  be placed into. What saves N4 is that its graph is baked from the bare map and
+  the live world is applied at refinement time — which is a property to keep
+  deliberately rather than to discover.
+- **N3b found: a node budget is not a tile budget, and 400 was measured against
+  tiles.** `budget` bounds *finalised nodes*, and a column with two floors can be
+  finalised twice, so the same 400 buys marginally less ground than it did. On
+  Britannia that is 0.6% of columns and the measured cost is two destinations out
+  of 37,248 at the bank — (1403, 1718) and (1402, 1719), whose goal used to be
+  found on the 400th node — and neither is lost at 600. It is filed rather than
+  fixed because the numbers to re-argue are 400 for server AI and 600 for a
+  client plan, and the argument for them is a *time* budget: the measurement
+  that would move them is the one in
+  [`terrain_seam.md`](terrain_seam.md#what-one-search-costs), not this one.
+  Whoever revisits them should know the unit changed under the number.
+- **N3b found: the probe's `revisits` count is zero over the bare map, and that
+  is the sweep rather than the world.** A route that comes back to a column at a
+  second height is the thing no tile-keyed search could plan, so
+  `map_path_probe` counts them — and finds none from any of the three origins,
+  because it runs with an empty overlay and the map's own multi-span columns are
+  bridges and piers you walk along. **A house is the shape that produces one.**
+  Anybody reading that zero as "no such routes exist" would be reading a sweep
+  over a world with no houses in it; the villa test in `walk_scenes.rs` is where
+  the shape is asserted, and a shard-side sweep is what would count them.
+- **N3b found: `Overlay::surface_at` breaks a tie by iteration order.** Two
+  surfaces equidistant from the height asked about resolve to whichever the
+  overlay happens to yield first, which is a `Vec` order nobody promised.
+  `path::goal_node` does not inherit it — it breaks the same tie by the lower
+  surface, so one caller's answer does not depend on insertion order — and the
+  overlay's own resolver is still order-dependent for everybody else. One line
+  to fix, in a crate this plan does not otherwise touch.
 - **A dense `average_land_z` array.** 29.4 MB turns the bare-column case from
   four corner reads into one. It waited for N3's measurement, and the
   measurement is that the whole landing half is 167 ns for eight neighbours —
@@ -984,23 +1063,23 @@ graph over spans names neither.
 
 ## Where a session starts
 
-**N3b — the node stops being a tile.** N3 is built and the win is banked: the
-shard's step rule reads the bake, a node expansion is 208 ns where it was 1,105,
-and the three recorded searches arrive on exactly the tiles they arrived on
-before. Which is precisely why the next node is the one that **must** change
-them — a column with two standing places still gets one slot in `closed`, and a
-route from a house's ground floor to its first floor is still answered with
-success and an empty route. Everything N3b needs is in
-[its own section](#n3b--the-node-stops-being-a-tile): the key widens to
-`(x, y, span)`, the goal becomes a node, and the four things that follow from
-that are enumerated there.
+**N4 — regions over spans.** N3 banked the speed and N3b spent it on the
+answer: a node is a place to stand, so 178 destinations round Britain that used
+to be reported as arrivals are now the refusals they always were, and a route
+from a house's ground floor to its first floor is a route rather than an empty
+one. What is left is the defect a *player* meets, and it is the one N3b could
+not touch from inside a fine search: **`coarse_bench` still refuses 37 of 44
+walkable destinations from the castle plateau**, unchanged to the unit, because
+the coarse graph samples `ground_z` — the land alone — once per tile and the
+plateau is therefore an island. Everything N4 needs is built, its section
+enumerates the two halves (spans as the graph's nodes, and directed edges so a
+ledge a body may step off is not deleted for not being climbable back), and its
+done-when is a number the bench already prints.
 
-**N4 is the alternative first move, and nothing forces the order.** N3b and N4
-both need only what is built; N3b is the finer defect and N4 is the one a player
-would notice — a creature that can route out of Britain's castle — with N7 the
-node where they actually notice it, because until then nothing on the server
-asks. If a session wants the visible repair, take N4 and leave N3b; they do not
-collide.
+**N7 is where a player actually notices it**, because until the server asks the
+graph nothing on the shard routes further than 600 nodes. Nothing forces N4
+before N5 or N6; N4 before N7 is forced, since N7 is the thing that reads what
+N4 fixes.
 
 **What a session should not do is re-open the landing rule.** `Spans::check` is
 what a step asks, `MapTerrain::check` is the map's own statement of the same
