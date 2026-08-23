@@ -2863,10 +2863,27 @@ impl WorldState {
     }
 
     /// Whether `watcher` may see mobile `other`. The living cannot see the dead: a
-    /// ghost is drawn only to itself, to another ghost, or to staff — ServUO's
-    /// `CanSee(Mobile)` (`this == m || m.Alive || !Alive || IsStaff`). Every other
+    /// ghost is drawn only to itself, to another ghost, or to staff. Every other
     /// mobile in range is visible to everyone; an item is never a ghost, so this
     /// bites only mobiles.
+    ///
+    /// **Two of ServUO's clauses are missing, and they are the same clause twice:
+    /// a ghost the living are *supposed* to see.** `CanSee(Mobile m)`
+    /// (`Server/Mobile.cs:9229`) ends
+    /// `((m.Alive || (Core.SE && Skills.SpiritSpeak.Value >= 100.0)) || !Alive ||
+    /// IsStaff() || m.Warmode)`. The last term is the manifest — **a ghost that
+    /// draws its stance is visible to the living**, which is how a player who
+    /// died in the woods is found and resurrected, and it is a gameplay rule
+    /// rather than a detail. The Spirit Speak term is the other way in. Neither
+    /// is implemented here; both are filed in `docs/roadmap.md` under the ghost
+    /// entry, together with what they cost — a war toggle becomes a `reveal`/
+    /// `hide` for every living watcher in range, which is a draw-path change and
+    /// not a predicate change.
+    ///
+    /// Until then the client's own body-blocking rule is written not to depend on
+    /// their absence: `clutter::crowd` reads a stranger's death off the body id
+    /// *and* `IGNORE_MOBILES` together, so a manifested ghost is already answered
+    /// for at that end.
     ///
     /// It gates *hearing* as well as drawing (`chat::speak`), because ServUO's
     /// speech runs through the same `CanSee`: a ghost nobody can see should not be

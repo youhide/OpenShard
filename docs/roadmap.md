@@ -623,13 +623,21 @@ Left open, and none of it blocks anything:
   so its answer is per asker and cannot be projected; the client's is a function
   of the view alone.
 - ~~**`is_ghost` is the client's whole answer to "is that one dead".**~~
-  **Closed, by deleting the filter.** A ghost could never reach that filter: the
-  shard draws one only to another ghost and to staff (`can_see_mobile`, and
-  `show` is the one draw path), and both of those hold `IGNORE_MOBILES`, so
-  their crowd is empty two lines earlier. The only body it *did* filter was the
-  living one wearing a ghost's graphic — the spectral NPC, which the shard
-  blocks on and this end walked through. `is_ghost` stays where a body id is
-  genuinely the fact, which is the drawing.
+  **Closed: it is two answers now, and they have to agree.** The crowd leaves
+  out a body whose *graphic* is a ghost's **and** whose flag byte carries
+  `IGNORE_MOBILES`. Each half alone is wrong in its own direction — the graphic
+  alone calls a living spectral NPC dead and walks into it a hold at a time; the
+  bit alone is `walks_through_bodies`, staff *or* dead, and walks into a visible
+  game master standing in a doorway. Together they are exact to within a game
+  master who has taken a ghost's graphic while alive.
+
+  **This first went in as a deletion, on a proof that was one gameplay rule from
+  false.** The proof was that a client holding a ghost is itself dead or staff,
+  both exempt — true of `can_see_mobile` *here*, and not of UO: ServUO's
+  `CanSee` ends `... || IsStaff() || m.Warmode` (`Server/Mobile.cs:9229`), so a
+  ghost in war mode is visible to the living, which is exactly how the living
+  find one to resurrect. Rules the shard has not implemented yet are not a thing
+  to build a client's step rule on top of. Filed below.
 - ~~**The `0x20`'s flag byte is now sent and still half-ignored.**~~ **Closed.**
   The player's `flags: StatusFlags` is now `walks_through_bodies: bool`: the one
   bit this end answers from, folded at the door, and no second home for the
@@ -642,14 +650,43 @@ Left open, and none of it blocks anything:
 
 #### Found while closing those three
 
-- **A stranger's `IGNORE_MOBILES` is not "this one is out of the way", and the
-  crowd must never read it as one.** The bit is `walks_through_bodies` — staff
-  *or* dead — while what the crowd wants is `body_blocks`, which a living,
-  visible game master satisfies. Filtering the crowd on the bit would let this
-  end walk into a game master standing in a doorway and be refused by the shard
-  a hold at a time. It reads like an easy improvement on the deleted `is_ghost`
-  and it is the same bug with better manners; the two questions are separate
-  functions on `WorldState` for exactly this reason.
+- 🚩 **A ghost in war mode is visible to the living, and this shard has never
+  said so.** ServUO's `CanSee(Mobile m)` (`Server/Mobile.cs:9229`) ends
+  `((m.Alive || (Core.SE && Skills.SpiritSpeak.Value >= 100.0)) || !Alive ||
+  IsStaff() || m.Warmode)`. Two ways in, and the second is the one that matters
+  for play: **the manifest** — a ghost draws its stance and the living can see
+  it, which is how somebody who died in the woods is found, and it is the
+  precondition for a stranger resurrecting them at all. `can_see_mobile` has
+  neither clause and its doc quoted `CanSee` without them, which is fixed.
+
+  What it costs is not a predicate: a war toggle on a ghost becomes a `reveal`
+  for every living watcher in range and its reverse becomes a `hide`, so the
+  `seen` set has to move when `warmode` moves — the same shape as
+  `break_cover`/`hide`. Spirit Speak's clause is cheaper (it is a property of
+  the *watcher*, so it only changes what a `show` decides) and it is SE-era, so
+  it can come second. The client's crowd is already written not to depend on
+  their absence — see the entry above.
+- **A ghost walks through a shut door, and neither end knows.** ServUO's
+  `MovementImpl.Check` sets `ignoreDoors = (m_AlwaysIgnoreDoors || m == null ||
+  !m.Alive || m.Body.BodyID == 0x3DB || m.IsDeadBondedPet)`
+  (`Scripts/Services/Pathing/Movement.cs:173`), and `IsOk` then steps past
+  anything carrying `TileFlag.Door` — with one exception kept: a `BaseHouseDoor`
+  still asks `CheckAccess`, so a ghost does not drift into a house it is locked
+  out of. Here every player step reads `Doors::AsTheyStand` (`tick/motion.rs`)
+  and the client reads `Doors::for_opener(auto_open_doors)`, neither of which
+  has heard of the dead. **The two ends agree today**, so this is a missing rule
+  and not a rubber-band — but it is a whole half of what being dead means in UO,
+  it is one argument at each end (`Doors::AllOpen` for a ghost, and the client
+  already has the reading), and the house-door exception is the part that will
+  want thought rather than a flag.
+- **A stranger's `IGNORE_MOBILES` is not "this one is out of the way".** The bit
+  is `walks_through_bodies` — staff *or* dead — while the crowd wants
+  `body_blocks`, which a living, visible game master satisfies (`body_blocks`
+  lets out only a *hidden* one). Filtering the crowd on the bit alone walks this
+  end into a game master standing in a doorway. It is half of the conjunction
+  above and it is not a rule on its own; the two questions are separate
+  functions on `WorldState` for exactly this reason, and there is a test at the
+  client's end named after the mistake.
 - **Nothing tests that `App::entered` calls `clutter::project`.** The seam has
   its own test (both halves replaced from one view) and the four readers have
   theirs, but the wiring between them is untested because an `App` needs a

@@ -38,28 +38,45 @@ built whole, thrown away whole, nothing to keep in step by hand.
 
 [`Ground::set_base`]: ../../../crates/common/movement/src/ground.rs
 
-### 🚩 The ghost filter could never fire, and fired only on the wrong body
+### 🚩 The ghost filter was one fact, and one fact cannot answer this
 
 `crowd` filtered out anything wearing a ghost's graphic, because "nothing on the
-wire says a stranger died". Both halves of that are true and the conclusion was
-still wrong, because of a fact neither end had written down:
+wire says a stranger died". Both halves of that are true and the rule was still
+wrong: a **living** mobile a shard gave a ghost's graphic to is blocked by the
+shard and was walked straight through by this end. A spectral NPC that
+rubber-bands, waiting for somebody to write one.
 
-**A client that can see a ghost is a client whose crowd is already empty.** The
-shard draws a ghost only to another ghost and to staff — `can_see_mobile`, and
-`show` is the one path a mobile reaches a screen by, so a living player never
-has one in `view.mobiles` at all. Both of those viewers carry `IGNORE_MOBILES`
-on their own body, which is the first thing `crowd` reads and the point at which
-it returns nothing. So the filter had no reachable case.
+It is a conjunction now — the graphic **and** the wire's `IGNORE_MOBILES` — and
+each half is load-bearing in its own direction:
 
-What it *did* have was the unreachable case's shadow: a **living** mobile a
-shard gave a ghost's graphic to. The shard blocks on that body, this end walked
-straight through it, and the report would have been a spectral NPC that
-rubber-bands. The filter is gone and the proof is in its place, in the same
-shape as the hidden-game-master clause beside it.
+| what is asked | what it gets wrong alone |
+|---|---|
+| the body id | a living spectral NPC is called dead, and walked into |
+| `IGNORE_MOBILES` | it is `walks_through_bodies`, staff *or* dead — so a **visible living game master** is called out of the way, and walked into |
 
-`is_ghost` stays where a body id is genuinely the fact — the drawing's
-translucency, and the sword a ghost is not holding. A step is decided against
-what the shard says, and the shard says nothing about a stranger's death.
+Exact, to within a game master who has taken a ghost's graphic while alive.
+
+**This first went in as a deletion, and that was wrong.** The argument was that
+a client holding a ghost is itself dead or staff — `can_see_mobile` draws a
+ghost only to those two, and both carry `IGNORE_MOBILES`, so their crowd is
+empty before any filter runs. It is true of *this shard*, and it is not true of
+UO: ServUO's `CanSee(Mobile m)` ends
+`((m.Alive || (Core.SE && Skills.SpiritSpeak.Value >= 100.0)) || !Alive ||
+IsStaff() || m.Warmode)` (`Server/Mobile.cs:9229`). **A ghost in war mode is
+visible to the living** — the manifest, which is how a player who died in the
+woods is found and resurrected. The clause is missing here, and
+`can_see_mobile`'s own doc quoted `CanSee` *without* it, so the proof was
+checking itself against a transcription of the rule with the interesting term
+already dropped.
+
+The lesson is narrower than "no proofs": a client's step rule may rest on what
+the shard *does*, and must not rest on a gameplay rule the shard has **not
+implemented yet**. The missing clause is filed, with what it costs; the doc it
+was mis-cited from is fixed; and the crowd now answers for a manifested ghost
+before there is one.
+
+`is_ghost` still stands alone where a body id is genuinely the fact — the
+drawing's translucency, and the sword a ghost is not holding.
 
 ### The player's flag byte is one bit now, and the stance has one home ✅
 
@@ -86,14 +103,17 @@ answer it can trust — not a divergence.
 
 ## What was decided
 
-**A proof, not a second filter.** The obvious repair for the spectral NPC was to
-require `is_ghost` *and* the wire's `IGNORE_MOBILES` before letting a body
-through. It is wrong, and it is filed in the roadmap so nobody tries it: a
-stranger's `IGNORE_MOBILES` is `walks_through_bodies` — staff **or** dead —
-while the crowd wants `body_blocks`, which a living, visible game master
-satisfies. Reading the bit that way would walk this end into a game master
-standing in a doorway and be refused a hold at a time. The shard keeps the two
-questions in two functions for exactly this reason.
+**Two facts agreeing, and not a proof that the case cannot arise.** Death is the
+one thing about a stranger that no packet states, so this end reads it off the
+picture and the flag byte together and refuses to call it from either alone.
+What settled it against the proof is that the proof's premise is a rule this
+shard has not written yet: the manifest is real UO, and a client rule that
+becomes wrong the day a gameplay rule lands is a trap laid for whoever lands it.
+
+**Not a `0xBF` of our own saying "this one is dead".** This engine does invent
+subcommands (`AuthorityNotice`), so it was on the table — and it buys one bit
+that the two facts already answer, at the price of a packet the reference
+clients do not send and a second thing to keep in step with `Ghost`.
 
 **The byte went, rather than the war bit being masked out of it.** Masking would
 have left a `StatusFlags` that lies about its own name. Keeping the byte "for
@@ -111,30 +131,29 @@ is no incremental edit and no removal anybody can forget, which is the property
 ## What is clean
 
 `cargo test -p openshard-client-app -p openshard-client-net -p openshard-movement`:
-**648 passed, 0 failed**, five ignored — 390 + 109 + 148 and the doctests, with
-three new tests among them, one per tail.
+**663 passed, 0 failed**, five ignored — 392 + 109 + 148 and the doctests, with
+five new tests among them.
 `cargo clippy` on the same three: the two findings that were already there
 (`uofiles/src/map.rs`, `client/app/src/link.rs`), neither this session's.
 `cargo fmt --all -- --check`: silent on every file this session touched.
 
-⚠ **The workspace does not build, and not because of this** — say when the
-numbers above were taken, because they were taken *before* the second half of
-it. A parallel session is mid-flight on the shove: `FacetRules` in
-`server/state` (so `cargo test --workspace` and `crates/e2e` cannot run at all),
-and, landing later, `movement`'s `Walk::Refused` gaining a `Refusal` payload —
-which its own crate's tests and `client/app`'s `dst.rs` have not caught up with
-yet. So the client-app figure is this tree's, one minute before that reached it;
-`client/net` still runs clean on its own (109 + 1) because it does not depend on
-`movement`. Nothing here touches a server crate, and no client crate depends on
-one — that is the dependency invariant, and it is what kept any of this
-runnable.
+⚠ **`cargo test --workspace` did not run at any point this session**, and not
+for a reason that is here: a parallel session is mid-flight on the shove —
+`FacetRules` in `server/state`, and `movement`'s `Walk::Refused` gaining a
+`Refusal` payload — so the server crates and `crates/e2e` spent the session in
+various states of not compiling. Nothing here touches a server crate except one
+doc comment, and no client crate depends on one; that is the dependency
+invariant, and it is what kept any of this runnable.
 
-**The controls were run by hand**, one per tail, each failing exactly its own
-test and nothing else:
+**The controls were run by hand**, each failing exactly its own test and nothing
+else. Five, because the ghost rule is a conjunction and each half had to be
+shown to carry weight:
 
 | the control | what fails |
 |---|---|
-| the `is_ghost` filter put back | `a_living_body_in_a_ghost_s_skin_is_in_the_way`, alone |
+| the graphic alone decides the dead | `a_living_body_in_a_ghost_s_skin_is_in_the_way`, alone |
+| `IGNORE_MOBILES` alone decides the dead | `a_visible_game_master_is_in_the_way_bit_or_no_bit`, alone |
+| neither is asked (the deletion this started as) | `a_ghost_the_shard_called_dead_is_in_nobody_s_way`, alone |
 | `war` folded out of the `0x20`'s byte | `a_player_update_carries_the_body_blocking_exemption_and_not_the_stance`, alone |
 | `project` writing the furniture and not the bodies | `one_call_replaces_the_furniture_and_the_crowd_together`, alone |
 
@@ -149,11 +168,25 @@ are still filed — this session closed only the client's three.
 | **Two bodies on a deck that moves under them** — still unexamined at both ends | — |
 | The four `a bucket is two lists` filed | [that entry](2026-08-24-a-bucket-is-two-lists.md) |
 
-And three this session made, filed in [`roadmap.md`](../../roadmap.md) under the
-entry this closed:
+And five this session made, filed in [`roadmap.md`](../../roadmap.md) under the
+entry this closed. **The first two are gameplay this shard owes UO**, and both
+came out of the ghost tail rather than out of the code:
 
-- 🚩 **A stranger's `IGNORE_MOBILES` is not "out of the way"** — the wrong repair
-  for the ghost filter, written down before somebody makes it.
+- 🚩 **A ghost in war mode is visible to the living, and this shard has never
+  said so.** `CanSee`'s `|| m.Warmode` — the manifest, and the precondition for
+  a stranger finding a corpse-side player and resurrecting them; `Core.SE`'s
+  Spirit Speak at 100 is the other way in. Not a predicate change: a war toggle
+  on a ghost has to become a `reveal` and its reverse a `hide` for every living
+  watcher in range, so the `seen` set moves with `warmode` the way it moves with
+  `break_cover`.
+- **A ghost walks through a shut door, and neither end knows.** ServUO's
+  `ignoreDoors` is `!m.Alive` among four terms, with `BaseHouseDoor.CheckAccess`
+  kept as the one exception. Both ends here read the doors as they stand, so
+  they agree and nothing rubber-bands — it is a missing rule, one argument wide
+  at each end, and the house door is the part that wants thought.
+- **A stranger's `IGNORE_MOBILES` is not "out of the way"** — half of the
+  conjunction and not a rule on its own, with a test at the client's end named
+  after the mistake.
 - **Nothing tests that `App::entered` calls `project`.** The seam has a test and
   the readers have theirs; the line between them has none, because an `App`
   wants a window and a GPU. It is one line wide and it is the line that would

@@ -88,8 +88,10 @@ use openshard_client_render::doors;
 use openshard_client_render::items::GroundItem;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::{Cover, Overlay};
+use openshard_protocol::mobile::StatusFlags;
 use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
+use openshard_uofiles::anim::is_ghost;
 
 /// Both halves of what refuses a step here, written from one view.
 ///
@@ -207,28 +209,49 @@ pub fn fill(live: &mut Overlay, items: &[GroundItem], tiles: &TileData) {
 ///   it is that this end does not have to guess. An empty crowd is what a mover
 ///   exempt from the rule gets, the same `Vec::new()` the shard's own answer is
 ///   for one.
-/// - **Is this body in the way?** Everything the shard shows us, with no
-///   predicate at all — and the two clauses left off are proofs rather than
-///   omissions.
+/// - **Is this body in the way?** Everything the shard shows us except the
+///   dead, and the dead are **two facts agreeing** rather than one: the picture
+///   says a ghost ([`is_ghost`] on the body id) *and* the wire says this body
+///   walks through others ([`StatusFlags::IGNORE_MOBILES`] on its own flag
+///   byte). Neither alone is the question.
 ///
-/// **A ghost is not filtered out, because one cannot get here.** The shard lets
-/// the dead through (`body_blocks` is false for a ghost), so this end would seem
-/// to owe the same answer — but a client with a ghost in its view is a client
-/// that is itself dead or staff: a ghost is drawn only to another ghost and to
-/// staff (`WorldState::can_see_mobile`, and `show` is the one draw path), and
-/// both of those are exempt by the rule above, so the answer for such a client
-/// is the empty crowd two lines up. A filter here could therefore never fire for
-/// a ghost. It *did* fire for the only body that can reach here wearing a
-/// ghost's graphic: a living mobile a shard gave one to — a spectral NPC — which
-/// the shard blocks on and which this end walked straight through. `is_ghost`
-/// stays where a body id is genuinely the fact, which is the drawing (its
-/// translucency, and the sword it is not holding); a step is decided against
-/// what the shard says, and it says nothing about a stranger's death.
+/// # Why the dead are two facts and not one
 ///
-/// **A hidden game master is in nobody's way, and cannot get here either.** A
-/// hidden mobile is drawn only to a staff viewer (`can_see_mobile` again), and a
-/// staff viewer's own crowd is empty by the first rule, so the case cannot
-/// arise at this end.
+/// The shard's answer is `body_blocks`, which is false for a ghost. Nothing on
+/// the wire states a *stranger's* death outright, so this end has to read it off
+/// something — and each of the two candidates is wrong on its own, in opposite
+/// directions:
+///
+/// - **The body id alone** calls anything wearing `0x0192`/`0x0193` dead, which
+///   a living mobile a shard gave a ghost's graphic to is not. That body blocks
+///   on the shard and this end would walk into it a hold at a time. A spectral
+///   NPC is content nobody has written yet, and the crowd should not be what
+///   discovers it.
+/// - **The bit alone** is `walks_through_bodies`, which is staff **or** dead —
+///   and a living, visible game master is very much in the way (`body_blocks`
+///   only lets a *hidden* one out). Reading the bit as "out of the way" walks
+///   this end into a game master standing in a doorway.
+///
+/// Together they are exact, to within one body: a game master who has taken a
+/// ghost's graphic while alive. That is a staff member deliberately wearing the
+/// picture of a dead one, and it costs a re-plan.
+///
+/// **And a living client really can see a ghost, so none of this is theoretical.**
+/// It cannot on this shard *today* — `WorldState::can_see_mobile` draws a ghost
+/// only to another ghost and to staff, both of which hold `IGNORE_MOBILES` and
+/// so have no crowd at all by the rule above — but that is the shard's rule
+/// being incomplete, not a property of UO. ServUO's `CanSee(Mobile)` ends
+/// `... || !Alive || IsStaff() || m.Warmode`: **a ghost in war mode is visible
+/// to the living**, which is how a corpse-side player is found and resurrected,
+/// and `Core.SE` adds a viewer with Spirit Speak at 100. When either lands here,
+/// a living client's view holds ghosts — and this rule already answers for them,
+/// where a proof that they cannot arrive would have quietly become a body the
+/// shard walks through and this end stops at.
+///
+/// **A hidden game master is in nobody's way, and that one genuinely cannot get
+/// here.** A hidden mobile is drawn only to a staff viewer (`can_see_mobile`
+/// again, and its hidden clause has no war-mode escape), and a staff viewer's
+/// own crowd is empty by the first rule.
 ///
 /// One sliver of the shard's rule is deliberately not reproduced: it also lets a
 /// creature worn down to no hit points out of the way, because such a body stands
@@ -269,7 +292,15 @@ pub fn crowd(view: Option<&WorldView>) -> Vec<Point> {
     if view.player.walks_through_bodies {
         return Vec::new();
     }
-    let mut crowd: Vec<Point> = view.mobiles.values().map(|mobile| mobile.position).collect();
+    let mut crowd: Vec<Point> = view
+        .mobiles
+        .values()
+        // The dead, and both halves are needed — see the doc above. The shard
+        // is the one that decides `IGNORE_MOBILES`; the graphic is what keeps a
+        // living game master in the crowd, where the shard puts them.
+        .filter(|mobile| !(is_ghost(mobile.body) && mobile.flags.has(StatusFlags::IGNORE_MOBILES)))
+        .map(|mobile| mobile.position)
+        .collect();
     // `Bodies::standing` looks a tile up by binary search and debug-asserts this
     // order rather than imposing it, for the reason its own doc gives: the
     // caller has just built the storage and knows whether it is sorted.
@@ -318,7 +349,6 @@ mod tests {
     use openshard_movement::{Around, Detour, Footing, Heading, Lean, Leeway, Step, step_allowed};
     use openshard_protocol::direction::{Direction, Facing};
     use openshard_protocol::items::ItemAmount;
-    use openshard_protocol::mobile::StatusFlags;
     use openshard_protocol::serial::Serial;
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_protocol::world::Point;
@@ -429,15 +459,38 @@ mod tests {
         );
     }
 
-    /// **A body wearing a ghost's graphic is still in the way**, because a body
-    /// this client can see is a body the shard let it see — and the shard shows
-    /// a ghost to nobody but another ghost and staff, both of which are exempt
-    /// and hold no crowd at all (the test below). So the only thing that can
-    /// reach here in a ghost's skin is a living one wearing it, and the shard
-    /// blocks on that: a spectral NPC used to be walked into a hold at a time.
+    /// The flag byte the shard's `stance_of` puts on a body that walks through
+    /// others: a ghost, or staff.
+    fn exempt(view: &mut WorldView, serial: u32) {
+        view.mobiles
+            .get_mut(&Serial::new(serial).unwrap())
+            .expect("the body was just seen")
+            .flags = StatusFlags::IGNORE_MOBILES;
+    }
+
+    /// **The dead are in nobody's way**, and the shard is what says which body
+    /// is dead: the graphic alone would be a guess.
     ///
-    /// This is the whole of the proof `crowd`'s doc states — the filter it
-    /// replaces could never fire for a real ghost, and fired only for this.
+    /// A living client can hold one of these. Not on this shard yet — a ghost is
+    /// drawn only to another ghost and to staff — but ServUO's `CanSee` ends
+    /// `|| m.Warmode`, so a ghost that draws its stance is visible to the living
+    /// and is how the living find it to resurrect it. This rule answers for that
+    /// the day it lands.
+    #[test]
+    fn a_ghost_the_shard_called_dead_is_in_nobody_s_way() {
+        let mut view = viewed();
+        seen(&mut view, 2, Point::new(HERE.x + 1, HERE.y, 0), GHOST);
+        exempt(&mut view, 2);
+        assert!(
+            crowd(Some(&view)).is_empty(),
+            "a ghost was put in the way of the living, whom it can walk straight through"
+        );
+    }
+
+    /// **A living body in a ghost's skin is still in the way** — the graphic is
+    /// not the fact, which is why the bit is asked for as well. A shard that
+    /// gives a spectral NPC `0x0192` blocks on it, and an end reading the
+    /// picture alone would walk into it a hold at a time.
     #[test]
     fn a_living_body_in_a_ghost_s_skin_is_in_the_way() {
         let mut view = viewed();
@@ -448,6 +501,25 @@ mod tests {
             step_allowed(&among(&crowd), HERE, Direction::East).is_none(),
             "a spectral NPC the shard blocks on was walked into"
         );
+    }
+
+    /// **And a game master standing in a doorway is in the way**, which is the
+    /// other direction of the same conjunction. `IGNORE_MOBILES` says this body
+    /// walks through others — staff *or* dead — and `body_blocks` lets only a
+    /// *hidden* staff member out, so a visible one is a body like any other.
+    /// Reading the bit on its own is the repair that looks obvious and is a bug.
+    #[test]
+    fn a_visible_game_master_is_in_the_way_bit_or_no_bit() {
+        let mut view = viewed();
+        seen(&mut view, 2, Point::new(HERE.x + 1, HERE.y, 0), LIVING);
+        exempt(&mut view, 2);
+        let crowd = crowd(Some(&view));
+        assert_eq!(
+            crowd.len(),
+            1,
+            "a living game master was taken for somebody out of the way"
+        );
+        assert!(step_allowed(&among(&crowd), HERE, Direction::East).is_none());
     }
 
     /// **And the exemption arrives from the shard, not from a guess here.**
