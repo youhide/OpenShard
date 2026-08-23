@@ -477,10 +477,7 @@ impl App {
             return;
         }
         let current = self.world.presentation.cutaway_at;
-        let reachable =
-            openshard_movement::can_step(&footing(&self.resources, self.walking_doors()), current, next)
-                .is_some();
-        if reachable {
+        if cutaway_follows(&footing(&self.resources, self.walking_doors()), current, next) {
             self.world.presentation.cutaway_at = next;
         }
     }
@@ -1092,6 +1089,31 @@ fn laid_out(components: &[openshard_uofiles::multi::Component], at: Point, hue: 
         .collect()
 }
 
+/// Whether the roof threshold may follow a body from `from` to `to`.
+///
+/// **`step_allowed` and not `can_step`**, which is what this asked until the
+/// shard's own decree stopped asking it. A landing answers for the destination
+/// tile alone and has no corner rule in it, so a direction held into a building
+/// corner moved the threshold for a diagonal the shard refuses — a roof popping
+/// for a step about to be rubber-banded. This client already had two other
+/// readings of *can I go there*, the walker's own prediction and the held-key
+/// detour, and both speak `step_allowed`; this was the third.
+///
+/// **A move that is not one step is not a step question.** The body standing
+/// where the threshold already is, a z that changed under it, a push or a gate
+/// — none of those is a step to approve, and the threshold follows, because a
+/// threshold left behind hides the very body the cutaway exists to reveal. What
+/// is guarded is the one case the guard was written for: the next tile.
+fn cutaway_follows(footing: &openshard_movement::Footing<'_>, from: Point, to: Point) -> bool {
+    let step = openshard_movement::direction_toward(from, to).filter(|direction| {
+        openshard_movement::step_from(from, *direction).is_some_and(|tile| (tile.x, tile.y) == (to.x, to.y))
+    });
+    let Some(direction) = step else {
+        return true;
+    };
+    openshard_movement::step_allowed(footing, from, direction).is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
@@ -1106,6 +1128,69 @@ mod tests {
     use openshard_tiles::AnimId;
 
     use super::*;
+
+    /// A held direction into a building corner is not a step, so the roof
+    /// threshold does not follow it there.
+    ///
+    /// The cutaway used to ask `can_step`, which answers for the destination
+    /// tile alone: the diagonal below is wide open and only its two flanks are
+    /// blocked, so the threshold moved for a step the shard refuses and a roof
+    /// popped for as long as the key was held. Reverted to `can_step`, the first
+    /// assertion is what fails.
+    #[test]
+    fn the_cutaway_does_not_follow_a_corner_cut() {
+        use openshard_map::grid::Tile;
+        use openshard_map::overlay::{Cover, Doors, Overlay};
+
+        /// Somewhere to stand, on flat open ground with no map under it.
+        const HERE: Point = Point::new(100, 100, 0);
+        /// A crate's tiledata height, so the span these stand in is a real one.
+        const CRATE_HEIGHT: u8 = 12;
+
+        let mut walled = Overlay::default();
+        // The two tiles flanking the south-east diagonal, and nothing on the
+        // diagonal itself.
+        walled.set(
+            Tile::new(HERE.x + 1, HERE.y),
+            vec![Cover::blocking(0, CRATE_HEIGHT)],
+        );
+        walled.set(
+            Tile::new(HERE.x, HERE.y + 1),
+            vec![Cover::blocking(0, CRATE_HEIGHT)],
+        );
+        let corner = openshard_movement::Footing::new(None, &walled, Doors::AsTheyStand);
+        let diagonal = Point::new(HERE.x + 1, HERE.y + 1, 0);
+        assert!(
+            !cutaway_follows(&corner, HERE, diagonal),
+            "the threshold followed a diagonal that clips a corner"
+        );
+
+        // The control, and it is why the destination was never the reason: the
+        // same crate somewhere that is not a flank, and the same move is an
+        // ordinary step. (Both flanks, not one: the rule here is the strict
+        // reading, and a diagonal needs the pair.)
+        let mut elsewhere = Overlay::default();
+        elsewhere.set(
+            Tile::new(HERE.x, HERE.y - 1),
+            vec![Cover::blocking(0, CRATE_HEIGHT)],
+        );
+        let open = openshard_movement::Footing::new(None, &elsewhere, Doors::AsTheyStand);
+        assert!(
+            cutaway_follows(&open, HERE, diagonal),
+            "the threshold refused a diagonal with an open flank"
+        );
+
+        // And a move that is no step at all still follows, which is what keeps a
+        // gate or a push from stranding the threshold a map away from the body.
+        assert!(
+            cutaway_follows(&corner, HERE, Point::new(HERE.x + 9, HERE.y + 9, 0)),
+            "the threshold was stranded by a move no step explains"
+        );
+        assert!(
+            cutaway_follows(&corner, HERE, Point::new(HERE.x, HERE.y, 20)),
+            "the threshold stopped following a z that changed under it"
+        );
+    }
 
     #[test]
     fn cliloc_arguments_fill_their_numbered_slots() {

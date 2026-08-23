@@ -1348,15 +1348,28 @@ graph over spans names neither.
   first step is not the cut, and with no crate at all it is). Reverted, both fail
   at the corner assertion and nowhere else.
 - **The client's roof cutaway asks `can_step`, so it advances for a diagonal
-  the shard refuses.** `advance_cutaway` in
-  [`net_command.rs`](../../crates/client/app/src/net_command.rs) moves the
-  cutaway source when "this move is locally known to be possible", and it asks
-  the one-landing reading. Now that every step the shard permits carries the
-  corner rule, the two disagree by exactly a corner cut: a direction held into a
-  building corner moves the roof threshold for a step that will be rubber-
-  banded. It is presentation and not a step gate, which is why it is filed
-  rather than fixed — but it is a third reading of *can I go there* inside one
-  client, and `step_allowed` is what it means.
+  the shard refuses. ✅ Fixed.** `advance_cutaway` in
+  [`net_command.rs`](../../crates/client/app/src/net_command.rs) moved the
+  cutaway source when "this move is locally known to be possible", and it asked
+  the one-landing reading — so once every step the shard permits carried the
+  corner rule, the two disagreed by exactly a cut: a direction held into a
+  building corner moved the roof threshold for a step about to be rubber-banded.
+  It was filed rather than fixed because it is presentation and not a step gate;
+  what it is *not* is a third reading of *can I go there* inside a client whose
+  other two — the walker's own prediction and the held-key detour — both speak
+  `step_allowed`.
+  **The guard is its own function now**, `cutaway_follows`, which is what makes
+  it testable at all: the threshold is otherwise only reachable through a packet
+  fold on a live `App`. **And it says what a step is.** `step_allowed` needs a
+  direction where `can_step` took two points, so a move that is not one step —
+  the body already standing where the threshold is, a z that changed under it, a
+  gate, a push — is answered *yes* rather than measured: a threshold stranded
+  behind hides the body the cutaway exists to reveal, which is the failure the
+  guard was written against in the first place.
+  **Done when:** `the_cutaway_does_not_follow_a_corner_cut` — two crates
+  flanking an open diagonal, with the same crate moved off the flank as the
+  control, and the two not-a-step cases asserted beside them. Reverted to
+  `can_step` it fails at the first assertion.
 - **`items/mounts.rs` resolves the same stance eight times to put a mount
   down. ✅ Fixed, and the corner rule came with it.** Dismounting looked for
   somewhere beside the rider with eight `can_step` calls, each re-deriving the
