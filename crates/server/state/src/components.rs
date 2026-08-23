@@ -1663,6 +1663,30 @@ pub struct ChasePath {
     pub planned_at: u64,
 }
 
+/// A goal the coarse navigation graph refused, and how long that answer stands.
+///
+/// **A refusal is the expensive answer.** A long query that finds a route pays
+/// the endpoint join and then walks; a long query that finds none pays the same
+/// join at both ends and has nothing to show for it — and it is asked the
+/// identical question on the next beat, for as long as the body keeps following
+/// something it cannot reach. `openshard_ai::step_toward` is a pure function of
+/// the world and had nowhere to write that down; a chase has one, in
+/// `give_up`'s ten-second guard.
+///
+/// **Only the coarse half waits.** The exact search still runs every beat, so a
+/// way that opens within its budget is taken at once. What waits is the
+/// facet-wide answer.
+///
+/// A tick count, like every other expiry — see [`Pacified`].
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct RouteRefused {
+    /// Where there was no route to. A body whose goal has moved on is asking a
+    /// different question and this says nothing about it.
+    pub goal: Point,
+    /// The tick the graph is asked about it again.
+    pub until: u64,
+}
+
 /// Which guild a mobile belongs to, and the title it wears inside it.
 ///
 /// A component rather than a list on the [`Guild`](crate::Guild), because the

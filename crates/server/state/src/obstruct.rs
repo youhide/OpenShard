@@ -248,6 +248,7 @@ mod tests {
     use openshard_map::overlay::Doors;
     use openshard_movement::Footing;
     use openshard_movement::scene::Scene;
+    use openshard_protocol::direction::Direction;
     use openshard_protocol::world::Point;
     use openshard_tiles::TileFlags;
 
@@ -316,13 +317,22 @@ mod tests {
         ));
     }
 
+    /// The corner rule is [`step_allowed`](openshard_movement::step_allowed)'s
+    /// and not [`can_step`](openshard_movement::can_step)'s.
+    ///
+    /// `can_step` is one landing: it answers whether a body may *stand* where
+    /// the step ends, and a diagonal's two flanks are not that question. The
+    /// rule lives one layer up, in `steps_out_of`, which resolves all eight
+    /// neighbours together precisely so a diagonal can read the flanks it needs
+    /// — see `docs/map/navigation_spans.md`'s N3. These two used to ask
+    /// `can_step` and had been failing since the rule moved.
     #[test]
     fn a_diagonal_passes_an_open_corner() {
         let obstructions = Obstructions::default();
         let live_overlay = project(&obstructions, &NO_BOATS);
         let live = Footing::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(
-            openshard_movement::can_step(&live, Point::new(10, 10, 0), Point::new(11, 11, 0)).is_some(),
+            openshard_movement::step_allowed(&live, Point::new(10, 10, 0), Direction::SouthEast).is_some(),
             "nothing flanks the diagonal, so it is not cutting a corner"
         );
     }
@@ -337,12 +347,12 @@ mod tests {
         let live_overlay = project(&obstructions, &NO_BOATS);
         let live = Footing::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(
-            openshard_movement::can_step(&live, Point::new(10, 10, 0), Point::new(11, 11, 0)).is_none(),
+            openshard_movement::step_allowed(&live, Point::new(10, 10, 0), Direction::SouthEast).is_none(),
             "a single blocked flank forbids the corner cut"
         );
         // The orthogonal step onto the open tile beside it is still fine.
         assert!(
-            openshard_movement::can_step(&live, Point::new(10, 10, 0), Point::new(10, 11, 0)).is_some(),
+            openshard_movement::step_allowed(&live, Point::new(10, 10, 0), Direction::South).is_some(),
             "the cardinal step is unaffected"
         );
     }
@@ -423,14 +433,24 @@ mod tests {
         );
     }
 
-    /// And with no map the default is what is wanted: a shard running without
-    /// client files has no sea, so it has nowhere to moor a boat.
+    /// And with no map there is no sea, so a shard running without client files
+    /// has nowhere to moor a boat.
+    ///
+    /// It used to ask a `MapTerrain` that had been made an `Option` under it and
+    /// unwrapped the `None`, so it had not passed since. There is nothing to
+    /// ask: water is the map's word and a footing with no map has no word. What
+    /// is left worth asserting is the consequence — the mooring rule reads the
+    /// same footing, and it refuses.
     #[test]
     fn a_live_terrain_with_no_map_reports_no_water() {
         let obstructions = Obstructions::default();
         let live_overlay = project(&obstructions, &NO_BOATS);
         let live = Footing::new(None, &live_overlay, Doors::AsTheyStand);
-        assert!(!live.map.unwrap().land_is_water(Tile::new(100, 5)));
+        assert!(live.map.is_none(), "a shard with no client files has no map");
+        assert!(
+            openshard_movement::step_allowed(&live, Point::new(100, 5, 0), Direction::North).is_some(),
+            "and the tile the sea would be on is walked like any other"
+        );
     }
 
     /// A sea with one strip of shore along `y = 0`, and nothing else to stand on.

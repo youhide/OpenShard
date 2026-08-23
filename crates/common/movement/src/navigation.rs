@@ -172,32 +172,30 @@ impl Places {
 /// over the region's own cells: turning "which place did that step land on" into
 /// two array reads and a walk of a one-element run, rather than a hash lookup on
 /// a path taken once per neighbour of every place on the facet.
+///
+/// **A query builds one too**, since the endpoint join stopped being a fan-out
+/// of exact searches and became a flood — see [`NavigationGraph::local_costs`].
+/// The bake takes its places out of the facet-wide sampling it is holding
+/// ([`Self::of`]); a query holds no such thing and samples the one region it
+/// needs ([`Self::sampled`]).
 struct RegionPlaces {
     region: Region,
     /// `offsets[cell]..offsets[cell + 1]`, in the region's row-major cell order.
     offsets: Vec<u32>,
     /// Every place of the region, in that order.
     points: Vec<Point>,
-    /// The same places' facet-wide numbers, so a label written by the component
-    /// pass can be read by the portal pass.
-    ids: Vec<u32>,
 }
 
 impl RegionPlaces {
+    /// The bake's, out of the facet-wide sampling it already holds.
     fn of(graph: &NavigationGraph, places: &Places, region: Region) -> Self {
         let cells = usize::from(region.width) * usize::from(region.height);
         let mut offsets = Vec::with_capacity(cells + 1);
         let mut points = Vec::with_capacity(cells);
-        let mut ids = Vec::with_capacity(cells);
         offsets.push(0);
         for y in region.top..region.top + region.height {
             for x in region.left..region.left + region.width {
-                let index = graph.index(x, y);
-                let start = places.starts[index] as usize;
-                for (offset, &point) in places.at(index).iter().enumerate() {
-                    points.push(point);
-                    ids.push((start + offset) as u32);
-                }
+                points.extend_from_slice(places.at(graph.index(x, y)));
                 offsets.push(points.len() as u32);
             }
         }
@@ -205,28 +203,102 @@ impl RegionPlaces {
             region,
             offsets,
             points,
-            ids,
         }
+    }
+
+    /// A query's, sampled out of the ground on the spot.
+    ///
+    /// One region is a thousand columns and [`column_places`] is what the bake
+    /// asked of each of them, so this reproduces the bake's own places over the
+    /// same footing — which is what lets a node of this region be found in it.
+    /// It is the whole of what a join costs before the flood starts, and it is
+    /// paid once per endpoint where the fan-out it replaced paid a bounded A\*
+    /// per node.
+    fn sampled(footing: &Footing<'_>, region: Region) -> Self {
+        let cells = usize::from(region.width) * usize::from(region.height);
+        let mut offsets = Vec::with_capacity(cells + 1);
+        let mut points = Vec::with_capacity(cells);
+        let mut column: Vec<i8> = Vec::with_capacity(16);
+        offsets.push(0);
+        for y in region.top..region.top + region.height {
+            for x in region.left..region.left + region.width {
+                column_places(footing, x, y, &mut column, &mut points);
+                offsets.push(points.len() as u32);
+            }
+        }
+        Self {
+            region,
+            offsets,
+            points,
+        }
+    }
+
+    /// These same places by their facet-wide numbers.
+    ///
+    /// The bake's alone: a label the component pass writes is read by the portal
+    /// pass, and both speak the facet's numbering. Walked again rather than kept
+    /// in the struct, because a query's region has no facet-wide sampling behind
+    /// it to number against — and this walk asks the step rule nothing.
+    fn facet_ids(&self, graph: &NavigationGraph, places: &Places) -> Vec<u32> {
+        let mut ids = Vec::with_capacity(self.points.len());
+        for y in self.region.top..self.region.top + self.region.height {
+            for x in self.region.left..self.region.left + self.region.width {
+                let index = graph.index(x, y);
+                let start = places.starts[index] as usize;
+                ids.extend((start..start + places.at(index).len()).map(|id| id as u32));
+            }
+        }
+        ids
     }
 
     fn len(&self) -> usize {
         self.points.len()
     }
 
+    /// One column's places, as a run of the region's own numbers. Empty for a
+    /// column outside the rectangle, which is how a flood stays inside it.
+    fn column(&self, x: u16, y: u16) -> std::ops::Range<usize> {
+        if !self.region.contains(Point::new(x, y, 0)) {
+            return 0..0;
+        }
+        let cell = usize::from(y - self.region.top) * usize::from(self.region.width)
+            + usize::from(x - self.region.left);
+        self.offsets[cell] as usize..self.offsets[cell + 1] as usize
+    }
+
     /// The region's own number for the place `at` names, or `None` when the step
     /// left the region.
     fn slot(&self, at: Point) -> Option<usize> {
-        if !self.region.contains(at) {
-            return None;
-        }
-        let cell = usize::from(at.y - self.region.top) * usize::from(self.region.width)
-            + usize::from(at.x - self.region.left);
-        let start = self.offsets[cell] as usize;
-        let end = self.offsets[cell + 1] as usize;
-        self.points[start..end]
+        let run = self.column(at.x, at.y);
+        let start = run.start;
+        self.points[run]
             .iter()
             .position(|place| place.z == at.z)
             .map(|offset| start + offset)
+    }
+
+    /// The region's own number for the place `at`'s column offers nearest the
+    /// height it names, with a tie going to the lower.
+    ///
+    /// **An endpoint is a point and a place is where feet are**, and the two
+    /// are not the same thing: a body stands on the live world's surfaces and a
+    /// join floods over the bare map, so the height a query arrives with is
+    /// often a height this map lists nothing at. It is the same resolution
+    /// [`goal_node`](crate::path) makes of a destination, and the same one the
+    /// join's target side already went through — an exact search aimed at the
+    /// endpoint aimed at the resolved place, not at the raw height. Where the
+    /// two differ the body is not standing anywhere the bare map knows about,
+    /// and what the join produces is a corridor the live refinement still has
+    /// to approve.
+    fn nearest_slot(&self, at: Point) -> Option<usize> {
+        let run = self.column(at.x, at.y);
+        let start = run.start;
+        let wanted = i32::from(at.z);
+        self.points[run]
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, place)| ((i32::from(place.z) - wanted).abs(), place.z))
+            .map(|(offset, _)| start + offset)
     }
 }
 
@@ -265,30 +337,42 @@ fn sample(footing: &Footing<'_>, width: u32, height: u32) -> Places {
     starts.push(0);
     for y in 0..height as u16 {
         for x in 0..width as u16 {
-            column.clear();
-            match footing.map {
-                Some(map) => column.extend(map.spans().surfaces(x, y).map(|span| span.stand_z)),
-                // No map at all: no floor and no walls, every step allowed and z
-                // never changing, so a column holds exactly one place. See
-                // `Footing::map`.
-                None => column.push(0),
-            }
-            for offset in 0..column.len() {
-                let z = column[offset];
-                // Two spans of one column can share a height — the land and a
-                // paving stone laid on it — and one height is one place.
-                if column[..offset].contains(&z) {
-                    continue;
-                }
-                let place = Point::new(x, y, z);
-                if crate::can_step(footing, place, place).is_some() {
-                    points.push(place);
-                }
-            }
+            column_places(footing, x, y, &mut column, &mut points);
             starts.push(points.len() as u32);
         }
     }
     Places { starts, points }
+}
+
+/// One column's places, appended to `out` in the order its spans are stored.
+///
+/// The whole of what [`sample`] does to one column, and a *query* reads it again
+/// — [`RegionPlaces::sampled`] samples one region on the spot, and what it
+/// produces has to be exactly what the bake produced or a node of that region
+/// would have no slot in it. One function is what says so.
+///
+/// `column` is the caller's scratch buffer, reused rather than sized.
+fn column_places(footing: &Footing<'_>, x: u16, y: u16, column: &mut Vec<i8>, out: &mut Vec<Point>) {
+    column.clear();
+    match footing.map {
+        Some(map) => column.extend(map.spans().surfaces(x, y).map(|span| span.stand_z)),
+        // No map at all: no floor and no walls, every step allowed and z
+        // never changing, so a column holds exactly one place. See
+        // `Footing::map`.
+        None => column.push(0),
+    }
+    for offset in 0..column.len() {
+        let z = column[offset];
+        // Two spans of one column can share a height — the land and a
+        // paving stone laid on it — and one height is one place.
+        if column[..offset].contains(&z) {
+            continue;
+        }
+        let place = Point::new(x, y, z);
+        if crate::can_step(footing, place, place).is_some() {
+            out.push(place);
+        }
+    }
 }
 
 impl NavigationGraph {
@@ -437,6 +521,7 @@ impl NavigationGraph {
         let mut labels = vec![NO_COMPONENT; places.len()];
         for &region in &self.regions {
             let local = RegionPlaces::of(self, places, region);
+            let ids = local.facet_ids(self, places);
             let cells = local.len();
             if cells == 0 {
                 continue;
@@ -515,7 +600,7 @@ impl NavigationGraph {
 
             let mut component = NO_COMPONENT;
             for root in finish.into_iter().rev() {
-                if labels[local.ids[root] as usize] != NO_COMPONENT {
+                if labels[ids[root] as usize] != NO_COMPONENT {
                     continue;
                 }
                 component = component
@@ -523,7 +608,7 @@ impl NavigationGraph {
                     .expect("a region has at most one component per standing place");
                 let mut stack = vec![root];
                 while let Some(at) = stack.pop() {
-                    let label = &mut labels[local.ids[at] as usize];
+                    let label = &mut labels[ids[at] as usize];
                     if *label != NO_COMPONENT {
                         continue;
                     }
@@ -531,7 +616,7 @@ impl NavigationGraph {
                     let run = incoming_offsets[at] as usize..incoming_offsets[at + 1] as usize;
                     for &neighbor in &incoming[run] {
                         let neighbor = neighbor as usize;
-                        if labels[local.ids[neighbor] as usize] == NO_COMPONENT {
+                        if labels[ids[neighbor] as usize] == NO_COMPONENT {
                             stack.push(neighbor);
                         }
                     }
@@ -700,16 +785,24 @@ impl NavigationGraph {
                 continue;
             }
             let local = RegionPlaces::of(self, places, self.regions[region]);
+            // The other nodes are the whole of what each traversal is for, so
+            // they are resolved once and handed to it: a flood that has costed
+            // all of them has nothing left to learn about this region.
+            let slots: Vec<usize> = nodes
+                .iter()
+                .map(|&node| {
+                    local
+                        .slot(self.nodes[node.0].point)
+                        .expect("a node is a place of its own region")
+                })
+                .collect();
             for &from in &nodes {
-                let costs = region_costs(footing, &local, self.nodes[from.0].point);
-                for &to in &nodes {
+                let costs = region_costs(footing, &local, self.nodes[from.0].point, &slots);
+                for (index, &to) in nodes.iter().enumerate() {
                     if from == to {
                         continue;
                     }
-                    let slot = local
-                        .slot(self.nodes[to.0].point)
-                        .expect("a node is a place of its own region");
-                    if let Some(cost) = costs[slot] {
+                    if let Some(cost) = costs[slots[index]] {
                         self.add_edge(from, to, cost);
                     }
                 }
@@ -833,30 +926,62 @@ impl NavigationGraph {
         Some(path)
     }
 
+    /// What it costs to join one endpoint to every node of its own region.
+    ///
+    /// **One flood, and not one search per node.** N4 filed this as a finding
+    /// and this is the repair: joining an endpoint used to run a bounded exact
+    /// search from it to *every* node of its region, at both ends of a query, so
+    /// a node the endpoint could not reach cost the whole budget before saying
+    /// so — and N4 had just made the regions that matter three times denser. A
+    /// uniform-cost flood answers all of them at once. Every place of the region
+    /// is expanded at most once however many nodes stand in it, and a node
+    /// outside the endpoint's reach costs nothing at all, because the flood
+    /// never arrives there. That reach *is* the component label the bake
+    /// computes and throws away, recovered where it is wanted instead of stored.
+    ///
+    /// **The two directions are two questions.** The step rule is asymmetric by
+    /// design — a body may drop off a ledge and not climb back — so what it
+    /// costs to reach a portal from an endpoint and what it costs to reach the
+    /// endpoint from that portal are different numbers, and a join that answered
+    /// one with the other would propose corridors nothing can walk. [`Join`]
+    /// says which was asked.
+    ///
+    /// **No deadline is read inside it**, unlike the fan-out it replaces. A
+    /// flood over one region is bounded work — one expansion per place of a
+    /// 32×32 rectangle, which the census puts at about a thousand and caps at
+    /// twelve thousand for a base set nobody has counted — where a fan-out
+    /// carried a whole node budget *per node* and could spend the query's 50 ms
+    /// by itself. The deadline is read where it already was, once the join is
+    /// paid.
     fn local_costs(
         &self,
         footing: &Footing<'_>,
         region_id: RegionId,
         endpoint: Point,
-        forbidden: &[bool],
-        toward_endpoint: bool,
-        deadline: Instant,
+        join: Join,
     ) -> Vec<(NodeId, u32)> {
-        let region = self.regions[region_id.0];
-        let budget = usize::from(region.width) * usize::from(region.height);
-        self.nodes_in_region(region_id)
-            .filter(|node| !forbidden[node.0])
-            .filter_map(|node| {
-                if Instant::now() >= deadline {
-                    return None;
-                }
-                let (from, to) = match toward_endpoint {
-                    true => (self.nodes[node.0].point, endpoint),
-                    false => (endpoint, self.nodes[node.0].point),
-                };
-                find_path_until(footing, from, to, budget, deadline, Some(region))
-                    .map(|route| (node, route.len() as u32))
-            })
+        let local = RegionPlaces::sampled(footing, self.regions[region_id.0]);
+        // A region whose walkable bit is set holds a place, and the endpoint's
+        // own height need not be one of them — see `RegionPlaces::nearest_slot`.
+        let Some(start) = local.nearest_slot(endpoint) else {
+            return Vec::new();
+        };
+        let at = local.points[start];
+        // The region's nodes are what the flood is for, and it stops once it has
+        // answered for all of them — so a query over open ground does not walk
+        // the far corners of a rectangle whose portals it has already reached.
+        let joined: Vec<(NodeId, usize)> = self
+            .nodes_in_region(region_id)
+            .filter_map(|node| local.slot(self.nodes[node.0].point).map(|slot| (node, slot)))
+            .collect();
+        let wanted: Vec<usize> = joined.iter().map(|&(_, slot)| slot).collect();
+        let costs = match join {
+            Join::OutOf => region_costs(footing, &local, at, &wanted),
+            Join::Into => region_costs_into(footing, &local, at, &wanted),
+        };
+        joined
+            .into_iter()
+            .filter_map(|(node, slot)| costs[slot].map(|cost| (node, cost)))
             .collect()
     }
 
@@ -916,6 +1041,57 @@ impl NavigationGraph {
     }
 }
 
+/// Which way round an endpoint is joined to the graph.
+///
+/// Not a flag on the flood but the question it is asked: the step rule is
+/// directed, so *out of* the endpoint and *into* it are two different sets of
+/// places at two different costs. See [`NavigationGraph::local_costs`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Join {
+    /// The endpoint is where the walk starts: what it costs to reach each node.
+    OutOf,
+    /// The endpoint is where the walk ends: what it costs to reach it from each
+    /// node.
+    Into,
+}
+
+/// The places a flood is being run for, and how many of them are still
+/// unanswered.
+///
+/// A uniform-cost flood finalises a place the first time it reaches it, so once
+/// every place the caller asked about has a cost there is nothing left for the
+/// flood to learn. Both callers ask about a handful of *nodes* in a rectangle
+/// that holds a thousand places — the bake about the other portals of one
+/// region, a query about the portals its endpoint might join — so stopping there
+/// keeps the traversal proportional to the portals it has to answer for rather
+/// than to the region it runs over.
+struct Sought {
+    marked: Vec<bool>,
+    left: usize,
+}
+
+impl Sought {
+    fn of(wanted: &[usize], places: usize) -> Self {
+        let mut marked = vec![false; places];
+        let mut left = 0;
+        for &slot in wanted {
+            if !marked[slot] {
+                marked[slot] = true;
+                left += 1;
+            }
+        }
+        Self { marked, left }
+    }
+
+    /// Whether the flood may stop, `slot` having just been given its cost.
+    fn done(&mut self, slot: usize) -> bool {
+        if self.marked[slot] {
+            self.left -= 1;
+        }
+        self.left == 0
+    }
+}
+
 /// Exact uniform-cost routes from one place to every place in one small region.
 /// One traversal replaces the old one-A*-per-node-pair construction while
 /// retaining directed movement and height resolution through the step rule.
@@ -924,11 +1100,25 @@ impl NavigationGraph {
 /// answered by the cost of reaching the road under it. The traversal is
 /// one-directional and always was, which is what makes a one-way drop cost what
 /// it really costs from this side and nothing at all from the other.
-fn region_costs(footing: &Footing<'_>, local: &RegionPlaces, from: Point) -> Vec<Option<u32>> {
+///
+/// `wanted` is the places the answer is for, and the traversal stops once they
+/// all have one — see [`Sought`]. Every other slot of the returned array is then
+/// `None` because the flood stopped, which is not the same `None` as *no route*;
+/// nothing may read a slot it did not ask about.
+fn region_costs(
+    footing: &Footing<'_>,
+    local: &RegionPlaces,
+    from: Point,
+    wanted: &[usize],
+) -> Vec<Option<u32>> {
     let mut costs = vec![None; local.len()];
+    let mut sought = Sought::of(wanted, local.len());
     let mut open = VecDeque::new();
     let start = local.slot(from).expect("a node is a place of its own region");
     costs[start] = Some(0);
+    if sought.done(start) {
+        return costs;
+    }
     open.push_back((from, start));
     while let Some((point, slot)) = open.pop_front() {
         let cost = costs[slot].expect("queued places have a cost");
@@ -938,7 +1128,81 @@ fn region_costs(footing: &Footing<'_>, local: &RegionPlaces, from: Point) -> Vec
             };
             if costs[at].is_none() {
                 costs[at] = Some(cost + 1);
+                if sought.done(at) {
+                    return costs;
+                }
                 open.push_back((next, at));
+            }
+        }
+    }
+    costs
+}
+
+/// The same traversal read backwards: what it costs to reach `to` from every
+/// place in one small region.
+///
+/// [`region_costs`] answers the other question, and on this step rule they are
+/// not each other's mirror — a ledge a body drops off is an edge one way and no
+/// edge the other, which is the whole of N4's second half. A join that asked
+/// only the forward one would offer a corridor whose last hop nothing can walk.
+///
+/// **There is no reverse step rule to ask**, so a place's predecessors are found
+/// by asking its neighbours where *they* land. A step lands on one of the eight
+/// neighbouring columns, so every predecessor of a place stands in one of them,
+/// and there are no others to consider. Each candidate's own expansion is
+/// computed once and kept, so the traversal costs one
+/// [`steps_out_of`] per place it *touches* — the flooded set and its border —
+/// rather than one per pop.
+fn region_costs_into(
+    footing: &Footing<'_>,
+    local: &RegionPlaces,
+    to: Point,
+    wanted: &[usize],
+) -> Vec<Option<u32>> {
+    let mut costs = vec![None; local.len()];
+    // Each place's landings by the region's own numbering, resolved the first
+    // time the traversal asks a place where it goes. `NO_NEIGHBOR` is a landing
+    // outside the region or no landing at all, and neither is a predecessor of
+    // anything in here.
+    let mut steps = vec![[NO_NEIGHBOR; Direction::ALL.len()]; local.len()];
+    let mut asked = vec![false; local.len()];
+    let mut sought = Sought::of(wanted, local.len());
+    let mut open = VecDeque::new();
+    let start = local.slot(to).expect("the endpoint is a place of its own region");
+    costs[start] = Some(0);
+    if sought.done(start) {
+        return costs;
+    }
+    open.push_back(start);
+    while let Some(slot) = open.pop_front() {
+        let cost = costs[slot].expect("queued places have a cost");
+        let here = local.points[slot];
+        for direction in Direction::ALL {
+            let Some(neighbor) = crate::step_from(here, direction) else {
+                continue;
+            };
+            for candidate in local.column(neighbor.x, neighbor.y) {
+                if costs[candidate].is_some() {
+                    continue;
+                }
+                if !asked[candidate] {
+                    for (bits, landing) in steps_out_of(footing, local.points[candidate])
+                        .into_iter()
+                        .enumerate()
+                    {
+                        steps[candidate][bits] = landing
+                            .and_then(|at| local.slot(at))
+                            .map_or(NO_NEIGHBOR, |at| at as u32);
+                    }
+                    asked[candidate] = true;
+                }
+                if steps[candidate].contains(&(slot as u32)) {
+                    costs[candidate] = Some(cost + 1);
+                    if sought.done(candidate) {
+                        return costs;
+                    }
+                    open.push_back(candidate);
+                }
             }
         }
     }
@@ -1049,11 +1313,11 @@ fn find_long_path_inner(
     }
     let mut forbidden = vec![false; graph.nodes.len()];
     // Refinement can forbid several portals and retry the abstract route, but
-    // the endpoint-to-portal searches do not change between those retries.
-    // Compute them once instead of repeating the whole portal fan-out.
-    let no_forbidden = vec![false; graph.nodes.len()];
-    let source = graph.local_costs(guide, from_region, from, &no_forbidden, false, deadline);
-    let target = graph.local_costs(guide, to_region, to, &no_forbidden, true, deadline);
+    // the endpoint's own flood does not change between those retries — a portal
+    // the corridor may not use is one `abstract_path` skips, not one the ground
+    // stopped reaching. Joined once, read every retry.
+    let source = graph.local_costs(guide, from_region, from, Join::OutOf);
+    let target = graph.local_costs(guide, to_region, to, Join::Into);
     if Instant::now() >= deadline {
         return (None, LongExit::Deadline);
     }
@@ -1420,6 +1684,62 @@ mod tests {
                 .any(|edge| edge.cost == 1 && !graph.edges_from(edge.to).any(|back| back.to.0 == from))
         });
         assert!(one_way, "a one-way ledge is a one-way edge");
+    }
+
+    /// Joining an endpoint is a directed question, and the two answers differ.
+    ///
+    /// The endpoint join stopped being a fan-out of exact searches and became a
+    /// flood, and a flood is the shape that could quietly lose this: reading the
+    /// step rule forwards for both ends is one line shorter and answers "can the
+    /// endpoint reach that portal" where the target side asked "can that portal
+    /// reach the endpoint". On a step rule where a body drops off a ledge and
+    /// cannot climb back, those are different sets — so a target joined forwards
+    /// would offer corridors whose last hop nothing can walk.
+    ///
+    /// The walkway here stops well short of the region border, so no node stands
+    /// on it: a body up there can leave and nothing can arrive, and the join has
+    /// to say both.
+    #[test]
+    fn a_one_way_drop_joins_an_endpoint_one_way() {
+        let mut scene = Scene::flat_holding(63, 31, 0);
+        walkway(&mut scene, 2..=20, 5);
+        let footing = scene.footing();
+        let graph = NavigationGraph::build(&footing, 64, 32).unwrap();
+
+        let high = Point::new(10, 12, 5);
+        let region = graph.region_at(high).expect("the walkway is walkable ground");
+        // The ground first, so the test says what it is about before it says
+        // what the graph did with it.
+        assert_eq!(
+            step_allowed(&footing, high, Direction::North),
+            Some(Point::new(10, 11, 0)),
+            "a body steps off the walkway"
+        );
+        assert_eq!(
+            step_allowed(&footing, Point::new(10, 11, 0), Direction::South),
+            None,
+            "and cannot climb back onto it"
+        );
+
+        let out_of = graph.local_costs(&footing, region, high, Join::OutOf);
+        assert_eq!(
+            out_of.len(),
+            graph.nodes_in_region(region).count(),
+            "a body that drops off the walkway reaches every portal of its region"
+        );
+        assert!(
+            graph.local_costs(&footing, region, high, Join::Into).is_empty(),
+            "and no portal of it reaches the walkway"
+        );
+
+        // And the router says the same thing, from a region away.
+        let low = Point::new(60, 12, 0);
+        let down = find_long_path(&footing, &footing, &graph, high, low, 600).expect("the drop is a route");
+        assert_eq!(end(&footing, high, &down), low);
+        assert!(
+            find_long_path(&footing, &footing, &graph, low, high, 600).is_none(),
+            "nothing climbs back onto a five-unit ledge"
+        );
     }
 
     /// A plateau reached only by a flight of steps is not an island.

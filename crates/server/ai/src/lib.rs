@@ -22,6 +22,7 @@ use openshard_protocol::world::{Facet, Point, Sight};
 use openshard_state::WorldState;
 use openshard_state::components::{
     Aggression, Brain, ChasePath, Client, Combat, Heading, Hitpoints, Pet, PetOrder, Position, RangedAttack,
+    RouteRefused,
 };
 use openshard_state::sectors::{distance, in_range};
 
@@ -65,6 +66,19 @@ const CHASE_RANGE_FACTOR: u32 = 2;
 /// perception is 16, and this is the same idea.
 const CHASE_RANGE_MIN: u32 = 12;
 
+/// How long a refused coarse query stands before the graph is asked about that
+/// goal again, in ticks (~2s).
+///
+/// The same cadence a planned route is trusted for, and for the same reason: it
+/// is how long an answer about the shape of the world stays worth believing. A
+/// body is not held still by it the way [`GUARD_TICKS`] holds a chaser — only
+/// the facet-wide search waits, while the exact one runs every beat.
+///
+/// Public for the same reason [`PATH_BUDGET`] is: the test that pins the memory
+/// has to wait exactly this long for it to lapse, and a copy of the number in
+/// the test would be a second place to change it.
+pub const REFUSAL_TICKS: u64 = REPATH_TICKS;
+
 /// A creature this tough never runs — ServUO's "500 hits does not flee" rule.
 const BRAVE_HITS: u16 = 500;
 
@@ -94,6 +108,14 @@ const KITE_GAP: u32 = 2;
 /// is then refined through the live ground, so a crate dropped in a doorway
 /// still refuses the step it is standing in — the corridor is the only thing
 /// the bare map decides.
+///
+/// # A refusal costs the most and is worth the least
+///
+/// A body that has somewhere to *keep* an answer should ask through
+/// [`step_body_toward`] instead. This one is a pure function of the world, so a
+/// goal it cannot reach costs the whole endpoint join at both ends on every
+/// beat, and the straight-line direction it hands back looks the same whether
+/// the graph refused or was never asked.
 pub fn step_toward(
     state: &WorldState,
     facet: Facet,
@@ -101,24 +123,138 @@ pub fn step_toward(
     to: Point,
     doors: Doors,
 ) -> Option<Direction> {
+    plan_step(state, facet, from, to, doors, Fallback::Ask).direction
+}
+
+/// The same step, decided for a body that can remember a refusal.
+///
+/// **N7's finding, and the guard `step_toward` had nowhere to put.** A pet
+/// following an owner behind a locked door, a townsperson whose post is walled
+/// off, an escortable trailing a master across a bridge that is not there: each
+/// of them asked the coarse graph the same unanswerable question every beat and
+/// paid the whole join for it. `chase_step` never did, because a refused chase
+/// goes through [`give_up`] and stands watch.
+///
+/// So the refusal is written on the body as a [`RouteRefused`], and while it
+/// stands the graph is not asked again about that goal. The body still walks —
+/// the exact search runs every beat as it always did, and the straight-line
+/// fall-back is unchanged — so what waits is the facet-wide answer and nothing
+/// else. A goal that moves further than [`GOAL_DRIFT`] is a different question
+/// and clears it, exactly as it invalidates a [`ChasePath`].
+///
+/// `facet` and `from` are the body's own, and are arguments rather than reads
+/// because every caller has just read them.
+#[must_use]
+pub fn step_body_toward(
+    state: &mut WorldState,
+    mover: EntityId,
+    facet: Facet,
+    from: Point,
+    to: Point,
+    doors: Doors,
+) -> Option<Direction> {
+    let fallback = match state.registry.get::<RouteRefused>(mover).copied() {
+        Some(refusal) if state.ticks < refusal.until && distance(refusal.goal, to) <= GOAL_DRIFT => {
+            Fallback::Withheld
+        }
+        // Expired, or about a goal nobody is walking to any more.
+        Some(_) => {
+            state.registry.remove::<RouteRefused>(mover);
+            Fallback::Ask
+        }
+        None => Fallback::Ask,
+    };
+    let plan = plan_step(state, facet, from, to, doors, fallback);
+    match plan.coarse {
+        Coarse::Refused => {
+            let until = state.ticks + REFUSAL_TICKS;
+            state.registry.insert(mover, RouteRefused { goal: to, until });
+        }
+        // A corridor answered, so whatever was remembered is out of date by
+        // construction — and nothing was remembered, since a memory that stood
+        // is why the graph would not have been asked.
+        Coarse::Routed => {
+            state.registry.remove::<RouteRefused>(mover);
+        }
+        Coarse::NotAsked => {}
+    }
+    plan.direction
+}
+
+/// Whether a refused exact search may fall through to the coarse graph.
+///
+/// Not a tuning knob but how a caller spends a memory: the join is the expensive
+/// half of a long query, and a refusal is the case that pays it in full for an
+/// answer nothing keeps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Fallback {
+    Ask,
+    Withheld,
+}
+
+/// What the coarse fall-back did with one decision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Coarse {
+    /// Never reached: the exact search answered, the goal is inside
+    /// [`COARSE_MIN_DISTANCE`], the facet has no graph, or a standing refusal
+    /// withheld it.
+    NotAsked,
+    /// A corridor answered.
+    Routed,
+    /// The whole endpoint join was paid at both ends and no route came back.
+    Refused,
+}
+
+/// One [`step_toward`], reported rather than answered.
+///
+/// The split [`search_path`](openshard_movement::search_path) is to
+/// `find_path`: one decision, both readings. The direction alone cannot say why
+/// it is what it is, and *why* is the only thing a caller with a memory acts on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StepPlan {
+    direction: Option<Direction>,
+    coarse: Coarse,
+}
+
+fn plan_step(
+    state: &WorldState,
+    facet: Facet,
+    from: Point,
+    to: Point,
+    doors: Doors,
+    fallback: Fallback,
+) -> StepPlan {
     // The live terrain, not the bare map: a route must not thread a placed
     // crate the step would then refuse. A door-opener plans through doors and
     // opens them on arrival.
     let planner = state.footing(facet, doors);
     if let Some(path) = find_path(&planner, from, to, PATH_BUDGET) {
-        return path.first().copied();
+        return StepPlan {
+            direction: path.first().copied(),
+            coarse: Coarse::NotAsked,
+        };
     }
     // Short and refused stays refused: joining both endpoints to the graph
     // costs more than the local answer that has already said no.
-    if distance(from, to) > COARSE_MIN_DISTANCE {
-        if let Some(graph) = state.facet_state(facet).coarse_router() {
-            let guide = state.guide(facet);
-            if let Some(path) = find_long_path(&guide, &planner, graph, from, to, PATH_BUDGET) {
-                return path.first().copied();
-            }
-        }
+    let ask = fallback == Fallback::Ask && distance(from, to) > COARSE_MIN_DISTANCE;
+    let graph = ask.then(|| state.facet_state(facet).coarse_router()).flatten();
+    let Some(graph) = graph else {
+        return StepPlan {
+            direction: direction_toward(from, to),
+            coarse: Coarse::NotAsked,
+        };
+    };
+    let guide = state.guide(facet);
+    match find_long_path(&guide, &planner, graph, from, to, PATH_BUDGET) {
+        Some(path) => StepPlan {
+            direction: path.first().copied(),
+            coarse: Coarse::Routed,
+        },
+        None => StepPlan {
+            direction: direction_toward(from, to),
+            coarse: Coarse::Refused,
+        },
     }
-    direction_toward(from, to)
 }
 
 /// One creature's beat: chase and fight what it has, pick a fight if it sees one,
@@ -564,7 +700,7 @@ pub fn pet_beat(state: &mut WorldState, pet: EntityId) -> Option<Direction> {
             if openshard_state::in_range(at, target_at, 1) {
                 return None;
             }
-            step_toward(state, facet, at, target_at, Doors::AllOpen)
+            step_body_toward(state, pet, facet, at, target_at, Doors::AllOpen)
         }
         PetOrder::Guard | PetOrder::Follow | PetOrder::Come => {
             let &Position(owner_at) = state.registry.get::<Position>(owner)?;
@@ -576,7 +712,7 @@ pub fn pet_beat(state: &mut WorldState, pet: EntityId) -> Option<Direction> {
                 // than pathing across the map, the same give-up the chase has.
                 return None;
             }
-            step_toward(state, facet, at, owner_at, Doors::AllOpen)
+            step_body_toward(state, pet, facet, at, owner_at, Doors::AllOpen)
         }
     }
 }

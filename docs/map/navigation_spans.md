@@ -1,6 +1,6 @@
 # The first storey
 
-> **Status: live — era P. N0, N1, N2, N3, N3b and N4 are built.** The gate is
+> **Status: live — era P. N0, N1, N2, N3, N3b, N4 and N7 are built.** The gate is
 > gone: [`realtime_map.md`](realtime_map.md)'s era R is over, the span layer is
 > built and measured against the whole facet, and **the shard now walks on it**
 > — a node expansion is 208 ns where it was 1,105 and a search from the castle
@@ -11,8 +11,11 @@
 > retired the defect this plan was written for**: the coarse graph samples spans
 > and its edges are directed, so `refused_but_walkable` is **0 in every band
 > from all five recorded origins** where the castle plateau alone used to refuse
-> 37 of 44. **N7 is next** — the server reads the graph, which is where a player
-> meets any of it. See [`map_rebuild.md`](map_rebuild.md) for the order and
+> 37 of 44. **N7 has put it under a player**: the shard reads the artifact, and
+> a creature rounds a town block the exact search cannot see past. **Nothing in
+> this plan is open** and every finding with a defect behind it is repaired —
+> what is left is N5 and N6, both gated rather than queued. See
+> [`map_rebuild.md`](map_rebuild.md) for the order and
 > [`handoffs/`](handoffs/) for where the work stands.
 
 Two defects were found in one session and they are the same omission seen from
@@ -844,7 +847,10 @@ an endpoint to the graph with **one exact search per node in its region**, and
 the castle's own region went from **18 nodes to 51** while the facet total fell
 16%. That is the shape of the cost: it lands where storeys are, which is where
 the new answers are. p50 is 2.6–5.6 ms against `MAX_LONG_PATH_TIME`'s 50 ms, so
-it is filed rather than fixed — see *Out of scope, named*.
+it was filed rather than fixed here — and **repaired since**: the join is one
+flood over the endpoint's region rather than one search per node of it, which
+takes the same seven routes to 0.53 ms p50, below what they cost before N4 made
+the region denser. See *Out of scope, named*.
 
 **🚩 The done-when cannot see the directed half.** Baking the same places with
 the old both-ways requirement puts `refused_but_walkable` at **0 from all five
@@ -1143,15 +1149,26 @@ graph over spans names neither.
   see the change is `walk::aboard`, the deck a body steps onto; `can_fit` asks
   for an exact match, and distance zero is a unique minimum.
 - **N4 found: `local_costs` is one exact search per node in the endpoint's
-  region, and N4 made the regions that matter denser.** Joining an endpoint to
-  the graph runs a bounded A\* from it to *every* node of its own region, at both
-  ends of the query, and a node that cannot be reached costs the whole budget
-  before saying so. The castle's region went from 18 nodes to 51 while the facet
-  total fell 16%, and the same seven routes went from 1.29 ms to 4.39 ms p50.
-  Filed rather than fixed: 50 ms is the deadline and this is 2.6–5.6 ms, and the
-  repair is a real design question — the fan-out could be bounded by distance, or
-  cut to the nodes of the endpoint's own *component*, which is a label the bake
-  computes and then throws away.
+  region, and N4 made the regions that matter denser. ✅ Fixed.** Joining an
+  endpoint to the graph ran a bounded A\* from it to *every* node of its own
+  region, at both ends of the query, and a node that cannot be reached cost the
+  whole budget before saying so. The castle's region went from 18 nodes to 51
+  while the facet total fell 16%, and the same seven routes went from 1.29 ms to
+  4.39 ms p50. **The join is one flood now**, not a fan-out: a uniform-cost
+  traversal of the endpoint's own region answers every node at once, expanding
+  each place at most once however many nodes stand in it, and a node outside the
+  endpoint's reach costs nothing because the flood never arrives there. That
+  reach *is* the component label the bake computes and throws away, recovered
+  where it is wanted instead of stored — which is the second of the two options
+  filed here, arrived at without the artifact growing. The two directions are
+  two traversals, because the step rule is asymmetric and a target joined
+  forwards would offer corridors whose last hop nothing can walk. On facet 0
+  from the castle, release, three runs agreeing to the hundredth: **p50 3.70 →
+  0.53 ms at 32 tiles**, 2.74 → 0.66 at 64, 2.44 → 1.00 at 128, 2.44 → 1.13 at
+  256, 2.96 → 1.56 at 512, 3.75 → 2.32 at 1024, and the worst reading of any
+  band 6.50 → 2.89. Every route came back with the same number of steps. The
+  band that N4's regression was measured in is now *below* the 1.29 ms it
+  regressed from.
 - **N4 found: the bake was paying eight times over for every neighbour, and so
   is every other flood in the tree.** `component_labels` and `region_costs` asked
   `step_allowed` once per direction, and `step_allowed` is *defined* as one slot
@@ -1215,23 +1232,53 @@ graph over spans names neither.
   `step_toward`, and whoever wants a creature to round a town block should know
   the second planner is there.
 - **🚩 N7 found: a refused coarse query pays the whole join, and nothing behind
-  `step_toward` remembers it.** A goal that is walkable-looking but sealed off
-  costs `local_costs` at both ends in full — every node of both regions, each to
-  its own budget — plus up to `LIVE_REROUTES` abstract retries: **17.4 ms on a
-  96×64 fixture with twenty nodes, in a debug build**, repeatable to the tenth.
-  `chase_step` has `give_up`'s ten-second guard behind its refusal; `step_toward`
-  is a pure function of the world and has nowhere to put one, so an escort whose
-  goal is unreachable and more than `COARSE_MIN_DISTANCE` away pays that on
-  every beat. The 50 ms deadline bounds it and nothing here is on a tick's
-  critical path, but the cost is new and it is per beat per body.
-  **The same-region repair above widens this class**: a refusal that used to be
-  one confined A\* now pays the join twice over one region. On a 64×64 fixture
-  with sixteen nodes, debug, repeatable to the tenth: **4.8 ms → 25 ms**. The
-  successful case is the same shape — 37 ms for a corridor whose 58 steps the
-  exhaustive exact search found in 6.7 ms, exploring 558 nodes at a budget of
-  4,096. The graph is what answers when the exact search is refused, and on
-  ground this size it is not cheaper than that search would have been with a
-  budget the shard does not grant it: `PATH_BUDGET` is 400.
+  `step_toward` remembers it. ✅ Fixed.** A goal that is walkable-looking but
+  sealed off cost `local_costs` at both ends in full — every node of both
+  regions, each to its own budget — plus up to `LIVE_REROUTES` abstract retries:
+  **17.4 ms on a 96×64 fixture with twenty nodes, in a debug build**, repeatable
+  to the tenth, and the same-region repair widened the class (4.8 ms → 25 ms on
+  a 64×64 fixture with sixteen nodes). `chase_step` has `give_up`'s ten-second
+  guard behind its refusal; `step_toward` is a pure function of the world and had
+  nowhere to put one, so an escort whose goal is unreachable and more than
+  `COARSE_MIN_DISTANCE` away paid that on every beat.
+  **A body has somewhere to keep it now.** `ai::step_body_toward` is the same
+  decision made for an entity rather than for a point: a refusal is written on it
+  as a `RouteRefused { goal, until }`, and while that stands the graph is not
+  asked about that goal again. Only the coarse half waits — the exact search runs
+  every beat as it always did — so what is deferred is the facet-wide answer, for
+  `REFUSAL_TICKS` (~2 s, the repath cadence), and a goal that drifts past
+  `GOAL_DRIFT` clears it the way it invalidates a `ChasePath`. The three callers
+  the plan named — a pet, a townsperson walking home, an escortable — all go
+  through it; `step_toward` stays as the pure reading, which is what the shard's
+  own walk probe asks. Asserted in
+  `a_refused_long_route_is_remembered_until_it_lapses`: one wall, one doorway,
+  one shut door, and a route that opens while the memory holds is **not** taken
+  until it lapses — the blindness is the only thing about a memory a test can
+  see, and with the memory disabled by hand the test fails at exactly that
+  assertion.
+  What remains true and is not a defect: the graph is what answers when the exact
+  search is refused, and on small ground it is not cheaper than that search would
+  have been *with a budget the shard does not grant it* — `PATH_BUDGET` is 400
+  and the 64×64 fixture's exhaustive search wanted 558 nodes.
+- **🚩 Found while repairing the join: `can_step` has no corner rule, and the
+  shard decides a player's step with it.** A diagonal may not clip the corner
+  where two blockers meet, and that rule lives in `steps_out_of` — which
+  resolves all eight neighbours together precisely so a diagonal can read its
+  two flanks, and where it moved in [N3](#n3--the-search-takes-spans).
+  `can_step` is one landing: it answers whether a body may *stand* where a step
+  ends, and nothing else. Two production callers decide a **step** through it:
+  [`tick/motion.rs`](../../crates/server/world/src/tick/motion.rs)'s validator,
+  which is what approves a player's move, and
+  [`ai`'s `probe`](../../crates/server/ai/src/lib.rs), which is what a chase
+  asks whether a direction is open. So `find_path` refuses to plan a corner cut
+  and the shard then permits one walked by hand — a client sending steps itself
+  is not a client that plans them. Found by two tests in
+  `state/src/obstruct.rs` that had been asking `can_step` for the corner rule
+  and failing since it moved; those are repaired to ask `step_allowed`, which
+  is the reading every caller wants, and the two production sites are **not** —
+  changing what the shard permits is a gameplay rule and wants its own
+  measurement against both references. It is a defect of the *step rule*, not
+  of this layer.
 - **A second `Ground` now exists in `client/app`, and it is the misnamed one.**
   [`steer::Ground`](../../crates/client/app/src/steer.rs) is a pair of
   `Footing`s — the same map read twice, once with the doors shut and once open —
@@ -1273,13 +1320,15 @@ from any of the five recorded origins, and since N7 the shard reads it. What
 remains is N5 and N6, and both are gated rather than queued — see below.
 
 **What a session that wants work here should read first** is *Out of scope,
-named*, which is where six nodes filed what they saw and did not fix. N7's
-same-region refusal has since been repaired; the two with a defect behind them
-are N4's `local_costs` fan-out (the routing cost roughly doubled and the
-mechanism is measured) and N7's unremembered refusal (a sealed goal costs the
-whole join, every beat — and since the same-region repair, over more of the
-queries that reach it). **They are one repair**: both are the endpoint join
-paid in full for an answer nothing keeps.
+named*, which is where six nodes filed what they saw and did not fix. **Every
+finding there with a defect behind it has since been repaired** — N7's
+same-region refusal, then N4's `local_costs` fan-out and N7's unremembered
+refusal, which were one repair wearing two names and were taken together: the
+first made the join cheap (a flood over the endpoint's region instead of one
+exact search per node of it: p50 3.70 → 0.53 ms at 32 tiles on facet 0, and the
+worst reading of any band 6.50 → 2.89), the second made it rare (a refusal is
+written on the body and the graph is not asked again for two seconds). What is
+left in that section is filed observations with no defect under them.
 
 **Rebake before running anything.** `ROUTING_VERSION` is 4, so every artifact
 baked before N4 is refused — and refused *loudly*: the shard does not boot.

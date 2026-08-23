@@ -20,7 +20,7 @@ use openshard_skills::SkillUsed;
 use openshard_state::components::Riding;
 use openshard_state::components::{
     Amount, Contained, Container, CorpseBody, CriminalUntil, Decays, Drawn, Equipped, MurderDecay, Murders,
-    Skills, Stackable,
+    RouteRefused, Skills, Stackable,
 };
 use openshard_state::components::{Banker, SwingSpeed, WrestlingCombo, WrestlingOpener, WrestlingStride};
 use openshard_state::sectors::distance;
@@ -13978,6 +13978,111 @@ fn a_creature_routes_past_its_exact_budget_over_the_coarse_graph() {
             "it walks the straight line south and stands at the divider"
         );
     }
+}
+
+/// A facet split by one wall with a single doorway in it, far from either
+/// side's origin.
+///
+/// The way through is a route only the graph can find — the exact search runs
+/// out of budget long before it — and one shut door on that tile makes it no
+/// route at all, while the bare map the graph is baked over still has it. So the
+/// corridor is proposed and the live layer refuses every hop of it, which is the
+/// refusal that costs the most: the whole endpoint join at both ends, for
+/// nothing.
+fn one_doorway() -> Scene {
+    let mut scene = Scene::flat_holding(95, 63, 0);
+    for x in 0..=95u16 {
+        if x != DOORWAY.0 {
+            scene.wall(x, DOORWAY.1, 0, 20);
+        }
+    }
+    scene
+}
+
+/// The one tile of the divider that is not a wall.
+const DOORWAY: (u16, u16) = (90, 32);
+
+/// A refused long route is remembered, and the graph is not asked again until
+/// it lapses.
+///
+/// **[`docs/map/navigation_spans.md`](../../../../docs/map/navigation_spans.md)'s
+/// N7 finding.** `ai::step_toward` is a pure function of the world, so a body
+/// following something it cannot reach paid the whole endpoint join on *every*
+/// beat and had nowhere to write down that it had already asked. A chase does
+/// not — `give_up` guards it for ten seconds — and a pet, a townsperson walking
+/// home and an escortable all did.
+///
+/// The memory is deliberately blind for as long as it stands, and that blindness
+/// is what this asserts, because it is the only thing about it a test can see: a
+/// route that opens while it holds is not taken until [`ai::REFUSAL_TICKS`] have
+/// passed. Without the memory the third step below would already be the
+/// corridor's, and it is the straight line instead.
+#[test]
+fn a_refused_long_route_is_remembered_until_it_lapses() {
+    /// North of the divider, at the far end from the doorway.
+    const FROM: Point = Point::new(2, 20, 0);
+    /// South of it, straight ahead through the wall.
+    const GOAL: Point = Point::new(2, 48, 0);
+
+    let now = Instant::now();
+    let straight = openshard_movement::direction_toward(FROM, GOAL);
+    let scene = one_doorway();
+    // The oracle: this ground joins, and the exact search cannot say so.
+    assert_eq!(
+        scene.reachable(FROM).get(&(GOAL.x, GOAL.y)),
+        Some(&GOAL.z),
+        "the goal is walkable ground once the door is open"
+    );
+    let search = openshard_movement::search_path(&scene.footing(), FROM, GOAL, ai::PATH_BUDGET);
+    assert!(!search.arrived, "flat A* must not find this route");
+
+    let graph = openshard_movement::NavigationGraph::build(&scene.footing(), 96, 64)
+        .expect("a 96x64 facet has a graph");
+    let mut world = shard_over(one_doorway(), Some(graph));
+    let (door, _) = place_door(&mut world, Point::new(DOORWAY.0, DOORWAY.1, 0), now);
+    // Sight enough to be given a brain at all, and no prey on the facet to use
+    // it on: what this body is here for is somewhere to write a refusal.
+    let walker = spawn_brained(&mut world, 0x0190, FROM, 8, now);
+
+    // Shut: the corridor is proposed over the bare map and refused hop by hop,
+    // and the body walks the straight line at the wall.
+    let refused = ai::step_body_toward(&mut world.state, walker, Facet(0), FROM, GOAL, Doors::AsTheyStand);
+    assert_eq!(
+        refused, straight,
+        "a refused query falls back to the straight line"
+    );
+    let remembered = world
+        .registry()
+        .get::<RouteRefused>(walker)
+        .copied()
+        .expect("the refusal was written on the body");
+    assert_eq!(remembered.goal, GOAL, "and it is about the goal that was refused");
+
+    // The way opens, and the memory is what keeps the body from noticing.
+    openshard_items::open_door(&mut world.state, door);
+    let blind = ai::step_body_toward(&mut world.state, walker, Facet(0), FROM, GOAL, Doors::AsTheyStand);
+    assert_eq!(
+        blind, straight,
+        "the graph is not asked again while the refusal stands"
+    );
+
+    // It lapses on its own beat, and the corridor answers.
+    for _ in 0..=ai::REFUSAL_TICKS {
+        world.tick(now);
+    }
+    let routed = ai::step_body_toward(&mut world.state, walker, Facet(0), FROM, GOAL, Doors::AsTheyStand);
+    assert!(
+        routed.is_some(),
+        "the corridor answers once the memory has lapsed"
+    );
+    assert_ne!(
+        routed, straight,
+        "and it aims at the doorway rather than at the wall"
+    );
+    assert!(
+        world.registry().get::<RouteRefused>(walker).is_none(),
+        "a corridor that answered clears the memory"
+    );
 }
 
 #[test]

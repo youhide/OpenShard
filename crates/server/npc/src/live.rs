@@ -273,7 +273,7 @@ fn wander_step(state: &mut WorldState, npc: EntityId, at: Point) -> Option<Direc
 /// auto-close swings it shut again behind them).
 fn walk_home(state: &mut WorldState, npc: EntityId, at: Point, post: Point) -> Option<Direction> {
     let facet = state.facet_of(npc);
-    let dir = openshard_ai::step_toward(state, facet, at, post, Doors::AllOpen)?;
+    let dir = openshard_ai::step_body_toward(state, npc, facet, at, post, Doors::AllOpen)?;
     if let Some(tile) = openshard_movement::step_from(at, dir) {
         // The obstruction index and not the terrain: the overlay a step reads
         // says a door is in the way, and only this says which door to open.
