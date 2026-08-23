@@ -22,8 +22,7 @@ use openshard_gateway::ConnectionId;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::{Cover, Doors};
 use openshard_map::snapshot::MapSnapshot;
-use openshard_map::world::World;
-use openshard_movement::spans::SpanIndex;
+use openshard_movement::ground::Ground;
 use openshard_movement::{Footing, MapTerrain, NavigationGraph};
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::combat::HealthBar;
@@ -390,32 +389,23 @@ pub struct Outbound {
 /// [`WorldState::map_terrain`](WorldState::map_terrain) — see
 /// `docs/map/terrain_seam.md`'s node D.
 pub struct FacetState {
-    /// The ground, and what the live world has laid over it.
+    /// The ground, what the live world has laid over it, and where a body may
+    /// stand on the pair.
     ///
-    /// **One value, and private.** The two used to be a public
-    /// `Option<MapSnapshot>` and a private overlay beside it, which meant
-    /// nothing stopped a reader taking one of them and forgetting the other —
-    /// and the pair could be given a map and an overlay of different facets
-    /// without anything noticing. See [`World`], and
+    /// **One value, and private.** The three used to be a public
+    /// `Option<MapSnapshot>`, a private overlay beside it and a private span
+    /// bake beside that, which meant nothing stopped a reader taking one of
+    /// them and forgetting the others — and the set could be given a map and an
+    /// overlay of different facets, or a bake over a map this facet no longer
+    /// held, without anything noticing. See [`Ground`], and
     /// [`WorldState::footing`](WorldState::footing), which is the one
     /// composition over it.
-    world: World,
+    ground: Ground,
     /// Static long-distance connectivity, built with the terrain at facet load.
     /// It deliberately has no live doors or placed items in it; a caller still
     /// refines every hop through [`WorldState::live_terrain`] or its
     /// doors-open sibling.
     pub coarse: Option<NavigationGraph>,
-    /// Where a body may stand on this facet's two lower layers, baked once.
-    ///
-    /// **`Some` exactly when [`world`](Self::world) has a base**, which is what
-    /// [`Footing::of`] asserts and what [`set_map`](Self::set_map) is the one
-    /// seam for: it is a projection of the snapshot, so a snapshot changing
-    /// without it changing is a shard walking a map it no longer has.
-    ///
-    /// It would live in [`World`] beside the layers it projects if it could —
-    /// `openshard_map` is underneath `openshard_movement`, and where a body may
-    /// stand is a movement rule. See `docs/map/navigation_spans.md`'s N3.
-    spans: Option<SpanIndex>,
     /// How wide this facet's map is, in tiles.
     ///
     /// Kept here rather than asked of the terrain because the client has to be
@@ -467,8 +457,8 @@ impl FacetState {
     /// [`world`](Self::world), which is a projection of the other two.
     ///
     /// The tile table is the one argument that is not a fact about this facet:
-    /// it is the install's, and it is here because the span bake is built from
-    /// the pair. See [`spans`](Self::spans).
+    /// it is the install's, and it is here because the span bake inside
+    /// [`Ground`] is built from the pair.
     #[must_use]
     pub fn new(
         map: Option<MapSnapshot>,
@@ -478,8 +468,7 @@ impl FacetState {
         tiles: &TileData,
     ) -> Self {
         Self {
-            spans: map.as_ref().map(|base| SpanIndex::build(base.map(), tiles)),
-            world: World::new(map),
+            ground: Ground::new(map, tiles),
             coarse,
             width,
             height,
@@ -516,15 +505,17 @@ impl FacetState {
         &self.boats
     }
 
-    /// This facet's ground and the live world over it, as one value.
+    /// This facet's ground, the live world over it and the bake that says where
+    /// a body may stand on the two — as one value.
     ///
     /// Read-only: the live layer is a projection of
     /// [`obstructions`](Self::obstructions) and [`boats`](Self::boats), so the
     /// only way to change it is to change one of those and let
-    /// [`refresh`](Self::refresh) follow.
+    /// [`refresh`](Self::refresh) follow; the ground itself moves through
+    /// [`set_map`](Self::set_map), which is the seam the bake follows.
     #[must_use]
-    pub const fn world(&self) -> &World {
-        &self.world
+    pub const fn ground(&self) -> &Ground {
+        &self.ground
     }
 
     /// Give this facet its ground, or take it away.
@@ -534,14 +525,14 @@ impl FacetState {
     /// the scene it is about. It used to be a public field, which is what made
     /// the pair forgettable.
     ///
-    /// **The span bake follows the ground here and nowhere else.** It is a
-    /// projection of what is being replaced, so the two move together or the
-    /// shard decides steps against a map it no longer holds. The tile table is
-    /// the install's and is passed in for the same reason
-    /// [`new`](Self::new) takes one.
+    /// **The span bake follows the ground, and it does so inside [`Ground`].**
+    /// It is a projection of what is being replaced, so the two move together or
+    /// the shard decides steps against a map it no longer holds — which is why
+    /// this facet cannot separate them even if it tried. The tile table is the
+    /// install's and is passed in for the same reason [`new`](Self::new) takes
+    /// one.
     pub fn set_map(&mut self, map: Option<MapSnapshot>, tiles: &TileData) {
-        self.spans = map.as_ref().map(|base| SpanIndex::build(base.map(), tiles));
-        self.world.set_base(map);
+        self.ground.set_base(map, tiles);
     }
 
     /// Bring the span bake back in step with a tile table that arrived after
@@ -551,17 +542,7 @@ impl FacetState {
     /// bake is a statement about both: see `World::with_tiles`, the only
     /// caller. A facet with no map has nothing to bake and stays that way.
     pub fn rebake(&mut self, tiles: &TileData) {
-        self.spans = self
-            .world
-            .snapshot()
-            .map(|base| SpanIndex::build(base.map(), tiles));
-    }
-
-    /// The bake over this facet's ground, for the one composition that needs
-    /// it. See [`spans`](Self::spans).
-    #[must_use]
-    pub const fn span_index(&self) -> Option<&SpanIndex> {
-        self.spans.as_ref()
+        self.ground.rebake(tiles);
     }
 
     /// Put `entity`'s `cover` on `(x, y)`.
@@ -607,7 +588,7 @@ impl FacetState {
     /// has nothing to merge.
     fn refresh(&mut self, x: u16, y: u16) {
         let covers = crate::obstruct::covers_at(&self.obstructions, &self.boats, x, y);
-        self.world.live_mut().set(Tile::new(x, y), covers);
+        self.ground.live_mut().set(Tile::new(x, y), covers);
     }
 }
 
@@ -628,7 +609,7 @@ pub struct HeldItem {
 impl std::fmt::Debug for FacetState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FacetState")
-            .field("has_map", &self.world.snapshot().is_some())
+            .field("has_map", &self.ground.snapshot().is_some())
             .field("sectors", &self.sectors.len())
             .finish()
     }
@@ -1219,9 +1200,7 @@ impl WorldState {
     /// deciding a step wants [`live_terrain`](Self::live_terrain) instead.
     #[must_use]
     pub fn map_terrain(&self, facet: Facet) -> Option<MapTerrain<'_>> {
-        let map = self.facets.get(&facet)?.world.snapshot()?;
-        let spans = self.facets[&facet].span_index()?;
-        Some(MapTerrain::new(map.map(), &self.tiles, spans))
+        self.facets.get(&facet)?.ground().terrain(&self.tiles)
     }
 
     /// The ground every movement decision is actually decided against: the map,
@@ -1239,7 +1218,7 @@ impl WorldState {
     #[must_use]
     pub fn footing(&self, facet: Facet, doors: Doors) -> Footing<'_> {
         let state = self.facet_state(facet);
-        Footing::of(state.world(), &self.tiles, state.span_index(), doors)
+        Footing::of(state.ground(), &self.tiles, doors)
     }
 
     /// Is any connected player within `range` tiles (Chebyshev) of `centre` on

@@ -901,11 +901,13 @@ impl WorldState {
 /// The client's own map, unclutted by anything the shard has stood on it —
 /// [`footing`] is what a step decision should actually ask.
 ///
-/// A facade over [`resources::Resources::map`] and
+/// A facade over [`resources::Resources::ground`] and
 /// [`resources::Resources::tiledata`], which travel together in every caller
-/// that wants either: the tile table's scope is the *install* and the map's is
-/// one facet, so the two are separate fields and this is the seam that reads
-/// them as the pair every caller wants.
+/// that wants either: the tile table's scope is the *install* and the ground's
+/// is one facet, so the two are separate fields and this is the seam that reads
+/// them as the pair every caller wants. The bake the terrain is read through is
+/// inside the ground, so there is no third thing to fetch and nothing to pair
+/// wrongly.
 ///
 /// **A free function taking `&Resources`, not an `App` method taking
 /// `&self`.** A method on `App` borrows the whole of it, so a caller that
@@ -915,14 +917,10 @@ impl WorldState {
 /// a method call, which is opaque to it. Passing `&self.resources` here is
 /// the same projection the field access always was, just wrapped.
 pub(crate) fn terrain(resources: &resources::Resources) -> openshard_movement::MapTerrain<'_> {
-    openshard_movement::MapTerrain::new(
-        resources.map(),
-        &resources.tiledata,
-        resources
-            .spans
-            .as_ref()
-            .expect("a client that opened a facet baked its spans"),
-    )
+    resources
+        .ground
+        .terrain(&resources.tiledata)
+        .expect("a client that got as far as drawing opened a facet")
 }
 
 /// Nothing placed, for a *map-only* reading to borrow.
@@ -953,12 +951,7 @@ pub(crate) fn footing(
     resources: &resources::Resources,
     doors: openshard_map::overlay::Doors,
 ) -> openshard_movement::Footing<'_> {
-    openshard_movement::Footing::of(
-        &resources.world,
-        &resources.tiledata,
-        resources.spans.as_ref(),
-        doors,
-    )
+    openshard_movement::Footing::of(&resources.ground, &resources.tiledata, doors)
 }
 
 #[cfg(test)]

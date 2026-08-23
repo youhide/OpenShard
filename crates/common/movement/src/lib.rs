@@ -58,6 +58,7 @@ pub mod bake;
 mod detour;
 pub mod door_frames;
 mod footing;
+pub mod ground;
 mod navigation;
 mod pace;
 mod path;

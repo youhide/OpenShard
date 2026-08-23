@@ -292,11 +292,11 @@ fn a_house_floor_is_a_surface_and_the_wall_over_it_is_not() {
     place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner).expect("a legal spot");
 
     let facet = state.facet_state(Facet(0));
-    let world = facet.world();
+    let ground = facet.ground();
     // The first floor: somewhere to stand at z 7, and nothing in the way there.
-    assert_eq!(world.live().surface_at(Tile::new(12, 12), 0), Some(7));
+    assert_eq!(ground.live().surface_at(Tile::new(12, 12), 0), Some(7));
     assert!(
-        world
+        ground
             .live()
             .blocker_at(Tile::new(12, 12), Body::new(7, 16), Doors::AsTheyStand)
             .is_none(),
@@ -305,20 +305,20 @@ fn a_house_floor_is_a_surface_and_the_wall_over_it_is_not() {
     // And the ground under it is still open: an upper storey is not a ceiling
     // that seals the room below.
     assert!(
-        world
+        ground
             .live()
             .blocker_at(Tile::new(12, 12), Body::new(0, 16), Doors::AsTheyStand)
             .is_none()
     );
     // The wall beside it, at the same height, is in the way and is no surface.
     assert!(
-        world
+        ground
             .live()
             .blocker_at(Tile::new(12, 13), Body::new(7, 16), Doors::AsTheyStand)
             .is_some(),
         "the upper-storey wall lets a body walk through it"
     );
-    assert_eq!(world.live().surface_at(Tile::new(12, 13), 7), None);
+    assert_eq!(ground.live().surface_at(Tile::new(12, 13), 7), None);
 }
 
 /// **The risk this node names.** A floor laid exactly on the ground it
@@ -340,7 +340,7 @@ fn a_ground_floor_laid_on_the_ground_seals_nothing() {
     let facet = state.facet_state(Facet(0));
     assert!(
         facet
-            .world()
+            .ground()
             .live()
             .blocker_at(Tile::new(12, 12), Body::new(0, 16), Doors::AsTheyStand)
             .is_none(),

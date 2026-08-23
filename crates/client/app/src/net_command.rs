@@ -695,7 +695,7 @@ impl App {
         // click plans a route over hundreds of tiles, and each of them would
         // otherwise rescan everything on screen. See `clutter.rs`.
         clutter::fill(
-            self.resources.world.live_mut(),
+            self.resources.ground.live_mut(),
             &self.world.presentation.items,
             view.mobiles.values(),
             &self.resources.tiledata,

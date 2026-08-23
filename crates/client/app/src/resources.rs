@@ -12,8 +12,8 @@ use openshard_client_render::atlas::FontAtlas;
 use openshard_client_render::gump::GumpAtlas;
 use openshard_client_render::hue::HueRamp;
 use openshard_map::map::WorldMap;
-use openshard_map::world::World;
 use openshard_movement::NavigationGraph;
+use openshard_movement::ground::Ground;
 use openshard_tiles::TileData;
 use openshard_uofiles::anim::Anim;
 use openshard_uofiles::art::Art;
@@ -35,7 +35,7 @@ use openshard_uofiles::ttf_font::TtfFont;
 /// on this struct rather than a getter that hands the field out raw.
 ///
 /// **One field here does change on a packet**, and deliberately:
-/// [`Resources::world`]'s live layer, which is what the shard has put on the
+/// [`Resources::ground`]'s live layer, which is what the shard has put on the
 /// ground. It is here because the ground is here — the two are one facet, and
 /// splitting them across two structs is exactly the arrangement
 /// `docs/map/realtime_map.md`'s era R exists to end. See [`crate::clutter`],
@@ -43,8 +43,9 @@ use openshard_uofiles::ttf_font::TtfFont;
 impl Resources {
     /// The ground this client is drawing.
     ///
-    /// A method rather than a field because of the shape of [`World`]: its base
-    /// is optional, for a *shard* that runs with no client files at all. A
+    /// A method rather than a field because of the shape of
+    /// [`Ground`]: its base is optional, for a *shard* that runs with no client
+    /// files at all. A
     /// client is not one — it opened the install to get this far, and `run`
     /// fails before building a `Resources` if it could not — so the absence is
     /// unreachable here, and every one of the forty readers below would
@@ -56,7 +57,7 @@ impl Resources {
     /// takes a client's ground away again.
     #[must_use]
     pub fn map(&self) -> &WorldMap {
-        self.world
+        self.ground
             .snapshot()
             .expect("a client that got as far as drawing opened a facet")
             .map()
@@ -64,26 +65,20 @@ impl Resources {
 }
 
 pub struct Resources {
-    /// The facet: the ground read off the install, and what the shard has laid
-    /// over it. Its base is shared with the shard thread — see
-    /// [`crate::link::connect`].
+    /// The facet: the ground read off the install, what the shard has laid over
+    /// it, and where a body may stand on the two. Its base is shared with the
+    /// shard thread — see [`crate::link::connect`].
     ///
     /// The live layer is rebuilt whole from the view whenever the view changes
     /// and is never diffed; this end has no identities to address a finer edit
     /// to. See [`crate::clutter::fill`].
-    pub world: World,
-    /// Where a body may stand on [`Resources::world`]'s ground, baked once at
-    /// startup — what every step decision on this end reads.
     ///
-    /// **`Some` exactly when [`Resources::world`] has a base**, which is the
-    /// pairing [`openshard_movement::Footing::of`] asserts; on this end the base
-    /// is never absent at all (see [`Resources::map`]), so the `Option` is the
-    /// shape of that composition rather than a state this client is ever in.
-    /// It sits beside the world rather than inside it because `openshard_map`
-    /// is underneath `openshard_movement` — see `docs/map/navigation_spans.md`'s
-    /// N3.
-    pub spans: Option<openshard_movement::spans::SpanIndex>,
-    /// Static long-distance connectivity over [`Resources::world`]. It is built
+    /// The span bake used to sit in a field of its own beside this one, with a
+    /// comment on each saying the two had to agree; it is inside
+    /// [`Ground`](openshard_movement::ground::Ground) now, which is that comment
+    /// made into a value.
+    pub ground: Ground,
+    /// Static long-distance connectivity over [`Resources::ground`]. It is built
     /// once, before the event loop starts, and only proposes a corridor; the
     /// live route still reads the map with the shard's clutter laid over it.
     pub coarse: Option<NavigationGraph>,
@@ -110,7 +105,7 @@ pub struct Resources {
     /// eviction otherwise waits for a full atlas to trigger.
     pub repack_forced: bool,
     pub texmaps: TexMaps,
-    /// Shared with the shard thread, the same way [`Resources::world`]'s base is — see
+    /// Shared with the shard thread, the same way [`Resources::ground`]'s base is — see
     /// [`crate::link::connect`]: the walk prediction weighs a pier's or a
     /// bridge's deck now, not only the land, and that needs `tiledata.mul` on
     /// both ends of the channel.

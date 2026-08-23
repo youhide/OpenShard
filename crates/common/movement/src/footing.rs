@@ -31,23 +31,22 @@
 //!   only a step needs all three.
 
 use openshard_map::overlay::{Doors, Overlay};
-use openshard_map::world::World;
 use openshard_tiles::TileData;
 
-use crate::spans::SpanIndex;
+use crate::ground::Ground;
 use crate::terrain::MapTerrain;
 
 /// The map, the live world over it, and how the doors are read.
 ///
 /// `Copy` and built where it is asked: two pointers, a reference and a byte,
 /// with nothing owned and nothing stored. Both ends of the wire already hold
-/// the parts — a facet's [`World`] and the install's tile table — so this is a
+/// the parts — a facet's [`Ground`] and the install's tile table — so this is a
 /// view over what the caller has rather than a thing anybody keeps. It is built
-/// through [`Footing::of`] wherever that pair is what the caller has; the bare
-/// [`Footing::new`] is for the callers that deliberately want *less* than a
-/// world, and there are two of them: a client reading the bare map the coarse
-/// graph was baked over, and a test that is about the overlay and nothing
-/// else.
+/// through [`Footing::of`] wherever a facet's [`Ground`] is what the caller has;
+/// the bare [`Footing::new`] is for the callers that deliberately want *less*
+/// than a facet, and there are two of them: a client reading the bare map the
+/// coarse graph was baked over, and a test that is about the overlay and
+/// nothing else.
 #[derive(Clone, Copy, Debug)]
 pub struct Footing<'a> {
     /// The map, or `None` for a world with no map at all: no floor, no walls,
@@ -72,43 +71,31 @@ impl<'a> Footing<'a> {
         Self { map, overlay, doors }
     }
 
-    /// The ground one facet's [`World`] is, read as `doors` reads it.
+    /// The ground one facet's [`Ground`] is, read as `doors` reads it.
     ///
-    /// **The one composition**, and the reason `World` exists: the map and what
-    /// is laid over it come out of a single value that says they are the same
-    /// facet, instead of being two arguments a caller assembled and could
-    /// assemble wrongly. Every production site that used to build a footing
-    /// field by field goes through here.
+    /// **The one composition**, and the reason [`Ground`] exists: the map, what
+    /// is laid over it and the bake that says where a body may stand on it come
+    /// out of a single value that says they are the same facet, instead of being
+    /// three arguments a caller assembled and could assemble wrongly. Every
+    /// production site that used to build a footing field by field goes through
+    /// here.
     ///
-    /// The tile table is its own argument because its scope is different: one
-    /// install has one table and several facets, so what a graphic *is* is not
-    /// a fact about this world. That asymmetry is the whole of the signature.
+    /// This used to take the bake as a fourth argument and *check* the pairing —
+    /// it panicked on a facet with a map and no bake over it, because a facet
+    /// like that decides its steps by re-deriving every column from `tiledata`,
+    /// six times more expensively, with nothing at all saying so. There is
+    /// nothing left to check: the two are one value, and neither can arrive
+    /// without the other.
     ///
-    /// **The bake is the third argument for a different reason**, and not a
-    /// happy one: a [`SpanIndex`] *is* a fact about this world — it is a
-    /// projection of the snapshot's own two layers — and it would live in
-    /// [`World`] if it could. It cannot: `openshard_map` is underneath this
-    /// crate, and where a body may stand is a movement rule. So it travels
-    /// beside the world, held by whoever holds the world, and the pairing is
-    /// checked here rather than by the type system.
-    ///
-    /// # Panics
-    ///
-    /// If exactly one of the map and the bake is present. Both or neither: a
-    /// facet with a map and no bake would be a facet whose steps are decided by
-    /// re-deriving every column from `tiledata`, six times more expensively,
-    /// with nothing at all saying so. That is the failure this refuses to have
-    /// quietly.
+    /// The tile table is still its own argument, because its scope is different:
+    /// one install has one table and several facets, so what a graphic *is* is
+    /// not a fact about this world. That asymmetry is the whole of the
+    /// signature.
     #[must_use]
-    pub fn of(world: &'a World, tiles: &'a TileData, spans: Option<&'a SpanIndex>, doors: Doors) -> Self {
+    pub fn of(ground: &'a Ground, tiles: &'a TileData, doors: Doors) -> Self {
         Self {
-            map: match (world.snapshot(), spans) {
-                (Some(base), Some(index)) => Some(MapTerrain::new(base.map(), tiles, index)),
-                (None, None) => None,
-                (Some(_), None) => panic!("a facet with a map and no span bake over it"),
-                (None, Some(_)) => panic!("a span bake for a facet with no map"),
-            },
-            overlay: world.live(),
+            map: ground.terrain(tiles),
+            overlay: ground.live(),
             doors,
         }
     }

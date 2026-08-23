@@ -737,7 +737,14 @@ pub fn run<D: Dial + Send + 'static>(
     // every step it draws, and since `navigation_spans.md`'s N3 a step reads
     // this rather than re-deriving each column from `tiledata`. One pass over
     // the facet, and the one thing a `MapTerrain` cannot be built without.
-    let spans = openshard_movement::spans::SpanIndex::build(map.map(), &tiledata);
+    //
+    // The snapshot goes in here rather than at `Resources` because the bake is
+    // taken with it: a `Ground` is the facet *and* the bake over it, so there is
+    // no window in which this end holds one without the other. What is left
+    // below is a borrow of the snapshot it now owns, which is all the loaders
+    // after this point read of it.
+    let ground = openshard_movement::ground::Ground::new(Some(map), &tiledata);
+    let map = ground.snapshot().expect("it was given a facet a line ago");
     checkpoint("span index baked");
 
     let navigation_path = openshard_movement::bake::artifact_path(dir, facet);
@@ -870,8 +877,7 @@ pub fn run<D: Dial + Send + 'static>(
         updates,
         stall_on_update,
         resources: resources::Resources {
-            world: openshard_map::world::World::new(Some(map)),
-            spans: Some(spans),
+            ground,
             coarse,
             interiors,
             art,
