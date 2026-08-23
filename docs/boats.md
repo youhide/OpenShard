@@ -391,12 +391,39 @@ The two differ by one comparison, `plank.boat != boat`, and
 `a_ship_is_not_blocked_by_the_tiles_it_is_leaving` is the test that fails when
 they are folded together.
 
-**Being aboard is two questions, not one.** The plan said "who is standing on a
-tile the boat covers". That is half of it: a swimmer at the waterline and a body
-on a pier the ship is moored against are both on a covered tile and neither is a
-passenger. The manifest asks for feet on a plank as well —
-`deck_at(x, y, z) == Some(z)` — and `someone_in_the_water_beside_the_hull_is_left_behind`
-is the test.
+**Being aboard is three questions, not one**, and each of the two the plan did
+not ask cost a defect.
+
+The plan said "who is standing on a tile the boat covers". That is a third of it:
+
+1. *On a covered tile.* A sector sweep answers this, and it is the only part the
+   plan had.
+2. *With feet on a plank* — a swimmer at the waterline and a body on a pier the
+   ship is moored against are both on a covered tile and neither is a passenger.
+   `someone_in_the_water_beside_the_hull_is_left_behind` is the test.
+3. *A plank of **this** ship.* The manifest asked `Boats::deck_at`, which
+   answers for the whole facet — *there is a floor here*, never whose. A tile
+   belongs to a list of planks with a `boat` on each, and two ships sharing one
+   is a case the index has always supported
+   (`casting_off_one_boat_leaves_the_other`); the manifest was the one reader
+   that did not look at that field. So a ship under way took the crew of any
+   other ship its sweep reached and translated them by its own delta, off their
+   deck and into the water. `Boats::carries(boat, x, y, z)` is the named half of
+   `deck_at`, and
+   `a_ship_under_way_does_not_carry_the_crew_of_the_ship_beside_it` is the test.
+
+**And the sweep is the berth's box, not a square hung off its corner.** The
+candidates come from one sector query rather than one per covered tile, and a
+query is a square around a point. That point was `covered.first()` — the
+north-west corner — with a radius reaching the far end of the hull, so a galleon
+lying east-west put twenty-odd tiles of open sea on every side of its bow inside
+the net. Centred on the bounding box the radius is half the longer span.
+
+That is *not* what fixed question 3 — the filter is what decides, and the
+control run confirms the passenger is still dragged under the new geometry with
+the old filter. It is worth having because the surplus of a sweep is where wrong
+answers live, and a surplus of twenty tiles of sea is one nothing notices is too
+big.
 
 **The packets a move costs**, which this document asked for by name: **two per
 client that can see the ship** — a `0x1D` and the `0x1A`/`0xF3` that draws it
