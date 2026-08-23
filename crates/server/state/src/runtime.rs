@@ -1221,6 +1221,25 @@ impl WorldState {
         Footing::of(state.ground(), &self.tiles, doors)
     }
 
+    /// The same ground with nothing the shard has put on it — the bare map
+    /// [`FacetState::coarse`] was baked over, and the reading a long route's
+    /// *corridor* is proposed and joined by.
+    ///
+    /// Never what approves a step: a route from the coarse graph is refined hop
+    /// by hop through [`footing`](Self::footing), which is where a shut door and
+    /// a dropped crate get their say. See
+    /// [`Footing::guide`](openshard_movement::Footing::guide) for why the two
+    /// readings are separate, and `openshard_ai::step_toward` for the one caller
+    /// on this end.
+    ///
+    /// # Panics
+    ///
+    /// On a facet that is not loaded, like [`footing`](Self::footing).
+    #[must_use]
+    pub fn guide(&self, facet: Facet) -> Footing<'_> {
+        Footing::guide(self.facet_state(facet).ground(), &self.tiles)
+    }
+
     /// Is any connected player within `range` tiles (Chebyshev) of `centre` on
     /// `facet`? Cheap: players are few, so this walks the player table rather than
     /// the sector grid, and stops at the first hit. The primitive level-of-detail

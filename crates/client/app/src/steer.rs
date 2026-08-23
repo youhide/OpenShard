@@ -181,8 +181,8 @@ use std::time::{Duration, Instant};
 use openshard_map::grid::Tile;
 use openshard_map::overlay::Doors;
 use openshard_movement::{
-    Around, Detour, Footing, Heading, Lean, Leeway, NavigationGraph, RUN_HOLD, Step, WALK_HOLD,
-    find_long_path, find_path, find_path_toward, step_allowed,
+    Around, COARSE_MIN_DISTANCE, Detour, Footing, Heading, Lean, Leeway, NavigationGraph, RUN_HOLD, Step,
+    WALK_HOLD, find_long_path, find_path, find_path_toward, step_allowed,
 };
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::world::Point;
@@ -198,11 +198,6 @@ use crate::keys::Held;
 /// one of those, `STUCK_STEPS` times over and again on every re-click. A budget
 /// sized for "ample" and not "generous" is what keeps that bounded.
 pub const PLAN_BUDGET: usize = 600;
-
-/// A coarse graph is counterproductive for a short failed search: joining an
-/// endpoint to every portal in adjacent regions costs more than the local
-/// answer, especially around a house with several doors.
-const COARSE_MIN_DISTANCE: u32 = 8;
 
 /// How long the step that follows a turn waits: ClassicUO's
 /// `Constants.TURN_DELAY`, charged in `PlayerMobile.Walk` as

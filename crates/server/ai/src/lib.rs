@@ -15,7 +15,7 @@ use openshard_combat::MobileDamaged;
 use openshard_entities::EntityId;
 use openshard_items as items;
 use openshard_map::overlay::Doors;
-use openshard_movement::{direction_toward, find_path, step_from};
+use openshard_movement::{COARSE_MIN_DISTANCE, direction_toward, find_long_path, find_path, step_from};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::world::{Facet, Point, Sight};
@@ -29,9 +29,19 @@ use openshard_state::sectors::{distance, in_range};
 /// that a field of creatures drifts rather than marches.
 const WANDER_IN_EIGHT: u32 = 3;
 
-/// How many tiles a chase may plan across before it concludes there is no way.
-/// Ample to round a building; an unreachable quarry is not worth more.
-const PATH_BUDGET: usize = 400;
+/// How many *nodes* an exact chase plan may finalise before it gives up.
+///
+/// Ample to round a building; an unreachable quarry is not worth more. It is
+/// not a reach: since `docs/map/navigation_spans.md`'s N3b a column with two
+/// floors can be finalised twice, so this bounds the work rather than the
+/// distance — and past it the answer comes from the coarse graph instead of
+/// from a bigger number. See [`step_toward`].
+///
+/// Public because it is the subject of an assertion and not only a knob: the
+/// test that pins the fall-back has to say which budget the exact search was
+/// refused at, and a copy of `400` in the test would be a second place to
+/// change it.
+pub const PATH_BUDGET: usize = 400;
 
 /// How long a planned route stays trusted before it is re-planned, in ticks —
 /// the references' two-second repath cadence.
@@ -64,8 +74,26 @@ const KITE_GAP: u32 = 2;
 
 /// The first step from `from` toward `to`, planned *around* obstacles so a chaser
 /// does not wedge itself against a wall. Falls back to the straight-line direction
-/// when there is no map, or no route within the budget — better to close the gap
-/// roughly and re-plan than to freeze.
+/// when there is no map, or no route the exact search and the coarse graph
+/// between them can find — better to close the gap roughly and re-plan than to
+/// freeze.
+///
+/// # Two searches, and the same order the client asks them in
+///
+/// [`PATH_BUDGET`] bounds the *exact* search, and a budget is what makes a
+/// chase affordable rather than what a body can walk: past a few hundred nodes
+/// the answer is "no route" whether or not the town has one. That is what the
+/// baked navigation graph is for — it has the facet's whole connectivity in it,
+/// and a route across a town costs a corridor of region hops instead of the
+/// tiles between here and there.
+///
+/// So a refused exact search is asked again of the graph, over
+/// [`COARSE_MIN_DISTANCE`] tiles, which is the [same fall-back the client
+/// walks a click by](openshard_movement::find_long_path). The graph proposes
+/// the corridor over the bare map ([`WorldState::guide`]) and every hop of it
+/// is then refined through the live ground, so a crate dropped in a doorway
+/// still refuses the step it is standing in — the corridor is the only thing
+/// the bare map decides.
 pub fn step_toward(
     state: &WorldState,
     facet: Facet,
@@ -79,6 +107,16 @@ pub fn step_toward(
     let planner = state.footing(facet, doors);
     if let Some(path) = find_path(&planner, from, to, PATH_BUDGET) {
         return path.first().copied();
+    }
+    // Short and refused stays refused: joining both endpoints to the graph
+    // costs more than the local answer that has already said no.
+    if distance(from, to) > COARSE_MIN_DISTANCE {
+        if let Some(graph) = state.facet_state(facet).coarse_router() {
+            let guide = state.guide(facet);
+            if let Some(path) = find_long_path(&guide, &planner, graph, from, to, PATH_BUDGET) {
+                return path.first().copied();
+            }
+        }
     }
     direction_toward(from, to)
 }

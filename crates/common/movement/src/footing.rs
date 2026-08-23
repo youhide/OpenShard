@@ -42,11 +42,11 @@ use crate::terrain::MapTerrain;
 /// with nothing owned and nothing stored. Both ends of the wire already hold
 /// the parts — a facet's [`Ground`] and the install's tile table — so this is a
 /// view over what the caller has rather than a thing anybody keeps. It is built
-/// through [`Footing::of`] wherever a facet's [`Ground`] is what the caller has;
-/// the bare [`Footing::new`] is for the callers that deliberately want *less*
-/// than a facet, and there are two of them: a client reading the bare map the
-/// coarse graph was baked over, and a test that is about the overlay and
-/// nothing else.
+/// through [`Footing::of`] wherever a facet's [`Ground`] is what the caller has,
+/// and through [`Footing::guide`] where the caller means the bare map the coarse
+/// navigation graph was baked over; the bare [`Footing::new`] is left for the one
+/// caller that deliberately wants *less* than a facet — a test that is about the
+/// overlay and nothing else.
 #[derive(Clone, Copy, Debug)]
 pub struct Footing<'a> {
     /// The map, or `None` for a world with no map at all: no floor, no walls,
@@ -100,6 +100,33 @@ impl<'a> Footing<'a> {
         }
     }
 
+    /// The same ground with nothing the live world has put on it — what a coarse
+    /// navigation graph is guided and joined by.
+    ///
+    /// The graph is baked over the bare map (`docs/map/navigation_spans.md`'s
+    /// N4), so the corridor it proposes has to be read over the bare map too: a
+    /// door that happens to be shut, or a crate somebody dropped, must not be
+    /// able to rewrite a route's *topology*. What the live world has to say is
+    /// asked of each exact step instead — [`find_long_path`](crate::find_long_path)
+    /// takes this and [`of`](Self::of) side by side, and only the second one
+    /// approves a step.
+    ///
+    /// **Both ends of the wire want this value**, and each used to build it for
+    /// itself out of an empty overlay it kept alive somewhere: the client's
+    /// `world::guide` and the shard's `WorldState::guide`.
+    ///
+    /// The doors are read [`AsTheyStand`](Doors::AsTheyStand), which is a
+    /// statement about nothing: an empty overlay has no door in it, so both
+    /// readings of it are the same ground.
+    #[must_use]
+    pub fn guide(ground: &'a Ground, tiles: &'a TileData) -> Self {
+        Self {
+            map: ground.terrain(tiles),
+            overlay: &NOTHING_PLACED,
+            doors: Doors::AsTheyStand,
+        }
+    }
+
     /// The same ground, read the other way round.
     ///
     /// A route is planned through shut doors and then walked as they stand, and
@@ -110,3 +137,11 @@ impl<'a> Footing<'a> {
         Self { doors, ..self }
     }
 }
+
+/// Nothing placed, for a map-only reading to borrow.
+///
+/// One for the process rather than one per holder, because it is the *absence*
+/// of a live layer: a second one would be a second name for the same emptiness,
+/// and an empty overlay a caller keeps beside its map is a thing that can be
+/// written to by mistake.
+static NOTHING_PLACED: std::sync::LazyLock<Overlay> = std::sync::LazyLock::new(Overlay::default);

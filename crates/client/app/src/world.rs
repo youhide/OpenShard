@@ -923,22 +923,22 @@ pub(crate) fn terrain(resources: &resources::Resources) -> openshard_movement::M
         .expect("a client that got as far as drawing opened a facet")
 }
 
-/// Nothing placed, for a *map-only* reading to borrow.
-///
-/// The coarse graph was baked over the bare map, so the guide has to be read
-/// over the bare map too: a door that happens to be shut must not be able to
-/// rewrite a corridor's topology.
-static NOTHING_PLACED: std::sync::LazyLock<openshard_map::overlay::Overlay> =
-    std::sync::LazyLock::new(openshard_map::overlay::Overlay::default);
-
 /// The bare static map, as a footing with nothing live on it — what the coarse
 /// graph is guided and joined by.
+///
+/// The same pairing [`footing`] beneath makes — the ground is a facet's and the
+/// tile table is the install's — so this is the seam that reads them together
+/// and nothing more. What used to be here is the empty overlay a map-only
+/// reading borrows: the shard wanted the same value and kept a second one, so
+/// there is one now, inside
+/// [`Footing::guide`](openshard_movement::Footing::guide).
+///
+/// A client with no facet open gets a footing with no map, where [`terrain`]
+/// above would have panicked. Nothing asks this before it has one; saying
+/// "there is no map" is simply what a value the caller cannot mis-pair can say
+/// and a panic cannot.
 pub(crate) fn guide(resources: &resources::Resources) -> openshard_movement::Footing<'_> {
-    openshard_movement::Footing::new(
-        Some(terrain(resources)),
-        &NOTHING_PLACED,
-        openshard_map::overlay::Doors::AsTheyStand,
-    )
+    openshard_movement::Footing::guide(&resources.ground, &resources.tiledata)
 }
 
 /// The facet as a step decision on this end reads it: the ground, what the

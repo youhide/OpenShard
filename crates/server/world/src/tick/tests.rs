@@ -13824,6 +13824,162 @@ fn a_chase_rounds_a_wall_of_crates() {
     );
 }
 
+/// Two corridors that meet a whole map away from where a walk between them
+/// starts, with a walkway of statics over the northern one.
+///
+/// The shape is what makes N7's question askable. The way through is eighty-odd
+/// tiles *away from* the goal and eighty back, so an exact search runs out of
+/// budget long before it finds it — while the goal is thirty-two tiles off and
+/// plainly walkable. A body handed the straight-line direction instead walks
+/// south until the divider and stands there.
+///
+/// The walkway is the other half: five units up, laid on ground that has no
+/// room under it, so standing on it is standing somewhere `ground_z` does not
+/// report. That is the raised origin
+/// [`docs/map/navigation_spans.md`](../../../../docs/map/navigation_spans.md)'s
+/// N7 asks for by name — the one that would have passed for the wrong reason
+/// before N4 gave the graph a node per place rather than per tile.
+fn two_corridors() -> Scene {
+    let mut scene = Scene::flat_holding(95, 63, 0);
+    for x in 0..=84u16 {
+        scene.wall(x, 32, 0, 20);
+    }
+    for x in 0..=15u16 {
+        scene.floor(x, 16, 0, 5);
+    }
+    scene
+}
+
+/// A shard standing on `scene`, with the graph baked over it or without one.
+///
+/// The tile table goes in before the facet does, because a span bake is a
+/// statement about both — `with_tiles` rebakes what is already loaded, and
+/// `with_facet` bakes against what the world is holding.
+fn shard_over(scene: Scene, coarse: Option<openshard_movement::NavigationGraph>) -> World {
+    let (map, tiles) = scene.into_shard(Facet(0));
+    world()
+        .with_tiles(tiles, openshard_uofiles::multi::Multis::default())
+        .with_facet(Facet(0), map, coarse)
+}
+
+/// How many beats the walk below is given. The route is 168 steps; this is
+/// slack, not the answer — a test that pinned the length would fail on a
+/// corridor the router is free to choose differently.
+const MOST_BEATS: usize = 300;
+
+/// Walk from `from` toward `to` the way the tick does: the brain decides, the
+/// step rule approves, one step per beat.
+///
+/// Both halves are the shard's own — [`ai::step_toward`] is what a chase asks
+/// and `step_allowed` is what the world would allow — so this cannot walk a
+/// step the shard would refuse. Stops where a body would: at the goal, or on
+/// the first direction it may not take, which is a creature standing at a wall.
+fn walk_toward(world: &World, from: Point, to: Point) -> Point {
+    let footing = world.state.footing(Facet(0), Doors::AsTheyStand);
+    let mut at = from;
+    for _ in 0..MOST_BEATS {
+        if at == to {
+            break;
+        }
+        let Some(direction) = ai::step_toward(&world.state, Facet(0), at, to, Doors::AsTheyStand) else {
+            break;
+        };
+        let Some(next) = openshard_movement::step_allowed(&footing, at, direction) else {
+            break;
+        };
+        at = next;
+    }
+    at
+}
+
+/// The shard walks a creature a route the exact search cannot see, and the
+/// baked graph is what carries it.
+///
+/// **[`docs/map/navigation_spans.md`](../../../../docs/map/navigation_spans.md)'s
+/// N7**, and the first thing on the shard to read `FacetState::coarse`. The
+/// artifact has been loaded, validated and paid for since the terrain-seam work;
+/// what it had was one test for its only reader. Server AI planned with flat
+/// `find_path` at [`ai::PATH_BUDGET`], so a creature could not route across a
+/// town while the answer sat in the facet beside it.
+///
+/// The two origins are the two halves of the claim. The flat one says the
+/// fall-back happens at all; the raised one says it happens *from a place the
+/// land does not report*, which is the half that would have passed for the
+/// wrong reason before N4 — a graph sampling `ground_z` would have joined the
+/// endpoint at the ground under the walkway and answered about a body that is
+/// not there.
+///
+/// The facet without a graph is the control, and it is what the shard was: the
+/// same ground, the same creature, the same budget, and a body that walks south
+/// until the divider and stands there for the rest of the walk.
+#[test]
+fn a_creature_routes_past_its_exact_budget_over_the_coarse_graph() {
+    /// On the plain, south of the walkway.
+    const FLAT: Point = Point::new(2, 20, 0);
+    /// On the walkway, five units up, over ground nothing can stand on.
+    const RAISED: Point = Point::new(2, 16, 5);
+    /// The far corridor, thirty-two tiles south and a map's width away by foot.
+    const GOAL: Point = Point::new(2, 48, 0);
+    /// A walkway tile that is not the origin, so the flood says something about
+    /// the walkway rather than about where the body was put.
+    const ALONG: (u16, u16) = (10, 16);
+
+    let scene = two_corridors();
+    // The flood is the oracle: whatever a search says about finding the way,
+    // this is ground a body can walk.
+    for from in [FLAT, RAISED] {
+        assert_eq!(
+            scene.reachable(from).get(&(GOAL.x, GOAL.y)),
+            Some(&GOAL.z),
+            "the goal is walkable ground from {from:?}"
+        );
+    }
+    // And the raised origin is raised: the walkway is a surface only the statics
+    // put there, with no room for a body on the ground beneath it.
+    assert_eq!(
+        scene.reachable(RAISED).get(&ALONG),
+        Some(&RAISED.z),
+        "the walkway is walked at its own height"
+    );
+    assert_eq!(
+        scene.reachable(FLAT).get(&ALONG),
+        None,
+        "and the plain cannot reach it — neither onto it nor under it"
+    );
+
+    // What the shard had before this node: an exact search that refuses, and
+    // refuses for want of *budget* rather than for want of a way.
+    for from in [FLAT, RAISED] {
+        let search = openshard_movement::search_path(&scene.footing(), from, GOAL, ai::PATH_BUDGET);
+        assert!(!search.arrived, "flat A* must not find this route from {from:?}");
+        assert_eq!(
+            search.exit,
+            openshard_movement::SearchExit::Budget,
+            "and it must be the budget that stopped it, not a wall"
+        );
+    }
+
+    let graph = openshard_movement::NavigationGraph::build(&scene.footing(), 96, 64)
+        .expect("a 96x64 facet has a graph");
+    let routed = shard_over(two_corridors(), Some(graph));
+    let blind = shard_over(two_corridors(), None);
+
+    for from in [FLAT, RAISED] {
+        assert_eq!(
+            walk_toward(&routed, from, GOAL),
+            GOAL,
+            "the graph carried the creature from {from:?} to the far corridor"
+        );
+        let stood = walk_toward(&blind, from, GOAL);
+        assert_ne!(stood, GOAL, "a facet with no graph cannot plan this route");
+        assert_eq!(
+            stood,
+            Point::new(2, 31, 0),
+            "it walks the straight line south and stands at the divider"
+        );
+    }
+}
+
 #[test]
 fn a_human_chaser_opens_the_door_in_its_way() {
     let now = Instant::now();

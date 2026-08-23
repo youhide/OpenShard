@@ -985,6 +985,21 @@ enum LongExit {
 /// one has, on the same ground.
 const LIVE_REROUTES: usize = 8;
 
+/// The shortest failed search worth asking the graph about, in tiles.
+///
+/// A coarse graph is counterproductive for a short failed search: joining an
+/// endpoint to the graph is `local_costs` — one exact search per node of the
+/// endpoint's own region, at *both* ends — and that costs more than the local
+/// answer the caller has already been refused, especially around a house with
+/// several doors.
+///
+/// A property of this router rather than of any one caller, which is why it
+/// lives beside [`find_long_path`] and not beside the budgets: the client's
+/// click-to-walk and the shard's chase read the same number, and a fall-back
+/// the two ends drew at different distances would be two answers to "how far
+/// can a body plan".
+pub const COARSE_MIN_DISTANCE: u32 = 8;
+
 /// Refine a route proposed by a static navigation graph through live terrain.
 #[must_use]
 pub fn find_long_path(
