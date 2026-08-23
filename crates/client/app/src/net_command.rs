@@ -1064,25 +1064,30 @@ pub(crate) fn multi_pieces(
     MultiDraw::Pieces(laid_out(multi.components.as_slice(), at, hue))
 }
 
-/// A component list, placed at an origin. The one piece of arithmetic a multi
-/// and a design share, written once so the two cannot come to disagree about
-/// what an offset means.
+/// A component list, placed at an origin.
+///
+/// **[`Component::placed_at`] and not an addition of its own.** A multi is
+/// expanded in three places in this workspace — the shard's footprint, the
+/// shard's tile list, and this, the picture — and this one used to wrap: an
+/// offset that ran off the west edge of the world came back on the east, and
+/// a `dz` that overflowed an `i8` was clamped. So a house near the edge had a
+/// wall the shard refused to place drawn in another town, and a piece drawn at
+/// a height nobody built it at. It is dropped now, which is what the other two
+/// already did with it.
 fn laid_out(components: &[openshard_uofiles::multi::Component], at: Point, hue: Hue) -> Vec<GroundItem> {
     components
         .iter()
         .filter(|component| component.drawn())
-        .map(|component| GroundItem {
-            at: Point::new(
-                at.x.wrapping_add_signed(component.dx),
-                at.y.wrapping_add_signed(component.dy),
-                at.z.saturating_add(component.dz as i8),
-            ),
-            graphic: Graphic(component.graphic),
-            hue,
-            // A house's wall is a wall, not a pile of walls: a multi's parts
-            // are pictures laid out from a component list and have no stack of
-            // their own to count. See `GroundItem::amount`.
-            amount: openshard_protocol::items::ItemAmount::ONE,
+        .filter_map(|component| {
+            Some(GroundItem {
+                at: component.placed_at(at)?,
+                graphic: Graphic(component.graphic),
+                hue,
+                // A house's wall is a wall, not a pile of walls: a multi's
+                // parts are pictures laid out from a component list and have no
+                // stack of their own to count. See `GroundItem::amount`.
+                amount: openshard_protocol::items::ItemAmount::ONE,
+            })
         })
         .collect()
 }

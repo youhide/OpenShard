@@ -66,6 +66,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use openshard_protocol::world::Point;
+
 /// How many multi ids a client's index can name.
 ///
 /// The index is a flat table and most of it is empty: the shipped file has 8,704
@@ -160,6 +162,31 @@ impl Component {
     #[must_use]
     pub const fn drawn(self) -> bool {
         self.flags != 0
+    }
+
+    /// Where this component stands when the multi is placed at `origin`.
+    ///
+    /// **The one arithmetic**, and it is here because a multi is expanded in
+    /// three places that are not in one crate: the shard's footprint, the
+    /// shard's tile list, and the client's picture. Each had its own copy, and
+    /// the copies did not agree about the edge of the world — the shard refused
+    /// the placement, the client *wrapped* the offset, so a house built near
+    /// x = 0 had a wall drawn on the far side of Britannia. See
+    /// `docs/map/realtime_map.md`'s R3.
+    ///
+    /// `None` where the result does not fit the world's own coordinates: off
+    /// the map east or west, or a `dz` that leaves the `i8` a z is. Refusing is
+    /// the only honest answer — a saturated z draws a roof at the height of a
+    /// floor, and a wrapped x draws it in another town.
+    ///
+    /// `origin` is the multi's **origin** and not the corner of its box; see
+    /// [`Multi::center`].
+    #[must_use]
+    pub fn placed_at(self, origin: Point) -> Option<Point> {
+        let x = u16::try_from(i32::from(origin.x) + i32::from(self.dx)).ok()?;
+        let y = u16::try_from(i32::from(origin.y) + i32::from(self.dy)).ok()?;
+        let z = i8::try_from(i32::from(origin.z) + i32::from(self.dz)).ok()?;
+        Some(Point::new(x, y, z))
     }
 }
 
@@ -692,6 +719,35 @@ mod tests {
             components[1].graphic, 0x06A5,
             "the cliloc block after the first entry was not skipped"
         );
+    }
+
+    /// A component off the edge of the world is refused, not wrapped.
+    ///
+    /// The three expansions of a multi disagreed about exactly this: the shard
+    /// refused, the client wrapped, so a house built at x = 1 had a wall the
+    /// shard never placed drawn at x = 65535 — a whole map away. And a `dz`
+    /// past what an `i8` holds was clamped rather than dropped, which draws a
+    /// roof at the height of a floor.
+    #[test]
+    fn a_component_off_the_map_is_refused_rather_than_wrapped() {
+        let west = Component {
+            graphic: 0x0006,
+            dx: -3,
+            dy: 0,
+            dz: 0,
+            flags: 1,
+        };
+        assert_eq!(west.placed_at(Point::new(10, 10, 0)), Some(Point::new(7, 10, 0)));
+        assert_eq!(west.placed_at(Point::new(1, 10, 0)), None, "it wrapped east");
+
+        let high = Component {
+            graphic: 0x0006,
+            dx: 0,
+            dy: 0,
+            dz: 100,
+            flags: 1,
+        };
+        assert_eq!(high.placed_at(Point::new(10, 10, 100)), None, "the z was clamped");
     }
 
     /// A truncated entry answers `None` rather than reading past its end.

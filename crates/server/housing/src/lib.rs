@@ -119,11 +119,11 @@ fn drawn_tiles(components: &[Component], at: Point) -> Vec<Tile> {
     let mut out: Vec<Tile> = components
         .iter()
         .filter(|component| component.drawn())
-        .filter_map(|component| {
-            let x = u16::try_from(i32::from(at.x) + i32::from(component.dx)).ok()?;
-            let y = u16::try_from(i32::from(at.y) + i32::from(component.dy)).ok()?;
-            Some(Tile::new(x, y))
-        })
+        // `Component::placed_at` and not this function's own addition: a multi
+        // is expanded in three places in this workspace and the offset has to
+        // mean one thing in all of them.
+        .filter_map(|component| component.placed_at(at))
+        .map(|at| Tile::new(at.x, at.y))
         .collect();
     out.sort_unstable_by_key(|tile| (tile.x, tile.y));
     out.dedup();
@@ -703,13 +703,10 @@ pub fn footprint_of(
     let mut out = Vec::new();
     for component in components.iter().filter(|c| c.drawn()) {
         let graphic = Graphic(component.graphic);
-        let x = i32::from(at.x) + i32::from(component.dx);
-        let y = i32::from(at.y) + i32::from(component.dy);
-        let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) else {
-            return Err(Refusal::OffTheMap);
-        };
-        let z = i32::from(at.z) + i32::from(component.dz);
-        let Ok(z) = i8::try_from(z) else {
+        // The one expansion. A footprint *refuses* what falls off the edge of
+        // the world rather than skipping it, because a house with a wall
+        // missing is a house somebody walks out of.
+        let Some(spot) = component.placed_at(at) else {
             return Err(Refusal::OffTheMap);
         };
         // Whatever this component's art lays, which is the same rule a *loose*
@@ -720,8 +717,8 @@ pub fn footprint_of(
         // This used to read `is_blocking` here and take the height itself, so a
         // house was its walls and nothing else: no floor to stand on above the
         // ground, and stairs that stopped a body instead of lifting one.
-        let covers = Cover::of_static(tiledata.static_tile(graphic.0)).based_at(z);
-        let tile = Tile::new(x, y);
+        let covers = Cover::of_static(tiledata.static_tile(graphic.0)).based_at(spot.z);
+        let tile = Tile::new(spot.x, spot.y);
         out.extend(covers.into_iter().map(|cover| Footprint { tile, cover }));
     }
     Ok(out)
