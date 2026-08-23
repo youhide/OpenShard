@@ -611,15 +611,28 @@ which is the price of not having two rules.
 
 **The bake is not optional where the map is.** `MapTerrain::new` takes a
 `&SpanIndex` as its third argument, so there is no way to build a terrain that
-would silently re-derive every column, and `Footing::of` panics rather than
-accept a map without one. It sits *beside* the world rather than inside it —
+would silently re-derive every column, and `Footing::of` panicked rather than
+accept a map without one. It sat *beside* the world rather than inside it —
 `FacetState::spans` on the shard, `Resources::spans` on the client — for a
 reason that is worth writing down because it is not a preference:
 `openshard_map` is underneath `openshard_movement`, and where a body may stand
 is a movement rule, so [`World`](../../crates/common/map/src/world.rs) cannot
-hold the projection of its own two layers. `FacetState::set_map` is the one seam
-that moves both, and `World::with_tiles` rebakes every facet already loaded, so
-the builder's argument order cannot produce a bake over the empty tile table.
+hold the projection of its own two layers. `FacetState::set_map` was the one
+seam that moved both, and `World::with_tiles` rebakes every facet already
+loaded, so the builder's argument order cannot produce a bake over the empty
+tile table.
+
+> **Since corrected: the pair is one value, and the panic is gone.**
+> [`Ground`](../../crates/common/movement/src/ground.rs) is a `World` and the
+> `SpanIndex` over its base, private fields and three functions that write both
+> in the same statement — so "a facet with a map and no span bake over it" is a
+> state nothing can spell rather than a state `Footing::of` notices. The
+> layering argument above is unchanged and is why it *wraps* the world instead
+> of the bake moving down: the bake reads `MAX_STEP_UP` and `PLAYER_HEIGHT`, and
+> pushing those into `openshard_map` is the move R2 refused when `Cover::meets`
+> asked for it. `FacetState` and `Resources` each hold one and neither hands the
+> inner world back out. See
+> [the handoff](handoffs/2026-08-23-the-ground-and-its-bake-are-one-value.md).
 
 **`MapTerrain::check` is now an oracle and nothing else.** No production caller
 reaches it: `can_step`, `land_at`, `surface_at` and `predict_step` all read
@@ -1042,7 +1055,12 @@ graph over spans names neither.
   longer has. Three test fixtures do it today, harmlessly (they assign the same
   table they just baked from). The repair is to make the field private behind a
   setter that rebakes — the same shape `FacetState::obstructions` already has,
-  and for the same reason.
+  and for the same reason. **Still open, and now the only one left**: since
+  [`Ground`](../../crates/common/movement/src/ground.rs) the *ground* can no
+  longer move out from under its bake, so a table written past `with_tiles` is
+  the one remaining way to hold a bake that describes neither world in hand.
+  Six sites write it, all of them fixtures; the sixty-seven that read it are
+  what makes the field private rather than the write.
 - **N3 found: the interiors bake builds two facet-wide span indexes of its
   own.** `PlanarTopology::bake` and `Buildings::bake` in
   `client/render/src/interiors.rs` each take a map and a tile table and now
@@ -1050,7 +1068,11 @@ graph over spans names neither.
   walks the facet, and the client builds a third at startup. Threading one
   through five `bake` signatures would put a movement index in the arguments of
   a wall contour, which is why it was not done; the honest fix is for the
-  interiors bake to take the ground it is baking over as one value.
+  interiors bake to take the ground it is baking over as one value. **That value
+  now exists** — [`Ground`](../../crates/common/movement/src/ground.rs), whose
+  `terrain(tiles)` is exactly what both of them build for themselves — so what
+  is left of this finding is the signature sweep, across `interiors.rs`'s five
+  bakes plus `artscan` and the examples that call them.
 - **N3 found: a `Scene` rebakes on every setter.** A fixture that places a
   thousand statics pays a thousand bakes of its own blocks, and each one walks
   `land_kinds`'s 16,384 land ids. Nothing in the suite is slow enough to notice
@@ -1142,6 +1164,15 @@ graph over spans names neither.
   its facets are rebaked. That is the right loudness for a graph that would
   otherwise answer with a one-storey world — it is recorded because it is a
   *deployment* step, not a defect.
+- **A second `Ground` now exists in `client/app`, and it is the misnamed one.**
+  [`steer::Ground`](../../crates/client/app/src/steer.rs) is a pair of
+  `Footing`s — the same map read twice, once with the doors shut and once open —
+  which is a *reading*, and not ground. Nothing collides at the compiler and no
+  file imports both, but one crate spells two different ideas with one word
+  since the ground and its bake became
+  [`Ground`](../../crates/common/movement/src/ground.rs). If either is renamed
+  it should be that one: `Readings` says what it is.
+
 - **A dense `average_land_z` array.** 29.4 MB turns the bare-column case from
   four corner reads into one. It waited for N3's measurement, and the
   measurement is that the whole landing half is 167 ns for eight neighbours —
