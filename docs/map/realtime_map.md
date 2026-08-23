@@ -1,9 +1,10 @@
 # The map you hold — era R, in order
 
-> **Status: R1, R2 and R3 built; R4 and R5 next, in either order.** The tile
-> table has its own crate, `openshard-uofiles` is readers, formats and errors,
-> one `World` is the map on both ends of the wire, and a house has floors you
-> can stand on. R4 and R5 are still plans.
+> **Status: R1, R2, R3 and R4 built; R5 is what is left.** The tile table has
+> its own crate, `openshard-uofiles` is readers, formats and errors, one `World`
+> is the map on both ends of the wire, a house has floors you can stand on, and
+> a facet's statics are one run of 2,906,871 items in two allocations. R5 is
+> still a plan.
 
 The executable half of [`map_rebuild.md`](map_rebuild.md)'s era R. That document
 holds the model and the decisions — three layers, what may be baked, why a house
@@ -47,7 +48,7 @@ other and can land in any order once R2 has.
 
 ```
 R1. the table leaves the file reader ✔ ──> R2. the third layer joins the type ✔ ──┬─> R3. a house has floors ✔
-                                                                                 ├─> R4. statics become one run
+                                                                                 ├─> R4. statics become one run ✔
                                                                                  └─> R5. one install, one load
 ```
 
@@ -335,11 +336,13 @@ Four questions the plan did not name.
   stepped off from the top of the whole tread. Without the third, a body on the
   top tread cannot reach the floor it arrives at.
 
-## R4 — statics become one run
+## R4 — statics become one run ✔
 
 **Goal.** The base layer is one immutable run, and what changes is a layer above.
 
-Measured: 2,906,871 statics over 120,744 non-empty blocks — **120,745
+**Built**, in one commit: `dd253978` statics become one run.
+
+Measured before: 2,906,871 statics over 120,744 non-empty blocks — **120,745
 allocations, 38.2 MiB**. The CSR pair is already written in
 [`chunk.rs`](../../crates/common/map/src/chunk.rs#L154) and was never carried
 into `WorldMap`.
@@ -352,6 +355,8 @@ into `WorldMap`.
 - `place_static` as an in-place tail shift **goes**. A builder assembles the base;
   [`patch::apply_op`](../../crates/common/map/src/patch.rs#L401) rebuilds the
   blocks its ops touched, which is what a publish is already defined to do.
+  **This one was built the other way round** — the pair stayed and its cost
+  changed. See *What the node decided* at the end of this node.
 - The **packed four-byte record** is not in this node. It changes accessors from
   handing back a reference to handing back a value, and it waits for
   [N3](navigation_spans.md#n3--the-search-takes-spans)'s measurement to say
@@ -359,7 +364,60 @@ into `WorldMap`.
 
 **Done when:** two allocations; the base-set round trip is byte-identical and
 `openshard-map-import --verify` still compares all 29,360,128 tiles clean; the
-resident size is recorded in this document.
+resident size is recorded in this document. **Met**, and the round trip took
+0.9 s over all 29,360,128 tiles of Felucca.
+
+### What it measures
+
+| | before | after |
+|---|---|---|
+| allocations | 120,745 | **2** |
+| the statics | 29,068,710 B | 29,068,710 B |
+| what describes them | 11,010,048 B of `Vec` headers | 1,835,012 B of offsets |
+| **resident** | **40,078,758 B (38.2 MiB)** | **30,903,722 B (29.5 MiB)** |
+
+Felucca, 7168×4096, its 458,752 blocks and its 2,906,871 statics — the counts
+the importer reports, not an estimate. A static is ten bytes (nine of fields and
+one of alignment), which `a_static_is_ten_bytes_in_the_run` pins, because after
+this node the base layer's size is that number times a count and nothing else.
+The headers were counted for **every** block: an empty `Vec` allocates nothing
+but still costs its 24 bytes in the array, and three quarters of Felucca's
+blocks are empty ground.
+
+The whole facet load peaks at 257 MiB resident, most of which is the land —
+29,360,128 cells of four bytes is 112 MiB — and the file buffers it was read
+from.
+
+### What the node decided
+
+**`place_static` and `remove_static` stay, and what changes is their cost.** The
+plan said the in-place tail shift goes and a builder replaces it; what went is
+the *per-block* shift, and the tail it moves now is the facet's. The reasoning
+the plan did not have:
+
+- **The pair is already the narrow door it was going to be replaced by.** Only
+  [`patch::apply_op`](../../crates/common/map/src/patch.rs) calls them in the
+  engine, and a patch op *is* "rebuild the block this touches" — `Vec::insert`
+  on the run is that rebuild, and the cheapest spelling of it: one move of the
+  tail, no second buffer.
+- **A builder's other callers are scenes**, which are one block, and it would
+  have cost every one of them a `build()` seam for no property. `Scene` in
+  `openshard-movement` mutates and reads interleaved by design, so a builder
+  would have had to be materialised on each read or cached behind a dirty flag.
+- **The trap the plan was closing is closed by `from_parts` instead.** It was
+  that an importer might assemble a facet an item at a time, which is now
+  quadratic; both importers hand over a run and a count per block, and neither
+  can reach `place_static` to do otherwise.
+
+**The counts, not the offsets, are what `from_parts` takes.** It is
+`Chunk::from_parts`' shape deliberately: the prefix sum is the type's, so a
+second decoder cannot accumulate it differently from the first, and the sum
+against the run's length is the assertion that catches a decoder disagreeing
+with itself.
+
+**The sort stays per block.** A global sort by `(y, x)` would interleave two
+blocks that share a row — `from_parts_sorts_each_blocks_own_part_of_the_run` is
+two blocks of one row for that reason.
 
 ## R5 — one install, one load
 
@@ -388,12 +446,13 @@ The oracles that already exist, and which every node above runs:
 
 ## Where a session starts
 
-**R4 or R5** — the two are independent of each other and R3 has landed, so either
-can go first. They are not the same size or the same kind of risk:
+**R5**, and it is the last of the era. The smallest of the five, and the only one
+that changes what a process *holds* rather than what a type is: a playground
+holding two ~150 MiB copies of one world holds one.
 
-- **R4** is measured, bounded and has an oracle already written: the base-set
-  round trip either stays byte-identical or it does not.
-- **R5** is the smallest, and the only one that changes what a process *holds*
-  rather than what a type is.
+With R4 landed, nothing is left waiting on era R's shape — [era
+P](map_rebuild.md) may start, and `Spans` now has both halves of the argument it
+was waiting for: what a house contributes to a surface (R3) and how the statics
+are held (R4).
 
 Progress goes in [`handoffs/`](handoffs/), not here.

@@ -150,6 +150,14 @@ outer array and then a pointer into one of 120,744 separate allocations
 scattered across 28 MiB of heap. That is finding 6, and it is the half of the
 intuition that is correct.
 
+> **Spent.** [R4](../realtime_map.md#r4--statics-become-one-run) made them one
+> run with a per-block offset beside it: two allocations, 38.2 → 29.5 MiB, and a
+> block is reached by an index into a contiguous array rather than by a pointer
+> into the heap. The walk is still transposed against the layout — that is the
+> land's paragraph above, and it is still fine — and the rectangle is still
+> walked three to five times a frame, which is the paragraph below and is still
+> unowned.
+
 **And the rectangle is walked three to five times a frame**, independently:
 [`statics::collect_in_with_fades`](../../../crates/client/render/src/statics.rs#L547),
 [`occlusion::collect_with_interior`](../../../crates/client/render/src/occlusion.rs#L2765) —

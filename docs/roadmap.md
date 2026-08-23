@@ -556,6 +556,30 @@ to read the live layer's surfaces
   pass over the shipped decoration data with a placement of each classic multi
   before anyone is told housing is finished.
 
+### Backlog from R4, the statics becoming one run
+
+Found while making a facet's statics one run with a per-block offset array
+([`realtime_map.md`](map/realtime_map.md)'s R4). Neither blocks R5 or era P.
+
+- **A patch of many ops is now quadratic in the facet.** `place_static` and
+  `remove_static` move the tail of the run and every offset past it, where they
+  used to move the tail of one block — which is right for the one op a published
+  patch usually is, and wrong for a thousand. Nothing publishes at that size
+  today; [direction F](map/new_map_representation/plan.md#f--the-editor)'s editor
+  is what will, and the fix it wants is a publish that groups its ops by block
+  and rebuilds each touched block once, rather than an op at a time. Worth
+  measuring before designing: the whole run is 29.5 MiB, so an op is a ~30 MiB
+  move, and the crossover with "just rebuild the facet" is not far away.
+- **`WorldMap::from_parts`' grouping is a contract with no oracle.** It asserts
+  that the counts are one per block and that they sum to the run's length —
+  neither of which catches a caller that put the *right number* of items in the
+  *wrong* block. That sorts them into the wrong span and every lookup after it is
+  silently wrong, which is the failure mode this crate's block order has always
+  had. Both callers are in-tree and both are tested end to end (the base-set
+  round trip and the client-files import), so this is about the third one: a
+  debug-only check that every item's coordinates fall in the block its count
+  claims would cost one pass over the run at load.
+
 ### Backlog: a sector lookup is linear in a bucket, and a house makes the bucket fat
 
 `Sectors` (`state/src/sectors.rs`) is right where it was measured. Buckets are

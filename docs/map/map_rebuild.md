@@ -127,7 +127,7 @@ Read off the workspace and the plans, so a session does not re-derive it:
 | the tile table lives in the file reader | ✅ R1 — `openshard-tiles`, and `uofiles` is readers, formats and errors |
 | the live layer is not in the map | ✅ R2 — one `World` on both ends |
 | a house has walls and no floors | ✅ R3 — a platform lays two covers, and `can_step` climbs onto them |
-| **the statics are 120,745 vectors** | ⬜ R4 |
+| the statics are 120,745 vectors | ✅ R4 — one run, two allocations, 38.2 → 29.5 MiB |
 | **both ends load the same install separately** | ⬜ R5 |
 | spans, regions over spans, the server reading the graph | ⬜ era P |
 | live publish, revisioned bakes, chunks to the client, the editor | ⬜ era S |
@@ -279,10 +279,15 @@ operation, which is why it is a layer. Committing one into the base stays what
 [direction F](new_map_representation/plan.md#f--the-editor) says it is — an
 editor operation, one-way, after which the entity ceases to exist.
 
-### R4 — the statics stop being 120,745 vectors
+### R4 — the statics stop being 120,745 vectors ✅
 
 **Goal.** The base layer is one immutable run, and the thing that changes is a
 layer above it.
+
+**Built.** The measured end of it is in
+[`realtime_map.md`](realtime_map.md#what-it-measures) — 40,078,758 bytes in
+120,745 allocations became 30,903,722 in two — and the one thing the node
+decided against this plan is below.
 
 Measured on the shipped facet: 2,906,871 statics across 120,744 non-empty
 blocks, **120,745 allocations, 38.2 MiB**, median 18 per block. The CSR pair that
@@ -302,6 +307,12 @@ Take the layout, and take the property under it:
   the base; a patch that adds or removes a static rebuilds the blocks it touched,
   which is what [direction C](new_map_representation/plan.md#c--patches-and-the-resolved-snapshot)
   already says a publish does. `patch::apply_op` moves onto that path.
+  **Built the other way round, and the reasoning is
+  [in the node](realtime_map.md#what-the-node-decided):** the pair stayed and
+  what changed is what it costs. `Vec::insert` on the run *is* "rebuild the block
+  this touches", spelled as one move of the tail; the builder's job — a facet
+  assembled without ever inserting an item — is `from_parts`', which takes the
+  run and a count per block, and both importers go through it.
 - **The packed record is a separate step, gated on a measurement.** Four bytes an
   item — `x`/`y` relative to the block, `hue` in a side table for the 0.95% that
   use one — is 38.2 → ~13.5 MiB and 16 items to a cache line instead of 6.4. It
@@ -311,7 +322,9 @@ Take the layout, and take the property under it:
 
 **Done when:** `WorldMap` holds two allocations of statics; the base is built
 rather than inserted into; the resident size is recorded here; every statics test
-and the base-set round trip pass unchanged.
+and the base-set round trip pass unchanged. **Met**, with the second clause read
+as it is written above: a facet is assembled by `from_parts` and never by
+insertion, and the pair that inserts is the patch path alone.
 
 ### R5 — one install, one load
 
@@ -526,21 +539,21 @@ waits for a measurement that says the statics are still on a hot path.
 
 ## Where a session starts
 
-**R4 or R5 — and the plan to run either from is
-[`realtime_map.md`](realtime_map.md).** R1, R2 and R3 are built: the tile table
-is `openshard-tiles`, a crate with no dependencies at all; one `World` is the map
-on both ends of the wire; and a house has floors a body can stand on, which was
-the first thing here a player would notice. What is left of era R is the two
-nodes about *how much* rather than *what*: the statics as one run, and one load
+**R5, or era P — and the plan to run R5 from is
+[`realtime_map.md`](realtime_map.md).** R1 to R4 are built: the tile table is
+`openshard-tiles`, a crate with no dependencies at all; one `World` is the map on
+both ends of the wire; a house has floors a body can stand on, which was the
+first thing here a player would notice; and a facet's statics are one run. What
+is left of era R is the last node about *how much* rather than *what*: one load
 per install.
 
 **Where the work stands is [`handoffs/`](handoffs/)**, newest last — not here,
 and not in the plan.
 
-**Nothing in era P starts until R4 lands.** The gate was R2 for the *type* and
-that has landed; what era P still waits on is the shape of the layers `Spans` is
-a projection of, and R4 changes how the statics are held. R3 has settled the
-other half — what a house contributes to a surface.
+**Era P is no longer gated.** The gate was R2 for the *type*, and after that the
+shape of the layers `Spans` is a projection of: what a house contributes to a
+surface (R3) and how the statics are held (R4). Both have landed, and R5 changes
+neither — it changes how many copies of a facet a process holds.
 
 **Era S is resumed, not restarted.** Its first half is built and running; the
 handoffs in [`handoffs/`](new_map_representation/handoffs/) are where its state
