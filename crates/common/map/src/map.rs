@@ -68,11 +68,14 @@ fn describe_size(width: u32, height: u32) -> &'static str {
 pub struct WorldMap {
     /// The ground, and the only thing that knows the order it is in.
     land: LandGrid,
-    /// Statics per block, indexed by **the same [`BlockIndex`]** the land is —
-    /// which is load-bearing and which nothing enforces: the two arrays are
-    /// built side by side from one block count and are only ever addressed
-    /// through [`LandGrid::index_of`], so a block's cells and a block's statics
-    /// cannot come apart without that call being wrong for both.
+    /// Every static on the facet, its blocks in the order the land's own
+    /// [`BlockIndex`] gives them — **one run**, not one vector per block.
+    ///
+    /// Felucca is 2,906,871 statics over 120,744 non-empty blocks. Per block
+    /// that was 120,745 allocations and 38.2 MiB, most of it the `Vec` headers
+    /// and the slack of a hundred thousand tiny vectors; as one run it is two
+    /// allocations and 29.6 MiB, and every accessor still hands back a
+    /// `&[StaticItem]` because a block is still contiguous.
     ///
     /// **Each block is sorted by the tile its items stand on** — see
     /// [`WorldMap::statics_at`], which is what the order is for, and [`tile_key`],
@@ -83,7 +86,20 @@ pub struct WorldMap {
     /// `client/render`'s `statics::pick` breaks a tie by taking the last, so a
     /// resort that swapped two items on one tile would change which of them is on
     /// top.
-    statics: Vec<Vec<StaticItem>>,
+    statics: Vec<StaticItem>,
+    /// Where each block's items start, plus a final entry holding the total —
+    /// one more than the land has blocks, non-decreasing. Block `i` owns
+    /// `statics[offsets[i]..offsets[i + 1]]`.
+    ///
+    /// Indexed by **the same [`BlockIndex`]** the land is — which is
+    /// load-bearing and which nothing enforces: the two arrays are built side by
+    /// side from one block count and are only ever addressed through
+    /// [`LandGrid::index_of`], so a block's cells and a block's statics cannot
+    /// come apart without that call being wrong for both.
+    ///
+    /// The same CSR layout [`crate::chunk::Chunk`] has held since it was cut,
+    /// and for the same reason — see that type's `offsets`.
+    offsets: Vec<u32>,
 }
 
 /// A static's sortable coordinate within its block: **`y` first**, then `x`.
@@ -115,7 +131,7 @@ impl fmt::Debug for WorldMap {
         f.debug_struct("WorldMap")
             .field("size", &format!("{}x{}", self.width(), self.height()))
             .field("facet", &self.facet_name())
-            .field("statics", &self.statics.iter().map(Vec::len).sum::<usize>())
+            .field("statics", &self.statics.len())
             .finish()
     }
 }
@@ -153,20 +169,32 @@ impl WorldMap {
     /// client ships is 7,168 tiles across.
     pub fn from_blocks(extent: BlockExtent, cell: impl FnMut(u16, u16) -> LandCell) -> Self {
         let land = LandGrid::from_blocks(extent, cell);
-        let statics = vec![Vec::new(); land.block_count() as usize];
-        Self { land, statics }
+        let offsets = vec![0; land.block_count() as usize + 1];
+        Self {
+            land,
+            statics: Vec::new(),
+            offsets,
+        }
     }
 
     /// Build a facet from land and statics an importer already decoded.
     ///
-    /// The door every importer comes through, and the reason it exists rather
-    /// than a pair of public fields: **the sort is this type's invariant, not
-    /// the decoder's.** [`WorldMap::statics_at`] and [`WorldMap::statics_in_row`] are
-    /// binary searches over `(y, x)` order — see [`tile_key`] — so a decoder
-    /// that handed over an unsorted block would not fail here, it would make
-    /// every later lookup quietly find nothing. Sorting here means no importer
-    /// can get it wrong, and a second importer cannot get it wrong *differently*
-    /// from the first.
+    /// **`statics` is one run, block by block in [`LandGrid::blocks`]' order**,
+    /// and `counts` says how long each block's part of it is — the layout the
+    /// map keeps them in, so an importer that already reads a facet block by
+    /// block hands over what it built rather than a vector per block that would
+    /// be flattened here. It is [`crate::chunk::Chunk::from_parts`]' shape, and
+    /// the prefix sum is this type's for that function's reason: a second
+    /// decoder cannot accumulate it differently from the first.
+    ///
+    /// The other half of why this exists rather than a set of public fields:
+    /// **the sort is this type's invariant, not the decoder's.**
+    /// [`WorldMap::statics_at`] and [`WorldMap::statics_in_row`] are binary
+    /// searches over `(y, x)` order — see [`tile_key`] — so a decoder that
+    /// handed over an unsorted block would not fail here, it would make every
+    /// later lookup quietly find nothing. Sorting here means no importer can get
+    /// it wrong, and a second importer cannot get it wrong *differently* from
+    /// the first.
     ///
     /// The sort is **stable**, which is the half with a consequence a player can
     /// see: two statics on one tile keep the order the importer produced them
@@ -176,22 +204,48 @@ impl WorldMap {
     ///
     /// # Panics
     ///
-    /// If `statics` does not hold exactly one entry per block of `land`. The two
-    /// arrays share [`LandGrid`]'s own [`BlockIndex`], which is what lets a
-    /// block's cells and a block's items be found by one number; a length that
-    /// disagrees is an importer disagreeing with itself, and every lookup past
-    /// the short end would silently be a block with nothing on it.
+    /// If `counts` does not hold exactly one entry per block of `land`, or if
+    /// the counts do not add up to `statics`. The counts and the land share
+    /// [`LandGrid`]'s own [`BlockIndex`], which is what lets a block's cells and
+    /// a block's items be found by one number; a length that disagrees is an
+    /// importer disagreeing with itself, and every lookup past the short end
+    /// would silently be a block with nothing on it.
     #[must_use]
-    pub fn from_parts(land: LandGrid, mut statics: Vec<Vec<StaticItem>>) -> Self {
+    pub fn from_parts(land: LandGrid, mut statics: Vec<StaticItem>, counts: &[u32]) -> Self {
         assert_eq!(
-            statics.len(),
+            counts.len(),
             land.block_count() as usize,
             "an importer handed over statics for a facet of a different size",
         );
-        for block in &mut statics {
-            block.sort_by_key(tile_key);
+        let mut offsets = Vec::with_capacity(counts.len() + 1);
+        let mut total: u32 = 0;
+        offsets.push(0);
+        for count in counts {
+            total = total
+                .checked_add(*count)
+                .expect("a facet of fewer than 4G statics");
+            offsets.push(total);
         }
-        Self { land, statics }
+        assert_eq!(
+            total as usize,
+            statics.len(),
+            "an importer's block counts do not add up to the statics it handed over",
+        );
+
+        for block in 0..counts.len() {
+            let (from, to) = (offsets[block] as usize, offsets[block + 1] as usize);
+            statics[from..to].sort_by_key(tile_key);
+        }
+        // The base layer is one run and it is done growing: a loader that
+        // pushed its way to three million items is holding up to twice the
+        // memory it needs, and this is the one place that knows the growing is
+        // over.
+        statics.shrink_to_fit();
+        Self {
+            land,
+            statics,
+            offsets,
+        }
     }
 
     /// The facet's width in tiles.
@@ -289,13 +343,27 @@ impl WorldMap {
     /// push used to put it — which is what keeps the sort an invariant of the
     /// type rather than of the loader, and what makes the ordinal of a
     /// just-added static knowable without a search.
+    ///
+    /// # What it costs, and why that is not the way to load a facet
+    ///
+    /// The statics are one run, so putting one in moves the rest of the facet's
+    /// items along by one and bumps every block offset after it — the block
+    /// this touches is rebuilt in place and everything past it shifts. That is
+    /// the cost a *published patch* is defined to pay, and it is nothing at all
+    /// on a scene of one block. It is also why an importer must not come this
+    /// way: three million calls would be three million shifts of a shrinking
+    /// tail. [`WorldMap::from_parts`] is the door that assembles a facet, and
+    /// the two `.mul`/base-set importers are both through it.
     pub fn place_static(&mut self, item: StaticItem) {
         let Some(block) = self.block_index(item.x, item.y) else {
             return;
         };
-        let slot = &mut self.statics[block.get() as usize];
-        let at = slot.partition_point(|had| tile_key(had) <= tile_key(&item));
-        slot.insert(at, item);
+        let (from, to) = self.span(block);
+        let at = from + self.statics[from..to].partition_point(|had| tile_key(had) <= tile_key(&item));
+        self.statics.insert(at, item);
+        for offset in &mut self.offsets[block.get() as usize + 1..] {
+            *offset += 1;
+        }
     }
 
     /// Take the `nth` static standing on a tile off the map, and hand it back.
@@ -310,15 +378,25 @@ impl WorldMap {
     /// is not a defect to be designed away: an ordinal is only ever read
     /// against a stated revision, and taking a static out is what produces the
     /// next one.
+    ///
+    /// It costs what [`WorldMap::place_static`] costs, and for the same reason.
     pub fn remove_static(&mut self, x: u16, y: u16, nth: usize) -> Option<StaticItem> {
         let block = self.block_index(x, y)?;
-        let slot = &mut self.statics[block.get() as usize];
+        let (start, end) = self.span(block);
+        let slot = &self.statics[start..end];
         // The same two searches [`WorldMap::statics_at`] makes, over the same sorted
         // run: the first item of the tile, and how many of them there are.
         let key = StaticTileKey(y, x);
         let from = slot.partition_point(|item| tile_key(item) < key);
         let count = slot[from..].partition_point(|item| tile_key(item) == key);
-        (nth < count).then(|| slot.remove(from + nth))
+        if nth >= count {
+            return None;
+        }
+        let gone = self.statics.remove(start + from + nth);
+        for offset in &mut self.offsets[block.get() as usize + 1..] {
+            *offset -= 1;
+        }
+        Some(gone)
     }
 
     /// Every static standing on a point.
@@ -418,14 +496,27 @@ impl WorldMap {
 
     /// One block's statics, empty for a block the facet does not have.
     ///
-    /// The one place `statics` is subscripted, and it goes through the land's
-    /// own [`LandGrid::index_of`] — which is what the field's doc comment means
-    /// by the two arrays sharing an index.
+    /// Two of the three places `statics` is sliced, and it goes through the
+    /// land's own [`LandGrid::index_of`] — which is what the offsets' doc
+    /// comment means by the two arrays sharing an index.
     fn statics_of(&self, block: BlockCoord) -> &[StaticItem] {
-        self.land
-            .index_of(block)
-            .and_then(|block| self.statics.get(block.get() as usize))
-            .map_or(NO_STATICS, Vec::as_slice)
+        match self.land.index_of(block) {
+            Some(block) => {
+                let (from, to) = self.span(block);
+                &self.statics[from..to]
+            }
+            None => NO_STATICS,
+        }
+    }
+
+    /// Where one block's items begin and end in the run.
+    ///
+    /// The offsets are one longer than the facet has blocks, so `block + 1` is
+    /// there for every block a [`BlockIndex`] can name — which is what makes
+    /// this infallible where [`WorldMap::statics_of`] is not.
+    fn span(&self, block: BlockIndex) -> (usize, usize) {
+        let at = block.get() as usize;
+        (self.offsets[at] as usize, self.offsets[at + 1] as usize)
     }
 
     /// Which block a tile's statics are in, or `None` off the map.
@@ -435,7 +526,7 @@ impl WorldMap {
 
     /// How many statics the facet holds.
     pub fn static_count(&self) -> usize {
-        self.statics.iter().map(Vec::len).sum()
+        self.statics.len()
     }
 
     /// A point on the ground, for a caller that only has x and y.
@@ -782,5 +873,133 @@ mod tests {
             "a column the facet has not"
         );
         assert!(map.statics_in_block(0, 2).is_empty(), "a row the facet has not");
+    }
+
+    /// An edit in one block moves every block after it, and none of them notices.
+    ///
+    /// The failure mode the one-run layout adds and the per-block vectors could
+    /// not have: a block's items are found through an offset now, so putting a
+    /// static into block 0 shifts block 1's items along the run and *every*
+    /// offset past it has to move with them. Miss one and the neighbour's
+    /// lookups read a slice one item out of place — which is not a panic, it is
+    /// a wall that is silently the item next to it.
+    ///
+    /// So the assertion is over the whole facet after each edit, and the edits
+    /// are in the earliest block on purpose: an edit in the last one would pass
+    /// with the offsets left alone entirely.
+    #[test]
+    fn an_edit_in_one_block_leaves_every_other_block_where_it_was() {
+        let mut map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 2 }, |_, _| LandCell::default());
+        // One item per block, named by its block, and one extra pair in block 0
+        // for the removal below to have an ordinal to name.
+        let mut expected: Vec<(Graphic, u16, u16)> = Vec::new();
+        let mut tile = 0;
+        for block_x in 0..3u16 {
+            for block_y in 0..2u16 {
+                tile += 1;
+                let (x, y) = (block_x * 8 + 2, block_y * 8 + 3);
+                map.place_static(StaticItem {
+                    tile: Graphic(tile),
+                    x,
+                    y,
+                    z: 0,
+                    hue: Hue(0),
+                });
+                expected.push((Graphic(tile), x, y));
+            }
+        }
+        let whole_facet = |map: &WorldMap| {
+            (0..16u16)
+                .flat_map(|y| {
+                    map.statics_in_row(y, 0, 23)
+                        .map(|item| (item.tile, item.x, item.y))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        let sorted = |mut items: Vec<(Graphic, u16, u16)>| {
+            items.sort_by_key(|(_, x, y)| (*y, *x));
+            items
+        };
+        assert_eq!(whole_facet(&map), sorted(expected.clone()));
+
+        // Into the first block, which is the one every other block's offset is
+        // downstream of.
+        map.place_static(StaticItem {
+            tile: Graphic(100),
+            x: 1,
+            y: 3,
+            z: 0,
+            hue: Hue(0),
+        });
+        expected.push((Graphic(100), 1, 3));
+        assert_eq!(whole_facet(&map), sorted(expected.clone()));
+        assert_eq!(map.static_count(), 7);
+
+        // And back out again: the first of the two standing in block 0's row 3.
+        let gone = map.remove_static(1, 3, 0).expect("the static just placed");
+        assert_eq!(gone.tile, Graphic(100));
+        expected.retain(|(tile, ..)| *tile != Graphic(100));
+        assert_eq!(whole_facet(&map), sorted(expected));
+        assert_eq!(map.static_count(), 6);
+        assert_eq!(map.remove_static(1, 3, 0), None, "nothing stands there now");
+    }
+
+    /// What the base layer costs is its count times this, and nothing else.
+    ///
+    /// Nine bytes of fields in ten of storage — the padding is the alignment of
+    /// the three `u16`s. Felucca's 2,906,871 statics are 29,068,710 bytes of
+    /// run and 1,835,012 of offsets, and both halves of that are arithmetic
+    /// over this number, so a field added here is 2.9 MiB of resident memory
+    /// per byte it adds. That is the measurement the one-run layout was for.
+    #[test]
+    fn a_static_is_ten_bytes_in_the_run() {
+        assert_eq!(size_of::<StaticItem>(), 10);
+    }
+
+    /// The importer's door sorts each block's own part of the run, and only it.
+    ///
+    /// [`WorldMap::from_parts`] takes one run and a count per block, so the sort
+    /// it owes is per block rather than over the whole facet — a global sort by
+    /// `(y, x)` would interleave two blocks that share a row and leave every
+    /// block's slice holding somebody else's items. Two blocks of one row are
+    /// where that shows.
+    #[test]
+    fn from_parts_sorts_each_blocks_own_part_of_the_run() {
+        let land = LandGrid::from_blocks(BlockExtent { wide: 2, down: 1 }, |_, _| LandCell::default());
+        let item = |tile, x, y| StaticItem {
+            tile: Graphic(tile),
+            x,
+            y,
+            z: 0,
+            hue: Hue(0),
+        };
+        // In file order, which is not tile order: block 0's three items and then
+        // block 1's two, the two on (3, 5) in the order the file has them.
+        let statics = vec![
+            item(10, 3, 5),
+            item(20, 1, 2),
+            item(30, 3, 5),
+            item(40, 9, 7),
+            item(50, 12, 0),
+        ];
+        let map = WorldMap::from_parts(land, statics, &[3, 2]);
+
+        let named = |items: &[StaticItem]| items.iter().map(|item| item.tile).collect::<Vec<_>>();
+        assert_eq!(
+            named(map.statics_in_block(0, 0)),
+            vec![Graphic(20), Graphic(10), Graphic(30)],
+            "block 0 is sorted by tile, stably",
+        );
+        assert_eq!(
+            named(map.statics_in_block(1, 0)),
+            vec![Graphic(50), Graphic(40)],
+            "block 1 is sorted within itself",
+        );
+        assert_eq!(
+            map.statics_at(3, 5).map(|item| item.tile).collect::<Vec<_>>(),
+            vec![Graphic(10), Graphic(30)],
+        );
+        assert_eq!(map.static_count(), 5);
     }
 }

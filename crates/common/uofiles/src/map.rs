@@ -236,15 +236,15 @@ fn from_bytes(
     })?;
     let land = LandGrid::from_file_order(width, height, cells_of(&bytes));
 
-    let statics = match statics_paths {
+    let (statics, counts) = match statics_paths {
         Some((index_path, data_path)) => load_statics(index_path.as_ref(), data_path.as_ref(), &land)?,
-        None => vec![Vec::new(); blocks],
+        None => (Vec::new(), vec![0; blocks]),
     };
 
-    // `from_parts` and not a pair of fields: the per-block sort by tile is the
+    // `from_parts` and not a set of fields: the per-block sort by tile is the
     // map's own invariant, so a decoder cannot forget it and a second importer
     // cannot get it wrong differently from this one.
-    Ok(WorldMap::from_parts(land, statics))
+    Ok(WorldMap::from_parts(land, statics, &counts))
 }
 
 /// `land` is what says how many blocks there are and where each one starts
@@ -254,7 +254,7 @@ fn load_statics(
     index_path: &Path,
     data_path: &Path,
     land: &LandGrid,
-) -> Result<Vec<Vec<StaticItem>>, MapError> {
+) -> Result<(Vec<StaticItem>, Vec<u32>), MapError> {
     let index = read(index_path)?;
     let data = read(data_path)?;
 
@@ -268,9 +268,12 @@ fn load_statics(
     }
 
     // `staidx` entry n describes block n, which is what makes the statics
-    // share the land's own [`BlockIndex`].
-    let mut out: Vec<Vec<StaticItem>> = vec![Vec::new(); blocks];
-    for (slot, block) in out.iter_mut().zip(land.blocks()) {
+    // share the land's own [`BlockIndex`]. Read in that order, so the items go
+    // straight into the one run `WorldMap` keeps them in and the counts are the
+    // lengths this loop already knows.
+    let mut out: Vec<StaticItem> = Vec::with_capacity(data.len() / STATIC_BYTES);
+    let mut counts: Vec<u32> = Vec::with_capacity(blocks);
+    for block in land.blocks() {
         let at = block.get() as usize * STAIDX_ENTRY;
         let offset = u32::from_le_bytes([index[at], index[at + 1], index[at + 2], index[at + 3]]);
         let length = u32::from_le_bytes([index[at + 4], index[at + 5], index[at + 6], index[at + 7]]);
@@ -279,39 +282,43 @@ fn load_statics(
         // most of Britannia is empty ground. A length that runs past the end
         // of the file means a truncated download, and reading it would
         // panic, so both are simply "nothing here".
-        if offset == u32::MAX || length == u32::MAX || length == 0 {
-            continue;
-        }
-        let (Ok(offset), Ok(length)) = (usize::try_from(offset), usize::try_from(length)) else {
-            continue;
-        };
-        let Some(chunk) = data.get(offset..offset + length) else {
-            continue;
+        let named = offset != u32::MAX && length != u32::MAX && length != 0;
+        let chunk = match named {
+            true => match (usize::try_from(offset), usize::try_from(length)) {
+                (Ok(offset), Ok(length)) => data.get(offset..offset + length),
+                _ => None,
+            },
+            false => None,
         };
 
-        // The inverse of the block order — the grid's, because getting it
-        // backwards here places every block past the first column somewhere
-        // else in a file that parses perfectly.
-        let (block_x, block_y) = land.origin_of(block).expect("a block of this facet");
+        // The block's own part of the run, measured rather than predicted: a
+        // trailing partial entry is not one, and the count has to be what was
+        // actually pushed.
+        let was = out.len();
+        if let Some(chunk) = chunk {
+            // The inverse of the block order — the grid's, because getting it
+            // backwards here places every block past the first column somewhere
+            // else in a file that parses perfectly.
+            let (block_x, block_y) = land.origin_of(block).expect("a block of this facet");
 
-        let mut items = Vec::with_capacity(chunk.len() / STATIC_BYTES);
-        for entry in chunk.chunks_exact(STATIC_BYTES) {
-            items.push(StaticItem {
-                tile: Graphic(u16::from_le_bytes([entry[0], entry[1]])),
-                // The file stores an offset within the block; a world
-                // coordinate is more use to everyone downstream.
-                x: (block_x + u32::from(entry[2] & 0x7)) as u16,
-                y: (block_y + u32::from(entry[3] & 0x7)) as u16,
-                z: entry[4] as i8,
-                hue: Hue(u16::from_le_bytes([entry[5], entry[6]])),
-            });
+            for entry in chunk.chunks_exact(STATIC_BYTES) {
+                out.push(StaticItem {
+                    tile: Graphic(u16::from_le_bytes([entry[0], entry[1]])),
+                    // The file stores an offset within the block; a world
+                    // coordinate is more use to everyone downstream.
+                    x: (block_x + u32::from(entry[2] & 0x7)) as u16,
+                    y: (block_y + u32::from(entry[3] & 0x7)) as u16,
+                    z: entry[4] as i8,
+                    hue: Hue(u16::from_le_bytes([entry[5], entry[6]])),
+                });
+            }
         }
         // Handed over in file order. `WorldMap::from_parts` is what sorts a block by
         // tile, **stably**, so two statics on one tile keep the order the file
         // has them in and the last of them stays the one on top.
-        *slot = items;
+        counts.push(u32::try_from(out.len() - was).expect("a block of fewer than 4G statics"));
     }
-    Ok(out)
+    Ok((out, counts))
 }
 
 /// The cells of a map file, straight down it: every block's four-byte header

@@ -499,7 +499,11 @@ pub fn assemble(
 ) -> Result<WorldMap, AssemblyError> {
     let blocks = facet_extent.count() as usize;
     let mut cells = vec![LandCell::default(); blocks * CELLS_PER_BLOCK];
-    let mut statics: Vec<Vec<StaticItem>> = vec![Vec::new(); blocks];
+    // Where each block's items are, still inside the chunk that carried them:
+    // the chunks arrive in *their* order and the facet wants them in the land's,
+    // so the run below is laid out in one pass over this rather than by growing
+    // a vector per block and flattening it afterwards.
+    let mut statics: Vec<&[StaticItem]> = vec![&[]; blocks];
     let mut covered = vec![false; blocks];
     let mut revision: Option<MapRevision> = None;
 
@@ -545,7 +549,7 @@ pub fn assemble(
             }
             let from = index * CELLS_PER_BLOCK;
             cells[from..from + CELLS_PER_BLOCK].copy_from_slice(chunk.land_in_block(local));
-            statics[index] = chunk.statics_in_block(local).to_vec();
+            statics[index] = chunk.statics_in_block(local);
         }
     }
 
@@ -559,10 +563,20 @@ pub fn assemble(
         facet_extent.down * BLOCK_SIZE,
         cells.into_iter(),
     );
-    // `from_parts`, and not a pair of fields: the sort is the map's invariant,
+    // One run in the land's own block order, which is the order this vector is
+    // in: the map's layout, assembled once here rather than copied twice.
+    let counts: Vec<u32> = statics
+        .iter()
+        .map(|block| u32::try_from(block.len()).expect("a block of fewer than 4G statics"))
+        .collect();
+    let mut items = Vec::with_capacity(statics.iter().map(|block| block.len()).sum());
+    for block in statics {
+        items.extend_from_slice(block);
+    }
+    // `from_parts`, and not a set of fields: the sort is the map's invariant,
     // so this importer cannot forget it and cannot get it wrong differently
     // from the `.mul` one.
-    Ok(WorldMap::from_parts(land, statics))
+    Ok(WorldMap::from_parts(land, items, &counts))
 }
 
 #[cfg(test)]
