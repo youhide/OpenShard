@@ -12,7 +12,7 @@
 //! from an install is the point of the split, and it is what
 //! `docs/map/new_map_representation/` is building towards.
 //!
-//! Seven modules, and the order they depend on each other in:
+//! Eight modules, and the order they depend on each other in:
 //!
 //! - [`grid`] — the land, and the one type that owns the block order it is in.
 //! - [`map`] — one facet: that land, and everything standing on it.
@@ -25,6 +25,8 @@
 //! - [`overlay`] — the third layer: what the live world has laid over the two
 //!   above, by tile. Storage, like everything else here; the rules that read it
 //!   are `openshard-movement`'s.
+//! - [`world`] — the three layers as one value, which is what a reader is
+//!   handed and what a bake is deliberately handed less than.
 //!
 //! Bytes are not a file: nothing here opens one, and where a base set or a
 //! patch log lives on disk is a caller's business — `openshard_basemap` is the
@@ -37,3 +39,4 @@ pub mod map;
 pub mod overlay;
 pub mod patch;
 pub mod snapshot;
+pub mod world;

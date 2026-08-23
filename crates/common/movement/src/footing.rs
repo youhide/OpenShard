@@ -31,6 +31,8 @@
 //!   only a step needs all three.
 
 use openshard_map::overlay::{Doors, Overlay};
+use openshard_map::world::World;
+use openshard_tiles::TileData;
 
 use crate::terrain::MapTerrain;
 
@@ -38,9 +40,13 @@ use crate::terrain::MapTerrain;
 ///
 /// `Copy` and built where it is asked: two pointers, a reference and a byte,
 /// with nothing owned and nothing stored. Both ends of the wire already hold
-/// the parts — the shard as a facet's snapshot, its overlay and the shard's
-/// tile table; the client as its resources and its view — so this is a view
-/// over what the caller has rather than a thing anybody keeps.
+/// the parts — a facet's [`World`] and the install's tile table — so this is a
+/// view over what the caller has rather than a thing anybody keeps. It is built
+/// through [`Footing::of`] wherever that pair is what the caller has; the bare
+/// [`Footing::new`] is for the callers that deliberately want *less* than a
+/// world, and there are two of them: a client reading the bare map the coarse
+/// graph was baked over, and a test that is about the overlay and nothing
+/// else.
 #[derive(Clone, Copy, Debug)]
 pub struct Footing<'a> {
     /// The map, or `None` for a world with no map at all: no floor, no walls,
@@ -63,6 +69,26 @@ impl<'a> Footing<'a> {
     #[must_use]
     pub const fn new(map: Option<MapTerrain<'a>>, overlay: &'a Overlay, doors: Doors) -> Self {
         Self { map, overlay, doors }
+    }
+
+    /// The ground one facet's [`World`] is, read as `doors` reads it.
+    ///
+    /// **The one composition**, and the reason `World` exists: the map and what
+    /// is laid over it come out of a single value that says they are the same
+    /// facet, instead of being two arguments a caller assembled and could
+    /// assemble wrongly. Every production site that used to build a footing
+    /// field by field goes through here.
+    ///
+    /// The tile table is its own argument because its scope is different: one
+    /// install has one table and several facets, so what a graphic *is* is not
+    /// a fact about this world. That asymmetry is the whole of the signature.
+    #[must_use]
+    pub fn of(world: &'a World, tiles: &'a TileData, doors: Doors) -> Self {
+        Self {
+            map: world.snapshot().map(|base| MapTerrain::new(base.map(), tiles)),
+            overlay: world.live(),
+            doors,
+        }
     }
 
     /// The same ground, read the other way round.
