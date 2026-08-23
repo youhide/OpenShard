@@ -15,6 +15,18 @@
 //!
 //! Everything is accumulated into a checksum that is printed, so nothing here
 //! can be optimised away as dead.
+//!
+//! # Raise `--repeat` on a busy machine, and say what you raised it to
+//!
+//! Every row is the *least* of `--repeat` passes, which is the right estimator
+//! under load — the fastest pass is the least disturbed one — but only once
+//! there are enough passes for one of them to run clean. The default five is
+//! enough on a quiet machine and is not enough on a loaded one: at load average
+//! 33 on 24 cores it moved rows by 30% run to run and produced a stable-looking
+//! reading that `--repeat 25` does not reproduce, which is how
+//! `navigation_spans.md`'s *baked adjacency* entry briefly recorded two tiers as
+//! costing the same when one of them is 23 ns cheaper. **Take three runs and
+//! quote the least**, and put the repeat count next to any number kept.
 
 use std::hint::black_box;
 use std::path::PathBuf;

@@ -1442,40 +1442,49 @@ graph over spans names neither.
 
   **A mask hangs on a span, and 92% of the facet's columns have none** — that is
   the whole of the finding, and it makes the *population* the number to measure
-  rather than the saving. Two origins, release, fastest of five:
+  rather than the saving. Two origins, release, `--repeat 25`, least of three
+  runs. **The repeat count is not decoration**: this was taken on a machine at
+  load average 33 on 24 cores, where the default five passes moved a row by 30%
+  run to run and produced a reading — *the two tiers cost the same* — that
+  twenty-five passes do not reproduce. Anything quoted here from fewer is a
+  number about the machine.
 
   | | open country (1500, 1900) | the castle (1363, 1600) |
   |---|---|---|
   | starts on a stored column | 16.0% | 46.3% |
-  | expansion, stored start | 204.5 ns | 240.4 ns |
-  | expansion, bare start | 204.6 ns | 196.9 ns |
-  | the floor — landings free | 39.4 ns | 44.0 ns |
+  | expansion, whole node | 198.9 ns | 210.5 ns |
+  | expansion, stored start | **170.4 ns** | 225.4 ns |
+  | expansion, bare start | 193.9 ns | 184.1 ns |
+  | the floor — landings free | 31.7 ns | 42.6 ns |
   | of 8 neighbours, refused from a stored column | 12% | 20% |
 
   **Three readings, and each kills a different version of the idea:**
 
-  - **The two tiers cost the same** — 204.5 against 204.6 in open country. The
-    premise baked adjacency inherited from Recast is that the columns with
-    geometry in them are the expensive ones; after N1's three tiers they are not,
-    and at the castle the 43 ns that separates them is the whole prize on 46% of
-    expansions.
+  - **The tier a mask could serve is the faster one where most walking happens.**
+    In open country a stored start is **170.4 ns against bare land's 193.9** —
+    the bake beats the land grid, because a span carries its height where a bare
+    column derives one from four corner reads. It is dearer only at the castle,
+    225.4 against 184.1, where the run being walked is a wall's. So the premise
+    baked adjacency inherited from Recast — that the columns with geometry in
+    them are the expensive ones — is not merely weakened after N1's three tiers;
+    over 84% of the sampled facet it is **backwards**.
   - **The rejection mask — one bit per direction, no heights, 1.6 MB — has
     nothing to skip.** It can only save the reads it refuses, and a stored column
     refuses **12–20% of its eight neighbours**: one read of eight, on 16–46% of
-    expansions. That is ~4 ns of a 209 ns expansion in open country and ~9 ns of
-    223 at the castle — **under 2% of a node** either way. This was the cheap,
+    expansions. That is ~3 ns of a 199 ns expansion in open country and ~9 ns of
+    211 at the castle — **under 2% of a node** either way. This was the cheap,
     census-approved half, and it is the one the number refuses.
   - **The full record does work, and covers the wrong half.** The floor says the
-    landing half is ~165 ns of a ~210 ns expansion, so removing it is real — but
-    a record that answers *where* a step lands is a mask plus eight landing
-    heights, ~9 bytes on a 4-byte span: **~15 MB against the bake's 11.2 MiB,
-    more than doubling it**, to make 16% of open-country and 46% of castle
-    expansions ~4× cheaper. Weighted against a whole node — expansion plus
-    ~231 ns of A\* — that is **6% and 17%**. Nothing asks for 6%, and the 17%
+    landing half is ~155–172 ns of a ~199–211 ns expansion, so removing it is
+    real — but a record that answers *where* a step lands is a mask plus eight
+    landing heights, ~9 bytes on a 4-byte span: **~15 MB against the bake's
+    11.2 MiB, more than doubling it**, to make 16% of open-country and 46% of
+    castle expansions ~4× cheaper. Weighted against a whole node — expansion plus
+    ~225 ns of A\* — that is **5% and 19%**. Nothing asks for 5%, and the 19%
     is the case the coarse graph already routes around.
 
   **The floor raised a fourth idea, and the same run refuses that too.** The
-  landing half is ~165 ns for eight neighbours — ~21 ns each — where
+  landing half is ~155–172 ns for eight neighbours — ~20 ns each — where
   `surface_at` measured *alone* on one column is 12.4 ns. The obvious reading of
   that gap is locality: eight neighbours are eight walks of the same addressing
   chain — `extent().index_of`, `blocks`, `tables`, the occupancy word, the prefix
@@ -1484,17 +1493,18 @@ graph over spans names neither.
 
   **It is not.** The row *all eight on one column* is those eight lookups aimed
   at one column: the same `check`, the same tier, the same arithmetic, with only
-  the addressing made hot and shared. It is **141.9 ns against 159.4** in open
-  country and **154.0 against 173.6** at the castle. So the addressing is ~20 ns
-  of the ~165 — one eighth — and a hoist threading a resolved block through
+  the addressing made hot and shared. It is **137.6 ns against 155.4** in open
+  country and **151.0 against 171.6** at the castle — the same gap, ~18 and
+  ~21 ns, in two places that share nothing else. So the addressing is **one
+  eighth of the landing half**, and a hoist threading a resolved block through
   `MapTerrain::check` into `Spans::check` would buy ~9% of an expansion and ~4%
   of a node, for a change across the seam N3 and the terrain work spent two
-  sessions making narrow. **The landing half is not addressing: it is ~18 ns of
+  sessions making narrow. **The landing half is not addressing: it is ~19 ns of
   rule, eight times**, which is what N1 already brought it down to.
 
   **So the whole of this entry closes the same way, and it closes the question
-  above it as well.** A node is ~215 ns of terrain against ~223 ns of A\*, and
-  after four attempts on the terrain half — a mask, a rejection mask, a full
+  above it as well.** A node is ~200–210 ns of terrain against ~225 ns of A\*,
+  and after four attempts on the terrain half — a mask, a rejection mask, a full
   record, a locality hoist — none of them moves a node by a tenth. The lever
   that is left is not a cheaper node. It is **fewer nodes**, which is the coarse
   graph, and that is built and read.
@@ -1535,10 +1545,10 @@ adjacency** — has now been measured and **declined**, along with the two
 smaller ideas around it.
 
 **🚩 That closes the node-expansion question itself, and a session should not
-re-open it without a new reason.** A node is ~215 ns of terrain against ~223 ns
-of A\*'s own heap and hash. Four separate attacks on the terrain half were
-priced in one run of `step_cost` — a full per-span record (~15 MB, 6% of a node
-in open country and 17% at the castle), a rejection mask (1.6 MB, under 2%), a
+re-open it without a new reason.** A node is ~200–210 ns of terrain against
+~225 ns of A\*'s own heap and hash. Four separate attacks on the terrain half
+were priced in one run of `step_cost` — a full per-span record (~15 MB, 5% of a
+node in open country and 19% at the castle), a rejection mask (1.6 MB, under 2%), a
 locality hoist across the `MapTerrain`/`Spans` seam (no bytes, ~4%), and the
 dense `average_land_z` before them — and **none of them moves a node by a
 tenth**. The terrain half is ~18 ns of rule eight times, which is what N1's
