@@ -212,6 +212,40 @@ So the boat phases do not have to *fix* the divergence, and must not make it
 worse. But they are what finally hands the fix its evidence, and that is named as
 an output rather than left to be noticed.
 
+#### 🚩 The measurement was taken, 2026-08-23, and the first bullet's cause is wrong
+
+`terrain.rs`'s `land_check_survey` runs the guard over the whole of facet 0
+twice, once as a walker and once **as a swimmer** — which is this bullet's case,
+since a swimmer is exactly the body water is ground to. The guard fires 2,385
+times for the swimmer against 2,381 for the walker, and in **neither** run does a
+body land below the surface the guard discarded. Not once, out of every platform
+static on the facet.
+
+The arithmetic is the guard's own third condition, `landCenter > ourZ`: it fires
+only where the land is *higher* than the deck, so discarding the deck moves the
+body **up** onto the land. It cannot put a body under anything.
+
+**And a boat's deck could never have been the thing discarded**, which is the
+stronger half. That guard lives inside `MapTerrain::check`'s loop over the
+*map's* statics, and a moored ship is not in the map — it is a `Cover` in the
+overlay, reached through `walk::aboard` and `walk::climbed`, which is a different
+function that never sees the guard at all. The bullet describes a mechanism that
+does not connect to the thing it is about.
+
+**What is not refuted is the outcome**, only this route to it. With `swimming`
+on, `check` stops refusing water and answers with its `land_center`, so a body
+that cannot reach the deck stands on the sea instead of being refused — and the
+deck is reached through `climbed`, which bounds the climb by `MAX_STEP_UP`. A
+deck more than two above the water would leave a body floating under its own
+ship. That is a different defect with a different owner, it has **not** been
+measured, and it needs the overlay this survey does not have.
+
+**So the flag stays off** — the conclusion is unchanged, and B4 does not move.
+What changes is that the reason is now an open question rather than a settled
+one, and the second bullet's repro is spent: it was run, and it refuted the thing
+it was built to confirm. See `roadmap.md`'s pier-and-bridge entry for the full
+numbers and for the suspects the player report has left.
+
 ### B6 — control is speech, and the tiller is a double-click.
 
 The reference's tillerman answers speech keywords — forward, back, left, unfurl

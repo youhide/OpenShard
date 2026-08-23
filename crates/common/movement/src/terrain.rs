@@ -1679,6 +1679,16 @@ mod tests {
     /// down: what is worth having is the count, on demand, and an assertion over
     /// a facet's worth of shipped art is an assertion about the art.
     ///
+    /// **Run twice, and the second run is `boats.md`'s.** That document argues
+    /// against ever turning `MapTerrain::swimming` on, and one of its two reasons
+    /// is this guard: with swimming on, water becomes ground, *"the deck static
+    /// is discarded from the candidate list, and a player walking aboard lands on
+    /// the water's `land_center` — in the sea, under their own boat. That is not
+    /// a tidiness argument against the flag; it is a measurable fall."* It is the
+    /// same prediction the roadmap entry makes, resting on the same arithmetic,
+    /// so it is measured here rather than reasoned about — a swimmer's view of
+    /// the same install is one call.
+    ///
     /// ```sh
     /// cargo test --release -p openshard-movement land_check_survey -- --nocapture --ignored
     /// ```
@@ -1689,7 +1699,14 @@ mod tests {
             eprintln!("OPENSHARD_CLIENT is unset — nothing to survey");
             return;
         };
-        let t = install.terrain();
+        survey_land_check(&install.terrain(), "a walker");
+        survey_land_check(&install.swimming(), "a swimmer — boats.md's case");
+    }
+
+    /// [`land_check_survey`]'s body, over whichever view of the install it is
+    /// handed. Water is ground to one of them and not to the other, which is the
+    /// whole of what the second run is asking about.
+    fn survey_land_check(t: &MapTerrain<'_>, who: &str) {
         let (width, height) = (t.map().width(), t.map().height());
 
         // Pairs of (tile, platform static) the guard would discard, split by
@@ -1783,7 +1800,7 @@ mod tests {
             }
         }
 
-        println!("landCheck survey over facet 0, {width}x{height}");
+        println!("landCheck survey over facet 0, {width}x{height} — {who}");
         println!("  the guard discards a platform:      {fired}");
         println!("    of those, climbable (pier/bridge): {fired_climbable}");
         println!("  and the body then lands BELOW it:   {fell} (worst {worst_fall})");
