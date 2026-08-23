@@ -4098,6 +4098,33 @@ work had to touch anyway:
   difference between enum variants). The first three are a parallel session's
   open files, which is why they were left rather than swept.
 
+### Found while pricing `navigation_spans.md`'s baked adjacency
+
+- **The instrument carries its own copy of the rule it measures.**
+  `examples/step_cost.rs`'s `expand` helper reimplements the diagonal flank rule
+  — the two flanking cardinals of a diagonal, refused together — and **four** of
+  its rows now go through it, including the *floor* and *all eight on one column*
+  rows the baked-adjacency decision rests on. `steps_out_of` owns that rule, and
+  the example cannot call it for the rows whose whole point is to swap one half
+  of the expansion out. So a change to the flank rule leaves the example
+  measuring the *old* rule and passing: no test fails, and the plan's next number
+  is quietly about something else. Same class as
+  [`parity.md`](parity.md)'s frame assembled by hand in seven places, one layer
+  down. What would close it is `steps_out_of` growing a seam the example can
+  substitute into, so there is one flank rule and the harness borrows it.
+- **A bench's default is a claim about the machine it was written on.**
+  `step_cost --repeat` defaulted to five passes, which is enough on a quiet
+  machine; at load average 33 on 24 cores it moved rows by 30% run to run and
+  produced a stable-*looking* reading that twenty-five passes do not reproduce —
+  and that reading reached `navigation_spans.md` before it was caught. The
+  discipline is now a section in the example's own module doc. **The other
+  measuring examples were not audited for the same thing.** `coarse_bench` is
+  the one that already does the right thing and is worth copying — it prints
+  `repeat={}` in its own header, so a number quoted from it carries how it was
+  taken. `map_path_probe` has the flag and does not print it; `span_index` and
+  `span_census` quote a bake time with no repeat at all, and it is a bake time
+  the plans keep.
+
 ## Later
 
 LLM NPCs, quest generation, GM assistant, Discord integration. All optional, all
