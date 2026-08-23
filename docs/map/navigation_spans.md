@@ -1,15 +1,18 @@
 # The first storey
 
-> **Status: live — era P, started. N0, N1, N2, N3 and N3b are built.** The gate
-> is gone: [`realtime_map.md`](realtime_map.md)'s era R is over, the span layer
-> is built and measured against the whole facet, and **the shard now walks on
-> it** — a node expansion is 208 ns where it was 1,105 and a search from the
-> castle is 0.168 ms where it was 0.793. N3b then spent that on the answer:
-> **a node is a place to stand rather than a tile**, so a route may pass over a
-> bridge and later under it, and *"from this house's ground floor to its first
-> floor"* is a route round the staircase instead of success with an empty route.
-> **N4 is next** — regions over spans, the repair a player would notice. See
-> [`map_rebuild.md`](map_rebuild.md) for the order and
+> **Status: live — era P. N0, N1, N2, N3, N3b and N4 are built.** The gate is
+> gone: [`realtime_map.md`](realtime_map.md)'s era R is over, the span layer is
+> built and measured against the whole facet, and **the shard now walks on it**
+> — a node expansion is 208 ns where it was 1,105 and a search from the castle
+> is 0.168 ms where it was 0.793. N3b then spent that on the answer: **a node is
+> a place to stand rather than a tile**, so a route may pass over a bridge and
+> later under it, and *"from this house's ground floor to its first floor"* is a
+> route round the staircase instead of success with an empty route. **N4 has
+> retired the defect this plan was written for**: the coarse graph samples spans
+> and its edges are directed, so `refused_but_walkable` is **0 in every band
+> from all five recorded origins** where the castle plateau alone used to refuse
+> 37 of 44. **N7 is next** — the server reads the graph, which is where a player
+> meets any of it. See [`map_rebuild.md`](map_rebuild.md) for the order and
 > [`handoffs/`](handoffs/) for where the work stands.
 
 Two defects were found in one session and they are the same omission seen from
@@ -141,7 +144,9 @@ distribution — two `stand_surfaces` per column over 29.4 million columns — i
 3.5 s, and building the tiers needs strictly less than that: one pass over the
 statics to mark non-bare columns, and a span list for the 7.9% that are. The
 baking that is actually expensive is the **region graph**, which is already
-baked and takes 96 s. So the span layer is built at load until something
+baked and took 96 s — **11.7 s since [N4](#n4--regions-over-spans)**, which
+rebuilt both of its hot passes on the way past. So the span layer is built at
+load until something
 measures otherwise, and [N6](#n6--an-artifact-if-a-measurement-asks-for-one) is
 where that measurement lives. Machinery this plan does not need yet is machinery
 it does not mint.
@@ -389,12 +394,13 @@ refuses a route rather than promising one that does not exist — but it is a
 refusal, and refusals are what [F's measurement](terrain_seam.md#-and-the-artifact-is-wrong-before-anyone-reads-it)
 found the graph already handing out too many of.
 
-**[N4](#n4--regions-over-spans) builds directed edges**, then: a portal joins two
-spans in one direction, and the reverse is a separate edge that may or may not
-exist. What that leaves [N5](#n5--off-mesh-links) is what it always should have
-been — links geometry does not imply *at all*, a teleporter and whatever the
-flood says is still unreachable — rather than the place a drop would have been
-declared by hand.
+**[N4](#n4--regions-over-spans) built directed edges**, then: a portal joins two
+places in one direction, and the reverse is a separate edge that may or may not
+exist. **5,903 of facet 0's 103,774 portal edges have no reverse** — every one of
+them a crossing the old rule deleted. What that leaves
+[N5](#n5--off-mesh-links) is what it always should have been — links geometry does
+not imply *at all*, a teleporter and whatever the flood says is still unreachable
+— rather than the place a drop would have been declared by hand.
 
 ## The nodes
 
@@ -406,10 +412,10 @@ declared by hand.
                                                     (the agreement oracle)   │        └─> N3b. the node stops
                                                                              │              being a tile ✅
                                                                              │
-                                                                             └─> N4. regions over spans ──┬─> N5. off-mesh links
-                                                                                          │               │
-                                                                                          │               └─> N7. the server reads the graph
-                                                                                          └─> N6. an artifact, if measured        (inherited from F)
+                                                                             └─> N4. regions over spans ✅ ──┬─> N5. off-mesh links
+                                                                                          │                  │
+                                                                                          │                  └─> N7. the server reads the graph
+                                                                                          └─> N6. an artifact, if measured           (inherited from F)
 ```
 
 N0 is done, and it is the one node that ran before the gate — a census reads the
@@ -758,31 +764,84 @@ castle it can spend the whole budget. The real answer for a long climb is
 [N4](#n4--regions-over-spans), where spans are the graph's nodes and a staircase
 is a portal.
 
-### N4 — regions over spans
+### N4 — regions over spans ✅
 
-Needs N2. This is the node that retires the one-storey defect, and it is where
-the user-visible repair lands.
+**Done**, and its done-when is met exactly: `coarse_bench`'s
+`refused_but_walkable` is **0 in every band from every one of the five origins**.
 
-`NavigationGraph::build` currently samples `ground_z` — the land alone — once
-per tile. It samples **spans** instead: a region's nodes are spans, its
-components are computed over spans, and a portal on a region border joins two
-spans rather than two tiles. A bridge crossing a border is then its own portal,
-and the castle plateau stops being an island.
+`NavigationGraph::build` sampled `ground_z` — the land alone — once per tile. It
+samples **places** instead: every standing surface the column's spans offer, so a
+bridge deck and the road under it are two nodes, and a region's components, its
+portals and its intra-region routes are all over places.
 
-**And the edges become directed**, which is the second half of the same repair.
-Today a shared side becomes a portal only where `step_allowed` succeeds *in both
-directions* ([`navigation_graph.md`](navigation_graph.md)), and the step rule is
-asymmetric by design: a climb reaches `start_top + 2` while a descent is
-unbounded. So every ledge a body may step off but not back onto is currently
-invisible to long-distance routing — a refusal rather than a lie, which is the
-right side of the error and still a refusal. A portal joins two spans one way and
-the reverse is its own edge.
+**The node is a place and not a span index**, which is
+[N3b's correction](#n3b--the-node-stops-being-a-tile) carried here as it warned
+it should be. The graph is baked from the bare map, so a span *would* have
+served; the map's surfaces are not all the surfaces, and a bake whose identity
+was a span could never have the live world placed into it. The key is `(x, y, z)`
+at both ends of the plan now.
 
-**Done when:** `coarse_bench`'s `refused_but_walkable` is **0 in every band from
-every one of the five origins** recorded in
-[`terrain_seam.md`](terrain_seam.md#-the-coarse-graph-is-a-one-storey-model-of-a-two-storey-world),
-including the castle plateau where it is currently 37 of 45. The bake's own
-duration and artifact size are recorded beside the 96 s baseline.
+**And the whole span list is kept, not the reachable part of it.** `check` only
+ever answers with a span's own `stand_z`, so the column's spans are a superset of
+every landing — which is what the passes need rather than a nicety: a flood that
+stepped somewhere the graph had no place for would stop dead and call the ground
+unreachable. Keeping a surface nothing can climb onto costs nothing in exchange,
+because the component pass is over *directed* steps: it is its own strong
+component, with no edge into it.
+
+**The edges are directed**, the second half of the same repair. A shared side
+became a portal only where `step_allowed` succeeded *in both directions*, and the
+step rule is asymmetric by design — a climb reaches `start_top + 2` while a
+descent is unbounded — so every ledge a body may step off but not back onto was
+deleted from the graph. A crossing is now one direction and its reverse is its own
+entrance over **interned** nodes, so a symmetric border still costs one node a
+side and one edge each way.
+
+#### What it measured
+
+The same bench, the same five origins, run **interleaved** over the old artifact
+and the new one so the workstation's drift moves both — flat A\*, whose code did
+not change, is the control and does not move.
+
+| origin | | refused but walkable |
+|---|---|---|
+| (1363, 1600, 30) Britain castle | 44 walkable of 45 | **37 → 0** |
+| (1434, 1699, 2) Britain bank | 43 of 45 | **5 → 0** |
+| (1828, 2745, 0) Trinsic | 36 of 42 | **1 → 0** |
+| (600, 2100, 0) Skara Brae | 15 of 35 | 0 → 0 |
+| (1500, 1900, 0) open country | 38 of 42 | 0 → 0 |
+
+**Nothing lost a route, and nothing changed one.** At the castle, 37
+destinations gained an answer, 0 lost one, and the seven the old graph already
+answered come back with **identical route lengths** in both passes — so this
+added answers rather than moving them.
+
+**The bake got faster: 96 s → 11.7 s**, and the artifact smaller: 8,527,862 →
+7,441,177 bytes, 85,310 → 71,545 nodes, 567,412 → 416,122 edges. Both hot passes
+— the component flood and the intra-region routes — asked `step_allowed` once per
+direction, which is `steps_out_of` eight times over; they ask `steps_out_of` once
+per place now, which is [N3](#n3--the-search-takes-spans)'s primitive arriving in
+the bake. The node count fell because a place is one node however many entrances
+name it.
+
+**The routing cost roughly doubled**, and the mechanism is measured rather than
+guessed: on the seven routes both graphs answer, the coarse query goes from 1.29
+ms to 4.39 ms p50 in one pass and 2.02 to 3.85 in the other. `local_costs` joins
+an endpoint to the graph with **one exact search per node in its region**, and
+the castle's own region went from **18 nodes to 51** while the facet total fell
+16%. That is the shape of the cost: it lands where storeys are, which is where
+the new answers are. p50 is 2.6–5.6 ms against `MAX_LONG_PATH_TIME`'s 50 ms, so
+it is filed rather than fixed — see *Out of scope, named*.
+
+**🚩 The done-when cannot see the directed half.** Baking the same places with
+the old both-ways requirement puts `refused_but_walkable` at **0 from all five
+origins too** — the spans alone do all the work this bench can measure. Directed
+edges are real on this facet (5,903 portal edges of 103,774 have no reverse, and
+they cost 5,176 nodes and 72,841 edges) but no sampled destination needed one.
+They are asserted instead in
+`a_ledge_is_a_portal_one_way_and_no_portal_the_other`, over a walkway of statics
+— which is the test the terrain-seam work deleted for want of ground that could
+carry it, owed back.
 
 ### N5 — off-mesh links
 
@@ -1030,13 +1089,59 @@ graph over spans names neither.
   Anybody reading that zero as "no such routes exist" would be reading a sweep
   over a world with no houses in it; the villa test in `walk_scenes.rs` is where
   the shape is asserted, and a shard-side sweep is what would count them.
-- **N3b found: `Overlay::surface_at` breaks a tie by iteration order.** Two
-  surfaces equidistant from the height asked about resolve to whichever the
-  overlay happens to yield first, which is a `Vec` order nobody promised.
-  `path::goal_node` does not inherit it — it breaks the same tie by the lower
-  surface, so one caller's answer does not depend on insertion order — and the
-  overlay's own resolver is still order-dependent for everybody else. One line
-  to fix, in a crate this plan does not otherwise touch.
+- **N3b found: `Overlay::surface_at` broke a tie by iteration order. ✅ Fixed.**
+  Two surfaces equidistant from the height asked about resolved to whichever the
+  overlay happened to yield first, which is a `Vec` order nobody promised — so
+  the answer followed the order a house's components were registered in.
+  `path::goal_node` never inherited it, because it breaks the same tie by the
+  lower surface on purpose; the overlay's own resolver now keys by
+  `(distance, surface)` and does the same. The one production caller that can
+  see the change is `walk::aboard`, the deck a body steps onto; `can_fit` asks
+  for an exact match, and distance zero is a unique minimum.
+- **N4 found: `local_costs` is one exact search per node in the endpoint's
+  region, and N4 made the regions that matter denser.** Joining an endpoint to
+  the graph runs a bounded A\* from it to *every* node of its own region, at both
+  ends of the query, and a node that cannot be reached costs the whole budget
+  before saying so. The castle's region went from 18 nodes to 51 while the facet
+  total fell 16%, and the same seven routes went from 1.29 ms to 4.39 ms p50.
+  Filed rather than fixed: 50 ms is the deadline and this is 2.6–5.6 ms, and the
+  repair is a real design question — the fan-out could be bounded by distance, or
+  cut to the nodes of the endpoint's own *component*, which is a label the bake
+  computes and then throws away.
+- **N4 found: the bake was paying eight times over for every neighbour, and so
+  is every other flood in the tree.** `component_labels` and `region_costs` asked
+  `step_allowed` once per direction, and `step_allowed` is *defined* as one slot
+  of `steps_out_of` — so each asked for the whole expansion eight times and used
+  one answer of it. Repaired here, and it is most of 96 s → 11.7 s. The same
+  shape is still in `coarse_bench`'s own `land_component` (6 s a flood, 12.8% of
+  the facet) and in `Scene::reachable`, which is every scene fixture's oracle.
+  Neither is on a hot path; both are one line.
+- **N4 found: in-degree over places is not bounded by the eight directions.**
+  Out-degree is — one landing per direction — and the builder's fixed `[_; 8]`
+  neighbour arrays assumed the same of the other side. It is false as soon as a
+  column has two places: **a stair is exactly the shape that breaks it**, since
+  the low place and the high place of one neighbouring column can land on the
+  same tread. It panicked on the first stair scene written against it. The
+  incoming half is counting-sorted into one run per place now.
+- **N4 found: a place is one node, and the old builder did not think so.** Every
+  logical entrance minted fresh nodes, so a point named by two entrances — the
+  two ways across one border, or a corner where a vertical and a horizontal
+  border meet — was two nodes with two identities and two sets of intra-region
+  routes to pay for. Interning them is what keeps a directed portal costing what
+  a symmetric one did.
+- **N4 found: the graph's `walkable` bitmap is still one bit per *tile*, and
+  `region_at` still ignores z.** That is deliberate and it is what lets an
+  endpoint with a z nobody promised join the graph at all — `path::goal_node`
+  resolves the height afterwards. It does mean the graph cannot say *which*
+  storey of a tile is walkable without looking at its nodes, so anything that
+  reads the bitmap as an answer about a place rather than about a column is
+  reading it wrong. [N7](#n7--the-server-reads-the-graph) is the next caller.
+- **N4 found: bumping `ROUTING_VERSION` stops the shard from booting, and only
+  warns the client.** A stale artifact is `Err` in `boot.rs` and a printed line
+  in the client's `lib.rs`, so a shard pulling this change does not start until
+  its facets are rebaked. That is the right loudness for a graph that would
+  otherwise answer with a one-storey world — it is recorded because it is a
+  *deployment* step, not a defect.
 - **A dense `average_land_z` array.** 29.4 MB turns the bare-column case from
   four corner reads into one. It waited for N3's measurement, and the
   measurement is that the whole landing half is 167 ns for eight neighbours —
@@ -1063,23 +1168,23 @@ graph over spans names neither.
 
 ## Where a session starts
 
-**N4 — regions over spans.** N3 banked the speed and N3b spent it on the
-answer: a node is a place to stand, so 178 destinations round Britain that used
-to be reported as arrivals are now the refusals they always were, and a route
-from a house's ground floor to its first floor is a route rather than an empty
-one. What is left is the defect a *player* meets, and it is the one N3b could
-not touch from inside a fine search: **`coarse_bench` still refuses 37 of 44
-walkable destinations from the castle plateau**, unchanged to the unit, because
-the coarse graph samples `ground_z` — the land alone — once per tile and the
-plateau is therefore an island. Everything N4 needs is built, its section
-enumerates the two halves (spans as the graph's nodes, and directed edges so a
-ledge a body may step off is not deleted for not being climbable back), and its
-done-when is a number the bench already prints.
+**N7 — the server reads the graph.** N4 retired the defect this plan was written
+for: the coarse graph refuses **nothing** the flood says is walkable, from any of
+the five recorded origins, where the castle plateau alone used to refuse 37 of
+44. And nothing on the shard reads it. Server AI plans with flat `find_path` at a
+budget of 400, so a creature still cannot route across a town while a correct
+artifact sits loaded and validated in `FacetState.coarse` with a test for its
+only reader. N7's section says what to change and what to assert; its raised
+origin is the half that would have passed for the wrong reason before N4.
 
-**N7 is where a player actually notices it**, because until the server asks the
-graph nothing on the shard routes further than 600 nodes. Nothing forces N4
-before N5 or N6; N4 before N7 is forced, since N7 is the thing that reads what
-N4 fixes.
+**Rebake before running anything.** `ROUTING_VERSION` is 4, so every artifact
+baked before N4 is refused — and refused *loudly*: the shard does not boot.
+`cargo run --release -p openshard-movement --bin openshard-navigation-bake --
+--facet 0` takes 11.7 s.
+
+**Nothing forces N5 or N6.** N5's content is deliberately empty until a flood
+says what the spans still cannot connect, and that flood is N5's own first step;
+N6 is gated on a number nobody has asked for yet.
 
 **What a session should not do is re-open the landing rule.** `Spans::check` is
 what a step asks, `MapTerrain::check` is the map's own statement of the same

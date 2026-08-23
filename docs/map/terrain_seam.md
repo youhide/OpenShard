@@ -905,6 +905,16 @@ in the other subsystem, found the same way.
 is filed.** Teaching `step_toward` to use the graph before this is fixed would
 give creatures a router that believes Britain's castle is unreachable.
 
+> **✅ Repaired by [`navigation_spans.md`](navigation_spans.md)'s N4.** The graph
+> samples the column's *places* — every standing surface the spans offer — and
+> its portals are directed. Re-measured by the same bench, interleaved over the
+> old artifact and the new one: **`refused_but_walkable` is 0 in every band from
+> all five origins above**, 37 → 0 at the castle, 5 → 0 at the bank, 1 → 0 at
+> Trinsic. No destination lost a route, and the seven the old graph already
+> answered come back with identical route lengths. The bake went 96 s → 11.7 s
+> on the way past. The table above is kept as the *before*; it is what the
+> repair was measured against.
+
 ### What the probes had to become
 
 Six changes, each of which was load-bearing for a number above:
@@ -1152,22 +1162,24 @@ The oracle measured what wiring it up would buy, and the answer has two halves.
 destinations past 128 tiles where flat A\* at budget 600 answers 3 — which is
 exactly the "cannot route across a town" this node is about, in numbers.
 
-**And it must be fixed first.** From a raised origin it refuses 29 of 29
+**And it had to be fixed first.** From a raised origin it refused 29 of 29
 walkable destinations past 128 tiles, because
-[`NavigationGraph::build` samples one height per tile and that height is the
+[`NavigationGraph::build` sampled one height per tile and that height was the
 land alone](#-the-coarse-graph-is-a-one-storey-model-of-a-two-storey-world).
-Every floor, bridge and stair a static provides is invisible to it, so Britain's
-castle plateau is an island in a graph whose own map says it is not. Teaching
-`step_toward` to plan with that would give creatures a router that is confidently
-wrong about the middle of the largest city on the facet — which is worse than
-the flat search it replaces, because the flat search at least fails honestly.
+Every floor, bridge and stair a static provides was invisible to it, so Britain's
+castle plateau was an island in a graph whose own map says it is not. Teaching
+`step_toward` to plan with that would have given creatures a router that is
+confidently wrong about the middle of the largest city on the facet — which is
+worse than the flat search it replaces, because the flat search at least fails
+honestly.
 
-The fix is a change of sampled height, not of structure: `ground_z` is
-`average_land_z`, and [`stand_z`](../../crates/common/movement/src/terrain.rs#L562)
-is the same question asked of the surfaces. What it costs is that a tile stops
-having *one* answer — a gallery over a street is two places — which is a change
-to what a graph node **is**, and is why this is filed rather than done in
-passing.
+The fix was a change of sampled height, not of structure, and the cost was that a
+tile stops having *one* answer — a gallery over a street is two places — which is
+a change to what a graph node **is**. **[`navigation_spans.md`](navigation_spans.md)'s
+N4 made it**, and the raised origin now refuses nothing the flood says is
+walkable. So the precondition is spent, and what is left of F is its own
+question: `step_toward` gains the fall-back, which is that plan's
+[N7](navigation_spans.md#n7--the-server-reads-the-graph).
 
 ### Which arm, and who swings it
 
@@ -1191,7 +1203,9 @@ same mistake with the arrow reversed.
 cannot, or `FacetState.coarse` is gone~~ — **answered, not acted on.** The
 decision is recorded above, the graph stays, and the two halves of the action are
 [N4](navigation_spans.md#n4--regions-over-spans) and the node after it. Nothing
-in this document is waiting on either.
+in this document is waiting on either. **N4 is built**, so the first half is
+spent and the second is
+[N7](navigation_spans.md#n7--the-server-reads-the-graph).
 
 ## What comes after the seam, and why it waits
 

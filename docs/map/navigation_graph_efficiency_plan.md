@@ -1,8 +1,10 @@
 # Navigation graph efficiency plan
 
-> **Status: phases 1, 2 and 4 built; phase 3 shut until spans exist.** A second
-> hierarchy level over a one-storey model would be a second level of the same
-> mistake — see [`navigation_spans.md`](navigation_spans.md)'s N4. Entry point:
+> **Status: phases 1, 2 and 4 built; phase 3's span gate is spent.** A second
+> hierarchy level over a one-storey model would have been a second level of the
+> same mistake, and [`navigation_spans.md`](navigation_spans.md)'s **N4 is
+> built**: the graph samples standing places and its portals are directed. What
+> phase 3 waits for now is only its own end-to-end p95 measurement. Entry point:
 > [`map_rebuild.md`](map_rebuild.md).
 
 ## Goal
@@ -22,10 +24,10 @@ retain their existing behaviour.
   opt-in path diagnostics.
 - [ ] Phase 3: second hierarchy level. **The facet-0 route set exists now** —
   measured 2026-08-22, recorded in
-  [`terrain_seam.md`](terrain_seam.md#0--the-oracle-) — and it does not settle
-  level 2 either way, because it first found a defect that makes the level-1
-  graph wrong on raised ground (below). Level 2 over a one-storey model would
-  be a second level of the same mistake.
+  [`terrain_seam.md`](terrain_seam.md#0--the-oracle-) — and it did not settle
+  level 2 either way, because it first found a defect that made the level-1
+  graph wrong on raised ground (below). **That defect is fixed**, so what is
+  left of this phase is the p95 benchmark it always wanted.
 - [ ] Real-install verification: facet-0 bake/load measurements require the
   client data files and the dedicated 2 GiB cgroup environment.
 
@@ -80,7 +82,10 @@ refusals were read against, are in
   cost of switching is that a tile stops having one answer, which is a change to
   what a graph node *is*. This gates Phase 3 and gates wiring server AI to the
   graph at all — see [`terrain_seam.md`](terrain_seam.md#f--the-graph-nobody-reads)'s
-  node F.
+  node F. **✅ Fixed by [`navigation_spans.md`](navigation_spans.md)'s N4**: the
+  build samples places rather than one height and its portals are directed, and
+  the re-measured router refuses nothing the flood says is walkable from any of
+  the five origins. Phase 3's gate is spent.
 
 - 🚩 **Real-install facet-0 measurements are still outstanding.** The current
   workspace has no verified run of the post-ML `7168x4096` bake/load procedure

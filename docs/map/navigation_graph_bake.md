@@ -1,7 +1,11 @@
 # Offline bake for the navigation graph
 
 > **Status: built.** The artifact, its stamp and its validation, as shipped — and
-> the stamp now carries a `MapRevision` as well as the input files. Entry point:
+> the stamp now carries a `MapRevision` as well as the input files. The
+> **routing version is 4** since
+> [`navigation_spans.md`](navigation_spans.md)'s N4, so every artifact baked
+> before it is refused: the shard does not boot and the client disables long
+> routing until the facet is rebaked. Entry point:
 > [`map_rebuild.md`](map_rebuild.md).
 
 ## Why
@@ -12,6 +16,13 @@ partitioned it into 311,296 regions in 8.4s, and found 1,355,438 portal nodes
 in 18.2s before entering the much longer intra-region routing phase. The
 in-process shard cannot become ready before that work finishes; the client
 would then construct a second, independent copy of the same graph.
+
+Those numbers are from before the region size and the grouping settled; the
+whole bake was **96 s** on this facet until N4, and **11.7 s** after it — the two
+hot passes were asking `step_allowed` once per direction, which is
+`steps_out_of` computed eight times over and used once. It is still an offline
+artifact and for the same reason: eleven seconds is not a thing to make two
+processes pay for at every start, and the second copy is still the point.
 
 The graph is derived solely from static client files and the routing rules. It
 therefore belongs in an offline artifact, not on either process's critical

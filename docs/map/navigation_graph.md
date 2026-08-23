@@ -22,10 +22,17 @@ may open it or must stop at it.
 
 ## Graph construction
 
-1. Scan static terrain into walkable cells, preserving the resolved point each
-   cell represents. A shared side is a portal only when `step_allowed` succeeds
-   in both directions, so a graph edge cannot invent a height transition or
-   diagonal corner cut.
+1. Scan static terrain into the **standing places** each column holds — every
+   surface the map's spans offer, so a bridge deck and the road under it are two
+   places rather than one cell at one height. A shared side becomes a portal
+   where `step_allowed` succeeds, **one direction at a time**: a crossing is
+   directed and its reverse is a separate edge that may or may not exist, because
+   the step rule is asymmetric by design and a ledge a body may step off but not
+   climb back onto is ordinary ground. The step rule is still the only thing
+   asked, so a graph edge cannot invent a height transition or a diagonal corner
+   cut. See [`navigation_spans.md`](navigation_spans.md)'s N4 for what this
+   replaced — one sampled height per tile, and a portal only where both ways
+   succeeded — and what it measured.
 2. Partition the facet into bounded 32×32 regions. Blocked cells inside a
    region remain blocked and are handled by exact intra-region pathfinding;
    they do not create graph nodes. Thus an internal tree creates zero nodes,
