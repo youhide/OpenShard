@@ -15,7 +15,13 @@ use crate::navigation::{Node, Region};
 const MAGIC: &[u8; 8] = b"OSNAV\0\r\n";
 const FORMAT_VERSION: u32 = 5;
 /// Increment whenever graph construction or static movement semantics change.
-pub const ROUTING_VERSION: u32 = 3;
+///
+/// 4 is `docs/map/navigation_spans.md`'s N4: a node is a standing place rather
+/// than a tile, and a portal joins two of them in one direction. The bytes did
+/// not change shape — a node was always a `Point` and the walkable bitmap was
+/// always per tile — so nothing but this number would stop a shard from loading
+/// a one-storey graph and believing it.
+pub const ROUTING_VERSION: u32 = 4;
 const MAX_COLLECTION: usize = 100_000_000;
 
 /// Metadata for one input selected by the client-file loader.
@@ -542,6 +548,7 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<NavigationGraph
         edge_offsets,
         edge_targets,
         edge_costs,
+        build_nodes: std::collections::BTreeMap::new(),
         build_region_nodes: Vec::new(),
         build_edges: Vec::new(),
     })

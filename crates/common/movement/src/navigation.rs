@@ -3,6 +3,24 @@
 //! Static terrain is represented by 32×32 regions.  Obstacles inside a region
 //! stay local to live refinement; only crossings between region components
 //! become abstract choices.
+//!
+//! # A node is a place to stand, and an edge goes one way
+//!
+//! Both halves of `docs/map/navigation_spans.md`'s N4, and they are one repair.
+//! The graph used to sample **one height per tile** — `ground_z`, the land alone
+//! — so a tile whose only surface is a static floor came back at the ground
+//! beneath it. Britain's castle plateau is land at z=30 over a city at z=0 and
+//! the stairs between them are statics the sampler never saw, so the plateau was
+//! an island in a graph whose own map said otherwise. It samples [`Places`] now:
+//! every standing surface the map's spans offer, so a bridge deck and the road
+//! under it are two nodes rather than one.
+//!
+//! And a crossing used to become a portal only where the step succeeded in
+//! **both** directions, while the step rule is asymmetric by design — a climb
+//! reaches `start_top + 2` and a descent is unbounded. Every ledge a body may
+//! step off and not climb back onto was therefore deleted from the graph. A
+//! crossing is one direction now and its reverse is its own edge, which is what
+//! makes a one-way drop representable at all.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, VecDeque};
@@ -15,6 +33,7 @@ use openshard_protocol::world::Point;
 use crate::footing::Footing;
 use openshard_map::grid::Tile;
 
+use crate::walk::steps_out_of;
 use crate::{find_path_toward_until, find_path_until, step_allowed};
 
 const MAX_LONG_PATH_TIME: Duration = Duration::from_millis(50);
@@ -25,7 +44,13 @@ const WIDE_PORTAL: usize = 6;
 /// terrain, not graph boundaries, so a forest does not emit a node per tree.
 const REGION_SIZE: u32 = 32;
 const NO_COMPONENT: u16 = 0;
-const NO_NEIGHBOR: u16 = u16::MAX;
+/// The fill of an unused neighbour slot, never read past its own length.
+///
+/// A `u32` since N4, because the thing being numbered is a region's *places*
+/// rather than its cells: a 32×32 rectangle has a thousand of the one and can
+/// have twelve thousand of the other, and a base set is a world nobody has
+/// counted.
+const NO_NEIGHBOR: u32 = u32::MAX;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct NavigationGraph {
@@ -43,6 +68,14 @@ pub struct NavigationGraph {
     // Kept only while `build` is assembling the graph, then dropped.
     pub(crate) build_region_nodes: Vec<Vec<NodeId>>,
     pub(crate) build_edges: Vec<Vec<Edge>>,
+    /// One node per standing place, however many entrances name it.
+    ///
+    /// A portal is directed now, so the two ways across one border are two
+    /// logical entrances and both want a node at the same place. Interning them
+    /// is what keeps a symmetric border costing what it always did — and it is
+    /// the right identity anyway: two entrances meeting at one place are one
+    /// place, not two.
+    pub(crate) build_nodes: BTreeMap<(u16, u16, i8), NodeId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,6 +114,183 @@ pub(crate) struct Edge {
     pub(crate) cost: u32,
 }
 
+/// The crossings of one region border, gathered by the logical entrance they
+/// belong to.
+///
+/// The key is *directed* — the region and component a step starts in, then the
+/// region and component it ends in — so the two ways across one border are two
+/// entrances. Ordered, because a representative is chosen by position along the
+/// run and a run assembled in a different order would choose a different one.
+type Entrances = BTreeMap<(usize, u16, usize, u16), Vec<(Point, Point)>>;
+
+/// Every place a body may stand on one facet, addressed by tile.
+///
+/// A column is a *list* of standing surfaces rather than one height, which is
+/// what the span layer is for and what this bake had never read. One tile's
+/// places are a contiguous run, highest first, and the census says 99.4% of the
+/// runs on Britannia hold one or none — so this is about a per-cent more
+/// entries than the one-per-tile array it replaces.
+struct Places {
+    /// `starts[tile]..starts[tile + 1]` is that tile's run.
+    starts: Vec<u32>,
+    /// The standing points themselves.
+    points: Vec<Point>,
+}
+
+impl Places {
+    /// One tile's run, by the graph's own row-major tile index.
+    fn at(&self, index: usize) -> &[Point] {
+        &self.points[self.starts[index] as usize..self.starts[index + 1] as usize]
+    }
+
+    /// How many places the facet holds.
+    fn len(&self) -> usize {
+        self.points.len()
+    }
+
+    /// The facet-wide number of the place a landing on tile `index` names, or
+    /// `None` where nothing is listed at that height.
+    ///
+    /// A landing carries its own height and that is the whole identity — the
+    /// same choice [`PathNodeKey`](crate::path) makes, and for the same reason:
+    /// a span is a fact about the map file, and a place is where feet are. The
+    /// run is one element long almost everywhere, so the walk is a comparison.
+    fn id(&self, index: usize, at: Point) -> Option<usize> {
+        let start = self.starts[index] as usize;
+        self.at(index)
+            .iter()
+            .position(|place| place.z == at.z)
+            .map(|offset| start + offset)
+    }
+}
+
+/// One region's places, numbered from zero.
+///
+/// The two per-region passes — the component flood and the intra-region routes
+/// — want a dense index over the places of one 32×32 rectangle, and the
+/// facet-wide runs are not one. This is that numbering, built as a prefix sum
+/// over the region's own cells: turning "which place did that step land on" into
+/// two array reads and a walk of a one-element run, rather than a hash lookup on
+/// a path taken once per neighbour of every place on the facet.
+struct RegionPlaces {
+    region: Region,
+    /// `offsets[cell]..offsets[cell + 1]`, in the region's row-major cell order.
+    offsets: Vec<u32>,
+    /// Every place of the region, in that order.
+    points: Vec<Point>,
+    /// The same places' facet-wide numbers, so a label written by the component
+    /// pass can be read by the portal pass.
+    ids: Vec<u32>,
+}
+
+impl RegionPlaces {
+    fn of(graph: &NavigationGraph, places: &Places, region: Region) -> Self {
+        let cells = usize::from(region.width) * usize::from(region.height);
+        let mut offsets = Vec::with_capacity(cells + 1);
+        let mut points = Vec::with_capacity(cells);
+        let mut ids = Vec::with_capacity(cells);
+        offsets.push(0);
+        for y in region.top..region.top + region.height {
+            for x in region.left..region.left + region.width {
+                let index = graph.index(x, y);
+                let start = places.starts[index] as usize;
+                for (offset, &point) in places.at(index).iter().enumerate() {
+                    points.push(point);
+                    ids.push((start + offset) as u32);
+                }
+                offsets.push(points.len() as u32);
+            }
+        }
+        Self {
+            region,
+            offsets,
+            points,
+            ids,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.points.len()
+    }
+
+    /// The region's own number for the place `at` names, or `None` when the step
+    /// left the region.
+    fn slot(&self, at: Point) -> Option<usize> {
+        if !self.region.contains(at) {
+            return None;
+        }
+        let cell = usize::from(at.y - self.region.top) * usize::from(self.region.width)
+            + usize::from(at.x - self.region.left);
+        let start = self.offsets[cell] as usize;
+        let end = self.offsets[cell + 1] as usize;
+        self.points[start..end]
+            .iter()
+            .position(|place| place.z == at.z)
+            .map(|offset| start + offset)
+    }
+}
+
+/// Every place a body may stand, one column at a time.
+///
+/// **The map's spans and not `ground_z`**, which is the first half of N4. The
+/// old sampler took one height per tile and that height was `average_land_z` —
+/// the land alone, with everything standing on it ignored — so a tile whose only
+/// surface is a static floor came back at the ground beneath it, and a
+/// thirty-unit cliff then refused every step onto the castle plateau.
+///
+/// **The whole span list, and no attempt to guess which of them a body could
+/// ever climb onto.** [`Spans::check`](crate::spans::Spans::check) only ever
+/// answers with a span's own `stand_z`, so a column's spans are a *superset* of
+/// every landing the step rule can produce over this map — and that is the
+/// property the passes below need rather than a nicety: a flood that stepped
+/// somewhere the graph had no place for would stop dead there and call the
+/// ground unreachable. Keeping a surface nothing can reach costs nothing in
+/// exchange, because the component pass is over **directed** steps: such a place
+/// is its own strong component with no edge into it, and no route is ever
+/// planned through one.
+///
+/// The filter is [`can_step`](crate::can_step) asked of the place itself, which
+/// is what drops a column the live world has walled off. A production bake runs
+/// over an empty overlay by design — a door that happened to be shut is not a
+/// property of the ground, see `docs/map/navigation_graph_bake.md` — so on the
+/// shard's own artifact this only ever drops what the map itself refuses.
+fn sample(footing: &Footing<'_>, width: u32, height: u32) -> Places {
+    let cells = width as usize * height as usize;
+    let mut starts = Vec::with_capacity(cells + 1);
+    let mut points = Vec::with_capacity(cells);
+    // The census caps a column at twelve spans on Britannia; the buffer is
+    // reused rather than sized, because a base set is a world nobody has
+    // counted.
+    let mut column: Vec<i8> = Vec::with_capacity(16);
+    starts.push(0);
+    for y in 0..height as u16 {
+        for x in 0..width as u16 {
+            column.clear();
+            match footing.map {
+                Some(map) => column.extend(map.spans().surfaces(x, y).map(|span| span.stand_z)),
+                // No map at all: no floor and no walls, every step allowed and z
+                // never changing, so a column holds exactly one place. See
+                // `Footing::map`.
+                None => column.push(0),
+            }
+            for offset in 0..column.len() {
+                let z = column[offset];
+                // Two spans of one column can share a height — the land and a
+                // paving stone laid on it — and one height is one place.
+                if column[..offset].contains(&z) {
+                    continue;
+                }
+                let place = Point::new(x, y, z);
+                if crate::can_step(footing, place, place).is_some() {
+                    points.push(place);
+                }
+            }
+            starts.push(points.len() as u32);
+        }
+    }
+    Places { starts, points }
+}
+
 impl NavigationGraph {
     /// Extract a static graph from one facet. Empty and unrepresentable facets
     /// cannot be addressed by `Point` and therefore have no graph.
@@ -93,22 +303,11 @@ impl NavigationGraph {
         let started = Instant::now();
         eprintln!("navigation graph: sampling {width}x{height} terrain");
         let cells = width as usize * height as usize;
-        let mut points = vec![None; cells];
-        for y in 0..height as u16 {
-            for x in 0..width as u16 {
-                let tile = Tile::new(x, y);
-                // 🚩 The land alone, which is the one-storey defect node F is
-                // about: a tile whose only surface is a static floor is sampled
-                // at the ground beneath it. See `docs/map/terrain_seam.md`.
-                let near = footing.map.and_then(|map| map.ground_z(tile)).unwrap_or(0);
-                let point = Point::new(x, y, near);
-                points[usize::from(y) * width as usize + usize::from(x)] =
-                    crate::can_step(footing, point, point);
-            }
-        }
+        let places = sample(footing, width, height);
         eprintln!(
-            "navigation graph +{:.3}s: terrain sampled",
-            started.elapsed().as_secs_f64()
+            "navigation graph +{:.3}s: terrain sampled, {} places over {cells} columns",
+            started.elapsed().as_secs_f64(),
+            places.len(),
         );
 
         let mut graph = Self {
@@ -124,21 +323,22 @@ impl NavigationGraph {
             edge_costs: Vec::new(),
             build_region_nodes: Vec::new(),
             build_edges: Vec::new(),
+            build_nodes: BTreeMap::new(),
         };
-        graph.partition(&points);
+        graph.partition(&places);
         eprintln!(
             "navigation graph +{:.3}s: partitioned into {} regions",
             started.elapsed().as_secs_f64(),
             graph.regions.len()
         );
-        let components = graph.component_labels(footing, &points);
-        graph.portals(footing, &points, &components);
+        let components = graph.component_labels(footing, &places);
+        graph.portals(footing, &places, &components);
         eprintln!(
             "navigation graph +{:.3}s: {} portal nodes found; calculating intra-region routes",
             started.elapsed().as_secs_f64(),
             graph.nodes.len()
         );
-        graph.intra_edges(footing);
+        graph.intra_edges(footing, &places);
         for edges in &mut graph.build_edges {
             edges.sort_unstable_by_key(|edge| (edge.to, edge.cost));
             edges.dedup_by_key(|edge| edge.to);
@@ -194,7 +394,7 @@ impl NavigationGraph {
         self.walkable[index / 8] |= 1 << (index % 8);
     }
 
-    fn partition(&mut self, points: &[Option<Point>]) {
+    fn partition(&mut self, places: &Places) {
         for top in (0..self.height).step_by(REGION_SIZE as usize) {
             for left in (0..self.width).step_by(REGION_SIZE as usize) {
                 let width = REGION_SIZE.min(self.width - left) as u16;
@@ -208,8 +408,12 @@ impl NavigationGraph {
                 self.build_region_nodes.push(Vec::new());
                 for y in top as u16..top as u16 + height {
                     for x in left as u16..left as u16 + width {
+                        // A tile is walkable when *something* stands on it,
+                        // whatever height that is. The bit is what an endpoint
+                        // is joined to the graph by, and an endpoint carries a z
+                        // nobody promised — see `path::goal_node`.
                         let index = self.index(x, y);
-                        if points[index].is_some() {
+                        if !places.at(index).is_empty() {
                             self.set_walkable(x, y);
                         }
                     }
@@ -219,54 +423,77 @@ impl NavigationGraph {
     }
 
     /// Mark strongly connected static components in each region.  These are
-    /// bake-time scratch data: `u16` is enough because a region has at most
-    /// 1,024 cells, and the labels never enter the artifact.
-    fn component_labels(&self, footing: &Footing<'_>, points: &[Option<Point>]) -> Vec<u16> {
-        let mut labels = vec![NO_COMPONENT; points.len()];
+    /// bake-time scratch data: the labels never enter the artifact.
+    ///
+    /// **One label per place**, so a bridge deck and the road beneath it are two
+    /// components of one region rather than one component of one tile.
+    ///
+    /// `u16` numbers a region's components, which is a whole region's worth of
+    /// places and then some: the deepest column on Britannia holds twelve spans,
+    /// so a 32×32 region holds at most twelve thousand of them. The counter
+    /// checks rather than wraps, because a base set is a world nobody has
+    /// counted.
+    fn component_labels(&self, footing: &Footing<'_>, places: &Places) -> Vec<u16> {
+        let mut labels = vec![NO_COMPONENT; places.len()];
         for &region in &self.regions {
-            let width = usize::from(region.width);
-            let cells = width * usize::from(region.height);
+            let local = RegionPlaces::of(self, places, region);
+            let cells = local.len();
+            if cells == 0 {
+                continue;
+            }
+            // Out-degree is bounded by the eight directions and in-degree is
+            // not: two places of one neighbouring column can land on the same
+            // place — which is exactly what a stair does, and what a fixed
+            // eight-slot array here used to make an out-of-bounds panic.
             let mut outgoing = vec![[NO_NEIGHBOR; Direction::ALL.len()]; cells];
             let mut outgoing_len = vec![0_u8; cells];
-            let mut incoming = vec![[NO_NEIGHBOR; Direction::ALL.len()]; cells];
-            let mut incoming_len = vec![0_u8; cells];
-            let local_index =
-                |point: Point| usize::from(point.y - region.top) * width + usize::from(point.x - region.left);
 
-            for y in region.top..region.top + region.height {
-                for x in region.left..region.left + region.width {
-                    let Some(from) = points[self.index(x, y)] else {
+            for from_index in 0..cells {
+                // The whole expansion at once. Eight `step_allowed` calls would
+                // resolve the place being stepped off eight times over and each
+                // cardinal neighbour twice — the same waste `find_path` stopped
+                // paying in N3, on the pass that walks every place of the facet.
+                for next in steps_out_of(footing, local.points[from_index])
+                    .into_iter()
+                    .flatten()
+                {
+                    let Some(next_index) = local.slot(next) else {
                         continue;
                     };
-                    let from_index = local_index(from);
-                    for direction in Direction::ALL {
-                        let Some(next) = step_allowed(footing, from, direction) else {
-                            continue;
-                        };
-                        if !region.contains(next) || points[self.index(next.x, next.y)].is_none() {
-                            continue;
-                        }
-                        let next_index = local_index(next);
-                        let out_at = usize::from(outgoing_len[from_index]);
-                        outgoing[from_index][out_at] = next_index as u16;
-                        outgoing_len[from_index] += 1;
-                        let in_at = usize::from(incoming_len[next_index]);
-                        incoming[next_index][in_at] = from_index as u16;
-                        incoming_len[next_index] += 1;
-                    }
+                    let out_at = usize::from(outgoing_len[from_index]);
+                    outgoing[from_index][out_at] = next_index as u32;
+                    outgoing_len[from_index] += 1;
                 }
             }
 
-            // Kosaraju's algorithm keeps directed height transitions honest.
+            // The same edges the other way round, counting-sorted into one run
+            // per place rather than a vector per place: Kosaraju's second pass
+            // walks them and a region has a thousand of them.
+            let mut incoming_offsets = vec![0_u32; cells + 1];
+            for from_index in 0..cells {
+                for &to in &outgoing[from_index][..usize::from(outgoing_len[from_index])] {
+                    incoming_offsets[to as usize + 1] += 1;
+                }
+            }
+            for index in 0..cells {
+                incoming_offsets[index + 1] += incoming_offsets[index];
+            }
+            let mut filled = incoming_offsets.clone();
+            let mut incoming = vec![0_u32; incoming_offsets[cells] as usize];
+            for from_index in 0..cells {
+                for &to in &outgoing[from_index][..usize::from(outgoing_len[from_index])] {
+                    incoming[filled[to as usize] as usize] = from_index as u32;
+                    filled[to as usize] += 1;
+                }
+            }
+
+            // Kosaraju's algorithm keeps directed height transitions honest —
+            // and since N4 there are some: a ledge a body steps off and cannot
+            // climb back onto is an edge one way and no edge the other.
             let mut seen = vec![false; cells];
             let mut finish = Vec::with_capacity(cells);
             for root in 0..cells {
-                let point = Point::new(
-                    region.left + (root % width) as u16,
-                    region.top + (root / width) as u16,
-                    0,
-                );
-                if seen[root] || points[self.index(point.x, point.y)].is_none() {
+                if seen[root] {
                     continue;
                 }
                 seen[root] = true;
@@ -288,30 +515,23 @@ impl NavigationGraph {
 
             let mut component = NO_COMPONENT;
             for root in finish.into_iter().rev() {
-                if labels[self.index(
-                    region.left + (root % width) as u16,
-                    region.top + (root / width) as u16,
-                )] != NO_COMPONENT
-                {
+                if labels[local.ids[root] as usize] != NO_COMPONENT {
                     continue;
                 }
                 component = component
                     .checked_add(1)
-                    .expect("a region has at most 1,024 components");
+                    .expect("a region has at most one component per standing place");
                 let mut stack = vec![root];
                 while let Some(at) = stack.pop() {
-                    let x = region.left + (at % width) as u16;
-                    let y = region.top + (at / width) as u16;
-                    let label = &mut labels[self.index(x, y)];
+                    let label = &mut labels[local.ids[at] as usize];
                     if *label != NO_COMPONENT {
                         continue;
                     }
                     *label = component;
-                    for &neighbor in &incoming[at][..usize::from(incoming_len[at])] {
-                        let neighbor = usize::from(neighbor);
-                        let x = region.left + (neighbor % width) as u16;
-                        let y = region.top + (neighbor / width) as u16;
-                        if labels[self.index(x, y)] == NO_COMPONENT {
+                    let run = incoming_offsets[at] as usize..incoming_offsets[at + 1] as usize;
+                    for &neighbor in &incoming[run] {
+                        let neighbor = neighbor as usize;
+                        if labels[local.ids[neighbor] as usize] == NO_COMPONENT {
                             stack.push(neighbor);
                         }
                     }
@@ -324,120 +544,145 @@ impl NavigationGraph {
     /// Adjacent raw crossings share a logical entrance when they connect the
     /// same strong components.  This lets an isolated tree on a border remain
     /// a local obstacle instead of multiplying portal nodes.
-    fn portals(&mut self, footing: &Footing<'_>, points: &[Option<Point>], components: &[u16]) {
+    ///
+    /// **Each way across is its own entrance**, which is the second half of N4:
+    /// an entrance is now keyed by where a step *starts* as well as where it
+    /// ends, so a border a body can cross one way and not the other is a portal
+    /// rather than nothing at all. Where both ways exist — which is nearly
+    /// everywhere — the two runs cover the same stretch of border, choose the
+    /// same representatives, and intern the same pair of nodes, so a symmetric
+    /// border costs exactly what it always did.
+    fn portals(&mut self, footing: &Footing<'_>, places: &Places, components: &[u16]) {
         for x in
             ((REGION_SIZE - 1) as u16..(self.width as u16).saturating_sub(1)).step_by(REGION_SIZE as usize)
         {
-            let mut entrances = BTreeMap::<(usize, u16, usize, u16), Vec<(Point, Point)>>::new();
+            let mut entrances = Entrances::new();
             for y in 0..self.height as u16 {
-                let Some(pair) = self.vertical_pair(footing, points, x, y) else {
-                    continue;
-                };
-                let first = self
-                    .region_at(pair.0)
-                    .expect("a valid crossing starts in a region");
-                let second = self.region_at(pair.1).expect("a valid crossing ends in a region");
-                entrances
-                    .entry((
-                        first.0,
-                        components[self.index(pair.0.x, pair.0.y)],
-                        second.0,
-                        components[self.index(pair.1.x, pair.1.y)],
-                    ))
-                    .or_default()
-                    .push(pair);
+                let side = Direction::East;
+                self.crossings(footing, places, components, Tile::new(x, y), side, &mut entrances);
+                let side = Direction::West;
+                self.crossings(
+                    footing,
+                    places,
+                    components,
+                    Tile::new(x + 1, y),
+                    side,
+                    &mut entrances,
+                );
             }
             for crossings in entrances.into_values() {
-                let first = self
-                    .region_at(crossings[0].0)
-                    .expect("a valid crossing starts in a region");
-                let second = self
-                    .region_at(crossings[0].1)
-                    .expect("a valid crossing ends in a region");
-                self.add_portal(first, second, &crossings);
+                self.add_portal(&crossings);
             }
         }
         for y in
             ((REGION_SIZE - 1) as u16..(self.height as u16).saturating_sub(1)).step_by(REGION_SIZE as usize)
         {
-            let mut entrances = BTreeMap::<(usize, u16, usize, u16), Vec<(Point, Point)>>::new();
+            let mut entrances = Entrances::new();
             for x in 0..self.width as u16 {
-                let Some(pair) = self.horizontal_pair(footing, points, x, y) else {
-                    continue;
-                };
-                let first = self
-                    .region_at(pair.0)
-                    .expect("a valid crossing starts in a region");
-                let second = self.region_at(pair.1).expect("a valid crossing ends in a region");
-                entrances
-                    .entry((
-                        first.0,
-                        components[self.index(pair.0.x, pair.0.y)],
-                        second.0,
-                        components[self.index(pair.1.x, pair.1.y)],
-                    ))
-                    .or_default()
-                    .push(pair);
+                let side = Direction::South;
+                self.crossings(footing, places, components, Tile::new(x, y), side, &mut entrances);
+                let side = Direction::North;
+                self.crossings(
+                    footing,
+                    places,
+                    components,
+                    Tile::new(x, y + 1),
+                    side,
+                    &mut entrances,
+                );
             }
             for crossings in entrances.into_values() {
-                let first = self
-                    .region_at(crossings[0].0)
-                    .expect("a valid crossing starts in a region");
-                let second = self
-                    .region_at(crossings[0].1)
-                    .expect("a valid crossing ends in a region");
-                self.add_portal(first, second, &crossings);
+                self.add_portal(&crossings);
             }
         }
     }
 
-    fn vertical_pair(
+    /// Every step across a region border out of one tile, filed under the
+    /// entrance it belongs to.
+    ///
+    /// One crossing per *place* on the tile, and one direction. The pair that
+    /// used to stand here asked the step both ways and kept it only where both
+    /// succeeded — which deleted every asymmetric border from the graph, and the
+    /// step rule is asymmetric by design.
+    ///
+    /// A landing with no place listed is skipped rather than invented. Over the
+    /// bare map that cannot happen — [`sample`] keeps a superset of every
+    /// landing — and over a footing with a live world in it, skipping is the
+    /// conservative answer a bake owes: a refusal, not a promise.
+    fn crossings(
         &self,
         footing: &Footing<'_>,
-        points: &[Option<Point>],
-        x: u16,
-        y: u16,
-    ) -> Option<(Point, Point)> {
-        let left = points[self.index(x, y)]?;
-        points[self.index(x + 1, y)]?;
-        let right = step_allowed(footing, left, Direction::East)?;
-        let left = step_allowed(footing, right, Direction::West)?;
-        (left.x == x && left.y == y && right.x == x + 1 && right.y == y).then_some((left, right))
+        places: &Places,
+        components: &[u16],
+        tile: Tile,
+        direction: Direction,
+        out: &mut Entrances,
+    ) {
+        let index = self.index(tile.x, tile.y);
+        for offset in 0..places.at(index).len() {
+            let from = places.at(index)[offset];
+            let Some(to) = step_allowed(footing, from, direction) else {
+                continue;
+            };
+            let Some(landed) = places.id(self.index(to.x, to.y), to) else {
+                continue;
+            };
+            let first = self
+                .region_at(from)
+                .expect("a place's own tile is walkable and on the map");
+            let second = self
+                .region_at(to)
+                .expect("a landing's own tile is walkable and on the map");
+            out.entry((
+                first.0,
+                components[places.starts[index] as usize + offset],
+                second.0,
+                components[landed],
+            ))
+            .or_default()
+            .push((from, to));
+        }
     }
 
-    fn horizontal_pair(
-        &self,
-        footing: &Footing<'_>,
-        points: &[Option<Point>],
-        x: u16,
-        y: u16,
-    ) -> Option<(Point, Point)> {
-        let top = points[self.index(x, y)]?;
-        points[self.index(x, y + 1)]?;
-        let bottom = step_allowed(footing, top, Direction::South)?;
-        let top = step_allowed(footing, bottom, Direction::North)?;
-        (top.x == x && top.y == y && bottom.x == x && bottom.y == y + 1).then_some((top, bottom))
-    }
-
-    fn add_portal(&mut self, first: RegionId, second: RegionId, run: &[(Point, Point)]) {
+    /// One logical entrance, as one or two directed edges.
+    ///
+    /// The representatives are what they always were — the middle of a narrow
+    /// run, both ends of a wide one — and what changed is that a crossing buys
+    /// **one** edge. Its reverse, where the ground allows one, arrives as its own
+    /// entrance and its own edge over the same interned nodes.
+    fn add_portal(&mut self, run: &[(Point, Point)]) {
         let ids: Vec<_> = match run.len() {
             0 => return,
             1..WIDE_PORTAL => vec![(run.len() - 1) / 2],
             _ => vec![0, run.len() - 1],
         };
         for index in ids {
-            let first_id = self.add_node(first, run[index].0);
-            let second_id = self.add_node(second, run[index].1);
+            let first_id = self.intern_node(run[index].0);
+            let second_id = self.intern_node(run[index].1);
             self.add_edge(first_id, second_id, 1);
-            self.add_edge(second_id, first_id, 1);
         }
     }
 
-    fn add_node(&mut self, region: RegionId, point: Point) -> NodeId {
+    /// The node one standing place is, minted the first time an entrance names
+    /// it.
+    ///
+    /// Interned rather than pushed, because a place is now named by up to two
+    /// entrances — the way in and the way out — and by the entrances of a
+    /// perpendicular border where they meet at a corner. Two nodes at one place
+    /// would be two names for one thing, and would double the intra-region
+    /// routing every one of them pays for.
+    fn intern_node(&mut self, point: Point) -> NodeId {
+        if let Some(&id) = self.build_nodes.get(&(point.x, point.y, point.z)) {
+            return id;
+        }
+        let region = self
+            .region_at(point)
+            .expect("a portal endpoint is a place on the map");
         let id = NodeId(self.nodes.len());
         self.nodes.push(Node { point });
         self.build_edges.push(Vec::new());
         self.build_region_nodes[region.0].push(id);
+        self.build_nodes.insert((point.x, point.y, point.z), id);
         id
     }
 
@@ -445,20 +690,26 @@ impl NavigationGraph {
         self.build_edges[from.0].push(Edge { to, cost });
     }
 
-    fn intra_edges(&mut self, footing: &Footing<'_>) {
+    fn intra_edges(&mut self, footing: &Footing<'_>, places: &Places) {
         for region in 0..self.regions.len() {
             let nodes = self.build_region_nodes[region].clone();
-            let region = self.regions[region];
+            // A region with one entrance has nothing to route between, and a
+            // facet is mostly such regions — the traversal below is the bake's
+            // whole cost, so not starting it is worth the branch.
+            if nodes.len() < 2 {
+                continue;
+            }
+            let local = RegionPlaces::of(self, places, self.regions[region]);
             for &from in &nodes {
-                let costs = region_costs(footing, region, self.nodes[from.0].point);
+                let costs = region_costs(footing, &local, self.nodes[from.0].point);
                 for &to in &nodes {
                     if from == to {
                         continue;
                     }
-                    let point = self.nodes[to.0].point;
-                    let x = usize::from(point.x - region.left);
-                    let y = usize::from(point.y - region.top);
-                    if let Some(cost) = costs[y * usize::from(region.width) + x] {
+                    let slot = local
+                        .slot(self.nodes[to.0].point)
+                        .expect("a node is a place of its own region");
+                    if let Some(cost) = costs[slot] {
                         self.add_edge(from, to, cost);
                     }
                 }
@@ -485,6 +736,7 @@ impl NavigationGraph {
         }
         self.build_region_nodes = Vec::new();
         self.build_edges = Vec::new();
+        self.build_nodes = BTreeMap::new();
     }
 
     fn node_region(&self, node: NodeId) -> RegionId {
@@ -664,30 +916,29 @@ impl NavigationGraph {
     }
 }
 
-/// Exact uniform-cost routes from one point to every tile in one small region.
+/// Exact uniform-cost routes from one place to every place in one small region.
 /// One traversal replaces the old one-A*-per-node-pair construction while
-/// retaining directed movement and height resolution through `step_allowed`.
-fn region_costs(footing: &Footing<'_>, region: Region, from: Point) -> Vec<Option<u32>> {
-    let width = usize::from(region.width);
-    let cells = width * usize::from(region.height);
-    let index = |point: Point| usize::from(point.y - region.top) * width + usize::from(point.x - region.left);
-    let mut costs = vec![None; cells];
+/// retaining directed movement and height resolution through the step rule.
+///
+/// **To every place and not to every tile**, so a route to a bridge deck is not
+/// answered by the cost of reaching the road under it. The traversal is
+/// one-directional and always was, which is what makes a one-way drop cost what
+/// it really costs from this side and nothing at all from the other.
+fn region_costs(footing: &Footing<'_>, local: &RegionPlaces, from: Point) -> Vec<Option<u32>> {
+    let mut costs = vec![None; local.len()];
     let mut open = VecDeque::new();
-    costs[index(from)] = Some(0);
-    open.push_back(from);
-    while let Some(point) = open.pop_front() {
-        let cost = costs[index(point)].expect("queued points have a cost");
-        for direction in Direction::ALL {
-            let Some(next) = step_allowed(footing, point, direction) else {
+    let start = local.slot(from).expect("a node is a place of its own region");
+    costs[start] = Some(0);
+    open.push_back((from, start));
+    while let Some((point, slot)) = open.pop_front() {
+        let cost = costs[slot].expect("queued places have a cost");
+        for next in steps_out_of(footing, point).into_iter().flatten() {
+            let Some(at) = local.slot(next) else {
                 continue;
             };
-            if !region.contains(next) {
-                continue;
-            }
-            let at = index(next);
             if costs[at].is_none() {
                 costs[at] = Some(cost + 1);
-                open.push_back(next);
+                open.push_back((next, at));
             }
         }
     }
@@ -1034,30 +1285,113 @@ mod tests {
         assert_eq!(graph.nodes.len(), 8);
     }
 
-    // 🚩 There is no `one_way_grid`, and there cannot be one.
-    //
-    // A test stood here — `one_way_region_transitions_do_not_merge_component_pairs`
-    // — over a `OneWayGrid` double whose `can_step` refused one direction
-    // outright. Converting it to real ground found that **no ground does that**,
-    // for two reasons that meet:
-    //
-    // - **Land cannot.** A land climb is not bounded by `MAX_STEP_UP` — see
-    //   `MapTerrain::check`'s `land_check` — so a drop of any depth is walked
-    //   back up. Land heights also interpolate between neighbouring cells, so
-    //   even a cliff is a ramp.
-    // - **A static can, and the bake cannot see it.** A floor's top *is* a hard
-    //   edge, and a three-unit one is a legal fall and an illegal climb. But
-    //   `build` samples one height per tile and that height is
-    //   `ground_z` — the land alone — so a tile whose only surface is a floor
-    //   is sampled at the land beneath it and comes back unwalkable. The whole
-    //   ledge is invisible.
-    //
-    // So the double was asserting the builder's handling of a situation the
-    // builder's own input cannot contain, which is the shape `BlindTerrain`
-    // had in node C. It is deleted rather than reimplemented, and it is owed
-    // back: `docs/map/terrain_seam.md`'s node F changes what height a graph
-    // node is sampled at, and a static ledge becomes representable the moment
-    // it lands. The directed-component pass is right and is untested until then.
+    /// A raised walkway of statics, one tile wide, running west from `(x, 12)`.
+    ///
+    /// **The shape the graph could not hold.** Land cannot make a ledge — a land
+    /// climb is not bounded by [`MAX_STEP_UP`](crate::MAX_STEP_UP), see
+    /// `MapTerrain::check`'s land branch, and land heights interpolate between
+    /// neighbouring cells, so even a cliff is a ramp walked both ways. A floor's
+    /// top *is* a hard edge, and the ground under a floor laid flat on it is not
+    /// somewhere a body fits — so a walkway of floors is a surface that exists
+    /// only as a static, at a height `ground_z` does not report.
+    fn walkway(scene: &mut Scene, xs: std::ops::RangeInclusive<u16>, height: u8) {
+        for x in xs {
+            scene.floor(x, 12, 0, height);
+        }
+    }
+
+    /// A body may step off a ledge and not climb back onto it, and the graph is
+    /// what used to lose that.
+    ///
+    /// A portal was minted only where the step succeeded **both** ways, so a
+    /// one-way border was not a portal at all — a refusal rather than a lie,
+    /// which is the right side of the error and still a refusal. Since N4 a
+    /// crossing is one direction and its reverse is its own edge, so a route off
+    /// the walkway exists and a route back up does not.
+    ///
+    /// A test stood here over a `OneWayGrid` double whose `can_step` refused one
+    /// direction outright, and it was deleted in the terrain-seam work because
+    /// no *ground* does that — the builder's own input could not contain the
+    /// situation, since it sampled `ground_z` and a walkway of floors came back
+    /// unwalkable. This is that test owed back, over ground.
+    #[test]
+    fn a_ledge_is_a_portal_one_way_and_no_portal_the_other() {
+        let mut scene = Scene::flat_holding(63, 31, 0);
+        // The walkway crosses the region border at x=31/32 and stops there, so
+        // the only way off it is the drop east.
+        walkway(&mut scene, 0..=31, 5);
+        let footing = scene.footing();
+        let graph = NavigationGraph::build(&footing, 64, 32).unwrap();
+
+        let high = Point::new(2, 12, 5);
+        let low = Point::new(61, 12, 0);
+        // The step itself, so the test says what ground it is about before it
+        // says what the graph did with it.
+        assert_eq!(
+            step_allowed(&footing, Point::new(31, 12, 5), Direction::East),
+            Some(Point::new(32, 12, 0)),
+            "a body steps off the walkway"
+        );
+        assert_eq!(
+            step_allowed(&footing, Point::new(32, 12, 0), Direction::West),
+            None,
+            "and cannot climb back onto it"
+        );
+
+        let route = find_long_path(&footing, &footing, &graph, high, low, 600)
+            .expect("the drop off the walkway is a route");
+        assert_eq!(end(&footing, high, &route), low);
+        assert!(
+            find_long_path(&footing, &footing, &graph, low, high, 600).is_none(),
+            "nothing climbs back onto a five-unit ledge"
+        );
+
+        // And the graph says it in its own terms: a crossing edge with no
+        // reverse. `edge_targets` is directed storage, so this is a statement
+        // about the bake rather than about the router reading it.
+        let one_way = graph.nodes.iter().enumerate().any(|(from, _)| {
+            graph
+                .edges_from(NodeId(from))
+                .any(|edge| edge.cost == 1 && !graph.edges_from(edge.to).any(|back| back.to.0 == from))
+        });
+        assert!(one_way, "a one-way ledge is a one-way edge");
+    }
+
+    /// A plateau reached only by a flight of steps is not an island.
+    ///
+    /// **N4's headline, in one scene.** The sampler took `ground_z` — the land
+    /// alone — so every tile of the stair and of the plateau over it came back
+    /// at the ground beneath, where a body does not fit; the whole climb was
+    /// invisible and the plateau had no portal to anywhere. It is Britain's
+    /// castle in miniature: land at one height, a raised place at another, and
+    /// nothing but statics between them.
+    #[test]
+    fn a_plateau_reached_by_stairs_is_not_an_island() {
+        let mut scene = Scene::flat_holding(63, 31, 0);
+        // Fifteen steps of two, from the plain at x=38 up to the plateau at
+        // x=24, and the plateau itself west of that. The border at x=31/32 falls
+        // half way up, so the portal that joins the two regions is sixteen units
+        // above the land the old sampler would have found there.
+        for x in 24..=38u16 {
+            scene.floor(x, 12, 0, 2 * (39 - x) as u8);
+        }
+        walkway(&mut scene, 0..=23, 30);
+        let footing = scene.footing();
+        let graph = NavigationGraph::build(&footing, 64, 32).unwrap();
+
+        assert!(
+            graph.nodes.iter().any(|node| node.point.z > 0),
+            "a graph that samples the land alone has every node at z=0"
+        );
+        let plain = Point::new(60, 12, 0);
+        let plateau = Point::new(2, 12, 30);
+        let route = find_long_path(&footing, &footing, &graph, plain, plateau, 600)
+            .expect("the stair is a route onto the plateau");
+        assert_eq!(end(&footing, plain, &route), plateau);
+        let down =
+            find_long_path(&footing, &footing, &graph, plateau, plain, 600).expect("and a route back down");
+        assert_eq!(end(&footing, plateau, &down), plain);
+    }
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(32))]
