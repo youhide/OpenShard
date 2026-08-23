@@ -83,6 +83,39 @@ only end normally tested, and surfaces as NPCs strolling through walls.
 there is no `UFLAG1_NOSHOOT` at all. Pin a flag's value in a test next to the
 constant.)
 
+**One rule can live in two files, and the one you find first is the smaller
+half.** ServUO answers "does a body block a step" twice, and reading only
+`Movement.CheckMovement` gets it backwards. That file's mobile check
+(`Scripts/Services/Pathing/Movement.cs:344`) is gated on
+`p is BaseCreature && !Controlled && (xForward, yForward) != m_Goal` — so it is
+**uncontrolled creatures only**, and it deliberately lets a route end on its
+quarry's own tile. A *player* never reaches it: `Mobile.Move` asks the mobile
+being walked into instead, through `OnMoveOver` → `CheckShove`
+(`Server/Mobile.cs:3517`), and that is not a block at all — at full stamina a
+player **shoves through** for 10 stamina and a message, and only a player
+already below full stamina is stopped. Staff shove for free.
+
+Three consequences, all of which a "bodies block" implementation gets wrong if
+it reads the first file alone: the goal-tile exemption exists (without it no
+chase is plannable, because the tile the route is *for* is the one it may not
+end on); the flanks of a diagonal are checked, not just the destination
+(`Movement.cs:552`); and hard-blocking players is a **divergence**, not parity —
+this engine takes it deliberately, and the shove is filed in
+[`roadmap.md`](roadmap.md) rather than built.
+
+The overlap test in both files is `(other.Z + 15) > z && (z + 15) > other.Z` —
+**fifteen**, where the same file's `PersonHeight` is sixteen. One unit, and it
+is the difference between a mezzanine floor being walkable with somebody
+standing under it and not.
+
+**`IgnoreMobiles` is on the wire, and it has to be.** ServUO carries the
+exemption to the client as bit `0x10` of the mobile flag byte in `0x77`/`0x78`
+(`Server/Mobile.cs:8802`, and again in the pre-7.0 encoder). That is not
+decoration: the client keeps its own copy of the body-blocking rule and applies
+it to what it predicts, so a server that exempts a mobile without sending the
+bit gets a step allowed at one end and refused at the other — which reads as a
+rubber-band rather than as a permission.
+
 ## How three other engines lit a flat world
 
 Read while planning the lighting rewrite ([`lighting.md`](lighting.md)), because

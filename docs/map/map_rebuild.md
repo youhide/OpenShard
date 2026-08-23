@@ -557,7 +557,7 @@ waits for a measurement that says the statics are still on a hot path.
 
 | question | what settles it |
 |---|---|
-| **Do bodies block?** The client refuses to route through an NPC, the shard permits it — deliberately, and the two ends have said so in comments for as long as both indexes have existed. It is a gameplay decision, not a map one | Whoever owns "may I walk into somebody" says which end is right; the layer carries either answer unchanged |
+| ~~**Do bodies block?**~~ **Taken: they do.** The shard refuses a step onto a living body and plans around one — `Footing`'s fourth field, built out of the sector grid at the question. The layer carried it unchanged, as this row said it would: no `Cover`, no overlay entry, no identity in `openshard-map`. See [`roadmap.md`](../roadmap.md)'s *a mobile is not an obstacle* | Settled. What is left is the client's end, which still plans through a crowd, and the *shove* — in UO a player at full stamina pushes past for 10 stamina rather than being stopped, and this engine hard-blocks on purpose |
 | **Which components of a multi are floors** | R3 reads the platform flag, which is what a static floor already is. If a shipped house has a floor that flag does not mark, that is a finding about the table and belongs in [`findings.md`](../findings.md) |
 | **Two floors over one tile, for the picture** | The step check chooses the highest surface in reach (`walk::climbed`, not `surface_at` as this table used to say); the *renderer* choosing a storey is [`interiors.md`](interiors.md)'s own subject, and R3 has given it the second surface it lacked |
 | **The packed static record** | N3's node-expansion measurement: whether the statics are still on a hot path once spans exist |

@@ -488,35 +488,80 @@ surveys say where not to look. The suspects left, in order:
 - **Arriving rather than walking** — a login, a spawn, a gate or a teleport onto
   a deck, which reach `spawn_z` and not `check`.
 
-### Backlog: a mobile is not an obstacle
+### ~~Backlog: a mobile is not an obstacle~~ — closed, and it was two entries
 
-The step check asks two things — `MapTerrain::check` for the client's files, and
-`Obstructions` for what the world has put on top (`state/src/obstruct.rs`,
-composed in `LiveTerrain::can_step`). Nothing registers a *mobile* in the second.
-Every `Obstructions::block` call is a door (`tick/decor.rs`), a placed impassable
-decoration, a restored item (`tick/persist.rs`) or a field spell
-(`tick/fields.rs`); no mobile is ever entered or removed. So a player walks
-through a standing NPC, a guard does not hold a doorway, and `find_path` plans
-straight through a crowd. ServUO blocks here (`Movement.CheckMovement` with
-`checkMobiles`), and so does the 2D client's expectation — bodies do not overlap.
+**A mobile is an obstacle, on both sides of the step.** The method is the one
+this entry chose — ask the sector grid, not a second copy in `Obstructions` —
+and it is now where every caller reads it rather than at two call sites.
 
-Two ways to close it, and the choice is the point:
+Read the shape before the history: `Footing` has a **fourth field**,
+[`Bodies`](../crates/common/movement/src/footing.rs), and `walk::landing` asks
+it last, at the height the body would arrive at, the way ServUO's `Check` does
+(`Movement.cs:344`). Because `landing` is what each of `steps_out_of`'s eight
+answers is, the diagonal's flanks obey it too, and so does everything above it:
+`can_step`, `step_allowed`, `find_path`, the coarse route's refinement.
 
-- **Register mobiles in `Obstructions`.** Cheap to read — the index is already on
-  the hot path — but it is a second copy of `Position`, updated on every step,
-  every spawn, every despawn and every teleport. That bargain is fine for a door
-  that flips twice an hour and much worse for a body that moves three times a
-  second; one missed `unblock` is a permanent invisible wall.
-- **Ask the sector grid.** `FacetState::sectors` is already the authoritative
-  index from tile to entity and is already kept honest by the step itself
-  (`tick/motion.rs` writes it beside `Position`). No second copy, and the cost is
-  one lookup per step. This is the one to take.
+`Bodies` holds feet and no identity — sorted by tile, borrowed, **built at the
+question and thrown away**, exactly as a `MapTerrain` is. `WorldState::crowd_near`
+builds one out of the sector grid; there is nothing to keep in step and no
+`unblock` to forget. A step asks for a reach of 1, a plan for the distance to its
+goal capped at `CROWD_REACH`, and the bound costs a re-plan and never a wrong
+step, because the step reads its own crowd.
 
-Either way three rules come with it and none are in the code yet: the dead do not
-block (a corpse is an item, a ghost walks through), a mobile may always step *off*
-the tile it is standing on, and staff walking through bodies is the same
-permission as walking through walls — see `gm.rs`, which has no such bypass
-either.
+The three rules are in `body_blocks` and `walks_through_bodies`, where the
+registry is:
+
+- **The dead do not block, and the dead are stopped by nobody** — ServUO's
+  `CanMoveOver`, both halves. A corpse is a `Drawn` item and never was a body; a
+  *ghost* keeps its `Body` (a shroud is a body graphic) and used to wall a
+  doorway the living could neither see nor pass.
+- **A mobile may always step off its own tile**, which comes to nothing more
+  than the mover being absent from its own crowd.
+- **Staff walk through bodies as through walls** — `Staff`, the flag a `.gm`
+  puts down, not the account's access level. A *hidden* game master is in nobody
+  else's way either, which is ServUO's `t.Hidden && t.IsStaff()`; a hidden player
+  still blocks.
+
+And the exemption **reaches the client**: `stance_of` sets
+`StatusFlags::IGNORE_MOBILES` (`0x10`) on a staff mobile's `0x77`/`0x78`. The
+client keeps its own copy of the rule and applies it to what it predicts, so
+without the bit a game master's step is allowed at one end and refused at the
+other. That bit was in `StatusFlags`' table with nothing setting it, under the
+note that a constant nobody sets is a constant nobody has tested; this is the
+day it was wanted.
+
+#### What this entry got wrong, and what is left
+
+**Half of it was already built.** `WorldState::mobile_occupies` had been refusing
+a step onto an occupied tile since 2026-08-14, in `tick/motion.rs`'s two step
+paths. So "a player walks through a standing NPC" was false when it was written.
+What was true — and worse than the entry said — is that the *step* knew about
+bodies and the *plan* did not: a creature whose quarry stood behind a bystander
+walked into the bystander, was refused, re-decided the same direction next beat,
+and never went round. `a_chase_rounds_a_line_of_bystanders` is that bug, and its
+second assertion is that the creature went round rather than through — reaching
+the quarry on its own would also pass on a shard that had forgotten bodies
+entirely.
+
+Left open, and none of it blocks anything:
+
+- **The client plans through bodies.** Everything above is the shard's end.
+  `client/app`'s `steer.rs` builds its footings with `Bodies::nobody`, so a
+  click-to-walk route still threads a crowd and the shard refuses it step by
+  step — the same rubber-band, from the other side. The client already has the
+  mobile list (`Clutter` inserts every one at `PLAYER_HEIGHT` for the *drawn*
+  route); what it does not have is a `crowd_near`.
+- **A player does not shove, and in UO a player shoves.** `Mobile.CheckShove`
+  costs 10 stamina and a message and lets the step through at full stamina;
+  refusal is only for a player already tired. This engine hard-blocks, which is
+  a deliberate divergence and not parity — see [`findings.md`](findings.md),
+  which has the whole of the ServUO reading. Building the shove means a stamina
+  charge, two clilocs and a reveal, and it is gameplay rather than movement.
+- **A boat's deck and a moving multi.** The crowd is read off the sector grid,
+  which holds a mobile's own tile. Nothing here asks what happens to two bodies
+  on a deck that moves under them.
+- **`Sectors::nearby` is still linear in a bucket**, and this entry is the second
+  per-step reader that was predicted below. It is now real.
 
 ### ~~Backlog: `can_step` does not check the corner, and two obstruct tests are red~~ — closed
 
@@ -714,9 +759,14 @@ fix is to split a bucket into two lists — mobiles and items — and let a call
 say which it means. AI sight then compares about ten rows instead of four
 thousand, and no caller changes shape.
 
-This matters more, not less, once "a mobile is not an obstacle" above is closed
-the recommended way: that backlog puts a *second* per-step reader on the same
-lookup.
+**This got worse, and it was predicted here.** "A mobile is not an obstacle"
+above is closed the recommended way, so `crowd_near` is now a *second* per-step
+reader on the same lookup — `nearby(from, 1)` for every step by anyone, and
+`nearby(from, ≤32)` for every route planned. Each is one call, so the linearity
+is not multiplied; what changed is that the four thousand comparisons a
+decorated castle costs are now paid on the movement path as well as the sight
+path, and a split into mobiles and items would take the movement half to about
+ten.
 
 ### The tick
 

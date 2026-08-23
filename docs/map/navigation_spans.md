@@ -309,6 +309,14 @@ offer), so "a body in the way" is currently a client-side courtesy rather than a
 rule. Nothing here changes that, and nothing here should: it is a gameplay
 decision about whether bodies block, and it belongs wherever that is taken.
 
+> **Taken since, and the span grid was right to stay out of it.** Bodies block,
+> on the shard's end: `Footing` grew a fourth field, `Bodies`, built out of the
+> sector grid at the question and read by `walk::landing`. Nothing in this plan
+> moved — no span, no `Cover`, no overlay entry, and the bake is still over
+> ground that has nobody on it, which is what keeps a *corridor* a statement
+> about topology. See [`roadmap.md`](../roadmap.md)'s *a mobile is not an
+> obstacle*.
+
 ### 🚩 Nothing but a ship can be stood upon
 
 `grep -rn "CoverKind::Stands" crates` has **one** producer in the whole
