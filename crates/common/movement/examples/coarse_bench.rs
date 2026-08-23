@@ -249,7 +249,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stamp = bake::stamp_of(&cli.client, facet, map.revision())?;
     let graph = bake::load(&bake::artifact_path(&cli.client, facet), &stamp)?;
     let (regions, nodes, edges) = graph.counts();
-    let terrain = MapTerrain::new(map.map(), &tiles);
+    let index = openshard_movement::spans::SpanIndex::build(map.map(), &tiles);
+    let terrain = MapTerrain::new(map.map(), &tiles, &index);
     // The map and nothing over it: a facet's numbers have to be about the facet.
     let nothing_placed = Overlay::default();
     let footing = Footing::new(Some(terrain), &nothing_placed, Doors::AsTheyStand);

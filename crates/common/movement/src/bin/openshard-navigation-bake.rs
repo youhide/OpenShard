@@ -142,8 +142,18 @@ fn bake_one(cli: &Cli, facet: Facet, tiles: &TileData) -> Result<(), Box<dyn std
     // a door that happened to be shut when the bake ran is not a property of
     // the ground. See `docs/map/navigation_graph_bake.md`.
     let nothing_placed = Overlay::default();
+    // The span bake first: the coarse graph is a flood over `step_allowed`, so
+    // it reads the same layer a step does — and building it here is 0.07 s
+    // against a graph bake measured in minutes.
+    let spans = openshard_movement::spans::SpanIndex::build(map.map(), tiles);
+    eprintln!(
+        "navigation bake +{:.3}s: {} spans, {} B resident",
+        started.elapsed().as_secs_f64(),
+        spans.span_count(),
+        spans.resident_bytes(),
+    );
     let footing = Footing::new(
-        Some(MapTerrain::new(map.map(), tiles)),
+        Some(MapTerrain::new(map.map(), tiles, &spans)),
         &nothing_placed,
         Doors::AsTheyStand,
     );

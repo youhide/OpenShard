@@ -122,16 +122,18 @@ fn a_facet_keeps_the_coarse_router_it_was_given_and_no_other() {
     // Nothing live over it, because a baked graph is the *static* connectivity
     // of a facet.
     let nothing_placed = openshard_map::overlay::Overlay::default();
-    let nothing_over = |map, tiles| {
+    let nothing_over = |map, tiles, spans| {
         openshard_movement::Footing::new(
-            Some(MapTerrain::new(map, tiles)),
+            Some(MapTerrain::new(map, tiles, spans)),
             &nothing_placed,
             Doors::AsTheyStand,
         )
     };
     let empty = TileData::empty();
     let map = flat();
-    let baked = NavigationGraph::build(&nothing_over(&map, &empty), 8, 8).expect("an 8x8 facet has a graph");
+    let spans = openshard_movement::spans::SpanIndex::build(&map, &empty);
+    let baked =
+        NavigationGraph::build(&nothing_over(&map, &empty, &spans), 8, 8).expect("an 8x8 facet has a graph");
     let loaded = World::new(START).with_facet(Facet(0), snapshot(), Some(baked));
     assert_eq!(
         loaded
@@ -9469,7 +9471,7 @@ fn door_frames(walled: bool) -> Scene {
 /// Give the default facet a scene, and the shard the table that scene reads.
 fn stand_on(world: &mut World, scene: Scene) {
     let (map, tiles) = scene.into_shard(Facet(0));
-    world.state.facet_state_mut(Facet(0)).set_map(Some(map));
+    world.state.facet_state_mut(Facet(0)).set_map(Some(map), &tiles);
     world.state.tiles = tiles;
 }
 
@@ -12973,10 +12975,12 @@ pub(super) fn add_empty_facet(world: &mut World, facet: Facet) {
 /// The same, at a size of the test's choosing — the facets are not all the
 /// shape of Britannia, and what the client is told about that is a rule.
 pub(super) fn add_empty_facet_sized(world: &mut World, facet: Facet, width: u32, height: u32) {
-    world
-        .state
-        .facets
-        .insert(facet, FacetState::new(None, None, width, height));
+    world.state.facets.insert(
+        facet,
+        // No map, so there is nothing to bake a span index over: the table
+        // is only along for the signature.
+        FacetState::new(None, None, width, height, &openshard_tiles::TileData::empty()),
+    );
 }
 
 pub(super) fn enter_on_facet(world: &mut World, connection: ConnectionId, facet: Facet, now: Instant) {

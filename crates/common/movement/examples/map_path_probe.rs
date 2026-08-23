@@ -193,7 +193,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let tiles = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
     let map = openshard_uofiles::map::read_facet(&cli.client, 0)?;
-    let terrain = MapTerrain::new(&map, &tiles);
+    // The layer a step actually reads, since `navigation_spans.md`'s N3: this
+    // probe's node-expansion cost is the number that plan is argued from, so it
+    // has to be the same ground the shard walks.
+    let index = openshard_movement::spans::SpanIndex::build(&map, &tiles);
+    let terrain = MapTerrain::new(&map, &tiles, &index);
     // The map and nothing over it. This probe measures the *ground*: a shard's
     // doors and crates are its own, and a facet's numbers have to be about the
     // facet to be comparable between runs.

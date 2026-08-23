@@ -34,6 +34,7 @@ use openshard_map::overlay::{Doors, Overlay};
 use openshard_map::world::World;
 use openshard_tiles::TileData;
 
+use crate::spans::SpanIndex;
 use crate::terrain::MapTerrain;
 
 /// The map, the live world over it, and how the doors are read.
@@ -82,10 +83,31 @@ impl<'a> Footing<'a> {
     /// The tile table is its own argument because its scope is different: one
     /// install has one table and several facets, so what a graphic *is* is not
     /// a fact about this world. That asymmetry is the whole of the signature.
+    ///
+    /// **The bake is the third argument for a different reason**, and not a
+    /// happy one: a [`SpanIndex`] *is* a fact about this world — it is a
+    /// projection of the snapshot's own two layers — and it would live in
+    /// [`World`] if it could. It cannot: `openshard_map` is underneath this
+    /// crate, and where a body may stand is a movement rule. So it travels
+    /// beside the world, held by whoever holds the world, and the pairing is
+    /// checked here rather than by the type system.
+    ///
+    /// # Panics
+    ///
+    /// If exactly one of the map and the bake is present. Both or neither: a
+    /// facet with a map and no bake would be a facet whose steps are decided by
+    /// re-deriving every column from `tiledata`, six times more expensively,
+    /// with nothing at all saying so. That is the failure this refuses to have
+    /// quietly.
     #[must_use]
-    pub fn of(world: &'a World, tiles: &'a TileData, doors: Doors) -> Self {
+    pub fn of(world: &'a World, tiles: &'a TileData, spans: Option<&'a SpanIndex>, doors: Doors) -> Self {
         Self {
-            map: world.snapshot().map(|base| MapTerrain::new(base.map(), tiles)),
+            map: match (world.snapshot(), spans) {
+                (Some(base), Some(index)) => Some(MapTerrain::new(base.map(), tiles, index)),
+                (None, None) => None,
+                (Some(_), None) => panic!("a facet with a map and no span bake over it"),
+                (None, Some(_)) => panic!("a span bake for a facet with no map"),
+            },
             overlay: world.live(),
             doors,
         }

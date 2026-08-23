@@ -24,7 +24,7 @@ use clap::Parser;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::{Doors, Overlay};
 use openshard_movement::spans::{SpanIndex, Spans};
-use openshard_movement::{Footing, MapTerrain, SearchExit, search_path, step_allowed};
+use openshard_movement::{Footing, MapTerrain, SearchExit, search_path, step_allowed, steps_out_of};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 
@@ -63,7 +63,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let tiledata = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
     let map = openshard_uofiles::map::read_facet(&cli.client, 0)?;
-    let terrain = MapTerrain::new(&map, &tiledata);
+    let baking = Instant::now();
+    let index = SpanIndex::build(&map, &tiledata);
+    println!(
+        "baked {} spans in {:.2}s, {} B resident",
+        index.span_count(),
+        baking.elapsed().as_secs_f64(),
+        index.resident_bytes(),
+    );
+    let terrain = MapTerrain::new(&map, &tiledata, &index);
     // The map and nothing over it: this probe is about what the *ground* costs
     // to ask, so the live world is empty on purpose.
     let nothing_placed = Overlay::default();
@@ -116,6 +124,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|p| terrain.surface_at(p.x, p.y, i32::from(p.z)).unwrap_or(0) as u64)
             .sum()
     });
+    // The *start* half of a step, asked once per node expansion where the
+    // landing half is asked eight or sixteen times. `navigation_spans.md`'s N3
+    // decides whether it is worth baking, and this row is that decision.
+    measure(cli.repeat, n, "terrain.start_surface (the start)", || {
+        standing
+            .iter()
+            .map(|p| terrain.start_surface(p.x, p.y, i32::from(p.z)).1 as u64)
+            .sum()
+    });
     measure(cli.repeat, n, "terrain.can_step (one neighbour)", || {
         standing
             .iter()
@@ -128,9 +145,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     println!("what one node expansion costs:");
-    // Exactly what `search` does per popped tile: eight directions through
-    // `step_allowed`, so the four diagonals also pay for their two flanks.
-    measure(cli.repeat, n, "8 x step_allowed (a whole node)", || {
+    // What `search` does per popped tile since `navigation_spans.md`'s N3: one
+    // call, which resolves the tile being stepped off once and answers each
+    // neighbour once. Every row below is the same eight answers by another
+    // route, and they all carry the same checksum.
+    measure(cli.repeat, n, "steps_out_of (a whole node)", || {
+        standing
+            .iter()
+            .map(|&p| {
+                steps_out_of(black_box(&footing), black_box(p))
+                    .into_iter()
+                    .flatten()
+                    .map(|p| u64::from(p.x))
+                    .sum::<u64>()
+            })
+            .sum()
+    });
+    // The same eight answers asked one direction at a time, which is what a
+    // search did before N3 — and what a caller that wants exactly one direction
+    // still pays, since `step_allowed` is now one slot of the row above. Eight
+    // of those is eight expansions, so this row is the *price of asking singly*
+    // rather than a slower rule.
+    measure(cli.repeat, n, "8 x step_allowed (singly)", || {
         standing
             .iter()
             .map(|&p| {
@@ -142,24 +178,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             })
             .sum()
     });
-    // The same eight answers, with the two things a node expansion currently
-    // recomputes done once: the tile stepped off, and each distinct neighbour.
-    measure(cli.repeat, n, "the same, landings computed once", || {
+    // The landing half derived from the column's statics, which is what
+    // `MapTerrain::check` still does — the rule the bake is proved equal to, and
+    // the number the bake is worth measuring against.
+    measure(cli.repeat, n, "the same, landings over the map", || {
         standing.iter().map(|&p| hoisted_expand(&terrain, p)).sum()
     });
-    // And the same again with the *landing* half answered off the span bake
-    // rather than derived from the column's statics — `navigation_spans.md`'s
-    // N2. The start half is still the map's: a span carries where a body stands
-    // and not the crest of the art under it, which is what `start_surface`
-    // returns, so that half is N3's to move.
-    let baking = Instant::now();
-    let index = SpanIndex::build(&map, &tiledata);
-    println!(
-        "  (baked {} spans in {:.2}s, {} B resident)",
-        index.span_count(),
-        baking.elapsed().as_secs_f64(),
-        index.resident_bytes(),
-    );
+    // And the same again with the *landing* half answered off the span bake —
+    // `navigation_spans.md`'s N2. The start half is still the map's: a span
+    // carries where a body stands and not the crest of the art under it, which
+    // is what `start_surface` returns, and N3 measured that half at a seventh of
+    // an expansion and left it there.
     let spans = Spans::new(&map, &index);
     measure(cli.repeat, n, "the same, landings off the bake", || {
         standing.iter().map(|&p| span_expand(&terrain, &spans, p)).sum()

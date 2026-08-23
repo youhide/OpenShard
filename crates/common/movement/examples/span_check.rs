@@ -36,9 +36,8 @@ use std::time::Instant;
 use clap::Parser;
 use openshard_map::grid::Tile;
 use openshard_map::map::WorldMap;
-use openshard_map::overlay::{Doors, Overlay};
 use openshard_movement::spans::{SpanIndex, Spans};
-use openshard_movement::{Footing, MapTerrain, step_allowed, step_from};
+use openshard_movement::{MapTerrain, step_from};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 
@@ -72,12 +71,39 @@ fn neighbour(x: u16, y: u16, direction: Direction) -> Option<(u16, u16)> {
     Some((x, y))
 }
 
-/// [`step_allowed`] with the landing half answered by the bake.
+/// The whole step rule, with the landing half answered by the *map* — which is
+/// [`MapTerrain::check`], and no longer what `step_allowed` asks.
 ///
-/// The corner rule is the map's own and unchanged — N2 moves `check` and
-/// nothing else — so this is deliberately a copy of [`step_allowed`]'s shape
-/// rather than a call to it: the point of the flood below is that the two
-/// differ in exactly one place.
+/// **Both sides of this oracle are written out here, and since N3 that is
+/// forced rather than stylistic.** The flood below used to walk one side
+/// through the shipped `step_allowed`; that now reads the bake, so a flood
+/// through it would be the bake compared against itself. Writing both out keeps
+/// the corner rule identical on both sides and leaves exactly one difference:
+/// which `check` answers the landing.
+fn map_step(terrain: &MapTerrain<'_>, from: Point, direction: Direction) -> Option<Point> {
+    if direction.is_diagonal() {
+        let bits = direction.to_bits();
+        for flank in [
+            Direction::from_bits((bits + 7) % 8),
+            Direction::from_bits((bits + 1) % 8),
+        ] {
+            map_land(terrain, from, flank)?;
+        }
+    }
+    map_land(terrain, from, direction)
+}
+
+/// Where one step onto the neighbouring tile lands, over the map — the mirror
+/// of [`span_land`], differing in one call.
+fn map_land(terrain: &MapTerrain<'_>, from: Point, direction: Direction) -> Option<Point> {
+    let to = step_from(from, direction)?;
+    let start_z = i32::from(from.z);
+    let (_, start_top) = terrain.start_surface(from.x, from.y, start_z);
+    let z = i8::try_from(terrain.check(to.x, to.y, start_z, start_top)?).ok()?;
+    Some(Point::new(to.x, to.y, z))
+}
+
+/// The same rule with the landing half answered by the bake.
 fn span_step(
     terrain: &MapTerrain<'_>,
     spans: &Spans<'_>,
@@ -155,10 +181,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tiles = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
     let map: WorldMap = openshard_uofiles::map::read_facet(&cli.client, cli.facet)?;
     let (width, height) = (map.width(), map.height());
-    let terrain = MapTerrain::new(&map, &tiles);
 
     let started = Instant::now();
     let index = SpanIndex::build(&map, &tiles);
+    // The terrain borrows the bake, because a step reads it — and this example
+    // is what proves the two rules agree, so it reaches past `can_step` to
+    // `MapTerrain::check` on one side and `Spans::check` on the other.
+    let terrain = MapTerrain::new(&map, &tiles, &index);
     println!(
         "facet {} {width}x{height}: baked in {:.2}s, {} spans, {} B resident",
         cli.facet,
@@ -218,11 +247,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|z| Point::new(cli.x, cli.y, z))
         .and_then(|point| terrain.can_step(point, point))
         .ok_or_else(|| format!("nothing stands at ({}, {})", cli.x, cli.y))?;
-    let nothing_placed = Overlay::default();
-    let footing = Footing::new(Some(terrain), &nothing_placed, Doors::AsTheyStand);
     let flooding = Instant::now();
     let by_map = flood(width, height, origin, |at, direction| {
-        step_allowed(&footing, at, direction)
+        map_step(&terrain, at, direction)
     });
     let map_time = flooding.elapsed();
     let spans = Spans::new(&map, &index);

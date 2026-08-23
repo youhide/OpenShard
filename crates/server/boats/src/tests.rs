@@ -103,7 +103,7 @@ fn a_sea() -> WorldState {
     // the terrain is looking at.
     let (map, tiles) = sea().into_shard(Facet(0));
     let mut facets = BTreeMap::new();
-    facets.insert(Facet(0), FacetState::new(Some(map), None, SIZE, SIZE));
+    facets.insert(Facet(0), FacetState::new(Some(map), None, SIZE, SIZE, &tiles));
     WorldState {
         registry: Registry::new(),
         bus: EventBus::new(),
@@ -362,7 +362,8 @@ fn a_shard_with_no_client_files_launches_nothing() {
 #[test]
 fn a_facet_with_no_map_moors_nothing() {
     let mut state = a_sea();
-    state.facet_state_mut(Facet(0)).set_map(None);
+    let tiles = openshard_tiles::TileData::empty();
+    state.facet_state_mut(Facet(0)).set_map(None, &tiles);
     let (actor, owner) = a_captain(&mut state);
 
     assert_eq!(

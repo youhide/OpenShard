@@ -18,6 +18,8 @@ use openshard_protocol::world::Point;
 use openshard_tiles::LandTileId;
 use openshard_tiles::{StaticTile, TileData, TileFlags};
 
+use crate::spans::{SpanIndex, Spans};
+
 /// How far a walking human can step up.
 ///
 /// Sphere: `if (blockingState->m_Bottom.m_z > ptDest->m_z + m_zClimbHeight + 2)`
@@ -89,6 +91,15 @@ pub(crate) fn static_top(tile: &StaticTile, base: i32) -> i32 {
 pub struct MapTerrain<'a> {
     map: &'a WorldMap,
     tiles: &'a TileData,
+    /// The bake over the two, which is what a *step* actually reads.
+    ///
+    /// **Not an `Option`.** A facet that has a map has a span index over it —
+    /// [`SpanIndex::build`] is one pass and 0.07 s over Britannia — and making
+    /// it optional would make the fast path something a holder could silently
+    /// forget, leaving the step rule to re-derive every column from `tiledata`
+    /// at six times the cost with nothing saying so. See
+    /// `docs/map/navigation_spans.md`'s N3.
+    spans: &'a SpanIndex,
     /// Whether water counts as ground. A boat or a fish says yes.
     ///
     /// A property of the *body* asking, which is why it is set on the view and
@@ -100,13 +111,31 @@ pub struct MapTerrain<'a> {
 }
 
 impl<'a> MapTerrain<'a> {
-    /// Read a loaded map through the table that says what its graphics are.
-    pub const fn new(map: &'a WorldMap, tiles: &'a TileData) -> Self {
+    /// Read a loaded map through the table that says what its graphics are,
+    /// and the bake over the pair.
+    ///
+    /// The bake is [`SpanIndex::build`]'s output over *these two*: an index
+    /// built over another facet's map, or over another install's tile table,
+    /// describes surfaces this map does not have. Nothing in the type system
+    /// says so — which is why each end of the wire builds all three from one
+    /// load and hands them over together.
+    pub const fn new(map: &'a WorldMap, tiles: &'a TileData, spans: &'a SpanIndex) -> Self {
         Self {
             map,
             tiles,
+            spans,
             swimming: false,
         }
+    }
+
+    /// The bake, as a body of this ability reads it.
+    ///
+    /// The ability travels with it, which is why this is a method rather than a
+    /// field: `swimming` is set on the terrain by the query, and a stored
+    /// [`Spans`] would be a second copy of it to keep in step.
+    #[must_use]
+    pub const fn spans(&self) -> Spans<'a> {
+        Spans::new(self.map, self.spans).swimming(self.swimming)
     }
 
     /// Ask as something that swims: water becomes ground.
@@ -127,15 +156,15 @@ impl<'a> MapTerrain<'a> {
 
     /// The height a mobile would stand at on `(x, y)`, reachable from `from_z`.
     ///
-    /// A convenience over [`check`](Self::check) for callers that have only a
-    /// single z and no picture of the tile they are standing on — the map's own
+    /// A convenience over [`Spans::check`] for callers that have only a single
+    /// z and no picture of the tile they are standing on — the map's own
     /// walkability tests. It reaches from `from_z` as both the current z and the
     /// top of the surface underfoot, which is the flat-ground case. A *walking*
     /// mobile does not go through here: [`can_step`](Self::can_step) computes the
     /// real surface it stands on first, because on a slope the top of that
     /// surface is higher than its feet, and the reach starts from the top.
     pub fn surface_at(&self, x: u16, y: u16, from_z: i32) -> Option<i32> {
-        self.check(x, y, from_z, from_z)
+        self.spans().check(x, y, from_z, from_z)
     }
 
     /// A guess at the height a mobile stands at on `(x, y)`, coming from
@@ -228,7 +257,8 @@ impl<'a> MapTerrain<'a> {
     pub fn predict_step(&self, from: Point, x: u16, y: u16) -> i32 {
         let from_z = i32::from(from.z);
         let (_, start_top) = self.start_surface(from.x, from.y, from_z);
-        self.check(x, y, from_z, start_top)
+        self.spans()
+            .check(x, y, from_z, start_top)
             .unwrap_or_else(|| self.predict_z(x, y, from_z))
     }
 
@@ -287,6 +317,16 @@ impl<'a> MapTerrain<'a> {
     /// Whether a mobile whose feet are at `start_z`, standing on a surface
     /// topping out at `start_top`, may step onto `(x, y)` — and the height it
     /// lands at.
+    ///
+    /// **The rule as the map states it, and no longer what a step asks.** Since
+    /// `docs/map/navigation_spans.md`'s N3 every caller here goes through
+    /// [`Spans::check`], which reads the same rule off a bake instead of
+    /// re-deriving it from the column's statics. This is what that bake is
+    /// *proved equal to* — 248 million steps over facet 0, 0 disagreements, by
+    /// the `span_check` example — and it stays for that: an oracle written in
+    /// terms of the source files is the only thing that would notice a bake
+    /// which had quietly stopped describing them. A caller wanting a step
+    /// wants [`Spans::check`].
     ///
     /// A blend of the three implementations, because the shard serves the 2D
     /// client and each got a different part of this right for it:
@@ -574,7 +614,25 @@ impl MapTerrain<'_> {
         // base that surface stands on, is ServUO's `checkTop` and is the one
         // thing in this port the 2D client disagrees with; see `check`.
         let (_, start_top) = self.start_surface(from.x, from.y, from_z);
-        let landing = self.check(to.x, to.y, from_z, start_top)?;
+        self.land_at(to, from_z, start_top)
+    }
+
+    /// [`can_step`](Self::can_step) with the tile being stepped *off* already
+    /// resolved: where a body whose feet are at `start_z`, on a surface topping
+    /// out at `start_top`, lands on `to`.
+    ///
+    /// **The landing half alone, and the only one of the two that is asked more
+    /// than once per node.** A search expands a tile into eight neighbours and
+    /// pays for `start_surface` once; this is what it pays for eight times, and
+    /// it reads the span bake rather than re-deriving the column from
+    /// `tiledata`. `docs/map/navigation_spans.md`'s N3 left the start half on
+    /// the map on that ratio: 23.3 ns of a 170.8 ns node expansion.
+    ///
+    /// `to.z` is not read — a landing is decided by the column and by where the
+    /// body came from, and the caller's third coordinate is only along for the
+    /// ride.
+    pub fn land_at(&self, to: Point, start_z: i32, start_top: i32) -> Option<Point> {
+        let landing = self.spans().check(to.x, to.y, start_z, start_top)?;
         let z = i8::try_from(landing).ok()?;
         Some(Point { x: to.x, y: to.y, z })
     }
@@ -779,12 +837,16 @@ mod tests {
     struct Install {
         map: WorldMap,
         tiles: TileData,
+        /// The bake over the two, because a terrain borrows one — see
+        /// [`MapTerrain::new`]. It is 0.07 s and 16.5 MiB for the whole facet,
+        /// which is why every test here can have one rather than sharing.
+        spans: crate::spans::SpanIndex,
     }
 
     impl Install {
         /// A walker's view of the install.
         fn terrain(&self) -> MapTerrain<'_> {
-            MapTerrain::new(&self.map, &self.tiles)
+            MapTerrain::new(&self.map, &self.tiles, &self.spans)
         }
 
         /// A swimmer's view of the same install: one map, two bodies asking.
@@ -798,7 +860,8 @@ mod tests {
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("the client's map0 should load");
         let tiles =
             openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata should load");
-        Some(Install { map, tiles })
+        let spans = crate::spans::SpanIndex::build(&map, &tiles);
+        Some(Install { map, tiles, spans })
     }
 
     #[test]

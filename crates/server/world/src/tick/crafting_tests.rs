@@ -54,7 +54,7 @@ fn shop(world: &mut World, statics: &[(u16, i8)]) {
         scene.put(START.0, START.1, z, graphic);
     }
     let (map, tiles) = scene.into_shard(Facet(0));
-    world.state.facet_state_mut(Facet(0)).set_map(Some(map));
+    world.state.facet_state_mut(Facet(0)).set_map(Some(map), &tiles);
     world.state.tiles = tiles;
 }
 

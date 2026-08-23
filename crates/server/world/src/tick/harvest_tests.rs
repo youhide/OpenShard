@@ -71,7 +71,7 @@ fn ground(world: &mut World, land: u16, static_at: Option<(u16, i8)>) {
         scene.put(START.0 + 1, START.1, z, graphic);
     }
     let (map, tiles) = scene.into_shard(Facet(0));
-    world.state.facet_state_mut(Facet(0)).set_map(Some(map));
+    world.state.facet_state_mut(Facet(0)).set_map(Some(map), &tiles);
     world.state.tiles = tiles;
 }
 

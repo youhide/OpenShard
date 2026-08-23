@@ -1379,7 +1379,13 @@ impl PlanarTopology {
         // hole in the wall contour.  Recover that immutable anchor with the
         // server's exact frame tables and equal-height guard; the leaf's
         // open/closed graphic remains a live item-layer fact.
-        let terrain = MapTerrain::new(map, tiledata);
+        // A terrain borrows the span bake over its two tables, so this builds
+        // one: it is a projection of exactly the `map` and `tiledata` in hand,
+        // it costs 0.07 s against a bake that already walks the whole facet,
+        // and threading the client's own through five `bake` signatures would
+        // put a movement index in the arguments of a wall contour.
+        let spans = openshard_movement::spans::SpanIndex::build(map, tiledata);
+        let terrain = MapTerrain::new(map, tiledata, &spans);
         for y in 0..height {
             for x in 0..width {
                 let x16 = u16::try_from(x).expect("facet fits UO coordinates");
@@ -1488,7 +1494,9 @@ impl Buildings {
             by_tile.entry(cell.tile).or_default().push(at);
         }
 
-        let terrain = MapTerrain::new(map, tiledata);
+        // Built here for the reason `PlanarTopology::bake`'s is.
+        let spans = openshard_movement::spans::SpanIndex::build(map, tiledata);
+        let terrain = MapTerrain::new(map, tiledata, &spans);
         let mut steps = BTreeSet::new();
         for (at, cell) in cells.iter().copied().enumerate() {
             let Ok(z) = i8::try_from(cell.floor_z) else {

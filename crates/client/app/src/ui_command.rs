@@ -240,7 +240,7 @@ impl App {
             // the body is, so there is nothing to step from.
             return;
         };
-        let terrain = openshard_movement::MapTerrain::new(self.resources.map(), &self.resources.tiledata);
+        let terrain = crate::world::terrain(&self.resources);
         let stepped = walk.step(facing, |from, tile| {
             i8::try_from(terrain.predict_step(from, tile.x, tile.y)).ok()
         });

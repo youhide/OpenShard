@@ -72,6 +72,17 @@ pub struct Resources {
     /// and is never diffed; this end has no identities to address a finer edit
     /// to. See [`crate::clutter::fill`].
     pub world: World,
+    /// Where a body may stand on [`Resources::world`]'s ground, baked once at
+    /// startup — what every step decision on this end reads.
+    ///
+    /// **`Some` exactly when [`Resources::world`] has a base**, which is the
+    /// pairing [`openshard_movement::Footing::of`] asserts; on this end the base
+    /// is never absent at all (see [`Resources::map`]), so the `Option` is the
+    /// shape of that composition rather than a state this client is ever in.
+    /// It sits beside the world rather than inside it because `openshard_map`
+    /// is underneath `openshard_movement` — see `docs/map/navigation_spans.md`'s
+    /// N3.
+    pub spans: Option<openshard_movement::spans::SpanIndex>,
     /// Static long-distance connectivity over [`Resources::world`]. It is built
     /// once, before the event loop starts, and only proposes a corridor; the
     /// live route still reads the map with the shard's clutter laid over it.

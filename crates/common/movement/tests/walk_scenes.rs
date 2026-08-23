@@ -436,6 +436,90 @@ fn a_random_scene_is_walked_the_way_the_rules_say() {
 /// The covers come out of [`Cover::of_static`] over a tiledata this test
 /// declares, and never by hand: what is under test includes *which* cover that
 /// reading lays, so a fixture that stated the answer would agree with itself.
+/// The three layers compose in one order, over ground whose spans were baked.
+///
+/// `docs/map/navigation_spans.md`'s N3 asks for exactly this, and it is a
+/// composition test rather than a step test: since N3 the map's half of a
+/// landing is read off a [`SpanIndex`](openshard_movement::spans::SpanIndex)
+/// instead of derived from the column's statics, and the live world still has
+/// to be able to add a floor the bake does not know about, take away a tile the
+/// bake says is fine, and hang a door that one reading walks through and the
+/// other does not.
+///
+/// **The bake is deliberately not a fixture here.** A [`Scene`] carries one and
+/// keeps it in step with its own map, so this walks the same two-layer
+/// arrangement the shard does — with the third layer, which the bake is
+/// constructed never to see, laid over the top.
+#[test]
+fn the_live_world_adds_takes_away_and_hangs_a_door_over_baked_spans() {
+    use openshard_map::grid::Tile;
+    use openshard_map::overlay::{Cover, Doors, Overlay};
+    use openshard_movement::{Footing, can_step};
+
+    // Flat ground at zero with nothing on it: every column here is the *bare*
+    // tier of the bake — no span is stored for it at all — which is the tier
+    // 92% of a facet is and the one an overlay has to be able to overrule.
+    let scene = Scene::flat(0);
+    let from = Point::new(1, 1, 0);
+
+    // Bare ground first, so each claim below is a change from a known answer.
+    let nothing = Overlay::default();
+    let bare = Footing::new(Some(scene.terrain()), &nothing, Doors::AsTheyStand);
+    for tile in [(2, 1), (3, 1), (4, 1)] {
+        assert_eq!(
+            can_step(&bare, from, Point::new(tile.0, tile.1, 0)),
+            Some(Point::new(tile.0, tile.1, 0)),
+            "the ground at {tile:?} is ground before anything is laid on it"
+        );
+    }
+
+    let mut live = Overlay::default();
+    // A deck two above the ground: in reach of a body standing on it (a step
+    // reaches `start_top + 2`), and higher than the ground it covers, which is
+    // what makes it the surface rather than a no-op.
+    live.set(Tile::new(2, 1), vec![Cover::standing(2, 0)]);
+    // A crate in the body's own span on the next tile.
+    live.set(Tile::new(3, 1), vec![Cover::blocking(0, 20)]);
+    // And a shut door on the third.
+    live.set(Tile::new(4, 1), vec![Cover::door(0, 20)]);
+
+    let walked = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
+    assert_eq!(
+        can_step(&walked, from, Point::new(2, 1, 0)),
+        Some(Point::new(2, 1, 2)),
+        "a deck the live world laid over bare ground is what a body stands on"
+    );
+    assert_eq!(
+        can_step(&walked, from, Point::new(3, 1, 0)),
+        None,
+        "a blocker in the body's own span refuses a step the ground allows"
+    );
+    assert_eq!(
+        can_step(&walked, from, Point::new(4, 1, 0)),
+        None,
+        "a shut door is in the way of a body walking into it"
+    );
+
+    // The same ground, the same three covers, read by somebody who will open
+    // what is shut: only the door changes its answer.
+    let planned = walked.reading(Doors::AllOpen);
+    assert_eq!(
+        can_step(&planned, from, Point::new(4, 1, 0)),
+        Some(Point::new(4, 1, 0)),
+        "a route planned by a body that opens doors goes through the doorway"
+    );
+    assert_eq!(
+        can_step(&planned, from, Point::new(3, 1, 0)),
+        None,
+        "a crate is not a door, and no reading of the doors moves it"
+    );
+    assert_eq!(
+        can_step(&planned, from, Point::new(2, 1, 0)),
+        Some(Point::new(2, 1, 2)),
+        "and the deck is still the deck"
+    );
+}
+
 #[test]
 fn a_villa_stair_carries_a_body_to_its_first_floor() {
     use openshard_map::grid::Tile;

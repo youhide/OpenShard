@@ -390,19 +390,82 @@ pub fn step_from(position: Point, direction: Direction) -> Option<Point> {
 /// route planned by somebody who will open it.
 #[must_use]
 pub fn can_step(footing: &Footing<'_>, from: Point, to: Point) -> Option<Point> {
+    landing(footing, Stance::of(footing, from), to)
+}
+
+/// The tile a body is leaving, resolved once.
+///
+/// Every step out of one tile is measured from the same two heights, and both
+/// are properties of that tile and the feet on it — not of where the step is
+/// going. A node expansion asks about eight landings (sixteen, counting the
+/// diagonals' flanks) from one of them, and re-deriving these per landing is
+/// most of what made `8 × step_allowed` cost 1,105 ns where the same eight
+/// answers cost 171. See [`steps_out_of`] and
+/// `docs/map/navigation_spans.md`'s N3.
+#[derive(Clone, Copy, Debug)]
+struct Stance {
+    /// The feet — ServUO's `startZ`, and what the body's height is measured
+    /// from.
+    z: i32,
+    /// The top of what the *map* says is underfoot: `start_surface`'s second
+    /// element, or the feet where there is no map.
+    ///
+    /// Kept apart from [`top`](Self::top) because the map's landing rule is
+    /// asked with the map's own reach: the live world's crests are what a body
+    /// *climbs* from, and folding them in here would let a stair tread the
+    /// shard placed raise the reach of a step onto the ground beside it.
+    map_top: i32,
+    /// The same, with the live world's crests folded in — the reach
+    /// [`climbed`] measures from.
+    top: i32,
+}
+
+impl Stance {
+    /// Resolve where a body at `from` is standing, on both layers.
+    fn of(footing: &Footing<'_>, from: Point) -> Self {
+        let z = i32::from(from.z);
+        // The *reach*, and never the feet — on a slope, or on a stair, those
+        // differ, and starting from the feet refuses the step the client took.
+        // The live half is `Cover::crest`: standing half way up a tread, the
+        // next step is measured from the top of the whole tread, which is what
+        // carries a body off the flight and onto the floor it arrives at.
+        let map_top = footing
+            .map
+            .map_or(z, |map| map.start_surface(from.x, from.y, z).1);
+        Self {
+            z,
+            map_top,
+            top: footing
+                .overlay
+                .surfaces_at(Tile::new(from.x, from.y))
+                .filter(|cover| cover.surface() <= z)
+                .map(Cover::crest)
+                .fold(map_top, i32::max),
+        }
+    }
+}
+
+/// [`can_step`]'s whole rule, with the tile being stepped *off* already
+/// resolved.
+///
+/// The three sources in the order [`can_step`] documents; what is hoisted is
+/// only the answer about `from`, which every landing out of one tile shares.
+fn landing(footing: &Footing<'_>, stance: Stance, to: Point) -> Option<Point> {
     let tile = Tile::new(to.x, to.y);
     let ground = match footing.map {
-        Some(map) => match map.can_step(from, to) {
+        // `land_at` and not `can_step`: the start half is `stance`'s, computed
+        // once for every landing out of this tile rather than per call.
+        Some(map) => match map.land_at(to, stance.z, stance.map_top) {
             Some(landed) => Some(i32::from(landed.z)),
             // The map says there is nothing to stand on, which over open water
             // is true right up until a ship is moored there.
-            None => aboard(footing, from, to),
+            None => aboard(footing, stance, to),
         },
         // No map at all: no floor and no walls, so the ground allows everything
         // and only what the live world put there can refuse.
         None => Some(i32::from(to.z)),
     };
-    let landed = climbed(footing, from, tile, ground).or(ground)?;
+    let landed = climbed(footing, stance, tile, ground).or(ground)?;
     let z = i8::try_from(landed).ok()?;
     match footing
         .overlay
@@ -420,13 +483,11 @@ pub fn can_step(footing: &Footing<'_>, from: Point, to: Point) -> Option<Point> 
 /// step onto it from a pier and down onto it from a mast, and either way you
 /// arrive at the deck. Not [`climbed`]'s rule, because there is nothing to be
 /// higher *than*: the map refused, so any surface at all is better than none.
-fn aboard(footing: &Footing<'_>, from: Point, to: Point) -> Option<i32> {
+fn aboard(footing: &Footing<'_>, stance: Stance, to: Point) -> Option<i32> {
     if footing.overlay.is_empty() {
         return None;
     }
-    footing
-        .overlay
-        .surface_at(Tile::new(to.x, to.y), i32::from(from.z))
+    footing.overlay.surface_at(Tile::new(to.x, to.y), stance.z)
 }
 
 /// The highest surface the live world put at `tile` that a body coming from
@@ -452,42 +513,21 @@ fn aboard(footing: &Footing<'_>, from: Point, to: Point) -> Option<i32> {
 /// Among what survives, the **highest**, which is Sphere's `GetFixPoint`: a
 /// tile can carry both a floor and the stair over it, and the climber takes the
 /// stair. Nearest-z would keep a body on the floor while the client climbed.
-fn climbed(footing: &Footing<'_>, from: Point, tile: Tile, ground: Option<i32>) -> Option<i32> {
+fn climbed(footing: &Footing<'_>, stance: Stance, tile: Tile, ground: Option<i32>) -> Option<i32> {
     // The hot path's two cheap refusals: a shard with nothing placed on it, and
     // a tile with nothing to climb — one length and one hash.
     if footing.overlay.is_empty() || footing.overlay.surfaces_at(tile).next().is_none() {
         return None;
     }
-    let reach = standing_on(footing, from) + MAX_STEP_UP;
+    let reach = stance.top + MAX_STEP_UP;
     footing
         .overlay
         .surfaces_at(tile)
         .filter(|cover| cover.reach() <= reach)
         .map(Cover::surface)
         .filter(|&z| ground.is_none_or(|ground| z > ground))
-        .filter(|&z| fits_at(footing, from, tile, z))
+        .filter(|&z| fits_at(footing, stance, tile, z))
         .max()
-}
-
-/// The top of whatever the body at `from` is standing on: the map's answer and
-/// the live world's, whichever is higher.
-///
-/// The *reach* a step is measured from, and never the feet — on a slope, or on
-/// a stair, those differ, and starting from the feet refuses the step the client
-/// took. The live half is [`Cover::crest`]: standing half way up a tread, the
-/// next step is measured from the top of the whole tread, which is what carries
-/// a body off the flight and onto the floor it arrives at.
-fn standing_on(footing: &Footing<'_>, from: Point) -> i32 {
-    let feet = i32::from(from.z);
-    let map_top = footing
-        .map
-        .map_or(feet, |map| map.start_surface(from.x, from.y, feet).1);
-    footing
-        .overlay
-        .surfaces_at(Tile::new(from.x, from.y))
-        .filter(|cover| cover.surface() <= feet)
-        .map(Cover::crest)
-        .fold(map_top, i32::max)
 }
 
 /// Whether a body walking in from `from` fits standing at `z` on `tile`, asking
@@ -497,8 +537,8 @@ fn standing_on(footing: &Footing<'_>, from: Point) -> i32 {
 /// it is going — ServUO's `testTop`, and the hole a body falls through without
 /// it: a wall that starts above the head of a body standing on the landing is
 /// squarely in the way of the same body walking in at the height it left.
-fn fits_at(footing: &Footing<'_>, from: Point, tile: Tile, z: i32) -> bool {
-    let head = (i32::from(from.z) + PLAYER_HEIGHT).max(z + PLAYER_HEIGHT);
+fn fits_at(footing: &Footing<'_>, stance: Stance, tile: Tile, z: i32) -> bool {
+    let head = (stance.z + PLAYER_HEIGHT).max(z + PLAYER_HEIGHT);
     if footing
         .overlay
         .blocker_at(tile, Body::new(z, head - z), footing.doors)
@@ -578,31 +618,61 @@ pub fn sight_clear(footing: &Footing<'_>, from: Point, to: Point) -> bool {
 /// believe a corner-cutting diagonal was walkable, send it, and be rubber-
 /// banded: a body stuck against a building corner for as long as the player
 /// held that direction.
+///
+/// **One direction of [`steps_out_of`], and it costs the whole expansion.**
+/// That is deliberate: the corner rule already made a diagonal ask about three
+/// tiles, and the alternative is a second copy of the step rule that can drift
+/// from the one a search uses. A caller asking about every direction — a
+/// search, the detour's four tiles — asks [`steps_out_of`] once instead.
 #[must_use]
 pub fn step_allowed(footing: &Footing<'_>, from: Point, direction: Direction) -> Option<Point> {
-    let to = step_from(from, direction)?;
-    if direction.is_diagonal() && !corner_open(footing, from, direction) {
-        return None;
-    }
-    can_step(footing, from, to)
+    steps_out_of(footing, from)[direction.to_bits() as usize]
 }
 
-/// Whether both cardinal tiles flanking a diagonal are steppable, so the
-/// diagonal does not cut through a wall's corner. The flanks of a diagonal are
-/// the two wire directions either side of it (NE lies between N and E).
+/// Every legal step out of `from`, indexed by
+/// [`Direction::to_bits`] — which is [`Direction::ALL`]'s own order.
 ///
-/// The flanks are cardinal, so [`can_step`] here cannot re-enter this.
-fn corner_open(footing: &Footing<'_>, from: Point, diagonal: Direction) -> bool {
-    let d = diagonal.to_bits();
-    let flanks = [
-        Direction::from_bits((d + 7) % 8),
-        Direction::from_bits((d + 1) % 8),
-    ];
-    flanks.iter().all(|&card| {
-        step_from(from, card)
-            .and_then(|tile| can_step(footing, from, tile))
-            .is_some()
-    })
+/// **One node expansion, and the primitive [`step_allowed`] is one reading
+/// of.** A search asks about all eight neighbours of every tile it pops, and
+/// asking them one at a time pays for the same two things over and over: the
+/// tile being stepped *off*, resolved on every call from the same point, and
+/// the four cardinal neighbours, each of which is asked about once as a
+/// destination and again as some diagonal's flank. Answering the eight together
+/// pays for each once — sixteen landing checks become eight — and it is why
+/// this, rather than [`step_allowed`], is what [`find_path`](crate::find_path)
+/// calls.
+///
+/// The answers are the same answers: `step_allowed` is *defined* as one slot of
+/// this, so there is one rule here and no second one to drift.
+#[must_use]
+pub fn steps_out_of(footing: &Footing<'_>, from: Point) -> [Option<Point>; 8] {
+    let stance = Stance::of(footing, from);
+    // Every neighbour once, cardinals included — a diagonal's flank rule below
+    // reads these rather than asking again.
+    let mut landings = [None; 8];
+    for direction in Direction::ALL {
+        let Some(to) = step_from(from, direction) else {
+            continue;
+        };
+        landings[direction.to_bits() as usize] = landing(footing, stance, to);
+    }
+    let mut allowed = landings;
+    for direction in Direction::ALL {
+        // A diagonal may not clip the corner where two blockers meet: both
+        // cardinal tiles flanking it must themselves be steppable. The flanks of
+        // a diagonal are the two wire directions either side of it (NE lies
+        // between N and E), and both are cardinal — so this reads only landings
+        // and can never re-enter the rule.
+        let bits = usize::from(direction.to_bits());
+        if direction.is_diagonal()
+            && [(bits + 7) % 8, (bits + 1) % 8]
+                .iter()
+                .any(|&flank| landings[flank].is_none())
+        {
+            allowed[bits] = None;
+        }
+    }
+    allowed
 }
 
 #[cfg(test)]

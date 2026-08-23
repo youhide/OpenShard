@@ -23,6 +23,7 @@ use openshard_map::grid::Tile;
 use openshard_map::overlay::{Cover, Doors};
 use openshard_map::snapshot::MapSnapshot;
 use openshard_map::world::World;
+use openshard_movement::spans::SpanIndex;
 use openshard_movement::{Footing, MapTerrain, NavigationGraph};
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::combat::HealthBar;
@@ -39,6 +40,7 @@ use openshard_protocol::world::{
     Facet, MapChange, MapSize, PlayerUpdate, Point, Season, encode_server_change,
 };
 use openshard_protocol::{access::AccessLevel, feature::Feature, version::ClientVersion};
+use openshard_tiles::TileData;
 
 use crate::boat::Plank;
 use crate::components::{
@@ -403,6 +405,17 @@ pub struct FacetState {
     /// refines every hop through [`WorldState::live_terrain`] or its
     /// doors-open sibling.
     pub coarse: Option<NavigationGraph>,
+    /// Where a body may stand on this facet's two lower layers, baked once.
+    ///
+    /// **`Some` exactly when [`world`](Self::world) has a base**, which is what
+    /// [`Footing::of`] asserts and what [`set_map`](Self::set_map) is the one
+    /// seam for: it is a projection of the snapshot, so a snapshot changing
+    /// without it changing is a shard walking a map it no longer has.
+    ///
+    /// It would live in [`World`] beside the layers it projects if it could —
+    /// `openshard_map` is underneath `openshard_movement`, and where a body may
+    /// stand is a movement rule. See `docs/map/navigation_spans.md`'s N3.
+    spans: Option<SpanIndex>,
     /// How wide this facet's map is, in tiles.
     ///
     /// Kept here rather than asked of the terrain because the client has to be
@@ -452,9 +465,20 @@ impl FacetState {
     /// to be able to spell. The three live indexes start empty and are private
     /// — see [`obstructions`](Self::obstructions), and the live layer of
     /// [`world`](Self::world), which is a projection of the other two.
+    ///
+    /// The tile table is the one argument that is not a fact about this facet:
+    /// it is the install's, and it is here because the span bake is built from
+    /// the pair. See [`spans`](Self::spans).
     #[must_use]
-    pub fn new(map: Option<MapSnapshot>, coarse: Option<NavigationGraph>, width: u32, height: u32) -> Self {
+    pub fn new(
+        map: Option<MapSnapshot>,
+        coarse: Option<NavigationGraph>,
+        width: u32,
+        height: u32,
+        tiles: &TileData,
+    ) -> Self {
         Self {
+            spans: map.as_ref().map(|base| SpanIndex::build(base.map(), tiles)),
             world: World::new(map),
             coarse,
             width,
@@ -509,8 +533,35 @@ impl FacetState {
     /// state before it has read a map, and a test builds one and then hands it
     /// the scene it is about. It used to be a public field, which is what made
     /// the pair forgettable.
-    pub fn set_map(&mut self, map: Option<MapSnapshot>) {
+    ///
+    /// **The span bake follows the ground here and nowhere else.** It is a
+    /// projection of what is being replaced, so the two move together or the
+    /// shard decides steps against a map it no longer holds. The tile table is
+    /// the install's and is passed in for the same reason
+    /// [`new`](Self::new) takes one.
+    pub fn set_map(&mut self, map: Option<MapSnapshot>, tiles: &TileData) {
+        self.spans = map.as_ref().map(|base| SpanIndex::build(base.map(), tiles));
         self.world.set_base(map);
+    }
+
+    /// Bring the span bake back in step with a tile table that arrived after
+    /// the ground did.
+    ///
+    /// The world builder takes its tables and its facets in either order, and a
+    /// bake is a statement about both: see `World::with_tiles`, the only
+    /// caller. A facet with no map has nothing to bake and stays that way.
+    pub fn rebake(&mut self, tiles: &TileData) {
+        self.spans = self
+            .world
+            .snapshot()
+            .map(|base| SpanIndex::build(base.map(), tiles));
+    }
+
+    /// The bake over this facet's ground, for the one composition that needs
+    /// it. See [`spans`](Self::spans).
+    #[must_use]
+    pub const fn span_index(&self) -> Option<&SpanIndex> {
+        self.spans.as_ref()
     }
 
     /// Put `entity`'s `cover` on `(x, y)`.
@@ -1169,7 +1220,8 @@ impl WorldState {
     #[must_use]
     pub fn map_terrain(&self, facet: Facet) -> Option<MapTerrain<'_>> {
         let map = self.facets.get(&facet)?.world.snapshot()?;
-        Some(MapTerrain::new(map.map(), &self.tiles))
+        let spans = self.facets[&facet].span_index()?;
+        Some(MapTerrain::new(map.map(), &self.tiles, spans))
     }
 
     /// The ground every movement decision is actually decided against: the map,
@@ -1186,7 +1238,8 @@ impl WorldState {
     /// and for the same reason: every live entity is on a loaded facet.
     #[must_use]
     pub fn footing(&self, facet: Facet, doors: Doors) -> Footing<'_> {
-        Footing::of(self.facet_state(facet).world(), &self.tiles, doors)
+        let state = self.facet_state(facet);
+        Footing::of(state.world(), &self.tiles, state.span_index(), doors)
     }
 
     /// Is any connected player within `range` tiles (Chebyshev) of `centre` on

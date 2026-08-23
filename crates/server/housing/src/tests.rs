@@ -146,7 +146,7 @@ fn ground_of(components: Vec<Component>, land: u16, fits: bool) -> WorldState {
     // disagree with the tiledata the terrain is looking at.
     let (map, tiles) = ground_scene(land, fits).into_shard(Facet(0));
     let mut facets = BTreeMap::new();
-    facets.insert(Facet(0), FacetState::new(Some(map), None, SIZE, SIZE));
+    facets.insert(Facet(0), FacetState::new(Some(map), None, SIZE, SIZE, &tiles));
     WorldState {
         registry: Registry::new(),
         bus: EventBus::new(),

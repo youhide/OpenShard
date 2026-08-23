@@ -26,6 +26,7 @@ use std::path::PathBuf;
 
 use openshard_map::grid::Tile;
 use openshard_movement::MapTerrain;
+use openshard_movement::spans::SpanIndex;
 use openshard_protocol::world::{Facet, Point};
 
 /// The client directory, or `None` to skip.
@@ -79,8 +80,13 @@ fn a_base_set_walks_and_sees_exactly_as_the_install_does() {
     // table instead of a test of the map.
     let tiles =
         openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata should load");
-    let was: MapTerrain<'_> = MapTerrain::new(installed.map(), &tiles);
-    let is: MapTerrain<'_> = MapTerrain::new(restored.map(), &tiles);
+    // A bake each, over each side's own map: a shared one would be a third
+    // party both terrains agreed with rather than a projection of the map each
+    // is actually reading.
+    let was_spans = SpanIndex::build(installed.map(), &tiles);
+    let is_spans = SpanIndex::build(restored.map(), &tiles);
+    let was: MapTerrain<'_> = MapTerrain::new(installed.map(), &tiles, &was_spans);
+    let is: MapTerrain<'_> = MapTerrain::new(restored.map(), &tiles, &is_spans);
 
     let (width, height) = (restored.map().width() as u16, restored.map().height() as u16);
     assert_eq!(

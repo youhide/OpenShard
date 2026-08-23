@@ -240,7 +240,17 @@ impl World {
         let mut facets = BTreeMap::new();
         facets.insert(
             Facet(DEFAULT_FACET),
-            FacetState::new(None, None, FACET_WITHOUT_A_MAP.0, FACET_WITHOUT_A_MAP.1),
+            FacetState::new(
+                None,
+                None,
+                FACET_WITHOUT_A_MAP.0,
+                FACET_WITHOUT_A_MAP.1,
+                // No map, so nothing to bake — the table this would be baked
+                // over is the empty one `WorldState` starts with, and
+                // `with_tiles` rebakes every facet that has ground when the
+                // real one arrives.
+                &openshard_tiles::TileData::empty(),
+            ),
         );
         Self {
             state: WorldState {
@@ -397,6 +407,15 @@ impl World {
     ) -> Self {
         self.state.tiles = tiles;
         self.state.multis = multis;
+        // Every facet already loaded is holding a span bake over the *old*
+        // table, and a span bake is a statement about both. Rebuilding here is
+        // what makes the builder's order not matter: what a graphic is decides
+        // how tall a wall is and whether a tile is water, so a facet baked
+        // against the empty table would answer steps for a world of
+        // height-zero, flag-less statics.
+        for facet in self.state.facets.values_mut() {
+            facet.rebake(&self.state.tiles);
+        }
         self
     }
 
@@ -424,9 +443,10 @@ impl World {
                 .as_ref()
                 .is_none_or(|graph| graph.dimensions() == (width, height))
         );
-        self.state
-            .facets
-            .insert(facet, FacetState::new(Some(map), coarse, width, height));
+        self.state.facets.insert(
+            facet,
+            FacetState::new(Some(map), coarse, width, height, &self.state.tiles),
+        );
         self
     }
 

@@ -733,6 +733,13 @@ pub fn run<D: Dial + Send + 'static>(
     // The facet comes from the snapshot rather than from `FACET` again: one
     // answer per process is the whole point of the snapshot owning it.
     let facet = map.facet();
+    // Where a body may stand, baked before anything can ask: this end predicts
+    // every step it draws, and since `navigation_spans.md`'s N3 a step reads
+    // this rather than re-deriving each column from `tiledata`. One pass over
+    // the facet, and the one thing a `MapTerrain` cannot be built without.
+    let spans = openshard_movement::spans::SpanIndex::build(map.map(), &tiledata);
+    checkpoint("span index baked");
+
     let navigation_path = openshard_movement::bake::artifact_path(dir, facet);
     let coarse = openshard_movement::bake::stamp_of(dir, facet, map.revision())
         .and_then(|stamp| openshard_movement::bake::load(&navigation_path, &stamp))
@@ -864,6 +871,7 @@ pub fn run<D: Dial + Send + 'static>(
         stall_on_update,
         resources: resources::Resources {
             world: openshard_map::world::World::new(Some(map)),
+            spans: Some(spans),
             coarse,
             interiors,
             art,

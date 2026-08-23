@@ -1233,7 +1233,7 @@ mod tests {
         };
         let index = SpanIndex::build(&map, &tiles);
         for swimming in [false, true] {
-            let terrain = MapTerrain::new(&map, &tiles).swimming(swimming);
+            let terrain = MapTerrain::new(&map, &tiles, &index).swimming(swimming);
             let spans = Spans::new(&map, &index).swimming(swimming);
             let mut compared = 0_u64;
             let mut landed = 0_u64;

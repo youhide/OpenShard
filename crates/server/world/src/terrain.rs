@@ -24,11 +24,15 @@ mod tests {
     struct Install {
         map: openshard_map::map::WorldMap,
         tiles: TileData,
+        /// A terrain borrows one — see [`MapTerrain::new`]. Nothing in this
+        /// file reads a surface, but a terrain is what the table is read
+        /// *through*, and that is the point of the fixture.
+        spans: openshard_movement::spans::SpanIndex,
     }
 
     impl Install {
         fn terrain(&self) -> MapTerrain<'_> {
-            MapTerrain::new(&self.map, &self.tiles)
+            MapTerrain::new(&self.map, &self.tiles, &self.spans)
         }
     }
 
@@ -40,7 +44,8 @@ mod tests {
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("the client's map0 should load");
         let tiles =
             openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata should load");
-        Some(Install { map, tiles })
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiles);
+        Some(Install { map, tiles, spans })
     }
 
     #[test]

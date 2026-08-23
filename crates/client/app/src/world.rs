@@ -915,7 +915,14 @@ impl WorldState {
 /// a method call, which is opaque to it. Passing `&self.resources` here is
 /// the same projection the field access always was, just wrapped.
 pub(crate) fn terrain(resources: &resources::Resources) -> openshard_movement::MapTerrain<'_> {
-    openshard_movement::MapTerrain::new(resources.map(), &resources.tiledata)
+    openshard_movement::MapTerrain::new(
+        resources.map(),
+        &resources.tiledata,
+        resources
+            .spans
+            .as_ref()
+            .expect("a client that opened a facet baked its spans"),
+    )
 }
 
 /// Nothing placed, for a *map-only* reading to borrow.
@@ -946,7 +953,12 @@ pub(crate) fn footing(
     resources: &resources::Resources,
     doors: openshard_map::overlay::Doors,
 ) -> openshard_movement::Footing<'_> {
-    openshard_movement::Footing::of(&resources.world, &resources.tiledata, doors)
+    openshard_movement::Footing::of(
+        &resources.world,
+        &resources.tiledata,
+        resources.spans.as_ref(),
+        doors,
+    )
 }
 
 #[cfg(test)]

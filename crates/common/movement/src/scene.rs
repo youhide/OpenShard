@@ -53,6 +53,7 @@ use openshard_tiles::LandTileId;
 use openshard_tiles::{StaticTile, TileData, TileFlags};
 
 use crate::footing::Footing;
+use crate::spans::SpanIndex;
 use crate::terrain::MapTerrain;
 use openshard_map::overlay::{Doors, Overlay};
 
@@ -93,6 +94,14 @@ pub struct Scene {
     /// alive beside it. A test that wants a crate in the way builds its own
     /// overlay and its own [`Footing`](crate::Footing).
     nothing_placed: Overlay,
+    /// The span bake over [`map`](Self::map) and [`tiles`](Self::tiles), as
+    /// they stand.
+    ///
+    /// **Rebuilt by every setter**, because a scene is mutated and then read
+    /// through `&self`: there is nowhere to notice staleness later, and a bake
+    /// one static behind its map is a fixture that tests the wrong world. It
+    /// costs a walk of the scene's own blocks, which is one for most of them.
+    spans: SpanIndex,
 }
 
 impl Scene {
@@ -115,9 +124,11 @@ impl Scene {
             tile: LandTileId(0),
             z,
         });
+        let tiles = TileData::empty();
         Self {
+            spans: SpanIndex::build(&map, &tiles),
             map,
-            tiles: TileData::empty(),
+            tiles,
             next_graphic: 1,
             nothing_placed: Overlay::default(),
         }
@@ -161,6 +172,7 @@ impl Scene {
     pub fn ground(&mut self, x: u16, y: u16, z: i8) -> &mut Self {
         let cell = self.cell(x, y);
         self.map.set_land(x, y, LandCell { z, ..cell });
+        self.rebake();
         self
     }
 
@@ -172,6 +184,14 @@ impl Scene {
     /// lists. What the id can *do* is a second question, and [`Scene::land_art`]
     /// is where it is answered.
     pub fn land(&mut self, x: u16, y: u16, tile: u16) -> &mut Self {
+        self.set_land_id(x, y, tile);
+        self.rebake();
+        self
+    }
+
+    /// [`Scene::land`] without the rebake, so a sweep over every cell pays for
+    /// one bake rather than one per cell.
+    fn set_land_id(&mut self, x: u16, y: u16, tile: u16) {
         let cell = self.cell(x, y);
         self.map.set_land(
             x,
@@ -181,7 +201,6 @@ impl Scene {
                 ..cell
             },
         );
-        self
     }
 
     /// The same, everywhere: the whole scene becomes road, or sea, or grass.
@@ -192,9 +211,10 @@ impl Scene {
     pub fn land_everywhere(&mut self, tile: u16) -> &mut Self {
         for y in 0..self.height() {
             for x in 0..self.width() {
-                self.land(x, y, tile);
+                self.set_land_id(x, y, tile);
             }
         }
+        self.rebake();
         self
     }
 
@@ -213,6 +233,7 @@ impl Scene {
                 ..openshard_tiles::LandTile::default()
             },
         );
+        self.rebake();
         self
     }
 
@@ -232,6 +253,7 @@ impl Scene {
                 ..StaticTile::default()
             },
         );
+        self.rebake();
         self
     }
 
@@ -248,7 +270,14 @@ impl Scene {
             z: base,
             hue: Hue(0),
         });
+        self.rebake();
         self
+    }
+
+    /// Bring [`spans`](Self::spans) back in step with the map and the table it
+    /// is a projection of. Every setter ends with this.
+    fn rebake(&mut self) {
+        self.spans = SpanIndex::build(&self.map, &self.tiles);
     }
 
     /// One cell as it stands, so a setter can change one of its two facts
@@ -296,13 +325,14 @@ impl Scene {
             z: base,
             hue: Hue(0),
         });
+        self.rebake();
         self
     }
 
     /// The terrain to ask, borrowing this scene.
     #[must_use]
     pub const fn terrain(&self) -> MapTerrain<'_> {
-        MapTerrain::new(&self.map, &self.tiles)
+        MapTerrain::new(&self.map, &self.tiles, &self.spans)
     }
 
     /// This scene as a step can be decided against: its map, nothing live over
@@ -575,7 +605,8 @@ mod tests {
         assert_eq!(tiles.static_tile(WALL).height, 20);
         // The pair as the shard holds it: the snapshot in a facet, the table
         // beside it, and a terrain that borrows both at the question.
-        let terrain = MapTerrain::new(map.map(), &tiles);
+        let spans = SpanIndex::build(map.map(), &tiles);
+        let terrain = MapTerrain::new(map.map(), &tiles, &spans);
         assert!(
             !terrain.can_fit(Tile::new(1, 1), 0, PLAYER_HEIGHT),
             "the wall the shard knows about is the wall standing on the ground"

@@ -32,7 +32,7 @@ use crate::footing::Footing;
 use crate::navigation::Region;
 use openshard_map::grid::Tile;
 
-use crate::walk::step_allowed;
+use crate::walk::steps_out_of;
 
 /// How long one search may run before it gives up, whatever its budget says.
 ///
@@ -287,12 +287,18 @@ fn search(
             exit = SearchExit::Budget;
             break;
         }
+        // The whole node at once — `steps_out_of` and not eight `step_allowed`
+        // calls, which would resolve the tile being stepped off eight times and
+        // each cardinal neighbour twice. Same answers, in the same order:
+        // `step_allowed` is one slot of this. See `docs/map/navigation_spans.md`'s
+        // N3 for what the difference is worth.
+        let steps = steps_out_of(footing, current);
         for dir in Direction::ALL {
-            // `step_allowed`, not `can_step`: a diagonal may not clip a wall
-            // corner, and that half of the rule is not the terrain's to answer
-            // — see its doc for why it is shared with the shard and the client
-            // rather than restated here.
-            let Some(landing) = step_allowed(footing, current, dir) else {
+            // `steps_out_of`, not `can_step` per neighbour: a diagonal may not
+            // clip a wall corner, and that half of the rule is not the terrain's
+            // to answer — see `step_allowed` for why it is shared with the shard
+            // and the client rather than restated here.
+            let Some(landing) = steps[dir.to_bits() as usize] else {
                 continue;
             };
             // The region bound, where there is one: a search inside one region

@@ -31,7 +31,10 @@ const SIZE: u32 = 8;
 
 fn world() -> WorldState {
     let mut facets = BTreeMap::new();
-    facets.insert(Facet(0), FacetState::new(None, None, SIZE, SIZE));
+    facets.insert(
+        Facet(0),
+        FacetState::new(None, None, SIZE, SIZE, &openshard_tiles::TileData::empty()),
+    );
     WorldState {
         registry: Registry::new(),
         bus: EventBus::new(),
