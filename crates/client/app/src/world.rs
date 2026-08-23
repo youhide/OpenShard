@@ -907,6 +907,21 @@ impl WorldState {
         self.authoritative.view.as_ref().map(|view| view.player.serial)
     }
 
+    /// Whether the shard has said this body is dead.
+    ///
+    /// The `0x2C` a death sends and a resurrection unsays, read off the one
+    /// view rather than remembered beside it — the same reason
+    /// [`me`](Self::me) is a lookup and not a field.
+    ///
+    /// `false` with no view at all, which is the honest answer for the offline
+    /// viewer: there is no shard to have died on.
+    pub fn dead(&self) -> bool {
+        self.authoritative
+            .view
+            .as_ref()
+            .is_some_and(|view| view.player.dead)
+    }
+
     /// Where the body is drawn this instant, wherever game motion has it —
     /// [`crate::App::follow_player`]'s reason for calling this every frame.
     pub fn drawn_player(&self) -> Gaze {
@@ -981,6 +996,31 @@ pub(crate) fn footing(
     openshard_movement::Footing::of(&resources.ground, &resources.tiledata, doors)
 }
 
+/// Which reading of the shut doors this client's own steps are decided by.
+///
+/// **This end's copy of `WorldState::walking_doors`**, and it is a copy because
+/// the two ends hold different halves of the same question: the shard knows who
+/// is dead and the client knows what its player asked for. The answers have to
+/// agree on the one case they share — a ghost — or every step a dead player
+/// takes at a door is a rubber-band.
+///
+/// Two ways a leaf stops being in the way, and they are not the same way:
+///
+/// - **Dead.** A ghost walks through the shut leaf and opens nothing. It is not
+///   a preference, so the auto-door setting has no say in it.
+/// - **Auto-door.** A shut leaf *is* a usable next step, because `walk` sends
+///   the use before the step — so the honest half of a plan is the doors-open
+///   reading. With the setting off, shut is shut.
+///
+/// A free function rather than a method so the rule can be read and tested
+/// without a window and a GPU to hang an `App` on.
+pub(crate) const fn walking_doors(dead: bool, auto_open_doors: bool) -> openshard_map::overlay::Doors {
+    match dead {
+        true => openshard_map::overlay::Doors::AllOpen,
+        false => openshard_map::overlay::Doors::for_opener(auto_open_doors),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -988,6 +1028,35 @@ mod tests {
     use openshard_protocol::direction::Direction;
     use openshard_protocol::wire::Hue;
     use openshard_uofiles::anim::BodyKind;
+
+    /// **A ghost walks through a shut door, and the door key has no say in it.**
+    ///
+    /// The shard reads the same ground the same way for the same body
+    /// (`WorldState::walking_doors`), so what is asserted here is an agreement:
+    /// a dead player predicting `AsTheyStand` would refuse itself a step the
+    /// shard allows, which on screen is a body that will not leave the room it
+    /// died in until a correction snaps it there.
+    #[test]
+    fn the_dead_read_the_doors_open_whatever_the_door_key_says() {
+        use openshard_map::overlay::Doors;
+
+        assert_eq!(
+            walking_doors(true, false),
+            Doors::AllOpen,
+            "being dead is not a preference"
+        );
+        assert_eq!(walking_doors(true, true), Doors::AllOpen);
+        assert_eq!(
+            walking_doors(false, true),
+            Doors::AllOpen,
+            "a door-opener plans through the leaf it means to open"
+        );
+        assert_eq!(
+            walking_doors(false, false),
+            Doors::AsTheyStand,
+            "and with neither, shut is shut"
+        );
+    }
 
     #[test]
     fn presentation_clocks_retain_the_interval_delivered_with_an_update() {

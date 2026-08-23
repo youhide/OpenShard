@@ -635,9 +635,20 @@ impl App {
         // client is not going to take.
         let ground = steer::Readings {
             // The route the HUD draws is the one a step would take, so it reads
-            // the doors as they stand whatever the auto-door setting is.
-            live: footing(&self.resources, openshard_map::overlay::Doors::AsTheyStand)
-                .among(openshard_movement::Bodies::standing(&self.world.bodies)),
+            // the doors as they stand whatever the auto-door setting is — the
+            // setting is an intention to open one, and a picture of a walk is
+            // not the place for intentions.
+            //
+            // Being dead is not an intention, which is why it is passed and the
+            // setting is not: a ghost's route runs through the shut leaf because
+            // its step does (`crate::world::walking_doors`). Drawing that route
+            // stopped at the door would be a picture of a refusal that is not
+            // going to happen — `docs/parity.md`'s whole complaint.
+            live: footing(
+                &self.resources,
+                crate::world::walking_doors(self.world.dead(), false),
+            )
+            .among(openshard_movement::Bodies::standing(&self.world.bodies)),
             guide: guide(&self.resources),
             coarse: self.resources.coarse.as_ref(),
         };

@@ -303,11 +303,13 @@ pub(crate) struct OccluderCache {
 impl App {
     /// Which reading of the shut doors this client's own steps are decided by.
     ///
-    /// With auto-door mode on, a shut leaf *is* a usable next step — `walk`
-    /// sends the use before the step — so the real half of a plan is the
-    /// doors-open reading. With it off, shut is shut.
-    pub(crate) const fn walking_doors(&self) -> openshard_map::overlay::Doors {
-        openshard_map::overlay::Doors::for_opener(self.auto_open_doors)
+    /// The two facts the rule is made of, fetched from where each of them
+    /// lives: whether the shard has said this body is dead, and what the player
+    /// asked of the door key. The rule itself is
+    /// [`crate::world::walking_doors`], which is where it is explained and
+    /// where it is tested.
+    pub(crate) fn walking_doors(&self) -> openshard_map::overlay::Doors {
+        crate::world::walking_doors(self.world.dead(), self.auto_open_doors)
     }
 
     /// The sole cutaway policy for this client's current frame.

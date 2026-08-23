@@ -575,9 +575,11 @@ through the living, who cannot see it to move aside.
 
 Left open, and none of it blocks anything:
 
-- **A player does not shove, and in UO a player shoves.** This engine
+- ~~**A player does not shove, and in UO a player shoves.** This engine
   hard-blocks, which is not parity and is not invisible: the stock client has
-  the mirror of the rule and draws the step we refuse. Its own entry follows.
+  the mirror of the rule and draws the step we refuse.~~ **Closed** — a rested
+  player shoves past for ten stamina now, and the facet ruleset the rule opens
+  with exists. See the backlog entry below.
 - **A boat's deck and a moving multi.** The crowd is read off the sector grid,
   which holds a mobile's own tile. Nothing here asks what happens to two bodies
   on a deck that moves under them.
@@ -666,19 +668,32 @@ Left open, and none of it blocks anything:
   the *watcher*, so it only changes what a `show` decides) and it is SE-era, so
   it can come second. The client's crowd is already written not to depend on
   their absence — see the entry above.
-- **A ghost walks through a shut door, and neither end knows.** ServUO's
-  `MovementImpl.Check` sets `ignoreDoors = (m_AlwaysIgnoreDoors || m == null ||
-  !m.Alive || m.Body.BodyID == 0x3DB || m.IsDeadBondedPet)`
-  (`Scripts/Services/Pathing/Movement.cs:173`), and `IsOk` then steps past
-  anything carrying `TileFlag.Door` — with one exception kept: a `BaseHouseDoor`
-  still asks `CheckAccess`, so a ghost does not drift into a house it is locked
-  out of. Here every player step reads `Doors::AsTheyStand` (`tick/motion.rs`)
-  and the client reads `Doors::for_opener(auto_open_doors)`, neither of which
-  has heard of the dead. **The two ends agree today**, so this is a missing rule
-  and not a rubber-band — but it is a whole half of what being dead means in UO,
-  it is one argument at each end (`Doors::AllOpen` for a ghost, and the client
-  already has the reading), and the house-door exception is the part that will
-  want thought rather than a flag.
+- ~~**A ghost walks through a shut door, and neither end knows.**~~ **Closed,
+  and the exception this entry promised thought about turned out not to exist.**
+  ServUO's `MovementImpl.Check` sets `ignoreDoors = (m_AlwaysIgnoreDoors ||
+  m == null || !m.Alive || m.Body.BodyID == 0x3DB || m.IsDeadBondedPet)`
+  (`Scripts/Services/Pathing/Movement.cs:173`) and `IsOk` then steps past
+  anything carrying `TileFlag.Door`. It was one argument at each end and both
+  now carry it: `WorldState::walking_doors` on the shard, off the same
+  `is_alive` that `walks_through_bodies` reads — one definition of dead, not two
+  to drift apart — and `world::walking_doors(dead, auto_open_doors)` in the
+  client, which the HUD's route reads too, so the green line does not stop at a
+  leaf the body is about to drift through.
+
+  **A house's door is not an exception.** `BaseHouseDoor.CheckAccess` guards
+  `Use` (`Scripts/Items/Functional/HouseDoors.cs:194`) — the hand on the latch,
+  which is `items::doors::may_pass` at this end — and movement never asks whose
+  door it is once `ignoreDoors` is set. What a ghost drifting into a stranger's
+  house can do there is nothing: it cannot lift, cannot open, and nobody living
+  hears it.
+
+  What came with it, because it is the same mechanic seen from the other side: a
+  ghost cannot *work* a latch either. ServUO gates every double-click on
+  `CheckAlive` before the item is asked (`Server/Mobile.cs:4402`), so
+  `toggle_door` answers "I am dead and cannot do that" and the client's
+  auto-door stops sending the use. The dead pass through the door they cannot
+  open — and a ghost that could swing one would be opening shopfronts in front
+  of living people who cannot see who did it.
 - **A stranger's `IGNORE_MOBILES` is not "this one is out of the way".** The bit
   is `walks_through_bodies` — staff *or* dead — while the crowd wants
   `body_blocks`, which a living, visible game master satisfies (`body_blocks`
@@ -708,7 +723,35 @@ Left open, and none of it blocks anything:
   load-bearing — it is the proof that a ghost cannot reach the client's crowd,
   and a proof resting on a function nobody can find is a proof nobody can check.
 
-### Backlog: the shove — a rested player pushes past a body rather than stopping at it
+#### Found while letting the dead through the doors
+
+- **Nothing gates the dead out of using things in general, and every new
+  double-click has to remember on its own.** ServUO answers it once and early:
+  `Mobile.Use` reaches `CheckAlive` before the item is ever asked
+  (`Server/Mobile.cs:4402`), so *everything* refuses a ghost by default and an
+  exception has to be written. Here it is a scatter of `has::<Ghost>` —
+  `items::trade`, `items::seating`, `skills::button`, three skill handlers, and
+  now `items::doors` — the same rule written once per place that remembered it,
+  defaulting the wrong way in every place that did not. The one that forgets
+  gives a ghost hands, and it will be the one written after this sentence. The
+  choke point exists: `tick.rs`'s `Command::DoubleClick { request:
+  UseRequest::Use(..) }` arm, where ServUO asks. What it lacks is the question —
+  and one named exception, because ServUO gates mobiles too (`Mobile.Use(Mobile)`
+  ends at the same `CheckAlive`) and reaches a ghost by *movement* instead:
+  `BaseHealer.OnMovement` offers the resurrection when the dead walk up. This
+  shard has that path **and** a double-click on the healer, and the second one
+  is what a blanket gate would take away.
+- **The walkability wash still paints a shut door blocked for a ghost.**
+  `picking_query::terrain_overlay` asks `can_fit`, which reads
+  `Doors::AsTheyStand` whatever the footing it is handed says — deliberately,
+  because it answers "does a thing *fit* here" and a door that could be opened is
+  still hanging in the gap. That contract is right for placement and wrong for a
+  diagnostic about where *this* body may stand, which is what the wash is drawn
+  for. The route line and the wash now disagree for one player: the dead one.
+  Small, visible, and the fix is a body-aware `can_stand` rather than another
+  argument on `can_fit`.
+
+### ✅ The shove — a rested player pushes past a body rather than stopping at it
 
 **A good mechanic, and the reason to write it down is not only that it is
 good.** A body in the way is not a wall in UO: a player at full stamina walks

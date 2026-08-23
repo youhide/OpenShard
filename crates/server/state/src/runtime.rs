@@ -1352,6 +1352,36 @@ impl WorldState {
         self.registry.has::<Staff>(mover) || !self.is_alive(mover)
     }
 
+    /// How `mover` reads the shut doors when it is the one taking the step.
+    ///
+    /// ServUO's `MovementImpl.Check`, where `ignoreDoors` is set for
+    /// `!m.Alive` (`Scripts/Services/Pathing/Movement.cs:173`) and `IsOk` then
+    /// steps past anything carrying `TileFlag.Door`: **a leaf does not stop the
+    /// dead.** It is the other half of being dead beside
+    /// [`walks_through_bodies`](Self::walks_through_bodies), and it is the same
+    /// argument — a ghost has to be able to walk home, and it has no hands to
+    /// work a latch with on the way. The same `is_alive` answers both, so there
+    /// is one definition of "dead" here and not two that can drift apart.
+    ///
+    /// **A house's door is not an exception**, which is worth saying because it
+    /// reads like one. What `BaseHouseDoor` guards with `CheckAccess` is `Use`
+    /// — the hand on the latch, which is `items::doors::may_pass` at this end —
+    /// and movement never asks whose door it is once `ignoreDoors` is set. A
+    /// ghost drifting through a stranger's front door arrives somewhere it can
+    /// lift nothing, open nothing and be heard by nobody living.
+    ///
+    /// A planner reads [`Doors::AllOpen`] too, for a different reason, and the
+    /// two must not be confused: **this is the only seam where a step that
+    /// reaches the wire may take that reading**, because here the doors really
+    /// are no obstacle rather than being ones somebody intends to open.
+    #[must_use]
+    pub fn walking_doors(&self, mover: EntityId) -> Doors {
+        match self.is_alive(mover) {
+            true => Doors::AsTheyStand,
+            false => Doors::AllOpen,
+        }
+    }
+
     /// Whether `entity` is a body other movers have to walk around.
     ///
     /// ServUO's `CanMoveOver`, the other half. A [`Body`] is what separates a

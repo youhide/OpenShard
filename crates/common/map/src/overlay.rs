@@ -61,9 +61,21 @@ pub enum Doors {
     /// step that reaches the wire may use.
     #[default]
     AsTheyStand,
-    /// Every shut door stands open: what a *route* may be planned through, by a
-    /// body that intends to open its way along it. Never a walkability answer —
-    /// a mobile walked into a door on this reading is refused by the shard.
+    /// Every shut door stands open, and two kinds of caller are entitled to
+    /// that reading for two different reasons.
+    ///
+    /// A *route* is planned on it by a body that intends to open its way along
+    /// it — and for that caller this is never a walkability answer: a mobile
+    /// walked into a door on a planner's reading is refused by the shard, which
+    /// is the whole point of the plan and the step disagreeing.
+    ///
+    /// **The dead take it as a walkability answer**, because for them it is
+    /// one: a ghost is not stopped by a leaf, it opens nothing on the way
+    /// through, and the step it takes on this reading is the step the shard
+    /// allows. Which mobiles those are is a rule about mobiles and lives at
+    /// each end — `WorldState::walking_doors` on the shard, `App::walking_doors`
+    /// in the client — never here, because this crate is storage and has never
+    /// known who is asking.
     AllOpen,
 }
 

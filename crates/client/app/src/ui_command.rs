@@ -397,7 +397,12 @@ impl App {
     /// and only its following item update makes this client regard the way as
     /// open.
     fn open_door_ahead(&mut self, facing: Facing) {
-        if !self.auto_open_doors {
+        // A ghost has no hands, and needs none: the leaf it is walking at is
+        // already not in its way (`App::walking_doors`). Sending the use anyway
+        // would ask the shard for something it refuses — and on a shard that
+        // did not refuse it, this client would be swinging doors open across
+        // town for the living, who cannot see who is doing it.
+        if !self.auto_open_doors || self.world.dead() {
             self.auto_opened_door = None;
             return;
         }
