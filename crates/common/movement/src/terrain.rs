@@ -16,7 +16,7 @@ use openshard_map::overlay::Cover;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_tiles::LandTileId;
-use openshard_tiles::{TileData, TileFlags};
+use openshard_tiles::{StaticTile, TileData, TileFlags};
 
 /// How far a walking human can step up.
 ///
@@ -56,6 +56,21 @@ fn platform_surface(base: i32, height: i32, climbable: bool) -> (i32, i32) {
         false => Cover::standing(0, height as u8),
     };
     (base + cover.reach(), base + cover.surface())
+}
+
+/// How high one static reaches from its base, for a caller that already has the
+/// tiledata entry.
+///
+/// [`MapTerrain::static_top`] is this with the table lookup in front of it, and
+/// it is a free function because the span bake asks the same question of a
+/// column it is holding the entries for — see [`crate::spans`]. Two readings of
+/// "how tall is this" would be a wall the step rule and the layer under it
+/// disagreed about.
+pub(crate) fn static_top(tile: &StaticTile, base: i32) -> i32 {
+    match tile.flags.is_platform() {
+        true => platform_surface(base, i32::from(tile.height), tile.flags.is_climbable()).1,
+        false => base + i32::from(tile.height).max(1),
+    }
 }
 
 /// The real world: ground heights, walls, water.
@@ -187,11 +202,7 @@ impl<'a> MapTerrain<'a> {
     /// else is its art, and at least one unit: walls often carry zero height in
     /// tiledata, and a zero-tall wall that blocks nothing is not a wall.
     fn static_top(&self, tile: Graphic, base: i32) -> i32 {
-        let tile = self.tiles().static_tile(tile.0);
-        match tile.flags.is_platform() {
-            true => platform_surface(base, i32::from(tile.height), tile.flags.is_climbable()).1,
-            false => base + i32::from(tile.height).max(1),
-        }
+        static_top(self.tiles().static_tile(tile.0), base)
     }
 
     /// The height a mobile stepping from `from` onto `(x, y)` lands at — the
