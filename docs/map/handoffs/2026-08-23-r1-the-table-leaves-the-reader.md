@@ -27,9 +27,12 @@ is R1's done-when. The crates that still depend on it depend on it for a
 `stand_surfaces` is `openshard_movement::surfaces` now, a crate-local call from
 `MapTerrain::surfaces`.
 
-**Four checks silent** — `cargo check --workspace --all-targets`, `cargo test
---workspace`, `cargo fmt --all`, and clippy on everything this session touched.
-See *What was found* for the state of the last two before this session started.
+**`cargo check --workspace --all-targets` and `cargo fmt --all` are silent**,
+and clippy is silent on everything this session changed. The other two are not,
+and neither was before it started: `cargo test --workspace --no-fail-fast` ends
+with two red tests in `openshard-state`, and clippy warns at six sites in
+`client/app` and `client/render`. Both are in *What was found*, with what they
+are and whose they are.
 
 ## What the move decided
 
