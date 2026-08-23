@@ -930,8 +930,11 @@ walk. That control is what the shard was.
 **One number, and one shared threshold.** `COARSE_MIN_DISTANCE` was a private
 constant in the client's `steer.rs`, with the argument for it written there; it
 is `openshard_movement`'s now, beside `find_long_path`, because it is a property
-of the *router* — joining an endpoint costs one exact search per node of its
-region at both ends — and not of either caller. A fall-back the two ends drew at
+of the *router* — joining an endpoint walks its whole region, at both ends —
+and not of either caller. (It cost one exact search *per node* of that region
+when N7 was written, which is what made the threshold worth drawing; the join is
+one flood now and the threshold is still a real one, since the region is walked
+either way.) A fall-back the two ends drew at
 different distances would be two answers to "how far can a body plan", which is
 the disagreement this node closes.
 
@@ -1306,6 +1309,34 @@ graph over spans names neither.
   `a_chase_does_not_cut_a_corner` (the same corner, walked by a creature: the
   first step is not the cut, and with no crate at all it is). Reverted, both fail
   at the corner assertion and nowhere else.
+- **The client's roof cutaway asks `can_step`, so it advances for a diagonal
+  the shard refuses.** `advance_cutaway` in
+  [`net_command.rs`](../../crates/client/app/src/net_command.rs) moves the
+  cutaway source when "this move is locally known to be possible", and it asks
+  the one-landing reading. Now that every step the shard permits carries the
+  corner rule, the two disagree by exactly a corner cut: a direction held into a
+  building corner moves the roof threshold for a step that will be rubber-
+  banded. It is presentation and not a step gate, which is why it is filed
+  rather than fixed — but it is a third reading of *can I go there* inside one
+  client, and `step_allowed` is what it means.
+- **`items/mounts.rs` resolves the same stance eight times to put a mount
+  down.** Dismounting looks for somewhere beside the rider with eight `can_step`
+  calls, each re-deriving the tile being stepped off — the shape N4 found in
+  `component_labels` and `region_costs`, and the same one-line repair.
+  `steps_out_of` is those eight answers for the price of one. The thing to
+  decide before swapping it is the corner rule, which is not obviously wanted
+  here: a mount is *placed* beside its rider, not walked there.
+- **`a_creature_routes_past_its_exact_budget_over_the_coarse_graph` is
+  load-sensitive by construction.** `walk_toward` re-plans from scratch on every
+  beat, and every plan reads `MAX_LONG_PATH_TIME` — 50 ms of *wall clock*. A
+  debug build on a busy machine can miss it, and one miss anywhere along the
+  walk drops the creature onto the straight-line fall-back and ends it far from
+  the goal. It went red once during the corner-rule work — `left: Point { x: 37,
+  y: 31, z: 0 }` against `right: Point { x: 2, y: 48, z: 0 }` — and did not
+  reproduce afterwards, including ten runs in isolation; that run overlapped a
+  parallel session's in-flight edit to `spans.rs`, so the cause is **not**
+  settled. What is settled is that a wall clock decides this assertion, and a
+  deadline the caller names is what would take it out of the assertion.
 - **A second `Ground` now exists in `client/app`, and it is the misnamed one.**
   [`steer::Ground`](../../crates/client/app/src/steer.rs) is a pair of
   `Footing`s — the same map read twice, once with the doors shut and once open —
