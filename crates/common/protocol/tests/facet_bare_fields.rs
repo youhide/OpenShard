@@ -74,6 +74,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "the same `--facet` argument on the span bake's own oracle, span_census's shape and beside it",
     ),
     (
+        "crates/common/movement/examples/span_check.rs",
+        1,
+        "the same `--facet` argument on the span step rule's own oracle, span_index's shape and beside it",
+    ),
+    (
         "crates/client/render/examples/shard/mod.rs",
         1,
         "a standalone diagnostic tool reading a SQL column directly, the record.rs shape, in a crate with no protocol dependency",

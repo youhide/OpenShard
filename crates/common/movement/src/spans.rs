@@ -42,7 +42,7 @@ use openshard_map::map::{BLOCK_SIZE, CELLS_PER_BLOCK, StaticItem, WorldMap};
 use openshard_map::overlay::Cover;
 use openshard_tiles::{LAND_TILE_COUNT, TileData};
 
-use crate::terrain::static_top;
+use crate::terrain::{MAX_STEP_UP, PLAYER_HEIGHT, static_top};
 
 /// One place a body can put its feet, and what is above it.
 ///
@@ -67,9 +67,15 @@ pub struct Span {
     /// The other half of what a step asks: `check` calls `is_obstructed` with a
     /// body reaching from the height it *came from*, so the height needed
     /// varies per step and the answer cannot be a bit. It can be a byte: a body
-    /// wanting `h` above `stand_z` fits exactly when `h <= clearance`. 255
-    /// means nothing above at all rather than "255 units" — see
-    /// [`Spans::surfaces`], where a bare column is synthesised with it.
+    /// wanting `h` above `stand_z` fits exactly when `h <= clearance`.
+    ///
+    /// **255 is not by itself "nothing above".** N1 argued that it was, on the
+    /// grounds that a base and a `stand_z` are both `i8` and so a gap can never
+    /// exceed 255 — which is true, and leaves the *boundary* ambiguous: a
+    /// static based at 127 over a surface at −128 is a real gap of exactly 255.
+    /// [`SpanFlags::CEILED`] is what separates the two, and it matters for a
+    /// body needing more than 255 above its feet, which is a body that walked in
+    /// more than 239 above where it is landing.
     pub clearance: u8,
     /// What kind of surface this is. Today: whether only a swimmer stands here.
     pub flags: SpanFlags,
@@ -77,9 +83,14 @@ pub struct Span {
 
 /// What a [`Span`] is, past its heights.
 ///
-/// A byte with seven bits spare, in the shape
+/// A byte with four bits spare, in the shape
 /// [`TileFlags`](openshard_tiles::TileFlags) has: a mask constant per bit and
 /// one `has`, so a reader that only wants one bit does not learn the layout.
+///
+/// Three of the four in use are the step rule's, and they are here rather than
+/// in the query for one reason each: they are properties of the *column*, and a
+/// query that derived them would be reading the statics this layer exists to
+/// stop it reading. See [`Spans::check`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct SpanFlags(u8);
 
@@ -94,6 +105,32 @@ impl SpanFlags {
     /// and need no storage of their own. The *asker* filters; the structure
     /// offers. See [`Spans::swimming`].
     pub const SWIMMER_ONLY: u8 = 0x01;
+    /// The column's own land, rather than something standing on it.
+    ///
+    /// One span of a column carries it, or none where the land is a mountainside
+    /// nobody stands on. What reads it is [`LAND_WINS`](Self::LAND_WINS)'s
+    /// residue: the guard needs the tile's *lowest corner*, and the land span is
+    /// where the column already keeps it.
+    pub const GROUND: u8 = 0x02;
+    /// ServUO's `landCheck` guard: the ground pokes through this static, so the
+    /// land under it wins and this is not something to climb onto.
+    ///
+    /// Three of that guard's four conditions are facts about the column — the
+    /// static's base against the land's centre, and the land's centre against
+    /// where a body would stand on the static — and both of those are settled
+    /// here. The fourth is start-dependent and stays in [`Spans::check`]; the
+    /// first, whether the land is ground *for the body asking*, is the ability
+    /// filter that the [`GROUND`](Self::GROUND) span is subject to anyway.
+    ///
+    /// Never set on a land span: the guard is about a static the land beats.
+    pub const LAND_WINS: u8 = 0x04;
+    /// The map put something above this surface, so
+    /// [`clearance`](Span::clearance) is a measurement rather than an absence.
+    ///
+    /// The one bit that keeps the obstruction test exact at its boundary: a gap
+    /// of exactly 255 and no gap at all are the same byte, and they answer
+    /// differently for a body that needs more than 255 above its feet.
+    pub const CEILED: u8 = 0x08;
 
     /// The flags with `bits` set.
     #[must_use]
@@ -107,6 +144,12 @@ impl SpanFlags {
         self.0
     }
 
+    /// The same flags, with every bit of `mask` also set.
+    #[must_use]
+    pub const fn with(self, mask: u8) -> Self {
+        Self(self.0 | mask)
+    }
+
     /// Whether any bit of `mask` is set.
     #[must_use]
     pub const fn has(self, mask: u8) -> bool {
@@ -117,6 +160,24 @@ impl SpanFlags {
     #[must_use]
     pub const fn is_swimmer_only(self) -> bool {
         self.has(Self::SWIMMER_ONLY)
+    }
+
+    /// Whether this is the column's own land.
+    #[must_use]
+    pub const fn is_ground(self) -> bool {
+        self.has(Self::GROUND)
+    }
+
+    /// Whether the land under this static beats it as somewhere to stand.
+    #[must_use]
+    pub const fn land_wins(self) -> bool {
+        self.has(Self::LAND_WINS)
+    }
+
+    /// Whether anything of the map's own is above this surface.
+    #[must_use]
+    pub const fn is_ceiled(self) -> bool {
+        self.has(Self::CEILED)
     }
 }
 
@@ -422,6 +483,88 @@ impl<'a> Spans<'a> {
     const fn wants(&self, span: Span) -> bool {
         self.swimming || !span.flags.is_swimmer_only()
     }
+
+    /// The height a body whose feet are at `start_z`, standing on a surface
+    /// topping out at `start_top`, lands at stepping onto `(x, y)` — or `None`
+    /// where it may not step there at all.
+    ///
+    /// [`MapTerrain::check`](crate::MapTerrain::check) with the column already
+    /// resolved: the same rule, choosing among surfaces this layer stored rather
+    /// than deriving them from `tiledata` per step. `docs/map/navigation_spans.md`'s
+    /// N2, and its whole content is that the answer did not change — the
+    /// `span_check` example is where that is proved over the facet.
+    ///
+    /// **First accepted wins**, because the spans are stored highest first and
+    /// the rule wants the highest surface in reach (Sphere's `GetFixPoint`).
+    /// `check` expresses the same choice as a running maximum over the map file's
+    /// own order, and a candidate that is refused never suppresses a lower one,
+    /// so a descending walk that stops at the first acceptance is the same
+    /// answer. On a tie between the land and a static at one height the two
+    /// disagree about *which* surface won and agree about the number, which is
+    /// the whole of what either returns.
+    #[must_use]
+    pub fn check(&self, x: u16, y: u16, start_z: i32, start_top: i32) -> Option<i32> {
+        // How high a step reaches, and where the head of a body that walked in
+        // from `start_z` is — the two scalars the whole rule reaches its source
+        // through.
+        let step_top = start_top + MAX_STEP_UP;
+        let check_top = start_z + PLAYER_HEIGHT;
+        let stored = self.index.stored(self.map, x, y);
+        if stored.is_empty() {
+            // The column tier. Nothing was stored because nothing stands here
+            // and nothing is in the way, so the reach is the whole question —
+            // and there is no `landCheck` guard without a static to guard
+            // against.
+            let ground = self.ground(x, y).filter(|span| self.wants(*span))?;
+            return (step_top >= i32::from(ground.reach_z)).then_some(i32::from(ground.stand_z));
+        }
+        // The column's own land, for the one clause that reaches past a single
+        // span. `None` here is exactly `land_is_ground` saying no: the land is a
+        // mountainside, or it is water and this body walks.
+        let ground = stored
+            .iter()
+            .copied()
+            .find(|span| span.flags.is_ground() && self.wants(*span));
+        stored
+            .iter()
+            .copied()
+            .filter(|span| self.wants(*span))
+            .find(|&span| self.admits(span, ground, step_top, check_top))
+            .map(|span| i32::from(span.stand_z))
+    }
+
+    /// Whether a body reaching `step_top` with its head at `check_top` may take
+    /// `span`, given the column's own `ground`.
+    ///
+    /// The three clauses of `MapTerrain::check`'s loop, in its order:
+    ///
+    /// - **Reach.** `step_top >= item_top`, and `item_top` is
+    ///   [`reach_z`](Span::reach_z).
+    /// - **The `landCheck` guard.** [`SpanFlags::LAND_WINS`] carries three of its
+    ///   four conditions; the fourth is `test_top > land_z`, and the land's
+    ///   lowest corner is the ground span's own reach.
+    /// - **The body fits.** `is_obstructed(our_z, test_top)` read off
+    ///   [`clearance`](Span::clearance) — obstructed exactly when the free height
+    ///   is less than the height wanted, which is the same comparison
+    ///   `is_obstructed` makes against every static at once.
+    fn admits(&self, span: Span, ground: Option<Span>, step_top: i32, check_top: i32) -> bool {
+        let stand = i32::from(span.stand_z);
+        if step_top < i32::from(span.reach_z) {
+            return false;
+        }
+        // `test_top`, not `stand + PLAYER_HEIGHT`: a body walks in at the height
+        // it left, and dropping that half is the hole `is_obstructed` documents.
+        let test_top = check_top.max(stand + PLAYER_HEIGHT);
+        if span.flags.land_wins() && ground.is_some_and(|land| test_top > i32::from(land.reach_z)) {
+            return false;
+        }
+        // Nothing above at all admits any body. Where there is something, the
+        // byte *is* the gap and not a saturation of it — a base and a `stand_z`
+        // are both `i8`, so no gap exceeds 255 — and the comparison is therefore
+        // exact for every height a body could ask for. See `Span::clearance` for
+        // why the flag is what carries the difference.
+        !span.flags.is_ceiled() || test_top - stand <= i32::from(span.clearance)
+    }
 }
 
 /// [`Spans::surfaces`]'s walk: at most one synthesised land surface, or a run
@@ -467,10 +610,14 @@ fn land_kinds(tiles: &TileData) -> Vec<LandKind> {
 
 /// The flags a land surface of this kind carries, or `None` where it is not a
 /// surface at all.
+///
+/// [`SpanFlags::GROUND`] is here rather than at the two call sites because this
+/// is the only thing that builds a land span, and a column whose ground forgot
+/// to say so is a column the `landCheck` guard silently stops applying to.
 const fn kind_flags(kind: LandKind) -> Option<SpanFlags> {
     match kind {
-        LandKind::Ground => Some(SpanFlags(SpanFlags::NONE)),
-        LandKind::Water => Some(SpanFlags(SpanFlags::SWIMMER_ONLY)),
+        LandKind::Ground => Some(SpanFlags(SpanFlags::GROUND)),
+        LandKind::Water => Some(SpanFlags(SpanFlags::GROUND | SpanFlags::SWIMMER_ONLY)),
         LandKind::Blocked => None,
     }
 }
@@ -501,36 +648,46 @@ fn surfaces_of(
     if !map.contains(x, y) {
         return;
     }
+    // The land, read once. Its *centre* is wanted even where it is no surface at
+    // all — a mountainside still decides `landCheck` for the statics standing on
+    // it — so this is the height and not the span.
+    let land_center = map.land(x, y).map(|_| {
+        let corners = map.land_corners(x, y).expect("land was just present");
+        i32::from(openshard_map::map::average_corner_z(corners))
+    });
     if let Some(flags) = map
         .land(x, y)
         .and_then(|cell| kind_flags(land[usize::from(cell.tile.0)]))
     {
         let corners = map.land_corners(x, y).expect("land was just present");
-        let stand_z = openshard_map::map::average_corner_z(corners);
-        out.push(Span {
-            stand_z,
-            reach_z: corners.into_iter().min().expect("four corners"),
-            clearance: clearance(tiles, items, i32::from(stand_z)),
+        out.push(span_over(
+            tiles,
+            items,
+            openshard_map::map::average_corner_z(corners),
+            corners.into_iter().min().expect("four corners"),
             flags,
-        });
+        ));
     }
     for item in items {
         // `Cover::of_static` and not a second reading of the platform bit: the
         // halved climbable lives there, both ends of the wire lay a *placed*
         // static's surface with it, and `stand_surfaces` — the oracle this has
         // to match — asks the very same question.
-        let Some(cover) = Cover::of_static(tiles.static_tile(item.tile.0))
-            .based_at(item.z)
-            .stands()
-        else {
+        let tile = tiles.static_tile(item.tile.0);
+        let Some(cover) = Cover::of_static(tile).based_at(item.z).stands() else {
             continue;
         };
-        out.push(Span {
-            stand_z: fits(cover.surface(), "a surface", x, y),
-            reach_z: fits(cover.reach(), "a step's reach", x, y),
-            clearance: clearance(tiles, items, cover.surface()),
-            flags: SpanFlags(SpanFlags::NONE),
-        });
+        let stand_z = fits(cover.surface(), "a surface", x, y);
+        out.push(span_over(
+            tiles,
+            items,
+            stand_z,
+            fits(cover.reach(), "a step's reach", x, y),
+            SpanFlags(match land_wins(land_center, item.z, tile.height, stand_z) {
+                true => SpanFlags::LAND_WINS,
+                false => SpanFlags::NONE,
+            }),
+        ));
     }
     // Highest first — see `Spans::surfaces`. Stable, so two statics at one
     // height keep the file's order, which is the order that decides which of
@@ -548,8 +705,27 @@ fn fits(z: i32, what: &str, x: u16, y: u16) -> i8 {
     i8::try_from(z).unwrap_or_else(|_| panic!("{what} at ({x}, {y}) is z={z}, which is not a height"))
 }
 
-/// How much room there is above `z` on a column holding `items`, saturating at
-/// 255.
+/// One span standing at `stand_z` and met at `reach_z`, with the headroom over
+/// it measured off the column it belongs to.
+///
+/// The one place a [`Span`] is built from a height, so the pairing of
+/// [`clearance`](Span::clearance) with [`SpanFlags::CEILED`] cannot be got right
+/// at one call site and wrong at the other.
+fn span_over(tiles: &TileData, items: &[StaticItem], stand_z: i8, reach_z: i8, flags: SpanFlags) -> Span {
+    let above = headroom(tiles, items, i32::from(stand_z));
+    Span {
+        stand_z,
+        reach_z,
+        clearance: above.unwrap_or(u8::MAX),
+        flags: match above.is_some() {
+            true => flags.with(SpanFlags::CEILED),
+            false => flags,
+        },
+    }
+}
+
+/// How much room there is above `z` on a column holding `items`, or `None` where
+/// the map put nothing above it at all.
 ///
 /// `MapTerrain::is_obstructed` asked once per surface instead of once per step:
 /// a static is in the way when its body overlaps the body of whoever is
@@ -561,8 +737,12 @@ fn fits(z: i32, what: &str, x: u16, y: u16) -> i8 {
 /// A surface does **not** block the body standing on it: its top is exactly at
 /// the feet, and `top > z` is false there. That is the same property
 /// `is_obstructed` documents, arrived at the same way.
-fn clearance(tiles: &TileData, items: &[StaticItem], z: i32) -> u8 {
-    let mut free = i32::from(u8::MAX);
+///
+/// `None` and not 255: they are the same byte for a static based at 127 over a
+/// surface at −128, and they are different answers for a body that needs more
+/// than 255 above its feet.
+fn headroom(tiles: &TileData, items: &[StaticItem], z: i32) -> Option<u8> {
+    let mut free = None;
     for item in items {
         let tile = tiles.static_tile(item.tile.0);
         // What `is_obstructed` counts: a wall, and a surface too — a stair or an
@@ -574,24 +754,67 @@ fn clearance(tiles: &TileData, items: &[StaticItem], z: i32) -> u8 {
         if static_top(tile, base) <= z {
             continue;
         }
-        free = free.min((base - z).max(0));
+        // Both ends are `i8`, so the gap is inside `0..=255` and the cast is
+        // total — which is the whole reason a byte can carry this at all.
+        let gap = (base - z).max(0) as u8;
+        free = Some(free.map_or(gap, |free: u8| free.min(gap)));
     }
-    // Every branch above kept `free` inside `0..=255`.
-    free as u8
+    free
+}
+
+/// Whether ServUO's `landCheck` guard's two column-shaped conditions hold for a
+/// static based at `base` with art `height`, standing a body at `stand_z`.
+///
+/// The guard is the rule that a low static the ground pokes through is not
+/// something you climb onto. Its four conditions split three ways, and this is
+/// the middle pair — the ones that are neither a property of the *body* asking
+/// nor of where it came from:
+///
+/// - `land_check < land_center`: the static's near edge is under the ground.
+/// - `land_center > our_z`: standing on it would put you under the ground too.
+///
+/// The first condition, `land_is_ground`, is an ability question and is answered
+/// by whether the column's [`SpanFlags::GROUND`] span survives the asker's
+/// filter. The fourth, `test_top > land_z`, is start-dependent and lives in
+/// [`Spans::check`]. `land_center` is `None` only off the map, where there is no
+/// land to win.
+fn land_wins(land_center: Option<i32>, base: i8, height: u8, stand_z: i8) -> bool {
+    let Some(land_center) = land_center else {
+        return false;
+    };
+    let land_check = i32::from(base) + MAX_STEP_UP.min(i32::from(height));
+    land_check < land_center && land_center > i32::from(stand_z)
 }
 
 #[cfg(test)]
 mod tests {
-    use openshard_map::grid::BlockExtent;
+    use openshard_map::grid::{BlockExtent, Tile};
     use openshard_tiles::TileFlags;
 
     use super::*;
     use crate::scene::Scene;
     use crate::surfaces::stand_surfaces;
+    use crate::terrain::MapTerrain;
 
     /// A land graphic the scenes below declare, so it can be made water or
     /// mountainside. Anything else is [`Scene`]'s own tile 0: plain ground.
     const OTHER_GROUND: u16 = 7;
+
+    /// The eight tiles one step away, in no particular order — a node
+    /// expansion's whole neighbourhood.
+    const NEIGHBOURS: [(i32, i32); 8] = [
+        (-1, -1),
+        (0, -1),
+        (1, -1),
+        (-1, 0),
+        (1, 0),
+        (-1, 1),
+        (0, 1),
+        (1, 1),
+    ];
+
+    /// A second one, so a scene can carry water and a mountainside at once.
+    const BLOCKED_GROUND: u16 = 8;
 
     /// The bake of a scene, and a walker's view of it.
     ///
@@ -760,6 +983,134 @@ mod tests {
         }
     }
 
+    /// The step rule over the bake is the step rule over the map, for every
+    /// column of `scene`, every start height in `-20..=60` and three shapes of
+    /// surface underfoot.
+    ///
+    /// The sweep and not a case, because N2's whole content is that the answer
+    /// did not change: a case proves the clause somebody thought of.
+    fn check_agrees(scene: &Scene, index: &SpanIndex, swimming: bool) {
+        let terrain = scene.terrain().swimming(swimming);
+        let spans = view(scene, index).swimming(swimming);
+        // A sweep that refused everything would agree perfectly and prove
+        // nothing, and so would one that never landed anywhere but the ground.
+        let mut landed = 0_u32;
+        let mut refused = 0_u32;
+        let mut above_the_ground = 0_u32;
+        for y in 0..scene.height() {
+            for x in 0..scene.width() {
+                let ground = terrain.ground_z(Tile::new(x, y));
+                for start_z in -20..=60 {
+                    // Feet and top together: flat ground, a slope, and a body
+                    // standing half way up a tall tread — the three shapes
+                    // `start_surface` hands `check`.
+                    for lift in [0, 4, 20] {
+                        let start_top = start_z + lift;
+                        let baked = spans.check(x, y, start_z, start_top);
+                        assert_eq!(
+                            baked,
+                            terrain.check(x, y, start_z, start_top),
+                            "({x}, {y}) from z={start_z} top={start_top}, swimming={swimming}"
+                        );
+                        match baked {
+                            Some(z) => {
+                                landed += 1;
+                                above_the_ground +=
+                                    u32::from(ground.is_none_or(|ground| z > i32::from(ground)));
+                            }
+                            None => refused += 1,
+                        }
+                    }
+                }
+            }
+        }
+        assert!(landed > 1000, "only {landed} of the sweep's steps landed");
+        assert!(refused > 100, "only {refused} of the sweep's steps were refused");
+        assert!(
+            above_the_ground > 100,
+            "only {above_the_ground} landings were on something over the land"
+        );
+    }
+
+    #[test]
+    fn check_is_the_map_rule_over_a_scene_of_everything() {
+        let mut scene = Scene::flat(0);
+        scene
+            // A slope, so the tile's lowest corner and the height a body stands
+            // at are different numbers — which is the whole of what `reach_z`
+            // is for.
+            .ground(1, 1, 6)
+            .ground(2, 1, 12)
+            .ground(2, 2, 18)
+            // Water on one column and a mountainside on another, so both
+            // abilities take a different path through the tiers.
+            .land(5, 5, OTHER_GROUND)
+            .land_art(OTHER_GROUND, TileFlags::WATER | TileFlags::BLOCK)
+            .land(6, 6, BLOCKED_GROUND)
+            .land_art(BLOCKED_GROUND, TileFlags::BLOCK)
+            // A storey with a wall on it, a flight of treads, and a floor over
+            // open water.
+            .floor(3, 3, 20, 4)
+            .wall(3, 3, 24, 20)
+            .stair(4, 3, 0, 10)
+            .stair(4, 3, 10, 10)
+            .floor(5, 5, 0, 4)
+            // ServUO's `landCheck`, in the shape where it is the only thing
+            // deciding: a tread whose low end is within a step of a body down at
+            // z=-5, buried in ground the same body cannot reach. Without the
+            // guard the tread is a landing at z=7; with it there is nowhere to
+            // stand on the column at all. The whole four-tile corner is raised
+            // so the tile's *lowest* corner is 20 too — that is the height the
+            // guard's start-dependent clause is measured against.
+            .ground(2, 6, 20)
+            .ground(3, 6, 20)
+            .ground(2, 7, 20)
+            .ground(3, 7, 20)
+            .stair(2, 6, 0, 14);
+        let index = bake(&scene);
+        for swimming in [false, true] {
+            check_agrees(&scene, &index, swimming);
+        }
+    }
+
+    #[test]
+    fn the_ground_poking_through_a_low_static_is_flagged_at_bake_time() {
+        // The plank at z=0..4 under ground standing at 20: you do not climb onto
+        // it, because the land it is buried in is higher than it is.
+        let mut scene = Scene::flat(20);
+        scene.floor(3, 3, 0, 4);
+        let index = bake(&scene);
+        let spans = view(&scene, &index);
+        let plank = spans
+            .surfaces(3, 3)
+            .find(|span| !span.flags.is_ground())
+            .expect("the plank is a surface of the column");
+        assert!(plank.flags.land_wins(), "the ground stands over the plank");
+        assert_eq!(
+            spans.check(3, 3, 20, 20),
+            Some(20),
+            "a body walking in at ground level stays on the ground"
+        );
+        // Far enough below that the guard's fourth condition fails — the body's
+        // head is under the tile's lowest corner — and the plank is a candidate
+        // again, exactly as `MapTerrain::check` has it.
+        assert_eq!(spans.check(3, 3, 2, 2), scene.terrain().check(3, 3, 2, 2));
+    }
+
+    #[test]
+    fn a_surface_with_nothing_over_it_is_not_ceiled() {
+        let mut scene = Scene::flat(0);
+        scene.wall(3, 3, 16, 20);
+        let index = bake(&scene);
+        let spans = view(&scene, &index);
+        let ground = spans.surfaces(3, 3).next().expect("the ground is a surface");
+        assert!(ground.flags.is_ceiled(), "the wall is above it");
+        assert_eq!(ground.clearance, 16);
+        let bare = spans.surfaces(4, 3).next().expect("the column next door");
+        assert!(!bare.flags.is_ceiled(), "nothing at all is above it");
+        assert_eq!(bare.clearance, u8::MAX);
+    }
+
     #[test]
     fn each_column_of_a_block_reads_its_own_run() {
         // Four columns of one block, each with a different number of surfaces
@@ -865,5 +1216,55 @@ mod tests {
             deep > 100,
             "only {deep} columns in the box hold more than one surface"
         );
+    }
+
+    /// The step rule over the bake is the step rule over the map, for a node
+    /// expansion out of every surface of every column in a box of the real
+    /// facet.
+    ///
+    /// N2's suite-sized oracle. **The whole-facet form is the `span_check`
+    /// example**, which also floods the facet through both rules; this is the
+    /// same comparison over Britain and the water west of it, and it is the one
+    /// that runs on a machine with an install and no arguments.
+    #[test]
+    fn check_is_the_map_rule_over_a_box_of_britain() {
+        let Some((map, tiles)) = real_install() else {
+            return;
+        };
+        let index = SpanIndex::build(&map, &tiles);
+        for swimming in [false, true] {
+            let terrain = MapTerrain::new(&map, &tiles).swimming(swimming);
+            let spans = Spans::new(&map, &index).swimming(swimming);
+            let mut compared = 0_u64;
+            let mut landed = 0_u64;
+            for y in 1600..1900_u16 {
+                for x in 1350..1600_u16 {
+                    // Every height a body could be standing at here, and the top
+                    // of the surface under each of them: a node expansion's
+                    // start half, exactly as `can_step` computes it.
+                    for start_z in terrain.surfaces(x, y) {
+                        let (_, start_top) = terrain.start_surface(x, y, start_z);
+                        for (dx, dy) in NEIGHBOURS {
+                            let (Ok(to_x), Ok(to_y)) =
+                                (u16::try_from(i32::from(x) + dx), u16::try_from(i32::from(y) + dy))
+                            else {
+                                continue;
+                            };
+                            let baked = spans.check(to_x, to_y, start_z, start_top);
+                            assert_eq!(
+                                baked,
+                                terrain.check(to_x, to_y, start_z, start_top),
+                                "({to_x}, {to_y}) from ({x}, {y}) z={start_z} top={start_top}, \
+                                 swimming={swimming}"
+                            );
+                            compared += 1;
+                            landed += u64::from(baked.is_some());
+                        }
+                    }
+                }
+            }
+            assert!(compared > 100_000, "only {compared} steps compared");
+            assert!(landed > 10_000, "only {landed} of them landed anywhere");
+        }
     }
 }

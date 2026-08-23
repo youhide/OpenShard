@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 use clap::Parser;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::{Doors, Overlay};
+use openshard_movement::spans::{SpanIndex, Spans};
 use openshard_movement::{Footing, MapTerrain, SearchExit, search_path, step_allowed};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
@@ -146,6 +147,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     measure(cli.repeat, n, "the same, landings computed once", || {
         standing.iter().map(|&p| hoisted_expand(&terrain, p)).sum()
     });
+    // And the same again with the *landing* half answered off the span bake
+    // rather than derived from the column's statics — `navigation_spans.md`'s
+    // N2. The start half is still the map's: a span carries where a body stands
+    // and not the crest of the art under it, which is what `start_surface`
+    // returns, so that half is N3's to move.
+    let baking = Instant::now();
+    let index = SpanIndex::build(&map, &tiledata);
+    println!(
+        "  (baked {} spans in {:.2}s, {} B resident)",
+        index.span_count(),
+        baking.elapsed().as_secs_f64(),
+        index.resident_bytes(),
+    );
+    let spans = Spans::new(&map, &index);
+    measure(cli.repeat, n, "the same, landings off the bake", || {
+        standing.iter().map(|&p| span_expand(&terrain, &spans, p)).sum()
+    });
     println!("what the search itself costs, with terrain taken away:");
     // Open ground with no map at all and nothing on it: the floor under every
     // measurement above. A search here pops its whole budget — the goal is two
@@ -200,16 +218,37 @@ const fn step_from_east(point: Point) -> Option<Point> {
 ///    asked about. Answering each tile once turns sixteen landing checks into
 ///    eight.
 fn hoisted_expand(terrain: &MapTerrain<'_>, from: Point) -> u64 {
+    expand(
+        from,
+        |to, start_z, start_top| terrain.check(to.x, to.y, start_z, start_top),
+        terrain.start_surface(from.x, from.y, i32::from(from.z)).1,
+    )
+}
+
+/// The same expansion with the landing half read off the span bake.
+///
+/// Identical in shape to [`hoisted_expand`] on purpose: the two differ in one
+/// call and nothing else, so the difference between their rows is the rule and
+/// not the harness.
+fn span_expand(terrain: &MapTerrain<'_>, spans: &Spans<'_>, from: Point) -> u64 {
+    expand(
+        from,
+        |to, start_z, start_top| spans.check(to.x, to.y, start_z, start_top),
+        terrain.start_surface(from.x, from.y, i32::from(from.z)).1,
+    )
+}
+
+/// One node expansion: eight landings, then the diagonals' flank rule over
+/// them.
+fn expand(from: Point, mut landing_at: impl FnMut(Point, i32, i32) -> Option<i32>, start_top: i32) -> u64 {
     let start_z = i32::from(from.z);
-    let (_, start_top) = terrain.start_surface(from.x, from.y, start_z);
     // One landing answer per neighbour, in `Direction::ALL` order.
     let mut landing = [None; 8];
     for direction in Direction::ALL {
         let Some(to) = openshard_movement::step_from(from, direction) else {
             continue;
         };
-        landing[direction.to_bits() as usize] = terrain
-            .check(to.x, to.y, start_z, start_top)
+        landing[direction.to_bits() as usize] = landing_at(to, start_z, start_top)
             .and_then(|z| i8::try_from(z).ok())
             .map(|z| Point { x: to.x, y: to.y, z });
     }
