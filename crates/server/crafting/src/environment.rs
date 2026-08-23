@@ -16,7 +16,7 @@
 //! and the z band below already throws out the forge on the floor above.
 
 use openshard_entities::EntityId;
-use openshard_movement::Tile;
+use openshard_map::grid::Tile;
 use openshard_state::WorldState;
 use openshard_state::components::{Drawn, Position};
 

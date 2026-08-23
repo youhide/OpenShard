@@ -17,8 +17,8 @@ use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::depth;
 use openshard_client_render::mobiles::{self, Mobile};
 use openshard_client_render::{light, occlusion};
+use openshard_map::grid::Tile;
 use openshard_map::map::WorldMap;
-use openshard_movement::Tile;
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Graphic;
@@ -171,7 +171,7 @@ impl App {
         let cluttered = footing(
             &self.world,
             &self.resources,
-            openshard_movement::Doors::AsTheyStand,
+            openshard_map::overlay::Doors::AsTheyStand,
         );
         let mut levels: Vec<(Height, bool)> = terrain
             .surfaces(x, y)
@@ -415,12 +415,13 @@ impl App {
     /// is on or not, so that a Ctrl-drag shows where the body is about to go
     /// with no debugging switch thrown — see [`App::route_shown`].
     pub(crate) fn terrain_overlay(&self, bounds: TileBounds) -> TerrainOverlay {
-        use openshard_movement::{PLAYER_HEIGHT, Tile};
+        use openshard_map::grid::Tile;
+        use openshard_movement::PLAYER_HEIGHT;
 
         let terrain = footing(
             &self.world,
             &self.resources,
-            openshard_movement::Doors::AsTheyStand,
+            openshard_map::overlay::Doors::AsTheyStand,
         );
         let near = i32::from(self.world.motion.planning_state().position.z);
         let mut open = Vec::new();
@@ -647,7 +648,7 @@ impl App {
             live: footing(
                 &self.world,
                 &self.resources,
-                openshard_movement::Doors::AsTheyStand,
+                openshard_map::overlay::Doors::AsTheyStand,
             ),
             guide: guide(&self.resources),
             coarse: self.resources.coarse.as_ref(),

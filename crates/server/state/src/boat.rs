@@ -36,7 +36,7 @@
 use std::collections::HashMap;
 
 use openshard_entities::EntityId;
-use openshard_movement::Cover;
+use openshard_map::overlay::Cover;
 
 /// One tile of one boat, as the step check needs it.
 ///

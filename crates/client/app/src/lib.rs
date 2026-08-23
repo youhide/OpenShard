@@ -163,7 +163,8 @@ use openshard_client_render::mobiles::Mobile;
 use openshard_client_render::occlusion;
 use openshard_client_render::sprite::SpriteQuad;
 use openshard_client_render::text::{self, GumpLabel};
-use openshard_movement::{Leeway, Tile};
+use openshard_map::grid::Tile;
+use openshard_movement::Leeway;
 use openshard_protocol::direction::{Direction, Facing};
 #[cfg(test)]
 use openshard_protocol::serial::Serial;
@@ -510,8 +511,8 @@ pub fn run<D: Dial + Send + 'static>(
         }
     };
     checkpoint("terrain textures opened");
-    let tiledata = match openshard_uofiles::tiledata::load(dir.join("tiledata.mul")) {
-        Ok(read) => read.tiles,
+    let tiledata = match openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")) {
+        Ok(tiles) => tiles,
         Err(error) => {
             eprintln!("opening tiledata.mul: {error}");
             return ExitCode::FAILURE;
@@ -843,7 +844,7 @@ pub fn run<D: Dial + Send + 'static>(
                 multi_preview: Vec::new(),
                 damage_numbers: Vec::new(),
                 health_estimates: std::collections::BTreeMap::new(),
-                overlay: openshard_movement::Overlay::default(),
+                overlay: openshard_map::overlay::Overlay::default(),
                 crowd: {
                     // The body's ease, which is not the camera's — see `STARTUP_EASE`.
                     let mut crowd = Crowd::default();

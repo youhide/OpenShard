@@ -1406,7 +1406,7 @@ pub(crate) fn encode_world_passes(
             // two are usually different tiles — a wall's picture stands up
             // the screen from its own cell, so the ground under the cursor is
             // the cell behind it.
-            Selection::DEFAULT.on(openshard_movement::Tile::new(picked.at.x, picked.at.y)),
+            Selection::DEFAULT.on(openshard_map::grid::Tile::new(picked.at.x, picked.at.y)),
         );
         profile::end(window.gpu.as_ref(), encoder, timed);
     }

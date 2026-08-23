@@ -16,7 +16,7 @@
 
 use crate::camera::TileBounds;
 use crate::light::{self, Lighting, Spot};
-use openshard_movement::Tile;
+use openshard_map::grid::Tile;
 
 /// What the blit puts on the screen.
 ///

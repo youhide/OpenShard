@@ -2,7 +2,8 @@
 //! living mobile, and the event that announces it.
 
 use openshard_entities::EntityId;
-use openshard_movement::{Tile, Walker};
+use openshard_map::grid::Tile;
+use openshard_movement::Walker;
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::{Serial, SerialKind};

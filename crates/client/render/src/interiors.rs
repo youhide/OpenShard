@@ -234,7 +234,7 @@ impl RoomTree {
                     if lower_room == room.id
                         || building_for_room.get(&lower_room) != Some(&building)
                         || lower.floor_z >= cell.floor_z
-                        || cell.floor_z - lower.floor_z >= i32::from(PLAYER_HEIGHT)
+                        || cell.floor_z - lower.floor_z >= PLAYER_HEIGHT
                         || lower.ceiling != Some(cell.floor_z)
                     {
                         continue;
@@ -1129,8 +1129,8 @@ impl BuildingMap {
         // A door may connect two rooms in the same house, but never connects a
         // positive room back to the exterior.  Joining only positive labels is
         // the key distinction between a front door and an internal one.
-        for door in 0..cells {
-            if !doors[door] {
+        for (door, is_door) in doors.iter().enumerate().take(cells) {
+            if !is_door {
                 continue;
             }
             let x = door % width as usize;
@@ -1308,9 +1308,9 @@ impl BuildingMap {
                 // Direction from `other` back to `here`.
                 previous[other] = match other as isize - here as isize {
                     delta if delta == -(width as isize) => 2,
-                    delta if delta == 1 => 3,
+                    1 => 3,
                     delta if delta == width as isize => 0,
-                    delta if delta == -1 => 1,
+                    -1 => 1,
                     _ => unreachable!("cardinal neighbour"),
                 };
                 pending.push_back(other);
@@ -1468,7 +1468,7 @@ fn generated_door_anchor(
         return;
     }
     if terrain.can_fit(
-        openshard_movement::Tile::new(
+        openshard_map::grid::Tile::new(
             u16::try_from(x).expect("facet fits UO coordinates"),
             u16::try_from(y).expect("facet fits UO coordinates"),
         ),
@@ -2208,7 +2208,7 @@ fn wall_supports_low_platform(
         return false;
     };
     let top = i32::from(wall_z) + i32::from(wall.height);
-    top - floor_z < i32::from(PLAYER_HEIGHT)
+    top - floor_z < PLAYER_HEIGHT
         && map.statics_at(x, y).any(|item| {
             let tile = tiledata.static_tile(item.tile.0);
             tile.flags.is_platform()

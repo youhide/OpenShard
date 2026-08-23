@@ -34,7 +34,7 @@
 //! night would stop working exactly when the picture is hardest to read. So this
 //! draws on the surface, in screen pixels, over what the blit has lit.
 
-use openshard_movement::Tile;
+use openshard_map::grid::Tile;
 
 /// What one selection looks like, and where it is.
 ///

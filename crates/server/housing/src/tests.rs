@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use openshard_entities::Registry;
 use openshard_events::EventBus;
-use openshard_movement::Tile;
+use openshard_map::grid::Tile;
 use openshard_movement::scene::Scene;
 use openshard_protocol::serial::{Serial, SerialKind};
 use openshard_protocol::wire::Graphic;

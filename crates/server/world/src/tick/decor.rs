@@ -161,7 +161,8 @@ impl World {
         // client lays the same cover from the same table through the same
         // function, which is what "agree by construction" has to mean to be
         // worth saying. See `openshard_movement::overlay`.
-        if let Some(cover) = openshard_movement::Cover::of_static(self.state.tiles.static_tile(graphic.0)) {
+        if let Some(cover) = openshard_map::overlay::Cover::of_static(self.state.tiles.static_tile(graphic.0))
+        {
             self.state.facet_state_mut(facet).block(
                 position.x,
                 position.y,

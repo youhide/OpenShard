@@ -50,7 +50,7 @@ impl HealthPoints {
 /// Everything the client knows about one map tile for inspection.
 #[derive(Clone)]
 pub struct PickedTile {
-    pub at: openshard_movement::Tile,
+    pub at: openshard_map::grid::Tile,
     pub land: Option<Graphic>,
     pub land_z: Height,
     pub stand_z: Height,

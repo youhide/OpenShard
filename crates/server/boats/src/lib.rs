@@ -33,7 +33,7 @@
 //! crew.
 
 use openshard_entities::EntityId;
-use openshard_movement::Tile;
+use openshard_map::grid::Tile;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};

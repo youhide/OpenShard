@@ -13,7 +13,8 @@ use openshard_events::EventBus;
 use openshard_movement::scene::Scene;
 // `Terrain` is in scope for its *methods*: the tests below ask a `LiveTerrain`
 // whether a step is allowed. Nothing here implements it any more.
-use openshard_movement::{Doors, Walker};
+use openshard_map::overlay::Doors;
+use openshard_movement::Walker;
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::serial::SerialKind;
 use openshard_state::rng::Rng;

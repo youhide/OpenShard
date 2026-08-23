@@ -1,5 +1,6 @@
 use super::*;
-use openshard_movement::{Doors, Walker, step_from};
+use openshard_map::overlay::Doors;
+use openshard_movement::{Walker, step_from};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::world::{Aggression, Sight};
 use openshard_state::components::{Brain, Heading, Hitpoints, Movement};

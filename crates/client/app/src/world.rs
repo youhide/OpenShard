@@ -220,7 +220,7 @@ pub struct PresentationWorld {
     /// The same type the shard keeps on the other end of the wire — built here
     /// from the view rather than from an entity registry, and rebuilt whole
     /// whenever the view changes. See [`clutter::of`].
-    pub overlay: openshard_movement::Overlay,
+    pub overlay: openshard_map::overlay::Overlay,
     /// Animation and glide history, which belongs to presentation rather than
     /// authoritative state.
     pub crowd: Crowd,
@@ -244,6 +244,7 @@ pub struct StaticGeometryCacheKey {
 }
 
 impl StaticGeometryCacheKey {
+    #[allow(clippy::too_many_arguments)] // This constructor is the typed boundary for every cache invalidation input.
     pub const fn new(
         camera: Camera,
         cutaway: Cutaway,
@@ -937,8 +938,8 @@ pub(crate) fn terrain(resources: &resources::Resources) -> openshard_movement::M
 /// The coarse graph was baked over the bare map, so the guide has to be read
 /// over the bare map too: a door that happens to be shut must not be able to
 /// rewrite a corridor's topology.
-static NOTHING_PLACED: std::sync::LazyLock<openshard_movement::Overlay> =
-    std::sync::LazyLock::new(openshard_movement::Overlay::default);
+static NOTHING_PLACED: std::sync::LazyLock<openshard_map::overlay::Overlay> =
+    std::sync::LazyLock::new(openshard_map::overlay::Overlay::default);
 
 /// The bare static map, as a footing with nothing live on it — what the coarse
 /// graph is guided and joined by.
@@ -946,14 +947,14 @@ pub(crate) fn guide(resources: &resources::Resources) -> openshard_movement::Foo
     openshard_movement::Footing::new(
         Some(terrain(resources)),
         &NOTHING_PLACED,
-        openshard_movement::Doors::AsTheyStand,
+        openshard_map::overlay::Doors::AsTheyStand,
     )
 }
 
 pub(crate) fn footing<'a>(
     world: &'a WorldState,
     resources: &'a resources::Resources,
-    doors: openshard_movement::Doors,
+    doors: openshard_map::overlay::Doors,
 ) -> openshard_movement::Footing<'a> {
     openshard_movement::Footing::new(Some(terrain(resources)), &world.presentation.overlay, doors)
 }
@@ -994,7 +995,7 @@ mod tests {
             multi_preview: Vec::new(),
             damage_numbers: Vec::new(),
             health_estimates: BTreeMap::new(),
-            overlay: openshard_movement::Overlay::default(),
+            overlay: openshard_map::overlay::Overlay::default(),
             crowd: Crowd::default(),
         };
         let update_interval = Duration::from_millis(750);

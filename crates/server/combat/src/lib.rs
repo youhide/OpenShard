@@ -14,7 +14,7 @@
 
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
-use openshard_movement::Doors;
+use openshard_map::overlay::Doors;
 use openshard_protocol::combat::{AttackTarget, WarMode};
 use openshard_protocol::feedback::{EffectKind, GraphicalEffect};
 use openshard_protocol::mobile::Notoriety;

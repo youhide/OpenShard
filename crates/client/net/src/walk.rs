@@ -36,7 +36,8 @@
 
 use std::collections::VecDeque;
 
-use openshard_movement::{Intent, StepCounter, Tile, intend};
+use openshard_map::grid::Tile;
+use openshard_movement::{Intent, StepCounter, intend};
 use openshard_protocol::direction::Facing;
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::packet::FramedClientPacket;

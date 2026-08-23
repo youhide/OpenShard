@@ -2529,6 +2529,7 @@ dependencies = [
  "openshard-combat",
  "openshard-entities",
  "openshard-items",
+ "openshard-map",
  "openshard-movement",
  "openshard-protocol",
  "openshard-state",
@@ -2550,6 +2551,7 @@ version = "0.0.1"
 dependencies = [
  "openshard-entities",
  "openshard-events",
+ "openshard-map",
  "openshard-movement",
  "openshard-protocol",
  "openshard-state",
@@ -2624,6 +2626,7 @@ name = "openshard-client-net"
 version = "0.0.1"
 dependencies = [
  "openshard-client-model",
+ "openshard-map",
  "openshard-movement",
  "openshard-protocol",
  "rustc-hash 2.1.3",
@@ -2666,6 +2669,7 @@ dependencies = [
  "openshard-config",
  "openshard-entities",
  "openshard-gateway",
+ "openshard-map",
  "openshard-movement",
  "openshard-protocol",
  "openshard-skills",
@@ -2695,6 +2699,7 @@ dependencies = [
  "openshard-entities",
  "openshard-gateway",
  "openshard-items",
+ "openshard-map",
  "openshard-movement",
  "openshard-protocol",
  "openshard-skills",
@@ -2763,6 +2768,7 @@ dependencies = [
  "openshard-entities",
  "openshard-events",
  "openshard-gateway",
+ "openshard-map",
  "openshard-movement",
  "openshard-protocol",
  "openshard-state",
@@ -2776,6 +2782,7 @@ version = "0.0.1"
 dependencies = [
  "openshard-entities",
  "openshard-gateway",
+ "openshard-map",
  "openshard-movement",
  "openshard-protocol",
  "openshard-state",
@@ -2810,6 +2817,7 @@ version = "0.0.1"
 dependencies = [
  "openshard-protocol",
  "openshard-tiles",
+ "rustc-hash 2.1.3",
 ]
 
 [[package]]
@@ -2840,6 +2848,7 @@ dependencies = [
  "openshard-entities",
  "openshard-gateway",
  "openshard-items",
+ "openshard-map",
  "openshard-movement",
  "openshard-protocol",
  "openshard-state",
@@ -2907,6 +2916,7 @@ dependencies = [
  "openshard-entities",
  "openshard-gateway",
  "openshard-items",
+ "openshard-map",
  "openshard-movement",
  "openshard-protocol",
  "openshard-state",
@@ -2945,6 +2955,7 @@ dependencies = [
  "openshard-entities",
  "openshard-gateway",
  "openshard-items",
+ "openshard-map",
  "openshard-movement",
  "openshard-protocol",
  "openshard-state",

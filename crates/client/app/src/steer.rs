@@ -178,8 +178,10 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+use openshard_map::grid::Tile;
+use openshard_map::overlay::Doors;
 use openshard_movement::{
-    Around, Detour, Doors, Footing, Heading, Lean, Leeway, NavigationGraph, RUN_HOLD, Step, Tile, WALK_HOLD,
+    Around, Detour, Footing, Heading, Lean, Leeway, NavigationGraph, RUN_HOLD, Step, WALK_HOLD,
     find_long_path, find_path, find_path_toward, step_allowed,
 };
 use openshard_protocol::direction::{Direction, Facing};
@@ -1427,7 +1429,8 @@ fn debug_detour(from: Point, around: &Around, step: Step) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openshard_movement::{Cover, Overlay, step_from};
+    use openshard_map::overlay::{Cover, Overlay};
+    use openshard_movement::step_from;
     use std::sync::LazyLock;
 
     /// Open ground: no map, so no floor and no walls, and nothing placed on it.

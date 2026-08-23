@@ -28,7 +28,7 @@
 //! not only silent, they were walking away.
 
 use openshard_entities::EntityId;
-use openshard_movement::Doors;
+use openshard_map::overlay::Doors;
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::world::{Facet, Point};

@@ -41,7 +41,7 @@
 //! there is one number to derive.
 
 use openshard_entities::EntityId;
-use openshard_movement::Tile;
+use openshard_map::grid::Tile;
 use openshard_protocol::serial::Serial;
 use openshard_state::WorldState;
 use openshard_state::components::{Contained, Container, House, LockedDown, Position, Standing};

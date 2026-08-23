@@ -15,6 +15,8 @@ workspace = true
 openshard-entities.workspace = true
 # The sign's window is answered per connection, like every other gump's.
 openshard-gateway.workspace = true
+# `Tile`: a house's footprint is a set of them.
+openshard-map.workspace = true
 openshard-movement.workspace = true
 openshard-protocol.workspace = true
 openshard-state.workspace = true

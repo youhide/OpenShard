@@ -29,7 +29,7 @@ use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::lod::BlockLodSelector;
 use openshard_client_render::mobiles;
 use openshard_client_render::radar::{RadarCache, RadarLodSelector, RadarWorkQueue};
-use openshard_movement::Tile;
+use openshard_map::grid::Tile;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::world::Point;
@@ -306,8 +306,8 @@ impl App {
     /// With auto-door mode on, a shut leaf *is* a usable next step — `walk`
     /// sends the use before the step — so the real half of a plan is the
     /// doors-open reading. With it off, shut is shut.
-    pub(crate) const fn walking_doors(&self) -> openshard_movement::Doors {
-        openshard_movement::Doors::for_opener(self.auto_open_doors)
+    pub(crate) const fn walking_doors(&self) -> openshard_map::overlay::Doors {
+        openshard_map::overlay::Doors::for_opener(self.auto_open_doors)
     }
 
     /// The sole cutaway policy for this client's current frame.

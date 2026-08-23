@@ -40,7 +40,7 @@
 //! the walk stop in front of it. `steer::plan` is the reader; the server has the same pair
 //! under the same name (`state::obstruct`'s `Obstacle::door`), and since node E
 //! of `docs/map/terrain_seam.md` it is not merely the same name but the same
-//! type: both ends build an `openshard_movement::Overlay`.
+//! type: both ends build an `openshard_map::overlay::Overlay`.
 //!
 //! **The graphic is what says a door is open, and its own art disagrees.** This
 //! module used to argue that no state had to be tracked at all — "a door's own
@@ -67,7 +67,8 @@ use std::collections::HashMap;
 use openshard_client_net::view::Mobile;
 use openshard_client_render::doors;
 use openshard_client_render::items::GroundItem;
-use openshard_movement::{Cover, Overlay, Tile};
+use openshard_map::grid::Tile;
+use openshard_map::overlay::{Cover, Overlay};
 use openshard_tiles::TileData;
 
 /// A mobile's body height in z-units — how tall a span a blocker has to reach
@@ -170,11 +171,19 @@ fn placed(blockers: &[(openshard_protocol::world::Point, u8)]) -> Overlay {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openshard_movement::{Around, Detour, Doors, Footing, Heading, Lean, Leeway, Step, step_allowed};
+    use openshard_map::overlay::{Body, Doors};
+    use openshard_movement::{Around, Detour, Footing, Heading, Lean, Leeway, Step, step_allowed};
     use openshard_protocol::direction::Direction;
     use openshard_protocol::items::ItemAmount;
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_protocol::world::Point;
+
+    /// A body with its feet at `z`, as the shard asks about one — the same
+    /// height [`MOBILE_HEIGHT`] gives a mobile, because these tests are about
+    /// what a *person* is refused by.
+    fn standing_at(z: i32) -> Body {
+        Body::new(z, MOBILE_HEIGHT)
+    }
 
     /// A barrel's tiledata height, so the span in these tests is a real one.
     const BARREL_HEIGHT: u8 = 12;
@@ -278,11 +287,8 @@ mod tests {
     fn client_tiledata() -> Option<TileData> {
         let dir = std::path::PathBuf::from(std::env::var_os("OPENSHARD_CLIENT")?);
         let file = dir.join("tiledata.mul");
-        file.exists().then(|| {
-            openshard_uofiles::tiledata::load(file)
-                .expect("tiledata should load")
-                .tiles
-        })
+        file.exists()
+            .then(|| openshard_uofiles::tiledata::load_tiles(file).expect("tiledata should load"))
     }
 
     #[test]
@@ -336,7 +342,7 @@ mod tests {
         let clutter = of(&[item(100, 100, 0, water_barrel)], [], &tiles);
         assert!(
             clutter
-                .blocker_at(Tile::new(100, 100), 0, Doors::AsTheyStand)
+                .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AsTheyStand)
                 .is_none(),
             "a water barrel was made solid here and the shard would still allow the step"
         );
@@ -350,13 +356,13 @@ mod tests {
         let clutter = of(&[item(100, 100, 0, BARREL)], [], &tiles);
         assert!(
             clutter
-                .blocker_at(Tile::new(100, 100), 0, Doors::AsTheyStand)
+                .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AsTheyStand)
                 .is_some(),
             "a barrel underfoot is not in the way"
         );
         assert!(
             clutter
-                .blocker_at(Tile::new(101, 100), 0, Doors::AsTheyStand)
+                .blocker_at(Tile::new(101, 100), standing_at(0), Doors::AsTheyStand)
                 .is_none(),
             "a barrel blocked a tile it is not on"
         );
@@ -370,13 +376,13 @@ mod tests {
         let clutter = of(&[item(100, 100, 40, BARREL)], [], &tiles);
         assert!(
             clutter
-                .blocker_at(Tile::new(100, 100), 0, Doors::AsTheyStand)
+                .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AsTheyStand)
                 .is_none(),
             "a crate on an upper floor sealed the floor beneath it"
         );
         assert!(
             clutter
-                .blocker_at(Tile::new(100, 100), 40, Doors::AsTheyStand)
+                .blocker_at(Tile::new(100, 100), standing_at(40), Doors::AsTheyStand)
                 .is_some(),
             "a crate did not block the floor it stands on"
         );
@@ -397,7 +403,7 @@ mod tests {
         let clutter = of(&[item(100, 100, 0, gold)], [], &tiles);
         assert!(
             clutter
-                .blocker_at(Tile::new(100, 100), 0, Doors::AsTheyStand)
+                .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AsTheyStand)
                 .is_none(),
             "a coin on the floor stopped a step"
         );
@@ -444,7 +450,7 @@ mod tests {
         let clutter = of(&[item(100, 100, 0, DOOR_OPEN)], [], &tiles);
         assert!(
             clutter
-                .blocker_at(Tile::new(100, 100), 0, Doors::AsTheyStand)
+                .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AsTheyStand)
                 .is_none(),
             "an open door blocked its own doorway"
         );
@@ -460,11 +466,15 @@ mod tests {
         let clutter = of(&[item(100, 100, 0, DOOR_SHUT)], [], &tiles);
         let doorway = Tile::new(100, 100);
         assert!(
-            clutter.blocker_at(doorway, 0, Doors::AsTheyStand).is_some(),
+            clutter
+                .blocker_at(doorway, standing_at(0), Doors::AsTheyStand)
+                .is_some(),
             "a shut door let a step through"
         );
         assert!(
-            clutter.blocker_at(doorway, 0, Doors::AllOpen).is_none(),
+            clutter
+                .blocker_at(doorway, standing_at(0), Doors::AllOpen)
+                .is_none(),
             "a shut door is what 'potentially passable' means; the plan must be able to look past it"
         );
     }
@@ -481,7 +491,7 @@ mod tests {
         let clutter = of(&[item(100, 100, 0, BARREL)], [], &tiles);
         assert!(
             clutter
-                .blocker_at(Tile::new(100, 100), 0, Doors::AllOpen)
+                .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AllOpen)
                 .is_some()
         );
     }
@@ -502,7 +512,7 @@ mod tests {
         );
         assert!(
             clutter
-                .blocker_at(Tile::new(100, 100), 0, Doors::AllOpen)
+                .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AllOpen)
                 .is_some(),
             "a doorway with a barrel in it was called openable"
         );

@@ -16,7 +16,7 @@
 //! ends up when the pack will not take it, which is `items`' door.
 
 use openshard_entities::EntityId;
-use openshard_movement::Tile;
+use openshard_map::grid::Tile;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::target::{TargetCursor, TargetKind};
 use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue};

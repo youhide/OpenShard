@@ -124,7 +124,7 @@ fn picture(scene: &Scene, lighting: &Lighting) -> String {
         scene.name,
         debug::diagram(
             lighting,
-            debug::around(openshard_movement::Tile::new(CENTRE.x, CENTRE.y), 6),
+            debug::around(openshard_map::grid::Tile::new(CENTRE.x, CENTRE.y), 6),
             0.0,
         )
     )
@@ -1445,7 +1445,7 @@ fn every_scene_prints_a_diagram_that_is_not_blank() {
         let lighting = scene.lighting(STILL);
         let drawn = debug::diagram(
             &lighting,
-            debug::around(openshard_movement::Tile::new(CENTRE.x, CENTRE.y), 6),
+            debug::around(openshard_map::grid::Tile::new(CENTRE.x, CENTRE.y), 6),
             0.0,
         );
         // A flame, an occluder, or lit ground: every scene has at least one of

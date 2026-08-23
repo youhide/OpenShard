@@ -383,7 +383,7 @@ fn the_wash_covers_the_selected_sprite_and_its_ground_and_nothing_else() {
     let Some((device, queue)) = gpu() else {
         return;
     };
-    let selection = Selection::DEFAULT.on(openshard_movement::Tile::new(SELECTED.0, SELECTED.1));
+    let selection = Selection::DEFAULT.on(openshard_map::grid::Tile::new(SELECTED.0, SELECTED.1));
     let frame = wash(&device, &queue, selection);
 
     let sprite = washed(selection.sprite);

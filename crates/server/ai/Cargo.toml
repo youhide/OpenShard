@@ -15,6 +15,8 @@ workspace = true
 openshard-combat.workspace = true
 openshard-items.workspace = true
 openshard-entities.workspace = true
+# `Doors`: which reading of the shut doors a route is planned under.
+openshard-map.workspace = true
 openshard-movement.workspace = true
 openshard-protocol.workspace = true
 openshard-state.workspace = true

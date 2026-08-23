@@ -25,8 +25,8 @@
 //! then none of these tests would run anywhere.
 
 use openshard_map::grid::BlockExtent;
+use openshard_map::grid::Tile;
 use openshard_map::map::{LandCell, WorldMap};
-use openshard_movement::Tile;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};

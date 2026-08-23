@@ -13,6 +13,8 @@ workspace = true
 
 [dependencies]
 openshard-client-model.workspace = true
+# Where a thing is on a facet: `Tile`, the plane a view and a walk both address.
+openshard-map.workspace = true
 openshard-protocol.workspace = true
 # The walk handshake, shared with the server: `intend` is the turn-versus-step
 # rule both ends have to agree on, and `StepCounter` is the client half of the

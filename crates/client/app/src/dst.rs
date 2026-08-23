@@ -71,9 +71,9 @@ use openshard_client_render::control::Control;
 use openshard_client_render::follow::Gaze;
 use openshard_client_render::follow::Rig;
 use openshard_client_render::mobiles::{self, Mobile};
-use openshard_movement::{
-    Cover, Doors, Footing, Overlay, Tile, WALK_HOLD, Walk as Handled, Walker, step_hold, step_progress,
-};
+use openshard_map::grid::Tile;
+use openshard_map::overlay::{Cover, Doors, Overlay};
+use openshard_movement::{Footing, WALK_HOLD, Walk as Handled, Walker, step_hold, step_progress};
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::packet::{FramedClientPacket, decode_packet};

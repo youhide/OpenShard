@@ -20,7 +20,7 @@
 use openshard_combat::MobileDied;
 use openshard_entities::EntityId;
 use openshard_items::Contents;
-use openshard_movement::Doors;
+use openshard_map::overlay::Doors;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::{Font, TalkMode};

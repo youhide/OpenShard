@@ -10,7 +10,7 @@
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_items as items;
-use openshard_movement::Doors;
+use openshard_map::overlay::Doors;
 use openshard_protocol::containers::{ContainerContents, GridSlot, encode_open_container};
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::{RawSerial, Serial, SerialKind};

@@ -25,7 +25,8 @@ use std::collections::HashMap;
 
 use crate::boat::Boats;
 use openshard_entities::EntityId;
-use openshard_movement::{Cover, CoverKind, Overlay, Tile};
+use openshard_map::grid::Tile;
+use openshard_map::overlay::{Cover, CoverKind, Overlay};
 
 /// A mobile's body height in z-units, for deciding what overlaps it. Matches the
 /// step check's `PLAYER_HEIGHT` in `world::terrain`.
@@ -234,8 +235,9 @@ mod tests {
     use super::*;
     use crate::boat::{Boats, Plank};
     use openshard_entities::Registry;
+    use openshard_map::overlay::Doors;
+    use openshard_movement::Footing;
     use openshard_movement::scene::Scene;
-    use openshard_movement::{Doors, Footing};
     use openshard_protocol::world::Point;
     use openshard_tiles::TileFlags;
 

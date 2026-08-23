@@ -14,7 +14,7 @@
 
 use openshard_commands::StaffCommand;
 use openshard_entities::EntityId;
-use openshard_movement::Tile;
+use openshard_map::grid::Tile;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::speech::{Font, SpokenMessage, TalkMode};

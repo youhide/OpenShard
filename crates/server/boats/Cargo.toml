@@ -13,6 +13,8 @@ workspace = true
 
 [dependencies]
 openshard-entities.workspace = true
+# `Tile`, and `Doors` for the reading a walk over a deck is judged by.
+openshard-map.workspace = true
 openshard-movement.workspace = true
 openshard-protocol.workspace = true
 openshard-state.workspace = true

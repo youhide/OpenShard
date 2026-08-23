@@ -22,7 +22,7 @@ use std::process::ExitCode;
 use clap::{Parser, ValueEnum};
 use openshard_client_net::session::{Pick, Plan};
 use openshard_client_net::transport::Tcp;
-use openshard_movement::Tile;
+use openshard_map::grid::Tile;
 use openshard_protocol::identity::{RawAccountName, RawPlaintextPassword};
 use tracing_subscriber::EnvFilter;
 

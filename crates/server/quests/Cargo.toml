@@ -21,6 +21,8 @@ openshard-items.workspace = true
 # For `Doors`: which reading of the shut doors an escort plans under. The enum
 # a step is asked with, rather than the `bool` it used to be — see
 # `docs/map/terrain_seam.md`'s node E.
+# `Doors`: which reading a quest's escort plans its route under.
+openshard-map.workspace = true
 openshard-movement.workspace = true
 openshard-protocol.workspace = true
 openshard-state.workspace = true

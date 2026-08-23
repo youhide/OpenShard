@@ -18,6 +18,8 @@ openshard-combat.workspace = true
 openshard-entities.workspace = true
 openshard-gateway.workspace = true
 openshard-items.workspace = true
+# `Tile`, and `Doors` for the reading a creature plans its route under.
+openshard-map.workspace = true
 openshard-movement.workspace = true
 openshard-protocol.workspace = true
 openshard-state.workspace = true
