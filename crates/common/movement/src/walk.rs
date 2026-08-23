@@ -6,12 +6,12 @@ use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::world::{Point, WalkRequest};
 
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Body, Doors};
+use openshard_map::overlay::{Body, Cover, Doors};
 
 use crate::footing::Footing;
 use crate::pace::{Pace, WalkPace};
 use crate::sequence::WalkSequence;
-use crate::terrain::PLAYER_HEIGHT;
+use crate::terrain::{MAX_STEP_UP, PLAYER_HEIGHT};
 
 /// What a walk request did.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -383,42 +383,130 @@ pub fn step_from(position: Point, direction: Direction) -> Option<Point> {
 /// for. The map answers first, because it owns the ground. Where it refuses,
 /// the overlay may still put a floor there — a deck over open water is the one
 /// thing that can overrule a refusal, and no index that only subtracts could
-/// say so. Then, at the height the body will actually stand at, the overlay is
-/// asked what is in the way: a hull, a wall, a crate, or a shut door that
-/// yields only to a route planned by somebody who will open it.
+/// say so. Where it *allows*, the overlay may still put a floor **above** the
+/// answer: a house's stair tread, its first storey, which is [`climbed`]. Then,
+/// at the height the body will actually stand at, the overlay is asked what is
+/// in the way: a hull, a wall, a crate, or a shut door that yields only to a
+/// route planned by somebody who will open it.
 #[must_use]
 pub fn can_step(footing: &Footing<'_>, from: Point, to: Point) -> Option<Point> {
-    let landed = match footing.map {
+    let tile = Tile::new(to.x, to.y);
+    let ground = match footing.map {
         Some(map) => match map.can_step(from, to) {
-            Some(landed) => landed,
+            Some(landed) => Some(i32::from(landed.z)),
             // The map says there is nothing to stand on, which over open water
             // is true right up until a ship is moored there.
-            None => aboard(footing, from, to)?,
+            None => aboard(footing, from, to),
         },
         // No map at all: no floor and no walls, so the ground allows everything
         // and only what the live world put there can refuse.
-        None => to,
+        None => Some(i32::from(to.z)),
     };
-    match footing.overlay.blocker_at(
-        Tile::new(to.x, to.y),
-        Body::new(i32::from(landed.z), PLAYER_HEIGHT),
-        footing.doors,
-    ) {
+    let landed = climbed(footing, from, tile, ground).or(ground)?;
+    let z = i8::try_from(landed).ok()?;
+    match footing
+        .overlay
+        .blocker_at(tile, Body::new(landed, PLAYER_HEIGHT), footing.doors)
+    {
         Some(_) => None,
-        None => Some(landed),
+        None => Some(Point::new(to.x, to.y, z)),
     }
 }
 
 /// Where a body coming from `from` would land on a surface the live world put
-/// at `to`, if it put one there.
-fn aboard(footing: &Footing<'_>, from: Point, to: Point) -> Option<Point> {
+/// at `to`, if it put one there — **and the map put none**.
+///
+/// The nearest one to where the body already is, which is a deck's rule: you
+/// step onto it from a pier and down onto it from a mast, and either way you
+/// arrive at the deck. Not [`climbed`]'s rule, because there is nothing to be
+/// higher *than*: the map refused, so any surface at all is better than none.
+fn aboard(footing: &Footing<'_>, from: Point, to: Point) -> Option<i32> {
     if footing.overlay.is_empty() {
         return None;
     }
-    let deck = footing
+    footing
         .overlay
-        .surface_at(Tile::new(to.x, to.y), i32::from(from.z))?;
-    Some(Point::new(to.x, to.y, i8::try_from(deck).ok()?))
+        .surface_at(Tile::new(to.x, to.y), i32::from(from.z))
+}
+
+/// The highest surface the live world put at `tile` that a body coming from
+/// `from` can reach, fits on, and would gain height by taking.
+///
+/// **How you get upstairs.** The map answers a house's tiles with the ground
+/// under it, because a house is not in the map's files at all — so without this
+/// a placed staircase is a picture and its first floor is unreachable, however
+/// correctly the overlay describes them.
+///
+/// Three filters, and each is one of the step rule's own:
+///
+/// - **In reach.** [`Cover::reach`] against the top of what the body is
+///   standing on plus [`MAX_STEP_UP`] — Sphere's and ServUO's `itemTop` against
+///   `startTop + 2`. A climbable is met at its base, which is what lets a
+///   flight be climbed a tread at a time.
+/// - **Worth taking.** Strictly above what the map already answered. A house's
+///   ground floor is a platform laid on the ground it duplicates, and this is
+///   the filter that makes it a no-op rather than a body lifted a hair.
+/// - **Fits.** Nothing of either layer in the body's way there, measured from
+///   the height the body walked in at — see [`fits_at`].
+///
+/// Among what survives, the **highest**, which is Sphere's `GetFixPoint`: a
+/// tile can carry both a floor and the stair over it, and the climber takes the
+/// stair. Nearest-z would keep a body on the floor while the client climbed.
+fn climbed(footing: &Footing<'_>, from: Point, tile: Tile, ground: Option<i32>) -> Option<i32> {
+    // The hot path's two cheap refusals: a shard with nothing placed on it, and
+    // a tile with nothing to climb — one length and one hash.
+    if footing.overlay.is_empty() || footing.overlay.surfaces_at(tile).next().is_none() {
+        return None;
+    }
+    let reach = standing_on(footing, from) + MAX_STEP_UP;
+    footing
+        .overlay
+        .surfaces_at(tile)
+        .filter(|cover| cover.reach() <= reach)
+        .map(Cover::surface)
+        .filter(|&z| ground.is_none_or(|ground| z > ground))
+        .filter(|&z| fits_at(footing, from, tile, z))
+        .max()
+}
+
+/// The top of whatever the body at `from` is standing on: the map's answer and
+/// the live world's, whichever is higher.
+///
+/// The *reach* a step is measured from, and never the feet — on a slope, or on
+/// a stair, those differ, and starting from the feet refuses the step the client
+/// took. The live half is [`Cover::crest`]: standing half way up a tread, the
+/// next step is measured from the top of the whole tread, which is what carries
+/// a body off the flight and onto the floor it arrives at.
+fn standing_on(footing: &Footing<'_>, from: Point) -> i32 {
+    let feet = i32::from(from.z);
+    let map_top = footing
+        .map
+        .map_or(feet, |map| map.start_surface(from.x, from.y, feet).1);
+    footing
+        .overlay
+        .surfaces_at(Tile::new(from.x, from.y))
+        .filter(|cover| cover.surface() <= feet)
+        .map(Cover::crest)
+        .fold(map_top, i32::max)
+}
+
+/// Whether a body walking in from `from` fits standing at `z` on `tile`, asking
+/// both layers.
+///
+/// The head is measured from where the body *came from* as well as from where
+/// it is going — ServUO's `testTop`, and the hole a body falls through without
+/// it: a wall that starts above the head of a body standing on the landing is
+/// squarely in the way of the same body walking in at the height it left.
+fn fits_at(footing: &Footing<'_>, from: Point, tile: Tile, z: i32) -> bool {
+    let head = (i32::from(from.z) + PLAYER_HEIGHT).max(z + PLAYER_HEIGHT);
+    if footing
+        .overlay
+        .blocker_at(tile, Body::new(z, head - z), footing.doors)
+        .is_some()
+    {
+        return false;
+    }
+    footing.map.is_none_or(|map| !map.obstructed(tile, z, head))
 }
 
 /// Whether an object `height` tall fits at `tile, z`: nothing solid in its body,

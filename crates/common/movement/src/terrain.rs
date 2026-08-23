@@ -475,6 +475,19 @@ impl<'a> MapTerrain<'a> {
         })
     }
 
+    /// Whether the map's own statics are in the way of a body at `z` whose head
+    /// is at `top`.
+    ///
+    /// [`is_obstructed`](Self::is_obstructed) by its public name, and it has one
+    /// because a landing the *overlay* offered still has to clear the map: a
+    /// house's first floor is the live world's, and the tree standing through it
+    /// is the map's. Without this the two layers would each veto only their own
+    /// candidates. See `walk::can_step`.
+    #[must_use]
+    pub fn obstructed(&self, at: Tile, z: i32, top: i32) -> bool {
+        self.is_obstructed(at.x, at.y, z, top)
+    }
+
     /// Whether an object `height` tall fits at `at` and `z` with a surface under it.
     ///
     /// The same shape as [`Terrain::can_fit`](crate::Terrain::can_fit) on

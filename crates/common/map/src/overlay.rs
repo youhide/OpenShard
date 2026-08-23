@@ -346,6 +346,26 @@ impl Cover {
             }
     }
 
+    /// How far the art itself reaches above its base.
+    ///
+    /// The third of three tops, and they are three because ServUO's step check
+    /// needs all three of them under different names:
+    ///
+    /// | | what it is | who asks |
+    /// |---|---|---|
+    /// | [`top`](Self::top) | the *body*, never empty — a zero-tall wall is still a wall | what is in the way |
+    /// | [`surface`](Self::surface) | where feet go, half way up a climbable | where a body lands |
+    /// | `crest` | the art's own extent | how far the **next** step reaches |
+    ///
+    /// The last is the one a staircase needs: standing half way up a tread, the
+    /// step off it is measured from the top of the whole tread, which is what
+    /// carries a body from the flight onto the floor it arrives at. ServUO's
+    /// `GetStartZ` calls it `zTop`.
+    #[must_use]
+    pub const fn crest(self) -> i32 {
+        self.bottom() + self.height as i32
+    }
+
     /// The edge a step has to reach to get onto this.
     ///
     /// The same as [`surface`](Self::surface) for anything flat — you arrive

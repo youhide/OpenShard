@@ -20,6 +20,7 @@ use openshard_movement::scene::{SIDE, Scene};
 use openshard_movement::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
+use openshard_tiles::TileFlags;
 
 // ---------------------------------------------------------------- regressions
 
@@ -413,5 +414,108 @@ fn a_random_scene_is_walked_the_way_the_rules_say() {
     assert!(
         past_walls > 500,
         "only {past_walls} steps landed on a tile with a wall"
+    );
+}
+
+// ------------------------------------------------------------ the live layer
+
+/// A villa's staircase, walked from the ground to its first floor.
+///
+/// **R3's own acceptance.** A house is not in the map's files at all — the
+/// shard placed it this morning — so every tile it stands on is answered by the
+/// map with the ground underneath, and the storey above is the live layer's to
+/// offer. Until [`can_step`](openshard_movement::can_step) read that layer's
+/// surfaces, a placed staircase was a picture and its first floor was
+/// unreachable however correctly the overlay described them.
+///
+/// The geometry is multi `0x0064`'s, measured off the shipped file: stone
+/// stairs (`PLATFORM | CLIMBABLE`, five tall) at `dz = 2`, wooden boards
+/// (`PLATFORM`, height zero) at `dz = 7`, plaster walls (`BLOCK`, nineteen
+/// tall) at the same `dz` as the boards.
+///
+/// The covers come out of [`Cover::of_static`] over a tiledata this test
+/// declares, and never by hand: what is under test includes *which* cover that
+/// reading lays, so a fixture that stated the answer would agree with itself.
+#[test]
+fn a_villa_stair_carries_a_body_to_its_first_floor() {
+    use openshard_map::grid::Tile;
+    use openshard_map::overlay::{Cover, Doors, Overlay};
+    use openshard_movement::{Footing, can_step};
+
+    const STAIR: u16 = 0x0751;
+    const BOARDS: u16 = 0x04AC;
+    const PLASTER: u16 = 0x0203;
+
+    let mut scene = Scene::flat(0);
+    scene.art(STAIR, TileFlags::PLATFORM | TileFlags::CLIMBABLE, 5);
+    scene.art(BOARDS, TileFlags::PLATFORM, 0);
+    scene.art(PLASTER, TileFlags::BLOCK, 19);
+
+    // The house, as the shard's index would hold it: the component list, laid
+    // through the one reading of the art both ends of the wire use.
+    let house: [(u16, u16, i8, u16); 5] = [
+        (5, 5, 2, STAIR),
+        (5, 4, 7, BOARDS),
+        (4, 4, 7, BOARDS),
+        (6, 4, 7, BOARDS),
+        (4, 3, 7, PLASTER),
+    ];
+    let mut live = Overlay::default();
+    for (x, y, z, graphic) in house {
+        let tile = Tile::new(x, y);
+        let mut covers = live.at(tile).to_vec();
+        covers.extend(Cover::of_static(scene.tiles().static_tile(graphic)).based_at(z));
+        live.set(tile, covers);
+    }
+    let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
+
+    // Up: the ground, then the tread (half way up a five-tall stair based at
+    // two), then the boards.
+    let ground = Point::new(5, 6, 0);
+    let tread = can_step(&footing, ground, Point::new(5, 5, 0)).expect("the stair is out of reach");
+    assert_eq!(tread, Point::new(5, 5, 4), "you stand half way up the tread");
+    let landing = can_step(&footing, tread, Point::new(5, 4, 0)).expect("the first floor is out of reach");
+    assert_eq!(landing, Point::new(5, 4, 7), "the boards are where the storey is");
+
+    // Along the first floor, and not through the wall standing on it.
+    assert_eq!(
+        can_step(&footing, landing, Point::new(4, 4, 0)),
+        Some(Point::new(4, 4, 7)),
+        "a body on the first floor fell back to the ground crossing it"
+    );
+    assert_eq!(
+        can_step(&footing, Point::new(4, 4, 7), Point::new(4, 3, 0)),
+        None,
+        "the upper-storey wall is not in the way of a body on the storey"
+    );
+
+    // Down again, the same way.
+    assert_eq!(
+        can_step(&footing, landing, Point::new(5, 5, 0)),
+        Some(Point::new(5, 5, 4))
+    );
+    assert_eq!(can_step(&footing, tread, ground), Some(ground));
+
+    // And the ground floor is still the ground floor: a body walking under the
+    // boards is not lifted onto them, and the wall that stands on them is not
+    // in its way either.
+    assert_eq!(
+        can_step(&footing, Point::new(4, 5, 0), Point::new(4, 4, 0)),
+        Some(Point::new(4, 4, 0)),
+        "the storey above pulled a body up through its own floor"
+    );
+    // What is *not* asserted here: that the ground under (4, 3) stays open. A
+    // plaster wall based at seven spans up to twenty-six, and a body sixteen
+    // tall standing at zero is squarely inside it — correctly, and the reason a
+    // real house's upper walls stand over its ground-floor walls rather than
+    // over open room. The z-span leaving a lower storey open is
+    // `openshard-housing`'s own test, at the height where the two spans miss.
+
+    // The first floor is out of reach from the ground: there is a staircase for
+    // that, and a body does not step seven units into the air.
+    assert_eq!(
+        can_step(&footing, Point::new(6, 5, 0), Point::new(6, 4, 0)),
+        Some(Point::new(6, 4, 0)),
+        "the boards were climbed from the ground beside them"
     );
 }
