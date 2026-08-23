@@ -67,7 +67,7 @@ use openshard_state::components::{
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
-use openshard_state::{FacetState, Gameplay, Occupant, Outbound, TICKS_PER_SECOND, TooltipMode, WorldState};
+use openshard_state::{FacetState, Gameplay, Outbound, TICKS_PER_SECOND, TooltipMode, WorldState};
 
 use openshard_ai as ai;
 use openshard_chat as chat;
@@ -428,7 +428,7 @@ impl World {
 
     /// The default facet's spatial index.
     pub fn sectors(&self) -> &Sectors {
-        &self.state.facets[&self.state.default_facet].sectors
+        self.state.facets[&self.state.default_facet].sectors()
     }
 
     /// The event bus, for reading what happened.
@@ -1577,7 +1577,7 @@ impl World {
             }
         }
         self.state.seen.remove(&entity);
-        self.state.facet_state_mut(facet).sectors.remove(entity);
+        self.state.unplace(facet, entity);
         // The character's worn items — its backpack and whatever is in it — are
         // not saved yet, so they go with it rather than orphaning on a serial that
         // is about to be released and reused.

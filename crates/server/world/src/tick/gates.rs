@@ -147,10 +147,7 @@ impl World {
         self.state.registry.insert(entity, Position(at));
         self.state.registry.insert(entity, facet);
         self.state.registry.insert(entity, gate);
-        self.state
-            .facet_state_mut(facet)
-            .sectors
-            .insert(entity, at, Occupant::Item);
+        self.state.place_item(facet, entity, at);
         // No obstruction, ever: a gate is walked *into*. Blocking the tile is how
         // the walk-in trigger becomes dead code that reads as a movement bug.
         self.state.reveal(entity);
@@ -194,10 +191,7 @@ impl World {
             self.state
                 .registry
                 .insert(entity, Name(format!("a moongate to {}", gate.name)));
-            self.state
-                .facet_state_mut(gate.facet)
-                .sectors
-                .insert(entity, gate.at, Occupant::Item);
+            self.state.place_item(gate.facet, entity, gate.at);
             self.state.reveal(entity);
             placed += 1;
         }
@@ -284,7 +278,7 @@ impl World {
         for watcher in self.state.watchers_of(entity) {
             self.state.forget(watcher, entity, serial);
         }
-        self.state.facet_state_mut(facet).sectors.remove(entity);
+        self.state.unplace(facet, entity);
         self.state.registry.despawn(entity);
     }
 

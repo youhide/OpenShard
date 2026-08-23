@@ -228,10 +228,7 @@ pub(crate) fn set_door(state: &mut WorldState, door: EntityId, serial: Serial, o
             close_at,
         },
     );
-    state
-        .facet_state_mut(facet)
-        .sectors
-        .insert(door, moved, Occupant::Item);
+    state.place_item(facet, door, moved);
     // The creak or thud, heard by everyone who can see the door — the same
     // audience the redraw goes to. A door that swings in silence reads as broken.
     state.play_sound(door, if open { DOOR_OPEN_SOUND } else { DOOR_CLOSE_SOUND });

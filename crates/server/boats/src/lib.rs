@@ -37,9 +37,9 @@ use openshard_map::grid::Tile;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
+use openshard_state::WorldState;
 use openshard_state::boat::Plank;
 use openshard_state::components::{Boat, Drawn, Movement, Position, Sailing};
-use openshard_state::{Occupant, WorldState};
 
 /// The bit a multi's graphic carries on the wire.
 ///
@@ -189,10 +189,7 @@ pub fn place(
     state.registry.insert(entity, facet);
     // On the sector grid like any item, so a client sailing into view is told
     // about it by the ordinary interest sweep rather than by a path of its own.
-    state
-        .facet_state_mut(facet)
-        .sectors
-        .insert(entity, at, Occupant::Item);
+    state.place_item(facet, entity, at);
     state.facet_state_mut(facet).moor(entity, berth);
     Ok(entity)
 }
@@ -279,10 +276,7 @@ pub fn step(
     // already where the ship is going rather than on the one it is leaving.
     state.facet_state_mut(facet).moor(boat, berth);
     state.registry.insert(boat, Position(to));
-    state
-        .facet_state_mut(facet)
-        .sectors
-        .insert(boat, to, Occupant::Item);
+    state.place_item(facet, boat, to);
 
     let (dx, dy) = (
         i32::from(to.x) - i32::from(at.x),
@@ -387,7 +381,7 @@ fn aboard(state: &WorldState, boat: EntityId, facet: Facet) -> Vec<(EntityId, Po
         .unwrap_or(0);
 
     facet_state
-        .sectors
+        .sectors()
         .mobiles_near(centre, reach)
         .filter(|&(entity, _)| entity != boat)
         .filter(|(entity, _)| state.registry.has::<Movement>(*entity))
@@ -484,7 +478,7 @@ pub fn sail(state: &mut WorldState) -> Vec<EntityId> {
 pub fn sink(state: &mut WorldState, boat: EntityId) {
     let facet = state.facet_of(boat);
     state.facet_state_mut(facet).cast_off(boat);
-    state.facet_state_mut(facet).sectors.remove(boat);
+    state.unplace(facet, boat);
     state.registry.despawn(boat);
 }
 

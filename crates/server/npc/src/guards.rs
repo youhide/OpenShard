@@ -170,7 +170,7 @@ fn nearest_candidate(state: &WorldState, at: Point, facet: Facet) -> Option<Enti
     state
         .facets
         .get(&facet)?
-        .sectors
+        .sectors()
         .mobiles_near(at, CALL_RANGE)
         .filter(|&(entity, _)| is_candidate(state, entity))
         .min_by_key(|&(_, point)| openshard_state::sectors::distance(point, at))

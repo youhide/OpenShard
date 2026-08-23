@@ -365,11 +365,7 @@ pub(super) fn teleport(world: &mut World, connection: ConnectionId, point: Point
         world.state.registry.insert(entity, Movement(walker));
     }
     let facet = world.state.facet_of(entity);
-    world
-        .state
-        .facet_state_mut(facet)
-        .sectors
-        .insert(entity, point, openshard_state::Occupant::Mobile);
+    world.state.place_mobile(facet, entity, point);
     world.state.refresh_around(entity);
 }
 
@@ -3063,11 +3059,12 @@ fn spawn_mobile_full(
 
 /// **What the shard puts on the sector grid is filed as what it is.**
 ///
-/// [`Occupant`] is declared at the insert and never worked out from the
-/// registry, which is what makes it impossible to go stale — at the cost of the
-/// one thing no compiler catches: a caller naming the wrong list. A mobile filed
-/// as an item is invisible to sight, to chat, to a guard's call and to the crowd
-/// a step is decided against, and *nothing errors*.
+/// The kind is declared where the thing is put down — by calling
+/// `WorldState::place_mobile` rather than `place_item` — and never worked out
+/// from the registry, which is what makes it impossible to go stale, at the cost
+/// of the one thing no compiler catches: a caller reaching for the wrong one of
+/// the two. A mobile filed as an item is invisible to sight, to chat, to a
+/// guard's call and to the crowd a step is decided against, and *nothing errors*.
 ///
 /// So this is the guard, and it holds the grid against the registry rather than
 /// against itself: the real spawn paths run — a player entering, a creature
@@ -3093,7 +3090,7 @@ fn the_shard_files_what_it_spawns_as_what_it_is() {
         world.tick(now);
     }
 
-    let sectors = &world.state.facet_state(Facet(0)).sectors;
+    let sectors = world.state.facet_state(Facet(0)).sectors();
     let range = openshard_state::VIEW_RANGE;
     let mobiles: Vec<EntityId> = sectors.mobiles_near(at, range).map(|(id, _)| id).collect();
     let items: Vec<EntityId> = sectors.items_near(at, range).map(|(id, _)| id).collect();
@@ -13974,11 +13971,7 @@ fn a_bystander_at(world: &mut World, at: Point) -> EntityId {
     );
     world.state.registry.insert(entity, Position(at));
     world.state.registry.insert(entity, Facet(0));
-    world
-        .state
-        .facet_state_mut(Facet(0))
-        .sectors
-        .insert(entity, at, openshard_state::Occupant::Mobile);
+    world.state.place_mobile(Facet(0), entity, at);
     entity
 }
 

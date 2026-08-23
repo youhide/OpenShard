@@ -44,19 +44,19 @@ fn a_traveller_leaves_the_old_facets_sector_grid() {
     let traveller = world.state.players[&connection];
 
     assert!(
-        world.state.facet_state(Facet(0)).sectors.position_of(traveller) == Some(arrival()),
+        world.state.facet_state(Facet(0)).sectors().position_of(traveller) == Some(arrival()),
         "it starts on facet 0's grid"
     );
 
     world.state.move_to(traveller, Facet(1), arrival());
 
     assert_eq!(
-        world.state.facet_state(Facet(0)).sectors.position_of(traveller),
+        world.state.facet_state(Facet(0)).sectors().position_of(traveller),
         None,
         "and is gone from it"
     );
     assert_eq!(
-        world.state.facet_state(Facet(1)).sectors.position_of(traveller),
+        world.state.facet_state(Facet(1)).sectors().position_of(traveller),
         Some(arrival()),
         "and on the new one"
     );
@@ -384,7 +384,7 @@ fn a_facet_the_shard_never_loaded_is_refused() {
         "it did not go anywhere"
     );
     assert_eq!(
-        world.state.facet_state(Facet(0)).sectors.position_of(traveller),
+        world.state.facet_state(Facet(0)).sectors().position_of(traveller),
         Some(arrival()),
         "and is still on the grid it started on"
     );
@@ -805,7 +805,7 @@ fn a_gate_closes_on_its_own_and_leaves_nothing_behind() {
 
     assert!(world.registry().get::<Moongate>(gate).is_none(), "it closed");
     assert_eq!(
-        world.state.facet_state(Facet(0)).sectors.position_of(gate),
+        world.state.facet_state(Facet(0)).sectors().position_of(gate),
         None,
         "and left nothing on the sector grid to walk into"
     );

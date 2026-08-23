@@ -85,10 +85,7 @@ pub fn spawn_item(
         state.registry.insert(entity, Stackable);
     }
     mark_decay(state, entity);
-    state
-        .facet_state_mut(facet)
-        .sectors
-        .insert(entity, position, Occupant::Item);
+    state.place_item(facet, entity, position);
     state.bus.send(ItemSpawned {
         entity,
         serial,
@@ -179,10 +176,7 @@ pub fn spawn_leftover(
     state.registry.insert(leftover, Position(position));
     state.registry.insert(leftover, facet);
     mark_decay(state, leftover);
-    state
-        .facet_state_mut(facet)
-        .sectors
-        .insert(leftover, position, Occupant::Item);
+    state.place_item(facet, leftover, position);
     state.reveal(leftover);
 }
 
@@ -192,9 +186,6 @@ pub fn place_on_ground(state: &mut WorldState, item: EntityId, position: Point, 
     state.registry.insert(item, facet);
     // Back on the ground, back on the decay clock.
     mark_decay(state, item);
-    state
-        .facet_state_mut(facet)
-        .sectors
-        .insert(item, position, Occupant::Item);
+    state.place_item(facet, item, position);
     state.reveal(item);
 }

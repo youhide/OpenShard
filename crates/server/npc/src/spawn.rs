@@ -14,7 +14,7 @@ use openshard_state::components::{
     NightHome, Npc, Position, RangedAttack, Resistance, Skills, SwingSpeed, Title, body_opens_doors,
     creature_name,
 };
-use openshard_state::{Occupant, Skill, WorldState};
+use openshard_state::{Skill, WorldState};
 use tracing::{debug, warn};
 
 use openshard_items as items;
@@ -363,10 +363,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
     state
         .registry
         .insert(entity, Movement(Walker::new(position, facing)));
-    state
-        .facet_state_mut(facet)
-        .sectors
-        .insert(entity, position, Occupant::Mobile);
+    state.place_mobile(facet, entity, position);
     state.reveal(entity);
     // Say who and where, so a script can take control of it: the mobile
     // counterpart of `PlayerEntered`: how anything outside the world learns a serial.

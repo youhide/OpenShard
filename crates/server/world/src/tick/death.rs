@@ -565,10 +565,7 @@ impl World {
         // A corpse is an item and always was: it is a container with a body
         // graphic, not a body, so it goes in the list the living are not read
         // out of.
-        self.state
-            .facet_state_mut(facet)
-            .sectors
-            .insert(entity, at, Occupant::Item);
+        self.state.place_item(facet, entity, at);
         self.state.reveal(entity);
         Some(serial)
     }

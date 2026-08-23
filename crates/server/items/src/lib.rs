@@ -33,7 +33,7 @@ use openshard_state::components::{
     mount_item_for, scroll_spell,
 };
 use openshard_state::sectors::in_range;
-use openshard_state::{HeldItem, Occupant, Origin, Outbound, TICKS_PER_SECOND, TradeWindow, WorldState};
+use openshard_state::{HeldItem, Origin, Outbound, TICKS_PER_SECOND, TradeWindow, WorldState};
 use tracing::{debug, warn};
 
 mod backpack;

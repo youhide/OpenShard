@@ -628,7 +628,7 @@ fn nearest_player_in_sight(
 ) -> Option<Serial> {
     let facet_state = state.facet_state(facet);
     let live = state.footing(facet, Doors::AsTheyStand);
-    let sectors = &facet_state.sectors;
+    let sectors = facet_state.sectors();
     let mut best: Option<(u32, Serial)> = None;
     for (id, pos) in sectors.mobiles_near(from, u32::from(sight.0)) {
         if id == creature || !state.registry.has::<Client>(id) {

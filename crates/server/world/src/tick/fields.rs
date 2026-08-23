@@ -83,10 +83,7 @@ impl World {
         self.state.registry.insert(entity, Position(pos));
         self.state.registry.insert(entity, facet);
         self.state.registry.insert(entity, field);
-        self.state
-            .facet_state_mut(facet)
-            .sectors
-            .insert(entity, pos, Occupant::Item);
+        self.state.place_item(facet, entity, pos);
         if field.blocks {
             // A wall, not a door: nothing routes through it.
             self.state.facet_state_mut(facet).block(
@@ -121,7 +118,7 @@ impl World {
             let victims: Vec<Serial> = self
                 .state
                 .facet_state(facet)
-                .sectors
+                .sectors()
                 .mobiles_near(pos, 0)
                 .filter_map(|(entity, _)| self.state.registry.serial_of(entity))
                 .collect();
@@ -196,7 +193,7 @@ impl World {
         for watcher in self.state.watchers_of(entity) {
             self.state.forget(watcher, entity, serial);
         }
-        self.state.facet_state_mut(facet).sectors.remove(entity);
+        self.state.unplace(facet, entity);
         self.state.registry.despawn(entity);
     }
 }

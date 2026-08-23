@@ -19,12 +19,11 @@ use openshard_movement::scene::Scene;
 use openshard_protocol::serial::{Serial, SerialKind};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::{Facet, Point};
-use openshard_state::sectors::Sectors;
 use openshard_tiles::{TileData, TileFlags};
 use openshard_uofiles::multi::{Component, Multi, Multis};
 
 use super::*;
-use openshard_state::{FacetState, Regions};
+use openshard_state::FacetState;
 
 /// A reach no storey in these tests can be out of.
 ///
@@ -138,22 +137,29 @@ fn world_with(components: Vec<Component>) -> WorldState {
 /// accident — the clamp would fold the point back into a bucket that happens to
 /// hold the region. The real extent is what makes the coordinate mean what it
 /// says.
+///
+/// The extent goes in at construction rather than being written over the facet's
+/// fields afterwards. Three things are sized from it — the sector grid, the
+/// region index, and the width and height the client is told — and
+/// [`FacetState::new`] is the one place they cannot be put out of step with each
+/// other.
 fn britannia_with(components: Vec<Component>) -> WorldState {
-    let mut state = ground_of(components, 0, true);
-    let facet = state.facet_state_mut(Facet(0));
-    facet.width = 7168;
-    facet.height = 4096;
-    facet.sectors = Sectors::new(7168, 4096);
-    facet.regions = Regions::new(7168, 4096);
-    state
+    ground_sized(components, 0, true, 7168, 4096)
 }
 
 fn ground_of(components: Vec<Component>, land: u16, fits: bool) -> WorldState {
+    ground_sized(components, land, fits, SIZE, SIZE)
+}
+
+/// The same, on a facet that claims `width` by `height` tiles. The ground is the
+/// fixture scene either way — only the extent the live indexes are built from
+/// changes.
+fn ground_sized(components: Vec<Component>, land: u16, fits: bool, width: u32, height: u32) -> WorldState {
     // The ground and the table it reads, from one scene: a wall's height cannot
     // disagree with the tiledata the terrain is looking at.
     let (map, tiles) = ground_scene(land, fits).into_shard(Facet(0));
     let mut facets = BTreeMap::new();
-    facets.insert(Facet(0), FacetState::new(Some(map), None, SIZE, SIZE, &tiles));
+    facets.insert(Facet(0), FacetState::new(Some(map), None, width, height, &tiles));
     WorldState::new(facets, Facet(0), tiles, multis(components), (0, 0), 1)
 }
 

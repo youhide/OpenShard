@@ -418,7 +418,23 @@ pub struct FacetState {
     /// How tall this facet's map is, in tiles. See [`FacetState::width`].
     pub height: u32,
     /// Who is near what, on this facet.
-    pub sectors: Sectors,
+    ///
+    /// **Private, and written only through
+    /// [`WorldState::place_mobile`](WorldState::place_mobile),
+    /// [`WorldState::place_item`](WorldState::place_item) and
+    /// [`WorldState::unplace`](WorldState::unplace).** It was public and written
+    /// from forty-five places in six crates, which is the same "a public field
+    /// is a way to forget" its two neighbours here are private for — and the
+    /// forgettable half was the removal: an entity taken out of the world but
+    /// left in the grid is answered to every lookup that passes over its tile,
+    /// forever.
+    ///
+    /// The second thing the seam buys is that [`Occupant`] is named once per
+    /// kind of thing rather than once per call site. The kind is still the
+    /// caller's to declare — see [`Occupant`] for why it is never derived — but
+    /// it is declared by *which* of the two calls is made, so there is no third
+    /// spelling to get wrong.
+    sectors: Sectors,
     /// What the live world has put in the way: closed doors, placed decoration.
     ///
     /// **Private, and mutated only through this facet.** Every write here has to
@@ -503,6 +519,19 @@ impl FacetState {
     #[must_use]
     pub const fn boats(&self) -> &crate::boat::Boats {
         &self.boats
+    }
+
+    /// Who is near what, on this facet — to read.
+    ///
+    /// Every lookup lives here: [`Sectors::mobiles_near`],
+    /// [`Sectors::items_near`], [`Sectors::everything_near`],
+    /// [`Sectors::mobiles_in_block`]. Read-only, because a row written here has
+    /// to agree with the [`Position`] the registry holds, and the pair moves
+    /// through [`WorldState::place_mobile`](WorldState::place_mobile) and its
+    /// two siblings.
+    #[must_use]
+    pub const fn sectors(&self) -> &Sectors {
+        &self.sectors
     }
 
     /// This facet's ground, the live world over it and the bake that says where
@@ -1264,7 +1293,7 @@ impl WorldState {
         }
         let mut crowd: Vec<Point> = self
             .facet_state(facet)
-            .sectors
+            .sectors()
             .mobiles_near(centre, reach)
             // `mover` is absent from its own crowd, which is the whole of "a
             // mobile may always step off the tile it is standing on".
@@ -1420,6 +1449,73 @@ impl WorldState {
         })
     }
 
+    /// Put `entity` on `facet`'s sector grid at `at`, **as a body**.
+    ///
+    /// The grid is a second copy of [`Position`] and this is the line that keeps
+    /// it honest, so it belongs beside the registry write and not somewhere
+    /// later: a mobile whose row says the old tile is seen from where it used to
+    /// stand and missed from where it is. Calling it again *moves* the row —
+    /// there is never a second one, on this facet or on any other.
+    ///
+    /// **The caller declares the kind by coming here rather than to
+    /// [`place_item`](Self::place_item)**, and the two edges are why that cannot
+    /// be worked out instead: a corpse carries a body *graphic* and is
+    /// furniture, and a mount is an item on a layer while it is ridden and a
+    /// body again the moment it is dismounted. See [`Occupant`].
+    ///
+    /// # Panics
+    ///
+    /// If `facet` is not loaded, like
+    /// [`facet_state_mut`](Self::facet_state_mut).
+    pub fn place_mobile(&mut self, facet: Facet, entity: EntityId, at: Point) {
+        self.facet_state_mut(facet)
+            .sectors
+            .insert(entity, at, Occupant::Mobile);
+    }
+
+    /// Put `entity` on `facet`'s sector grid at `at`, **as a thing on the
+    /// ground**: an item, a corpse, a door, a house, a ship, a moongate.
+    ///
+    /// [`place_mobile`](Self::place_mobile) in every other respect — including
+    /// that handing the same entity to the other one moves it between the two
+    /// lists rather than filing it twice, which is the one thing a dismounted
+    /// horse legitimately does.
+    ///
+    /// The list this files into is read by exactly one gameplay question — what
+    /// is on the ground here, a forge to craft at — and by the screen sweep.
+    /// Filing a body here is therefore not merely wasteful: it is invisible to
+    /// sight, chat, guards and the crowd a step is decided against.
+    ///
+    /// # Panics
+    ///
+    /// If `facet` is not loaded, like
+    /// [`facet_state_mut`](Self::facet_state_mut).
+    pub fn place_item(&mut self, facet: Facet, entity: EntityId, at: Point) {
+        self.facet_state_mut(facet)
+            .sectors
+            .insert(entity, at, Occupant::Item);
+    }
+
+    /// Take `entity` off `facet`'s sector grid, whichever of the two lists it is
+    /// in.
+    ///
+    /// **The half a public field made forgettable.** Every way out of the world
+    /// comes through here — a despawn, a decay, an item picked up, a mount put
+    /// back on its rider's layer, a boat sunk, a traveller leaving a facet — and
+    /// a row left behind is worse than stale: it is handed to every lookup that
+    /// passes over that tile for as long as the shard runs, and
+    /// [`Sectors::position_of`] keeps swearing the thing is there.
+    ///
+    /// Harmless for an entity the grid never held.
+    ///
+    /// # Panics
+    ///
+    /// If `facet` is not loaded, like
+    /// [`facet_state_mut`](Self::facet_state_mut).
+    pub fn unplace(&mut self, facet: Facet, entity: EntityId) {
+        self.facet_state_mut(facet).sectors.remove(entity);
+    }
+
     /// Take a mobile out of the world: forget it from every screen, drop it from
     /// the sector grid, despawn it.
     ///
@@ -1436,7 +1532,7 @@ impl WorldState {
             self.forget(watcher, entity, serial);
         }
         self.seen.remove(&entity);
-        self.facet_state_mut(facet).sectors.remove(entity);
+        self.unplace(facet, entity);
         self.registry.despawn(entity);
     }
 
@@ -1493,7 +1589,7 @@ impl WorldState {
     /// *felt*, not merely correct.
     pub fn broadcast_from(&mut self, source: EntityId, packet: Vec<u8>) {
         let facet = self.facet_of(source);
-        let sectors = &self.facet_state(facet).sectors;
+        let sectors = self.facet_state(facet).sectors();
         let Some(centre) = sectors.position_of(source) else {
             return;
         };
@@ -1985,7 +2081,7 @@ impl WorldState {
             }
             // Out of the old grid. `teleport` never had to do this, which is why
             // the removal is easy to leave out and costly to leave out.
-            self.facet_state_mut(from).sectors.remove(entity);
+            self.unplace(from, entity);
             self.registry.insert(entity, facet);
             // The remembered region indexes the *old* facet's list, so keeping it
             // would compare a Felucca id against an Ilshenar one.
@@ -2005,9 +2101,7 @@ impl WorldState {
         // A mobile: every caller of this is a traveller — a gate, a recall, a
         // `.go`, a body relocated by the ship it is standing on. An item is put
         // down by `items::place_on_ground`, which files it as one.
-        self.facet_state_mut(facet)
-            .sectors
-            .insert(entity, to, Occupant::Mobile);
+        self.place_mobile(facet, entity, to);
 
         if from != facet {
             if let Some(&Client { connection, .. }) = self.registry.get::<Client>(entity) {
@@ -2130,7 +2224,7 @@ impl WorldState {
         // Only this entity's facet: two mobiles on different facets share no
         // sector grid, so a lookup here never turns up anyone on another one.
         let facet = self.facet_of(entity);
-        let sectors = &self.facet_state(facet).sectors;
+        let sectors = self.facet_state(facet).sectors();
         let Some(centre) = sectors.position_of(entity) else {
             return;
         };
@@ -3391,7 +3485,7 @@ impl WorldState {
     /// queued.
     fn audience_of(&self, source: EntityId) -> Vec<(ConnectionId, ClientVersion)> {
         let facet = self.facet_of(source);
-        let sectors = &self.facet_state(facet).sectors;
+        let sectors = self.facet_state(facet).sectors();
         let Some(centre) = sectors.position_of(source) else {
             return Vec::new();
         };
@@ -3405,7 +3499,7 @@ impl WorldState {
     /// already have it — a fresh item, a spawned creature, an equipped mobile.
     pub fn reveal(&mut self, entity: EntityId) {
         let facet = self.facet_of(entity);
-        let sectors = &self.facet_state(facet).sectors;
+        let sectors = self.facet_state(facet).sectors();
         let Some(centre) = sectors.position_of(entity) else {
             return;
         };
@@ -3483,10 +3577,7 @@ mod tests {
             },
         );
         state.registry.insert(entity, Position(at));
-        state
-            .facet_state_mut(Facet(0))
-            .sectors
-            .insert(entity, at, Occupant::Mobile);
+        state.place_mobile(Facet(0), entity, at);
         entity
     }
 
@@ -3517,10 +3608,7 @@ mod tests {
         // `body_blocks` would refuse it if it were.
         let chest = state.registry.spawn();
         state.registry.insert(chest, Position(Point::new(7, 8, 0)));
-        state
-            .facet_state_mut(Facet(0))
-            .sectors
-            .insert(chest, Point::new(7, 8, 0), Occupant::Item);
+        state.place_item(Facet(0), chest, Point::new(7, 8, 0));
         assert!(
             !state.body_blocks(chest),
             "an item is not a body wherever it is filed"

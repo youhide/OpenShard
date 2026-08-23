@@ -80,7 +80,7 @@ pub fn try_mount(state: &mut WorldState, player: EntityId, target: EntityId, tar
         }
     }
     let facet = state.facet_of(target);
-    state.facet_state_mut(facet).sectors.remove(target);
+    state.unplace(facet, target);
     state.registry.remove::<Position>(target);
     state.registry.insert(target, Ridden { rider: player });
     state.registry.insert(player, Riding { mount: target, item });
@@ -186,10 +186,7 @@ pub fn dismount(state: &mut WorldState, player: EntityId) {
     // Back on the grid as a mobile: while it was ridden it was an item on a
     // layer, and dismounting is where it becomes a body again — one somebody
     // else now has to walk around.
-    state
-        .facet_state_mut(facet)
-        .sectors
-        .insert(mount, landing, Occupant::Mobile);
+    state.place_mobile(facet, mount, landing);
     state.reveal(mount);
     // And the rider redraws on foot for everyone watching.
     state.broadcast_move(player);

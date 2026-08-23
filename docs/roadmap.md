@@ -948,25 +948,47 @@ in the item list is invisible, an item in the mobile list is merely wasteful.
 
 #### Found while closing it
 
-- 🚩 **`FacetState::sectors` is public, and forty-five places across six crates
-  write to it** — thirty-two inserts and thirteen removals. Its two neighbours in
+- ✅ **`FacetState::sectors` was public, and forty-five places across six crates
+  wrote to it** — thirty-two inserts and thirteen removals. Its two neighbours in
   the same struct are private on an argument
   that applies here word for word: "every write here has to be followed by …, and
   a public field is a way to forget". The sector grid's forgettable half is
   `remove` — a despawn that misses it leaves a row pointing at an entity that no
   longer exists, which is the "ghost that never leaves" `despawn_mobile` already
-  has a written-down order for, and nothing makes anyone follow it. A
-  `WorldState::place(entity, facet, at, occupant)` / `unplace(entity)` pair would
-  be the seam, and would give `Occupant` one place to be named per *kind of
-  thing* rather than per call site. Not done here because it is a second
-  refactor over the same sites and this one already had to touch them all; doing
-  both at once would have hidden which change broke what.
+  has a written-down order for, and nothing made anyone follow it.
+
+  **Closed with the seam it asked for**, in the shape the field forced rather
+  than the one this entry guessed. The field is private and read through
+  `FacetState::sectors()`; the writes are
+  [`WorldState::place_mobile`](../crates/server/state/src/runtime.rs) /
+  `place_item` / `unplace(facet, entity)` — 19 · 12 · 12 of the forty-three
+  mutation sites. **Two calls, not one call with an argument**: that is what
+  makes `Occupant` named once per kind of thing rather than once per call site,
+  and it keeps the previous entry's rule intact — the caller still *declares* the
+  kind, now by which of the two it reaches for, so it still cannot go stale.
+  Behaviour-preserving by construction, and the suite says so: 3,524 passed, the
+  same count and the same five pre-existing clippy findings.
+
+  The asymmetry from the entry above was re-run **against the seam itself**,
+  which is the point of having one — flipping `place_mobile` to file items
+  fails **64** tests across sight, chat, guards, the chase and death; flipping
+  `place_item` to file mobiles fails exactly one, the dedicated guard. One place
+  to break it now, and it is loud.
+
+  It also took `britannia_with` in housing's tests off four public-field pokes: a
+  facet's extent is `FacetState::new`'s argument, and writing `width`, `height`,
+  a fresh `Sectors` and a fresh `Regions` over a built facet is four chances to
+  put three sized-from-the-same-pair indexes out of step. Which leaves
+  `FacetState::width` and `height` with **no writer anywhere in the shard** — two
+  accessors and they are private, with no call site to revisit. `regions` is a
+  public field whose writes already go through `Regions::set`/`clear`, so it
+  leaks `&mut` rather than being the API; the weaker case, and the one left.
 - **`WorldState::move_to` files its traveller as a mobile, and its callers make
   that true rather than its signature.** Every one of the six is a body — a gate,
   a recall, a `.go`, a ship relocating who is standing on it. An item put through
   it would land in the mobile list and be invisible to the crafting scan, which
-  is the one reader of the item list. The doc says so now; the seam above is what
-  would make it structural.
+  is the one reader of the item list. The doc says so, and it now says so by
+  calling `place_mobile`; the signature is still the thing that does not.
 - **`openshard_boats::aboard` sweeps a square around the ship's *first* covered
   tile.** The reach is the greatest Chebyshev distance from that tile to any
   other, so a galleon moored east-west sweeps a box as wide as it is long in both

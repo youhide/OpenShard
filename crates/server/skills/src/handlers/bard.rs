@@ -419,7 +419,7 @@ fn mobiles_near(state: &WorldState, centre: EntityId, range: u32) -> Vec<EntityI
     let facet = state.facet_of(centre);
     state
         .facet_state(facet)
-        .sectors
+        .sectors()
         .mobiles_near(at, range)
         .map(|(entity, _)| entity)
         .collect()

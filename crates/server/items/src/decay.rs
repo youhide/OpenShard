@@ -63,7 +63,7 @@ pub(crate) fn remove_ground_item(state: &mut WorldState, item: EntityId, serial:
         state.forget(watcher, item, serial);
     }
     despawn_contents(state, serial);
-    state.facet_state_mut(facet).sectors.remove(item);
+    state.unplace(facet, item);
     state.registry.despawn(item);
 }
 

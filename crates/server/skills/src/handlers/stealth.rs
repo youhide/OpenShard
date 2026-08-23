@@ -146,7 +146,7 @@ pub(super) fn detect_hidden(state: &mut WorldState, actor: EntityId) {
     let facet = state.facet_of(actor);
     let nearby: Vec<EntityId> = state
         .facet_state(facet)
-        .sectors
+        .sectors()
         .mobiles_near(at, range)
         .map(|(entity, _)| entity)
         .collect();
@@ -285,7 +285,7 @@ fn somebody_is_fighting(state: &WorldState, actor: EntityId, range: u32) -> bool
     let facet = state.facet_of(actor);
     state
         .facet_state(facet)
-        .sectors
+        .sectors()
         .mobiles_near(at, range)
         .any(|(entity, _)| {
             entity != actor

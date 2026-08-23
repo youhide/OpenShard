@@ -133,10 +133,7 @@ fn a_walker(state: &mut WorldState, at: Point) -> EntityId {
         entity,
         openshard_state::components::Movement(Walker::new(at, Facing::walking(Direction::North))),
     );
-    state
-        .facet_state_mut(Facet(0))
-        .sectors
-        .insert(entity, at, openshard_state::Occupant::Mobile);
+    state.place_mobile(Facet(0), entity, at);
     entity
 }
 
@@ -407,7 +404,7 @@ fn the_deck_carries_whoever_is_standing_on_it() {
         "the sailor stayed on the tile of the ship they were standing on",
     );
     assert_eq!(
-        state.facet_state(Facet(0)).sectors.position_of(sailor),
+        state.facet_state(Facet(0)).sectors().position_of(sailor),
         Some(Point::new(20, 21, 2)),
         "and the sector grid was told, or every nearby query still finds them astern",
     );

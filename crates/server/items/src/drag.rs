@@ -129,7 +129,7 @@ pub fn pick_up(state: &mut WorldState, connection: ConnectionId, serial: RawSeri
         }
         // Off the sector grid, off every screen but the picker's — whose own
         // client already put it on the cursor, so a 0x1D there would fight it.
-        state.facet_state_mut(facet).sectors.remove(item);
+        state.unplace(facet, item);
         for watcher in state.watchers_of(item) {
             if watcher == player {
                 if let Some(seen) = state.seen.get_mut(&player) {

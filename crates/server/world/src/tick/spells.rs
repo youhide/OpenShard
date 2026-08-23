@@ -267,7 +267,7 @@ impl World {
                 let victims: Vec<Serial> = self
                     .state
                     .facet_state(facet)
-                    .sectors
+                    .sectors()
                     .mobiles_near(centre, magic::AREA_RADIUS)
                     .filter(|(entity, _)| *entity != caster)
                     .filter_map(|(entity, _)| self.state.registry.serial_of(entity))
@@ -313,7 +313,7 @@ impl World {
                 let healed: Vec<Serial> = self
                     .state
                     .facet_state(facet)
-                    .sectors
+                    .sectors()
                     .mobiles_near(target_location, magic::AREA_RADIUS)
                     .filter_map(|(entity, _)| self.state.registry.serial_of(entity))
                     .collect();

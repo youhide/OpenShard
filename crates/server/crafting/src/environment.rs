@@ -94,7 +94,7 @@ pub fn around(state: &WorldState, crafter: EntityId) -> Facilities {
     // `GetItemsInRange` walks too — and the one lookup in the shard that wants
     // the sector grid's *item* list, since a forge is furniture and a smith
     // standing beside it is not what is being asked about.
-    for (item, pos) in state.facet_state(facet).sectors.items_near(at, WORKSHOP_RANGE) {
+    for (item, pos) in state.facet_state(facet).sectors().items_near(at, WORKSHOP_RANGE) {
         if !in_z_band(i32::from(at.z), i32::from(pos.z)) {
             continue;
         }

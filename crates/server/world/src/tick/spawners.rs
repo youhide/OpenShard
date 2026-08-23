@@ -325,7 +325,7 @@ impl World {
             }
         }
         let facet = self.state.facet_of(entity);
-        self.state.facet_state_mut(facet).sectors.remove(entity);
+        self.state.unplace(facet, entity);
         self.state.registry.despawn(entity);
     }
 

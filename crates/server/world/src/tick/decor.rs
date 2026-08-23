@@ -167,10 +167,7 @@ impl World {
                 .facet_state_mut(facet)
                 .block(position.x, position.y, entity, cover);
         }
-        self.state
-            .facet_state_mut(facet)
-            .sectors
-            .insert(entity, position, Occupant::Item);
+        self.state.place_item(facet, entity, position);
         self.state.reveal(entity);
         Some(entity)
     }
@@ -321,7 +318,7 @@ impl World {
             if let Some(&Position(at)) = self.state.registry.get::<Position>(entity) {
                 self.state.facet_state_mut(facet).unblock(at.x, at.y, entity);
             }
-            self.state.facet_state_mut(facet).sectors.remove(entity);
+            self.state.unplace(facet, entity);
             self.state.registry.despawn(entity);
         }
     }

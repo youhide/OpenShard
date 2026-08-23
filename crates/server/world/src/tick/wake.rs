@@ -53,7 +53,7 @@ impl World {
                 continue;
             };
             let facet = self.state.facet_of(player);
-            let sector = self.state.facet_state(facet).sectors.sector_of(at);
+            let sector = self.state.facet_state(facet).sectors().sector_of(at);
             // A player with no remembered sector has just arrived — logged in,
             // been resurrected, been teleported — and that is a crossing too.
             // `.0` because `player_sectors` remembers the pair as raw numbers.
@@ -69,7 +69,7 @@ impl World {
             let sleepers: Vec<EntityId> = self
                 .state
                 .facet_state(facet)
-                .sectors
+                .sectors()
                 .mobiles_in_block(at)
                 .map(|(entity, _)| entity)
                 .collect();

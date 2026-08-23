@@ -128,10 +128,7 @@ impl World {
                 }
                 // The index is a second copy of the position; this is the line
                 // that keeps it honest.
-                self.state
-                    .facet_state_mut(facet)
-                    .sectors
-                    .insert(entity, position, Occupant::Mobile);
+                self.state.place_mobile(facet, entity, position);
                 self.state.send_packet(
                     connection,
                     &ServerPacket::WalkAck(WalkAck {
