@@ -520,11 +520,17 @@ fn the_live_world_adds_takes_away_and_hangs_a_door_over_baked_spans() {
     );
 }
 
-#[test]
-fn a_villa_stair_carries_a_body_to_its_first_floor() {
+/// A two-storey villa on flat ground: a stair up from the south, boards for a
+/// first floor over three tiles of it, and a plaster wall standing on those
+/// boards.
+///
+/// The scene and the overlay come back apart because they are held apart: the
+/// map is what the client shipped and the house is what the shard laid over it.
+/// Built once here because two tests need the same house — one for the step
+/// rule that climbs it, one for the search that plans the climb.
+fn a_villa() -> (Scene, openshard_map::overlay::Overlay) {
     use openshard_map::grid::Tile;
-    use openshard_map::overlay::{Cover, Doors, Overlay};
-    use openshard_movement::{Footing, can_step};
+    use openshard_map::overlay::{Cover, Overlay};
 
     const STAIR: u16 = 0x0751;
     const BOARDS: u16 = 0x04AC;
@@ -551,6 +557,15 @@ fn a_villa_stair_carries_a_body_to_its_first_floor() {
         covers.extend(Cover::of_static(scene.tiles().static_tile(graphic)).based_at(z));
         live.set(tile, covers);
     }
+    (scene, live)
+}
+
+#[test]
+fn a_villa_stair_carries_a_body_to_its_first_floor() {
+    use openshard_map::overlay::Doors;
+    use openshard_movement::{Footing, can_step};
+
+    let (scene, live) = a_villa();
     let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
 
     // Up: the ground, then the tread (half way up a five-tall stair based at
@@ -602,4 +617,51 @@ fn a_villa_stair_carries_a_body_to_its_first_floor() {
         Some(Point::new(6, 4, 0)),
         "the boards were climbed from the ground beside them"
     );
+}
+
+/// And the search plans that climb, for a body standing under the floor it is
+/// sent to.
+///
+/// `(4, 4)` carries two places to stand — the ground, and the boards seven
+/// above it — and the route between them leaves the column and comes back:
+/// out to the stair, up onto the first floor, and back west over the same
+/// tile. **Before `navigation_spans.md`'s N3b this was answered with success
+/// and an empty route**, because the search compared the goal's *tile* to the
+/// start's and found them equal; the body then stood where it was, believing
+/// it was upstairs. A tile-keyed `closed` could not have found the real route
+/// either — the column is finalised by the first pop, so the return is
+/// forbidden by the search's own bookkeeping rather than by the house.
+#[test]
+fn a_route_climbs_from_a_villas_ground_floor_to_its_first_floor() {
+    use openshard_map::overlay::Doors;
+    use openshard_movement::{Footing, find_path, step_allowed};
+
+    let (scene, live) = a_villa();
+    let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
+    let under = Point::new(4, 4, 0);
+    let upstairs = Point::new(4, 4, 7);
+
+    let route = find_path(&footing, under, upstairs, 200).expect("the villa has a staircase");
+    assert_eq!(
+        route,
+        vec![Direction::SouthEast, Direction::NorthWest],
+        "the way up is onto the stair and back over one's own column",
+    );
+    // Walked by the shipped step rule: a route the search invented that the
+    // step rule refuses is worse than no route at all.
+    let mut at = under;
+    for &dir in &route {
+        at = step_allowed(&footing, at, dir).expect("the search planned a step nobody may take");
+    }
+    assert_eq!(at, upstairs, "the loop comes home one storey up");
+
+    // Both directions, because the step rule is not symmetric and the closed
+    // set is what used to decide this: coming down, the boards are climbed
+    // again from the tread, so the way back to the ground is round the house.
+    let down = find_path(&footing, upstairs, under, 200).expect("there is a way down");
+    let mut at = upstairs;
+    for &dir in &down {
+        at = step_allowed(&footing, at, dir).expect("the search planned a step nobody may take");
+    }
+    assert_eq!(at, under, "the way down does not end on the floor it started on");
 }

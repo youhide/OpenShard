@@ -20,12 +20,13 @@
 //! *is there a way* and `find_path_toward`'s *how far does the way go*. This
 //! reads both off one [`search_path`] rather than searching twice.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
 use openshard_map::overlay::{Doors, Overlay};
-use openshard_movement::{Footing, MapTerrain, PathSearch, SearchExit, search_path};
+use openshard_movement::{Footing, MapTerrain, PathSearch, SearchExit, search_path, step_allowed};
 use openshard_protocol::world::Point;
 
 #[derive(Debug, Parser)]
@@ -44,6 +45,18 @@ struct Cli {
     /// 400 and a client plan at 600.
     #[arg(long, value_name = "N")]
     budget: Vec<usize>,
+    /// Write one line per destination — `budget x y arrived nodes steps column
+    /// surfaces` — so that two runs can be **diffed** rather than compared as
+    /// totals.
+    ///
+    /// What a total cannot say is *which* destinations moved, and that is the
+    /// question every change to the search has to answer: `navigation_spans.md`'s
+    /// N3b moved 178 answers across three origins, and the claim that every one
+    /// of them is a column with two floors on it is a claim about a set rather
+    /// than about a count. Diffing two dumps is what found the two that are
+    /// not — and what showed they are the node budget rather than the rule.
+    #[arg(long, value_name = "FILE")]
+    dump: Option<PathBuf>,
     /// Times to repeat each search, keeping the fastest.
     ///
     /// A shared workstation drifts: the same sweep measured 40.6 s and 65.5 s
@@ -67,11 +80,52 @@ struct Reading {
     /// Whether the same search has an *approach* to offer where it has no
     /// route: `find_path_toward`'s answer, read off `find_path`'s search.
     approaches: bool,
+    /// What the goal's own column has to say about this reading.
+    column: Column,
+    /// Whether the route walks over some column twice.
+    ///
+    /// The other half of N3b, counted rather than argued: **no tile-keyed
+    /// search could ever produce one of these**, because the first visit closed
+    /// the column for good. A route that comes back is a route that left a
+    /// column, gained height, and returned to it a storey up.
+    revisits: bool,
     exit: SearchExit,
 }
 
+/// What the goal's column is, for a destination the search did not arrive at.
+///
+/// The pair is one value because the second only means anything beside the
+/// first: `reached` is the set of answers `navigation_spans.md`'s N3b changed,
+/// and `surfaces` is the attribution for each of them.
+#[derive(Clone, Copy)]
+struct Column {
+    /// Whether the search reached the goal's column without reaching the place
+    /// on it that was asked for.
+    ///
+    /// Arrival used to compare tiles, so a search that got to the column at any
+    /// height reported success; it now compares standing places. The approach
+    /// half of the same search still steers by a planar distance, so a search
+    /// that reached the column left its route ending on it — which is what this
+    /// tests for.
+    reached: bool,
+    /// How many places to stand the column holds.
+    ///
+    /// A column with one surface cannot be reached at a height other than its
+    /// own, so [`Self::reached`] must never be set on one. That is the claim
+    /// the run prints rather than assumes.
+    surfaces: usize,
+}
+
 impl Reading {
-    fn new(x: u16, y: u16, distance: u32, elapsed: Duration, search: &PathSearch) -> Self {
+    fn new(
+        x: u16,
+        y: u16,
+        distance: u32,
+        elapsed: Duration,
+        search: &PathSearch,
+        column: Column,
+        revisits: bool,
+    ) -> Self {
         Self {
             elapsed,
             x,
@@ -81,6 +135,8 @@ impl Reading {
             route_steps: search.route.len(),
             arrived: search.arrived,
             approaches: search.arrived || !search.route.is_empty(),
+            column,
+            revisits,
             exit: search.exit,
         }
     }
@@ -176,6 +232,24 @@ fn report(title: &str, readings: &[Reading]) {
         ms(percentile(&elapsed, 95)),
         ms(*elapsed.last().expect("the sweep is non-empty")),
     );
+    // N3b's own line: what the node key changed, and whether every one of
+    // those changes is a column that has somewhere else to stand.
+    let elsewhere = readings
+        .iter()
+        .filter(|reading| reading.column.reached)
+        .collect::<Vec<_>>();
+    let flat = elsewhere
+        .iter()
+        .filter(|reading| reading.column.surfaces < 2)
+        .count();
+    println!(
+        "  reached the column at another height: {} ({flat} of them on a column with one surface)",
+        elsewhere.len(),
+    );
+    println!(
+        "  routes that come back to a column higher up: {}",
+        readings.iter().filter(|reading| reading.revisits).count(),
+    );
     for class in CLASSES {
         let of_class = readings
             .iter()
@@ -254,13 +328,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 fastest = fastest.min(started.elapsed());
                 last = Some(search);
             }
-            bare.push(Reading::new(
-                x,
-                y,
-                distance,
-                fastest,
-                &last.expect("at least one repeat"),
-            ));
+            let search = last.expect("at least one repeat");
+            // Where the route actually ends, and whether it ever returns to a
+            // column it has already stood on — walked by the shipped step rule
+            // rather than by arithmetic over the directions.
+            let mut end = Some(from);
+            let mut columns = HashSet::from([(from.x, from.y)]);
+            let mut revisits = false;
+            for &direction in &search.route {
+                let Some(at) = end.and_then(|at| step_allowed(&footing, at, direction)) else {
+                    end = None;
+                    break;
+                };
+                revisits |= !columns.insert((at.x, at.y));
+                end = Some(at);
+            }
+            let column = Column {
+                reached: !search.arrived && end.is_some_and(|end| (end.x, end.y) == (x, y)),
+                surfaces: terrain.spans().surfaces(x, y).count(),
+            };
+            bare.push(Reading::new(x, y, distance, fastest, &search, column, revisits));
+        }
+
+        if let Some(path) = &cli.dump {
+            use std::io::Write as _;
+            let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+            for reading in &bare {
+                writeln!(
+                    file,
+                    "{budget} {} {} {} {} {} {} {}",
+                    reading.x,
+                    reading.y,
+                    reading.arrived,
+                    reading.explored,
+                    reading.route_steps,
+                    reading.column.reached,
+                    reading.column.surfaces,
+                )?;
+            }
         }
 
         report(&format!("budget={budget} bare"), &bare);

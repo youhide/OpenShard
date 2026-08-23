@@ -24,6 +24,7 @@ use std::collections::BinaryHeap;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+use openshard_map::overlay::Cover;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -46,8 +47,12 @@ pub const MAX_SEARCH_TIME: Duration = Duration::from_millis(50);
 /// why [`Self::manhattan`] is there at all.
 ///
 /// Field order is intentional: the derived ordering ranks `f`, then `h`, then
-/// the Manhattan distance, followed by the tile only to make equal candidates
-/// deterministic.
+/// the Manhattan distance, followed by the node's own coordinates only to make
+/// equal candidates deterministic.
+///
+/// **The height is one of those coordinates and not a payload.** A candidate is
+/// a place to stand, so the same tile reached at two heights is two entries —
+/// see [`PathNodeKey`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct OpenEntry {
     f: u32,
@@ -55,18 +60,26 @@ struct OpenEntry {
     manhattan: u32,
     x: u16,
     y: u16,
+    z: i8,
 }
 
-/// Plan a walk from `from` to the tile of `to`, at most `budget` tiles explored.
+/// Plan a walk from `from` to the place `to` names, at most `budget` nodes
+/// explored.
 ///
 /// Returns the sequence of steps — the caller usually takes the first each beat
 /// and re-plans as the quarry moves — or `None` if the goal is unreachable within
 /// the budget (blocked, or simply too far for the cap). An empty `Vec` means
-/// `from` already stands on the goal tile.
+/// `from` already stands on the goal.
+///
+/// **A destination is a place and not a tile**, so a body under a floor asked
+/// to be on it is given the route round the staircase, and a body on a floor it
+/// cannot get to is refused. Which place a caller's z names is
+/// [`goal_node`]'s to resolve, and it is generous about it — see there.
 ///
 /// The budget bounds the cost: a search that would explore more than `budget`
-/// tiles gives up rather than spend the tick. A few hundred is ample for moving
-/// about a town; open-world roaming would want caching, not a bigger cap.
+/// standing places gives up rather than spend the tick. A few hundred is ample
+/// for moving about a town; open-world roaming would want caching, not a bigger
+/// cap.
 ///
 /// *Is there a way there* is what this answers, and `None` is a real answer to
 /// it. A caller that has to do something with an unreachable destination —
@@ -91,11 +104,13 @@ pub fn find_path(footing: &Footing<'_>, from: Point, to: Point, budget: usize) -
 /// reference client's own answer, and the only one that does not have this end
 /// sending steps it already knows the shard will refuse.
 ///
-/// The route ends on the reached tile closest to the goal, by the same Chebyshev
+/// The route ends on the reached place closest to the goal, by the same Chebyshev
 /// measure the search steers by, with the shorter route winning a tie. `None`
 /// when nothing reachable is any closer than where the body already stands —
 /// walled in, or already as close as it gets; either way there is nothing worth
-/// walking. An empty `Vec` still means `from` stands on the goal tile.
+/// walking. An empty `Vec` still means `from` stands on the goal. The measure
+/// is planar, so a floor above the goal's own column counts as having arrived
+/// over it.
 ///
 /// The budget is the same bound and cuts the same way: what comes back is then
 /// the closest tile the search got to before it ran out, which is a route in the
@@ -136,14 +151,19 @@ pub fn search_path(footing: &Footing<'_>, from: Point, to: Point, budget: usize)
 /// can only be guessed at. [`search_path`] is that reading.
 #[derive(Clone, Debug)]
 pub struct PathSearch {
-    /// Whether [`Self::route`] ends on the goal tile itself.
+    /// Whether [`Self::route`] ends on the goal itself — the tile *and* the
+    /// height, since [`PathNodeKey`] is what the search compares.
     pub arrived: bool,
-    /// The steps to the goal, or — where it was never reached — to the tile that
+    /// The steps to the goal, or — where it was never reached — to the place that
     /// came closest to it. Empty when nothing the search reached bettered its own
     /// start: with `arrived`, that is a body already standing on the goal, and
     /// without it, a body with nowhere closer to go.
     pub route: Vec<Direction>,
-    /// Number of tiles removed from the open list and finalised.
+    /// Number of standing places removed from the open list and finalised.
+    ///
+    /// Not tiles: a column with two floors in it can be finalised twice. On
+    /// Britannia that is 0.6% of columns, so the count is what it always was
+    /// everywhere else.
     pub explored: usize,
     /// Why the search stopped.  This is diagnostic only; the two entry points
     /// above keep the established `Option<Vec<Direction>>` contract.
@@ -163,7 +183,7 @@ pub enum SearchExit {
     /// The open list emptied. Nothing reachable is left to try, so no budget
     /// would have changed the answer.
     Exhausted,
-    /// `budget` tiles were finalised and the goal was not among them.
+    /// `budget` standing places were finalised and the goal was not among them.
     Budget,
     /// [`MAX_SEARCH_TIME`] passed inside the search.
     Deadline,
@@ -209,8 +229,10 @@ fn search(
     deadline: Instant,
     within: Option<Region>,
 ) -> PathSearch {
-    let goal = Tile::new(to.x, to.y);
-    let start = Tile::new(from.x, from.y);
+    // The destination as a *place*, which is what the search compares against:
+    // see `goal_node` for why the caller's own z is not it.
+    let goal = goal_node(footing, from, to);
+    let start = from;
     if start == goal {
         return PathSearch {
             arrived: true,
@@ -220,12 +242,12 @@ fn search(
         };
     }
 
-    // Pack the planar tile into one integer. Besides making the key cheaper to
-    // hash, this lets FxHash use its integer fast path. The resolved landing
-    // point lives in came_from, so there is no second point_at map to maintain.
-    let mut cost: FxHashMap<PathTileKey, u32> = FxHashMap::default();
-    let mut came_from: FxHashMap<PathTileKey, (PathTileKey, Direction, Point)> = FxHashMap::default();
-    let mut closed: FxHashSet<PathTileKey> = FxHashSet::default();
+    // Pack the standing place into one integer. Besides making the key cheaper
+    // to hash, this lets FxHash use its integer fast path. The key carries the
+    // whole landing point, so nothing has to remember where a node was.
+    let mut cost: FxHashMap<PathNodeKey, u32> = FxHashMap::default();
+    let mut came_from: FxHashMap<PathNodeKey, (PathNodeKey, Direction)> = FxHashMap::default();
+    let mut closed: FxHashSet<PathNodeKey> = FxHashSet::default();
     // The tuple's third field is a tie-breaker, not a second admissible heuristic:
     // Chebyshev alone cannot tell a straight cardinal line from a route that
     // drifts off it and back — both cost the same eight-way step count. Manhattan
@@ -237,7 +259,7 @@ fn search(
     // asked for a straight walk on stays a straight walk.
     let mut open: BinaryHeap<Reverse<OpenEntry>> = BinaryHeap::new();
 
-    cost.insert(tile_key(start), 0);
+    cost.insert(node_key(start), 0);
     let h0 = heuristic(from, to);
     open.push(Reverse(OpenEntry {
         f: h0,
@@ -245,26 +267,41 @@ fn search(
         manhattan: manhattan(from, to),
         x: start.x,
         y: start.y,
+        z: start.z,
     }));
-    // How close a finalised tile has come to the goal, and what it cost to get
-    // there. Seeded with the start, so a tile takes the place only by being
+    // How close a finalised node has come to the goal, and what it cost to get
+    // there. Seeded with the start, so a node takes the place only by being
     // *strictly* closer: walking to somewhere no nearer than here is not getting
-    // closer, it is only walking. Among equally close tiles the cheaper route
+    // closer, it is only walking. Among equally close nodes the cheaper route
     // wins, which is the same "do not wander" preference the tie-break above is.
+    //
+    // The measure is `heuristic`'s, which is planar — so a body that got onto
+    // the roof over the goal has "arrived" as far as the approach is concerned.
+    // That is the right answer for a move order (it is as close as the ground
+    // goes) and it is why `arrived` is a separate field rather than `h == 0`.
     let mut closest = (h0, 0, start);
     let mut exit = SearchExit::Exhausted;
-    while let Some(Reverse(OpenEntry { h, x: cx, y: cy, .. })) = open.pop() {
+    while let Some(Reverse(OpenEntry {
+        h,
+        x: cx,
+        y: cy,
+        z: cz,
+        ..
+    })) = open.pop()
+    {
         if Instant::now() >= deadline {
             exit = SearchExit::Deadline;
             break;
         }
-        let tile = Tile::new(cx, cy);
-        // Skip a tile already finalised by a cheaper pop.
-        if !closed.insert(tile_key(tile)) {
+        // The key *is* the place, so the popped entry is the whole node and
+        // nothing has to be looked up to find out where it was.
+        let current = Point::new(cx, cy, cz);
+        // Skip a node already finalised by a cheaper pop.
+        if !closed.insert(node_key(current)) {
             continue;
         }
         let explored = closed.len();
-        if tile == goal {
+        if current == goal {
             return PathSearch {
                 arrived: true,
                 route: reconstruct(&came_from, start, goal),
@@ -272,16 +309,11 @@ fn search(
                 exit: SearchExit::Goal,
             };
         }
-        let current = if tile == start {
-            from
-        } else {
-            came_from[&tile_key(tile)].2
-        };
-        let here_cost = cost[&tile_key(tile)];
-        // The first pop of a tile is its cheapest, so this is its final cost —
+        let here_cost = cost[&node_key(current)];
+        // The first pop of a node is its cheapest, so this is its final cost —
         // see `closed`.
         if (h, here_cost) < (closest.0, closest.1) {
-            closest = (h, here_cost, tile);
+            closest = (h, here_cost, current);
         }
         if closed.len() > budget {
             exit = SearchExit::Budget;
@@ -309,23 +341,24 @@ fn search(
             if within.is_some_and(|region| !region.contains(landing)) {
                 continue;
             }
-            let next = Tile::new(landing.x, landing.y);
-            if closed.contains(&tile_key(next)) {
+            let next = node_key(landing);
+            if closed.contains(&next) {
                 continue;
             }
             let next_cost = here_cost + 1;
-            if next_cost >= cost.get(&tile_key(next)).copied().unwrap_or(u32::MAX) {
+            if next_cost >= cost.get(&next).copied().unwrap_or(u32::MAX) {
                 continue;
             }
-            cost.insert(tile_key(next), next_cost);
-            came_from.insert(tile_key(next), (tile_key(tile), dir, landing));
+            cost.insert(next, next_cost);
+            came_from.insert(next, (node_key(current), dir));
             let h = heuristic(landing, to);
             open.push(Reverse(OpenEntry {
                 f: next_cost + h,
                 h,
                 manhattan: manhattan(landing, to),
-                x: next.x,
-                y: next.y,
+                x: landing.x,
+                y: landing.y,
+                z: landing.z,
             }));
         }
     }
@@ -381,34 +414,108 @@ fn debug_slow(
 
 /// Walk the parent chain from the goal back to the start, collecting the steps in
 /// travel order.
+///
+/// **The chain is over places, not tiles**, so a route that leaves a column and
+/// comes back to it higher up is a chain that visits `(x, y)` twice and
+/// terminates all the same — see [`PathNodeKey`]. Keyed by tile it would either
+/// stop short at the first visit or never have been found at all.
 fn reconstruct(
-    came_from: &FxHashMap<PathTileKey, (PathTileKey, Direction, Point)>,
-    start: Tile,
-    goal: Tile,
+    came_from: &FxHashMap<PathNodeKey, (PathNodeKey, Direction)>,
+    start: Point,
+    goal: Point,
 ) -> Vec<Direction> {
     let mut steps = Vec::new();
-    let start = tile_key(start);
-    let mut tile = tile_key(goal);
-    while tile != start {
-        let (parent, dir, _) = came_from[&tile];
+    let start = node_key(start);
+    let mut at = node_key(goal);
+    while at != start {
+        let (parent, dir) = came_from[&at];
         steps.push(dir);
-        tile = parent;
+        at = parent;
     }
     steps.reverse();
     steps
 }
 
-/// A planar tile packed for A*'s hash tables.
+/// One standing place, packed for A*'s hash tables: a tile **and** the height
+/// a body's feet are at on it.
 ///
-/// Its representation retains `u32`'s inexpensive integer hashing, while the
-/// newtype prevents the packed coordinate from being mixed with a path cost or
-/// another unrelated integer.
+/// **Not a tile, and that is the whole of `navigation_spans.md`'s N3b.** A
+/// column can hold more than one place to stand — a bridge over a road, the
+/// first floor of a house over its ground floor — and keying the search by the
+/// tile collapses them into one slot in `closed`. What that costs is not a
+/// missed route but a wrong answer: the column is closed the first time it is
+/// reached at *some* height, so the other height can never be entered, and a
+/// destination on it is reported as reached.
+///
+/// **The discriminator is the height and not a span index**, which is where
+/// this departs from the plan that asked for `(x, y, span)`. A span is the
+/// map's own surface, and the surfaces this search lands on are not all the
+/// map's: a house, a ship's deck and a placed stair are the
+/// [`Overlay`](openshard_map::overlay::Overlay)'s, and
+/// [`climbed`](crate::walk) picks them with no span to name. The height is what
+/// both layers already agree to speak in — it is what a landing *is* — so it is
+/// what the key is made of. Two surfaces of one column at one height are one
+/// place to stand, which is the right identity anyway.
+///
+/// Forty bits of a `u64`, laid out `x`, `y`, `z`, so hashing stays FxHash's
+/// integer fast path and no coordinate can be silently truncated the way a
+/// `u32` would have to truncate one.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct PathTileKey(u32);
+struct PathNodeKey(u64);
 
 #[inline]
-fn tile_key(tile: Tile) -> PathTileKey {
-    PathTileKey((u32::from(tile.x) << 16) | u32::from(tile.y))
+fn node_key(at: Point) -> PathNodeKey {
+    // `as u8` on the height: the bits, not the value — this is an identity, and
+    // the only thing asked of it is that two different places differ.
+    PathNodeKey((u64::from(at.x) << 24) | (u64::from(at.y) << 8) | u64::from(at.z as u8))
+}
+
+/// The node a caller's destination names: the place to stand at `to`'s column
+/// nearest the height it was asked at.
+///
+/// **A destination is a point and a node is a place, and the two are not the
+/// same thing.** Every caller has a z and almost none of them has the *exact*
+/// z of the surface it means: the coarse graph's nodes carry the land's height
+/// under a bridge they mean the deck of, a probe sweeps a neighbourhood at the
+/// height its origin stands at, and a client's click carries whatever the tile
+/// it hit was drawn at. Before N3b every one of those arrived, because arrival
+/// compared tiles and threw the height away. Comparing nodes without resolving
+/// first would swap that lie for a refusal, which is not the repair.
+///
+/// So the height is resolved against what is actually there — the map's spans
+/// and the live world's surfaces, the same union a landing can come from —
+/// exactly the way [`Overlay::surface_at`](openshard_map::overlay::Overlay::surface_at)
+/// resolves one, with the tie broken by the lower surface so the answer does
+/// not depend on which layer was read first.
+///
+/// **The start's own column offers the start's own height**, because a body
+/// standing there is proof that there is somewhere to stand: a search from a
+/// place to itself answers "you are here" rather than hunting for a surface the
+/// world does not list. A column nothing names a surface on keeps the height it
+/// was asked at, and nothing will ever land on it — a goal in a wall, which is
+/// the refusal it always was.
+fn goal_node(footing: &Footing<'_>, from: Point, to: Point) -> Point {
+    let tile = Tile::new(to.x, to.y);
+    let wanted = i32::from(to.z);
+    let mapped = footing
+        .map
+        .iter()
+        .flat_map(|map| map.spans().surfaces(to.x, to.y))
+        .map(|span| span.stand_z);
+    let placed = footing
+        .overlay
+        .surfaces_at(tile)
+        .map(Cover::surface)
+        // A surface no body could be represented as standing on is not a place
+        // a landing can name either — `landing` drops the same ones.
+        .filter_map(|z| i8::try_from(z).ok());
+    let standing = (Tile::new(from.x, from.y) == tile).then_some(from.z);
+    let z = mapped
+        .chain(placed)
+        .chain(standing)
+        .min_by_key(|&z| ((i32::from(z) - wanted).abs(), z))
+        .unwrap_or(to.z);
+    Point::new(to.x, to.y, z)
 }
 
 /// The remaining distance estimate: Chebyshev, the count of eight-way steps, which
@@ -549,6 +656,92 @@ mod tests {
         assert_eq!(
             find_path_toward(&over(&world), from, Point::new(12, 10, 0), 500),
             None
+        );
+    }
+
+    /// A mezzanine over `(5, 5)` and one step up to it from the east, so the
+    /// only way onto it leaves its column and comes back.
+    ///
+    /// No map: with nothing under it a body keeps the height it walks in at,
+    /// so every z in here is one the overlay put there. `Cover::standing` is
+    /// not climbable, so its surface is its base and it is met at its base —
+    /// two of them, one `MAX_STEP_UP` apart, are a staircase with one tread.
+    fn a_mezzanine() -> Overlay {
+        let mut overlay = Overlay::default();
+        overlay.set(Tile::new(5, 5), vec![Cover::standing(4, 0)]);
+        overlay.set(Tile::new(6, 5), vec![Cover::standing(2, 0)]);
+        overlay
+    }
+
+    /// One column, two places to stand, and the route between them is a loop —
+    /// `navigation_spans.md`'s N3b, and the whole reason a node is not a tile.
+    ///
+    /// Nothing in UO moves up in place: the step rule changes a body's height
+    /// as a *consequence* of a horizontal step. So getting from under the
+    /// mezzanine onto it means stepping off `(5, 5)` and back onto it higher,
+    /// which a search keyed by the tile can never do — the column is closed by
+    /// the first pop and the return is forbidden by the closed set rather than
+    /// by the world.
+    #[test]
+    fn a_route_out_of_a_column_and_back_reaches_its_other_floor() {
+        let world = a_mezzanine();
+        let footing = over(&world);
+        let under = Point::new(5, 5, 0);
+        let over_head = Point::new(5, 5, 4);
+        let route = find_path(&footing, under, over_head, 100).expect("the mezzanine has a way up");
+        assert_eq!(
+            route,
+            vec![Direction::East, Direction::West],
+            "the way up is out of the column and back over it"
+        );
+        // Walked by the shipped step rule rather than by the test's own
+        // arithmetic: the route has to be one a body could actually take.
+        let mut at = under;
+        for dir in &route {
+            at = crate::step_allowed(&footing, at, *dir).expect("the search planned a step nobody may take");
+        }
+        assert_eq!(at, over_head, "the loop comes home one storey up");
+    }
+
+    /// And the lie it replaces: with the tread taken away there is no way up,
+    /// and the answer is a refusal rather than an empty route.
+    ///
+    /// **This is what the tile key answered before N3b.** `start == goal`
+    /// compared tiles, so a body under a floor asking to be on it was told it
+    /// had arrived and given nothing to walk — the caller then stood still
+    /// believing it was upstairs.
+    #[test]
+    fn a_floor_with_no_way_up_is_refused_and_not_answered_with_an_empty_route() {
+        let mut world = a_mezzanine();
+        world.set(Tile::new(6, 5), Vec::new());
+        assert_eq!(
+            find_path(&over(&world), Point::new(5, 5, 0), Point::new(5, 5, 4), 100),
+            None,
+            "an unreachable floor of one's own column is not an arrival"
+        );
+    }
+
+    /// The height a caller asks at is resolved to the place that is there.
+    ///
+    /// Almost no caller has the exact z of the surface it means — the coarse
+    /// graph carries the land's height under a deck, a probe sweeps at its
+    /// origin's height — so the goal is the nearest standing place to what was
+    /// asked, and *which* place that is decides the answer. Asking nearer the
+    /// mezzanine than the ground is asking for the mezzanine.
+    #[test]
+    fn a_goals_height_names_the_nearest_place_to_stand() {
+        let world = a_mezzanine();
+        let footing = over(&world);
+        let under = Point::new(5, 5, 0);
+        assert_eq!(
+            find_path(&footing, under, Point::new(5, 5, 3), 100),
+            Some(vec![Direction::East, Direction::West]),
+            "three of four units up is the mezzanine, and it is climbed"
+        );
+        assert_eq!(
+            find_path(&footing, under, Point::new(5, 5, 1), 100),
+            Some(Vec::new()),
+            "one unit up is the ground the body is already standing on"
         );
     }
 
