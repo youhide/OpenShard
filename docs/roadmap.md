@@ -501,10 +501,13 @@ R5.
   opaque to the borrow checker's field disjointness, so a caller wanting
   `&mut resources.<anything>` beside the map has to hoist — `window.rs`'s atlas
   rebuild already did. If a second one appears, the answer is a free function
-  over `&Resources::world` rather than another hoist: that borrows one field,
-  exactly as the old `resources.map` did.
+  over `&Resources::ground` rather than another hoist: that borrows one field,
+  exactly as the old `resources.map` did. (The field was `world` when this was
+  written; the ground and its span bake are one value now — see
+  [`Ground`](../crates/common/movement/src/ground.rs).)
 - **`World` has no way to publish a patch.** `MapSnapshot::publish` wants
-  `&mut self` and `World::snapshot` hands out a `&`. Nothing in production
+  `&mut self` and `World::snapshot` hands out a `&` — as does `Ground`, which
+  wraps it and forwards that accessor. Nothing in production
   publishes yet — only `openshard-map`'s own tests do — so the accessor was left
   unwritten rather than guessed at. Era S is what needs it, and what it should
   look like is a question about who is allowed to move a facet's revision, not
