@@ -580,11 +580,20 @@ impl Overlay {
     ///
     /// The nearest one to where the body already is, so stepping up onto a deck
     /// from a pier and stepping down onto it from a mast are the same rule.
+    ///
+    /// **A tie goes to the lower surface**, which is a rule rather than an
+    /// accident: two surfaces equidistant from `near_z` — a floor a body's
+    /// height under it and a ceiling-floor the same distance over it — used to
+    /// resolve to whichever the tile's `Vec` happened to yield first, so the
+    /// answer depended on the order a house's components were registered in.
+    /// Movement's own `path::goal_node` breaks the same tie the same way, and
+    /// its reason is this one: a landing may not depend on which layer of the
+    /// world was read first.
     #[must_use]
     pub fn surface_at(&self, tile: Tile, near_z: i32) -> Option<i32> {
         self.surfaces_at(tile)
             .map(|cover| cover.surface())
-            .min_by_key(|surface| (surface - near_z).abs())
+            .min_by_key(|&surface| ((surface - near_z).abs(), surface))
     }
 }
 
@@ -710,6 +719,26 @@ mod tests {
 
         assert_eq!(overlay.surface_at(HERE, 0), Some(3));
         assert_eq!(overlay.surface_at(HERE, 50), Some(42));
+    }
+
+    /// Two surfaces the same distance away, and the answer may not be the order
+    /// they were registered in. A storey a body's own height over the floor it
+    /// stands on is exactly that shape, and a house registers its components in
+    /// whatever order its design lists them.
+    #[test]
+    fn equidistant_surfaces_resolve_to_the_lower_one() {
+        let mut overlay = Overlay::default();
+        // Floors at 0 and 20, asked about from the middle: 10 is ten from both.
+        overlay.set(HERE, vec![Cover::standing(-1, 1), Cover::standing(19, 1)]);
+        assert_eq!(overlay.surface_at(HERE, 10), Some(0));
+
+        // The same two floors, registered the other way round.
+        overlay.set(HERE, vec![Cover::standing(19, 1), Cover::standing(-1, 1)]);
+        assert_eq!(
+            overlay.surface_at(HERE, 10),
+            Some(0),
+            "the answer followed the order the components were registered in"
+        );
     }
 
     /// Emptying a tile empties the overlay, so the hot path's first question
