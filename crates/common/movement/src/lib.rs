@@ -7,7 +7,8 @@
 //!
 //! ```
 //! use std::time::Instant;
-//! use openshard_movement::{Doors, Footing, Overlay, Walk, Walker};
+//! use openshard_map::overlay::{Doors, Overlay};
+//! use openshard_movement::{Footing, Walk, Walker};
 //! use openshard_protocol::world::{Point, RawFastwalkKey, RawStepSequence, WalkRequest};
 //! use openshard_protocol::direction::{Direction, Facing};
 //!
@@ -33,9 +34,11 @@
 //! [`Footing`]: the map, what the live world has laid over it, and which way the
 //! shut doors are read. [`MapTerrain`] is the static half — the map and
 //! `tiledata.mul`, nothing else — shared between the server tick and the
-//! client's own click-to-walk planner; [`Overlay`] is the live half, which both
-//! ends *build* and neither end owns a private version of. A footing with no map
-//! is what a shard with no client files runs.
+//! client's own click-to-walk planner; [`openshard_map::overlay::Overlay`] is
+//! the live half, which both ends *build* and neither end owns a private
+//! version of. It is storage and lives with the rest of the map; every rule
+//! that reads one is here. A footing with no map is what a shard with no client
+//! files runs.
 //!
 //! And two ways of getting somewhere, which answer different questions.
 //! [`find_path`] needs a destination and searches for a route to it.
@@ -56,7 +59,6 @@ mod detour;
 pub mod door_frames;
 mod footing;
 mod navigation;
-mod overlay;
 mod pace;
 mod path;
 pub mod scene;
@@ -68,7 +70,6 @@ mod walk;
 pub use detour::{Around, Detour, Leeway, Step};
 pub use footing::Footing;
 pub use navigation::{NavigationGraph, find_long_path};
-pub use overlay::{Cover, CoverKind, Doors, Overlay};
 pub use pace::{
     Pace, RUN_HOLD, RUN_INTERVAL, WALK_BUFFER, WALK_HOLD, WALK_INTERVAL, WalkPace, step_hold, step_progress,
 };
@@ -77,6 +78,6 @@ pub(crate) use path::{find_path_toward_until, find_path_until};
 pub use sequence::{OutOfSequence, StepCounter, WalkSequence};
 pub use terrain::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
 pub use walk::{
-    Heading, Intent, Lean, Tile, Walk, Walker, can_fit, can_step, direction_toward, heading_toward, intend,
+    Heading, Intent, Lean, Walk, Walker, can_fit, can_step, direction_toward, heading_toward, intend,
     line_tiles, sight_clear, step_allowed, step_from,
 };

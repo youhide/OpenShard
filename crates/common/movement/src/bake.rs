@@ -662,9 +662,10 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::overlay::{Cover, Doors, Overlay};
     use crate::scene::Scene;
-    use crate::{Footing, Tile, find_long_path};
+    use crate::{Footing, find_long_path};
+    use openshard_map::grid::Tile;
+    use openshard_map::overlay::{Cover, Doors, Overlay};
 
     /// A bounded open grid with some tiles blocked: a real map for the ground,
     /// an overlay for what is in the way. See `navigation`'s twin of this — the

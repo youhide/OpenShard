@@ -2,10 +2,10 @@
 //!
 //! # Why the map is not enough, said once
 //!
-//! [`MapTerrain`](crate::MapTerrain) reads the client's files — land and static
-//! art — and nothing else. A door is an *entity*: the doorway it stands in is an
-//! open gap in the statics by construction, and the leaf that closes it lives in
-//! the shard's registry. A barrel is an entity. A ship is an entity, and it is
+//! [`WorldMap`](crate::map::WorldMap) is the ground and the statics an install
+//! shipped, and nothing else. A door is an *entity*: the doorway it stands in is
+//! an open gap in the statics by construction, and the leaf that closes it lives
+//! in the shard's registry. A barrel is an entity. A ship is an entity, and it is
 //! the one that can put ground where the map says there is none.
 //!
 //! Both ends of the wire had to say that, and until this module existed both
@@ -33,13 +33,20 @@
 //! a `GroundItem` is a position, a graphic, a hue and an amount. An owner field
 //! here would be a hole one end fills with a lie. See
 //! `docs/map/terrain_seam.md`'s node E.
+//!
+//! # Why this is the map's crate and not movement's
+//!
+//! It is storage — a span and a kind per tile — and the third layer of the map
+//! `docs/map/map_rebuild.md` describes: the ground, the statics, and what the
+//! live world has laid over them. Every *rule* that reads one stayed in
+//! `openshard-movement`, which is why nothing here knows how tall a body is; see
+//! [`Body`].
 
 use rustc_hash::FxHashMap;
 
 use openshard_tiles::StaticTile;
 
-use crate::terrain::PLAYER_HEIGHT;
-use crate::walk::Tile;
+use crate::grid::Tile;
 
 /// Which of the two readings of the same ground a question is asked under.
 ///
@@ -73,6 +80,43 @@ impl Doors {
             true => Self::AllOpen,
             false => Self::AsTheyStand,
         }
+    }
+}
+
+/// The z-span a body takes up while it stands somewhere: `[z, z + height)`.
+///
+/// **The whole of what the overlay knows about a body**, and it is an argument
+/// rather than a constant on purpose. How tall a creature is is a movement rule
+/// — `openshard_movement::PLAYER_HEIGHT`, whose own comment admits it should
+/// vary by creature — and this module is storage. A `blocker_at` that reached
+/// for that constant would be the map's crate deciding how big a person is.
+///
+/// It is a type and not two `i32` arguments because the two are a position and
+/// a length in the same units, side by side, on the hot path of every step:
+/// nothing but the order of the pair would say which was which.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Body {
+    z: i32,
+    height: i32,
+}
+
+impl Body {
+    /// A body whose feet are at `z` and which stands `height` units tall.
+    #[must_use]
+    pub const fn new(z: i32, height: i32) -> Self {
+        Self { z, height }
+    }
+
+    /// Where its feet are.
+    #[must_use]
+    pub const fn feet(self) -> i32 {
+        self.z
+    }
+
+    /// One past the top of its head — the exclusive end of its span.
+    #[must_use]
+    pub const fn head(self) -> i32 {
+        self.z + self.height
     }
 }
 
@@ -218,15 +262,15 @@ impl Cover {
         self.bottom() + self.height as i32
     }
 
-    /// Whether a body whose feet are at `stand_z` has this in its way.
+    /// Whether `body` has this in its way.
     ///
-    /// The body spans `[stand_z, stand_z + PLAYER_HEIGHT)` and this spans
-    /// `[bottom, top)`; they are in the way of each other when the two overlap.
-    /// The z-span and not the tile, so a crate on a building's upper floor
-    /// leaves the ground floor beneath it open.
+    /// The body spans `[feet, head)` and this spans `[bottom, top)`; they are in
+    /// the way of each other when the two overlap. The z-span and not the tile,
+    /// so a crate on a building's upper floor leaves the ground floor beneath it
+    /// open.
     #[must_use]
-    pub const fn meets(self, stand_z: i32) -> bool {
-        self.bottom() < stand_z + PLAYER_HEIGHT && stand_z < self.top()
+    pub const fn meets(self, body: Body) -> bool {
+        self.bottom() < body.head() && body.feet() < self.top()
     }
 }
 
@@ -296,17 +340,17 @@ impl Overlay {
         self.tiles.clear();
     }
 
-    /// The first thing in the way of a body standing at `stand_z` on `tile`,
-    /// under this reading of the doors.
+    /// The first thing in the way of `body` standing on `tile`, under this
+    /// reading of the doors.
     ///
     /// What a step asks. `None` is "nothing here stops you", which is not the
     /// same as "you may stand here" — the map answers that.
     #[must_use]
-    pub fn blocker_at(&self, tile: Tile, stand_z: i32, doors: Doors) -> Option<Cover> {
+    pub fn blocker_at(&self, tile: Tile, body: Body, doors: Doors) -> Option<Cover> {
         self.at(tile)
             .iter()
             .copied()
-            .find(|cover| cover.blocks_body(stand_z, doors))
+            .find(|cover| cover.blocks_body(body, doors))
     }
 
     /// The first thing in the way on `tile` at *any* height.
@@ -338,16 +382,16 @@ impl Overlay {
 }
 
 impl Cover {
-    /// Whether this stops a body standing at `stand_z`, under `doors`.
+    /// Whether this stops `body`, under `doors`.
     ///
     /// Private, because the two halves are not separable: a door left open by
     /// the reading is not "a blocker that does not block", it is nothing at
     /// all, and a caller that saw it as the former would report a doorway as
     /// obstructed.
-    const fn blocks_body(self, stand_z: i32, doors: Doors) -> bool {
+    const fn blocks_body(self, body: Body, doors: Doors) -> bool {
         match self.kind {
             CoverKind::Blocks { door: true } if matches!(doors, Doors::AllOpen) => false,
-            CoverKind::Blocks { .. } => self.meets(stand_z),
+            CoverKind::Blocks { .. } => self.meets(body),
             CoverKind::Stands => false,
         }
     }
@@ -360,6 +404,12 @@ mod tests {
 
     const HERE: Tile = Tile::new(100, 100);
 
+    /// A person, as `openshard-movement` asks about one. Spelled here so the
+    /// tests read like the call sites do; the constant itself is movement's.
+    fn person(z: i32) -> Body {
+        Body::new(z, 16)
+    }
+
     /// The whole of what the z-span is for: a wall on an upper floor is not a
     /// sealed ground floor. Registering both used to be the only way to say it
     /// on the server and a separate arithmetic on the client.
@@ -368,9 +418,9 @@ mod tests {
         let mut overlay = Overlay::default();
         overlay.set(HERE, vec![Cover::blocking(20, 20)]);
 
-        assert!(overlay.blocker_at(HERE, 0, Doors::AsTheyStand).is_none());
-        assert!(overlay.blocker_at(HERE, 25, Doors::AsTheyStand).is_some());
-        assert!(overlay.blocker_at(HERE, 60, Doors::AsTheyStand).is_none());
+        assert!(overlay.blocker_at(HERE, person(0), Doors::AsTheyStand).is_none());
+        assert!(overlay.blocker_at(HERE, person(25), Doors::AsTheyStand).is_some());
+        assert!(overlay.blocker_at(HERE, person(60), Doors::AsTheyStand).is_none());
     }
 
     /// Impassable art with a tiledata height of zero still occupies its tile.
@@ -381,9 +431,9 @@ mod tests {
         let mut overlay = Overlay::default();
         overlay.set(HERE, vec![Cover::blocking(0, 0)]);
 
-        assert!(overlay.blocker_at(HERE, 0, Doors::AsTheyStand).is_some());
+        assert!(overlay.blocker_at(HERE, person(0), Doors::AsTheyStand).is_some());
         // And nothing above it: a flat blocker is one z tall, not infinite.
-        assert!(overlay.blocker_at(HERE, 1, Doors::AsTheyStand).is_none());
+        assert!(overlay.blocker_at(HERE, person(1), Doors::AsTheyStand).is_none());
     }
 
     /// The two readings, on the same tile, differing only in the door.
@@ -391,13 +441,13 @@ mod tests {
     fn a_plan_walks_through_a_door_and_not_through_a_crate() {
         let mut overlay = Overlay::default();
         overlay.set(HERE, vec![Cover::door(0, 20)]);
-        assert!(overlay.blocker_at(HERE, 0, Doors::AsTheyStand).is_some());
-        assert!(overlay.blocker_at(HERE, 0, Doors::AllOpen).is_none());
+        assert!(overlay.blocker_at(HERE, person(0), Doors::AsTheyStand).is_some());
+        assert!(overlay.blocker_at(HERE, person(0), Doors::AllOpen).is_none());
 
         // A crate dragged into the doorway is still there once the door swings:
         // opening it does not move the crate.
         overlay.set(HERE, vec![Cover::door(0, 20), Cover::blocking(0, 12)]);
-        assert!(overlay.blocker_at(HERE, 0, Doors::AllOpen).is_some());
+        assert!(overlay.blocker_at(HERE, person(0), Doors::AllOpen).is_some());
     }
 
     /// A deck is somewhere to stand and not something in the way, and the same
@@ -409,13 +459,13 @@ mod tests {
 
         assert_eq!(overlay.surface_at(HERE, 0), Some(3));
         assert!(
-            overlay.blocker_at(HERE, 3, Doors::AsTheyStand).is_none(),
+            overlay.blocker_at(HERE, person(3), Doors::AsTheyStand).is_none(),
             "a body standing on the deck is not blocked by the deck"
         );
 
         overlay.set(HERE, vec![Cover::standing(-2, 5), Cover::blocking(3, 12)]);
         assert_eq!(overlay.surface_at(HERE, 0), Some(3), "the crate is not a surface");
-        assert!(overlay.blocker_at(HERE, 3, Doors::AsTheyStand).is_some());
+        assert!(overlay.blocker_at(HERE, person(3), Doors::AsTheyStand).is_some());
     }
 
     /// A gunwale at deck height seals neither the deck nor the water under the
@@ -434,11 +484,11 @@ mod tests {
         overlay.set(HERE, vec![Cover::standing(-2, 5), Cover::blocking(-2, 5)]);
 
         assert!(
-            overlay.blocker_at(HERE, 3, Doors::AsTheyStand).is_none(),
+            overlay.blocker_at(HERE, person(3), Doors::AsTheyStand).is_none(),
             "the hull sealed the deck standing on top of it"
         );
         assert!(
-            overlay.blocker_at(HERE, -2, Doors::AsTheyStand).is_some(),
+            overlay.blocker_at(HERE, person(-2), Doors::AsTheyStand).is_some(),
             "the water inside the hull is not somewhere to swim"
         );
     }
@@ -465,6 +515,29 @@ mod tests {
         assert!(!overlay.is_empty());
         overlay.set(HERE, Vec::new());
         assert!(overlay.is_empty(), "an emptied tile is still hashed");
+    }
+
+    /// A body's height is the caller's, and the overlay answers differently for
+    /// two of them over the same cover: a gap a person does not fit under is one
+    /// a rat walks straight through.
+    #[test]
+    fn how_tall_the_body_is_is_the_askers_business() {
+        let mut overlay = Overlay::default();
+        // A shelf whose underside is at z = 8.
+        overlay.set(HERE, vec![Cover::blocking(8, 4)]);
+
+        assert!(
+            overlay
+                .blocker_at(HERE, Body::new(0, 16), Doors::AsTheyStand)
+                .is_some(),
+            "a person standing under it reaches into it"
+        );
+        assert!(
+            overlay
+                .blocker_at(HERE, Body::new(0, 8), Doors::AsTheyStand)
+                .is_none(),
+            "something half as tall does not"
+        );
     }
 
     /// The rule both ends of the wire lay a placed item's cover with.
@@ -506,8 +579,8 @@ mod tests {
             ..StaticTile::default()
         };
         let flat = Cover::of_static(&flat).expect("it blocks").based_at(0);
-        assert!(flat.meets(0));
-        assert!(!flat.meets(1));
+        assert!(flat.meets(person(0)));
+        assert!(!flat.meets(person(1)));
     }
 
     /// Sight and door-detection ask about the tile and not about a height.
@@ -516,7 +589,7 @@ mod tests {
         let mut overlay = Overlay::default();
         overlay.set(HERE, vec![Cover::standing(-2, 5), Cover::door(80, 20)]);
 
-        assert!(overlay.blocker_at(HERE, 0, Doors::AsTheyStand).is_none());
+        assert!(overlay.blocker_at(HERE, person(0), Doors::AsTheyStand).is_none());
         assert!(
             overlay.blocker_anywhere(HERE).is_some_and(Cover::is_door),
             "a door three storeys up is still a door on this tile"

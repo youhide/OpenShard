@@ -24,7 +24,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use openshard_movement::{Doors, Footing, MapTerrain, Overlay, PathSearch, SearchExit, search_path};
+use openshard_map::overlay::{Doors, Overlay};
+use openshard_movement::{Footing, MapTerrain, PathSearch, SearchExit, search_path};
 use openshard_protocol::world::Point;
 
 #[derive(Debug, Parser)]
@@ -190,7 +191,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if cli.budget.is_empty() {
         cli.budget = vec![400, 600];
     }
-    let tiles = openshard_uofiles::tiledata::load(cli.client.join("tiledata.mul"))?.tiles;
+    let tiles = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
     let map = openshard_uofiles::map::read_facet(&cli.client, 0)?;
     let terrain = MapTerrain::new(&map, &tiles);
     // The map and nothing over it. This probe measures the *ground*: a shard's

@@ -10,7 +10,7 @@
 //! `Obstructions` — the dynamic half, doors and placed items, which needs the
 //! entity registry a client does not have.
 
-use crate::Tile;
+use openshard_map::grid::Tile;
 use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
@@ -763,9 +763,8 @@ mod tests {
     fn real_install() -> Option<Install> {
         let dir = client_dir()?;
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("the client's map0 should load");
-        let tiles = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("tiledata should load")
-            .tiles;
+        let tiles =
+            openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata should load");
         Some(Install { map, tiles })
     }
 

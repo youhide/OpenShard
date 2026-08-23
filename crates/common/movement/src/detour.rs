@@ -331,8 +331,8 @@ const fn flanks(intent: Direction) -> [Direction; 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::overlay::{Cover, Doors, Overlay};
-    use crate::walk::Tile;
+    use openshard_map::grid::Tile;
+    use openshard_map::overlay::{Cover, Doors, Overlay};
 
     /// Every state the machine can be in, for the enumerations below: the two
     /// slides are both flanks, because which one is remembered is exactly what

@@ -53,8 +53,8 @@ use openshard_tiles::LandTileId;
 use openshard_tiles::{StaticTile, TileData, TileFlags};
 
 use crate::footing::Footing;
-use crate::overlay::{Doors, Overlay};
 use crate::terrain::MapTerrain;
+use openshard_map::overlay::{Doors, Overlay};
 
 /// The side of the square [`Scene::flat`] covers, in tiles.
 ///
@@ -399,8 +399,8 @@ impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Tile;
     use crate::terrain::PLAYER_HEIGHT;
+    use openshard_map::grid::Tile;
 
     /// The scene machinery itself: ground at the height it was asked for, and a
     /// static whose flags and height came back out of the tiledata.

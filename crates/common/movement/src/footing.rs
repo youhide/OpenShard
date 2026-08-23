@@ -30,7 +30,8 @@
 //!   is in the way takes an [`Overlay`]. Only a *step* takes all three, because
 //!   only a step needs all three.
 
-use crate::overlay::{Doors, Overlay};
+use openshard_map::overlay::{Doors, Overlay};
+
 use crate::terrain::MapTerrain;
 
 /// The map, the live world over it, and how the doors are read.

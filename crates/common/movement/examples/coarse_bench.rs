@@ -26,10 +26,11 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
+use openshard_map::grid::Tile;
+use openshard_map::overlay::{Doors, Overlay};
 use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::{
-    Doors, Footing, MapTerrain, NavigationGraph, Overlay, Tile, bake, find_long_path, find_path, search_path,
-    step_allowed,
+    Footing, MapTerrain, NavigationGraph, bake, find_long_path, find_path, search_path, step_allowed,
 };
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::{Facet, Point};
@@ -240,7 +241,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         synthetic();
     }
     let facet = Facet(cli.facet);
-    let tiles = openshard_uofiles::tiledata::load(cli.client.join("tiledata.mul"))?.tiles;
+    let tiles = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
     let map: MapSnapshot = openshard_uofiles::map::load_facet(&cli.client, facet)?;
     // The artifact the shard loads, validated the way the shard validates it: a
     // graph that no longer matches its inputs is not a slower answer, it is a

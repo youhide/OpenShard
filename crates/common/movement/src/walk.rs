@@ -5,10 +5,13 @@ use std::time::Instant;
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::world::{Point, WalkRequest};
 
+use openshard_map::grid::Tile;
+use openshard_map::overlay::{Body, Doors};
+
 use crate::footing::Footing;
-use crate::overlay::Doors;
 use crate::pace::{Pace, WalkPace};
 use crate::sequence::WalkSequence;
+use crate::terrain::PLAYER_HEIGHT;
 
 /// What a walk request did.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -33,23 +36,6 @@ pub enum Walk {
     },
     /// The step is refused. The client snaps back and resets its sequence.
     Refused,
-}
-
-/// A tile's column and row, with no height — a [`Point`] flattened to the plane
-/// a sight line or a path search reasons on.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct Tile {
-    /// East-west tile.
-    pub x: u16,
-    /// North-south tile.
-    pub y: u16,
-}
-
-impl Tile {
-    /// A tile at `(x, y)`.
-    pub const fn new(x: u16, y: u16) -> Self {
-        Self { x, y }
-    }
 }
 
 /// The tiles a straight line from `from` to `to` crosses, endpoints excluded —
@@ -413,10 +399,11 @@ pub fn can_step(footing: &Footing<'_>, from: Point, to: Point) -> Option<Point> 
         // and only what the live world put there can refuse.
         None => to,
     };
-    match footing
-        .overlay
-        .blocker_at(Tile::new(to.x, to.y), i32::from(landed.z), footing.doors)
-    {
+    match footing.overlay.blocker_at(
+        Tile::new(to.x, to.y),
+        Body::new(i32::from(landed.z), PLAYER_HEIGHT),
+        footing.doors,
+    ) {
         Some(_) => None,
         None => Some(landed),
     }
@@ -446,7 +433,15 @@ fn aboard(footing: &Footing<'_>, from: Point, to: Point) -> Option<Point> {
 /// body is not what this places.
 #[must_use]
 pub fn can_fit(footing: &Footing<'_>, tile: Tile, z: i32, height: i32) -> bool {
-    if footing.overlay.blocker_at(tile, z, Doors::AsTheyStand).is_some() {
+    // `height` and not `PLAYER_HEIGHT`: the map half below is already asked
+    // about the thing being placed rather than about a person, and the overlay
+    // half used to reach for the body constant because the overlay held one.
+    // Every caller passes a person's height today, so this is the same answer.
+    if footing
+        .overlay
+        .blocker_at(tile, Body::new(z, height), Doors::AsTheyStand)
+        .is_some()
+    {
         return false;
     }
     // A surface the live world put at exactly this height is a floor the map
@@ -527,7 +522,7 @@ mod tests {
     use openshard_protocol::world::{RawFastwalkKey, RawStepSequence};
 
     use super::*;
-    use crate::overlay::{Cover, Overlay};
+    use openshard_map::overlay::{Cover, Overlay};
 
     /// Where [`direction_toward`] flattens: far more east than south still
     /// reads as a diagonal, because only the signs of `dx`/`dy` are looked at.

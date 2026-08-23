@@ -38,6 +38,35 @@ use std::fmt;
 
 use crate::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell};
 
+/// A tile's column and row on the facet, with no height.
+///
+/// The plane a sight line, a path search and the live overlay all address, and
+/// the coordinate [`BlockCoord`] is deliberately *not*: eight of these across
+/// and eight down make one block. A `Point` flattened to it is
+/// `Tile::new(point.x, point.y)`.
+///
+/// It lives beside the block grid because the two are the same kind of thing —
+/// where something is on a facet — and because the overlay in
+/// [`crate::overlay`] keys by it. It used to live in `openshard-movement`, next
+/// to the walk rules that were its first reader, which made every crate that
+/// only wanted to name a place depend on the crate that decides who may go
+/// there.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Tile {
+    /// East-west tile.
+    pub x: u16,
+    /// North-south tile.
+    pub y: u16,
+}
+
+impl Tile {
+    /// A tile at `(x, y)`.
+    #[must_use]
+    pub const fn new(x: u16, y: u16) -> Self {
+        Self { x, y }
+    }
+}
+
 /// A block's position on the facet — not a tile, and not a radar chunk.
 ///
 /// A radar chunk is sixty-four tiles square (`client/render`'s

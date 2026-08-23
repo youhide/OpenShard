@@ -21,7 +21,9 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use openshard_movement::{Doors, Footing, MapTerrain, Overlay, SearchExit, Tile, search_path, step_allowed};
+use openshard_map::grid::Tile;
+use openshard_map::overlay::{Doors, Overlay};
+use openshard_movement::{Footing, MapTerrain, SearchExit, search_path, step_allowed};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 
@@ -58,7 +60,7 @@ fn measure(repeat: usize, tiles: usize, label: &str, mut pass: impl FnMut() -> u
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let tiledata = openshard_uofiles::tiledata::load(cli.client.join("tiledata.mul"))?.tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
     let map = openshard_uofiles::map::read_facet(&cli.client, 0)?;
     let terrain = MapTerrain::new(&map, &tiledata);
     // The map and nothing over it: this probe is about what the *ground* costs

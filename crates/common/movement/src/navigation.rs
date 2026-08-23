@@ -13,7 +13,9 @@ use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 
 use crate::footing::Footing;
-use crate::{Tile, find_path_toward_until, find_path_until, step_allowed};
+use openshard_map::grid::Tile;
+
+use crate::{find_path_toward_until, find_path_until, step_allowed};
 
 const MAX_LONG_PATH_TIME: Duration = Duration::from_millis(50);
 
@@ -896,8 +898,8 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::overlay::{Cover, Doors, Overlay};
     use crate::scene::Scene;
+    use openshard_map::overlay::{Cover, Doors, Overlay};
 
     /// A bounded open grid with some tiles blocked.
     ///

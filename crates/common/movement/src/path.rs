@@ -30,7 +30,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::footing::Footing;
 use crate::navigation::Region;
-use crate::walk::{Tile, step_allowed};
+use openshard_map::grid::Tile;
+
+use crate::walk::step_allowed;
 
 /// How long one search may run before it gives up, whatever its budget says.
 ///
@@ -422,7 +424,7 @@ fn manhattan(from: Point, to: Point) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::overlay::{Cover, Doors, Overlay};
+    use openshard_map::overlay::{Cover, Doors, Overlay};
 
     /// Ground with nothing on it: no map, so no floor and no walls, and the
     /// overlay is the only thing that can refuse a step.
