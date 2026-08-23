@@ -551,12 +551,9 @@ Left open, and none of it blocks anything:
   step — the same rubber-band, from the other side. The client already has the
   mobile list (`Clutter` inserts every one at `PLAYER_HEIGHT` for the *drawn*
   route); what it does not have is a `crowd_near`.
-- **A player does not shove, and in UO a player shoves.** `Mobile.CheckShove`
-  costs 10 stamina and a message and lets the step through at full stamina;
-  refusal is only for a player already tired. This engine hard-blocks, which is
-  a deliberate divergence and not parity — see [`findings.md`](findings.md),
-  which has the whole of the ServUO reading. Building the shove means a stamina
-  charge, two clilocs and a reveal, and it is gameplay rather than movement.
+- **A player does not shove, and in UO a player shoves.** This engine
+  hard-blocks, which is not parity and is not invisible: the stock client has
+  the mirror of the rule and draws the step we refuse. Its own entry follows.
 - **A boat's deck and a moving multi.** The crowd is read off the sector grid,
   which holds a mobile's own tile. Nothing here asks what happens to two bodies
   on a deck that moves under them.
@@ -582,6 +579,101 @@ Left open, and none of it blocks anything:
   it is the same sweep the entry above says is linear in a decorated town, and
   if that ever needs shrinking, `intend` is the shared function that says
   whether a request steps at all.
+
+### Backlog: the shove — a rested player pushes past a body rather than stopping at it
+
+**A good mechanic, and the reason to write it down is not only that it is
+good.** A body in the way is not a wall in UO: a player at full stamina walks
+*through* the crowd, spends ten stamina and is told they shoved somebody. It is
+a small rule that does a lot of work — it keeps a doorway from being griefable by
+standing in it, it makes a busy bank an obstacle course rather than a wall, and
+it prices moving through people in the one currency a fight already cares about.
+Stamina is the throttle: shove your way across a market and you arrive with
+nothing left to run with.
+
+**And this engine currently contradicts the client about it.** ClassicUO applies
+the mirror of the same rule to what it *predicts* — see
+[`findings.md`](findings.md) for the line and its reading — so the stock client
+walks a rested player's body into a crowd and the shard snaps it back. That is
+today's behaviour on every facet, not a hypothetical.
+
+#### The rule, as the two references state it
+
+`Mobile.CheckShove` (`Server/Mobile.cs:3517`), called on the **mover** through
+`OnMoveOver` from `Mobile.Move` (`:3216` and `:3243`, at the same
+`(other.Z + 15) > z` overlap the rest of the step uses):
+
+| when | what happens |
+|---|---|
+| The facet has `MapRules.FreeMovement` (everything but Felucca — `Server/Map.cs:129`) | The rule does not run at all. Everyone walks through everyone |
+| The mover has `IgnoreMobiles` | Same: no rule, no cost, no message |
+| Either party is dead, or is a dead bonded pet | Allowed, silently and free — this is `CanMoveOver` again, and it is already built |
+| The one being walked over is hidden **and** staff | Allowed, silently and free — also already built |
+| Already shoved once this step (`m_Pushing`) | Allowed, silently and free. The flag is cleared once per `Mobile.Move` (`:3180`), so walking over two overlapping bodies costs one shove, not two |
+| The mover is staff | A message, and nothing else — no stamina, no reveal |
+| The mover is at **exactly** full stamina | **10 stamina, a reveal of the mover, a message — and the step goes through** |
+| Anything else — a mover one point below full | **Refused.** This is the only branch that stops anybody |
+
+The four messages are clilocs, and which one depends on whether the mover is
+staff and whether the body being shoved is hidden:
+
+| | visible | hidden |
+|---|---|---|
+| staff | `1019040` | `1019041` |
+| player | `1019042` | `1019043` |
+
+`1019042` reads *"Being perfectly rested, you shove them out of the way"* and
+`1019043` *"Being perfectly rested, you shove something invisible out of the
+way"* — read off the client's own table, so the mechanic's in-game name is
+*shove* and the hidden form deliberately does not say who. The staff pair's text
+has not been read. Note what the wording settles: the line goes to the **mover**,
+and the reveal is the mover's too — shoving a hidden player does not reveal
+*them*.
+
+#### What is ours to decide, and it is one thing
+
+**This engine has no facet rulesets.** `Facet` is an id and nothing else; there
+is no `MapRules`, no Trammel/Felucca split, and nothing anywhere that says a
+facet is a ruleset. So the first row of that table has nowhere to come from, and
+the choice is:
+
+- **Shove everywhere.** One rule, no new concept, and the client's own
+  `_world.Map.Index == 0` clause then disagrees on every facet but the first —
+  the client would predict a free walk-through where the shard charges stamina.
+  Cheap, and wrong in a way a player feels as a stutter.
+- **Grow a facet ruleset.** Honest, and it is a thing this engine will want
+  anyway: `BeneficialRestrictions` and `HarmfulRestrictions` live in the same
+  ServUO enum and are the same question asked about spells. It is a component or
+  a field on `FacetState`, not a plan.
+
+The second is almost certainly right, and it is worth deciding **before** the
+shove rather than during it — a shove built on "everywhere" has the facet test
+missing rather than wrong, which is the kind of gap nothing fails on.
+
+#### The seams it would use
+
+All of them exist:
+
+- `Stamina { current, max }` (`state/src/components.rs:2076`), and
+  `combat::spend_step_stamina`, which is already the one place a step charges
+  stamina.
+- `WorldState::reveal` (`state/src/runtime.rs:3376`) — ServUO's
+  `RevealingAction`.
+- `WorldState::localized_message`, plus four entries in
+  `protocol/src/localized.rs`'s catalogue, which `localized::contains`
+  debug-asserts against.
+- `WorldState::crowd_near` already finds who is in the way; what the shove needs
+  and it does not have is *which entity*, since `Bodies` deliberately carries
+  feet and no identity. The shove wants the shoved mobile (is it hidden? is it
+  staff?), so it is a second, server-side lookup at the moment a step is
+  refused — not a change to `Bodies`.
+- And the wire is already right: `StatusFlags::IGNORE_MOBILES`.
+
+**Done when** a rested player walks through a standing NPC and arrives ten
+stamina poorer, a tired one is stopped, neither is a rubber-band on a stock
+client, and a staff member does it for free. Its natural companion is the
+client's own end — `steer.rs` still plans through a crowd, which is the entry
+above.
 
 ### ~~Backlog: `can_step` does not check the corner, and two obstruct tests are red~~ — closed
 

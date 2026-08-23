@@ -99,9 +99,36 @@ Three consequences, all of which a "bodies block" implementation gets wrong if
 it reads the first file alone: the goal-tile exemption exists (without it no
 chase is plannable, because the tile the route is *for* is the one it may not
 end on); the flanks of a diagonal are checked, not just the destination
-(`Movement.cs:552`); and hard-blocking players is a **divergence**, not parity —
-this engine takes it deliberately, and the shove is filed in
-[`roadmap.md`](roadmap.md) rather than built.
+(`Movement.cs:552`); and hard-blocking players is a **divergence**, not parity.
+
+**And the client has the same rule, which makes that divergence visible.**
+ClassicUO's `Pathfinder.CreateItemList` decides in one line
+(`Game/Pathfinder.cs:65`) whether bodies are in the way at all:
+
+```csharp
+bool ignoreGameCharacters = profile.IgnoreStaminaCheck
+    || stepState == PSS_DEAD_OR_GM
+    || _world.Player.IgnoreCharacters
+    || !(_world.Player.Stamina < _world.Player.StaminaMax && _world.Map.Index == 0);
+```
+
+Read the last clause twice: mobiles block **only** below full stamina **and**
+only on map 0. That is `CheckShove` seen from the other end — full stamina is
+what buys the shove, and map 0 is Felucca, whose `FeluccaRules = None` is the
+one ruleset without `MapRules.FreeMovement`
+(`Server/Map.cs:129`, commented "anyone can move over anyone else without taking
+stamina loss"). Two engines, one rule, expressed as a server permission and a
+client prediction.
+
+It is not only the pathfinder: `PlayerMobile.Walk` runs the held-direction step
+through the same `Pathfinder.CanWalk` (`Game/GameObjects/PlayerMobile.cs:572`
+and `:598`). So a shard that hard-blocks contradicts what a stock client has
+already drawn — the client walks its body into the crowd and the shard snaps it
+back, on every facet and at every stamina level.
+
+Its `PSS_DEAD_OR_GM` is `IsDead || Graphic == 0x03DB` — the client recognises a
+game master **by body graphic**, not by access level. A shard whose staff wear
+ordinary bodies has exactly one lever, and it is the `0x10` flag below.
 
 The overlap test in both files is `(other.Z + 15) > z && (z + 15) > other.Z` —
 **fifteen**, where the same file's `PersonHeight` is sixteen. One unit, and it
