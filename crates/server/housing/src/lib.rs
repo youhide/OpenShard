@@ -38,6 +38,7 @@ mod tests;
 
 use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
+use openshard_map::overlay::Cover;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
@@ -147,15 +148,23 @@ fn shape_of<'a>(design: Option<&'a [Component]>, state: &'a WorldState, multi: u
     design.unwrap_or_else(|| state.multis.components(multi))
 }
 
-/// One tile of a house's footprint, already in world coordinates.
+/// One entry a house lays on one tile, already in world coordinates.
+///
+/// **A `Cover` and a place to put it**, which is all it ever was: it used to
+/// spell out a `z` and a `height` beside the tile and hand those to
+/// `FacetState::block`, which is a cover with the kind left out — and leaving
+/// the kind out is exactly why a house had no floors. See
+/// `docs/map/realtime_map.md`'s R3.
+///
+/// One component can produce two of these on one tile: a stair tread is a
+/// surface and a body. See [`openshard_map::overlay::Cover::of_static`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Footprint {
     /// Where.
     pub tile: Tile,
-    /// The z the component stands at, the house's own z included.
-    pub z: i8,
-    /// How tall it blocks, from its tiledata.
-    pub height: u8,
+    /// What the house puts there, based at the house's own z plus the
+    /// component's.
+    pub cover: Cover,
 }
 
 /// Put a house on the ground and make its walls stop people.
@@ -694,11 +703,6 @@ pub fn footprint_of(
     let mut out = Vec::new();
     for component in components.iter().filter(|c| c.drawn()) {
         let graphic = Graphic(component.graphic);
-        // Only what actually stops somebody. A floor tile and a roof are drawn and
-        // walked over; folding them in would seal a house shut from the inside.
-        if !tiledata.static_tile(graphic.0).flags.is_blocking() {
-            continue;
-        }
         let x = i32::from(at.x) + i32::from(component.dx);
         let y = i32::from(at.y) + i32::from(component.dy);
         let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) else {
@@ -708,11 +712,17 @@ pub fn footprint_of(
         let Ok(z) = i8::try_from(z) else {
             return Err(Refusal::OffTheMap);
         };
-        out.push(Footprint {
-            tile: Tile::new(x, y),
-            z,
-            height: tiledata.static_tile(graphic.0).height.max(1),
-        });
+        // Whatever this component's art lays, which is the same rule a *loose*
+        // static laid on the same tile would be read by — `Cover::of_static`,
+        // called by both ends of the wire. A wall is a body, a floor is a
+        // surface, a stair is one of each, and a roof tile is neither.
+        //
+        // This used to read `is_blocking` here and take the height itself, so a
+        // house was its walls and nothing else: no floor to stand on above the
+        // ground, and stairs that stopped a body instead of lifting one.
+        let covers = Cover::of_static(tiledata.static_tile(graphic.0)).based_at(z);
+        let tile = Tile::new(x, y);
+        out.extend(covers.into_iter().map(|cover| Footprint { tile, cover }));
     }
     Ok(out)
 }
@@ -824,7 +834,13 @@ fn check_ground(state: &WorldState, facet: Facet, at: Point, footprint: &[Footpr
         if terrain.land_tile(spot.tile).is_some_and(|land| is_road(land.0)) {
             return Err(Refusal::OnARoad);
         }
-        if spot.z == at.z && !terrain.can_fit(spot.tile, i32::from(spot.z), i32::from(spot.height).max(1)) {
+        if spot.cover.z == at.z
+            && !terrain.can_fit(
+                spot.tile,
+                i32::from(spot.cover.z),
+                i32::from(spot.cover.height).max(1),
+            )
+        {
             return Err(Refusal::BadGround);
         }
     }
@@ -870,15 +886,7 @@ fn within_yard(one: Tile, other: Tile) -> bool {
 /// only the facet holds both. See `FacetState::block`.
 fn block_footprint(facet_state: &mut FacetState, entity: EntityId, footprint: &[Footprint]) {
     for spot in footprint {
-        // Not a door: a house's own doors are entities of their own, placed on
-        // top of it, and a wall a mobile could ask to open is a wall that stops
-        // nobody who knows how.
-        facet_state.block(
-            spot.tile.x,
-            spot.tile.y,
-            entity,
-            openshard_map::overlay::Cover::blocking(spot.z, spot.height),
-        );
+        facet_state.block(spot.tile.x, spot.tile.y, entity, spot.cover);
     }
 }
 
@@ -895,7 +903,7 @@ fn occupied_tile(state: &WorldState, facet: Facet, footprint: &[Footprint]) -> O
         .iter()
         .find(|spot| {
             obstructions
-                .blocker_at_z(spot.tile.x, spot.tile.y, i32::from(spot.z))
+                .blocker_at_z(spot.tile.x, spot.tile.y, i32::from(spot.cover.z))
                 .is_some()
         })
         .map(|spot| spot.tile)

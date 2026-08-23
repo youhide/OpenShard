@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use openshard_entities::Registry;
 use openshard_events::EventBus;
 use openshard_map::grid::Tile;
+use openshard_map::overlay::{Body, Doors};
 use openshard_movement::scene::Scene;
 use openshard_protocol::serial::{Serial, SerialKind};
 use openshard_protocol::wire::Graphic;
@@ -38,10 +39,19 @@ const FOUNDATION: u16 = 0x13EC;
 /// A wall: impassable, twenty tall — the classic UO wall the door height was
 /// taken from.
 const WALL: u16 = 0x0006;
-/// A floor: drawn, walked over, and *not* impassable. The component that must
-/// not be folded into the footprint, because a house whose floor blocked would
-/// be sealed shut from the inside.
+/// A floor: drawn, walked over, and *not* impassable — `PLATFORM` with a
+/// tiledata height of zero, which is what every wooden-boards component of every
+/// classic multi is.
+///
+/// It goes into the footprint as a **surface** and never as a body: a house
+/// whose floor blocked would be sealed shut from the inside, and a floor of no
+/// thickness laid on the ground it duplicates is the case that would do it. See
+/// [`openshard_map::overlay::Cover::of_static`].
 const FLOOR: u16 = 0x0007;
+
+/// A stair: `PLATFORM | CLIMBABLE`, five tall, like multi `0x0064`'s own stone
+/// stairs. Met at its base and stood on half way up.
+const STAIR: u16 = 0x0008;
 
 /// The ground these tests build on, and the table it reads.
 ///
@@ -57,17 +67,18 @@ const FLOOR: u16 = 0x0007;
 /// it and never the terrain — flat ground at one height allows every step, which
 /// is the same guarantee the double gave by fiat.
 ///
-/// The wall is impassable and twenty tall, the floor is drawn and walked over.
-/// Both come from the scene's own tiledata, which is the table the shard is
-/// handed, so a house's footprint and the terrain under it cannot be reading two
-/// different files.
+/// The wall is impassable and twenty tall, the floor is a platform of no
+/// thickness and the stair a climbable one five tall. All three come from the
+/// scene's own tiledata, which is the table the shard is handed, so a house's
+/// footprint and the terrain under it cannot be reading two different files.
 fn ground_scene(land: u16, fits: bool) -> Scene {
     let side = u16::try_from(SIZE - 1).unwrap();
     let mut scene = Scene::flat_holding(side, side, 0);
     scene.land_art(land, if fits { 0 } else { TileFlags::BLOCK });
     scene.land_everywhere(land);
     scene.art(WALL, TileFlags::WALL | TileFlags::BLOCK, 20);
-    scene.art(FLOOR, TileFlags::FLOOR, 0);
+    scene.art(FLOOR, TileFlags::FLOOR | TileFlags::PLATFORM, 0);
+    scene.art(STAIR, TileFlags::PLATFORM | TileFlags::CLIMBABLE, 5);
     scene
 }
 
@@ -255,8 +266,92 @@ fn the_walls_block_and_the_floor_does_not() {
         "the floor was folded in, which seals the house shut from the inside"
     );
     assert!(
-        !obstructions.is_blocked(20, 20),
+        !obstructions.holds_anything(20, 20),
         "an undrawn component was folded in"
+    );
+}
+
+/// A house's floor is somewhere to stand, and the wall over it is still in the
+/// way.
+///
+/// **What R3 is for.** `footprint_of` folded in only the components whose
+/// tiledata said they blocked, so a house was its walls: no first floor, and a
+/// staircase that stopped a body rather than lifting one. The two halves are
+/// now one reading of the art — `Cover::of_static` — and this is that reading
+/// arriving at the shard's own index.
+///
+/// The floor is over open ground it does *not* duplicate (`dz = 7`), because
+/// the duplicate is a separate case with its own test below.
+#[test]
+fn a_house_floor_is_a_surface_and_the_wall_over_it_is_not() {
+    let mut components = cottage();
+    components.push(component(FLOOR, 2, 2, 7, true));
+    components.push(component(WALL, 2, 3, 7, true));
+    let mut state = world_with(components);
+    let (actor, owner) = an_actor(&mut state);
+    place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner).expect("a legal spot");
+
+    let facet = state.facet_state(Facet(0));
+    let world = facet.world();
+    // The first floor: somewhere to stand at z 7, and nothing in the way there.
+    assert_eq!(world.live().surface_at(Tile::new(12, 12), 0), Some(7));
+    assert!(
+        world
+            .live()
+            .blocker_at(Tile::new(12, 12), Body::new(7, 16), Doors::AsTheyStand)
+            .is_none(),
+        "a body standing on the floor is blocked by the floor"
+    );
+    // And the ground under it is still open: an upper storey is not a ceiling
+    // that seals the room below.
+    assert!(
+        world
+            .live()
+            .blocker_at(Tile::new(12, 12), Body::new(0, 16), Doors::AsTheyStand)
+            .is_none()
+    );
+    // The wall beside it, at the same height, is in the way and is no surface.
+    assert!(
+        world
+            .live()
+            .blocker_at(Tile::new(12, 13), Body::new(7, 16), Doors::AsTheyStand)
+            .is_some(),
+        "the upper-storey wall lets a body walk through it"
+    );
+    assert_eq!(world.live().surface_at(Tile::new(12, 13), 7), None);
+}
+
+/// **The risk this node names.** A floor laid exactly on the ground it
+/// duplicates must not change where a body stands, and must not seal the room.
+///
+/// A house's ground floor is a `PLATFORM` of tiledata height zero at `dz = 0`,
+/// so its surface is the same z the land already answers with. The failure it
+/// guards against is not subtle: a blocking half of height zero reaches one z up
+/// (`Cover::top`'s `max(1)`, which is right for a wall), and a body standing on
+/// its own ground floor would be inside it.
+#[test]
+fn a_ground_floor_laid_on_the_ground_seals_nothing() {
+    let mut components = cottage();
+    components.push(component(FLOOR, 2, 2, 0, true));
+    let mut state = world_with(components);
+    let (actor, owner) = an_actor(&mut state);
+    place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner).expect("a legal spot");
+
+    let facet = state.facet_state(Facet(0));
+    assert!(
+        facet
+            .world()
+            .live()
+            .blocker_at(Tile::new(12, 12), Body::new(0, 16), Doors::AsTheyStand)
+            .is_none(),
+        "the ground floor seals the room it is the floor of"
+    );
+    // And the step onto it lands where it always did — on the ground, at zero,
+    // not one unit up on a floor that duplicates it.
+    let footing = state.footing(Facet(0), Doors::AsTheyStand);
+    assert_eq!(
+        openshard_movement::can_step(&footing, Point::new(12, 11, 0), Point::new(12, 12, 0)),
+        Some(Point::new(12, 12, 0))
     );
 }
 
@@ -327,9 +422,11 @@ fn a_multi_nobody_can_build_is_refused_by_name() {
         "a foundation whose platform this shard cannot read has nothing to build a design from"
     );
 
-    // A multi that is in the table and blocks nothing — the treasure-site markers
-    // a real file ships five of.
-    let mut marker = world_with(vec![component(FLOOR, 0, 0, 0, true)]);
+    // A multi that is in the table and draws nothing — the treasure-site markers
+    // a real file ships five of. Every component of all five is *undrawn*, which
+    // is what the fixture says here: a drawn floor is a floor and belongs to the
+    // house that has one.
+    let mut marker = world_with(vec![component(FLOOR, 0, 0, 0, false)]);
     let (marker_actor, marker_owner) = an_actor(&mut marker);
     assert_eq!(
         place(&mut marker, marker_actor, at, Facet(0), COTTAGE, marker_owner),
@@ -384,7 +481,7 @@ fn unblocking_gives_the_ground_back() {
 
     unblock(&mut state, house, Facet(0), &footprint);
     assert!(
-        !state.facet_state(Facet(0)).obstructions().is_blocked(9, 9),
+        !state.facet_state(Facet(0)).obstructions().holds_anything(9, 9),
         "a wall outlived the house"
     );
 
@@ -1234,7 +1331,7 @@ fn a_collapsed_house_leaves_a_crate_and_no_walls() {
         state
             .facet_state(Facet(0))
             .obstructions()
-            .is_blocked(at.x - 1, at.y - 1),
+            .holds_anything(at.x - 1, at.y - 1),
         "the cottage never had walls"
     );
     let mut down = Vec::new();
@@ -1251,7 +1348,7 @@ fn a_collapsed_house_leaves_a_crate_and_no_walls() {
         !state
             .facet_state(Facet(0))
             .obstructions()
-            .is_blocked(at.x - 1, at.y - 1),
+            .holds_anything(at.x - 1, at.y - 1),
         "the walls outlived the house"
     );
     assert!(
@@ -1610,7 +1707,7 @@ fn a_redesigned_house_takes_its_old_walls_out_and_puts_its_new_ones_in() {
     let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
 
     assert!(
-        state.facet_state(Facet(0)).obstructions().is_blocked(9, 9),
+        state.facet_state(Facet(0)).obstructions().holds_anything(9, 9),
         "the cottage's north-west wall"
     );
 
@@ -1618,13 +1715,17 @@ fn a_redesigned_house_takes_its_old_walls_out_and_puts_its_new_ones_in() {
 
     let obstructions = &state.facet_state(Facet(0)).obstructions();
     assert!(
-        !obstructions.is_blocked(9, 9),
+        !obstructions.holds_anything(9, 9),
         "a wall that is no longer part of the house is still blocking"
     );
-    assert!(obstructions.is_blocked(13, 13), "the lean-to's wall");
+    assert!(obstructions.holds_anything(13, 13), "the lean-to's wall");
     assert!(
-        !obstructions.is_blocked(13, 14),
+        obstructions.blocker_at_z(13, 14, 0).is_none(),
         "the floor is walked over, not blocked — the same rule as before the redesign"
+    );
+    assert!(
+        obstructions.holds_anything(13, 14),
+        "and it is still *there*: the new design's floor is somewhere to stand"
     );
 }
 
@@ -1682,7 +1783,7 @@ fn a_design_that_draws_nothing_leaves_the_house_exactly_as_it_was() {
         "a design of one undrawn signature tile is not a house"
     );
     assert!(
-        state.facet_state(Facet(0)).obstructions().is_blocked(9, 9),
+        state.facet_state(Facet(0)).obstructions().holds_anything(9, 9),
         "the refusal took the walls down anyway"
     );
     assert_eq!(
@@ -1841,7 +1942,7 @@ fn a_foundation_blocks_where_its_design_says_and_not_where_its_platform_does() {
     // The cottage fixture's walls are at ±1, and the design keeps them: a
     // design is the platform *plus* a floor and stairs, never a replacement.
     assert!(
-        state.facet_state(Facet(0)).obstructions().is_blocked(9, 9),
+        state.facet_state(Facet(0)).obstructions().holds_anything(9, 9),
         "the platform's own components were dropped from the design"
     );
 }

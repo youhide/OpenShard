@@ -145,9 +145,15 @@ impl Obstructions {
         })
     }
 
-    /// Whether anything is registered on `(x, y)` at all — a surface included.
+    /// Whether anything at all is registered on `(x, y)` — **a surface
+    /// included**, so this is not the question a step asks.
+    ///
+    /// It was called `is_blocked` while nothing but blockers could be in here.
+    /// A house's floor is a surface and goes in the same index, so the old name
+    /// would now answer "yes, blocked" about an open room. Use
+    /// [`blocker_at`](Self::blocker_at) for what is in the way.
     #[must_use]
-    pub fn is_blocked(&self, x: u16, y: u16) -> bool {
+    pub fn holds_anything(&self, x: u16, y: u16) -> bool {
         self.tiles.contains_key(&(x, y))
     }
 
@@ -348,7 +354,7 @@ mod tests {
         obstructions.block(5, 5, door, Cover::door(0, DOOR_HEIGHT));
         obstructions.block(5, 5, door, Cover::door(0, DOOR_HEIGHT));
         obstructions.unblock(5, 5, door);
-        assert!(!obstructions.is_blocked(5, 5));
+        assert!(!obstructions.holds_anything(5, 5));
     }
 
     #[test]

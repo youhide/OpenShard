@@ -982,7 +982,7 @@ fn a_house_restored_without_client_files_stands_but_stops_nobody() {
             .state
             .facet_state(Facet(0))
             .obstructions()
-            .is_blocked(START.0 + 4, START.1 + 5),
+            .holds_anything(START.0 + 4, START.1 + 5),
         "a shard with no multi table invented a wall"
     );
 }

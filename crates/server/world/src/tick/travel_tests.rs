@@ -904,7 +904,7 @@ fn a_city_moongate_does_not_seal_the_tile_it_stands_on() {
             .state
             .facet_state(britain.facet)
             .obstructions()
-            .is_blocked(britain.at.x, britain.at.y),
+            .holds_anything(britain.at.x, britain.at.y),
         "nothing bars the tile"
     );
     assert!(

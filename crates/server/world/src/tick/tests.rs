@@ -6610,7 +6610,7 @@ fn wall_of_stone_blocks_the_way_then_clears() {
             .state
             .facet_state(Facet(0))
             .obstructions()
-            .is_blocked(spot.x, spot.y),
+            .holds_anything(spot.x, spot.y),
         "the wall blocks its centre tile"
     );
 
@@ -6634,7 +6634,7 @@ fn wall_of_stone_blocks_the_way_then_clears() {
             .state
             .facet_state(Facet(0))
             .obstructions()
-            .is_blocked(spot.x, spot.y),
+            .holds_anything(spot.x, spot.y),
         "and the way is free again"
     );
 }
