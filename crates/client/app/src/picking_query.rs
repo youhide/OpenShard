@@ -569,7 +569,7 @@ impl App {
     /// **The plan itself, not a picture of one.** [`steer::plan`] is the same
     /// call `Steering` walks by, so the green half is the route the body is
     /// really taking, and the red half begins at a shut door — the only thing
-    /// the two readings of the ground differ by (see [`steer::Ground`]). A cut
+    /// the two readings of the ground differ by (see [`steer::Readings`]). A cut
     /// written here for the drawing alone would be a second policy about the
     /// same question, which `docs/parity.md` is the standing argument against.
     ///
@@ -629,7 +629,7 @@ impl App {
                 }
             }
         }
-        let ground = steer::Ground {
+        let ground = steer::Readings {
             // The route the HUD draws is the one a step would take, so it reads
             // the doors as they stand whatever the auto-door setting is.
             live: footing(&self.resources, openshard_map::overlay::Doors::AsTheyStand),

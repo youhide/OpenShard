@@ -3786,7 +3786,7 @@ and the test that reproduces the original bug.
 
 ### The route a Ctrl-drag draws, and what is left around it
 
-Built: `steer::plan` reads the ground twice (`steer::Ground` — the map with the
+Built: `steer::plan` reads the ground twice (`steer::Readings` — the map with the
 shard's items over it, and the map alone), so a destination sealed off by
 something placed is planned *up to* that thing rather than answered "no route";
 and where neither reading has a way through, `movement::find_path_toward` plans

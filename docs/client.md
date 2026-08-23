@@ -2612,7 +2612,7 @@ own understanding had written.
   into a room — was "no route", which degraded to walking at it in a straight
   line and giving up four beats later somewhere that was not the door.
 
-  The plan now reads the ground twice. `steer::Ground` carries both halves: the
+  The plan now reads the ground twice. `steer::Readings` carries both halves: the
   map with everything the shard placed over it (`clutter.rs`'s `Cluttered`,
   which is what every step is decided against) and the bare map, which is the
   same world with nothing placed in it and therefore every door open.

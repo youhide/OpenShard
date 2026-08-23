@@ -87,7 +87,7 @@ use crate::GLIDE_INTERVAL;
 use crate::crowd::{Crowd, Ease, Who};
 use crate::link::{self, Body};
 use crate::net_command::project_motion;
-use crate::steer::Ground;
+use crate::steer::Readings;
 use crate::world::PlayerMotion;
 
 /// The body every scenario walks.
@@ -540,7 +540,7 @@ impl Sim {
                             self.player.at,
                             self.instant(),
                             self.player.facing,
-                            Ground::plain(Footing::new(None, &EMPTY_FIELD, Doors::AsTheyStand)),
+                            Readings::plain(Footing::new(None, &EMPTY_FIELD, Doors::AsTheyStand)),
                         ) {
                             self.send(facing);
                         }
@@ -650,7 +650,7 @@ impl Sim {
                 self.instant(),
                 self.player.at,
                 self.player.facing,
-                Ground::plain(Footing::new(None, &EMPTY_FIELD, Doors::AsTheyStand)),
+                Readings::plain(Footing::new(None, &EMPTY_FIELD, Doors::AsTheyStand)),
             ) else {
                 break;
             };

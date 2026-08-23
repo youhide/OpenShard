@@ -1407,14 +1407,15 @@ graph over spans names neither.
   parallel session's in-flight edit to `spans.rs`, so the cause is **not**
   settled. What is settled is that a wall clock decides this assertion, and a
   deadline the caller names is what would take it out of the assertion.
-- **A second `Ground` now exists in `client/app`, and it is the misnamed one.**
-  [`steer::Ground`](../../crates/client/app/src/steer.rs) is a pair of
-  `Footing`s — the same map read twice, once with the doors shut and once open —
-  which is a *reading*, and not ground. Nothing collides at the compiler and no
-  file imports both, but one crate spells two different ideas with one word
-  since the ground and its bake became
-  [`Ground`](../../crates/common/movement/src/ground.rs). If either is renamed
-  it should be that one: `Readings` says what it is.
+- **A second `Ground` now exists in `client/app`, and it is the misnamed one.
+  ✅ Fixed.** [`steer::Readings`](../../crates/client/app/src/steer.rs) is a
+  pair of `Footing`s — the same map read twice, once with the doors shut and
+  once open — which is a *reading*, and not ground. Nothing collided at the
+  compiler and no file imported both, which is what let one crate spell two
+  ideas with one word after the ground and its bake became
+  [`Ground`](../../crates/common/movement/src/ground.rs). It is `Readings` now,
+  and the type says why on itself. Nothing else moved — the fields, the callers
+  and their bindings are what they were — because the name was the whole of it.
 
 - **A dense `average_land_z` array.** 29.4 MB turns the bare-column case from
   four corner reads into one. It waited for N3's measurement, and the

@@ -1091,7 +1091,7 @@ index *which* door.
 
 It also earned its keep at once. `Footing::reading` makes "the same ground the
 other way" a method on one value rather than a second thing a caller assembles,
-and the client's `steer::Ground` collapsed from three terrains to one footing
+and the client's `steer::Readings` collapsed from three terrains to one footing
 and a guide because of it.
 
 ### The agreement is by construction, which is stronger than the test 🚩
@@ -1151,7 +1151,7 @@ workspace is in a test. Server AI plans with flat
 explored tiles — so a creature cannot route across a town while the artifact
 that would let it sits loaded and unread. The client does use it, through its
 own `Resources.coarse`:
-[`steer::Ground::path`](../../crates/client/app/src/steer.rs#L331) falls back
+[`steer::Readings::path`](../../crates/client/app/src/steer.rs#L331) falls back
 past 8 tiles.
 
 Either `step_toward` gains the same fall-back, or `boot.rs` stops paying for

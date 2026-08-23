@@ -271,7 +271,7 @@ impl ApplicationHandler<()> for App {
                                 motion.position,
                                 Instant::now(),
                                 motion.facing.direction,
-                                steer::Ground {
+                                steer::Readings {
                                     // An enabled auto-door mode turns a shut
 
                                     // leaf into a usable next step; `walk`
@@ -826,10 +826,10 @@ impl ApplicationHandler<()> for App {
         let mut moved = false;
         for _ in 0..2 {
             // Both halves of the ground, because this is where a destination
-            // replans: see `steer::Ground`. Built here rather than held, for the
+            // replans: see `steer::Readings`. Built here rather than held, for the
             // reason the single terrain always was — they borrow the map and the
             // view, and the walk borrows `steer` mutably beside them.
-            let ground = steer::Ground {
+            let ground = steer::Readings {
                 live: footing(&self.resources, self.walking_doors()),
 
                 guide: guide(&self.resources),

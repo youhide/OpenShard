@@ -449,7 +449,7 @@ impl App {
         let Some(tile) = self.pick_tile(*self.control.camera()) else {
             return false;
         };
-        let ground = steer::Ground {
+        let ground = steer::Readings {
             live: footing(&self.resources, self.walking_doors()),
 
             guide: guide(&self.resources),
