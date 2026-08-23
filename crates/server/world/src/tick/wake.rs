@@ -70,7 +70,7 @@ impl World {
                 .state
                 .facet_state(facet)
                 .sectors
-                .in_block(at)
+                .mobiles_in_block(at)
                 .map(|(entity, _)| entity)
                 .collect();
             for entity in sleepers {

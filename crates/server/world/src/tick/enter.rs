@@ -400,7 +400,10 @@ impl World {
             context_menus = self.state.gameplay.context_menus,
             "player feature gates"
         );
-        self.state.facet_state_mut(facet).sectors.insert(entity, position);
+        self.state
+            .facet_state_mut(facet)
+            .sectors
+            .insert(entity, position, Occupant::Mobile);
         self.state.seen.insert(entity, HashSet::new());
 
         // Bring back what this character was carrying, if the store had it. A

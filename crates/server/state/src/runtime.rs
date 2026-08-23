@@ -54,7 +54,7 @@ use crate::obstruct::Obstructions;
 use crate::quest::QuestDefs;
 use crate::region::{Region, Regions};
 use crate::rng::Rng;
-use crate::sectors::{Sectors, VIEW_RANGE};
+use crate::sectors::{Occupant, Sectors, VIEW_RANGE};
 use crate::skill::Skill;
 
 /// A character's height above the ground when the facet has no map to ask.
@@ -1251,8 +1251,12 @@ impl WorldState {
     /// the plan, which costs a re-plan when the route reaches it, and never a
     /// wrong step: the step itself is decided with its own crowd.
     ///
-    /// The grid holds items and decoration too, which is why every candidate is
-    /// then asked [`body_blocks`](Self::body_blocks).
+    /// The grid's mobile list, which is not the same as "everything that
+    /// blocks": a body that is dead, or a hidden game master, is in the list and
+    /// in nobody's way, which is why every candidate is then asked
+    /// [`body_blocks`](Self::body_blocks). What the list *does* spare this is
+    /// the furniture — a decorated house's lockdowns share a sector with the
+    /// street outside it, and this runs on every step by anyone.
     #[must_use]
     pub fn crowd_near(&self, facet: Facet, mover: EntityId, centre: Point, reach: u32) -> Vec<Point> {
         if self.walks_through_bodies(mover) {
@@ -1261,7 +1265,7 @@ impl WorldState {
         let mut crowd: Vec<Point> = self
             .facet_state(facet)
             .sectors
-            .nearby(centre, reach)
+            .mobiles_near(centre, reach)
             // `mover` is absent from its own crowd, which is the whole of "a
             // mobile may always step off the tile it is standing on".
             .filter(|&(entity, _)| entity != mover && self.body_blocks(entity))
@@ -1493,8 +1497,12 @@ impl WorldState {
         let Some(centre) = sectors.position_of(source) else {
             return;
         };
-        // Collected before the mutation so the sectors borrow is dropped.
-        let audience: Vec<EntityId> = sectors.nearby(centre, VIEW_RANGE).map(|(id, _)| id).collect();
+        // Collected before the mutation so the sectors borrow is dropped. The
+        // mobile list, because only a mobile has a client to hear it.
+        let audience: Vec<EntityId> = sectors
+            .mobiles_near(centre, VIEW_RANGE)
+            .map(|(id, _)| id)
+            .collect();
         for entity in audience {
             if let Some(&Client { connection, .. }) = self.registry.get::<Client>(entity) {
                 self.outbox.push(Outbound {
@@ -1994,7 +2002,12 @@ impl WorldState {
             walker.sequence.reset();
             self.registry.insert(entity, Movement(walker));
         }
-        self.facet_state_mut(facet).sectors.insert(entity, to);
+        // A mobile: every caller of this is a traveller — a gate, a recall, a
+        // `.go`, a body relocated by the ship it is standing on. An item is put
+        // down by `items::place_on_ground`, which files it as one.
+        self.facet_state_mut(facet)
+            .sectors
+            .insert(entity, to, Occupant::Mobile);
 
         if from != facet {
             if let Some(&Client { connection, .. }) = self.registry.get::<Client>(entity) {
@@ -2143,8 +2156,12 @@ impl WorldState {
         // neighbours from shifting while it is walked. A set and not a `Vec`:
         // it is membership-tested once per remembered entity and once per watcher
         // below, which on a `Vec` is a linear scan inside two loops.
+        //
+        // Both lists, and the only lookup in this file that wants both: a screen
+        // holds the people *and* the furniture, so a player who walks up to a
+        // house has to be sent the house.
         let neighbours: HashSet<EntityId> = sectors
-            .nearby(centre, VIEW_RANGE)
+            .everything_near(centre, VIEW_RANGE)
             .map(|(id, _)| id)
             .filter(|id| *id != entity)
             .collect();
@@ -3379,7 +3396,7 @@ impl WorldState {
             return Vec::new();
         };
         sectors
-            .nearby(centre, VIEW_RANGE)
+            .mobiles_near(centre, VIEW_RANGE)
             .filter_map(|(entity, _)| self.client_of(entity))
             .collect()
     }
@@ -3392,8 +3409,10 @@ impl WorldState {
         let Some(centre) = sectors.position_of(entity) else {
             return;
         };
+        // The watchers, so the mobile list: `show` wants a screen to draw on and
+        // an item has none.
         let watchers: Vec<EntityId> = sectors
-            .nearby(centre, VIEW_RANGE)
+            .mobiles_near(centre, VIEW_RANGE)
             .map(|(id, _)| id)
             .filter(|id| *id != entity)
             .collect();
@@ -3464,7 +3483,10 @@ mod tests {
             },
         );
         state.registry.insert(entity, Position(at));
-        state.facet_state_mut(Facet(0)).sectors.insert(entity, at);
+        state
+            .facet_state_mut(Facet(0))
+            .sectors
+            .insert(entity, at, Occupant::Mobile);
         entity
     }
 
@@ -3489,13 +3511,20 @@ mod tests {
 
         // A chest is in the same sector grid and is not a body. It is what the
         // obstruction index is for, and asking it here would be the second
-        // reading of one fact that this whole seam exists to avoid.
+        // reading of one fact that this whole seam exists to avoid. Two things
+        // keep it out of the crowd now and this asserts the pair: it is filed as
+        // an [`Occupant::Item`], so the mobile list never offers it, and
+        // `body_blocks` would refuse it if it were.
         let chest = state.registry.spawn();
         state.registry.insert(chest, Position(Point::new(7, 8, 0)));
         state
             .facet_state_mut(Facet(0))
             .sectors
-            .insert(chest, Point::new(7, 8, 0));
+            .insert(chest, Point::new(7, 8, 0), Occupant::Item);
+        assert!(
+            !state.body_blocks(chest),
+            "an item is not a body wherever it is filed"
+        );
         assert_eq!(
             state.crowd_near(Facet(0), walker, Point::new(8, 8, 0), 1),
             vec![Point::new(9, 8, 0)],

@@ -420,11 +420,7 @@ fn mobiles_near(state: &WorldState, centre: EntityId, range: u32) -> Vec<EntityI
     state
         .facet_state(facet)
         .sectors
-        .nearby(at, range)
-        .filter(|(entity, spot)| {
-            openshard_state::in_range(at, *spot, range)
-                && state.registry.has::<openshard_state::components::Body>(*entity)
-        })
+        .mobiles_near(at, range)
         .map(|(entity, _)| entity)
         .collect()
 }

@@ -1206,7 +1206,10 @@ impl World {
                 },
             );
         }
-        self.state.facet_state_mut(facet).sectors.insert(entity, position);
+        self.state
+            .facet_state_mut(facet)
+            .sectors
+            .insert(entity, position, Occupant::Item);
     }
 
     /// Equip a logging-in character's saved inventory, if any is waiting.
@@ -1536,7 +1539,10 @@ impl World {
                 }
                 self.state.registry.insert(entity, sheet);
             }
-            self.state.facet_state_mut(facet).sectors.insert(entity, position);
+            self.state
+                .facet_state_mut(facet)
+                .sectors
+                .insert(entity, position, Occupant::Mobile);
             // Whether it gives quests, and whether it can be escorted. This is
             // the binding that used to live only in the script's memory and so
             // was lost at every restart.
@@ -1675,7 +1681,10 @@ impl World {
                     }
                 }
             }
-            self.state.facet_state_mut(facet).sectors.insert(entity, position);
+            self.state
+                .facet_state_mut(facet)
+                .sectors
+                .insert(entity, position, Occupant::Item);
         }
     }
 

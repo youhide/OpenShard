@@ -24,10 +24,10 @@ use openshard_protocol::target::{MultiTargetRequest, TargetKind};
 use openshard_protocol::wire::CursorId;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
-use openshard_state::TargetPurpose;
 use openshard_state::components::{
     Client, Contained, Drawn, House, HouseDeed, HouseDesign, HouseSign, Position,
 };
+use openshard_state::{Occupant, TargetPurpose};
 use tracing::{info, warn};
 
 use super::World;
@@ -145,7 +145,10 @@ impl World {
                 },
             );
             self.state.registry.insert(entity, facet);
-            self.state.facet_state_mut(facet).sectors.insert(entity, at);
+            self.state
+                .facet_state_mut(facet)
+                .sectors
+                .insert(entity, at, Occupant::Item);
             // The hull-and-deck split, recomputed. A shard with no client files
             // gets a ship that draws on every client and carries nobody — the
             // same bargain a house's walls make, and for the same reason.
@@ -255,7 +258,10 @@ impl World {
                 },
             );
             self.state.registry.insert(entity, facet);
-            self.state.facet_state_mut(facet).sectors.insert(entity, at);
+            self.state
+                .facet_state_mut(facet)
+                .sectors
+                .insert(entity, at, Occupant::Item);
             // The design, if this house has one. Put on before the footprint is
             // computed, because the footprint is computed *from* it.
             let design = by_house.remove(&record.serial);

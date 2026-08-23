@@ -34,8 +34,8 @@ use openshard_entities::EntityId;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
-use openshard_state::WorldState;
 use openshard_state::components::{Contained, Drawn, House, HouseDoor, HouseSign, LockedDown, Position};
+use openshard_state::{Occupant, WorldState};
 
 /// The crate a demolished house's contents land in — ServUO's `MovingCrate`,
 /// graphic and hue both.
@@ -279,7 +279,10 @@ fn pack_into_a_crate(
     );
     state.registry.insert(crate_entity, Position(at));
     state.registry.insert(crate_entity, facet);
-    state.facet_state_mut(facet).sectors.insert(crate_entity, at);
+    state
+        .facet_state_mut(facet)
+        .sectors
+        .insert(crate_entity, at, Occupant::Item);
 
     // The secures go in whole — a chest keeps its contents, and the things
     // already inside it are left alone. Everything else goes in loose, which is

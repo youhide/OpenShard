@@ -37,9 +37,9 @@ use openshard_map::grid::Tile;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
-use openshard_state::WorldState;
 use openshard_state::boat::Plank;
 use openshard_state::components::{Boat, Drawn, Movement, Position, Sailing};
+use openshard_state::{Occupant, WorldState};
 
 /// The bit a multi's graphic carries on the wire.
 ///
@@ -189,7 +189,10 @@ pub fn place(
     state.registry.insert(entity, facet);
     // On the sector grid like any item, so a client sailing into view is told
     // about it by the ordinary interest sweep rather than by a path of its own.
-    state.facet_state_mut(facet).sectors.insert(entity, at);
+    state
+        .facet_state_mut(facet)
+        .sectors
+        .insert(entity, at, Occupant::Item);
     state.facet_state_mut(facet).moor(entity, berth);
     Ok(entity)
 }
@@ -276,7 +279,10 @@ pub fn step(
     // already where the ship is going rather than on the one it is leaving.
     state.facet_state_mut(facet).moor(boat, berth);
     state.registry.insert(boat, Position(to));
-    state.facet_state_mut(facet).sectors.insert(boat, to);
+    state
+        .facet_state_mut(facet)
+        .sectors
+        .insert(boat, to, Occupant::Item);
 
     let (dx, dy) = (
         i32::from(to.x) - i32::from(at.x),
@@ -371,8 +377,8 @@ fn aboard(state: &WorldState, boat: EntityId, facet: Facet) -> Vec<(EntityId, Po
         return Vec::new();
     };
     // One sector query for the whole ship rather than one per tile: the berth is
-    // a handful of tiles and `nearby` is a block sweep, so asking it four times
-    // for a sloop would walk the same statics four times.
+    // a handful of tiles and a lookup is a block sweep, so asking it four times
+    // for a sloop would walk the same neighbourhood four times.
     let centre = Point::new(first.0, first.1, 0);
     let reach = covered
         .iter()
@@ -382,7 +388,7 @@ fn aboard(state: &WorldState, boat: EntityId, facet: Facet) -> Vec<(EntityId, Po
 
     facet_state
         .sectors
-        .nearby(centre, reach)
+        .mobiles_near(centre, reach)
         .filter(|&(entity, _)| entity != boat)
         .filter(|(entity, _)| state.registry.has::<Movement>(*entity))
         .filter(|&(_, at)| facet_state.boats().deck_at(at.x, at.y, i32::from(at.z)) == Some(i32::from(at.z)))

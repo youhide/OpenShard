@@ -268,8 +268,8 @@ impl World {
                     .state
                     .facet_state(facet)
                     .sectors
-                    .nearby(centre, magic::AREA_RADIUS)
-                    .filter(|(entity, _)| *entity != caster && self.state.registry.has::<Body>(*entity))
+                    .mobiles_near(centre, magic::AREA_RADIUS)
+                    .filter(|(entity, _)| *entity != caster)
                     .filter_map(|(entity, _)| self.state.registry.serial_of(entity))
                     .collect();
                 for victim in victims {
@@ -314,8 +314,7 @@ impl World {
                     .state
                     .facet_state(facet)
                     .sectors
-                    .nearby(target_location, magic::AREA_RADIUS)
-                    .filter(|(entity, _)| self.state.registry.has::<Body>(*entity))
+                    .mobiles_near(target_location, magic::AREA_RADIUS)
                     .filter_map(|(entity, _)| self.state.registry.serial_of(entity))
                     .collect();
                 for mobile in healed {

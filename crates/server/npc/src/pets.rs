@@ -129,7 +129,7 @@ pub fn hear_pet_order(state: &mut WorldState, speaker: EntityId, text: &str) {
     let mine: Vec<EntityId> = state
         .facet_state(facet)
         .sectors
-        .nearby(at, PET_HEARING)
+        .mobiles_near(at, PET_HEARING)
         .map(|(entity, _)| entity)
         .filter(|&entity| {
             state

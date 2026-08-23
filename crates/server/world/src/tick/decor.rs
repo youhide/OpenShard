@@ -167,7 +167,10 @@ impl World {
                 .facet_state_mut(facet)
                 .block(position.x, position.y, entity, cover);
         }
-        self.state.facet_state_mut(facet).sectors.insert(entity, position);
+        self.state
+            .facet_state_mut(facet)
+            .sectors
+            .insert(entity, position, Occupant::Item);
         self.state.reveal(entity);
         Some(entity)
     }

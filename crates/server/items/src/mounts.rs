@@ -183,7 +183,13 @@ pub fn dismount(state: &mut WorldState, player: EntityId) {
         );
     }
 
-    state.facet_state_mut(facet).sectors.insert(mount, landing);
+    // Back on the grid as a mobile: while it was ridden it was an item on a
+    // layer, and dismounting is where it becomes a body again — one somebody
+    // else now has to walk around.
+    state
+        .facet_state_mut(facet)
+        .sectors
+        .insert(mount, landing, Occupant::Mobile);
     state.reveal(mount);
     // And the rider redraws on foot for everyone watching.
     state.broadcast_move(player);

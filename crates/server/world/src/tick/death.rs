@@ -562,7 +562,13 @@ impl World {
                 at_tick: self.state.ticks + CORPSE_DECAY_TICKS,
             },
         );
-        self.state.facet_state_mut(facet).sectors.insert(entity, at);
+        // A corpse is an item and always was: it is a container with a body
+        // graphic, not a body, so it goes in the list the living are not read
+        // out of.
+        self.state
+            .facet_state_mut(facet)
+            .sectors
+            .insert(entity, at, Occupant::Item);
         self.state.reveal(entity);
         Some(serial)
     }

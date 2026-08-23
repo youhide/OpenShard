@@ -90,9 +90,11 @@ pub fn around(state: &WorldState, crafter: EntityId) -> Facilities {
     let facet = state.facet_of(crafter);
 
     // The decoration the converter placed, and anything a player or a script has
-    // dropped since. `nearby` is a Chebyshev box, which is the shape ServUO's
-    // `GetItemsInRange` walks too.
-    for (item, pos) in state.facet_state(facet).sectors.nearby(at, WORKSHOP_RANGE) {
+    // dropped since. A Chebyshev box, which is the shape ServUO's
+    // `GetItemsInRange` walks too — and the one lookup in the shard that wants
+    // the sector grid's *item* list, since a forge is furniture and a smith
+    // standing beside it is not what is being asked about.
+    for (item, pos) in state.facet_state(facet).sectors.items_near(at, WORKSHOP_RANGE) {
         if !in_z_band(i32::from(at.z), i32::from(pos.z)) {
             continue;
         }

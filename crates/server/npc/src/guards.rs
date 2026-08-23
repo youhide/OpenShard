@@ -30,7 +30,6 @@ use openshard_state::WorldState;
 use openshard_state::components::{
     Aggression, Client, CriminalUntil, DamageType, Ghost, Guard, Hitpoints, Murders, Position, Staff,
 };
-use openshard_state::sectors::in_range;
 
 use openshard_combat as combat;
 
@@ -172,9 +171,8 @@ fn nearest_candidate(state: &WorldState, at: Point, facet: Facet) -> Option<Enti
         .facets
         .get(&facet)?
         .sectors
-        .nearby(at, CALL_RANGE)
+        .mobiles_near(at, CALL_RANGE)
         .filter(|&(entity, _)| is_candidate(state, entity))
-        .filter(|&(_, point)| in_range(point, at, CALL_RANGE))
         .min_by_key(|&(_, point)| openshard_state::sectors::distance(point, at))
         .map(|(entity, _)| entity)
 }

@@ -43,7 +43,7 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{Drawn, House, Position};
-use openshard_state::{FacetState, WorldState};
+use openshard_state::{FacetState, Occupant, WorldState};
 use openshard_uofiles::multi::Component;
 
 /// The bit that turns a multi id into the graphic the wire carries.
@@ -298,7 +298,10 @@ pub fn place(
     }
     // On the sector grid like any item, so a client entering the area is told
     // about it by the ordinary interest sweep rather than by a path of its own.
-    state.facet_state_mut(facet).sectors.insert(entity, at);
+    state
+        .facet_state_mut(facet)
+        .sectors
+        .insert(entity, at, Occupant::Item);
     block_footprint(state.facet_state_mut(facet), entity, &footprint);
     adopt_doors(state, entity, facet, at, multi);
     hang_sign(state, entity, facet, at, multi);
@@ -515,7 +518,10 @@ pub fn hang_sign(
         .registry
         .insert(sign, openshard_state::components::HouseSign { house: serial });
     state.registry.insert(sign, facet);
-    state.facet_state_mut(facet).sectors.insert(sign, spot);
+    state
+        .facet_state_mut(facet)
+        .sectors
+        .insert(sign, spot, Occupant::Item);
     Some(sign)
 }
 

@@ -84,6 +84,6 @@ pub use runtime::{
     HeldItem, HouseChange, HouseGumpContext, HouseList, HouseStorage, Origin, Outbound, QuestGumpContext,
     QuestSection, TICKS_PER_SECOND, TargetPurpose, TooltipMode, Trade, TradeSide, WorldState,
 };
-pub use sectors::{SECTOR_SIZE, Sectors, VIEW_RANGE, distance, in_range};
+pub use sectors::{Occupant, SECTOR_SIZE, Sectors, VIEW_RANGE, distance, in_range};
 pub use skill::{SKILL_COUNT, SKILLS, Skill, SkillInfo, StatCode};
 pub use title::{award_fame, award_karma, award_message, compute_title, titled_name};

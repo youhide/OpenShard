@@ -365,7 +365,11 @@ pub(super) fn teleport(world: &mut World, connection: ConnectionId, point: Point
         world.state.registry.insert(entity, Movement(walker));
     }
     let facet = world.state.facet_of(entity);
-    world.state.facet_state_mut(facet).sectors.insert(entity, point);
+    world
+        .state
+        .facet_state_mut(facet)
+        .sectors
+        .insert(entity, point, openshard_state::Occupant::Mobile);
     world.state.refresh_around(entity);
 }
 
@@ -3055,6 +3059,72 @@ fn spawn_mobile_full(
         .filter_map(|(entity, _)| world.state.registry.serial_of(entity))
         .max()
         .expect("a spawned creature")
+}
+
+/// **What the shard puts on the sector grid is filed as what it is.**
+///
+/// [`Occupant`] is declared at the insert and never worked out from the
+/// registry, which is what makes it impossible to go stale — at the cost of the
+/// one thing no compiler catches: a caller naming the wrong list. A mobile filed
+/// as an item is invisible to sight, to chat, to a guard's call and to the crowd
+/// a step is decided against, and *nothing errors*.
+///
+/// So this is the guard, and it holds the grid against the registry rather than
+/// against itself: the real spawn paths run — a player entering, a creature
+/// spawned, an item and a container placed, and a corpse left behind by a death
+/// — and every row of both lists has to agree with the [`Body`] the registry
+/// has.
+#[test]
+fn the_shard_files_what_it_spawns_as_what_it_is() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+    let at = Point::new(START.0, START.1, 0);
+
+    // Eight hits, five a swing: dead on the second, and what it leaves is the
+    // case most worth asserting — a corpse carries a body *graphic* and is not a
+    // body.
+    let mob = spawn_mobile_at(&mut world, at, 8, now);
+    spawn_item_at(&mut world, Point::new(START.0 + 1, START.1, 0), now);
+    spawn_container_at(&mut world, Point::new(START.0 + 2, START.1, 0), now);
+    engage(&mut world, connection, mob, now);
+    for _ in 0..(2 * WRESTLING_SWING_TICKS) {
+        world.tick(now);
+    }
+
+    let sectors = &world.state.facet_state(Facet(0)).sectors;
+    let range = openshard_state::VIEW_RANGE;
+    let mobiles: Vec<EntityId> = sectors.mobiles_near(at, range).map(|(id, _)| id).collect();
+    let items: Vec<EntityId> = sectors.items_near(at, range).map(|(id, _)| id).collect();
+
+    assert!(
+        mobiles.contains(&player),
+        "the player who entered is on the mobile list"
+    );
+    assert!(
+        items.iter().any(|&entity| world
+            .state
+            .registry
+            .get::<Drawn>(entity)
+            .is_some_and(|drawn| drawn.id == openshard_state::components::CORPSE_GRAPHIC)),
+        "the corpse the death left is on the item list"
+    );
+    assert!(items.len() >= 3, "the corpse, the item and the container");
+
+    for entity in mobiles {
+        assert!(
+            world.state.registry.has::<Body>(entity),
+            "filed as a mobile with no body: everything that reads the mobile list \
+             would have to re-check what the list is for"
+        );
+    }
+    for entity in items {
+        assert!(
+            !world.state.registry.has::<Body>(entity),
+            "a body filed as furniture is invisible to everything that looks for people"
+        );
+    }
 }
 
 #[test]
@@ -13904,7 +13974,11 @@ fn a_bystander_at(world: &mut World, at: Point) -> EntityId {
     );
     world.state.registry.insert(entity, Position(at));
     world.state.registry.insert(entity, Facet(0));
-    world.state.facet_state_mut(Facet(0)).sectors.insert(entity, at);
+    world
+        .state
+        .facet_state_mut(Facet(0))
+        .sectors
+        .insert(entity, at, openshard_state::Occupant::Mobile);
     entity
 }
 

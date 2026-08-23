@@ -630,11 +630,8 @@ fn nearest_player_in_sight(
     let live = state.footing(facet, Doors::AsTheyStand);
     let sectors = &facet_state.sectors;
     let mut best: Option<(u32, Serial)> = None;
-    for (id, pos) in sectors.nearby(from, u32::from(sight.0)) {
+    for (id, pos) in sectors.mobiles_near(from, u32::from(sight.0)) {
         if id == creature || !state.registry.has::<Client>(id) {
-            continue;
-        }
-        if !in_range(from, pos, u32::from(sight.0)) {
             continue;
         }
         // Noticing needs a sight line — both reference emulators gate the

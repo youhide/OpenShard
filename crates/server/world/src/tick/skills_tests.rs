@@ -1304,7 +1304,11 @@ fn taming_makes_a_creature_yours_and_it_follows() {
     // *already* close enough (the follow gap), which is why it is moved first.
     let far = Point::new(START.0 + 7, START.1, 0);
     world.state.registry.insert(entity, Position(far));
-    world.state.facet_state_mut(Facet(0)).sectors.insert(entity, far);
+    world
+        .state
+        .facet_state_mut(Facet(0))
+        .sectors
+        .insert(entity, far, openshard_state::Occupant::Mobile);
     let before = world.state.registry.get::<Position>(entity).unwrap().0;
     for _ in 0..200 {
         world.tick(now);

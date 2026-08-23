@@ -67,7 +67,7 @@ use openshard_state::components::{
 };
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
-use openshard_state::{FacetState, Gameplay, Outbound, TICKS_PER_SECOND, TooltipMode, WorldState};
+use openshard_state::{FacetState, Gameplay, Occupant, Outbound, TICKS_PER_SECOND, TooltipMode, WorldState};
 
 use openshard_ai as ai;
 use openshard_chat as chat;

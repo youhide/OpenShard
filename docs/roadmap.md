@@ -581,8 +581,10 @@ Left open, and none of it blocks anything:
 - **A boat's deck and a moving multi.** The crowd is read off the sector grid,
   which holds a mobile's own tile. Nothing here asks what happens to two bodies
   on a deck that moves under them.
-- **`Sectors::nearby` is still linear in a bucket**, and this entry is the second
-  per-step reader that was predicted below. It is now real.
+- ~~**`Sectors::nearby` is still linear in a bucket**, and this entry is the second
+  per-step reader that was predicted below. It is now real.~~ **Closed** — a
+  bucket is two lists now and `crowd_near` reads the mobile one. See the backlog
+  entry below.
 
 #### Found while closing it
 
@@ -891,43 +893,89 @@ have. The same gate governs the packed four-byte static record in
 [R4](map/realtime_map.md#r4--statics-become-one-run), which until now was gated
 only on whether the statics are still hot.
 
-### Backlog: a sector lookup is linear in a bucket, and a house makes the bucket fat
+### ✅ A sector lookup was linear in a bucket, and a house made the bucket fat
 
-`Sectors` (`state/src/sectors.rs`) is right where it was measured. Buckets are
+`Sectors` (`state/src/sectors.rs`) was right where it was measured. Buckets are
 64 tiles square, `located` maps an entity to **its bucket and its row in it**,
-so insert, move and remove are all O(1) — the row half is already the lesson
+so insert, move and remove are all O(1) — the row half was already the lesson
 learned from this exact case, and its own doc says so: "in a decorated town
 that is thousands of entries, and finding an entity's own row in it by scanning
 was paid on *every step by anyone*".
 
-What is still linear is the read. `Sectors::nearby` walks **every entry** in up
-to four buckets and filters by Chebyshev distance. That is correct and was
-cheap while a bucket held mobiles; a decorated house makes it not cheap.
+What was still linear was the read. `Sectors::nearby` walked **every entry** in
+up to four buckets and filtered by Chebyshev distance. That is correct and was
+cheap while a bucket held mobiles; a decorated house made it not cheap.
 Housing's own caps say how not: `LOCKDOWNS_PER_TILE` is 4, so a castle's 992
 tiles are worth about **4,000 locked-down items**, and at 64 tiles a side that
-castle sits in one or two buckets. Every `nearby` touching it compares four
-thousand rows.
+castle sits in one or two buckets. Every `nearby` touching it compared four
+thousand rows — asked per NPC per tick by AI sight, and again by guards, pets,
+chat, area spells, quest listeners, the broadcast audience, and, since "a mobile
+is not an obstacle" closed, by `crowd_near` on **every step by anyone**. The
+cost landed on the NPC that happened to share a sector with somebody's
+decorated house, not on the house.
 
-The callers are the problem, not the count. `nearby` is asked per NPC per tick
-by AI sight (`ai/src/lib.rs:365`), and again by guards, pets, chat, area spells,
-quest listeners and the broadcast audience (`runtime.rs:1104`). The cost lands
-on every NPC that happens to share a sector with someone's decorated house, not
-on the house.
+**Closed the way it says: a bucket is two lists, and the caller says which it
+means.** `nearby` is gone as a name, which is the point — every call site had to
+be revisited rather than keeping the old cost by inheritance.
+[`mobiles_near`](../crates/server/state/src/sectors.rs), `items_near`,
+`everything_near`, `mobiles_in_block`. Of the nineteen readers, **seventeen
+wanted mobiles**, one wanted items (the crafting workshop scan) and one wanted
+both (`refresh_around`, which fills a screen and so is about the furniture as
+much as the people). **Six** of the seventeen also re-filtered by Chebyshev
+distance after a lookup whose doc already promised exactness — chat, both
+stealth sweeps, the bard's audience, a guard's call and the AI's sight; those
+went with the rename.
 
-**Almost all of them want mobiles.** Only field spells (`tick/fields.rs`) and
-the crafting workshop scan (`crafting/environment.rs`) ask about items. So the
-fix is to split a bucket into two lists — mobiles and items — and let a caller
-say which it means. AI sight then compares about ten rows instead of four
-thousand, and no caller changes shape.
+The count this entry got wrong: it named `tick/fields.rs` as an item reader. A
+field damages whoever *stands on it* and filtered its sweep by `Body` — it was a
+mobile reader all along, and one of the several that had been paying for the
+furniture twice, once to walk it and once to reject it.
 
-**This got worse, and it was predicted here.** "A mobile is not an obstacle"
-above is closed the recommended way, so `crowd_near` is now a *second* per-step
-reader on the same lookup — `nearby(from, 1)` for every step by anyone, and
-`nearby(from, ≤32)` for every route planned. Each is one call, so the linearity
-is not multiplied; what changed is that the four thousand comparisons a
-decorated castle costs are now paid on the movement path as well as the sight
-path, and a split into mobiles and items would take the movement half to about
-ten.
+**The kind is declared at the insert and never derived.** `Occupant::Mobile` /
+`Occupant::Item`, named at each of the twenty-five places the shard puts
+something on the grid, and seven more in tests. The alternative — reading `Body` off the registry inside the index — makes
+the answer depend on whether the component went on before the index did, which
+is a bug that only appears in whichever spawn path someone reorders later. The
+cost of declaring it is the one thing no compiler catches, a caller naming the
+wrong list, so `tick/tests.rs`'s
+`the_shard_files_what_it_spawns_as_what_it_is` runs the real spawn paths — a
+player entering, a creature spawned, an item and a container placed, a corpse
+left by a death — and holds every row of both lists against the registry's
+`Body`. Its controls: filing the corpse as a mobile fails it on the corpse
+assertion; filing an entering player as an item fails **fifty** tests across
+sight, chat, guards and the chase, which is the asymmetry to remember — a body
+in the item list is invisible, an item in the mobile list is merely wasteful.
+
+#### Found while closing it
+
+- 🚩 **`FacetState::sectors` is public, and forty-five places across six crates
+  write to it** — thirty-two inserts and thirteen removals. Its two neighbours in
+  the same struct are private on an argument
+  that applies here word for word: "every write here has to be followed by …, and
+  a public field is a way to forget". The sector grid's forgettable half is
+  `remove` — a despawn that misses it leaves a row pointing at an entity that no
+  longer exists, which is the "ghost that never leaves" `despawn_mobile` already
+  has a written-down order for, and nothing makes anyone follow it. A
+  `WorldState::place(entity, facet, at, occupant)` / `unplace(entity)` pair would
+  be the seam, and would give `Occupant` one place to be named per *kind of
+  thing* rather than per call site. Not done here because it is a second
+  refactor over the same sites and this one already had to touch them all; doing
+  both at once would have hidden which change broke what.
+- **`WorldState::move_to` files its traveller as a mobile, and its callers make
+  that true rather than its signature.** Every one of the six is a body — a gate,
+  a recall, a `.go`, a ship relocating who is standing on it. An item put through
+  it would land in the mobile list and be invisible to the crafting scan, which
+  is the one reader of the item list. The doc says so now; the seam above is what
+  would make it structural.
+- **`openshard_boats::aboard` sweeps a square around the ship's *first* covered
+  tile.** The reach is the greatest Chebyshev distance from that tile to any
+  other, so a galleon moored east-west sweeps a box as wide as it is long in both
+  axes. It is mobiles-only now, which is most of the fix by accident; the shape
+  is still wrong and the deck test would not notice.
+- **One full-suite run reported a single failure with no name captured**, and
+  three consecutive full runs since have been clean. Nothing to chase without the
+  panic line — recorded so the next person who sees one knows it is not the
+  first.
 
 ### The tick
 

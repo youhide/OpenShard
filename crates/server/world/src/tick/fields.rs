@@ -83,7 +83,10 @@ impl World {
         self.state.registry.insert(entity, Position(pos));
         self.state.registry.insert(entity, facet);
         self.state.registry.insert(entity, field);
-        self.state.facet_state_mut(facet).sectors.insert(entity, pos);
+        self.state
+            .facet_state_mut(facet)
+            .sectors
+            .insert(entity, pos, Occupant::Item);
         if field.blocks {
             // A wall, not a door: nothing routes through it.
             self.state.facet_state_mut(facet).block(
@@ -119,8 +122,7 @@ impl World {
                 .state
                 .facet_state(facet)
                 .sectors
-                .nearby(pos, 0)
-                .filter(|(entity, _)| self.state.registry.has::<Body>(*entity))
+                .mobiles_near(pos, 0)
                 .filter_map(|(entity, _)| self.state.registry.serial_of(entity))
                 .collect();
             // A Paralyze Field freezes for the tick its caster's Magery dictates —

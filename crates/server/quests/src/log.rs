@@ -80,7 +80,7 @@ pub fn speech_offer(state: &mut WorldState, speaker: Serial, text: &str) {
     let nearby: Vec<EntityId> = state
         .facet_state(facet)
         .sectors
-        .nearby(at, SPEECH_RANGE)
+        .mobiles_near(at, SPEECH_RANGE)
         .map(|(entity, _)| entity)
         .collect();
     for candidate in nearby {

@@ -133,7 +133,10 @@ fn a_walker(state: &mut WorldState, at: Point) -> EntityId {
         entity,
         openshard_state::components::Movement(Walker::new(at, Facing::walking(Direction::North))),
     );
-    state.facet_state_mut(Facet(0)).sectors.insert(entity, at);
+    state
+        .facet_state_mut(Facet(0))
+        .sectors
+        .insert(entity, at, openshard_state::Occupant::Mobile);
     entity
 }
 

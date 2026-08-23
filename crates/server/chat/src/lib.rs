@@ -19,7 +19,6 @@ use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::speech::{DEFAULT_LANGUAGE_TAG, Font, TalkMode, UnicodeMessage};
 use openshard_protocol::wire::Hue;
 use openshard_state::components::{Body, Client, Name, Position};
-use openshard_state::sectors::in_range;
 use openshard_state::{Gameplay, WorldState};
 
 /// A mobile said something.
@@ -116,11 +115,7 @@ pub fn speak(state: &mut WorldState, entity: EntityId, mode: TalkMode, hue: Hue,
 
     let range = speech_range(mode, &state.gameplay);
     let sectors = &state.facet_state(facet).sectors;
-    let listeners: Vec<EntityId> = sectors
-        .nearby(pos, range)
-        .filter(|(_, listener_pos)| in_range(pos, *listener_pos, range))
-        .map(|(id, _)| id)
-        .collect();
+    let listeners: Vec<EntityId> = sectors.mobiles_near(pos, range).map(|(id, _)| id).collect();
     // The living do not hear the dead — unless they have reached for them. A ghost
     // is drawn only to other ghosts and to staff (`can_see_mobile`, ServUO's
     // `CanSee`), and without a gate here it would be invisible but audible, which

@@ -1232,7 +1232,11 @@ fn teleport_to(world: &mut World, entity: EntityId, at: Point) {
         .registry
         .insert(entity, openshard_state::components::Position(at));
     let facet = world.state.facet_of(entity);
-    world.state.facet_state_mut(facet).sectors.insert(entity, at);
+    world
+        .state
+        .facet_state_mut(facet)
+        .sectors
+        .insert(entity, at, openshard_state::Occupant::Mobile);
 }
 
 #[test]

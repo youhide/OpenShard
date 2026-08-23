@@ -26,6 +26,25 @@
 //! draws a *square* region, so a mobile at (18, 18) is exactly as visible as one
 //! at (18, 0). Using a circle here would leave the corners of every screen
 //! empty, and the bug looks like mobiles popping in and out at the edges.
+//!
+//! # A bucket is two lists, because a bucket is mostly furniture
+//!
+//! Insert, move and remove have been O(1) since the row index went in. The
+//! *read* was not: a lookup walked every entry of up to four buckets, which was
+//! cheap while a bucket held mobiles and stopped being cheap the day a house
+//! could be decorated. Housing's own caps put about four thousand locked-down
+//! items inside a castle, and at 64 tiles a side that castle sits in one or two
+//! buckets — so an NPC that happened to share a sector with somebody's keep paid
+//! four thousand comparisons per glance, and, since the step's crowd began
+//! reading this index too, per step as well.
+//!
+//! Almost every reader wants **mobiles**: sight, chat, guards, pets, area
+//! spells, a sector waking up, and the bodies a step has to get past. So a
+//! bucket keeps its mobiles and its items apart and the caller says which it
+//! means — [`mobiles_near`](Sectors::mobiles_near),
+//! [`items_near`](Sectors::items_near),
+//! [`everything_near`](Sectors::everything_near). The castle stops being in the
+//! way of the questions that were never about it.
 
 use std::collections::HashMap;
 
@@ -75,6 +94,74 @@ pub fn in_range(a: Point, b: Point, range: u32) -> bool {
     distance(a, b) <= range
 }
 
+/// Which of a bucket's two lists an entity is filed in.
+///
+/// **The inserter says, and the grid never works it out by looking.** The fact
+/// exists in the registry — a mobile carries a
+/// [`Body`](crate::components::Body) and a thing on the ground a
+/// [`Drawn`](crate::components::Drawn), one or the other and never both — but
+/// reading it here would mean handing this index the registry at every insert,
+/// and the answer would then depend on whether the component went on before the
+/// index did. Every caller already knows what it is placing: a spawn knows, a
+/// step knows, a corpse knows. Saying so costs a word and cannot go stale.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Occupant {
+    /// A mobile: a player, an NPC, a creature — anything with a body.
+    Mobile,
+    /// Anything else standing on the ground: an item, a corpse, a door, a house,
+    /// a ship, a moongate.
+    Item,
+}
+
+/// One sector's contents, in the two lists the module doc explains.
+#[derive(Clone, Debug)]
+struct Bucket {
+    /// The bodies in this sector.
+    mobiles: Vec<(EntityId, Point)>,
+    /// Everything else in it, which in a decorated town is nearly all of it.
+    items: Vec<(EntityId, Point)>,
+}
+
+impl Bucket {
+    /// A sector with nothing in it.
+    const fn empty() -> Self {
+        Self {
+            mobiles: Vec::new(),
+            items: Vec::new(),
+        }
+    }
+
+    /// The list one kind of occupant is filed in.
+    fn list(&self, occupant: Occupant) -> &Vec<(EntityId, Point)> {
+        match occupant {
+            Occupant::Mobile => &self.mobiles,
+            Occupant::Item => &self.items,
+        }
+    }
+
+    /// The same, to write.
+    fn list_mut(&mut self, occupant: Occupant) -> &mut Vec<(EntityId, Point)> {
+        match occupant {
+            Occupant::Mobile => &mut self.mobiles,
+            Occupant::Item => &mut self.items,
+        }
+    }
+}
+
+/// Where the grid has filed one entity.
+///
+/// All three parts are needed to find its row again without scanning: which
+/// bucket, which of that bucket's two lists, and where in that list.
+#[derive(Clone, Copy, Debug)]
+struct Row {
+    /// Index into [`Sectors::buckets`].
+    bucket: usize,
+    /// Which list of that bucket.
+    occupant: Occupant,
+    /// Where in that list.
+    slot: usize,
+}
+
 /// A flat grid of buckets over one facet.
 ///
 /// # This duplicates `Position`, and that is what an index is
@@ -98,9 +185,9 @@ pub struct Sectors {
     /// Column-major to match the map's block order. Not required — nothing
     /// indexes both — but two different orders in one crate is a trap for
     /// whoever reads them next.
-    buckets: Vec<Vec<(EntityId, Point)>>,
-    /// Which bucket an entity is in *and* where in it, so neither a move nor a
-    /// removal scans.
+    buckets: Vec<Bucket>,
+    /// Which bucket an entity is in, which list of it, *and* where in that list,
+    /// so neither a move nor a removal scans.
     ///
     /// The slot half is not an optimisation of an optimisation. A bucket is 64
     /// tiles square and holds every mobile, ground item and piece of decoration
@@ -108,7 +195,13 @@ pub struct Sectors {
     /// entity's own row in it by scanning was paid on *every step by anyone*.
     /// Keeping the row index costs one `usize` and a repair when `swap_remove`
     /// moves another entity's row — see [`remove_from`](Sectors::remove_from).
-    located: HashMap<EntityId, (usize, usize)>,
+    ///
+    /// **One row per entity, wherever it is filed.** This map is what makes that
+    /// true: an entity handed to [`insert`](Sectors::insert) under a different
+    /// [`Occupant`] than it was filed under is *moved* between the two lists,
+    /// never copied into the second — which is the same guarantee, and the same
+    /// mechanism, as a mobile changing sector.
+    located: HashMap<EntityId, Row>,
 }
 
 impl Sectors {
@@ -121,7 +214,7 @@ impl Sectors {
         Self {
             across,
             down,
-            buckets: vec![Vec::new(); (across * down) as usize],
+            buckets: vec![Bucket::empty(); (across * down) as usize],
             located: HashMap::new(),
         }
     }
@@ -152,54 +245,118 @@ impl Sectors {
         (x * self.down + y) as usize
     }
 
-    /// Put an entity in the index, or move it if it is already there.
-    pub fn insert(&mut self, entity: EntityId, point: Point) {
+    /// Put an entity in the index as `occupant`, or move it if it is already
+    /// there.
+    ///
+    /// `occupant` is the caller's to say — see [`Occupant`]. Handing the same
+    /// entity a different one moves it between the bucket's two lists; it is
+    /// never in both.
+    pub fn insert(&mut self, entity: EntityId, point: Point, occupant: Occupant) {
         let bucket = self.bucket_of(point);
-        if let Some(&(current, slot)) = self.located.get(&entity) {
-            if current == bucket {
-                // Same sector: just update the point. The common case by far —
-                // a step moves 64 tiles' worth of sector only once every 64
-                // steps.
-                self.buckets[bucket][slot].1 = point;
+        if let Some(&row) = self.located.get(&entity) {
+            if row.bucket == bucket && row.occupant == occupant {
+                // Same sector, same list: just update the point. The common case
+                // by far — a step moves 64 tiles' worth of sector only once
+                // every 64 steps, and nothing changes what kind of thing it is.
+                self.buckets[bucket].list_mut(occupant)[row.slot].1 = point;
                 return;
             }
-            self.remove_from(current, slot);
+            self.remove_from(row);
         }
-        let slot = self.buckets[bucket].len();
-        self.buckets[bucket].push((entity, point));
-        self.located.insert(entity, (bucket, slot));
+        let list = self.buckets[bucket].list_mut(occupant);
+        let slot = list.len();
+        list.push((entity, point));
+        self.located.insert(
+            entity,
+            Row {
+                bucket,
+                occupant,
+                slot,
+            },
+        );
     }
 
     /// Take an entity out of the index.
     pub fn remove(&mut self, entity: EntityId) {
-        if let Some((bucket, slot)) = self.located.remove(&entity) {
-            self.remove_from(bucket, slot);
+        if let Some(row) = self.located.remove(&entity) {
+            self.remove_from(row);
         }
     }
 
-    /// Drop the row at `slot` in `bucket`, repairing whoever `swap_remove` moves
-    /// into its place.
-    fn remove_from(&mut self, bucket: usize, slot: usize) {
-        // `swap_remove`: order within a bucket means nothing, and a `retain`
+    /// Drop one row, repairing whoever `swap_remove` moves into its place.
+    fn remove_from(&mut self, row: Row) {
+        // `swap_remove`: order within a list means nothing, and a `retain`
         // would be O(n) in the bucket for every step anyone takes.
-        self.buckets[bucket].swap_remove(slot);
+        let list = self.buckets[row.bucket].list_mut(row.occupant);
+        list.swap_remove(row.slot);
         // The last row moved into `slot` — unless the removed row *was* the last.
-        if let Some(&(moved, _)) = self.buckets[bucket].get(slot) {
-            self.located.insert(moved, (bucket, slot));
+        if let Some(&(moved, _)) = list.get(row.slot) {
+            self.located.insert(
+                moved,
+                Row {
+                    bucket: row.bucket,
+                    occupant: row.occupant,
+                    slot: row.slot,
+                },
+            );
         }
     }
 
     /// Where the index thinks an entity is.
     pub fn position_of(&self, entity: EntityId) -> Option<Point> {
-        let &(bucket, slot) = self.located.get(&entity)?;
-        self.buckets[bucket].get(slot).map(|(_, point)| *point)
+        let &row = self.located.get(&entity)?;
+        self.buckets[row.bucket]
+            .list(row.occupant)
+            .get(row.slot)
+            .map(|(_, point)| *point)
     }
 
-    /// Everything within `range` of `centre`, Chebyshev.
+    /// The mobiles within `range` of `centre`, Chebyshev.
     ///
     /// Exact: the sectors overlapping the box are scanned and each entity is
-    /// checked, so nothing outside `range` comes back.
-    pub fn nearby(&self, centre: Point, range: u32) -> impl Iterator<Item = (EntityId, Point)> + '_ {
+    /// checked, so nothing outside `range` comes back — a caller that filters by
+    /// distance again is asking a question this already answered.
+    ///
+    /// What almost every caller wants, and the reason a bucket is two lists. A
+    /// castle's four thousand lockdowns are not walked to find the two people
+    /// standing in its doorway.
+    pub fn mobiles_near(&self, centre: Point, range: u32) -> impl Iterator<Item = (EntityId, Point)> + '_ {
+        self.buckets_over(centre, range)
+            .flat_map(|bucket| bucket.mobiles.iter())
+            .filter(move |(_, point)| in_range(centre, *point, range))
+            .copied()
+    }
+
+    /// The items within `range` of `centre`, Chebyshev. Exact, as
+    /// [`mobiles_near`](Self::mobiles_near) is.
+    ///
+    /// The other half, and asked far less often: what is on the ground here — a
+    /// forge to craft at, a fire to cook on.
+    pub fn items_near(&self, centre: Point, range: u32) -> impl Iterator<Item = (EntityId, Point)> + '_ {
+        self.buckets_over(centre, range)
+            .flat_map(|bucket| bucket.items.iter())
+            .filter(move |(_, point)| in_range(centre, *point, range))
+            .copied()
+    }
+
+    /// Both lists within `range` of `centre`, Chebyshev. Exact, as
+    /// [`mobiles_near`](Self::mobiles_near) is.
+    ///
+    /// For the one question that really is about everything near: what a client
+    /// should have on its screen. A player is shown the people *and* the
+    /// furniture, so drawing the neighbourhood cannot be either lookup alone.
+    pub fn everything_near(&self, centre: Point, range: u32) -> impl Iterator<Item = (EntityId, Point)> + '_ {
+        self.buckets_over(centre, range)
+            .flat_map(|bucket| bucket.mobiles.iter().chain(bucket.items.iter()))
+            .filter(move |(_, point)| in_range(centre, *point, range))
+            .copied()
+    }
+
+    /// The buckets a Chebyshev box of `range` around `centre` overlaps.
+    ///
+    /// The half every lookup shares: which sectors to look in, before anything
+    /// decides which of their two lists it wants.
+    fn buckets_over(&self, centre: Point, range: u32) -> impl Iterator<Item = &Bucket> + '_ {
         // The box in sector coordinates. `saturating_sub` because a range that
         // reaches past the west or north edge is normal — a player standing at
         // x=5 is not a bug.
@@ -212,9 +369,6 @@ impl Sectors {
         (min_x..=max_x)
             .flat_map(move |x| (min_y..=max_y).map(move |y| (x * down + y) as usize))
             .filter_map(move |bucket| self.buckets.get(bucket))
-            .flatten()
-            .filter(move |(_, point)| in_range(centre, *point, range))
-            .copied()
     }
 
     /// Which sector a point falls in. The unit a crossing is diffed against.
@@ -223,7 +377,7 @@ impl Sectors {
         self.bucket_of(point)
     }
 
-    /// Everything in the sector `centre` falls in, and its eight neighbours.
+    /// The mobiles in the sector `centre` falls in, and in its eight neighbours.
     ///
     /// Sphere's sector-wake unit: `CSector::_CanSleep` takes the block, not the
     /// tile (`fCheckAdjacents`), so a sector is already alive before a player
@@ -231,7 +385,11 @@ impl Sectors {
     /// player's whole sector wherever in it they happen to stand, which a radius
     /// centred on them does not, and to stay cheap enough that the caller need
     /// only run it on the tick someone actually crosses a boundary.
-    pub fn in_block(&self, centre: Point) -> impl Iterator<Item = (EntityId, Point)> + '_ {
+    ///
+    /// Mobiles only, because waking is something only a mobile does: an item has
+    /// no beat to pull forward, and nine whole sectors of furniture is the most
+    /// expensive sweep in this file to walk for nothing.
+    pub fn mobiles_in_block(&self, centre: Point) -> impl Iterator<Item = (EntityId, Point)> + '_ {
         let x = (u32::from(centre.x) / SECTOR_SIZE).min(self.across - 1);
         let y = (u32::from(centre.y) / SECTOR_SIZE).min(self.down - 1);
         let (min_x, max_x) = (x.saturating_sub(1), (x + 1).min(self.across - 1));
@@ -240,7 +398,7 @@ impl Sectors {
         (min_x..=max_x)
             .flat_map(move |x| (min_y..=max_y).map(move |y| (x * down + y) as usize))
             .filter_map(move |bucket| self.buckets.get(bucket))
-            .flatten()
+            .flat_map(|bucket| bucket.mobiles.iter())
             .copied()
     }
 }
@@ -259,6 +417,17 @@ mod tests {
         let mut registry = Registry::new();
         let ids = (0..count).map(|_| registry.spawn()).collect();
         (registry, ids)
+    }
+
+    /// Every row the grid holds, both lists of every bucket. What a duplicate
+    /// shows up in: `len` counts the `located` map, which cannot see a row the
+    /// index has lost track of.
+    fn rows(sectors: &Sectors) -> usize {
+        sectors
+            .buckets
+            .iter()
+            .map(|bucket| bucket.mobiles.len() + bucket.items.len())
+            .sum()
     }
 
     #[test]
@@ -304,11 +473,14 @@ mod tests {
         let mut sectors = grid();
         let centre = Point::new(1000, 1000, 0);
 
-        sectors.insert(ids[0], centre);
-        sectors.insert(ids[1], Point::new(1010, 1000, 0)); // 10 away
-        sectors.insert(ids[2], Point::new(1100, 1000, 0)); // 100 away
+        sectors.insert(ids[0], centre, Occupant::Mobile);
+        sectors.insert(ids[1], Point::new(1010, 1000, 0), Occupant::Mobile); // 10 away
+        sectors.insert(ids[2], Point::new(1100, 1000, 0), Occupant::Mobile); // 100 away
 
-        let found: Vec<_> = sectors.nearby(centre, VIEW_RANGE).map(|(id, _)| id).collect();
+        let found: Vec<_> = sectors
+            .mobiles_near(centre, VIEW_RANGE)
+            .map(|(id, _)| id)
+            .collect();
         assert_eq!(found.len(), 2);
         assert!(found.contains(&ids[0]));
         assert!(found.contains(&ids[1]));
@@ -324,10 +496,21 @@ mod tests {
         let mut sectors = grid();
         let centre = Point::new(1000, 1000, 0);
 
-        sectors.insert(ids[0], Point::new(1000 + VIEW_RANGE as u16, 1000, 0));
-        sectors.insert(ids[1], Point::new(1000 + VIEW_RANGE as u16 + 1, 1000, 0));
+        sectors.insert(
+            ids[0],
+            Point::new(1000 + VIEW_RANGE as u16, 1000, 0),
+            Occupant::Mobile,
+        );
+        sectors.insert(
+            ids[1],
+            Point::new(1000 + VIEW_RANGE as u16 + 1, 1000, 0),
+            Occupant::Mobile,
+        );
 
-        let found: Vec<_> = sectors.nearby(centre, VIEW_RANGE).map(|(id, _)| id).collect();
+        let found: Vec<_> = sectors
+            .mobiles_near(centre, VIEW_RANGE)
+            .map(|(id, _)| id)
+            .collect();
         assert_eq!(found, vec![ids[0]], "the range is inclusive");
     }
 
@@ -342,10 +525,10 @@ mod tests {
         // Straddle a sector edge: 64 is the first tile of the next sector.
         let west = Point::new(63, 1000, 0);
         let east = Point::new(64, 1000, 0);
-        sectors.insert(ids[0], west);
-        sectors.insert(ids[1], east);
+        sectors.insert(ids[0], west, Occupant::Mobile);
+        sectors.insert(ids[1], east, Occupant::Mobile);
 
-        let found: Vec<_> = sectors.nearby(west, VIEW_RANGE).map(|(id, _)| id).collect();
+        let found: Vec<_> = sectors.mobiles_near(west, VIEW_RANGE).map(|(id, _)| id).collect();
         assert_eq!(found.len(), 2, "one step apart, different sectors");
     }
 
@@ -358,10 +541,10 @@ mod tests {
         let mut sectors = grid();
 
         for target in 0..200u16 {
-            sectors.insert(ids[0], Point::new(target, 1000, 0));
+            sectors.insert(ids[0], Point::new(target, 1000, 0), Occupant::Mobile);
             for centre in 0..200u16 {
                 let from = Point::new(centre, 1000, 0);
-                let found = sectors.nearby(from, VIEW_RANGE).count();
+                let found = sectors.mobiles_near(from, VIEW_RANGE).count();
                 let expected = usize::from(centre.abs_diff(target) <= VIEW_RANGE as u16);
                 assert_eq!(
                     found,
@@ -379,8 +562,8 @@ mod tests {
         let (_, ids) = entities(1);
         let mut sectors = grid();
 
-        sectors.insert(ids[0], Point::new(1000, 1000, 0));
-        sectors.insert(ids[0], Point::new(1001, 1000, 0));
+        sectors.insert(ids[0], Point::new(1000, 1000, 0), Occupant::Mobile);
+        sectors.insert(ids[0], Point::new(1001, 1000, 0), Occupant::Mobile);
 
         assert_eq!(sectors.len(), 1, "moved, not duplicated");
         assert_eq!(sectors.position_of(ids[0]), Some(Point::new(1001, 1000, 0)));
@@ -393,14 +576,32 @@ mod tests {
         let (_, ids) = entities(1);
         let mut sectors = grid();
 
-        sectors.insert(ids[0], Point::new(63, 1000, 0));
-        sectors.insert(ids[0], Point::new(64, 1000, 0));
+        sectors.insert(ids[0], Point::new(63, 1000, 0), Occupant::Mobile);
+        sectors.insert(ids[0], Point::new(64, 1000, 0), Occupant::Mobile);
 
         assert_eq!(sectors.len(), 1);
-        let total: usize = (0..sectors.bucket_count())
-            .map(|bucket| sectors.buckets[bucket].len())
-            .sum();
-        assert_eq!(total, 1, "the old bucket still holds a ghost");
+        assert_eq!(rows(&sectors), 1, "the old bucket still holds a ghost");
+    }
+
+    #[test]
+    fn changing_which_list_an_entity_is_in_moves_it_rather_than_copying_it() {
+        // The same bug one field over, and the one the split invented: file an
+        // entity as an item and then as a mobile without taking it out first,
+        // and a grid that only compared buckets would leave it in both lists of
+        // the same bucket — found twice by `everything_near`, and never removed
+        // by anything that removes it once.
+        let (_, ids) = entities(1);
+        let mut sectors = grid();
+        let at = Point::new(1000, 1000, 0);
+
+        sectors.insert(ids[0], at, Occupant::Item);
+        sectors.insert(ids[0], at, Occupant::Mobile);
+
+        assert_eq!(sectors.len(), 1);
+        assert_eq!(rows(&sectors), 1, "one row, whichever list it is in");
+        assert_eq!(sectors.mobiles_near(at, VIEW_RANGE).count(), 1);
+        assert_eq!(sectors.items_near(at, VIEW_RANGE).count(), 0);
+        assert_eq!(sectors.everything_near(at, VIEW_RANGE).count(), 1);
     }
 
     #[test]
@@ -410,10 +611,9 @@ mod tests {
         let mut sectors = grid();
 
         for step in 0..500u16 {
-            sectors.insert(ids[0], Point::new(step, step, 0));
+            sectors.insert(ids[0], Point::new(step, step, 0), Occupant::Mobile);
             assert_eq!(sectors.len(), 1, "after step {step}");
-            let total: usize = sectors.buckets.iter().map(Vec::len).sum();
-            assert_eq!(total, 1, "a ghost appeared at step {step}");
+            assert_eq!(rows(&sectors), 1, "a ghost appeared at step {step}");
         }
         assert_eq!(sectors.position_of(ids[0]), Some(Point::new(499, 499, 0)));
     }
@@ -424,12 +624,38 @@ mod tests {
         let mut sectors = grid();
         let point = Point::new(1000, 1000, 0);
 
-        sectors.insert(ids[0], point);
+        sectors.insert(ids[0], point, Occupant::Mobile);
         sectors.remove(ids[0]);
 
         assert!(sectors.is_empty());
         assert_eq!(sectors.position_of(ids[0]), None);
-        assert_eq!(sectors.nearby(point, VIEW_RANGE).count(), 0);
+        assert_eq!(sectors.everything_near(point, VIEW_RANGE).count(), 0);
+    }
+
+    #[test]
+    fn removing_an_item_repairs_the_item_it_moved() {
+        // `swap_remove` moves the last row into the hole, and the row index of
+        // whoever was moved has to be repaired *in its own list*. Repairing it
+        // against the bucket's mobiles instead would leave an item pointing at a
+        // row that is somebody else's, or at no row at all.
+        let (_, ids) = entities(3);
+        let mut sectors = grid();
+        let at = Point::new(1000, 1000, 0);
+        for id in &ids {
+            sectors.insert(*id, at, Occupant::Item);
+        }
+
+        sectors.remove(ids[0]);
+
+        assert_eq!(
+            sectors.position_of(ids[2]),
+            Some(at),
+            "the moved row still resolves"
+        );
+        sectors.remove(ids[2]);
+        assert_eq!(sectors.len(), 1);
+        assert_eq!(rows(&sectors), 1);
+        assert_eq!(sectors.items_near(at, VIEW_RANGE).count(), 1);
     }
 
     #[test]
@@ -447,10 +673,10 @@ mod tests {
         let (_, ids) = entities(1);
         let mut sectors = grid();
         let corner = Point::new(0, 0, 0);
-        sectors.insert(ids[0], corner);
+        sectors.insert(ids[0], corner, Occupant::Mobile);
 
-        assert_eq!(sectors.nearby(corner, VIEW_RANGE).count(), 1);
-        assert_eq!(sectors.nearby(Point::new(5, 5, 0), VIEW_RANGE).count(), 1);
+        assert_eq!(sectors.mobiles_near(corner, VIEW_RANGE).count(), 1);
+        assert_eq!(sectors.mobiles_near(Point::new(5, 5, 0), VIEW_RANGE).count(), 1);
     }
 
     #[test]
@@ -458,8 +684,8 @@ mod tests {
         let (_, ids) = entities(1);
         let mut sectors = grid();
         let far = Point::new(7167, 4095, 0);
-        sectors.insert(ids[0], far);
-        assert_eq!(sectors.nearby(far, VIEW_RANGE).count(), 1);
+        sectors.insert(ids[0], far, Occupant::Mobile);
+        assert_eq!(sectors.mobiles_near(far, VIEW_RANGE).count(), 1);
     }
 
     #[test]
@@ -468,7 +694,7 @@ mod tests {
         // a mobile nobody can see and nothing reports.
         let (_, ids) = entities(1);
         let mut sectors = grid();
-        sectors.insert(ids[0], Point::new(u16::MAX, u16::MAX, 0));
+        sectors.insert(ids[0], Point::new(u16::MAX, u16::MAX, 0), Occupant::Mobile);
         assert_eq!(sectors.len(), 1);
     }
 
@@ -481,14 +707,36 @@ mod tests {
         for (index, id) in ids.iter().enumerate() {
             let x = (index as u16 % 100) * 70;
             let y = (index as u16 / 100) * 70;
-            sectors.insert(*id, Point::new(x, y, 0));
+            sectors.insert(*id, Point::new(x, y, 0), Occupant::Mobile);
         }
         assert_eq!(sectors.len(), 500);
 
         // Spread 70 tiles apart with an 18-tile view, a lookup sees at most
         // itself.
-        let found = sectors.nearby(Point::new(0, 0, 0), VIEW_RANGE).count();
+        let found = sectors.mobiles_near(Point::new(0, 0, 0), VIEW_RANGE).count();
         assert!(found <= 4, "{found} mobiles within view of a lone corner");
+    }
+
+    #[test]
+    fn a_decorated_house_is_not_in_the_way_of_a_mobile_lookup() {
+        // The whole reason for the split, as an assertion about *what is
+        // walked* rather than about how long it takes: housing's caps put about
+        // four thousand lockdowns in a castle, and at 64 tiles a side they share
+        // a bucket with everyone standing in the street outside.
+        let (_, ids) = entities(4_002);
+        let mut sectors = grid();
+        let doorway = Point::new(1000, 1000, 0);
+        for id in &ids[..4_000] {
+            sectors.insert(*id, doorway, Occupant::Item);
+        }
+        sectors.insert(ids[4_000], doorway, Occupant::Mobile);
+        sectors.insert(ids[4_001], Point::new(1001, 1000, 0), Occupant::Mobile);
+
+        let mobiles: Vec<_> = sectors.mobiles_near(doorway, VIEW_RANGE).collect();
+        assert_eq!(mobiles.len(), 2, "the two people, and not the furniture");
+        assert_eq!(sectors.mobiles_in_block(doorway).count(), 2);
+        assert_eq!(sectors.items_near(doorway, VIEW_RANGE).count(), 4_000);
+        assert_eq!(sectors.everything_near(doorway, VIEW_RANGE).count(), 4_002);
     }
 
     #[test]
@@ -499,8 +747,8 @@ mod tests {
         let mut sectors = Sectors::new(10, 10);
         assert_eq!(sectors.bucket_count(), 1);
 
-        sectors.insert(ids[0], Point::new(5, 5, 0));
-        assert_eq!(sectors.nearby(Point::new(0, 0, 0), VIEW_RANGE).count(), 1);
+        sectors.insert(ids[0], Point::new(5, 5, 0), Occupant::Mobile);
+        assert_eq!(sectors.mobiles_near(Point::new(0, 0, 0), VIEW_RANGE).count(), 1);
     }
 
     #[test]
