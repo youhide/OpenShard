@@ -8,6 +8,7 @@
 //! arithmetic by each reader.
 
 use openshard_map::map::WorldMap;
+use openshard_map::overlay::Cover;
 use openshard_tiles::TileData;
 
 /// Every height a body could stand at on one map tile.
@@ -26,17 +27,14 @@ pub fn stand_surfaces(map: &WorldMap, tiledata: &TileData, x: u16, y: u16, swimm
         }
     }
     for item in map.statics_at(x, y) {
-        let tile = tiledata.static_tile(item.tile.0);
-        if tile.flags.is_platform() {
-            let height = i32::from(tile.height);
-            let stand = i32::from(item.z)
-                + if tile.flags.is_climbable() {
-                    height / 2
-                } else {
-                    height
-                };
-            surfaces.push(stand);
-        }
+        // The same reading of the same table both ends of the wire lay a
+        // *placed* static's cover with — a house's floor, a ship's deck — so a
+        // shipped platform and a built one are one surface rule rather than
+        // two. `Cover::of_static` is where the halved climbable lives.
+        let stands = Cover::of_static(tiledata.static_tile(item.tile.0))
+            .based_at(item.z)
+            .stands();
+        surfaces.extend(stands.map(Cover::surface));
     }
     surfaces
 }

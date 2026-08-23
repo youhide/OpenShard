@@ -1657,18 +1657,21 @@ impl World {
                     }
                 }
                 None => {
-                    // Plain art blocks over its tiledata z-span, exactly as
-                    // `place_decoration` registered it the first time.
-                    let height = Some(self.state.tiles.static_tile(record.graphic))
-                        .filter(|tile| tile.flags.is_blocking())
-                        .map(|tile| tile.height);
-                    if let Some(height) = height {
-                        self.state.facet_state_mut(facet).block(
-                            position.x,
-                            position.y,
-                            entity,
-                            openshard_map::overlay::Cover::blocking(position.z, height),
-                        );
+                    // Plain art covers its tiledata z-span, exactly as
+                    // `place_decoration` registered it the first time — through
+                    // the same `Cover::of_static`, so a decoration reloaded
+                    // from a save is the same thing it was before the reboot.
+                    // This used to read the blocking flag itself, which was a
+                    // third copy of that rule and would have been the one left
+                    // behind when the platform arm landed.
+                    let covers = openshard_map::overlay::Cover::of_static(
+                        self.state.tiles.static_tile(record.graphic),
+                    )
+                    .based_at(position.z);
+                    for cover in covers {
+                        self.state
+                            .facet_state_mut(facet)
+                            .block(position.x, position.y, entity, cover);
                     }
                 }
             }

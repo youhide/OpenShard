@@ -150,23 +150,22 @@ impl World {
         self.state.registry.insert(entity, Position(position));
         self.state.registry.insert(entity, facet);
         self.state.registry.insert(entity, Decoration);
-        // Placed art with impassable tiledata blocks its tile, the way ServUO
-        // treats any non-movable impassable item; doors refine this to a door
-        // obstacle right after. It blocks only its own z-span — its base z and
-        // tiledata height — so an upper-floor wall does not seal the ground floor
-        // beneath it (the Britain-library bug).
+        // Placed art covers its tile the way ServUO treats any non-movable
+        // item; doors refine this to a door obstacle right after. It covers
+        // only its own z-span — its base z and tiledata height — so an
+        // upper-floor wall does not seal the ground floor beneath it (the
+        // Britain-library bug), and a *platform* lays a surface as well as a
+        // body, so a placed table is something to stand on.
         // `Cover::of_static` and not this end's own reading of the flags: the
-        // client lays the same cover from the same table through the same
+        // client lays the same covers from the same table through the same
         // function, which is what "agree by construction" has to mean to be
-        // worth saying. See `openshard_movement::overlay`.
-        if let Some(cover) = openshard_map::overlay::Cover::of_static(self.state.tiles.static_tile(graphic.0))
-        {
-            self.state.facet_state_mut(facet).block(
-                position.x,
-                position.y,
-                entity,
-                cover.based_at(position.z),
-            );
+        // worth saying. See `openshard_map::overlay`.
+        let covers = openshard_map::overlay::Cover::of_static(self.state.tiles.static_tile(graphic.0))
+            .based_at(position.z);
+        for cover in covers {
+            self.state
+                .facet_state_mut(facet)
+                .block(position.x, position.y, entity, cover);
         }
         self.state.facet_state_mut(facet).sectors.insert(entity, position);
         self.state.reveal(entity);

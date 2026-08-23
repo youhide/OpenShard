@@ -122,10 +122,17 @@ impl Body {
 
 /// What one entry over one tile does to a body.
 ///
-/// An enum and not a pair of flags, because the world already says the two are
-/// exclusive: a ship's `Plank` carries `blocks` and is read through two filters
-/// that partition it — the hull half stops a body, the deck half carries one —
-/// and no placed item has ever been both.
+/// An enum and not a pair of flags, and **one thing can still be both** — as
+/// two entries rather than as one entry with two answers. A ship's plank is the
+/// case that shaped this: it is read through two filters that partition it, the
+/// hull half stopping a body and the deck half carrying one, and a tile with a
+/// gunwale on it holds one of each. A house's stair tread is the same shape —
+/// something a body beside it walks into, and somewhere a body on top of it
+/// stands.
+///
+/// Keeping them separate is what keeps [`Stands`](Self::Stands) the *positive*
+/// arm: a reader asking what is in the way never has to know that some of the
+/// things in the way are also floors.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CoverKind {
     /// In the way.
@@ -135,14 +142,27 @@ pub enum CoverKind {
         /// of what "potentially passable" means here.
         door: bool,
     },
-    /// Somewhere to stand that the map does not have — a deck over open water.
+    /// Somewhere to stand that the map does not have — a deck over open water,
+    /// the first floor of a house somebody built this morning.
     ///
     /// **The one thing that can overrule the map's refusal.** Open water is not
     /// ground, so the map answers "nothing to stand on" — correctly, right up
     /// until a ship is moored there. An index that only ever subtracted could
     /// not say this, which is why boats were a structure of their own before
     /// this type existed.
-    Stands,
+    Stands {
+        /// A stair, a ramp, a ladder — UO's `CLIMBABLE` bit, and two different
+        /// numbers because of it. You stand **half way up** one rather than on
+        /// top of it, and you step onto it at its **base** rather than at its
+        /// top, which is what lets a staircase be climbed one tread at a time
+        /// instead of reading as a wall the height of the whole flight.
+        ///
+        /// A field on this arm and not a second variant, because the two are
+        /// the same *kind* of thing — a surface — differing in an arithmetic.
+        /// See [`Cover::surface`] and [`Cover::reach`], which are where the
+        /// difference is written, once.
+        climbable: bool,
+    },
 }
 
 /// One thing the live world has put on one tile.
@@ -192,12 +212,23 @@ impl Cover {
         Self {
             z,
             height,
-            kind: CoverKind::Stands,
+            kind: CoverKind::Stands { climbable: false },
         }
     }
 
-    /// The cover a placed item lays over its own tile, from the client-file
-    /// entry that says what its art is — or `None` where it lays none.
+    /// A stair `height` tall based at `z`: stood on half way up, stepped onto
+    /// at its base. See [`CoverKind::Stands`]'s `climbable`.
+    #[must_use]
+    pub const fn climbable(z: i8, height: u8) -> Self {
+        Self {
+            z,
+            height,
+            kind: CoverKind::Stands { climbable: true },
+        }
+    }
+
+    /// What a placed item lays over its own tile, from the client-file entry
+    /// that says what its art is.
     ///
     /// **The one rule both ends of the wire call**, and the reason the two
     /// agree by construction rather than by resemblance. It used to be written
@@ -206,21 +237,49 @@ impl Cover {
     /// `clutter::fill` did the same three lines a crate away. Same predicate,
     /// same span, two places to change one of them.
     ///
+    /// # The platform arm, and the order the flags are read in
+    ///
+    /// `PLATFORM` is asked **first**, and `BLOCK` only where it is absent. That
+    /// is not a preference: it is the same order the map's own reading takes
+    /// (`MapTerrain::static_top` branches on `is_platform` and never looks at
+    /// `is_blocking` after), and reading them the other way round would give
+    /// one piece of art two heights depending on which layer asked.
+    ///
+    /// A platform lays **two** covers. It is a surface — where a body on top of
+    /// it puts its feet — and it is also a body in the way of anything standing
+    /// beside it, which is what stops a staircase being walked into from the
+    /// side. The blocking half reaches exactly as far as the surface does, so
+    /// **a body standing on a platform is never blocked by it**.
+    ///
+    /// A platform of no thickness lays no blocking half at all, and that is
+    /// load-bearing: a house's ground floor is a `PLATFORM` of height zero laid
+    /// on the ground it duplicates, and a blocking half there — which the
+    /// `max(1)` in [`Cover::top`] would give it — would seal every house in
+    /// Britannia shut.
+    ///
     /// **Not a door**, whichever way round that is. Which leaves are doors is
     /// not a property of the tiledata — the shard knows because it made the
     /// entity, and the client knows from `client/render`'s ported door table —
-    /// so the caller refines this with [`Cover::door`] where it knows better.
+    /// so the caller refines this with [`Covers::as_door`] where it knows
+    /// better.
     #[must_use]
-    pub fn of_static(tile: &StaticTile) -> Option<Self> {
-        tile.flags.is_blocking().then(|| Self::blocking_at(tile.height))
-    }
-
-    /// A blocker `height` tall whose base is the caller's to fill in.
-    const fn blocking_at(height: u8) -> Self {
-        Self {
-            z: 0,
-            height,
-            kind: CoverKind::Blocks { door: false },
+    pub fn of_static(tile: &StaticTile) -> Covers {
+        if tile.flags.is_platform() {
+            let stands = match tile.flags.is_climbable() {
+                true => Self::climbable(0, tile.height),
+                false => Self::standing(0, tile.height),
+            };
+            // Based at zero, the surface *is* the rise, and `u8` is where it
+            // came from — a halved `u8` is still one.
+            let rise = stands.surface() as u8;
+            return Covers {
+                blocks: (rise > 0).then(|| Self::blocking(0, rise)),
+                stands: Some(stands),
+            };
+        }
+        Covers {
+            blocks: tile.flags.is_blocking().then(|| Self::blocking(0, tile.height)),
+            stands: None,
         }
     }
 
@@ -251,7 +310,7 @@ impl Cover {
     /// Whether this is somewhere to stand rather than something in the way.
     #[must_use]
     pub const fn is_surface(self) -> bool {
-        matches!(self.kind, CoverKind::Stands)
+        matches!(self.kind, CoverKind::Stands { .. })
     }
 
     /// The bottom of its body.
@@ -272,9 +331,37 @@ impl Cover {
     /// Not [`top`](Self::top): the `max(1)` there is about a body of zero
     /// height still occupying its tile, and a *surface* of zero height is at
     /// its own base — the deck is where the plank is, not one z above it.
+    ///
+    /// **Half way up a climbable**, which is UO's own rule for a stair: Sphere
+    /// halves the height of a `CLIMBABLE`, ServUO's `CalcHeight` does the same,
+    /// and this is the one place in this workspace it is written — the map's
+    /// reading of a *shipped* stair comes through here too. A flight of five
+    /// treads is five surfaces two units apart rather than one wall ten tall.
     #[must_use]
     pub const fn surface(self) -> i32 {
-        self.bottom() + self.height as i32
+        self.bottom()
+            + match self.kind {
+                CoverKind::Stands { climbable: true } => self.height as i32 / 2,
+                _ => self.height as i32,
+            }
+    }
+
+    /// The edge a step has to reach to get onto this.
+    ///
+    /// The same as [`surface`](Self::surface) for anything flat — you arrive
+    /// where you end up — and the **base** of a climbable, which is the whole
+    /// trick of a staircase: you meet a stair at the low end of its ramp and
+    /// are lifted half way up by standing on it. Checking the top instead makes
+    /// every riser a wall taller than a step, and the flight unclimbable.
+    ///
+    /// ServUO's `Movement.Check` calls this pair `(itemTop, ourZ)`; the two are
+    /// equal for a solid floor and a table.
+    #[must_use]
+    pub const fn reach(self) -> i32 {
+        match self.kind {
+            CoverKind::Stands { climbable: true } => self.bottom(),
+            _ => self.surface(),
+        }
     }
 
     /// Whether `body` has this in its way.
@@ -286,6 +373,83 @@ impl Cover {
     #[must_use]
     pub const fn meets(self, body: Body) -> bool {
         self.bottom() < body.head() && body.feet() < self.top()
+    }
+}
+
+/// Everything one piece of static art lays over its own tile: nothing, one
+/// thing, or both halves of a platform.
+///
+/// **Two named fields and not a `Vec`**, because there are exactly two and they
+/// are not interchangeable: a caller refining a door refines the blocking half,
+/// and a caller asking where a body's feet go wants the other. A list would
+/// make both of those a search.
+///
+/// Built by [`Cover::of_static`], based by [`based_at`](Self::based_at), and
+/// then poured into whatever index the caller keeps — it is an *answer in
+/// transit*, not something anybody stores.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Covers {
+    /// What of it is in the way, if any of it is.
+    blocks: Option<Cover>,
+    /// What of it can be stood on, if any of it can.
+    stands: Option<Cover>,
+}
+
+impl Covers {
+    /// The half that is in the way, if there is one.
+    #[must_use]
+    pub const fn blocks(self) -> Option<Cover> {
+        self.blocks
+    }
+
+    /// The half that can be stood on, if there is one.
+    #[must_use]
+    pub const fn stands(self) -> Option<Cover> {
+        self.stands
+    }
+
+    /// Whether this art lays nothing at all — a rug, a bush, a pile of gold.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.blocks.is_none() && self.stands.is_none()
+    }
+
+    /// The same covers, based at `z`.
+    ///
+    /// [`Cover::of_static`] reads a table, which knows a height and not a
+    /// position; this is where the placement supplies the other half, for both
+    /// halves at once so neither can be left behind at zero.
+    #[must_use]
+    pub fn based_at(self, z: i8) -> Self {
+        Self {
+            blocks: self.blocks.map(|cover| cover.based_at(z)),
+            stands: self.stands.map(|cover| cover.based_at(z)),
+        }
+    }
+
+    /// The same covers, with the blocking half marked a shut door.
+    ///
+    /// Only that half: a door is a leaf hanging in a gap and has never been a
+    /// floor, so if the art somehow claims to be both, what a body *walks
+    /// through* is the part the latch governs.
+    #[must_use]
+    pub fn as_door(self) -> Self {
+        Self {
+            blocks: self.blocks.map(|cover| Cover::door(cover.z, cover.height)),
+            ..self
+        }
+    }
+}
+
+impl IntoIterator for Covers {
+    type Item = Cover;
+    type IntoIter = std::iter::Chain<std::option::IntoIter<Cover>, std::option::IntoIter<Cover>>;
+
+    /// Both halves, in the way an index wants them: blocking first, because
+    /// that is the one a step asks about and [`Overlay::blocker_at`] stops at
+    /// the first match.
+    fn into_iter(self) -> Self::IntoIter {
+        self.blocks.into_iter().chain(self.stands)
     }
 }
 
@@ -381,6 +545,16 @@ impl Overlay {
             .find(|cover| matches!(cover.kind, CoverKind::Blocks { .. }))
     }
 
+    /// Every surface the live world put on `tile` — a deck, a house's floor, a
+    /// tread of its stairs.
+    ///
+    /// The candidate list, unfiltered and in the tile's own order. What a
+    /// *step* does with it is a movement rule and lives there: which of these
+    /// is in reach, and which of them a body fits on.
+    pub fn surfaces_at(&self, tile: Tile) -> impl Iterator<Item = Cover> + '_ {
+        self.at(tile).iter().copied().filter(|cover| cover.is_surface())
+    }
+
     /// The surface a body coming from `near_z` would stand on at `tile`, if the
     /// live world put one there.
     ///
@@ -388,9 +562,7 @@ impl Overlay {
     /// from a pier and stepping down onto it from a mast are the same rule.
     #[must_use]
     pub fn surface_at(&self, tile: Tile, near_z: i32) -> Option<i32> {
-        self.at(tile)
-            .iter()
-            .filter(|cover| cover.kind == CoverKind::Stands)
+        self.surfaces_at(tile)
             .map(|cover| cover.surface())
             .min_by_key(|surface| (surface - near_z).abs())
     }
@@ -407,7 +579,7 @@ impl Cover {
         match self.kind {
             CoverKind::Blocks { door: true } if matches!(doors, Doors::AllOpen) => false,
             CoverKind::Blocks { .. } => self.meets(body),
-            CoverKind::Stands => false,
+            CoverKind::Stands { .. } => false,
         }
     }
 }
@@ -569,21 +741,22 @@ mod tests {
             height: 12,
             ..StaticTile::default()
         };
+        let barrel = Cover::of_static(&barrel).based_at(-3);
         assert_eq!(
-            Cover::of_static(&barrel).map(|cover| cover.based_at(-3)),
+            barrel.blocks(),
             Some(Cover::blocking(-3, 12)),
             "the span is the art's own height, based where the item was placed"
         );
+        assert_eq!(barrel.stands(), None, "a barrel is not a table");
 
         let rug = StaticTile {
             flags: TileFlags::new(0),
             height: 0,
             ..StaticTile::default()
         };
-        assert_eq!(
-            Cover::of_static(&rug),
-            None,
-            "art that does not block covers nothing"
+        assert!(
+            Cover::of_static(&rug).is_empty(),
+            "art that neither blocks nor carries covers nothing"
         );
 
         // Impassable art with a tiledata height of zero is common, and it still
@@ -593,9 +766,119 @@ mod tests {
             height: 0,
             ..StaticTile::default()
         };
-        let flat = Cover::of_static(&flat).expect("it blocks").based_at(0);
+        let flat = Cover::of_static(&flat).based_at(0).blocks().expect("it blocks");
         assert!(flat.meets(person(0)));
         assert!(!flat.meets(person(1)));
+    }
+
+    /// A house's floor: `PLATFORM`, no `BLOCK`, and a tiledata height of zero.
+    ///
+    /// **The case the whole platform arm is about.** Every wooden-boards
+    /// component of every classic multi looks exactly like this, and until this
+    /// arm existed a house had no floors at all — `of_static` filtered on
+    /// `is_blocking` and a floor blocks nothing, so it laid nothing.
+    ///
+    /// The second assertion is the one that could have gone wrong: a blocking
+    /// half of height zero would reach one z up (see [`Cover::top`]) and seal
+    /// the very floor it is, which is a house nobody can stand in.
+    #[test]
+    fn a_floor_is_a_surface_and_not_a_body() {
+        let boards = StaticTile {
+            flags: TileFlags::new(TileFlags::PLATFORM),
+            height: 0,
+            ..StaticTile::default()
+        };
+        let floor = Cover::of_static(&boards).based_at(7);
+
+        assert_eq!(floor.stands(), Some(Cover::standing(7, 0)));
+        assert_eq!(floor.stands().expect("a floor").surface(), 7);
+        assert_eq!(
+            floor.blocks(),
+            None,
+            "a floor of no thickness is nothing to walk into"
+        );
+
+        let mut overlay = Overlay::default();
+        overlay.set(HERE, floor.into_iter().collect());
+        assert_eq!(overlay.surface_at(HERE, 0), Some(7));
+        assert!(
+            overlay.blocker_at(HERE, person(7), Doors::AsTheyStand).is_none(),
+            "a body standing on the floor is not blocked by it"
+        );
+        assert!(
+            overlay.blocker_at(HERE, person(0), Doors::AsTheyStand).is_none(),
+            "and neither is one on the ground beneath it"
+        );
+    }
+
+    /// A stair: `PLATFORM | CLIMBABLE`, five tall. Both halves, and both of the
+    /// climbable's two numbers.
+    ///
+    /// This is a real component of multi `0x0064` — "stone stairs", at `dz = 2`
+    /// against a first floor at `dz = 7`. The arithmetic here is what decides
+    /// whether that flight is climbable at all: you meet the tread at z 2, you
+    /// stand on it at z 4, and the *art* still reaches z 7, which is the height
+    /// the next step is measured from.
+    #[test]
+    fn a_stair_is_met_at_its_base_and_stood_on_half_way_up() {
+        let stone_stairs = StaticTile {
+            flags: TileFlags::new(TileFlags::PLATFORM | TileFlags::CLIMBABLE),
+            height: 5,
+            ..StaticTile::default()
+        };
+        let tread = Cover::of_static(&stone_stairs).based_at(2);
+        let stands = tread.stands().expect("a stair is somewhere to stand");
+
+        assert_eq!(stands.surface(), 4, "half way up, Sphere's halved CLIMBABLE");
+        assert_eq!(stands.reach(), 2, "and met at the low end of the ramp");
+        assert_eq!(stands.top(), 7, "the art still reaches its full height");
+        assert_eq!(
+            tread.blocks(),
+            Some(Cover::blocking(2, 2)),
+            "its body reaches exactly as far as its surface and no further"
+        );
+
+        // Which is the whole point of the second half: a body standing beside
+        // the tread walks into it, and a body standing *on* it does not.
+        let mut overlay = Overlay::default();
+        overlay.set(HERE, tread.into_iter().collect());
+        assert!(overlay.blocker_at(HERE, person(2), Doors::AsTheyStand).is_some());
+        assert!(overlay.blocker_at(HERE, person(4), Doors::AsTheyStand).is_none());
+    }
+
+    /// A table — `PLATFORM | BLOCK` — is read as a platform, and the order the
+    /// two flags are asked in is what says so.
+    ///
+    /// Read the other way round it would be a solid twelve-tall body with
+    /// nothing on top, which is both ends of the wire disagreeing with the
+    /// map's own reading of the same art (`MapTerrain::static_top`).
+    #[test]
+    fn art_that_is_both_flags_is_a_platform() {
+        let table = StaticTile {
+            flags: TileFlags::new(TileFlags::PLATFORM | TileFlags::BLOCK),
+            height: 12,
+            ..StaticTile::default()
+        };
+        let table = Cover::of_static(&table).based_at(0);
+        assert_eq!(table.stands(), Some(Cover::standing(0, 12)));
+        assert_eq!(table.blocks(), Some(Cover::blocking(0, 12)));
+    }
+
+    /// The blocking half of a door is the half the latch governs.
+    #[test]
+    fn a_door_refines_only_what_is_in_the_way() {
+        let leaf = StaticTile {
+            flags: TileFlags::new(TileFlags::BLOCK),
+            height: 20,
+            ..StaticTile::default()
+        };
+        let leaf = Cover::of_static(&leaf).based_at(0).as_door();
+        assert_eq!(leaf.blocks(), Some(Cover::door(0, 20)));
+
+        let mut overlay = Overlay::default();
+        overlay.set(HERE, leaf.into_iter().collect());
+        assert!(overlay.blocker_at(HERE, person(0), Doors::AsTheyStand).is_some());
+        assert!(overlay.blocker_at(HERE, person(0), Doors::AllOpen).is_none());
     }
 
     /// Sight and door-detection ask about the tile and not about a height.

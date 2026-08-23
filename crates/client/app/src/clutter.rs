@@ -118,20 +118,18 @@ pub fn fill<'a>(
             continue;
         }
         // `Cover::of_static` and not this end's own reading of the flags: the
-        // shard lays the same cover from the same table through the same
+        // shard lays the same covers from the same table through the same
         // function, which is what "agree by construction" has to mean to be
-        // worth saying.
-        let Some(cover) = Cover::of_static(tiles.static_tile(item.displayed().0)) else {
-            continue;
+        // worth saying. Up to two of them, because a platform — a house's
+        // floor, its stairs, a placed table — is both a body in the way and
+        // somewhere to stand.
+        let laid = Cover::of_static(tiles.static_tile(item.displayed().0)).based_at(item.at.z);
+        let laid = match doors::is_door(item.displayed()) {
+            true => laid.as_door(),
+            false => laid,
         };
         let at = Tile::new(item.at.x, item.at.y);
-        covers
-            .entry(at)
-            .or_default()
-            .push(match doors::is_door(item.displayed()) {
-                true => Cover::door(item.at.z, cover.height),
-                false => cover.based_at(item.at.z),
-            });
+        covers.entry(at).or_default().extend(laid);
     }
     // The server may permit two mobiles on one tile, but routing a player
     // visibly through an NPC is still a bad client-side result. Not a category

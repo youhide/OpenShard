@@ -12,6 +12,7 @@
 
 use openshard_map::grid::Tile;
 use openshard_map::map::WorldMap;
+use openshard_map::overlay::Cover;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_tiles::LandTileId;
@@ -40,13 +41,21 @@ pub const PLAYER_HEIGHT: i32 = 16;
 /// step. A solid platform (a floor, a table) has no such trick: both are its top.
 /// Mirrors ServUO's `Movement.Check` (`itemTop = itemZ`, `ourZ = itemZ +
 /// CalcHeight` for a bridge).
-const fn platform_surface(base: i32, height: i32, climbable: bool) -> (i32, i32) {
-    if climbable {
-        (base, base + height / 2)
-    } else {
-        let top = base + height;
-        (top, top)
-    }
+///
+/// **The arithmetic itself is [`Cover`]'s**, not this function's. A stair the
+/// shard *placed* — a house's, a ship's gangplank — reaches movement through
+/// the overlay rather than through the map, and a second copy of "halve a
+/// climbable" here would be the same flight of stairs climbed by two rules. So
+/// this builds the cover the overlay would have held and asks it. See
+/// `docs/map/realtime_map.md`'s R3.
+fn platform_surface(base: i32, height: i32, climbable: bool) -> (i32, i32) {
+    // The map's own heights are `i8` bases and `u8` art heights, which is
+    // exactly what a cover is spelled in.
+    let cover = match climbable {
+        true => Cover::climbable(0, height as u8),
+        false => Cover::standing(0, height as u8),
+    };
+    (base + cover.reach(), base + cover.surface())
 }
 
 /// The real world: ground heights, walls, water.
