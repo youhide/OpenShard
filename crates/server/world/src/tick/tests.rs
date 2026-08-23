@@ -9469,7 +9469,7 @@ fn door_frames(walled: bool) -> Scene {
 /// Give the default facet a scene, and the shard the table that scene reads.
 fn stand_on(world: &mut World, scene: Scene) {
     let (map, tiles) = scene.into_shard(Facet(0));
-    world.state.facet_state_mut(Facet(0)).map = Some(map);
+    world.state.facet_state_mut(Facet(0)).set_map(Some(map));
     world.state.tiles = tiles;
 }
 

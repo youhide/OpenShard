@@ -20,8 +20,9 @@ use openshard_entities::{EntityId, Registry};
 use openshard_events::EventBus;
 use openshard_gateway::ConnectionId;
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Doors, Overlay};
+use openshard_map::overlay::Doors;
 use openshard_map::snapshot::MapSnapshot;
+use openshard_map::world::World;
 use openshard_movement::{Footing, MapTerrain, NavigationGraph};
 use openshard_protocol::casting::SpellId;
 use openshard_protocol::combat::HealthBar;
@@ -387,8 +388,16 @@ pub struct Outbound {
 /// [`WorldState::map_terrain`](WorldState::map_terrain) — see
 /// `docs/map/terrain_seam.md`'s node D.
 pub struct FacetState {
-    /// The floor, if this facet has a map loaded.
-    pub map: Option<MapSnapshot>,
+    /// The ground, and what the live world has laid over it.
+    ///
+    /// **One value, and private.** The two used to be a public
+    /// `Option<MapSnapshot>` and a private overlay beside it, which meant
+    /// nothing stopped a reader taking one of them and forgetting the other —
+    /// and the pair could be given a map and an overlay of different facets
+    /// without anything noticing. See [`World`], and
+    /// [`WorldState::footing`](WorldState::footing), which is the one
+    /// composition over it.
+    world: World,
     /// Static long-distance connectivity, built with the terrain at facet load.
     /// It deliberately has no live doors or placed items in it; a caller still
     /// refines every hop through [`WorldState::live_terrain`] or its
@@ -423,14 +432,6 @@ pub struct FacetState {
     /// — is over; they project into one overlay now. Private for the same reason
     /// as [`obstructions`](Self::obstructions).
     boats: crate::boat::Boats,
-    /// The two indexes above as every step decision reads them: one type, by
-    /// tile, shared with the client.
-    ///
-    /// A projection and not a third source of truth. Nothing writes here except
-    /// [`refresh`](Self::refresh), and nothing calls that except the four
-    /// mutators below, which is what makes the invariant — *the overlay states
-    /// what the indexes hold* — unforgettable rather than remembered.
-    overlay: Overlay,
     /// The named areas of this facet — towns, dungeons, guarded zones.
     pub regions: Regions,
     /// What each block of this facet's ground still has left to give: the
@@ -449,18 +450,18 @@ impl FacetState {
     /// than passed, because every caller built them that way and a facet whose
     /// grid disagrees with its own width is not a configuration anybody wants
     /// to be able to spell. The three live indexes start empty and are private
-    /// — see [`obstructions`](Self::obstructions).
+    /// — see [`obstructions`](Self::obstructions), and the live layer of
+    /// [`world`](Self::world), which is a projection of the other two.
     #[must_use]
     pub fn new(map: Option<MapSnapshot>, coarse: Option<NavigationGraph>, width: u32, height: u32) -> Self {
         Self {
-            map,
+            world: World::new(map),
             coarse,
             width,
             height,
             sectors: Sectors::new(width, height),
             obstructions: Obstructions::default(),
             boats: crate::boat::Boats::default(),
-            overlay: Overlay::default(),
             regions: Regions::new(width, height),
             banks: Banks::default(),
         }
@@ -491,10 +492,25 @@ impl FacetState {
         &self.boats
     }
 
-    /// The live world over this facet's map, as every step decision reads it.
+    /// This facet's ground and the live world over it, as one value.
+    ///
+    /// Read-only: the live layer is a projection of
+    /// [`obstructions`](Self::obstructions) and [`boats`](Self::boats), so the
+    /// only way to change it is to change one of those and let
+    /// [`refresh`](Self::refresh) follow.
     #[must_use]
-    pub const fn overlay(&self) -> &Overlay {
-        &self.overlay
+    pub const fn world(&self) -> &World {
+        &self.world
+    }
+
+    /// Give this facet its ground, or take it away.
+    ///
+    /// A facet is inserted and *then* loaded — `tick`'s facet loader builds the
+    /// state before it has read a map, and a test builds one and then hands it
+    /// the scene it is about. It used to be a public field, which is what made
+    /// the pair forgettable.
+    pub fn set_map(&mut self, map: Option<MapSnapshot>) {
+        self.world.set_base(map);
     }
 
     /// Mark `entity` as blocking `(x, y)` through `[z, z + height)`.
@@ -540,7 +556,7 @@ impl FacetState {
     /// has nothing to merge.
     fn refresh(&mut self, x: u16, y: u16) {
         let covers = crate::obstruct::covers_at(&self.obstructions, &self.boats, x, y);
-        self.overlay.set(Tile::new(x, y), covers);
+        self.world.live_mut().set(Tile::new(x, y), covers);
     }
 }
 
@@ -561,7 +577,7 @@ pub struct HeldItem {
 impl std::fmt::Debug for FacetState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FacetState")
-            .field("has_map", &self.map.is_some())
+            .field("has_map", &self.world.snapshot().is_some())
             .field("sectors", &self.sectors.len())
             .finish()
     }
@@ -1152,7 +1168,7 @@ impl WorldState {
     /// deciding a step wants [`live_terrain`](Self::live_terrain) instead.
     #[must_use]
     pub fn map_terrain(&self, facet: Facet) -> Option<MapTerrain<'_>> {
-        let map = self.facets.get(&facet)?.map.as_ref()?;
+        let map = self.facets.get(&facet)?.world.snapshot()?;
         Some(MapTerrain::new(map.map(), &self.tiles))
     }
 
@@ -1170,7 +1186,7 @@ impl WorldState {
     /// and for the same reason: every live entity is on a loaded facet.
     #[must_use]
     pub fn footing(&self, facet: Facet, doors: Doors) -> Footing<'_> {
-        Footing::new(self.map_terrain(facet), self.facet_state(facet).overlay(), doors)
+        Footing::of(self.facet_state(facet).world(), &self.tiles, doors)
     }
 
     /// Is any connected player within `range` tiles (Chebyshev) of `centre` on
