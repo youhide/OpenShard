@@ -31,7 +31,7 @@ use openshard_client_render::confirm as confirm_art;
 use openshard_client_render::confirm::Hit;
 use openshard_client_render::gump::{GumpArt, GumpPixel};
 
-use crate::panes::{Button, Effect, Input, Pane, PaneCtx, PaneFrame, Response};
+use crate::panes::{Button, Effect, Input, PaneCtx, PaneFrame, Response};
 use crate::windows::Drawn;
 
 /// What this client is asking, and therefore what either button means.
@@ -187,16 +187,16 @@ impl ConfirmPane {
     }
 }
 
-impl Pane for ConfirmPane {
+impl ConfirmPane {
     /// The plate and both faces of both buttons — see
     /// [`confirm_art::art_of`], which packs the pressed faces too so that a
     /// button is never drawn blank on the frame it first goes down.
-    fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
+    pub(super) fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
         confirm_art::art_of().collect()
     }
 
     /// The question, if it still stands.
-    fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
+    pub(super) fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         Some(Drawn::Confirm(confirm_art::window(
             &self.question.text(frame.view)?,
             self.held,
@@ -206,7 +206,7 @@ impl Pane for ConfirmPane {
         )))
     }
 
-    fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
+    pub(super) fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         match input {
             Input::Press(Button::Left) if ctx.under_pointer => self.press(ctx),
             Input::Release(Button::Left) => self.release(ctx),

@@ -14,7 +14,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use async_trait::async_trait;
 use openshard_protocol::identity::AccountName;
 use openshard_protocol::serial::Serial;
 #[cfg(test)]
@@ -52,126 +51,6 @@ pub enum StoreError {
     Corrupt(String),
 }
 
-/// Operations every built-in persistence backend supports.
-///
-/// This is an implementation detail: the shard deals in the concrete [`Store`]
-/// enum, while the three backend implementations share these operations here.
-#[async_trait]
-pub(crate) trait Backend: Send + Sync {
-    /// Write a snapshot.
-    ///
-    /// # Must be atomic
-    ///
-    /// All of it or none of it. The snapshot is a consistent picture of one
-    /// tick, and half of it is a world that never existed — see the `journal`
-    /// module. A backend that cannot do a transaction is not a
-    /// backend that can implement this.
-    async fn save(&self, snapshot: &Snapshot) -> Result<(), StoreError>;
-
-    /// Every character, **in ascending serial order**.
-    ///
-    /// The order is part of the contract here and nowhere else in this trait,
-    /// because this is the only read whose order a player sees. The caller enrols
-    /// them in the order given, that list is what `0xA9` draws, and `0x83` picks a
-    /// character by its position in it — so the sequence this returns is the slot
-    /// order, and a boot that returns it differently has shuffled somebody's
-    /// character screen.
-    ///
-    /// Serial ascending is creation order: the allocator hands them out upwards
-    /// and a restored character keeps the one it was created with. It is also the
-    /// only key every backend has, which is the other half of why it is the rule —
-    /// the three implementations below disagreed by default. SQLite's `serial` is
-    /// `INTEGER PRIMARY KEY`, so a bare select is already rowid order and looked
-    /// stable; Postgres returns heap order, where an `UPDATE` moves a row to the
-    /// end, so one logout reordered the list on the next boot; and
-    /// [`MemoryStore`] returned `HashMap` iteration order, which is a fresh
-    /// shuffle every process. All three now say `ORDER BY serial` or its
-    /// equivalent.
-    async fn characters(&self) -> Result<Vec<CharacterRecord>, StoreError>;
-
-    /// Every saved item: characters' carried inventories and loose ground clutter.
-    /// The caller reserves their serials, restores ground items now, and hands each
-    /// character its own when it logs in.
-    async fn items(&self) -> Result<Vec<ItemRecord>, StoreError>;
-
-    /// Every saved spawn region, with the respawn timer it was saved with. The
-    /// caller re-creates them at boot so populated areas stay populated across a
-    /// restart, and a rare spawn keeps its remaining wait.
-    async fn spawners(&self) -> Result<Vec<SpawnerRecord>, StoreError>;
-
-    /// Every saved NPC mobile — townsfolk, vendors, creatures. The caller
-    /// re-creates them at boot exactly as they stood, the Sphere/ServUO whole-world
-    /// model: a killed creature is simply not in the save, and stays gone.
-    async fn mobiles(&self) -> Result<Vec<MobileRecord>, StoreError>;
-
-    /// Every saved decoration — the placed statics, doors and town containers.
-    /// The caller re-lays them at boot, door state and all.
-    async fn decorations(&self) -> Result<Vec<DecorationRecord>, StoreError>;
-
-    /// Every facet's named regions, for the boot load.
-    ///
-    /// # Errors
-    /// If the store cannot be read.
-    async fn regions(&self) -> Result<Vec<RegionRecord>, StoreError>;
-
-    /// Every guild on the shard, for the boot load.
-    ///
-    /// Only the guilds. Who is *in* one comes back with the characters, because
-    /// membership is a character's field — so a roster is the sum of who names
-    /// the guild, and there is no second list to fall out of step with it.
-    ///
-    /// # Errors
-    /// If the store cannot be read.
-    async fn guilds(&self) -> Result<Vec<GuildRecord>, StoreError>;
-
-    /// Every named alliance, in id order.
-    async fn alliances(&self) -> Result<Vec<crate::record::AllianceRecord>, StoreError>;
-
-    /// Every house on the shard, in serial order.
-    ///
-    /// # Errors
-    /// If the store cannot be read.
-    async fn houses(&self) -> Result<Vec<crate::record::HouseRecord>, StoreError>;
-
-    /// Every designed house's components, in serial order.
-    ///
-    /// A second read rather than a join into [`houses`](Self::houses), and that
-    /// is the cost `HouseDesignRecord` names: a design is a few hundred rows and
-    /// a house record is one, so they do not travel together. On the
-    /// overwhelmingly common shard this answers an empty vector.
-    ///
-    /// # Errors
-    /// If the store cannot be read.
-    async fn designs(&self) -> Result<Vec<crate::record::HouseDesignRecord>, StoreError>;
-
-    /// Every ship on the water, as last saved. The boat index is rebuilt from
-    /// these at boot, the way a house's footprint is.
-    ///
-    /// # Errors
-    /// If the store cannot be read.
-    async fn boats(&self) -> Result<Vec<crate::record::BoatRecord>, StoreError>;
-
-    /// The world's own scalars, as last saved — the clock and where the roll
-    /// generator got to. One read for the one row, so a scalar added to
-    /// [`WorldRecord`] does not add a method here and a query to every backend.
-    ///
-    /// `None` means this store has never held the row: a world nobody has saved
-    /// yet. That is not the same as a row of zeroes, and the difference matters for
-    /// the generator — zero is a seed like any other, so a caller handed
-    /// `WorldRecord::default()` would overwrite whatever the config asked for with
-    /// it. Absence leaves the fresh world's own seed alone.
-    ///
-    /// # Errors
-    /// If the store cannot be read.
-    async fn world(&self) -> Result<Option<WorldRecord>, StoreError>;
-
-    /// Every account.
-    async fn accounts(&self) -> Result<Vec<AccountRecord>, StoreError>;
-
-    /// Add or update an account.
-    async fn put_account(&self, account: &AccountRecord) -> Result<(), StoreError>;
-}
-
 /// Where the world is kept.
 ///
 /// The set is deliberately closed. Adding a persistence backend is an explicit
@@ -179,7 +58,7 @@ pub(crate) trait Backend: Send + Sync {
 /// the shard behind dynamic dispatch.
 #[derive(Debug)]
 pub enum Store {
-    Memory(MemoryStore),
+    Memory(Box<MemoryStore>),
     Sqlite(SqliteStore),
     Postgres(PgStore),
 }
@@ -196,7 +75,7 @@ macro_rules! delegate {
 
 impl Store {
     pub fn memory() -> Self {
-        Self::Memory(MemoryStore::new())
+        Self::Memory(Box::new(MemoryStore::new()))
     }
 
     pub fn sqlite(store: SqliteStore) -> Self {
@@ -320,8 +199,7 @@ impl MemoryStore {
     }
 }
 
-#[async_trait]
-impl Backend for MemoryStore {
+impl MemoryStore {
     async fn save(&self, snapshot: &Snapshot) -> Result<(), StoreError> {
         if snapshot.schema != SCHEMA_VERSION {
             return Err(StoreError::SchemaMismatch {
@@ -455,7 +333,7 @@ impl Backend for MemoryStore {
     }
 
     async fn characters(&self) -> Result<Vec<CharacterRecord>, StoreError> {
-        // Sorted, not `values()`: the trait promises ascending serial, and a
+        // Sorted, not `values()`: the store contract promises ascending serial, and a
         // `HashMap` walks its own way round every process. This is the backend a
         // shard with no database runs on and the one every test uses, so an
         // unsorted read here is a slot order that is different each boot and a
@@ -679,7 +557,7 @@ mod tests {
 
     #[tokio::test]
     async fn characters_come_back_in_slot_order() {
-        // The one read in this trait whose order a player sees: it is the account's
+        // The one store read whose order a player sees: it is the account's
         // character list, and `0x83` picks by position in it. Saved out of order on
         // purpose, and enough of them that a `HashMap` walk agreeing by luck is one
         // arrangement in 8!.

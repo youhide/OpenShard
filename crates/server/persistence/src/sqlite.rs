@@ -20,7 +20,6 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
 use openshard_protocol::identity::{AccountName, CharacterName};
 use openshard_protocol::serial::Serial;
 #[cfg(test)]
@@ -32,7 +31,7 @@ use crate::record::{
     AccountRecord, CharacterRecord, DecorationRecord, GuildRecord, ItemLocation, ItemRecord, MobileRecord,
     RegionRecord, SCHEMA_VERSION, SpawnerRecord, StatLockRecord, WorldRecord,
 };
-use crate::store::{Backend, StoreError};
+use crate::store::StoreError;
 
 /// The flat form of an [`ItemLocation`] for the `items` table: a kind tag and the
 /// union of every variant's parameters, the fields not used by a kind left zero.
@@ -426,9 +425,8 @@ impl SqliteStore {
     }
 }
 
-#[async_trait]
-impl Backend for SqliteStore {
-    async fn save(&self, snapshot: &Snapshot) -> Result<(), StoreError> {
+impl SqliteStore {
+    pub(crate) async fn save(&self, snapshot: &Snapshot) -> Result<(), StoreError> {
         // Refuse before touching the database, exactly as `MemoryStore` does: a
         // snapshot from a future schema must not be half-written.
         if snapshot.schema != SCHEMA_VERSION {
@@ -854,7 +852,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn characters(&self) -> Result<Vec<CharacterRecord>, StoreError> {
+    pub(crate) async fn characters(&self) -> Result<Vec<CharacterRecord>, StoreError> {
         let connection = Arc::clone(&self.connection);
         blocking(move || {
             let guard = connection.lock().expect("the sqlite mutex is never poisoned");
@@ -930,7 +928,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn items(&self) -> Result<Vec<ItemRecord>, StoreError> {
+    pub(crate) async fn items(&self) -> Result<Vec<ItemRecord>, StoreError> {
         let connection = Arc::clone(&self.connection);
         blocking(move || {
             let guard = connection.lock().expect("the sqlite mutex is never poisoned");
@@ -1037,7 +1035,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn spawners(&self) -> Result<Vec<SpawnerRecord>, StoreError> {
+    pub(crate) async fn spawners(&self) -> Result<Vec<SpawnerRecord>, StoreError> {
         let connection = Arc::clone(&self.connection);
         blocking(move || {
             let guard = connection.lock().expect("the sqlite mutex is never poisoned");
@@ -1079,7 +1077,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn mobiles(&self) -> Result<Vec<MobileRecord>, StoreError> {
+    pub(crate) async fn mobiles(&self) -> Result<Vec<MobileRecord>, StoreError> {
         let connection = Arc::clone(&self.connection);
         blocking(move || {
             let guard = connection.lock().expect("the sqlite mutex is never poisoned");
@@ -1097,7 +1095,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn decorations(&self) -> Result<Vec<DecorationRecord>, StoreError> {
+    pub(crate) async fn decorations(&self) -> Result<Vec<DecorationRecord>, StoreError> {
         let connection = Arc::clone(&self.connection);
         blocking(move || {
             let guard = connection.lock().expect("the sqlite mutex is never poisoned");
@@ -1116,7 +1114,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn regions(&self) -> Result<Vec<RegionRecord>, StoreError> {
+    pub(crate) async fn regions(&self) -> Result<Vec<RegionRecord>, StoreError> {
         let connection = Arc::clone(&self.connection);
         blocking(move || {
             let guard = connection.lock().expect("the sqlite mutex is never poisoned");
@@ -1136,7 +1134,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn alliances(&self) -> Result<Vec<crate::record::AllianceRecord>, StoreError> {
+    pub(crate) async fn alliances(&self) -> Result<Vec<crate::record::AllianceRecord>, StoreError> {
         let connection = Arc::clone(&self.connection);
         blocking(move || {
             let guard = connection.lock().expect("the sqlite mutex is never poisoned");
@@ -1172,7 +1170,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn designs(&self) -> Result<Vec<crate::record::HouseDesignRecord>, StoreError> {
+    pub(crate) async fn designs(&self) -> Result<Vec<crate::record::HouseDesignRecord>, StoreError> {
         let connection = Arc::clone(&self.connection);
         blocking(move || {
             let guard = connection.lock().expect("the sqlite mutex is never poisoned");
@@ -1219,7 +1217,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn boats(&self) -> Result<Vec<crate::record::BoatRecord>, StoreError> {
+    pub(crate) async fn boats(&self) -> Result<Vec<crate::record::BoatRecord>, StoreError> {
         let connection = Arc::clone(&self.connection);
         blocking(move || {
             let guard = connection.lock().expect("the sqlite mutex is never poisoned");
@@ -1262,7 +1260,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn houses(&self) -> Result<Vec<crate::record::HouseRecord>, StoreError> {
+    pub(crate) async fn houses(&self) -> Result<Vec<crate::record::HouseRecord>, StoreError> {
         let connection = Arc::clone(&self.connection);
         blocking(move || {
             let guard = connection.lock().expect("the sqlite mutex is never poisoned");
@@ -1323,7 +1321,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn guilds(&self) -> Result<Vec<GuildRecord>, StoreError> {
+    pub(crate) async fn guilds(&self) -> Result<Vec<GuildRecord>, StoreError> {
         let connection = Arc::clone(&self.connection);
         blocking(move || {
             let guard = connection.lock().expect("the sqlite mutex is never poisoned");
@@ -1367,7 +1365,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn world(&self) -> Result<Option<WorldRecord>, StoreError> {
+    pub(crate) async fn world(&self) -> Result<Option<WorldRecord>, StoreError> {
         let connection = Arc::clone(&self.connection);
         blocking(move || {
             let guard = connection.lock().expect("the sqlite mutex is never poisoned");
@@ -1401,7 +1399,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn accounts(&self) -> Result<Vec<AccountRecord>, StoreError> {
+    pub(crate) async fn accounts(&self) -> Result<Vec<AccountRecord>, StoreError> {
         let connection = Arc::clone(&self.connection);
         blocking(move || {
             let guard = connection.lock().expect("the sqlite mutex is never poisoned");
@@ -1421,7 +1419,7 @@ impl Backend for SqliteStore {
         .await
     }
 
-    async fn put_account(&self, account: &AccountRecord) -> Result<(), StoreError> {
+    pub(crate) async fn put_account(&self, account: &AccountRecord) -> Result<(), StoreError> {
         let connection = Arc::clone(&self.connection);
         let account = account.clone();
         blocking(move || {
@@ -1438,7 +1436,7 @@ impl Backend for SqliteStore {
     }
 }
 
-/// Turn a `rusqlite` error into the trait's error. The database says what went
+/// Turn a `rusqlite` error into the store's error. The database says what went
 /// wrong; whether that is fatal is the shard's call, not this crate's.
 fn database(error: rusqlite::Error) -> StoreError {
     StoreError::Database(error.to_string())

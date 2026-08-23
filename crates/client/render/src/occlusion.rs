@@ -5122,7 +5122,7 @@ mod tests {
         };
         let floor = |x: u16, y: u16| map.land(x, y).map_or(0, |cell| cell.z);
 
-        let fastest = |mut run: Box<dyn FnMut()>| {
+        fn fastest(mut run: impl FnMut()) -> std::time::Duration {
             let mut best = std::time::Duration::MAX;
             for _ in 0..RUNS {
                 let start = std::time::Instant::now();
@@ -5130,28 +5130,28 @@ mod tests {
                 best = best.min(start.elapsed());
             }
             best
-        };
+        }
 
         // Each of these is the one above it plus a phase, so the phase is the
         // difference. `black_box` on what a case produces, because a builder
         // nobody reads is work a release build may delete.
-        let empty = fastest(Box::new(|| {
+        let empty = fastest(|| {
             std::hint::black_box(Builder::new(bounds));
-        }));
-        let walked = fastest(Box::new(|| {
+        });
+        let walked = fastest(|| {
             let mut count = 0_usize;
             crate::statics::for_each_static_in(&map, bounds, |_| count += 1);
             std::hint::black_box(count);
-        }));
-        let shaded = fastest(Box::new(|| {
+        });
+        let shaded = fastest(|| {
             let mut grid = Builder::new(bounds);
             crate::statics::for_each_static_in(&map, bounds, |item| {
                 let tile = tiledata.static_tile(item.tile.0);
                 grid.shade(item.x, item.y, item.z, floor(item.x, item.y), item.tile, tile);
             });
             std::hint::black_box(grid.sky_at(bounds.min_x, bounds.min_y));
-        }));
-        let added = fastest(Box::new(|| {
+        });
+        let added = fastest(|| {
             let mut grid = Builder::new(bounds);
             crate::statics::for_each_static_in(&map, bounds, |item| {
                 let tile = tiledata.static_tile(item.tile.0);
@@ -5161,8 +5161,8 @@ mod tests {
                 }
             });
             std::hint::black_box(grid.sky_at(bounds.min_x, bounds.min_y));
-        }));
-        let whole = fastest(Box::new(|| {
+        });
+        let whole = fastest(|| {
             std::hint::black_box(
                 collect(
                     &map,
@@ -5174,7 +5174,7 @@ mod tests {
                 )
                 .dropped(),
             );
-        }));
+        });
 
         // And the two tails on their own, built once and timed over a clone, so
         // that the blur and the pack are read apart rather than as one remainder.
@@ -5189,17 +5189,17 @@ mod tests {
             });
             grid
         };
-        let blurred = fastest(Box::new(|| {
+        let blurred = fastest(|| {
             let mut grid = built.clone();
             grid.blur_sky();
             std::hint::black_box(grid.sky_at(bounds.min_x, bounds.min_y));
-        }));
-        let packed = fastest(Box::new(|| {
+        });
+        let packed = fastest(|| {
             std::hint::black_box(built.clone().finish(&Cutaway::OPEN).solid_count());
-        }));
-        let cloned = fastest(Box::new(|| {
+        });
+        let cloned = fastest(|| {
             std::hint::black_box(built.clone().sky_at(bounds.min_x, bounds.min_y));
-        }));
+        });
 
         // Step 21.5, and the two states a cache has. A **still** camera is the
         // ceiling — every block it wants is one it holds — and a camera moving a

@@ -36,7 +36,7 @@
 use openshard_client_render::gump::{GumpArt, GumpPixel};
 use openshard_client_render::split as split_art;
 
-use crate::panes::{Answer, Button, Effect, Input, Key, Pane, PaneCtx, PaneFrame, Response};
+use crate::panes::{Answer, Button, Effect, Input, Key, PaneCtx, PaneFrame, Response};
 use crate::windows::Drawn;
 
 /// One open amount picker: what may be taken, what is chosen, and which of its
@@ -200,12 +200,12 @@ impl SplitPane {
     }
 }
 
-impl Pane for SplitPane {
+impl SplitPane {
     /// All five pictures, named rather than left to the sweep over what was
     /// laid out — see [`split_art::ART`], which is where the reason is: the
     /// button's other two faces are drawn on the frame the pointer arrives, and
     /// an atlas grown from the last frame's layout would not hold them yet.
-    fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
+    pub(super) fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
         split_art::ART.to_vec()
     }
 
@@ -215,7 +215,7 @@ impl Pane for SplitPane {
     /// Never `None`, and it is the only kind of which that is true: every other
     /// window is drawn out of something in the view that can go away underneath
     /// it, and everything this one draws it is holding.
-    fn layout(&self, _frame: &PaneFrame<'_>) -> Option<Drawn> {
+    pub(super) fn layout(&self, _frame: &PaneFrame<'_>) -> Option<Drawn> {
         Some(Drawn::Split(split_art::window(
             self.amount,
             self.most,
@@ -233,7 +233,7 @@ impl Pane for SplitPane {
     /// reference's `HSliderBar::OnMouseWheel`, and a notch that fell through to
     /// the camera would zoom the map out from under a prompt the player is
     /// aiming at.
-    fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
+    pub(super) fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         match input {
             Input::Press(Button::Left) => {
                 if !ctx.under_pointer {
@@ -356,7 +356,7 @@ mod tests {
         assert_eq!(pane.face(), split_art::Face::Pressed);
     }
 
-    /// The gestures, through [`Pane::handle`] and against an install that ships
+    /// The gestures, through [`AnyPane::handle`](crate::panes::AnyPane::handle) and against an install that ships
     /// the five pictures — the shape step 8 of `docs/window_components.md` made
     /// possible, and the only way to assert what the *manager* is asked for.
     mod gestures {

@@ -384,7 +384,7 @@ pub(crate) fn advance_presentation_to(
 pub struct AuthoritativeWorld {
     /// The last thing the server said, whole. Kept for the HUD and as the sole
     /// source from which this app rebuilds render projections.
-    pub view: Option<Box<WorldView>>,
+    pub view: Option<WorldView>,
     /// The walk handshake, beside the view it belongs to.
     ///
     /// This end's half of `0x02`/`0x22`/`0x21`: which steps are in flight, what

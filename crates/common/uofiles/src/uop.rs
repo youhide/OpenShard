@@ -316,7 +316,7 @@ impl UopCompression {
 /// the world.
 pub fn read_concatenated(
     path: impl AsRef<Path>,
-    path_pattern: &dyn Fn(usize) -> String,
+    path_pattern: impl Fn(usize) -> String,
 ) -> Result<Vec<u8>, UopError> {
     let uop = Uop::open(path)?;
 

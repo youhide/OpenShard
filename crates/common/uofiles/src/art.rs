@@ -63,7 +63,7 @@ const STATIC_HEADER: usize = 8;
 #[non_exhaustive]
 pub enum ArtError {
     /// The container could not be read.
-    Container(Box<UopError>),
+    Container(UopError),
     /// An entry is there but is not the shape its format requires.
     Malformed {
         /// Which graphic.
@@ -95,7 +95,7 @@ impl std::error::Error for ArtError {
 
 impl From<UopError> for ArtError {
     fn from(source: UopError) -> Self {
-        Self::Container(Box::new(source))
+        Self::Container(source)
     }
 }
 

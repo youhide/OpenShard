@@ -59,7 +59,6 @@ pub(crate) struct WorldPassAudit {
     pub(crate) composite_cpu_bindings: Duration,
     pub(crate) composite_cpu_pass: Duration,
 }
-use crate::panes::Pane;
 use crate::windows::{Drawn, WindowSubject};
 use crate::{graphics, panes, profile, resources, shell, windows, world};
 

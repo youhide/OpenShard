@@ -12,7 +12,6 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
-async-trait.workspace = true
 openshard-entities.workspace = true
 openshard-protocol.workspace = true
 rusqlite = { version = "0.32", features = ["bundled"] }

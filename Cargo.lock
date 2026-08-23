@@ -2873,7 +2873,6 @@ dependencies = [
 name = "openshard-persistence"
 version = "0.0.1"
 dependencies = [
- "async-trait",
  "openshard-entities",
  "openshard-protocol",
  "rusqlite",

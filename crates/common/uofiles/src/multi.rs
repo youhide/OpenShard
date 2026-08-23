@@ -391,14 +391,14 @@ impl Multis {
         let path = path.as_ref().to_path_buf();
         let uop = crate::uop::Uop::open(&path).map_err(|source| MultiError::Container {
             path: path.clone(),
-            source: Box::new(source),
+            source,
         })?;
         let mut multis = BTreeMap::new();
         for id in 0..=MAX_MULTI_ID {
             let name = UOP_ENTRY.replace("{:06}", &format!("{id:06}"));
             let Some(raw) = uop.raw_entry(&name).map_err(|source| MultiError::Container {
                 path: path.clone(),
-                source: Box::new(source),
+                source,
             })?
             else {
                 continue;
@@ -562,7 +562,7 @@ pub enum MultiError {
         /// Which file.
         path: PathBuf,
         /// Why.
-        source: Box<crate::uop::UopError>,
+        source: crate::uop::UopError,
     },
     /// An entry could not be made sense of.
     Malformed {
@@ -610,7 +610,7 @@ impl std::error::Error for MultiError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Read { source, .. } => Some(source),
-            Self::Container { source, .. } => Some(source.as_ref()),
+            Self::Container { source, .. } => Some(source),
             Self::Malformed { .. } | Self::Truncated { .. } => None,
         }
     }

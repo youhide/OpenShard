@@ -27,7 +27,7 @@
 use openshard_client_render::gump::{GumpArt, GumpPixel};
 use openshard_client_render::status;
 
-use crate::panes::{Input, Pane, PaneCtx, PaneFrame, Response};
+use crate::panes::{Input, PaneCtx, PaneFrame, Response};
 use crate::windows::Drawn;
 
 /// This character's status frame, open.
@@ -40,14 +40,14 @@ use crate::windows::Drawn;
 #[derive(Debug, Default)]
 pub struct StatusPane;
 
-impl Pane for StatusPane {
+impl StatusPane {
     /// Nothing of its own, for [`SkillsPane`](crate::panes::skills)'s reason:
     /// the frame art and the glyphs over it are offered to the atlas by the
     /// sweep over every laid-out window at the end of
     /// `render_passes::draw_gump_windows`, and naming them here would be a
     /// second answer to "what does this window draw", worked out before the
     /// layout that decides it.
-    fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
+    pub(super) fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
         Vec::new()
     }
 
@@ -60,7 +60,7 @@ impl Pane for StatusPane {
     /// drawing a status window belonging to nobody; drawing nothing is the
     /// honest picture, and the window becomes visible with its numbers on the
     /// frame the reply lands.
-    fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
+    pub(super) fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         let player = &frame.view.player;
         Some(Drawn::Status(status::window(
             player.status.as_ref()?,
@@ -76,7 +76,7 @@ impl Pane for StatusPane {
     /// any pixel of it, and the right button that closes it. Decision 2 is what
     /// makes that the manager's rather than something repeated here, and this is
     /// the kind where the whole of a pane's input side is that sentence.
-    fn handle(&mut self, _input: Input, _ctx: &PaneCtx<'_>) -> Response {
+    pub(super) fn handle(&mut self, _input: Input, _ctx: &PaneCtx<'_>) -> Response {
         Response::ignored()
     }
 }
@@ -89,7 +89,7 @@ mod tests {
 
     use super::*;
 
-    /// **S3's `None` gap, closed through `Pane::layout`.** A `0x1B` opens no
+    /// **S3's `None` gap, closed through `AnyPane::layout`.** A `0x1B` opens no
     /// window (see the module docs), so the Status button's own path opens one
     /// and asks for a fresh `0x11` in the same press — and the frame or two
     /// before that reply lands is a window with nothing to draw. Drawing the

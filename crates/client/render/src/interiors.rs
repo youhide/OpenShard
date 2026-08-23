@@ -567,11 +567,11 @@ impl BlockRooms {
     /// A wall is an edge, not a solid floor tile.  The art table is therefore
     /// consulted while the flood graph is made; an unread graphic conservatively
     /// occupies every edge of its tile, the established renderer fallback.
-    pub fn bake_with_shapes(
+    pub fn bake_with_shapes<F: Fn(Graphic) -> crate::occlusion::Shape>(
         map: &WorldMap,
         tiledata: &TileData,
         id: BlockCoord,
-        shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
+        shape_of: &F,
     ) -> Option<Self> {
         let cells = BlockCells::bake(map, tiledata, id)?;
         // Furniture can block a character but it never makes two rooms.  Only
@@ -765,20 +765,20 @@ impl StitchedRooms {
     }
 
     /// Stitch with the same wall-edge predicate the block bakes used.
-    pub fn bake_with_shapes(
+    pub fn bake_with_shapes<F: Fn(Graphic) -> crate::occlusion::Shape>(
         map: &WorldMap,
         tiledata: &TileData,
         blocks: impl IntoIterator<Item = BlockRooms>,
-        shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
+        shape_of: &F,
     ) -> Self {
         Self::bake_with_join(blocks, &|one, other| {
             cells_join(map, tiledata, shape_of, one, other)
         })
     }
 
-    fn bake_with_join(
+    fn bake_with_join<F: Fn(Cell, Cell) -> bool>(
         blocks: impl IntoIterator<Item = BlockRooms>,
-        joins_cells: &dyn Fn(Cell, Cell) -> bool,
+        joins_cells: &F,
     ) -> Self {
         let blocks: BTreeMap<_, _> = blocks.into_iter().map(|block| (block.cells.id, block)).collect();
 
@@ -1034,10 +1034,10 @@ impl BuildingMap {
     /// renderer, while the result contains only map topology and is safe to
     /// load without opening a sprite archive.
     #[must_use]
-    pub fn bake(
+    pub fn bake<F: Fn(Graphic) -> crate::occlusion::Shape>(
         map: &WorldMap,
         tiledata: &TileData,
-        shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
+        shape_of: &F,
     ) -> Self {
         let width = map.width();
         let height = map.height();
@@ -1269,10 +1269,10 @@ impl BuildingMap {
     /// map boundary.  This is an offline inspection aid: it exposes the wall
     /// or doorway the positive-space rule failed to cross, without making a
     /// camera frame reconstruct topology.
-    pub fn exterior_path(
+    pub fn exterior_path<F: Fn(Graphic) -> crate::occlusion::Shape>(
         map: &WorldMap,
         tiledata: &TileData,
-        shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
+        shape_of: &F,
         start: (u16, u16),
     ) -> Option<Vec<(u16, u16)>> {
         let (width, height) = (map.width() as usize, map.height() as usize);
@@ -1345,10 +1345,10 @@ struct PlanarTopology {
 }
 
 impl PlanarTopology {
-    fn bake(
+    fn bake<F: Fn(Graphic) -> crate::occlusion::Shape>(
         map: &WorldMap,
         tiledata: &TileData,
-        shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
+        shape_of: &F,
     ) -> Self {
         let (width, height) = (map.width() as usize, map.height() as usize);
         let cells = width
@@ -2138,10 +2138,10 @@ fn bands_join(one: Cell, other: Cell) -> bool {
 /// escape a real house through art that was visually a continuous wall.  The
 /// art table's measured facing supplies the edge; an unread wall is the safe
 /// four-edge fallback in `named_edges`.
-fn cells_join(
+fn cells_join<F: Fn(Graphic) -> crate::occlusion::Shape>(
     map: &WorldMap,
     tiledata: &TileData,
-    shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
+    shape_of: &F,
     one: Cell,
     other: Cell,
 ) -> bool {
@@ -2164,10 +2164,10 @@ fn cells_join(
 }
 
 /// The wall panels that occupy a cell at its floor band.
-fn wall_edges(
+fn wall_edges<F: Fn(Graphic) -> crate::occlusion::Shape>(
     map: &WorldMap,
     tiledata: &TileData,
-    shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
+    shape_of: &F,
     cell: Cell,
 ) -> crate::occlusion::Edges {
     const WALLISH: u64 = TileFlags::WALL | TileFlags::NO_SHOOT;
@@ -2384,12 +2384,12 @@ impl Index {
     ///
     /// The shape source is immutable client data.  Callers must use one source
     /// for one `Index`: changing it would make a cached map fact stale.
-    pub fn rooms_with_shapes(
+    pub fn rooms_with_shapes<F: Fn(Graphic) -> crate::occlusion::Shape>(
         &mut self,
         map: &WorldMap,
         tiledata: &TileData,
         id: BlockCoord,
-        shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
+        shape_of: &F,
     ) -> Option<&BlockRooms> {
         if let Entry::Vacant(entry) = self.blocks.entry(id) {
             entry.insert(BlockRooms::bake_with_shapes(map, tiledata, id, shape_of)?);
@@ -2414,12 +2414,12 @@ impl Index {
     }
 
     /// Stitch blocks using the measured faces of the install's wall art.
-    pub fn stitched_with_shapes(
+    pub fn stitched_with_shapes<F: Fn(Graphic) -> crate::occlusion::Shape>(
         &mut self,
         map: &WorldMap,
         tiledata: &TileData,
         ids: impl IntoIterator<Item = BlockCoord>,
-        shape_of: &dyn Fn(Graphic) -> crate::occlusion::Shape,
+        shape_of: &F,
     ) -> Option<StitchedRooms> {
         let ids: BTreeSet<_> = ids.into_iter().collect();
         let mut blocks = Vec::with_capacity(ids.len());

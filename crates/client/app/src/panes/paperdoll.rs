@@ -40,7 +40,7 @@ use openshard_protocol::wire::{Hue, Layer};
 use crate::DOUBLE_CLICK;
 use crate::crowd;
 use crate::hand::{DragOrigin, Dragged, ItemPress, PendingDrop, centre_of};
-use crate::panes::{Button, Effect, Input, Line, LocalWindow, Pane, PaneCtx, PaneFrame, Response};
+use crate::panes::{Button, Effect, Input, Line, LocalWindow, PaneCtx, PaneFrame, Response};
 use crate::windows::Drawn;
 
 /// One open paperdoll window.
@@ -550,13 +550,13 @@ impl PaperdollPane {
     }
 }
 
-impl Pane for PaperdollPane {
+impl PaperdollPane {
     /// Nothing of its own, and it could not be otherwise: which picture a
     /// worn item is, is the answer to [`paperdoll::gump_of`], so asking for
     /// the list *is* laying the window out — [`paperdoll::art_of`]'s own doc.
     /// The sweep over every laid-out window at the end of
     /// `render_passes::draw_gump_windows` packs what the layout produced.
-    fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
+    pub(super) fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
         Vec::new()
     }
 
@@ -568,7 +568,7 @@ impl Pane for PaperdollPane {
     /// draws the *frame* — the window is open, and a window with no picture
     /// is one the pointer cannot find and the player cannot close; the doll
     /// appears on the frame the `0x77` arrives.
-    fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
+    pub(super) fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         let files = frame.files.gumps.as_ref()?;
         let view = frame.view;
         let own = self.own(frame);
@@ -656,7 +656,7 @@ impl Pane for PaperdollPane {
     /// **No wheel.** Nothing on a doll scrolls, so a notch over one goes past
     /// it to the camera, exactly as it did. The right button is the manager's
     /// close, and there is nothing here to type into.
-    fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
+    pub(super) fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         match input {
             Input::Press(Button::Left) => {
                 if !ctx.under_pointer {
@@ -846,7 +846,7 @@ mod tests {
         assert!(answer.out.is_empty(), "no worn backpack, nothing to use");
     }
 
-    /// **Step 8's paperdoll quarter, through [`Pane::handle`].**
+    /// **Step 8's paperdoll quarter, through [`AnyPane::handle`](crate::panes::AnyPane::handle).**
     ///
     /// S5 declined this press so the legacy chain could answer it; S6 is what
     /// moved the transfer machinery in, and the module docs above say what
@@ -857,7 +857,7 @@ mod tests {
     /// turned into [`Effect::Lift`] by the move that follows, past the same
     /// slop [`ItemPress::dragged`] pins for every holder.
     ///
-    /// The doll is built by hand rather than through [`Pane::layout`] — a real
+    /// The doll is built by hand rather than through [`PaperdollPane::layout`] — a real
     /// doll picture needs `gumpartLegacyMUL.uop`, which
     /// [`fixture::Install`] deliberately does not ship (see its own doc) —
     /// but `press` never asks how a picture got into `ctx.drawn`, only what is

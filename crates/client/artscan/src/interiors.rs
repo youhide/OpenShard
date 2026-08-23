@@ -49,9 +49,13 @@ pub enum Error {
         path: PathBuf,
         source: io::Error,
     },
-    Read {
+    Map {
         path: PathBuf,
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: openshard_uofiles::map::MapError,
+    },
+    TileData {
+        path: PathBuf,
+        source: openshard_uofiles::tiledata::TileDataError,
     },
     Incompatible {
         path: PathBuf,
@@ -73,7 +77,12 @@ impl fmt::Display for Error {
             Self::Art(error) => write!(f, "wall catalogue: {error}"),
             Self::Missing { path } => write!(f, "interior artifact {} does not exist", path.display()),
             Self::Io { path, source } => write!(f, "interior artifact {}: {source}", path.display()),
-            Self::Read { path, source } => write!(f, "interior input {}: {source}", path.display()),
+            Self::Map { path, source } => {
+                write!(f, "interior input {}: {source}", path.display())
+            }
+            Self::TileData { path, source } => {
+                write!(f, "interior input {}: {source}", path.display())
+            }
             Self::Incompatible { path, reason } => {
                 write!(
                     f,
@@ -96,7 +105,8 @@ impl std::error::Error for Error {
         match self {
             Self::Art(error) => Some(error),
             Self::Io { source, .. } => Some(source),
-            Self::Read { source, .. } => Some(source.as_ref()),
+            Self::Map { source, .. } => Some(source),
+            Self::TileData { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -163,15 +173,15 @@ pub fn stamp_of(client_dir: &Path, facet: Facet, revision: MapRevision) -> Resul
 /// artifact with what it is handed here.
 pub fn build(client_dir: &Path, facet: Facet) -> Result<(BuildingMap, MapRevision), Error> {
     let table = load(client_dir).map_err(Error::Art)?;
-    let map = openshard_uofiles::map::load_facet(client_dir, facet).map_err(|source| Error::Read {
+    let map = openshard_uofiles::map::load_facet(client_dir, facet).map_err(|source| Error::Map {
         path: client_dir.to_path_buf(),
-        source: Box::new(source),
+        source,
     })?;
     let tiles =
         openshard_uofiles::tiledata::load_tiles(client_dir.join("tiledata.mul")).map_err(|source| {
-            Error::Read {
+            Error::TileData {
                 path: client_dir.join("tiledata.mul"),
-                source: Box::new(source),
+                source,
             }
         })?;
     let graph = BuildingMap::bake(map.map(), &tiles, &|graphic| table.shape(graphic));

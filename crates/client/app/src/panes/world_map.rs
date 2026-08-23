@@ -6,7 +6,7 @@ use openshard_client_render::radar::RadarTile;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Graphic;
 
-use crate::panes::{Button, Effect, Input, Pane, PaneCtx, PaneFrame, Response};
+use crate::panes::{Button, Effect, Input, PaneCtx, PaneFrame, Response};
 use crate::windows::Drawn;
 
 pub const EXTENT: (i32, i32) = (640, 480);
@@ -119,12 +119,12 @@ fn clamp_centre(
     )
 }
 
-impl Pane for WorldMapPane {
-    fn art(&self, _: &PaneFrame<'_>) -> Vec<GumpArt> {
+impl WorldMapPane {
+    pub(super) fn art(&self, _: &PaneFrame<'_>) -> Vec<GumpArt> {
         art_of().collect()
     }
 
-    fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
+    pub(super) fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         let (left, top, right, bottom) = measured_insets(frame.files.gump_atlas);
         let content_at = GumpPixel::new(left, top);
         let content_extent = (EXTENT.0 - left - right, EXTENT.1 - top - bottom);
@@ -175,7 +175,7 @@ impl Pane for WorldMapPane {
         }))
     }
 
-    fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
+    pub(super) fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         let drawn = match ctx.drawn {
             Some(Drawn::WorldMap(window)) => Some(window),
             _ => None,

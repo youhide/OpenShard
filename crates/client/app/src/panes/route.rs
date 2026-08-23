@@ -29,7 +29,7 @@ use std::time::Instant;
 
 use crate::app::App;
 use crate::hand::Hand;
-use crate::panes::{Button, Effect, Input, Modifiers, Pane, PaneCtx, PaneFiles, PaneFrame, Response};
+use crate::panes::{Button, Effect, Input, Modifiers, PaneCtx, PaneFiles, PaneFrame, Response};
 use crate::windows::{Asking, WindowSubject};
 
 impl App {

@@ -97,11 +97,11 @@ impl EventBus {
     ///
     /// Yields nothing if no `E` has ever been sent — an unused event type is an
     /// empty read, not an error, so a system can read events no one emits yet.
-    pub fn read<'a, E: Event>(&'a self, cursor: &mut Cursor<E>) -> Box<dyn Iterator<Item = &'a E> + 'a> {
-        match self.queue::<E>() {
-            Some(queue) => Box::new(queue.read(cursor)),
-            None => Box::new(std::iter::empty()),
-        }
+    pub fn read<'a, E: Event>(&'a self, cursor: &mut Cursor<E>) -> impl Iterator<Item = &'a E> {
+        self.queue::<E>()
+            .map(|queue| queue.read(cursor))
+            .into_iter()
+            .flatten()
     }
 
     /// A cursor for `E`, positioned at the oldest readable event.

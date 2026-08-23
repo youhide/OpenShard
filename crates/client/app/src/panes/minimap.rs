@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use openshard_client_render::gump::{GumpArt, GumpPixel, Picture};
 use openshard_protocol::wire::Graphic;
 
-use crate::panes::{Input, Pane, PaneCtx, PaneFrame, Response};
+use crate::panes::{Input, PaneCtx, PaneFrame, Response};
 use crate::windows::Drawn;
 
 /// The two radar gumps used by the classic client.  The art supplies the
@@ -143,12 +143,12 @@ impl MinimapPane {
     }
 }
 
-impl Pane for MinimapPane {
-    fn art(&self, _: &PaneFrame<'_>) -> Vec<GumpArt> {
+impl MinimapPane {
+    pub(super) fn art(&self, _: &PaneFrame<'_>) -> Vec<GumpArt> {
         vec![self.frame_art()]
     }
 
-    fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
+    pub(super) fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         let extent = frame
             .files
             .gump_atlas
@@ -162,7 +162,7 @@ impl Pane for MinimapPane {
         }))
     }
 
-    fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
+    pub(super) fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         if !ctx.under_pointer {
             return Response::ignored();
         }

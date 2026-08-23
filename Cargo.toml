@@ -128,7 +128,6 @@ openshard-world = { path = "crates/server/world", version = "0.0.1" }
 
 # External
 anyhow = "1"
-async-trait = "0.1"
 bytes = "1"
 # The binaries' command lines. `env` is the feature that matters here: every
 # option a binary takes is also the environment variable it was taken from

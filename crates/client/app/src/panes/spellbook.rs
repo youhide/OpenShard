@@ -9,7 +9,7 @@ use openshard_client_render::gump::{GumpArt, GumpPixel};
 use openshard_client_render::spellbook::{self, Hit};
 use openshard_protocol::serial::Serial;
 
-use crate::panes::{Button, Effect, Input, Pane, PaneCtx, PaneFrame, Response};
+use crate::panes::{Button, Effect, Input, PaneCtx, PaneFrame, Response};
 use crate::windows::Drawn;
 
 /// One opened book and the state no packet carries.
@@ -89,12 +89,12 @@ impl SpellbookPane {
     }
 }
 
-impl Pane for SpellbookPane {
-    fn art(&self, _: &PaneFrame<'_>) -> Vec<GumpArt> {
+impl SpellbookPane {
+    pub(super) fn art(&self, _: &PaneFrame<'_>) -> Vec<GumpArt> {
         Vec::new()
     }
 
-    fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
+    pub(super) fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         let book = frame.view.spellbooks.get(&self.book)?;
         Some(Drawn::Spellbook(spellbook::window(
             book.offset,
@@ -104,7 +104,7 @@ impl Pane for SpellbookPane {
         )))
     }
 
-    fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
+    pub(super) fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         match input {
             Input::Press(Button::Left) if ctx.under_pointer => {
                 let Some(Drawn::Spellbook(window)) = ctx.drawn else {

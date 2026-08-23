@@ -31,7 +31,7 @@ use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::vendor::{BuyLine, SellLine};
 
-use crate::panes::{Button, Effect, Input, Pane, PaneCtx, PaneFrame, Response};
+use crate::panes::{Button, Effect, Input, PaneCtx, PaneFrame, Response};
 use crate::windows::Drawn;
 
 /// One open shop window.
@@ -217,7 +217,7 @@ impl VendorPane {
         }
     }
 
-    /// A notch anywhere over the window, once [`Pane::handle`] has already
+    /// A notch anywhere over the window, once [`AnyPane::handle`](crate::panes::AnyPane::handle) has already
     /// established the pointer is on this window at all.
     ///
     /// **Closes the plan's Backlog entry that pitted this pane against
@@ -304,7 +304,7 @@ impl VendorPane {
     }
 }
 
-impl Pane for VendorPane {
+impl VendorPane {
     /// The two parchment panels the window is drawn on, both halves of both
     /// catalogues.
     ///
@@ -313,11 +313,11 @@ impl Pane for VendorPane {
     /// the sweep at the end of `render_passes::draw_gump_windows`. Naming them
     /// here as well would be a second answer to "what is in this shop", worked
     /// out before the layout that decides which four rows are showing.
-    fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
+    pub(super) fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
         vendor::art_of().collect()
     }
 
-    fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
+    pub(super) fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         let stall = Stall::of(frame.view, self.vendor)?;
         // Window-local: `at` is the origin, exactly as if the manager had put
         // this window at `(0, 0)` — see `PaneFrame::cursor`'s doc. The draw
@@ -363,7 +363,7 @@ impl Pane for VendorPane {
     /// **A notch anywhere over the frame is this window's**, matching
     /// [`SkillsPane`](crate::panes::skills::SkillsPane) and ClassicUO — see
     /// `wheel_over_window`.
-    fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
+    pub(super) fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         if let Input::Move = input {
             return self.hover(ctx);
         }
@@ -443,7 +443,7 @@ mod tests {
     }
 
     /// **Step 8, and the defect this plan grew out of, asserted through
-    /// [`Pane::handle`].**
+    /// [`AnyPane::handle`](crate::panes::AnyPane::handle).**
     ///
     /// The three tests below it ask `VendorPane::wheel` directly, which pins the
     /// *rule*; this one goes in the front door — the located gate, the `drawn`

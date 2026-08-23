@@ -24,7 +24,7 @@ use openshard_client_render::party as party_art;
 use openshard_client_render::party::Hit;
 use openshard_protocol::serial::Serial;
 
-use crate::panes::{Button, Effect, Input, Pane, PaneCtx, PaneFrame, Response};
+use crate::panes::{Button, Effect, Input, PaneCtx, PaneFrame, Response};
 use crate::windows::Drawn;
 
 /// The open manifest: which of its controls is down, and nothing else.
@@ -119,15 +119,15 @@ fn me(view: &WorldView) -> Serial {
     view.player.serial
 }
 
-impl Pane for PartyPane {
+impl PartyPane {
     /// The background's nine pieces, the name plate, and both faces of every
     /// control — see [`party_art::art_of`].
-    fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
+    pub(super) fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
         party_art::art_of().collect()
     }
 
     /// The roster, if there is one.
-    fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
+    pub(super) fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         if !in_a_party(frame.view) {
             return None;
         }
@@ -141,7 +141,7 @@ impl Pane for PartyPane {
         )))
     }
 
-    fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
+    pub(super) fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         match input {
             Input::Press(Button::Left) if ctx.under_pointer => self.press(ctx),
             Input::Release(Button::Left) => self.release(ctx),

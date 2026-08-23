@@ -28,7 +28,7 @@ use openshard_protocol::skill::SkillLock;
 use openshard_protocol::wire::RawSkillId;
 use openshard_uofiles::skills::SkillId;
 
-use crate::panes::{Button, Effect, Input, Pane, PaneCtx, PaneFiles, PaneFrame, Response};
+use crate::panes::{Button, Effect, Input, PaneCtx, PaneFiles, PaneFrame, Response};
 use crate::windows::Drawn;
 
 /// This character's skill sheet, open.
@@ -237,14 +237,14 @@ const fn next_lock(lock: SkillLock) -> SkillLock {
     }
 }
 
-impl Pane for SkillsPane {
+impl SkillsPane {
     /// Nothing of its own. The sheet's frame, its arrows and its lock faces are
     /// all ordinary gump art, and every picture of every window is offered to
     /// the atlas once the frame has been laid out — the sweep at the end of
     /// `render_passes::draw_gump_windows`. Naming them here would be a second
     /// answer to "what does this window draw", worked out before the layout
     /// that decides which rows are showing.
-    fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
+    pub(super) fn art(&self, _frame: &PaneFrame<'_>) -> Vec<GumpArt> {
         Vec::new()
     }
 
@@ -258,7 +258,7 @@ impl Pane for SkillsPane {
     /// said, and the files' numbering is what the window is written against. A
     /// skill the files do not name has no row to put a number on, and is
     /// dropped inside the layout rather than here.
-    fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
+    pub(super) fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         let files = frame.files;
         Some(Drawn::Skills(skills::window(
             files.skill_names,
@@ -292,7 +292,7 @@ impl Pane for SkillsPane {
     /// only its catalogue's. The two kinds disagree, they always have, and the
     /// plan's Backlog is where that is written down rather than quietly settled
     /// here — moving the input is this step, choosing between them is not.
-    fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
+    pub(super) fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         match input {
             // Offered to every window, and answered only by the one whose thumb
             // is being held.
@@ -339,7 +339,7 @@ mod tests {
     use super::*;
 
     /// **Step 8 on the second window kind: the notch through
-    /// [`Pane::handle`].**
+    /// [`AnyPane::handle`](crate::panes::AnyPane::handle).**
     ///
     /// A sheet with no rows in it at all — this install names no skills — still
     /// takes the notch, which is the half that decides whether the camera hears

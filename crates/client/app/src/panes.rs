@@ -26,9 +26,8 @@
 //! # Two names that differ from the plan's
 //!
 //! The plan writes `trait Pane` and `enum Pane` in the same breath, which
-//! cannot both exist. The trait keeps the name — it is the concept — and the
-//! static-dispatch enum over its implementors is [`AnyPane`], the ordinary Rust
-//! spelling of that. The plan's `Panes::deliver` is [`crate::app::App::deliver`],
+//! cannot both exist. [`AnyPane`] keeps the closed, concrete set of pane kinds;
+//! there is no second interface hiding it. The plan's `Panes::deliver` is [`crate::app::App::deliver`],
 //! because the router still has to reach `App::fallback_gestures`, which needs
 //! the whole `App`; the loop over the panes itself already takes nothing but the
 //! pane list.
@@ -190,7 +189,7 @@ pub struct Modifiers {
 /// Nine borrows rather than the whole of [`Resources`], and the difference is
 /// not tidiness: `Resources` holds the facet, the navigation graph and the
 /// 195MB animation file, none of which can be built without an install on
-/// disk — so a `PaneFrame` carrying it made [`Pane::handle`] reachable from a
+/// disk — so a `PaneFrame` carrying it made [`AnyPane::handle`] reachable from a
 /// test only on a machine with a client in it. That is the whole of step 8 in
 /// `docs/window_components.md`, and the answer the step's own last paragraph
 /// proposed: *the two or three fields a pane actually reads instead of the
@@ -700,43 +699,9 @@ impl Line {
     }
 }
 
-/// One of the client's own windows, as a component.
-///
-/// Implemented once per window kind, and reached through [`AnyPane`] rather
-/// than through `dyn` — see decision 1 for why the vtable was refused.
-///
-/// The three methods are three phases of a frame, and decision 6 is that they
-/// are called in this order for *every* pane before the next one starts:
-/// [`art`](Pane::art) for all, pack once, [`layout`](Pane::layout) for all.
-/// That order is why the last two take `&self` and a *shared* atlas — a pane
-/// cannot be laid out against an atlas that is still growing.
-pub trait Pane {
-    /// The art this pane needs packed before it can be laid out.
-    ///
-    /// Asked every frame and not once at open: what a window needs depends on
-    /// what is in it, and the atlas answers a repeat with nothing — see
-    /// [`GumpAtlas::add`](openshard_client_render::gump::GumpAtlas::add), which
-    /// filters what it already holds.
-    fn art(&self, frame: &PaneFrame<'_>) -> Vec<GumpArt>;
-
-    /// Lay this pane out for this frame: the pictures the pass draws and the
-    /// pointer is tested against.
-    ///
-    /// `None` is a window with nothing to draw — a catalogue whose subject has
-    /// gone out of the view between the packet and the frame — and not an
-    /// error: it simply contributes no entry to
-    /// [`Windows::drawn_windows`](crate::windows::Windows::drawn_windows), so
-    /// nothing of it is drawn and nothing of it is clickable.
-    fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn>;
-
-    /// Offer one input. The answer says whether the pane took it, whether the
-    /// frame is stale because of it, and what it is asking the manager to do.
-    fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response;
-}
-
 /// Every window kind, as one type.
 ///
-/// Decision 1: an `enum` and not `Box<dyn Pane>`, because this is what makes a
+/// Decision 1: an `enum` and not a trait object, because this is what makes a
 /// seventh window kind a *compile error* everywhere the manager still has to
 /// know which kind it has — the same reason
 /// [`WindowSubject`](crate::windows::WindowSubject) and
@@ -804,10 +769,17 @@ impl AnyPane {
     }
 }
 
-impl Pane for AnyPane {
+impl AnyPane {
+    /// The art this pane needs packed before it can be laid out.
+    ///
+    /// Asked every frame and not once at open: what a window needs depends on
+    /// what is in it, and the atlas answers a repeat with nothing — see
+    /// [`GumpAtlas::add`](openshard_client_render::gump::GumpAtlas::add), which
+    /// filters what it already holds.
+    ///
     /// The delegating `match` decision 1 pays for the enum with: one line per
-    /// kind per trait method, once.
-    fn art(&self, frame: &PaneFrame<'_>) -> Vec<GumpArt> {
+    /// kind per phase, once.
+    pub fn art(&self, frame: &PaneFrame<'_>) -> Vec<GumpArt> {
         match self {
             Self::Container(pane) => pane.art(frame),
             Self::Vendor(pane) => pane.art(frame),
@@ -824,7 +796,15 @@ impl Pane for AnyPane {
         }
     }
 
-    fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
+    /// Lay this pane out for this frame: the pictures the pass draws and the
+    /// pointer is tested against.
+    ///
+    /// `None` is a window with nothing to draw — a catalogue whose subject has
+    /// gone out of the view between the packet and the frame — and not an
+    /// error: it simply contributes no entry to
+    /// [`Windows::drawn_windows`](crate::windows::Windows::drawn_windows), so
+    /// nothing of it is drawn and nothing of it is clickable.
+    pub fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         match self {
             Self::Container(pane) => pane.layout(frame),
             Self::Vendor(pane) => pane.layout(frame),
@@ -841,7 +821,9 @@ impl Pane for AnyPane {
         }
     }
 
-    fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
+    /// Offer one input. The answer says whether the pane took it, whether the
+    /// frame is stale because of it, and what it is asking the manager to do.
+    pub fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         match self {
             Self::Container(pane) => pane.handle(input, ctx),
             Self::Vendor(pane) => pane.handle(input, ctx),

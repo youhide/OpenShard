@@ -64,7 +64,7 @@ impl App {
     /// mutation of `WorldView`, so its source subtraction is visible now,
     /// rather than waiting for an unrelated inbound packet.
     pub(crate) fn reproject_item_drag(&mut self) {
-        let Some(view) = self.world.authoritative.view.as_deref().cloned() else {
+        let Some(view) = self.world.authoritative.view.as_ref().cloned() else {
             return;
         };
         self.entered(view, None);
@@ -140,7 +140,7 @@ impl App {
                 // answered and would block the same objects being asked about
                 // again. See `Tooltips::reset`.
                 self.tooltips.reset();
-                self.entered(*view, None);
+                self.entered(view, None);
             }
             link::Update::Mutation { packet } => self.fold_incoming(&packet),
             link::Update::Animation(animation) => self.world.presentation.crowd.play(animation),
@@ -432,7 +432,7 @@ impl App {
             view.player_stepped(confirmed.position, confirmed.facing);
         }
         self.world.motion.accept_network(movement);
-        self.entered(*view, previous_latest);
+        self.entered(view, previous_latest);
         self.sync_target_cursor();
     }
 
@@ -766,7 +766,7 @@ impl App {
         }
         // Whole, for the HUD's world window: the three projections above are
         // what the renderer wants, and none of them keeps a serial.
-        self.world.authoritative.view = Some(Box::new(view));
+        self.world.authoritative.view = Some(view);
         // The offline placeholder exists so a map-only window has a body to
         // inspect. A connected client must never reveal it while login packets
         // are still in flight: this snapshot is the first world picture the

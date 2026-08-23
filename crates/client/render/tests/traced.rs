@@ -202,7 +202,7 @@ const WALL_RUN: std::ops::Range<u16> = 100..103;
 /// rather than lenient: the tracer is handed three boxes and the walk one, and if
 /// the merge invented or lost any volume at all the two pictures are about
 /// different geometry.
-fn wall_run_scene(graphic: &dyn Fn(u16) -> u16) -> Vec<BoxSpec> {
+fn wall_run_scene(graphic: impl Fn(u16) -> u16) -> Vec<BoxSpec> {
     let h = 4.0;
     WALL_RUN
         .map(|x| BoxSpec {

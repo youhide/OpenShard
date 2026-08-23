@@ -1224,7 +1224,7 @@ fn camera_panel(
 /// is no per-frame reading this panel must agree with, so a live borrow costs
 /// nothing a clone would have bought.
 fn world_panel(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut Request) {
-    let view = world.authoritative.view.as_deref();
+    let view = world.authoritative.view.as_ref();
     // **What the frame draws**, which is the only way to look at a surface
     // something else is standing in front of: the G-buffer holds one answer per
     // pixel, so a wall behind a body is not dimmed or half-shown in a diagnostic,

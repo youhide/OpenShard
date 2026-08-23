@@ -23,8 +23,8 @@
 //! The same shape as SQLite's, for the same reasons. A transaction borrows the
 //! client mutably, so the client cannot simply be shared by `&`; and saves are
 //! infrequent and off the tick, so serialising them through a single connection
-//! costs nothing that matters and keeps the all-or-nothing write the trait
-//! demands. An async [`Mutex`] rather than a `std` one because the guard is held
+//! costs nothing that matters and keeps the all-or-nothing write the store
+//! requires. An async [`Mutex`] rather than a `std` one because the guard is held
 //! across `.await` — the whole point is that holding it never blocks the runtime.
 //!
 //! # No TLS yet
@@ -38,7 +38,6 @@
 use std::fmt;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use openshard_protocol::identity::{AccountName, CharacterName};
 use openshard_protocol::serial::Serial;
 use tokio::sync::Mutex;
@@ -49,7 +48,7 @@ use crate::record::{
     AccountRecord, CharacterRecord, DecorationRecord, GuildRecord, ItemLocation, ItemRecord, MobileRecord,
     RegionRecord, SCHEMA_VERSION, SpawnerRecord, WorldRecord,
 };
-use crate::store::{Backend, StoreError};
+use crate::store::StoreError;
 
 /// The tables, created on connect. `IF NOT EXISTS` so connecting to a database
 /// that already has them is a no-op rather than an error.
@@ -342,9 +341,8 @@ impl PgStore {
     }
 }
 
-#[async_trait]
-impl Backend for PgStore {
-    async fn save(&self, snapshot: &Snapshot) -> Result<(), StoreError> {
+impl PgStore {
+    pub(crate) async fn save(&self, snapshot: &Snapshot) -> Result<(), StoreError> {
         // Refuse before touching the database, exactly as the other backends do:
         // a snapshot from a future schema must not be half-written.
         if snapshot.schema != SCHEMA_VERSION {
@@ -726,7 +724,7 @@ impl Backend for PgStore {
         Ok(())
     }
 
-    async fn characters(&self) -> Result<Vec<CharacterRecord>, StoreError> {
+    pub(crate) async fn characters(&self) -> Result<Vec<CharacterRecord>, StoreError> {
         let client = self.client.lock().await;
         let rows = client
             .query(
@@ -741,7 +739,7 @@ impl Backend for PgStore {
         rows.iter().map(character_from_row).collect()
     }
 
-    async fn items(&self) -> Result<Vec<ItemRecord>, StoreError> {
+    pub(crate) async fn items(&self) -> Result<Vec<ItemRecord>, StoreError> {
         let client = self.client.lock().await;
         let rows = client
             .query(
@@ -758,7 +756,7 @@ impl Backend for PgStore {
         rows.iter().filter_map(item_from_row).collect()
     }
 
-    async fn mobiles(&self) -> Result<Vec<MobileRecord>, StoreError> {
+    pub(crate) async fn mobiles(&self) -> Result<Vec<MobileRecord>, StoreError> {
         let client = self.client.lock().await;
         let rows = client
             .query("SELECT data FROM mobiles", &[])
@@ -771,7 +769,7 @@ impl Backend for PgStore {
             .collect()
     }
 
-    async fn decorations(&self) -> Result<Vec<DecorationRecord>, StoreError> {
+    pub(crate) async fn decorations(&self) -> Result<Vec<DecorationRecord>, StoreError> {
         let client = self.client.lock().await;
         let rows = client
             .query("SELECT data FROM decorations", &[])
@@ -784,7 +782,7 @@ impl Backend for PgStore {
             .collect()
     }
 
-    async fn regions(&self) -> Result<Vec<RegionRecord>, StoreError> {
+    pub(crate) async fn regions(&self) -> Result<Vec<RegionRecord>, StoreError> {
         let client = self.client.lock().await;
         let rows = client
             .query("SELECT data FROM regions ORDER BY facet, id", &[])
@@ -797,7 +795,7 @@ impl Backend for PgStore {
             .collect()
     }
 
-    async fn guilds(&self) -> Result<Vec<GuildRecord>, StoreError> {
+    pub(crate) async fn guilds(&self) -> Result<Vec<GuildRecord>, StoreError> {
         let client = self.client.lock().await;
         let rows = client
             .query(
@@ -824,7 +822,7 @@ impl Backend for PgStore {
             .collect()
     }
 
-    async fn alliances(&self) -> Result<Vec<crate::record::AllianceRecord>, StoreError> {
+    pub(crate) async fn alliances(&self) -> Result<Vec<crate::record::AllianceRecord>, StoreError> {
         let client = self.client.lock().await;
         let rows = client
             .query(
@@ -848,7 +846,7 @@ impl Backend for PgStore {
             .collect()
     }
 
-    async fn designs(&self) -> Result<Vec<crate::record::HouseDesignRecord>, StoreError> {
+    pub(crate) async fn designs(&self) -> Result<Vec<crate::record::HouseDesignRecord>, StoreError> {
         let client = self.client.lock().await;
         let rows = client
             .query(
@@ -877,7 +875,7 @@ impl Backend for PgStore {
             .collect())
     }
 
-    async fn boats(&self) -> Result<Vec<crate::record::BoatRecord>, StoreError> {
+    pub(crate) async fn boats(&self) -> Result<Vec<crate::record::BoatRecord>, StoreError> {
         let client = self.client.lock().await;
         let rows = client
             .query(
@@ -906,7 +904,7 @@ impl Backend for PgStore {
             .collect())
     }
 
-    async fn houses(&self) -> Result<Vec<crate::record::HouseRecord>, StoreError> {
+    pub(crate) async fn houses(&self) -> Result<Vec<crate::record::HouseRecord>, StoreError> {
         let client = self.client.lock().await;
         let rows = client
             .query(
@@ -946,7 +944,7 @@ impl Backend for PgStore {
             .collect())
     }
 
-    async fn world(&self) -> Result<Option<WorldRecord>, StoreError> {
+    pub(crate) async fn world(&self) -> Result<Option<WorldRecord>, StoreError> {
         let client = self.client.lock().await;
         let rows = client
             .query(
@@ -966,7 +964,7 @@ impl Backend for PgStore {
         }))
     }
 
-    async fn spawners(&self) -> Result<Vec<SpawnerRecord>, StoreError> {
+    pub(crate) async fn spawners(&self) -> Result<Vec<SpawnerRecord>, StoreError> {
         let client = self.client.lock().await;
         let rows = client
             .query(
@@ -979,7 +977,7 @@ impl Backend for PgStore {
         rows.iter().map(spawner_from_row).collect()
     }
 
-    async fn accounts(&self) -> Result<Vec<AccountRecord>, StoreError> {
+    pub(crate) async fn accounts(&self) -> Result<Vec<AccountRecord>, StoreError> {
         let client = self.client.lock().await;
         let rows = client
             .query("SELECT name, credential FROM accounts", &[])
@@ -994,7 +992,7 @@ impl Backend for PgStore {
             .collect())
     }
 
-    async fn put_account(&self, account: &AccountRecord) -> Result<(), StoreError> {
+    pub(crate) async fn put_account(&self, account: &AccountRecord) -> Result<(), StoreError> {
         let client = self.client.lock().await;
         client
             .execute(
@@ -1338,7 +1336,7 @@ fn corrupt(field: &str) -> StoreError {
     ))
 }
 
-/// Turn a `tokio_postgres` error into the trait's error. The database says what
+/// Turn a `tokio_postgres` error into the store's error. The database says what
 /// went wrong; whether that is fatal is the shard's call, not this crate's.
 fn database(error: tokio_postgres::Error) -> StoreError {
     StoreError::Database(error.to_string())

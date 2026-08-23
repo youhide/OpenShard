@@ -58,7 +58,7 @@ use openshard_protocol::localized;
 use openshard_protocol::wire::ClilocId;
 use openshard_uofiles::cliloc::ClilocNumber;
 
-use crate::panes::{Button, Effect, Input, Key, Line, Pane, PaneCtx, PaneFrame, Response};
+use crate::panes::{Button, Effect, Input, Key, Line, PaneCtx, PaneFrame, Response};
 use crate::windows::Drawn;
 
 /// One open dialog: the page it is showing, what the player has set on it, and
@@ -549,7 +549,7 @@ impl DialogPane {
     }
 }
 
-impl Pane for DialogPane {
+impl DialogPane {
     /// Every page's art, and not the showing page's.
     ///
     /// Two reasons, both the shard's doing: a `{ resizepic }` cannot be placed
@@ -563,7 +563,7 @@ impl Pane for DialogPane {
     /// the atlas has been asked. That packing used to be a loop over every gump
     /// in the *view*, one rung above the windows — so a dialog this client had
     /// closed and the view had not yet forgotten still had its art packed.
-    fn art(&self, frame: &PaneFrame<'_>) -> Vec<GumpArt> {
+    pub(super) fn art(&self, frame: &PaneFrame<'_>) -> Vec<GumpArt> {
         self.gump(frame.view)
             .map(|gump| gump_art::art_of(&gump.elements).into_iter().collect())
             .unwrap_or_default()
@@ -574,7 +574,7 @@ impl Pane for DialogPane {
     /// `None` is **reachable**, the same as a shop's: the view can drop a gump
     /// between the packet that opened the window and the frame that draws it,
     /// and `reconcile_own_windows` takes the window itself away one frame later.
-    fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
+    pub(super) fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         let gump = self.gump(frame.view)?;
         // Only the switches that are *on*, which is what `gump_art::window`
         // wants: a set it can ask about, rather than the map of everything this
@@ -613,7 +613,7 @@ impl Pane for DialogPane {
     /// past it to the camera, exactly as it does today. Which windows claim a
     /// wheel they have no use for is the plan's own Backlog entry, and it is not
     /// settled by moving this kind's input.
-    fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
+    pub(super) fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         match input {
             Input::Press(Button::Left) => {
                 if !ctx.under_pointer {
@@ -890,7 +890,7 @@ mod tests {
     /// caret, and which should not — a field left focused in a window the
     /// player has clicked away from must go dark rather than keep blinking.
     /// That is read in exactly one place, [`DialogPane::lines`], which is what
-    /// this proves it through — [`Pane::layout`], not `handle`.
+    /// this proves it through — [`DialogPane::layout`], not `handle`.
     #[test]
     fn the_caret_is_drawn_only_while_this_window_holds_the_keyboard() {
         use openshard_protocol::serial::Serial;

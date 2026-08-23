@@ -42,7 +42,7 @@ use openshard_protocol::wire::{Graphic, Hue, Layer, RawLayer};
 
 use crate::DOUBLE_CLICK;
 use crate::hand::{DragOrigin, Dragged, Hand, ItemPress, PendingDrop};
-use crate::panes::{Answer, Button, Effect, Input, Line, Pane, PaneCtx, PaneFrame, Response, SplitPrompt};
+use crate::panes::{Answer, Button, Effect, Input, Line, PaneCtx, PaneFrame, Response, SplitPrompt};
 use crate::windows::Drawn;
 
 /// The face both of this window's labels are written in — `fonts.mul`'s face
@@ -124,11 +124,11 @@ pub struct ContainerPane {
     /// memory of the last move, compared against the layout's own predicate
     /// and asked to agree with what is drawn.
     action_hovered: bool,
-    /// A one-redraw memo of [`Self::contents`], left by [`art`](Pane::art)
-    /// for [`layout`](Pane::layout) to pick up rather than compute again.
+    /// A one-redraw memo of [`Self::contents`], left by [`Self::art`]
+    /// for [`Self::layout`] to pick up rather than compute again.
     ///
-    /// Interior mutability because both methods take `&self` — [`Pane`]'s own
-    /// shape — but this is not "whatever the bag last held": it is "whatever
+    /// Interior mutability because both phases take `&self` — but this is not
+    /// "whatever the bag last held": it is "whatever
     /// `art` computed a moment ago, for the `layout` call that always follows
     /// it before anything else runs." `render_passes.rs` asks every open
     /// pane's `art`, packs it, and only *then* asks every open pane's
@@ -440,7 +440,7 @@ impl ContainerPane {
         contents
     }
 
-    /// What [`layout`](Pane::layout) reads: whatever [`art`](Pane::art) left
+    /// What [`Self::layout`] reads: whatever [`Self::art`] left
     /// in [`Self::scratch`] a moment ago, or a fresh [`Self::contents`] if
     /// there is nothing there.
     ///
@@ -763,7 +763,7 @@ impl ContainerPane {
     }
 }
 
-impl Pane for ContainerPane {
+impl ContainerPane {
     /// The background, every icon in it, and the action button's own art when this
     /// window has one.
     ///
@@ -779,7 +779,7 @@ impl Pane for ContainerPane {
     /// What this call to [`Self::contents`] computes *is* remembered for the
     /// rest of this one redraw — see [`Self::scratch`] — so [`layout`],
     /// called next for this same window, does not ask a third time.
-    fn art(&self, frame: &PaneFrame<'_>) -> Vec<GumpArt> {
+    pub(super) fn art(&self, frame: &PaneFrame<'_>) -> Vec<GumpArt> {
         match frame.view.containers.get(&self.container) {
             Some(gump) => {
                 let contents = self.contents(frame.view, frame.hand);
@@ -807,7 +807,7 @@ impl Pane for ContainerPane {
         }
     }
 
-    fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
+    pub(super) fn layout(&self, frame: &PaneFrame<'_>) -> Option<Drawn> {
         let gump = *frame.view.containers.get(&self.container)?;
         let contents = self.recall_contents(frame.view, frame.hand);
         let action = self
@@ -839,7 +839,7 @@ impl Pane for ContainerPane {
     /// **No wheel.** Nothing in a bag scrolls: the shard sends coordinates and
     /// the window is exactly as big as its art, so a notch over one goes past
     /// it to the camera, as it always has.
-    fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
+    pub(super) fn handle(&mut self, input: Input, ctx: &PaneCtx<'_>) -> Response {
         match input {
             Input::Press(Button::Left) => {
                 // Nothing of this window — background, icon or action button — is
@@ -1272,7 +1272,7 @@ mod tests {
 
     /// **Step 8, through the front door.** `ItemPress::dragged` already pins
     /// the slop-then-lift rule (`hand.rs`'s own tests); this goes in through
-    /// [`Pane::handle`] instead — the located gate, the `drawn` lookup and
+    /// [`AnyPane::handle`](crate::panes::AnyPane::handle) instead — the located gate, the `drawn` lookup and
     /// `Window::item_at` ahead of it — which is what `docs/window_components.md`'s
     /// backlog entry asked for: a press on an icon becomes a lift without a
     /// client install on disk, now that [`fixture::Install`] answers every

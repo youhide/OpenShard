@@ -113,7 +113,7 @@ const FLAG_STORED: UopCompression = UopCompression::STORED;
 #[non_exhaustive]
 pub enum GumpError {
     /// The container could not be read.
-    Container(Box<UopError>),
+    Container(UopError),
     /// An entry's compression flag is neither of the two this reader has ever
     /// seen a real container use. Not something to guess at: a wrong guess
     /// here would not fail to parse, it would parse into a wrong picture, the
@@ -161,7 +161,7 @@ impl std::error::Error for GumpError {
 
 impl From<UopError> for GumpError {
     fn from(source: UopError) -> Self {
-        Self::Container(Box::new(source))
+        Self::Container(source)
     }
 }
 

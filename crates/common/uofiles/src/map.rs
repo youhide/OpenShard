@@ -90,7 +90,7 @@ pub enum MapError {
         /// Which file.
         path: PathBuf,
         /// Why.
-        source: Box<crate::uop::UopError>,
+        source: crate::uop::UopError,
     },
     /// `staidx` and `map` disagree about how many blocks there are.
     IndexMismatch {
@@ -196,7 +196,7 @@ pub fn read_facet(client_dir: impl AsRef<Path>, facet: u8) -> Result<WorldMap, M
         let pattern = |index: usize| format!("build/map{facet}legacymul/{index:08}.dat");
         let bytes = crate::uop::read_concatenated(&uop, &pattern).map_err(|source| MapError::Uop {
             path: uop.clone(),
-            source: Box::new(source),
+            source,
         })?;
         (uop, bytes)
     } else {

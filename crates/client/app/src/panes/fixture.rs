@@ -3,7 +3,7 @@
 //!
 //! Step 8 of `docs/window_components.md` is one assertion — a catalogue at its
 //! last row takes the notch and asks for no frame — made *through*
-//! [`Pane::handle`](crate::panes::Pane::handle) rather than through the pane's
+//! [`AnyPane::handle`](crate::panes::AnyPane::handle) rather than through the pane's
 //! own private method. What blocked it for seven steps was a single field: a
 //! [`PaneCtx`](crate::panes::PaneCtx) carried the whole of
 //! [`Resources`](crate::resources::Resources), which holds the facet, the
