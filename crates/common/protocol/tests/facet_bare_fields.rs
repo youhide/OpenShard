@@ -64,6 +64,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "the same `--facet` argument on the coarse-router probe; widened at `Facet(cli.facet)`",
     ),
     (
+        "crates/common/movement/examples/span_census.rs",
+        1,
+        "the same `--facet` argument on the span census, coarse_bench's shape: a command line takes a number and the map reader is handed `cli.facet`",
+    ),
+    (
         "crates/client/render/examples/shard/mod.rs",
         1,
         "a standalone diagnostic tool reading a SQL column directly, the record.rs shape, in a crate with no protocol dependency",
