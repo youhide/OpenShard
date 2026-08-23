@@ -1,11 +1,23 @@
 //! The ground one body's step is decided against.
 //!
-//! # Three things, and no fourth
+//! # Four things, and the fourth arrived late
 //!
-//! A step needs the map, what the live world has laid over it, and which way
-//! the shut doors are being read. That is the whole of it, and this is those
-//! three carried together because they travel together — through `find_path`,
-//! through the detour rule, through every hop a long route is refined by.
+//! A step needs the map, what the live world has laid over it, which way the
+//! shut doors are being read, and **who else is standing on the ground** — and
+//! this is those four carried together because they travel together, through
+//! `find_path`, through the detour rule, through every hop a long route is
+//! refined by.
+//!
+//! The fourth is [`Bodies`], and it was a caller-side afterthought before it was
+//! a field. The shard used to ask `WorldState::mobile_occupies` *after*
+//! [`can_step`](crate::can_step) had already answered, in the two places a step
+//! is actually taken — so a step was refused by a body and a **route** was
+//! planned straight through one. A creature whose quarry stood behind a
+//! bystander walked into the bystander, was refused, re-decided the same
+//! direction next beat, and never went round. One rule in one place is the whole
+//! of the fix: `walk::landing` asks — the private function each of
+//! [`can_step`](crate::can_step)'s and `steps_out_of`'s answers is — so every
+//! caller asks, flanks included.
 //!
 //! # Why this is not the trait it replaces
 //!
@@ -18,7 +30,7 @@
 //!
 //! This is not that, and three properties are what keep it from becoming that:
 //!
-//! - **Nothing implements it.** It is a struct with three public fields, so
+//! - **Nothing implements it.** It is a struct with four public fields, so
 //!   there is no "another kind of footing" to write.
 //! - **It has no methods.** Every rule over it is a free function that reads
 //!   its fields — [`can_step`](crate::can_step), [`step_allowed`](crate::step_allowed),
@@ -27,16 +39,119 @@
 //!   forward.
 //! - **A caller that wants less takes less.** Baking a navigation graph wants
 //!   the bare map and takes a [`MapTerrain`]; a caller that wants to know what
-//!   is in the way takes an [`Overlay`]. Only a *step* takes all three, because
-//!   only a step needs all three.
+//!   is in the way takes an [`Overlay`]. Only a *step* takes all four, because
+//!   only a step needs all four — and the fourth defaults to
+//!   [`Bodies::nobody`], which is the reading a bake, a survey and a coarse
+//!   corridor all want.
 
 use openshard_map::overlay::{Doors, Overlay};
+use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
 
 use crate::ground::Ground;
 use crate::terrain::MapTerrain;
 
-/// The map, the live world over it, and how the doors are read.
+/// How far apart two bodies' feet must be before neither is in the other's way.
+///
+/// ServUO's mobile overlap, character for character: `(mob.Z + 15) > newZ &&
+/// (newZ + 15) > mob.Z` (`Scripts/Services/Pathing/Movement.cs:352`). **Fifteen
+/// and not [`PLAYER_HEIGHT`](crate::PLAYER_HEIGHT)**, which is sixteen and is
+/// what the same file calls `PersonHeight` — the one place ServUO measures a
+/// body against another body rather than against the ceiling, it measures it a
+/// unit shorter. Kept as its own constant rather than folded into the other,
+/// because the two are different questions that happen to be one apart: a
+/// stairwell that fits a body and a tile that fits two.
+const MOBILE_OVERLAP: i32 = 15;
+
+/// The other bodies a step has to get past.
+///
+/// # Built at the question, and never kept
+///
+/// The same bargain [`MapTerrain`] makes: a value assembled where the question
+/// is asked, living exactly as long as the asking, owned by nobody. The shard
+/// builds one out of its sector grid — which is already the authority from tile
+/// to entity, and is already kept honest by the step itself — so there is no
+/// second copy of `Position` to fall out of step, and no `unblock` anybody can
+/// forget. That was the whole of the argument against registering mobiles in
+/// the obstruction index; see `docs/roadmap.md`'s *a mobile is not an
+/// obstacle*.
+///
+/// # What is not in here
+///
+/// **No identity, and no rules about who may pass whom.** Which bodies are in
+/// the way is decided where the registry is — the dead do not block, a ghost is
+/// stopped by nobody, staff walk through everyone — and by the time a slice
+/// reaches here those decisions are made. This is the same line the [`Overlay`]
+/// draws: it says a door is in the way and only the shard says which door.
+///
+/// A body's own feet are simply absent from the slice its own step is decided
+/// against, which is what "a mobile may always step off the tile it is standing
+/// on" comes to once it is written down.
+#[derive(Clone, Copy, Debug)]
+pub struct Bodies<'a> {
+    /// Where they stand — feet, not heads. **Sorted by `(x, y)`**, which is what
+    /// lets [`blocks`](Self::blocks) find a tile's occupants without walking the
+    /// crowd: a route planned across a market asks this once per landing, eight
+    /// times per node expanded.
+    standing: &'a [Point],
+}
+
+impl<'a> Bodies<'a> {
+    /// Nobody in the way.
+    ///
+    /// Not an empty world — a reading in which other bodies are not part of the
+    /// question. A navigation bake (nobody has spawned yet), a survey over
+    /// shipped art, the coarse corridor a long route is proposed along, and a
+    /// mover that passes through bodies anyway all want this.
+    #[must_use]
+    pub const fn nobody() -> Self {
+        Self { standing: &[] }
+    }
+
+    /// The bodies standing at `feet`, which **must be sorted by `(x, y)`**.
+    ///
+    /// Debug-checked rather than sorted here: the caller owns the storage and
+    /// knows whether it has just built it, and a sort hidden behind a borrow
+    /// would be a copy this type exists to avoid.
+    #[must_use]
+    pub fn standing(feet: &'a [Point]) -> Self {
+        debug_assert!(
+            feet.windows(2)
+                .all(|pair| (pair[0].x, pair[0].y) <= (pair[1].x, pair[1].y)),
+            "Bodies::standing was given an unsorted crowd, and its lookup would miss occupants"
+        );
+        Self { standing: feet }
+    }
+
+    /// Whether a body standing at `at` would be inside one of these.
+    ///
+    /// The vertical test is `MOBILE_OVERLAP` — fifteen, ServUO's, and a unit
+    /// short of [`PLAYER_HEIGHT`](crate::PLAYER_HEIGHT): two mobiles on separate
+    /// floors of a tower share an `(x, y)` and are not in each other's way.
+    #[must_use]
+    pub fn blocks(self, at: Point) -> bool {
+        let key = (at.x, at.y);
+        let z = i32::from(at.z);
+        let first = self.standing.partition_point(|body| (body.x, body.y) < key);
+        self.standing[first..]
+            .iter()
+            .take_while(|body| (body.x, body.y) == key)
+            .any(|body| {
+                let theirs = i32::from(body.z);
+                theirs + MOBILE_OVERLAP > z && z + MOBILE_OVERLAP > theirs
+            })
+    }
+
+    /// Whether this reading has anybody in it at all — what a caller checks
+    /// before paying for a lookup it knows the answer to.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.standing.is_empty()
+    }
+}
+
+/// The map, the live world over it, how the doors are read, and who is standing
+/// on it.
 ///
 /// `Copy` and built where it is asked: two pointers, a reference and a byte,
 /// with nothing owned and nothing stored. Both ends of the wire already hold
@@ -62,13 +177,26 @@ pub struct Footing<'a> {
     /// Whether a shut door is in the way, or whether this is a route being
     /// planned by somebody who will open it.
     pub doors: Doors,
+    /// Who else is standing on it, as far as this reading is concerned.
+    ///
+    /// [`Bodies::nobody`] unless a caller says otherwise, which every
+    /// constructor here leaves it at: a footing is assembled out of a facet, and
+    /// a crowd is assembled out of a *question* — who is asking, and how far
+    /// their step or their route reaches. [`among`](Self::among) is where the
+    /// two meet, exactly as [`reading`](Self::reading) is where the doors do.
+    pub bodies: Bodies<'a>,
 }
 
 impl<'a> Footing<'a> {
-    /// The ground as `doors` reads it.
+    /// The ground as `doors` reads it, with nobody standing on it.
     #[must_use]
     pub const fn new(map: Option<MapTerrain<'a>>, overlay: &'a Overlay, doors: Doors) -> Self {
-        Self { map, overlay, doors }
+        Self {
+            map,
+            overlay,
+            doors,
+            bodies: Bodies::nobody(),
+        }
     }
 
     /// The ground one facet's [`Ground`] is, read as `doors` reads it.
@@ -97,6 +225,7 @@ impl<'a> Footing<'a> {
             map: ground.terrain(tiles),
             overlay: ground.live(),
             doors,
+            bodies: Bodies::nobody(),
         }
     }
 
@@ -118,12 +247,17 @@ impl<'a> Footing<'a> {
     /// The doors are read [`AsTheyStand`](Doors::AsTheyStand), which is a
     /// statement about nothing: an empty overlay has no door in it, so both
     /// readings of it are the same ground.
+    ///
+    /// Nobody is standing on it either, and for the same reason: a corridor is a
+    /// statement about the *topology* of a facet, and a bystander who will have
+    /// walked off by the time anyone gets there must not be able to rewrite one.
     #[must_use]
     pub fn guide(ground: &'a Ground, tiles: &'a TileData) -> Self {
         Self {
             map: ground.terrain(tiles),
             overlay: &NOTHING_PLACED,
             doors: Doors::AsTheyStand,
+            bodies: Bodies::nobody(),
         }
     }
 
@@ -135,6 +269,19 @@ impl<'a> Footing<'a> {
     #[must_use]
     pub const fn reading(self, doors: Doors) -> Self {
         Self { doors, ..self }
+    }
+
+    /// The same ground with a crowd on it.
+    ///
+    /// [`reading`](Self::reading)'s sibling, and separate from every constructor
+    /// above for the same reason: a facet is what those assemble, and *who is in
+    /// the way* is not a fact about a facet — it is a fact about one mover at one
+    /// moment, and only the caller knows which mover is asking and how far the
+    /// question reaches. A step wants the eight tiles around it; a route wants
+    /// the ground it might cross.
+    #[must_use]
+    pub const fn among(self, bodies: Bodies<'a>) -> Self {
+        Self { bodies, ..self }
     }
 }
 

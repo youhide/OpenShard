@@ -40,13 +40,25 @@ use crate::world::Point;
 /// | `0x40` | in war mode |
 /// | `0x80` | hidden |
 ///
-/// **Only [`WARMODE`](Self::WARMODE) is set by this engine**, and only because a
-/// body's stance is the one of the eight that has a picture at this end: a
-/// client draws a human at war standing in a different animation group
-/// (`docs/combat.md`, D1 and D2). The other seven are written down so that the
-/// day one of them is wanted, its bit is a fact already looked up rather than a
-/// guess — but a constant nobody sets is a constant nobody has tested, so they
-/// stay in this table and out of the type until somebody has a use.
+/// **Two of the eight are set by this engine.**
+///
+/// [`WARMODE`](Self::WARMODE), because a body's stance is the one of the eight
+/// that has a picture at this end: a client draws a human at war standing in a
+/// different animation group (`docs/combat.md`, D1 and D2).
+///
+/// [`IGNORE_MOBILES`](Self::IGNORE_MOBILES), because the shard now has a rule
+/// the client would otherwise contradict. A body in the way stops a step
+/// (`docs/roadmap.md`, *a mobile is not an obstacle*) and staff are exempt, and
+/// the client applies its own copy of that rule to what it draws and to what it
+/// predicts — so without this bit a game master walking into an NPC is allowed
+/// by the shard and refused by the client they are looking at. ServUO carries
+/// the same fact in the same bit, off a saved per-mobile `IgnoreMobiles`
+/// (`Server/Mobile.cs:8802`).
+///
+/// The other six are written down so that the day one of them is wanted, its
+/// bit is a fact already looked up rather than a guess — but a constant nobody
+/// sets is a constant nobody has tested, so they stay in this table and out of
+/// the type until somebody has a use.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct StatusFlags(pub u8);
 
@@ -60,6 +72,14 @@ impl StatusFlags {
     /// bits are not the same bit — which is exactly why each is a named constant
     /// on the flags type that carries it.
     pub const WARMODE: Self = Self(0x40);
+
+    /// The mobile walks through other mobiles.
+    ///
+    /// What tells the client not to apply its own body-blocking rule to this
+    /// one. The shard's answer is its `Staff` component — the flag a `.gm` puts
+    /// down — and the client's has to agree, or a game master's step is allowed
+    /// by one end and refused by the other.
+    pub const IGNORE_MOBILES: Self = Self(0x10);
 
     /// Both sets of bits. A named method rather than `BitOr`, for
     /// [`PaperdollFlags::with`]'s reason.
@@ -1434,6 +1454,26 @@ mod tests {
         assert_eq!(StatusFlags::of_stance(false), StatusFlags::NONE);
         assert!(StatusFlags::of_stance(true).has(StatusFlags::WARMODE));
         assert!(!StatusFlags::of_stance(false).has(StatusFlags::WARMODE));
+    }
+
+    /// The bit that says "walk through other mobiles" is `0x10`, and it is
+    /// independent of the stance.
+    ///
+    /// A game master at war is both, and the reader that matters is a client
+    /// deciding whether to predict a step into somebody: an engine that packed
+    /// the two into one byte-wide answer would give a fighting GM the wrong one.
+    #[test]
+    fn ignoring_mobiles_is_its_own_bit_and_rides_beside_the_stance() {
+        assert_eq!(StatusFlags::IGNORE_MOBILES.0, 0x10);
+        let fighting_gm = StatusFlags::of_stance(true).with(StatusFlags::IGNORE_MOBILES);
+        assert_eq!(fighting_gm.0, 0x50);
+        assert!(fighting_gm.has(StatusFlags::WARMODE));
+        assert!(fighting_gm.has(StatusFlags::IGNORE_MOBILES));
+        assert!(!StatusFlags::of_stance(true).has(StatusFlags::IGNORE_MOBILES));
+        assert!(
+            !StatusFlags::IGNORE_MOBILES.has(StatusFlags::WARMODE),
+            "and a peaceable game master is not drawn with a sword out"
+        );
     }
 
     /// A mobile's flag byte survives the packet that carries it — both of them,

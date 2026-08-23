@@ -467,13 +467,27 @@ fn landing(footing: &Footing<'_>, stance: Stance, to: Point) -> Option<Point> {
     };
     let landed = climbed(footing, stance, tile, ground).or(ground)?;
     let z = i8::try_from(landed).ok()?;
-    match footing
+    if footing
         .overlay
         .blocker_at(tile, Body::new(landed, PLAYER_HEIGHT), footing.doors)
+        .is_some()
     {
-        Some(_) => None,
-        None => Some(Point::new(to.x, to.y, z)),
+        return None;
     }
+    let arrival = Point::new(to.x, to.y, z);
+    // **Last, and at the height the body actually arrives at.** ServUO asks in
+    // this order too — `Check` runs its whole ground-and-items rule, settles
+    // `newZ`, and only then walks the mobiles on the tile
+    // (`Scripts/Services/Pathing/Movement.cs:344`). It has to be last: which
+    // bodies are in the way depends on where this one would stand, and that is
+    // not known until the surface is.
+    //
+    // Being inside `landing` rather than beside it is what makes a diagonal's
+    // two flanks obey the same rule — `steps_out_of` reads them as landings —
+    // so a body cannot be slipped past at the corner. ServUO does the same, and
+    // for creatures only; this engine gives everybody the strict reading, as it
+    // does with the corner rule itself.
+    (!footing.bodies.blocks(arrival)).then_some(arrival)
 }
 
 /// Where a body coming from `from` would land on a surface the live world put
@@ -712,6 +726,7 @@ mod tests {
     use openshard_protocol::world::{RawFastwalkKey, RawStepSequence};
 
     use super::*;
+    use crate::footing::Bodies;
     use openshard_map::overlay::{Cover, Overlay};
 
     /// Where [`direction_toward`] flattens: far more east than south still
@@ -1070,6 +1085,98 @@ mod tests {
             can_step(&dry, Point::new(10, 10, 0), Point::new(10, 11, 0)),
             Some(Point::new(10, 11, 0)),
             "over ground the same storey is out of reach and the body stays on the ground",
+        );
+    }
+
+    /// **A body is in the way, and the flanks of a diagonal are bodies' too.**
+    ///
+    /// The rule lives in [`landing`], which is what every one of the eight
+    /// answers in [`steps_out_of`] is — so a body cannot be slipped past at the
+    /// corner where the corner rule would otherwise have nothing to say. ServUO
+    /// checks its flanks for mobiles the same way
+    /// (`Scripts/Services/Pathing/Movement.cs:552`); what differs is that it
+    /// only does so for uncontrolled creatures, and this engine gives everybody
+    /// the strict reading, as it does with the corner rule itself.
+    #[test]
+    fn a_body_refuses_the_tile_it_stands_on_and_the_corner_beside_it() {
+        let nothing = open_world();
+        let here = Point::new(10, 10, 0);
+        // One body due east. Sorted by `(x, y)`, which is one entry's whole
+        // obligation.
+        let east = [Point::new(11, 10, 0)];
+        let crowded = Footing::new(None, &nothing, Doors::AsTheyStand).among(Bodies::standing(&east));
+
+        assert_eq!(
+            step_allowed(&crowded, here, Direction::East),
+            None,
+            "the tile a body is standing on is not somewhere to step"
+        );
+        assert_eq!(
+            step_allowed(&crowded, here, Direction::SouthEast),
+            None,
+            "and the diagonal past its corner is refused by the flank rule"
+        );
+        assert!(
+            step_allowed(&crowded, here, Direction::South).is_some(),
+            "the tile beside it is untouched"
+        );
+        // The control: the same ground with nobody on it. Every one of the three
+        // is open, so what the assertions above measure is the crowd and not the
+        // terrain.
+        let empty = Footing::new(None, &nothing, Doors::AsTheyStand);
+        for direction in [Direction::East, Direction::SouthEast, Direction::South] {
+            assert!(
+                step_allowed(&empty, here, direction).is_some(),
+                "{direction:?} is open ground with nobody standing on it"
+            );
+        }
+    }
+
+    /// Two mobiles on separate floors of a tower share an `(x, y)` and are not
+    /// in each other's way.
+    ///
+    /// The overlap is fifteen — ServUO's, and a unit short of
+    /// [`PLAYER_HEIGHT`]. Asserted at the boundary in both directions, because
+    /// an off-by-one here is a floor that cannot be walked on with somebody
+    /// standing on the one below it.
+    #[test]
+    fn a_body_overhead_is_not_in_the_way_and_one_at_the_knee_is() {
+        let nothing = open_world();
+        // No map, so a step keeps the z it is asked for and the landing is
+        // exactly the height under test.
+        let ground = |z: i8| [Point::new(11, 10, z)];
+        let step_onto = |feet: &[Point], z: i8| {
+            can_step(
+                &Footing::new(None, &nothing, Doors::AsTheyStand).among(Bodies::standing(feet)),
+                Point::new(10, 10, z),
+                Point::new(11, 10, z),
+            )
+        };
+        assert_eq!(
+            step_onto(&ground(15), 0),
+            Some(Point::new(11, 10, 0)),
+            "fifteen clear"
+        );
+        assert_eq!(step_onto(&ground(14), 0), None, "fourteen overlaps");
+        assert_eq!(
+            step_onto(&ground(-15), 0),
+            Some(Point::new(11, 10, 0)),
+            "and below"
+        );
+        assert_eq!(step_onto(&ground(-14), 0), None, "and below, overlapping");
+    }
+
+    /// [`Bodies::nobody`] is not "an empty world" — it is the reading in which
+    /// other bodies are not part of the question, and it is what every footing
+    /// constructor leaves the field at.
+    #[test]
+    fn a_footing_built_from_a_facet_has_nobody_standing_on_it() {
+        let nothing = open_world();
+        let footing = Footing::new(None, &nothing, Doors::AsTheyStand);
+        assert!(footing.bodies.is_empty(), "nobody, until a caller says otherwise");
+        assert!(
+            !footing.bodies.blocks(Point::new(10, 10, 0)),
+            "and nobody is in the way anywhere"
         );
     }
 

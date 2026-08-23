@@ -13884,6 +13884,121 @@ fn a_chase_rounds_a_wall_of_crates() {
     );
 }
 
+/// Stand an inert body at `at`.
+///
+/// A bystander and not a creature: no [`Brain`], so nothing in the tick moves
+/// it, and no `Client`, so no aggressive creature picks a fight with it — the
+/// prey search is players only. What it has is the two things that make a
+/// mobile an obstacle: the `Body` that says it is one, and the **sector row**,
+/// which is what `crowd_near` actually reads. The tick writes that row beside
+/// `Position` on every step; a body with a position and no row is a body
+/// nothing can see.
+fn a_bystander_at(world: &mut World, at: Point) -> EntityId {
+    let entity = world.state.registry.spawn();
+    world.state.registry.insert(
+        entity,
+        openshard_state::components::Body {
+            id: Graphic(0x0190),
+            hue: Hue(0),
+        },
+    );
+    world.state.registry.insert(entity, Position(at));
+    world.state.registry.insert(entity, Facet(0));
+    world.state.facet_state_mut(Facet(0)).sectors.insert(entity, at);
+    entity
+}
+
+/// **The staff exemption reaches the client, or only half of it is real.**
+///
+/// The shard lets staff walk through bodies; the client keeps its own copy of
+/// the rule and applies it to what it predicts, so without `0x10` in the flag
+/// byte a game master's step is allowed at one end and refused at the other —
+/// which a player experiences as a rubber-band, not as a permission.
+///
+/// Asserted on the `0x78` this shard would build rather than on the bytes: the
+/// bit's *value* is `StatusFlags`' own test, and what is worth pinning here is
+/// that the shard's `Staff` and the wire's `IGNORE_MOBILES` are wired to each
+/// other at all.
+#[test]
+fn a_game_master_is_drawn_as_walking_through_bodies() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter_gm(&mut world, now);
+    let gm = *world.state.players.get(&connection).expect("the GM entered");
+
+    let seen = world
+        .state
+        .mobile_incoming(gm, gm)
+        .expect("a game master is a drawable mobile");
+    assert!(
+        seen.flags
+            .has(openshard_protocol::mobile::StatusFlags::IGNORE_MOBILES),
+        "the client will refuse to predict a step the shard allows"
+    );
+
+    // And a body that has put the flag down is drawn like anybody else — the
+    // permission is `Staff`, not the account's access level.
+    world
+        .state
+        .registry
+        .remove::<openshard_state::components::Staff>(gm);
+    let mortal = world.state.mobile_incoming(gm, gm).expect("still a mobile");
+    assert!(
+        !mortal
+            .flags
+            .has(openshard_protocol::mobile::StatusFlags::IGNORE_MOBILES),
+        "a game master playing by the rules is drawn playing by them"
+    );
+}
+
+/// **A chase goes round a crowd, and it used to walk into one for ever.**
+///
+/// `a_chase_rounds_a_wall_of_crates` with the crates replaced by people, which
+/// before this was the whole difference between a chase that worked and one
+/// that did not. A crate is in the overlay, so the route was planned around it;
+/// a body was in neither the overlay nor the plan, so the route went straight
+/// through the line, `World::step` refused the first step against a
+/// `mobile_occupies` check bolted on after the fact, and the next beat decided
+/// the same direction again. The creature butted into the same shoulder until
+/// something else moved.
+#[test]
+fn a_chase_rounds_a_line_of_bystanders() {
+    let now = Instant::now();
+    let mut world = world();
+    let _gm = enter_gm(&mut world, now);
+    let player_at = Point::new(START.0, START.1, 0);
+    // Five people standing shoulder to shoulder between quarry and creature,
+    // open at both ends.
+    let line: Vec<Point> = (-2i32..=2)
+        .map(|dx| Point::new((i32::from(player_at.x) + dx) as u16, player_at.y + 2, 0))
+        .collect();
+    for at in &line {
+        a_bystander_at(&mut world, *at);
+    }
+    let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.0, START.1 + 4, 0), 10, now);
+
+    let mut later = now;
+    let mut walked = Vec::new();
+    for _ in 0..(AI_THINK_TICKS * 30) {
+        later += TICK_INTERVAL;
+        world.tick(later);
+        walked.push(world.registry().get::<Position>(creature).unwrap().0);
+    }
+    let reached = *walked.last().unwrap();
+    assert!(
+        distance(reached, player_at) <= openshard_combat::MELEE_RANGE,
+        "the creature went around the line of people and reached its quarry (ended at {reached:?})"
+    );
+    // **Round, and not through.** Reaching the quarry is half the assertion: a
+    // shard that had forgotten about bodies altogether would reach it too, by
+    // walking over five of them. The step rule and the plan are one rule now, so
+    // neither half can pass on its own.
+    assert!(
+        !walked.iter().any(|at| line.contains(at)),
+        "the creature walked over somebody on its way: {walked:?}"
+    );
+}
+
 /// Where a creature standing two tiles off both axes from its quarry first
 /// steps, with `blockers` in its way.
 ///
@@ -13892,6 +14007,15 @@ fn a_chase_rounds_a_wall_of_crates() {
 /// diagonal — which is the step `probe` answers for. `None` when it never
 /// moved at all.
 fn first_chase_step(blockers: &[Point]) -> Option<Point> {
+    first_chase_step_among(blockers, &[])
+}
+
+/// The same, with `bystanders` standing where they stand.
+///
+/// The two lists are the two indexes a step reads — the overlay a crate is in,
+/// and the sector grid a body is in — and the point of asking the same question
+/// of both is that the answer is now the same rule.
+fn first_chase_step_among(blockers: &[Point], bystanders: &[Point]) -> Option<Point> {
     let now = Instant::now();
     let mut world = world();
     let _gm = enter_gm(&mut world, now);
@@ -13904,6 +14028,9 @@ fn first_chase_step(blockers: &[Point]) -> Option<Point> {
             crate_entity,
             openshard_map::overlay::Cover::blocking(0, openshard_state::DOOR_HEIGHT),
         );
+    }
+    for bystander in bystanders {
+        a_bystander_at(&mut world, *bystander);
     }
     let creature = spawn_brained(&mut world, 0x00D1, start, 8, now);
 
@@ -13943,6 +14070,36 @@ fn a_chase_does_not_cut_a_corner() {
         first_chase_step(&[]),
         Some(cut),
         "an unflanked diagonal is the straight step at the quarry"
+    );
+}
+
+/// The corner rule reads a body the way it reads a crate, because both are
+/// read as one thing: a *landing*, which is what each of `steps_out_of`'s eight
+/// answers is.
+///
+/// The same two tiles as `a_chase_does_not_cut_a_corner`, with people standing
+/// on them instead of crates. ServUO checks its diagonal's flanks for mobiles
+/// too (`Scripts/Services/Pathing/Movement.cs:552`) — for uncontrolled
+/// creatures only, where this engine gives everybody the strict reading, as it
+/// does with the corner rule itself.
+#[test]
+fn a_chase_does_not_cut_a_corner_past_a_bystander() {
+    let cut = Point::new(START.0 + 1, START.1 + 1, 0);
+    let flank = Point::new(START.0 + 2, START.1 + 1, 0);
+
+    let stepped = first_chase_step_among(&[], &[flank]);
+    assert_ne!(stepped, Some(cut), "the straight step clipped a person's corner");
+    assert!(
+        stepped.is_some(),
+        "and the rule refused a step rather than the whole chase"
+    );
+
+    // And the tile itself: somebody standing on the diagonal is not somewhere to
+    // step, which is the destination half of the same rule.
+    assert_ne!(
+        first_chase_step_among(&[], &[cut]),
+        Some(cut),
+        "the creature stepped onto the tile somebody was standing on"
     );
 }
 
@@ -13996,14 +14153,20 @@ const MOST_BEATS: usize = 300;
 /// and `step_allowed` is what the world would allow — so this cannot walk a
 /// step the shard would refuse. Stops where a body would: at the goal, or on
 /// the first direction it may not take, which is a creature standing at a wall.
-fn walk_toward(world: &World, from: Point, to: Point) -> Point {
+fn walk_toward(world: &mut World, from: Point, to: Point) -> Point {
+    // A plan is decided for *somebody*: `step_toward` reads who is asking so it
+    // can leave them out of their own crowd, and a ghost or a game master out of
+    // everybody's. Nothing else about this walker matters — the scene has no
+    // other mobiles in it, so the crowd is empty however the question is asked.
+    let mover = world.state.registry.spawn();
     let footing = world.state.footing(Facet(0), Doors::AsTheyStand);
     let mut at = from;
     for _ in 0..MOST_BEATS {
         if at == to {
             break;
         }
-        let Some(direction) = ai::step_toward(&world.state, Facet(0), at, to, Doors::AsTheyStand) else {
+        let Some(direction) = ai::step_toward(&world.state, mover, Facet(0), at, to, Doors::AsTheyStand)
+        else {
             break;
         };
         let Some(next) = openshard_movement::step_allowed(&footing, at, direction) else {
@@ -14083,16 +14246,16 @@ fn a_creature_routes_past_its_exact_budget_over_the_coarse_graph() {
 
     let graph = openshard_movement::NavigationGraph::build(&scene.footing(), 96, 64)
         .expect("a 96x64 facet has a graph");
-    let routed = shard_over(two_corridors(), Some(graph));
-    let blind = shard_over(two_corridors(), None);
+    let mut routed = shard_over(two_corridors(), Some(graph));
+    let mut blind = shard_over(two_corridors(), None);
 
     for from in [FLAT, RAISED] {
         assert_eq!(
-            walk_toward(&routed, from, GOAL),
+            walk_toward(&mut routed, from, GOAL),
             GOAL,
             "the graph carried the creature from {from:?} to the far corridor"
         );
-        let stood = walk_toward(&blind, from, GOAL);
+        let stood = walk_toward(&mut blind, from, GOAL);
         assert_ne!(stood, GOAL, "a facet with no graph cannot plan this route");
         assert_eq!(
             stood,

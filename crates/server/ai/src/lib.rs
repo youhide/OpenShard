@@ -44,6 +44,24 @@ const WANDER_IN_EIGHT: u32 = 3;
 /// change it.
 pub const PATH_BUDGET: usize = 400;
 
+/// How far from the planner a route looks for bodies to walk around.
+///
+/// A plan is decided against the crowd within this of where the body is
+/// standing, and the crowd is read out of the sector grid at the question
+/// ([`WorldState::crowd_near`]). Bounded because the sweep is not free and
+/// because the far half of a long route is not really being planned here: past
+/// a few dozen tiles the exact search runs out of [`PATH_BUDGET`] and the coarse
+/// corridor takes over, and the corridor is a statement about the facet's
+/// topology that a bystander must not be able to rewrite.
+///
+/// **What the bound costs is a re-plan, never a wrong step.** A body outside it
+/// is invisible to the route; the route walks into it; that step is refused by
+/// its own crowd, which is read fresh for every step, and the next beat plans
+/// again with the body now inside the reach. Thirty-two is a screen and a half
+/// — comfortably past [`VIEW_RANGE`](openshard_state::sectors::VIEW_RANGE),
+/// which is as far as anything a creature is chasing can be.
+const CROWD_REACH: u32 = 32;
+
 /// How long a planned route stays trusted before it is re-planned, in ticks —
 /// the references' two-second repath cadence.
 const REPATH_TICKS: u64 = 40;
@@ -116,14 +134,19 @@ const KITE_GAP: u32 = 2;
 /// goal it cannot reach costs the whole endpoint join at both ends on every
 /// beat, and the straight-line direction it hands back looks the same whether
 /// the graph refused or was never asked.
+///
+/// `mover` is who is walking, and it is needed for the same reason `from` is:
+/// the crowd a route is planned around is *this* body's — it is not in its own
+/// way, and a ghost or a game master is in nobody's.
 pub fn step_toward(
     state: &WorldState,
+    mover: EntityId,
     facet: Facet,
     from: Point,
     to: Point,
     doors: Doors,
 ) -> Option<Direction> {
-    plan_step(state, facet, from, to, doors, Fallback::Ask).direction
+    plan_step(state, mover, facet, from, to, doors, Fallback::Ask).direction
 }
 
 /// The same step, decided for a body that can remember a refusal.
@@ -164,7 +187,7 @@ pub fn step_body_toward(
         }
         None => Fallback::Ask,
     };
-    let plan = plan_step(state, facet, from, to, doors, fallback);
+    let plan = plan_step(state, mover, facet, from, to, doors, fallback);
     match plan.coarse {
         Coarse::Refused => {
             let until = state.ticks + REFUSAL_TICKS;
@@ -216,8 +239,34 @@ struct StepPlan {
     coarse: Coarse,
 }
 
+/// The bodies a route from `from` to `to` is planned around.
+///
+/// **Why a route needs one at all.** Before this, a route was planned over
+/// ground with nobody on it and then walked one step at a time over ground that
+/// had somebody on it: the step was refused, the next beat re-decided the same
+/// direction, and nothing ever went round. A crate in the same place worked
+/// fine, because a crate is in the overlay and the plan could see it.
+///
+/// **The goal tile is dropped**, and ServUO drops the same one
+/// (`Movement.cs:411`, `xForward != m_Goal.X`). A creature's goal is
+/// overwhelmingly the quarry it is chasing, which is itself a body: leaving it
+/// in makes every chase unplannable, because the one tile the route is *for* is
+/// the one tile it may not end on. Arriving *beside* the quarry is the caller's
+/// business — `chase_step` stops once it is in reach — and a step onto the goal,
+/// if one is ever attempted, is refused by its own crowd.
+///
+/// One function and not two call sites, because the two readings that must
+/// agree are the long route's and the chase's own: a route planned around a
+/// body the next beat cannot see is a route that will not be walked.
+fn crowd_for_route(state: &WorldState, mover: EntityId, facet: Facet, from: Point, to: Point) -> Vec<Point> {
+    let mut crowd = state.crowd_near(facet, mover, from, distance(from, to).clamp(1, CROWD_REACH));
+    crowd.retain(|body| (body.x, body.y) != (to.x, to.y));
+    crowd
+}
+
 fn plan_step(
     state: &WorldState,
+    mover: EntityId,
     facet: Facet,
     from: Point,
     to: Point,
@@ -226,8 +275,12 @@ fn plan_step(
 ) -> StepPlan {
     // The live terrain, not the bare map: a route must not thread a placed
     // crate the step would then refuse. A door-opener plans through doors and
-    // opens them on arrival.
-    let planner = state.footing(facet, doors);
+    // opens them on arrival. And the crowd — see [`crowd_for_route`], which is
+    // the whole of why a chase used to butt into a bystander for ever.
+    let crowd = crowd_for_route(state, mover, facet, from, to);
+    let planner = state
+        .footing(facet, doors)
+        .among(openshard_movement::Bodies::standing(&crowd));
     if let Some(path) = find_path(&planner, from, to, PATH_BUDGET) {
         return StepPlan {
             direction: path.first().copied(),
@@ -301,7 +354,7 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction
                 let gap = distance(pos, target_pos);
                 if gap <= KITE_GAP {
                     state.registry.remove::<ChasePath>(creature);
-                    return kite_step(state, facet, pos, target_pos);
+                    return kite_step(state, creature, facet, pos, target_pos);
                 }
                 let clear = openshard_movement::sight_clear(
                     &state.footing(facet, Doors::AsTheyStand),
@@ -407,11 +460,29 @@ fn will_move(state: &WorldState, creature: EntityId, dir: Direction) -> bool {
 /// in that flank: the door half below asks about the tile being stepped onto,
 /// which is what a creature would open to pass. A route round it is what the
 /// caller falls through to.
-fn probe(state: &WorldState, facet: Facet, from: Point, dir: Direction) -> (bool, Option<EntityId>) {
+///
+/// A body in the way has nothing to name either, and is refused with the same
+/// `(false, None)` a wall gets. That is the right answer for what the caller
+/// does with it: there is nothing to open, and going round is exactly the
+/// fall-through. What it is *not* is a reason for the creature to stand still —
+/// `plan_step` plans over the same crowd, so the route it comes back with is one
+/// that goes round the body rather than into it.
+fn probe(
+    state: &WorldState,
+    creature: EntityId,
+    facet: Facet,
+    from: Point,
+    dir: Direction,
+) -> (bool, Option<EntityId>) {
     let Some(target) = step_from(from, dir) else {
         return (false, None);
     };
-    let live = state.footing(facet, Doors::AsTheyStand);
+    // One tile of reach, which is every tile `steps_out_of` will look at — the
+    // eight neighbours, the diagonal's two flanks among them.
+    let crowd = state.crowd_near(facet, creature, from, 1);
+    let live = state
+        .footing(facet, Doors::AsTheyStand)
+        .among(openshard_movement::Bodies::standing(&crowd));
     if openshard_movement::step_allowed(&live, from, dir).is_some() {
         return (true, None);
     }
@@ -447,7 +518,7 @@ fn chase_step(
             state.registry.remove::<ChasePath>(creature);
         } else {
             let dir = path.steps[path.next];
-            let (open, door) = probe(state, facet, from, dir);
+            let (open, door) = probe(state, creature, facet, from, dir);
             if open {
                 if will_move(state, creature, dir) {
                     let mut advanced = path;
@@ -472,7 +543,7 @@ fn chase_step(
     // Nothing cached: walk straight at the quarry until something is in the
     // way — the naive-step-first shape both references use.
     let dir = direction_toward(from, to)?;
-    let (open, door) = probe(state, facet, from, dir);
+    let (open, door) = probe(state, creature, facet, from, dir);
     if open {
         return Some(dir);
     }
@@ -484,15 +555,20 @@ fn chase_step(
     }
 
     // Blocked: plan a route around. A door-opener plans through doors and
-    // opens them on arrival.
+    // opens them on arrival, and the route goes round the crowd as well as
+    // round the walls — the same reading `plan_step` gives the long route, and
+    // built by the same function so the two cannot drift.
     let planned = {
-        let planner = state.footing(facet, Doors::for_opener(brain.opens_doors));
+        let crowd = crowd_for_route(state, creature, facet, from, to);
+        let planner = state
+            .footing(facet, Doors::for_opener(brain.opens_doors))
+            .among(openshard_movement::Bodies::standing(&crowd));
         find_path(&planner, from, to, PATH_BUDGET)
     };
     match planned {
         Some(steps) if !steps.is_empty() => {
             let first = steps[0];
-            let (open, door) = probe(state, facet, from, first);
+            let (open, door) = probe(state, creature, facet, from, first);
             if !open {
                 if let Some(door) = door {
                     if brain.opens_doors {
@@ -611,7 +687,7 @@ fn flee_step(
     let away = direction_toward(threat, from).unwrap_or(Direction::South);
     for turn in [0u8, 1, 7, 2, 6, 3, 5] {
         let dir = Direction::from_bits((away.to_bits() + turn) & 7);
-        let (open, _) = probe(state, facet, from, dir);
+        let (open, _) = probe(state, creature, facet, from, dir);
         if open {
             return Some(dir);
         }
@@ -621,11 +697,17 @@ fn flee_step(
 
 /// A step that opens distance without dropping the fight — the kiting half of
 /// a ranged brain. Same search as fleeing, warmode kept.
-fn kite_step(state: &mut WorldState, facet: Facet, from: Point, threat: Point) -> Option<Direction> {
+fn kite_step(
+    state: &mut WorldState,
+    creature: EntityId,
+    facet: Facet,
+    from: Point,
+    threat: Point,
+) -> Option<Direction> {
     let away = direction_toward(threat, from).unwrap_or(Direction::South);
     for turn in [0u8, 1, 7, 2, 6] {
         let dir = Direction::from_bits((away.to_bits() + turn) & 7);
-        let (open, _) = probe(state, facet, from, dir);
+        let (open, _) = probe(state, creature, facet, from, dir);
         if open {
             return Some(dir);
         }

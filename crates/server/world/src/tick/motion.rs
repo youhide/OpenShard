@@ -87,38 +87,24 @@ impl World {
             .registry
             .has::<openshard_state::components::Riding>(entity);
         // The live terrain, not the bare map: a closed door blocks a walk the
-        // statics would allow.
-        let before = walker;
-        let outcome = walker.request(
-            request,
-            &self.state.footing(facet, Doors::AsTheyStand),
-            now,
-            mounted,
-        );
-        // `Walker::request` commits an accepted position to its private copy.
-        // A body on that tile is another kind of obstruction, so restore the
-        // whole walker before replying with the ordinary refusal. This keeps the
-        // walk sequence and the authoritative position in lockstep for the next
-        // client request.
-        if matches!(outcome, Walk::Moved { position, .. } if self.state.mobile_occupies(facet, position, entity))
-        {
-            self.state.registry.insert(entity, Movement(before));
-            self.state.send_packet(
-                connection,
-                &ServerPacket::WalkReject(WalkReject {
-                    sequence: request.sequence.interpret(),
-                    position: before.position,
-                    facing: before.facing,
-                }),
-            );
-            self.state.bus.send(StepRefused {
-                entity,
-                serial,
-                reason: RefusedReason::Blocked,
-            });
-            debug!(%serial, reason = ?RefusedReason::Blocked, "step refused: mobile occupies the destination");
-            return;
-        }
+        // statics would allow — and neither is the whole ground, because
+        // somebody may be standing on it.
+        //
+        // The crowd is built for this one step and thrown away: `reach` of 1 is
+        // the eight tiles a step can reach, which is every tile
+        // `steps_out_of` will ask about, flanks included. This used to be a
+        // `mobile_occupies` call *after* `request` had already answered, which
+        // meant restoring the walker by hand — `request` commits an accepted
+        // position to its private copy — and, worse, that the rule the shard
+        // stepped by was not the rule it planned by. See `footing.rs`.
+        let outcome = {
+            let crowd = self.state.crowd_near(facet, entity, walker.position, 1);
+            let footing = self
+                .state
+                .footing(facet, Doors::AsTheyStand)
+                .among(openshard_movement::Bodies::standing(&crowd));
+            walker.request(request, &footing, now, mounted)
+        };
         self.state.registry.insert(entity, Movement(walker));
 
         match outcome {
@@ -263,11 +249,19 @@ impl World {
         // It answers `None` off the edge of the coordinate space too, where
         // there is nowhere to step at all: the same refusal, and there is no
         // client to snap back either way.
-        let landed = openshard_movement::step_allowed(
-            &self.state.footing(facet, Doors::AsTheyStand),
-            walker.position,
-            direction,
-        );
+        //
+        // And the crowd, for the same reason and on the same reach as
+        // [`walk`](Self::walk): a decreed step is held to the rule a walked one
+        // is. It used to be a `mobile_occupies` call below this one, which is
+        // how the two ends of the same rule came to be written twice.
+        let landed = {
+            let crowd = self.state.crowd_near(facet, entity, walker.position, 1);
+            let footing = self
+                .state
+                .footing(facet, Doors::AsTheyStand)
+                .among(openshard_movement::Bodies::standing(&crowd));
+            openshard_movement::step_allowed(&footing, walker.position, direction)
+        };
         let Some(landed) = landed else {
             self.state.bus.send(StepRefused {
                 entity,
@@ -276,14 +270,6 @@ impl World {
             });
             return;
         };
-        if self.state.mobile_occupies(facet, landed, entity) {
-            self.state.bus.send(StepRefused {
-                entity,
-                serial,
-                reason: RefusedReason::Blocked,
-            });
-            return;
-        }
 
         let facing = Facing::walking(direction);
         walker.position = landed;

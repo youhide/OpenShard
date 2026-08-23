@@ -1234,18 +1234,89 @@ impl WorldState {
             .expect("an entity's facet is always loaded")
     }
 
-    /// Whether a mobile other than `except` is already standing at `at`.
+    /// The bodies within `reach` of `centre` that `mover` has to get past, as
+    /// [`Bodies`](openshard_movement::Bodies) wants them: feet, sorted by tile.
     ///
-    /// The sector grid also contains items and decorations, so looking up a tile
-    /// there is only the cheap candidate search. A [`Body`] is what distinguishes
-    /// a mobile from those world objects. Point equality includes the height: two
-    /// mobiles on separate floors at the same x/y do not block one another.
+    /// **The sector grid, and nothing kept beside it.** The grid is already the
+    /// authority from tile to entity and is already kept honest by the step
+    /// itself, so the crowd a step or a route is decided against is *derived*
+    /// where the question is asked rather than maintained as a second copy of
+    /// `Position` — see `docs/roadmap.md`'s *a mobile is not an obstacle*, which
+    /// weighed the two and took this one. Nothing here can drift, because
+    /// nothing here survives the answer.
+    ///
+    /// `reach` is the caller's, because only the caller knows what it is
+    /// asking: a step wants `1` — the eight neighbours and no more — and a route
+    /// wants the ground it might cross. A body outside the reach is invisible to
+    /// the plan, which costs a re-plan when the route reaches it, and never a
+    /// wrong step: the step itself is decided with its own crowd.
+    ///
+    /// The grid holds items and decoration too, which is why every candidate is
+    /// then asked [`body_blocks`](Self::body_blocks).
     #[must_use]
-    pub fn mobile_occupies(&self, facet: Facet, at: Point, except: EntityId) -> bool {
-        self.facet_state(facet)
+    pub fn crowd_near(&self, facet: Facet, mover: EntityId, centre: Point, reach: u32) -> Vec<Point> {
+        if self.walks_through_bodies(mover) {
+            return Vec::new();
+        }
+        let mut crowd: Vec<Point> = self
+            .facet_state(facet)
             .sectors
-            .nearby(at, 0)
-            .any(|(entity, position)| entity != except && position == at && self.registry.has::<Body>(entity))
+            .nearby(centre, reach)
+            // `mover` is absent from its own crowd, which is the whole of "a
+            // mobile may always step off the tile it is standing on".
+            .filter(|&(entity, _)| entity != mover && self.body_blocks(entity))
+            .map(|(_, position)| position)
+            .collect();
+        crowd.sort_unstable_by_key(|body| (body.x, body.y));
+        crowd
+    }
+
+    /// Whether `mover` walks through other bodies rather than round them.
+    ///
+    /// ServUO's `CanMoveOver`, the mover's half
+    /// (`Scripts/Services/Pathing/Movement.cs:359`): **the dead are stopped by
+    /// nobody.** A ghost has to be able to walk home, and the living cannot see
+    /// it to get out of its way.
+    ///
+    /// Staff is ours rather than ServUO's, where it is a saved per-mobile
+    /// `IgnoreMobiles` toggle that happens to be on for game masters. It is the
+    /// same permission as walking through walls: [`Staff`] is the flag a `.gm`
+    /// takes off, so a game master who has put it down is held to the rule like
+    /// anyone else.
+    #[must_use]
+    pub fn walks_through_bodies(&self, mover: EntityId) -> bool {
+        self.registry.has::<Staff>(mover) || !self.is_alive(mover)
+    }
+
+    /// Whether `entity` is a body other movers have to walk around.
+    ///
+    /// ServUO's `CanMoveOver`, the other half. A [`Body`] is what separates a
+    /// mobile from the items and decoration sharing the sector grid with it — a
+    /// corpse is [`Drawn`], not a `Body`, so it is walked over like the chest it
+    /// is.
+    ///
+    /// **A hidden game master is not in anybody's way**, which is ServUO's
+    /// `t.Hidden && t.IsStaff()` exactly. A hidden *player* still blocks: being
+    /// walked into is how you find one, and in ServUO the shove reveals them.
+    #[must_use]
+    pub fn body_blocks(&self, entity: EntityId) -> bool {
+        self.registry.has::<Body>(entity)
+            && self.is_alive(entity)
+            && !(self.registry.has::<Hidden>(entity) && self.registry.has::<Staff>(entity))
+    }
+
+    /// Whether a mobile is alive for the purpose of getting in somebody's way: a
+    /// ghost is not, and neither is anything worn down to no hit points.
+    ///
+    /// Both halves are needed. A dead *player* becomes a [`Ghost`] and keeps its
+    /// hit points at zero; a creature at zero is reaped a tick later and is a
+    /// body standing in a doorway until it is.
+    fn is_alive(&self, entity: EntityId) -> bool {
+        !self.registry.has::<Ghost>(entity)
+            && self
+                .registry
+                .get::<Hitpoints>(entity)
+                .is_none_or(|hitpoints| hitpoints.current > 0)
     }
 
     /// The region a point on `facet` falls in, if any.
@@ -2926,20 +2997,38 @@ impl WorldState {
 
     /// The flag byte a `0x77`/`0x78` carries about a mobile.
     ///
-    /// One bit of the eight is set by this engine, and it is the stance: a
-    /// client draws a body at war standing in a different animation group, so
-    /// this is the difference between a shopkeeper and a shopkeeper with a
-    /// sword out. The other seven bits are named in
-    /// [`StatusFlags`](openshard_protocol::mobile::StatusFlags)' own table and
-    /// nothing here sets them.
+    /// Two bits of the eight are set by this engine. The stance, because a
+    /// client draws a body at war standing in a different animation group — the
+    /// difference between a shopkeeper and a shopkeeper with a sword out. And
+    /// [`IGNORE_MOBILES`](StatusFlags::IGNORE_MOBILES), because the client keeps
+    /// its own copy of "a body is in the way" and would otherwise refuse to
+    /// predict a step this shard allows: [`walks_through_bodies`] is the rule at
+    /// this end, and this bit is the same rule sent to the other. The remaining
+    /// six are named in [`StatusFlags`](openshard_protocol::mobile::StatusFlags)'
+    /// own table and nothing here sets them.
+    ///
+    /// **The bit is `walks_through_bodies` and not a second reading of it** —
+    /// staff *and* the dead, so a ghost gets it too. A ghost is drawn only to
+    /// other ghosts and to staff, so the case is narrow, but it is real: two
+    /// ghosts can see each other and a client that has not been told would
+    /// refuse to walk one through the other. A separate condition here would be
+    /// the same rule written twice, and the second copy is the one that ends up
+    /// disagreeing.
     ///
     /// Read off [`Combat`] rather than remembered beside it, and asked at the
     /// moment the packet is built: `war_mode` writes `Combat::warmode` and
     /// every screen is rebuilt from these two functions, so there is one
     /// answer to "is this body at war" and no copy of it to fall behind.
+    ///
+    /// [`walks_through_bodies`]: Self::walks_through_bodies
     #[must_use]
     fn stance_of(&self, entity: EntityId) -> StatusFlags {
-        StatusFlags::of_stance(self.registry.get::<Combat>(entity).is_some_and(|c| c.warmode))
+        let war = StatusFlags::of_stance(self.registry.get::<Combat>(entity).is_some_and(|c| c.warmode));
+        if self.walks_through_bodies(entity) {
+            war.with(StatusFlags::IGNORE_MOBILES)
+        } else {
+            war
+        }
     }
 
     /// Build a `0x78` for an entity, if it is a drawable mobile.
@@ -3329,6 +3418,174 @@ mod tests {
         let mut scene = Scene::flat_holding(7, 7, 0);
         scene.wall(4, 4, 0, 20);
         scene.into_shard(facet)
+    }
+
+    /// A shard over one flat block of ground with nobody on it.
+    fn a_shard() -> WorldState {
+        let (map, tiles) = Scene::flat_holding(16, 16, 0).into_shard(Facet(0));
+        let mut facets = BTreeMap::new();
+        facets.insert(Facet(0), FacetState::new(Some(map), None, 16, 16, &tiles));
+        WorldState::new(
+            facets,
+            Facet(0),
+            tiles,
+            openshard_uofiles::multi::Multis::default(),
+            (0, 0),
+            1,
+        )
+    }
+
+    /// Put a mobile at `at`: the [`Body`] that makes it one, the [`Position`]
+    /// the world holds, and the sector row the crowd is read out of.
+    ///
+    /// The sector write is the part that matters here — it is what `crowd_near`
+    /// actually asks, and writing it beside `Position` is the bargain the tick
+    /// makes on every step.
+    fn a_body_at(state: &mut WorldState, at: Point) -> EntityId {
+        let entity = state.registry.spawn();
+        state.registry.insert(
+            entity,
+            Body {
+                id: openshard_protocol::wire::Graphic(0x0190),
+                hue: Hue(0),
+            },
+        );
+        state.registry.insert(entity, Position(at));
+        state.facet_state_mut(Facet(0)).sectors.insert(entity, at);
+        entity
+    }
+
+    /// **Who is in the way, and who only looks it.**
+    ///
+    /// The three rules that come with a mobile obstacle live in `body_blocks`
+    /// and `walks_through_bodies`, and every one of them is a bug a player
+    /// reports when it is missing. The ghost is the one that was: a dead player
+    /// keeps its [`Body`] — a shroud is still a body graphic — so before this it
+    /// stood in a doorway the living could neither see nor pass.
+    #[test]
+    fn a_crowd_holds_the_living_and_nobody_else() {
+        let mut state = a_shard();
+        let walker = a_body_at(&mut state, Point::new(8, 8, 0));
+        let bystander = a_body_at(&mut state, Point::new(9, 8, 0));
+
+        assert_eq!(
+            state.crowd_near(Facet(0), walker, Point::new(8, 8, 0), 1),
+            vec![Point::new(9, 8, 0)],
+            "a living body beside the walker is in its way, and the walker is not in its own"
+        );
+
+        // A chest is in the same sector grid and is not a body. It is what the
+        // obstruction index is for, and asking it here would be the second
+        // reading of one fact that this whole seam exists to avoid.
+        let chest = state.registry.spawn();
+        state.registry.insert(chest, Position(Point::new(7, 8, 0)));
+        state
+            .facet_state_mut(Facet(0))
+            .sectors
+            .insert(chest, Point::new(7, 8, 0));
+        assert_eq!(
+            state.crowd_near(Facet(0), walker, Point::new(8, 8, 0), 1),
+            vec![Point::new(9, 8, 0)],
+            "an item sharing the sector grid is not a body"
+        );
+
+        // The dead do not block. Both halves: the ghost marker a dead player
+        // carries, and the zero hit points a creature has for the tick before it
+        // is reaped.
+        state.registry.insert(
+            bystander,
+            Ghost {
+                body: Body {
+                    id: openshard_protocol::wire::Graphic(0x0190),
+                    hue: Hue(0),
+                },
+            },
+        );
+        assert!(
+            state
+                .crowd_near(Facet(0), walker, Point::new(8, 8, 0), 1)
+                .is_empty(),
+            "a ghost stands in nobody's way"
+        );
+        state.registry.remove::<Ghost>(bystander);
+        state
+            .registry
+            .insert(bystander, Hitpoints { current: 0, max: 50 });
+        assert!(
+            state
+                .crowd_near(Facet(0), walker, Point::new(8, 8, 0), 1)
+                .is_empty(),
+            "and neither does a body worn down to nothing, before the reap takes it"
+        );
+        state
+            .registry
+            .insert(bystander, Hitpoints { current: 1, max: 50 });
+        assert_eq!(
+            state.crowd_near(Facet(0), walker, Point::new(8, 8, 0), 1).len(),
+            1,
+            "one hit point is alive"
+        );
+
+        // Staff walk through bodies as they walk through walls — and it is
+        // `Staff`, the flag a `.gm` puts down, so a game master playing by the
+        // rules is held to them.
+        state.registry.insert(walker, Staff);
+        assert!(
+            state
+                .crowd_near(Facet(0), walker, Point::new(8, 8, 0), 1)
+                .is_empty(),
+            "a game master is stopped by nobody"
+        );
+        state.registry.remove::<Staff>(walker);
+
+        // A hidden game master is in nobody's way either — ServUO's
+        // `t.Hidden && t.IsStaff()`. A hidden *player* still blocks: being
+        // walked into is how you find one.
+        state.registry.insert(bystander, Hidden);
+        assert_eq!(
+            state.crowd_near(Facet(0), walker, Point::new(8, 8, 0), 1).len(),
+            1,
+            "a hidden player is still standing there"
+        );
+        state.registry.insert(bystander, Staff);
+        assert!(
+            state
+                .crowd_near(Facet(0), walker, Point::new(8, 8, 0), 1)
+                .is_empty(),
+            "a hidden game master is not"
+        );
+    }
+
+    /// The crowd comes back sorted by tile, which is
+    /// [`Bodies::standing`](openshard_movement::Bodies::standing)'s whole
+    /// contract — and its lookup silently misses occupants if it is broken,
+    /// which a debug assertion catches only in a debug build.
+    #[test]
+    fn a_crowd_comes_back_sorted_by_tile() {
+        let mut state = a_shard();
+        let walker = a_body_at(&mut state, Point::new(8, 8, 0));
+        for at in [
+            Point::new(9, 9, 0),
+            Point::new(7, 7, 0),
+            Point::new(9, 7, 0),
+            Point::new(7, 9, 0),
+        ] {
+            a_body_at(&mut state, at);
+        }
+        let crowd = state.crowd_near(Facet(0), walker, Point::new(8, 8, 0), 1);
+        assert_eq!(
+            crowd,
+            vec![
+                Point::new(7, 7, 0),
+                Point::new(7, 9, 0),
+                Point::new(9, 7, 0),
+                Point::new(9, 9, 0),
+            ],
+        );
+        assert!(
+            openshard_movement::Bodies::standing(&crowd).blocks(Point::new(9, 9, 0)),
+            "the last tile in the run is found, which is what an unsorted crowd loses"
+        );
     }
 
     /// A tile table that arrives after the facets do rebakes every one of them.
