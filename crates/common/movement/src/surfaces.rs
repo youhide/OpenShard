@@ -1,11 +1,13 @@
 //! Standable surfaces in one map column.
 //!
-//! A map column is shared input to movement and the interior index. Keeping
-//! this walk beside the file types means a floor that a body can stand on is
-//! not rediscovered with slightly different height arithmetic by each reader.
+//! Where a body *could* stand is a movement rule, and it lives here with the
+//! rest of them. It was parked beside the file reader for as long as that
+//! reader was the only thing owning a tile table; a map column is shared input
+//! to movement and the interior index, and this walk is what keeps a floor a
+//! body can stand on from being rediscovered with slightly different height
+//! arithmetic by each reader.
 
 use openshard_map::map::WorldMap;
-
 use openshard_tiles::TileData;
 
 /// Every height a body could stand at on one map tile.
