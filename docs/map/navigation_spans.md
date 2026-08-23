@@ -1,8 +1,10 @@
 # The first storey
 
-> **Status: live — era P, not started.** Its N0 is done and it waits for
-> [`realtime_map.md`](realtime_map.md)'s R1 and R2, which move the two types N1
-> is built from. See [`map_rebuild.md`](map_rebuild.md) for the order.
+> **Status: live — era P, started. N0 and N1 are built.** The gate is gone:
+> [`realtime_map.md`](realtime_map.md)'s era R is over, and the span layer is
+> built and measured against the whole facet. **N2 is next**, and it is where
+> the risk in this plan lives. See [`map_rebuild.md`](map_rebuild.md) for the
+> order and [`handoffs/`](handoffs/) for where the work stands.
 
 Two defects were found in one session and they are the same omission seen from
 two sides. The coarse graph
@@ -381,7 +383,7 @@ declared by hand.
  terrain_seam.md ✅ ──> map_rebuild.md R1 + R2 ──┐
  (the signature)       (the map, in one type)   │
                                                 ▼
- N0. the census ✅ ──> N1. three tiers ──> N2. the step rule reads them ──┬─> N3. the search takes Spans
+ N0. the census ✅ ──> N1. three tiers ✅ ──> N2. the step rule reads them ─┬─> N3. the search takes Spans
                                                     (the agreement oracle) │        └─> N3b. the node stops
                                                                            │              being a tile
                                                                            │
@@ -401,26 +403,53 @@ map and writes nothing, so it could not be written against the wrong API.
 rather than deleted: a base set or a second facet has its own distribution, and
 the tier boundaries are only right for a world that has been counted.
 
-### N1 — three tiers
+### N1 — three tiers ✅
 
-Build the structure and nothing else. No search reads it yet; the only consumer
-is N2's oracle.
+**Built**, in [`spans.rs`](../../crates/common/movement/src/spans.rs), and the
+structure is what this section described: the block tier is the map's own empty
+block, the column tier is the land grid read live, and the exception table is
+CSR — a per-block base and a `[u8; 64]` of counts, addressed by the land's own
+`BlockIndex` so there is no second block indirection to keep in step. The
+builder asserts the count fits a byte and that a height fits an `i8` rather
+than truncating either. Nothing reads it yet.
 
-- `Spans` in `openshard-movement`, built from a `&WorldMap` and a `&TileData`.
-- The block tier reuses the map's **own** block indirection rather than minting
-  a second one. `WorldMap` already indexes 8×8 blocks and already knows which
-  hold statics; a parallel index is a second thing to keep in step, and this
-  document set is a catalogue of what that costs.
-- The exception table is CSR: a per-block base into a flat span array, and a
-  per-block `[u8; 64]` of counts. The census caps a column at 12, so a count is
-  a byte and there is no overflow case to design — **but the builder asserts
-  it** rather than truncating, because a base set is a world nobody has counted.
-- The land surface of a bare column is *not* stored.
+**The measurement, against the estimates this document made before it:**
 
-**Done when:** `Spans::surfaces(x, y)` returns exactly what
-`openshard_movement::surfaces::stand_surfaces` returns, for every column of
-facet 0, for both abilities — asserted by a whole-facet test, not a sample —
-and the built size and build time are recorded in this document.
+| | estimated | measured |
+|---|---:|---:|
+| resident | under 20 MB | **16.5 MiB** (17,305,856 B) |
+| …block index | 1.8 MB | 1.8 MB (458,752 × `u32`) |
+| …count tables | 7.4 MB | 8.2 MB (120,744 × 68 B) |
+| …spans | ~9.6 MB | **6.5 MB** (1,635,392 × 4 B) |
+| spans stored | ~2.4 M | **1,635,392** |
+| build time | "less than the census's 3.5 s" | **0.05 s** |
+| equivalence | — | **0 disagreements**, 29,360,128 columns × 2 abilities, 2.0 s |
+
+The span count came in a third under the estimate because the estimate counted
+an exception column as at least one span: a column with statics whose land is
+water or mountainside stores no ground span, and a column whose statics are all
+walls stores only the ground. The build time is 70× under, which is what settles
+[N6](#n6--an-artifact-if-a-measurement-asks-for-one) for now — a fiftieth of a
+second is not an artifact's worth of work.
+
+**Two types, where this section wrote one.** `SpanIndex` is the bake: owned, no
+lifetimes, built at facet load and kept beside the map the way `NavigationGraph`
+is. `Spans` is the view a question is asked through — the index, the map, and
+the ability of the asker — built where it is asked, which is exactly
+`MapTerrain`'s shape. The split is forced by the middle tier rather than
+chosen: the bake deliberately does not store the 92% of columns the land grid
+can answer, so answering needs the map in hand, and a bake that borrowed the map
+could not be stored beside it in `FacetState`. `find_path(&Spans, &Overlay, …)`
+is unchanged as the shape N3 lands.
+
+**Done when** — and it is: `Spans::surfaces(x, y)` returns exactly what
+`stand_surfaces` returns for every column of facet 0 and both abilities. The
+oracle is the [`span_index`](../../crates/common/movement/examples/span_index.rs)
+example, which is also where the table above comes from; it is an example rather
+than a test for [`span_census`](../../crates/common/movement/examples/span_census.rs)'s
+own reason, that 29.4 million columns walked twice by two implementations is
+seconds in release and minutes in debug. `cargo test` carries the same oracle
+over a box of Britain, which runs in four seconds and takes all three tiers.
 
 ### N2 — the step rule reads them
 
@@ -439,6 +468,33 @@ source in some way a per-span bake cannot carry. It reaches the source through
 exactly two scalars, `start_z` and `start_top`, which is why this is expected to
 work — and expected is not measured. Where it turns out to be false, that is a
 finding about `check` and it is filed here rather than worked around.
+
+**N1 read `check` before writing the builder**, which is what this section asked
+for, and the answer is *one clause* rather than none:
+
+- **The reach test** is `step_top >= item_top`, and `item_top` is `reach_z`.
+  Carried.
+- **The obstruction test** is `is_obstructed(x, y, our_z, test_top)`, where
+  `test_top` varies per step because a body walks in at the height it left. A
+  byte carries it: what the test asks is whether anything overlaps
+  `[our_z, test_top)`, so the free height above `our_z` answers every `test_top`
+  at once. It is **exact and not an approximation**, and the reason is the
+  arithmetic rather than the range: a static's base and a span's `stand_z` are
+  both `i8`, so nothing can be more than 255 above a surface, and `clearance`
+  saturating at 255 therefore means *nothing above at all* rather than "at least
+  255".
+- **The ServUO `landCheck` guard** — the rule that a low static the ground pokes
+  through is not something you climb onto — is the clause that reaches further.
+  Three of its four conditions are properties of the column and are build-time
+  facts; the fourth, `test_top > land_z`, is start-dependent. It is
+  unconditionally true whenever `our_z + PLAYER_HEIGHT > land_z`, which fails
+  only for a candidate buried more than a body's height below the tile's lowest
+  corner. So the guard is **one flag bit, plus the land read the query already
+  knows how to make** in whatever is left of that residue.
+
+That is N2's shape and not N1's: the bit is not stored yet, because a bit whose
+oracle has not run is a rule written twice. The span record has seven spare
+flags and the layout does not move to gain one.
 
 Two oracles, both already built this session:
 
@@ -647,6 +703,13 @@ revisions of one world waiting to happen.
 already knows which blocks hold statics. A parallel index would be a second
 thing to keep in step, which is the failure this whole document set catalogues.
 
+**The bake and the view are two types, and the middle tier is why.** `SpanIndex`
+is what is built and stored; `Spans` is what is asked, and it holds the map
+beside the index because 92% of the facet is deliberately not in the index. A
+single type would have to either borrow the map — and then it could not be
+stored beside it — or store a second copy of the ground, which is the one thing
+the middle tier exists to avoid. Taken in N1; see that node.
+
 **The oracle is equivalence, not plausibility.** Nothing here is done because it
 looks right. N1 asserts against `stand_surfaces` over the whole facet, N2
 against `step_allowed` and against a whole-facet flood, N3 against bit-identical
@@ -689,10 +752,30 @@ graph over spans names neither.
 
 ## Out of scope, named
 
-- **Residency and tiling.** The estimate is under 20 MB, so the whole facet
-  stays resident and Recast's tiling problem does not arise. If N1's measurement
-  says otherwise, that is
-  [direction G](new_map_representation/plan.md#g--residency-and-size-deferred-on-purpose)'s.
+- **Residency and tiling.** ~~The estimate is under 20 MB~~ — **measured at
+  16.5 MiB in N1**, so the whole facet stays resident and Recast's tiling
+  problem does not arise. Residency is
+  [direction G](new_map_representation/plan.md#g--residency-and-size-deferred-on-purpose)'s
+  either way.
+- **N1 found: the count tables are bigger than the spans they address.** 8.2 MB
+  of `[u8; 64]` against 6.5 MB of spans, because only 2.3 M of the 7.7 M columns
+  in a static-bearing block are exceptions and the other 71% of every table is a
+  zero. A per-block `u64` occupancy mask with counts for the occupied columns
+  only is about 3.3 MB, and it replaces a 64-byte prefix sum with a
+  `count_ones` — smaller *and* fewer bytes read. Not taken: it is a layout
+  change with a query change in it, and N3 is the measurement that says whether
+  the query is on a hot path at all. The same gate the packed static record is
+  under.
+- **N1 found: the map and the overlay disagree about a platform of no
+  thickness.** `MapTerrain::is_obstructed` gives one a body from `base` to
+  `base`, so it is in the way of anything *below* it whose head passes the
+  floor; `Cover::of_static` lays no blocking half for the same art at all, and
+  its doc says why. So a floor the map shipped and a floor the shard placed
+  answer differently for a body underneath — a cellar under a shipped floor, and
+  the same cellar under a built one. The span bake reproduces the map's reading,
+  because that is what N2's oracle compares against; which of the two is right
+  is N2's question and is a finding about the step rule rather than about this
+  layer.
 - **A dense `average_land_z` array.** 29.4 MB turns the bare-column case from
   four corner reads into one. An obvious follow-up and exactly the kind of thing
   that should wait for N3's measurement to say whether it is needed.
@@ -715,27 +798,23 @@ graph over spans names neither.
 
 ## Where a session starts
 
-**Not here yet — [`map_rebuild.md`](map_rebuild.md)'s era R first.**
-[`terrain_seam.md`](terrain_seam.md) has closed and its E landed the signature
-this plan substitutes into, so the gate this section was written against is
-gone — and a second one replaced it. The map is about to become one type holding
-three layers (R2), the tile table is about to leave the file reader (R1), and
-`Spans` is built from exactly the two layers underneath the live one. Written
-before that, N1 is written against a `&WorldMap` and a `&TileData` it will be
-handed differently a week later, which is the same mistake this plan already
-waited once to avoid.
+**N2 — the step rule reads them.** Era R is over and N1 is built: the span layer
+exists, it is 16.5 MiB, it takes a twentieth of a second to bake, and it says
+exactly what `stand_surfaces` says for all 29,360,128 columns of facet 0 and
+both abilities. Nothing reads it yet, which is the whole of what N2 changes.
 
-When era R closes — R1 and R2 are what N1 actually needs, not R3–R5:
+**What N2 has to prove is the only risk in this plan**, and N1 read `check` in
+advance to find out what it would cost — the answer is in
+[N2's own section](#n2--the-step-rule-reads-them): the reach and the obstruction
+are carried by `reach_z` and `clearance`, exactly, and the ServUO `landCheck`
+guard is one flag bit plus a rare land read. That bit is deliberately not stored
+yet: it is a rule, and a rule whose oracle has not run is a rule written twice.
 
-**N1, and it needs no client install to write** — only to test, which this
-machine can do. The census is done and the tier boundaries are decided; N1 is the
-structure and one whole-facet equivalence test.
-
-**N2 is where the risk is**, and it is worth reading its own section before
-starting N1, because what N1 must store is decided by what N2 has to prove. If
-`check` turns out to reach the source through more than `start_z` and
-`start_top`, the span record grows a field, and it is cheaper to find that out
-before the builder is written.
+**Both of N2's oracles already exist.** Per-step agreement against
+`step_allowed`, and the whole-facet flood
+[`coarse_bench`](../../crates/common/movement/examples/coarse_bench.rs) uses as
+ground truth. The second is the one that would have caught the one-storey
+defect, and it is the one that makes everything after N2 safe to build on.
 
 **N4 is the one a player would notice**, and N7 is where they notice it.
 Everything before N4 is a structure and an oracle; N4 is the node where a

@@ -129,7 +129,8 @@ Read off the workspace and the plans, so a session does not re-derive it:
 | a house has walls and no floors | ✅ R3 — a platform lays two covers, and `can_step` climbs onto them |
 | the statics are 120,745 vectors | ✅ R4 — one run, two allocations, 38.2 → 29.5 MiB |
 | both ends load the same install separately | ✂ R5 struck — a shard and a client *are* two processes; only the test harness is one |
-| spans, regions over spans, the server reading the graph | ⬜ era P |
+| a column is a *list* of standable surfaces | ✅ [N1](navigation_spans.md#n1--three-tiers-) — 16.5 MiB, baked in 0.05 s, equal to `stand_surfaces` on all 29.4 M columns |
+| the step rule reads them; regions over spans; the server reading the graph | ⬜ era P, from [N2](navigation_spans.md#n2--the-step-rule-reads-them) |
 | live publish, revisioned bakes, chunks to the client, the editor | ⬜ era S |
 
 ## Era R — the map you hold
@@ -360,7 +361,9 @@ the shard's own loader is the only production `load_facet` call.
 ## Era P — the map you search
 
 Inherited whole from [`navigation_spans.md`](navigation_spans.md), whose nodes,
-measurements and DoDs stand as written. Three things this consolidation adds:
+measurements and DoDs stand as written. **N1 is built** — the span layer exists,
+is 16.5 MiB, and says what `stand_surfaces` says for every column of facet 0 —
+and N2 is where a session starts. Three things this consolidation adds:
 
 - **`Spans` is movement's own map, and it stays in `openshard-movement`.** It is
   a projection of the two lower layers for one purpose — where a body may stand
@@ -569,10 +572,13 @@ walk is not an improvement, whatever it weighs.
 **Where the work stands is [`handoffs/`](handoffs/)**, newest last — not here,
 and not in the plan.
 
-**Era P is no longer gated.** The gate was R2 for the *type*, and after that the
-shape of the layers `Spans` is a projection of: what a house contributes to a
-surface (R3) and how the statics are held (R4). Both have landed, and R5 — the
-only node that was left — is struck.
+**Era P is no longer gated, and it has started.** The gate was R2 for the
+*type*, and after that the shape of the layers `Spans` is a projection of: what
+a house contributes to a surface (R3) and how the statics are held (R4). Both
+landed, R5 — the only node that was left — is struck, and
+[N1](navigation_spans.md#n1--three-tiers-) is built: the span layer is a real
+16.5 MiB structure that nothing reads yet. **N2 is the next node**, and it is
+where the only risk in that plan lives.
 
 **Era S is resumed, not restarted.** Its first half is built and running; the
 handoffs in [`handoffs/`](new_map_representation/handoffs/) are where its state
