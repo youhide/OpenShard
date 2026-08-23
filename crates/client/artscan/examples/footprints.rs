@@ -151,9 +151,7 @@ fn main() {
 /// says how much of it a footprint would replace.
 fn placed(dir: &std::path::Path, art: &Art, cx: i32, cy: i32, radius: i32) {
     let map = openshard_uofiles::map::read_facet(dir, 0).expect("Felucca");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
 
     let (mut total, mut unread, mut measured, mut whole, mut roofs) = (0u32, 0u32, 0u32, 0u32, 0u32);
     let mut reasons: BTreeMap<String, u32> = BTreeMap::new();

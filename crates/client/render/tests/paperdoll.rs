@@ -26,9 +26,7 @@ fn client() -> Option<(Gumps, EquipConv, TileData)> {
     // failure — an empty one resolves nothing, which is the ordinary case for
     // most rows anyway.
     let equip_conv = EquipConv::load(dir.join("Equipconv.def")).unwrap_or_default();
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     Some((gumps, equip_conv, tiledata))
 }
 

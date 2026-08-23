@@ -40,9 +40,8 @@ fn client_dir() -> Option<std::path::PathBuf> {
 fn tiledata() -> Option<TileData> {
     let dir = client_dir()?;
     Some(
-        openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("a client ships a readable tiledata.mul")
-            .tiles,
+        openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul"))
+            .expect("a client ships a readable tiledata.mul"),
     )
 }
 

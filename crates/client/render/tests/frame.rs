@@ -73,9 +73,7 @@ fn client_dir() -> Option<PathBuf> {
 /// says which of them a land graphic uses.
 fn texmap_atlas(dir: &std::path::Path, wanted: impl IntoIterator<Item = Graphic>) -> TexmapAtlas {
     let texmaps = TexMaps::open(dir).expect("texidx.mul and texmaps.mul");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     TexmapAtlas::build(&texmaps, &tiledata, wanted).expect("a screen of textures fits")
 }
 
@@ -945,9 +943,7 @@ fn real_map_block_producer_keeps_every_owned_map_tile_after_restore() {
     };
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     // A dense central-Britain block: a quiet sea block proves only ground.
     let block = BlockCoord { x: 186, y: 203 };
     let key = CompositeKey {
@@ -5441,9 +5437,7 @@ fn britains_statics_cover_part_of_a_frame_that_is_still_whole() {
     };
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     let camera = Camera::new(Point::new(1495, 1629, 0), 768, 512);
 
     let wanted = ground::visible_graphics(&map, &camera);
@@ -5537,9 +5531,7 @@ fn dump_a_frame_of_britain() {
     let centre = Point::new(1495, 1629, 0);
     let camera = Camera::new(centre, 768, 512);
 
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     let wanted = ground::visible_graphics(&map, &camera);
     let atlas = LandAtlas::build(&art, wanted.iter().copied()).expect("fits");
     let texmaps = texmap_atlas(&dir, wanted);

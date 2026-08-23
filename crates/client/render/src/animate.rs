@@ -332,9 +332,8 @@ mod tests {
             return;
         };
         let animdata = AnimData::load(&dir).expect("animdata.mul");
-        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("tiledata.mul")
-            .tiles;
+        let tiledata =
+            openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
         let mut animations = StaticAnimations::build(&animdata, &tiledata);
         assert!(animations.len() > 1_000, "only {} animate", animations.len());
 

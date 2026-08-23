@@ -95,13 +95,13 @@ impl Region {
 fn main() {
     let dir = PathBuf::from(std::env::var_os("OPENSHARD_CLIENT").expect("OPENSHARD_CLIENT"));
     let regions: Vec<_> = std::env::args().skip(1).map(Region::parse).collect();
-    let regions = (!regions.is_empty())
-        .then_some(regions)
-        .unwrap_or_else(Region::defaults);
+    let regions = if regions.is_empty() {
+        Region::defaults()
+    } else {
+        regions
+    };
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
 
     for region in regions {
         measure(&map, &tiledata, &region);

@@ -32,7 +32,7 @@ Three layers, and what orders them is **how fast each one changes**:
 |---|---|---|---|
 | **the ground** | one `LandCell` per column — a land id and a height | a patch is published | [`LandGrid`](../../crates/common/map/src/grid.rs) inside `WorldMap` ✅ |
 | **the statics** | what the importer laid down: walls, trees, floors, roads | a patch is published | `WorldMap.statics`, `Vec<Vec<StaticItem>>` ⚠ |
-| **the live layer** | doors, crates, ship decks, house walls **and house floors** | between two ticks | nowhere in the map: [`Overlay`](../../crates/common/movement/src/overlay.rs) in `openshard-movement`, projected by `FacetState` on the server and rebuilt per view by `clutter::of` on the client ⚠ |
+| **the live layer** | doors, crates, ship decks, house walls **and house floors** | between two ticks | [`Overlay`](../../crates/common/map/src/overlay.rs), the third field of [`World`](../../crates/common/map/src/world.rs) — projected by `FacetState` on the server and rebuilt per view by `clutter::fill` on the client ✅ |
 
 The invariant that makes this a matryoshka rather than three fields in a struct:
 
@@ -44,7 +44,7 @@ The invariant that makes this a matryoshka rather than three fields in a struct:
 
 That is not a new rule. It is what
 [`navigation_graph.md`](navigation_graph.md) means by *"built once from the
-static terrain"*, what [`overlay.rs`](../../crates/common/movement/src/overlay.rs)
+static terrain"*, what [`overlay.rs`](../../crates/common/map/src/overlay.rs)
 means by *"an overlay is not a terrain"*, and what
 [`terrain_seam.md`](terrain_seam.md)'s node E landed as a type. What is new is
 that it is stated once, for all three layers at once, by the type that holds
@@ -224,7 +224,7 @@ stored, which is [`housing.md`](../housing.md)'s D2.
 What that leaves is the half nobody built. `grep -rn "CoverKind::Stands" crates`
 has **one** producer in the workspace — `Plank::cover`, a ship's deck. Every
 house component is either `Blocks` or absent, because
-[`Cover::of_static`](../../crates/common/movement/src/overlay.rs#L170) is
+[`Cover::of_static`](../../crates/common/map/src/overlay.rs) is
 `tile.flags.is_blocking().then(…)`. A floor is a *platform* and usually not
 blocking, so it produces nothing at all: a house's ground floor is walkable
 because the map's own ground is under it, and **its upper storey stands on

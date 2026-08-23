@@ -308,9 +308,7 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
 
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
 
     let (point, zoom) = frame_point_and_zoom();
     let mut camera = Camera::new(point, VIEWPORT.0, VIEWPORT.1);

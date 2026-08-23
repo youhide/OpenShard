@@ -266,7 +266,7 @@ bake is *allowed* to assume. Read off the workspace, not off the design:
 
 **Doors are the case that needs nothing.** A door is an entity and the doorway it
 hangs in is *an open gap in the statics by construction* —
-[`overlay.rs`](../../crates/common/movement/src/overlay.rs)'s header says so and
+[`overlay.rs`](../../crates/common/map/src/overlay.rs)'s header says so and
 it is why this works. A door therefore never reaches the bake, cannot be baked
 shut, and its two readings stay the `Doors` enum. The span grid is simply blind
 to doors, which is the correct relationship.

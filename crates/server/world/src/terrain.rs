@@ -38,9 +38,8 @@ mod tests {
             return None;
         }
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("the client's map0 should load");
-        let tiles = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("tiledata should load")
-            .tiles;
+        let tiles =
+            openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata should load");
         Some(Install { map, tiles })
     }
 

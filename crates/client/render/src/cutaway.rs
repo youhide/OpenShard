@@ -687,9 +687,8 @@ mod tests {
             return;
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("tiledata.mul")
-            .tiles;
+        let tiledata =
+            openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
 
         // A block of Britain wide enough to hold whole buildings and the
         // streets between them.
@@ -770,9 +769,8 @@ mod tests {
             return;
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("tiledata.mul")
-            .tiles;
+        let tiledata =
+            openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
 
         let mut checked = 0;
         for y in 1600..1660u16 {

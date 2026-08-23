@@ -606,6 +606,7 @@ pub fn pick(
 
 /// [`pick`] under the same building policy that collected this frame's items.
 #[must_use]
+#[allow(clippy::too_many_arguments)] // Rendering inputs intentionally mirror `pick` plus interior visibility.
 pub fn pick_with_interior(
     items: &[GroundItem],
     camera: &Camera,

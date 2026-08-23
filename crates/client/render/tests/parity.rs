@@ -534,9 +534,7 @@ struct Client {
 fn load(dir: PathBuf) -> Client {
     let real_map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     let animdata = AnimData::load(&dir).expect("animdata.mul");
     let animations = StaticAnimations::build(&animdata, &tiledata);
     let hue_ramp = HueRamp::build(&Hues::load(dir.join("hues.mul")).expect("hues.mul"));

@@ -110,9 +110,7 @@ fn what_the_table_says_against_what_the_artist_drew() {
         return;
     };
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     let path = table_path();
     let text = fs::read_to_string(&path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
     let table = ArtTable::parse(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));

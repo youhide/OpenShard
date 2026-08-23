@@ -80,9 +80,7 @@ fn main() {
     let radius: i32 = args.next().map_or(20, |v| v.parse().expect("radius"));
 
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
 
     let mut graphics: Vec<Graphic> = Vec::new();

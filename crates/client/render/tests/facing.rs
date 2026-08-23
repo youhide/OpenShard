@@ -80,9 +80,7 @@ const BRITAIN: (std::ops::Range<u16>, std::ops::Range<u16>) = (1350..1500, 1600.
 fn every_wall_graphic_the_client_ships_is_offered_to_the_detector() {
     let Some(dir) = client() else { return };
     let art = Art::open(&dir).expect("the client's art");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
 
     // The graphics this was designed against, by name and by verdict. A share is
     // a summary and a summary cannot be wrong in a way anybody can point at: if
@@ -211,9 +209,7 @@ fn every_wall_graphic_the_client_ships_is_offered_to_the_detector() {
 fn britain_s_walls_are_read_where_they_stand() {
     let Some(dir) = client() else { return };
     let art = Art::open(&dir).expect("the client's art");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
 
     // Read once per graphic, the way the atlas does: the answer is a property of

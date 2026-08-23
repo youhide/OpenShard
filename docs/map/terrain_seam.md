@@ -1089,7 +1089,7 @@ two three-line predicates a crate apart — `flags.is_blocking()`, then
 when" wanted a test against.
 
 There is no second reading to test against now.
-[`Cover::of_static`](../../crates/common/movement/src/overlay.rs) is the one
+[`Cover::of_static`](../../crates/common/map/src/overlay.rs) is the one
 rule, and `world::tick::decor::place_decoration` and `clutter::of` both call it.
 A test would have caught a divergence; this removes the place one could appear.
 

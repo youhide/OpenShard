@@ -154,6 +154,16 @@ pub fn load(path: impl AsRef<Path>) -> Result<Reading, TileDataError> {
     })
 }
 
+/// Read `tiledata.mul` when the file layout is not needed afterwards.
+///
+/// Most consumers need the domain table only.  Keeping that common path here
+/// means callers do not need to know that the decoder also records a
+/// file-format diagnostic in [`Reading`].  Code that reports or otherwise
+/// acts on the detected layout should use [`load`] instead.
+pub fn load_tiles(path: impl AsRef<Path>) -> Result<TileData, TileDataError> {
+    load(path).map(|reading| reading.tiles)
+}
+
 /// Parse bytes that are already in memory.
 #[must_use]
 pub fn parse(bytes: &[u8]) -> Option<Reading> {

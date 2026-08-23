@@ -90,9 +90,7 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 fn a_bookcases_measured_slab_is_narrower_than_the_whole_tile_and_a_lost_footprint_stands_it_back_up() {
     let Some(dir) = client() else { return };
     let art = Art::open(&dir).expect("the client's art");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
 
     for (id, x, y) in BOOKCASES {
         let image = art
@@ -292,9 +290,7 @@ fn a_real_frames_view_normal_draws_the_bookcases_lid_inside_that_slab() {
         return;
     };
     let art = Art::open(&dir).expect("the client's art");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     let animdata = AnimData::load(&dir).expect("animdata.mul");
     let animations = openshard_client_render::animate::StaticAnimations::build(&animdata, &tiledata);
 

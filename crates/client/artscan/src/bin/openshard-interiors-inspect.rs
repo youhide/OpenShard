@@ -48,7 +48,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let map = openshard_uofiles::map::load_facet(&cli.client, facet)?;
     let stamp = interiors::stamp_of(&cli.client, facet, map.revision())?;
     let graph = interiors::load_baked(&interiors::artifact_path(&cli.client, facet), &stamp)?;
-    let tiles = openshard_uofiles::tiledata::load(cli.client.join("tiledata.mul"))?.tiles;
+    let tiles = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
     let table = openshard_client_artscan::load(&cli.client)?;
     for (x, y) in cli.points {
         println!(

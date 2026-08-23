@@ -314,9 +314,7 @@ fn a_posts_shadow_is_a_quarter_tiles_and_a_lost_footprint_makes_it_a_whole_tiles
         return;
     };
     let art = Art::open(&dir).expect("the client's art");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     let animdata = AnimData::load(&dir).expect("animdata.mul");
     let animations = openshard_client_render::animate::StaticAnimations::build(&animdata, &tiledata);
 

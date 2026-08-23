@@ -167,12 +167,13 @@ pub fn build(client_dir: &Path, facet: Facet) -> Result<(BuildingMap, MapRevisio
         path: client_dir.to_path_buf(),
         source: Box::new(source),
     })?;
-    let tiles = openshard_uofiles::tiledata::load(client_dir.join("tiledata.mul"))
-        .map_err(|source| Error::Read {
-            path: client_dir.join("tiledata.mul"),
-            source: Box::new(source),
-        })?
-        .tiles;
+    let tiles =
+        openshard_uofiles::tiledata::load_tiles(client_dir.join("tiledata.mul")).map_err(|source| {
+            Error::Read {
+                path: client_dir.join("tiledata.mul"),
+                source: Box::new(source),
+            }
+        })?;
     let graph = BuildingMap::bake(map.map(), &tiles, &|graphic| table.shape(graphic));
     Ok((graph, map.revision()))
 }

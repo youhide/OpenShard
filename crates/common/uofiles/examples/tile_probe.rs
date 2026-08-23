@@ -16,9 +16,8 @@ fn main() {
         // The other question this answers: not what is on a tile, but what one
         // graphic *is* — the same table, read the way a placed item is read.
         let dir = std::path::PathBuf::from(std::env::var_os("OPENSHARD_CLIENT").expect("OPENSHARD_CLIENT"));
-        let tiles = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("tiledata should load")
-            .tiles;
+        let tiles =
+            openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata should load");
         let graphic: u16 = args
             .next()
             .expect("graphic")
@@ -41,9 +40,8 @@ fn main() {
 
     let dir = std::path::PathBuf::from(std::env::var_os("OPENSHARD_CLIENT").expect("OPENSHARD_CLIENT"));
     let map = openshard_uofiles::map::read_facet(&dir, facet).expect("the facet should load");
-    let tiles = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata should load")
-        .tiles;
+    let tiles =
+        openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata should load");
 
     if let Some(land) = map.land(x, y) {
         let data = tiles.land(land.tile.0);

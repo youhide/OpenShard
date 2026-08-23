@@ -5007,9 +5007,8 @@ mod tests {
             return;
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("tiledata.mul")
-            .tiles;
+        let tiledata =
+            openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
         // The same block of Britain the cutaway's own tests walk: wide enough to
         // hold whole buildings and the streets between them.
         let (from, to) = ((1470u16, 1600u16), (1530u16, 1660u16));
@@ -5093,9 +5092,8 @@ mod tests {
             return;
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("tiledata.mul")
-            .tiles;
+        let tiledata =
+            openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
         let art = openshard_uofiles::art::Art::open(&dir).expect("artLegacyMUL.uop");
 
         // The same eye `tests/cost.rs` measures through, so the two sets of

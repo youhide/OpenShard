@@ -79,9 +79,7 @@ fn client() -> Option<Client> {
         // Optional in an install, and its absence resolves nothing — which is
         // the ordinary case for most rows anyway.
         equip_conv: EquipConv::load(dir.join("Equipconv.def")).unwrap_or_default(),
-        tiledata: openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("tiledata.mul")
-            .tiles,
+        tiledata: openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul"),
         fonts: FontAtlas::build(&fonts).expect("ten faces of small glyphs fit an atlas"),
     })
 }

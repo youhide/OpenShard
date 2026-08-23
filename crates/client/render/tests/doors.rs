@@ -20,11 +20,7 @@ use openshard_tiles::{TileData, TileFlags};
 
 fn tiledata() -> Option<TileData> {
     let dir = std::env::var_os("OPENSHARD_CLIENT").map(std::path::PathBuf::from)?;
-    Some(
-        openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("tiledata.mul")
-            .tiles,
-    )
+    Some(openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul"))
 }
 
 /// Every graphic the table claims is a door in the client's own table.

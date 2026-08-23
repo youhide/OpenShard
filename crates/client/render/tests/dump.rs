@@ -135,9 +135,7 @@ fn draw_britain(
 ) -> Drawn {
     let map = openshard_uofiles::map::read_facet(dir, 0).expect("Felucca");
     let art = Art::open(dir).expect("artLegacyMUL.uop");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     let animdata = AnimData::load(dir).expect("animdata.mul");
     let animations = StaticAnimations::build(&animdata, &tiledata);
 

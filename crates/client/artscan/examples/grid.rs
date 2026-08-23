@@ -10,9 +10,7 @@ use openshard_uofiles::art::Art;
 
 fn main() {
     let dir = std::path::PathBuf::from(std::env::var_os("OPENSHARD_CLIENT").expect("client"));
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata");
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("felucca");
     let art = Art::open(&dir).expect("art");
 

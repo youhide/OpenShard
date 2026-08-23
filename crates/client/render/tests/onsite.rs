@@ -105,9 +105,7 @@ fn what_the_lighting_knows_about_a_place() {
     };
     let (at_x, at_y) = place();
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
 
     // The camera is only here to give `light::collect` the same bounds the client

@@ -1,8 +1,9 @@
 # The map you hold — era R, in order
 
-> **Status: R1 built; R2 next.** The tile table has its own crate and
-> `openshard-uofiles` is readers, formats and errors. Everything below R1 is
-> still a plan.
+> **Status: R1 and R2 built; R3, R4 and R5 next, in any order.** The tile table
+> has its own crate, `openshard-uofiles` is readers, formats and errors, and one
+> `World` is the map on both ends of the wire. Everything below R2 is still a
+> plan.
 
 The executable half of [`map_rebuild.md`](map_rebuild.md)'s era R. That document
 holds the model and the decisions — three layers, what may be baked, why a house
@@ -45,9 +46,9 @@ R1 and R2 are the two the rest wait on; R3, R4 and R5 are independent of each
 other and can land in any order once R2 has.
 
 ```
-R1. the table leaves the file reader ✔ ──> R2. the third layer joins the type ──┬─> R3. a house has floors
-                                                                              ├─> R4. statics become one run
-                                                                              └─> R5. one install, one load
+R1. the table leaves the file reader ✔ ──> R2. the third layer joins the type ✔ ──┬─> R3. a house has floors
+                                                                                 ├─> R4. statics become one run
+                                                                                 └─> R5. one install, one load
 ```
 
 ## R1 — the table leaves the file reader ✔
@@ -146,9 +147,13 @@ Two questions the plan did not name, both settled by the same rule it set:
   hang a constructor off, and `TileData::from_tables` is the one way to build a
   populated table.
 
-## R2 — the third layer joins the type
+## R2 — the third layer joins the type ✔
 
 **Goal.** One value is the map.
+
+**Built**, in the four commits below plus one the plan did not foresee — the
+call sites, which are their own commit for the reason R1's were. What the move
+decided is at the end of this node.
 
 ### What moves
 
@@ -162,6 +167,10 @@ What does **not** move: every rule that reads one. `step_allowed`, `can_step`,
 `blocker_at`, `blocker_anywhere` and `surface_at` are lookups into the structure
 and go with it.
 
+`Tile` landed in [`grid`](../../crates/common/map/src/grid.rs), beside
+`BlockCoord`, whose own doc already defined itself as *"a block's position on the
+facet — not a tile"*. The pair is now written down rather than implied.
+
 ### What is built
 
 - `World { base: Option<MapSnapshot>, live: Overlay }` in `openshard-map`, with
@@ -174,25 +183,63 @@ and go with it.
 - The server's `FacetState` holds a `World` where it held `map` and `overlay`;
   the four mutators (`block`, `unblock`, `moor`, `cast_off`) write through it and
   `refresh` keeps projecting, exactly as node E left them. **The builders do not
-  move** — `Obstructions` and `Boats` are the server's, `clutter::of` is the
+  move** — `Obstructions` and `Boats` are the server's, `clutter::fill` is the
   client's, and neither end learns about the other.
-- The client's `Resources` holds a `World`; `clutter::of` fills its live layer
-  rather than returning a value the frame carries beside the map.
+- The client's `Resources` holds a `World`; `clutter::fill` writes its live layer
+  rather than returning a value the frame carries beside the map. The client's
+  overlay left `PresentationWorld` for it, so `world::footing` takes one struct
+  where it took two.
 
 ### The commits
 
 1. The move, and `openshard-movement` re-importing from `openshard-map`.
-2. `World`, `Footing::of`, and the bake-facing accessor.
-3. The server: `FacetState` holds one.
-4. The client: `Resources` holds one.
+   `6702e72c`.
+2. **The call sites**, which the plan did not foresee and which are their own
+   commit for the reason R1's were: thirty-eight files and nine server crates
+   that only ever wanted to name a place. `49fa83c8`.
+3. `World`, `Footing::of`, and the bake-facing accessor. `fbe6588f`.
+4. The server: `FacetState` holds one. `9fd3f8af`.
+5. The client: `Resources` holds one. `b3f5ed97`.
 
 **Done when:** no production caller carries a map and an overlay as two values; a
 bake's argument has no path to the live layer; the movement, boat and housing
-test suites pass unchanged, because nothing about a rule changed.
+test suites pass unchanged, because nothing about a rule changed. **Met.** The
+`Footing::new` calls that survive are tests, examples, and the two that
+deliberately want *less* than a world: the bake binary and the client's `guide`,
+both reading the bare map their coarse graph was built over.
 
 **Risk:** medium, and all of it is in the client's lifetime. The client rebuilds
 its live layer per view and throws it away whole; putting it inside a `World` the
-frame pins must not turn that into a value kept across frames by accident.
+frame pins must not turn that into a value kept across frames by accident. It did
+not: `clutter::fill` clears and rewrites, which is the same lifecycle assigning a
+fresh overlay had, with the allocation kept instead of dropped.
+
+### What the move decided
+
+Three questions the plan did not name:
+
+- **A body's height is the caller's.** `Cover::meets` read `PLAYER_HEIGHT` off
+  `openshard-movement`, which the map's crate cannot see — and should not: how
+  tall a creature is is a movement rule, and that constant's own comment admits
+  it ought to vary by creature and does not. It is a `Body { z, height }`
+  argument now, a type rather than a second `i32`, because a position and a
+  length in the same units side by side on the hot path of every step say
+  nothing about which is which. It also closed a latent disagreement:
+  `can_fit` took a height, gave it to the map half and let the overlay half
+  reach for the body constant. Every caller passes a person's height, so the
+  answer is unchanged.
+- **The client's `Resources::map` is a method with one `expect` in it.** `World`'s
+  base is an `Option` because a *shard* with no client files is a real
+  configuration; a client is not one — it opened the install to get this far —
+  so the absence is unreachable at that end, and the alternative was the same
+  `expect` written out at forty readers. Its whole-`&self` borrow is the cost:
+  where the field it replaced borrowed only itself, this borrows the struct, and
+  one call site (`window.rs`'s atlas rebuild, which wants `&mut resources.anim`
+  beside the map) had to hoist its argument into a local.
+- **`FacetState::set_map` replaces the public field.** A facet is inserted and
+  *then* loaded on both ends, so something has to be able to give it ground after
+  the fact. What it must not be is a field a reader can take without the layer
+  beside it, which is what the old `pub map` was.
 
 ## R3 — a house has floors
 
@@ -284,9 +331,15 @@ The oracles that already exist, and which every node above runs:
 
 ## Where a session starts
 
-**R1, commit 1.** It has no incoming edge, it changes no behaviour, and every
-mistake in it is a compile error. The judgement call inside it is the
-`LandTile` collision, and this document has taken it: the id becomes
-`LandTileId` and moves to the table's crate.
+**R3, R4 or R5** — the three are independent of each other and R2 has landed, so
+any of them can go first. They are not the same size or the same kind of risk:
+
+- **R3** is the one with a *feature* in it — you can stand on the second storey —
+  and the one that can change where a body stands on ground it already walks on.
+  Its own node names the case to test.
+- **R4** is measured, bounded and has an oracle already written: the base-set
+  round trip either stays byte-identical or it does not.
+- **R5** is the smallest, and the only one that changes what a process *holds*
+  rather than what a type is.
 
 Progress goes in [`handoffs/`](handoffs/), not here.

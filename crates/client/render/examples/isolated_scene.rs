@@ -596,9 +596,7 @@ fn main() {
 
     let real_map = openshard_uofiles::map::read_facet(&dir, FACET).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
 
     let at = parse_point(&env("OPENSHARD_SCENE_AT"));
     let anchor = (at.x, at.y);

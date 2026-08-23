@@ -67,9 +67,7 @@ fn which_prism_the_art_is_a_picture_of() {
         return;
     };
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
 
     for id in wanted() {
         let Some(picture) = art.static_art(Graphic(id)).expect("the art reads") else {
@@ -170,9 +168,7 @@ fn how_much_of_the_climbable_art_the_prism_model_covers() {
         return;
     };
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
 
     let mut climbable = 0;
     let mut fits = 0;

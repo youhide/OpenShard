@@ -261,9 +261,7 @@ fn measure_residual(prism: &Prism, image: &Image) -> Option<(f32, f32, usize)> {
 /// and, where it fits, measured against the art at every internal step.
 fn report(dir: &Path) {
     let art = Art::open(dir).expect("art");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     let sweep = sweep();
 
     let (mut accepted, mut rejected) = (0usize, 0usize);
@@ -453,9 +451,7 @@ const CANVAS: [u8; 3] = [64, 0, 96];
 /// before its distribution is believed.
 fn debug_pictures(dir: &Path, out_dir: &Path, ids: &[u16]) {
     let art = Art::open(dir).expect("art");
-    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-        .expect("tiledata.mul")
-        .tiles;
+    let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
     let sweep = sweep();
     std::fs::create_dir_all(out_dir).expect("the output directory");
 

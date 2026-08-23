@@ -62,7 +62,7 @@ const BLOCK: u32 = 8;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let tiles = openshard_uofiles::tiledata::load(cli.client.join("tiledata.mul"))?.tiles;
+    let tiles = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
     let map: WorldMap = openshard_uofiles::map::read_facet(&cli.client, cli.facet)?;
     let (width, height) = (map.width(), map.height());
     let columns = u64::from(width) * u64::from(height);

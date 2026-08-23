@@ -1022,6 +1022,7 @@ pub fn pick(
 
 /// [`pick`] with the same building-cell gate as the static collector.
 #[must_use]
+#[allow(clippy::too_many_arguments)] // Rendering inputs intentionally mirror `pick` plus interior visibility.
 pub fn pick_with_interior(
     map: &WorldMap,
     camera: &Camera,
@@ -1894,9 +1895,8 @@ mod tests {
             return;
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("tiledata.mul")
-            .tiles;
+        let tiledata =
+            openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
         let animdata = AnimData::load(&dir).expect("animdata.mul");
         let mut animations = StaticAnimations::build(&animdata, &tiledata);
 
@@ -2024,9 +2024,8 @@ mod tests {
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
         let art = openshard_uofiles::art::Art::open(&dir).expect("artLegacyMUL.uop");
-        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("tiledata.mul")
-            .tiles;
+        let tiledata =
+            openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
 
         let camera = Camera::new(Point::new(1495, 1629, 0), 768, 512);
         let animations = StaticAnimations::default();
@@ -2093,9 +2092,8 @@ mod tests {
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
         let art = openshard_uofiles::art::Art::open(&dir).expect("artLegacyMUL.uop");
-        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
-            .expect("tiledata.mul")
-            .tiles;
+        let tiledata =
+            openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
 
         // Britain by the bank: buildings, walls, floors and signs, which is
         // what makes the ordering worth checking here rather than in a field.
