@@ -13951,6 +13951,86 @@ fn a_game_master_is_drawn_as_walking_through_bodies() {
     );
 }
 
+/// Where the flag byte sits in a `0x20` — after the id, the serial, the body, a
+/// pad byte and the hue. `PlayerUpdate::encode_body` is the layout, and the
+/// facing at 17 is what the turn tests above already read by hand.
+const PLAYER_UPDATE_FLAGS: usize = 10;
+
+/// The exemption a client needs is the one about **its own body**, and that one
+/// travels in the `0x20`.
+///
+/// The test above pins the `0x78`, which is how a client learns about *somebody
+/// else*. A client only ever predicts its own step, so the packet that decides
+/// whether a game master rubber-bands is this one — and all three of its senders
+/// used to write `StatusFlags::NONE` into it. The `0x78` a game master gets about
+/// itself on entering does carry the bit, which is what made the gap survive:
+/// it is true until the first step or relocation sends a `0x20` over it.
+#[test]
+fn a_game_master_s_own_0x20_says_it_walks_through_bodies() {
+    let now = Instant::now();
+    let mut world = world();
+
+    let ordinary = enter(&mut world, now);
+    let theirs = packets_for(&mut world, ordinary);
+    let theirs = theirs
+        .iter()
+        .find(|packet| packet.first() == Some(&0x20))
+        .expect("entering is told where it stands");
+    assert!(
+        !openshard_protocol::mobile::StatusFlags(theirs[PLAYER_UPDATE_FLAGS])
+            .has(openshard_protocol::mobile::StatusFlags::IGNORE_MOBILES),
+        "an ordinary player was told it walks through bodies, and the shard will refuse the steps it then predicts"
+    );
+
+    let connection = enter_gm(&mut world, now);
+    let mine = packets_for(&mut world, connection);
+    let mine = mine
+        .iter()
+        .find(|packet| packet.first() == Some(&0x20))
+        .expect("a game master is told where it stands too");
+    assert!(
+        openshard_protocol::mobile::StatusFlags(mine[PLAYER_UPDATE_FLAGS])
+            .has(openshard_protocol::mobile::StatusFlags::IGNORE_MOBILES),
+        "a game master's own client was never told, and it is the only client that predicts this body's steps"
+    );
+}
+
+/// **And a ghost is told the same thing, by the packet death sends.**
+///
+/// The dead are stopped by nobody — `walks_through_bodies`' other half — so a
+/// ghost's walk home passes through whatever is standing in it. A client that
+/// was not told keeps applying the rule to a body the shard has exempted, and
+/// refuses to predict a step nobody would have refused: the walk stalls in front
+/// of a bystander it cannot even see, since the living are drawn to a ghost and
+/// a ghost is drawn to almost nobody.
+#[test]
+fn a_ghost_s_own_0x20_says_it_walks_through_bodies() {
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let serial = serial_of(&world, connection);
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::Damage {
+        serial,
+        amount: 500,
+        damage_type: 0,
+        by: None,
+    });
+    world.tick(now);
+
+    let dying = packets_for(&mut world, connection);
+    let update = dying
+        .iter()
+        .find(|packet| packet.first() == Some(&0x20))
+        .expect("death redraws the player's own body");
+    assert!(
+        openshard_protocol::mobile::StatusFlags(update[PLAYER_UPDATE_FLAGS])
+            .has(openshard_protocol::mobile::StatusFlags::IGNORE_MOBILES),
+        "a ghost was left believing the living are in its way"
+    );
+}
+
 /// **A chase goes round a crowd, and it used to walk into one for ever.**
 ///
 /// `a_chase_rounds_a_wall_of_crates` with the crates replaced by people, which

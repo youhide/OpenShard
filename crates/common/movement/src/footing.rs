@@ -76,6 +76,15 @@ const MOBILE_OVERLAP: i32 = 15;
 /// the obstruction index; see `docs/roadmap.md`'s *a mobile is not an
 /// obstacle*.
 ///
+/// **Both ends of the wire build one**, which is the same fact
+/// [`Footing::guide`] records about the bare map: the shard's
+/// `WorldState::crowd_near` off its sector grid, and the client's
+/// `clutter::crowd` off the mobiles in its view. A client that decided this
+/// question differently would ask for steps the shard refuses — a rubber-band a
+/// hold at a time — so the two answers are held to each other on purpose, and
+/// the exemptions the client cannot derive for itself are sent to it in
+/// `StatusFlags::IGNORE_MOBILES`.
+///
 /// # What is not in here
 ///
 /// **No identity, and no rules about who may pass whom.** Which bodies are in

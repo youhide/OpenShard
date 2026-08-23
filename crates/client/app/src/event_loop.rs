@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use openshard_client_render::camera::RealPixel;
 use openshard_client_render::gump::GumpPixel;
+use openshard_movement::Bodies;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
@@ -266,6 +267,11 @@ impl ApplicationHandler<()> for App {
                     let step = match event.state {
                         ElementState::Pressed => {
                             let motion = self.world.motion.planning_state();
+                            // The bodies in the way of this press. A held arrow
+                            // never plans, but it does ask `Detour` for a way
+                            // past whatever is ahead — and somebody standing
+                            // there is one of the things it has to get past.
+                            let crowd = crate::clutter::crowd(self.world.authoritative.view.as_ref());
                             self.steer.press(
                                 direction,
                                 motion.position,
@@ -273,12 +279,10 @@ impl ApplicationHandler<()> for App {
                                 motion.facing.direction,
                                 steer::Readings {
                                     // An enabled auto-door mode turns a shut
-
                                     // leaf into a usable next step; `walk`
-
                                     // sends its use before this step.
-                                    live: footing(&self.resources, self.walking_doors()),
-
+                                    live: footing(&self.resources, self.walking_doors())
+                                        .among(Bodies::standing(&crowd)),
                                     guide: guide(&self.resources),
                                     coarse: self.resources.coarse.as_ref(),
                                 },
@@ -829,9 +833,9 @@ impl ApplicationHandler<()> for App {
             // replans: see `steer::Readings`. Built here rather than held, for the
             // reason the single terrain always was — they borrow the map and the
             // view, and the walk borrows `steer` mutably beside them.
+            let crowd = crate::clutter::crowd(self.world.authoritative.view.as_ref());
             let ground = steer::Readings {
-                live: footing(&self.resources, self.walking_doors()),
-
+                live: footing(&self.resources, self.walking_doors()).among(Bodies::standing(&crowd)),
                 guide: guide(&self.resources),
                 coarse: self.resources.coarse.as_ref(),
             };

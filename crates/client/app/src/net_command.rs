@@ -691,10 +691,12 @@ impl App {
         // a step cannot go through. Rebuilt here rather than per decision: one
         // click plans a route over hundreds of tiles, and each of them would
         // otherwise rescan everything on screen. See `clutter.rs`.
+        // Items only: a body is not clutter and does not go in the overlay —
+        // `clutter::crowd` is where the mobiles in this same view are read, and
+        // its docs say what a cover could not express about one.
         clutter::fill(
             self.resources.ground.live_mut(),
             &self.world.presentation.items,
-            view.mobiles.values(),
             &self.resources.tiledata,
         );
         // The cutaway has already followed each locally valid prediction. An

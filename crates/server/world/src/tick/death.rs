@@ -218,6 +218,12 @@ impl World {
         };
         self.state
             .send_packet(connection, &ServerPacket::DeathStatus(DeathStatus { dead }));
+        // Death is exactly where this byte changes: a ghost is stopped by
+        // nobody, so `stance_of` puts `IGNORE_MOBILES` on it, and this `0x20` is
+        // what tells the client keeping its own copy of the body-blocking rule.
+        // Without it a ghost's walk home is refused at every body it passes —
+        // by this end's own prediction, never by the shard.
+        let flags = self.state.stance_of(entity);
         if let (Some(&Position(at)), Some(&Heading(facing))) = (
             self.state.registry.get::<Position>(entity),
             self.state.registry.get::<Heading>(entity),
@@ -228,7 +234,7 @@ impl World {
                     serial,
                     body: body.id,
                     hue: body.hue,
-                    flags: StatusFlags::NONE,
+                    flags,
                     position: at,
                     facing,
                 }),

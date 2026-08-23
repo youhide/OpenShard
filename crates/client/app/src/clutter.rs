@@ -57,30 +57,45 @@
 //! offsets and the open ones on the odd, and an open leaf is left out of the index
 //! entirely.
 //!
-//! # Mobiles
+//! # A body is not clutter, and this is not where one goes
 //!
-//! Server-side movement remains authoritative. Mobiles are a client-side
-//! courtesy obstacle: the shard may permit occupying their tile, but a route
-//! that visibly walks through an NPC is not a useful route. The next snapshot
-//! replaces this short-lived projection and replans any active move order.
+//! A mobile used to be indexed here too — laid into the overlay as furniture
+//! with a body's height, under a comment admitting it was "not a category the
+//! shared type names". It is a category now: `openshard_movement::Bodies`, the
+//! fourth field of a [`Footing`](openshard_movement::Footing), asked *last* and
+//! at the height the body would arrive at. [`crowd`] is what builds one at this
+//! end, and it is in this module because it answers the same question `fill`
+//! does — what refuses a step here, before one is sent — off the same view.
+//!
+//! Two things were wrong with a body in the overlay, and neither is a matter of
+//! taste:
+//!
+//! - **The height.** A cover blocks over `[z, z + height)` and a body was given
+//!   `PLAYER_HEIGHT`, which is sixteen. The shard measures a body against
+//!   another body with fifteen (`Bodies`' `MOBILE_OVERLAP` — ServUO's, and one
+//!   short of what it measures against a ceiling on purpose). One unit, at
+//!   exactly the boundary: this end refused a step the shard allows.
+//! - **The exemptions.** Staff walk through bodies and so do the dead, and a
+//!   cover cannot say so — the overlay has no idea who is asking. The rule
+//!   belongs where the mover is known, which is [`crowd`].
 
 use std::collections::HashMap;
 
-use openshard_client_net::view::Mobile;
+use openshard_client_net::view::WorldView;
 use openshard_client_render::doors;
 use openshard_client_render::items::GroundItem;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::{Cover, Overlay};
+use openshard_protocol::mobile::StatusFlags;
+use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
+use openshard_uofiles::anim::is_ghost;
 
-/// A mobile's body height in z-units — how tall a span a blocker has to reach
-/// into to be in the way. `openshard_movement::PLAYER_HEIGHT`, and the server's
-/// `obstruct::MOBILE_HEIGHT`, which is the same number said in the same units on
-/// the other end of the wire.
-const MOBILE_HEIGHT: i32 = openshard_movement::PLAYER_HEIGHT;
-
-/// Index whatever in `items` or `mobiles` is in the way, and say of each placed
-/// item whether it is a door.
+/// Index whatever in `items` is in the way, and say of each placed item whether
+/// it is a door.
+///
+/// Items only. A mobile is not clutter and does not go in here — see the module
+/// header's *a body is not clutter*, and [`crowd`], which reads the same view.
 ///
 /// Two questions, two sources, and the module header is where the argument for
 /// the second one lives:
@@ -105,12 +120,7 @@ const MOBILE_HEIGHT: i32 = openshard_movement::PLAYER_HEIGHT;
 /// which is the same fact that keeps [`Cover`] free of an owner (see
 /// `openshard_map::overlay`), so `live` is cleared first and every tile in the
 /// view is written afresh.
-pub fn fill<'a>(
-    live: &mut Overlay,
-    items: &[GroundItem],
-    mobiles: impl IntoIterator<Item = &'a Mobile>,
-    tiles: &TileData,
-) {
+pub fn fill(live: &mut Overlay, items: &[GroundItem], tiles: &TileData) {
     let mut covers: HashMap<Tile, Vec<Cover>> = HashMap::new();
     for item in items {
         // What is drawn is what is in the way — see `GroundItem::displayed`.
@@ -131,29 +141,100 @@ pub fn fill<'a>(
         let at = Tile::new(item.at.x, item.at.y);
         covers.entry(at).or_default().extend(laid);
     }
-    // The server may permit two mobiles on one tile, but routing a player
-    // visibly through an NPC is still a bad client-side result. Not a category
-    // the shared type names: nothing downstream reads a mobile *as* one, so it
-    // goes in as furniture with a body's height.
-    for mobile in mobiles {
-        let at = Tile::new(mobile.position.x, mobile.position.y);
-        covers
-            .entry(at)
-            .or_default()
-            .push(Cover::blocking(mobile.position.z, MOBILE_HEIGHT as u8));
-    }
     live.clear();
     for (tile, covers) in covers {
         live.set(tile, covers);
     }
 }
 
+/// The other bodies this client's own step has to get past, as
+/// [`Bodies`](openshard_movement::Bodies) wants them: feet, sorted by tile.
+///
+/// **The shard's `WorldState::crowd_near` from the other end of the wire**, and the reason
+/// it has to exist at all is that both ends decide the same step. The shard
+/// refuses a step onto an occupied tile; a client that plans through one asks
+/// for a step it has already been told will be refused, gets a `0x21` back,
+/// and rubber-bands a hold at a time for as long as somebody is standing there.
+/// The route the HUD draws is the same plan, so the green line was drawn through
+/// a body too.
+///
+/// # The rule, and the half of it that cannot be seen from here
+///
+/// The shard's is two questions (`WorldState::walks_through_bodies` and
+/// `WorldState::body_blocks`), and this is both of them read off the wire:
+///
+/// - **Does this body walk through others?** [`StatusFlags::IGNORE_MOBILES`],
+///   which the shard sets from exactly that rule — staff, and the dead. Not a
+///   second reading of it here either: the bit *is* the answer, and the whole
+///   point of the shard setting it is that this end does not have to guess.
+///   An empty crowd is what a mover exempt from the rule gets, the same
+///   `Vec::new()` the shard's own answer is for one.
+/// - **Is this body in the way?** Everything the shard shows us except a ghost,
+///   which is `is_ghost` on the body id — the same pair the drawing decides
+///   translucency by, since nothing on the wire says a *stranger* is dead.
+///
+/// The shard's remaining clause — a hidden game master is in nobody's way — has
+/// no counterpart here and needs none. A hidden mobile is drawn only to a staff
+/// viewer (`WorldState::visible_to`), and a staff viewer's own crowd is empty by
+/// the first rule above, so the case cannot arise at this end.
+///
+/// One sliver of the shard's rule is deliberately not reproduced: it also lets a
+/// creature worn down to no hit points out of the way, because such a body stands
+/// in a doorway for the one tick before it is reaped. This end cannot answer that
+/// — a stranger's `hits` arrive as a percentage and not a count — and a single
+/// tick of a route planned round a creature that is about to be a corpse costs a
+/// re-plan and never a wrong step.
+///
+/// # Where the reach went
+///
+/// `crowd_near` takes one, because the shard's sector grid holds a whole facet
+/// and a step wants eight tiles of it. Here the *view* is the reach: this client
+/// has been shown the mobiles near it and nothing else, so the answer is
+/// everything it holds. A body further off is invisible to a plan, which costs a
+/// re-plan when the route reaches it and never a wrong step — the same bargain,
+/// with the bound arriving from the shard rather than being chosen.
+///
+/// The list is small for the same reason: a screenful, rebuilt at the question
+/// rather than kept, which is the bargain the shard makes too. There is nothing
+/// to hold in step with the view and no removal anybody can forget — the whole
+/// of the argument against a body in an index, made here as well.
+///
+/// Positions are the shard's last word and not the glide `crowd.rs` draws them
+/// along, because the shard's last word is what the shard will decide the step
+/// against. The player's own body is not among them: [`WorldView::mobiles`] is
+/// never keyed by our own serial, which is "a mobile may always step off the
+/// tile it is standing on" needing no code at all here.
+///
+/// `None` is the offline map viewer — no shard, no view, and nobody to be in the
+/// way.
+///
+/// [`crowd_near`]: openshard_state::WorldState::crowd_near
+pub fn crowd(view: Option<&WorldView>) -> Vec<Point> {
+    let Some(view) = view else {
+        return Vec::new();
+    };
+    if view.player.flags.has(StatusFlags::IGNORE_MOBILES) {
+        return Vec::new();
+    }
+    let mut crowd: Vec<Point> = view
+        .mobiles
+        .values()
+        .filter(|mobile| !is_ghost(mobile.body))
+        .map(|mobile| mobile.position)
+        .collect();
+    // `Bodies::standing` looks a tile up by binary search and debug-asserts this
+    // order rather than imposing it, for the reason its own doc gives: the
+    // caller has just built the storage and knows whether it is sorted.
+    crowd.sort_unstable_by_key(|body| (body.x, body.y));
+    crowd
+}
+
 /// [`fill`] into a fresh overlay, for the tests that are about what went in
 /// rather than about where it was written.
 #[cfg(test)]
-fn of<'a>(items: &[GroundItem], mobiles: impl IntoIterator<Item = &'a Mobile>, tiles: &TileData) -> Overlay {
+fn of(items: &[GroundItem], tiles: &TileData) -> Overlay {
     let mut live = Overlay::default();
-    fill(&mut live, items, mobiles, tiles);
+    fill(&mut live, items, tiles);
     live
 }
 
@@ -187,16 +268,19 @@ mod tests {
     use super::*;
     use openshard_map::overlay::{Body, Doors};
     use openshard_movement::{Around, Detour, Footing, Heading, Lean, Leeway, Step, step_allowed};
-    use openshard_protocol::direction::Direction;
+    use openshard_protocol::direction::{Direction, Facing};
     use openshard_protocol::items::ItemAmount;
+    use openshard_protocol::serial::Serial;
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_protocol::world::Point;
 
-    /// A body with its feet at `z`, as the shard asks about one — the same
-    /// height [`MOBILE_HEIGHT`] gives a mobile, because these tests are about
-    /// what a *person* is refused by.
+    /// A body with its feet at `z`, as the shard asks about one — a whole
+    /// [`PLAYER_HEIGHT`](openshard_movement::PLAYER_HEIGHT) of it, because these
+    /// tests are about what a *person* is refused by. Not the fifteen a body is
+    /// measured against another body with: this is a person against a *crate*,
+    /// which is the taller of the two questions. See `Bodies`' `MOBILE_OVERLAP`.
     fn standing_at(z: i32) -> Body {
-        Body::new(z, MOBILE_HEIGHT)
+        Body::new(z, openshard_movement::PLAYER_HEIGHT)
     }
 
     /// A barrel's tiledata height, so the span in these tests is a real one.
@@ -223,21 +307,135 @@ mod tests {
         );
     }
 
+    /// The living body's graphic, and the ghost the same player becomes.
+    const LIVING: Graphic = Graphic(0x0190);
+    const GHOST: Graphic = Graphic(0x0192);
+
+    /// A world this client has entered and nobody else is in yet.
+    fn viewed() -> WorldView {
+        WorldView::entered(openshard_protocol::world::PlayerStart {
+            serial: Serial::new(0x0000_002A).unwrap(),
+            body: LIVING,
+            position: HERE,
+            facing: Facing::walking(Direction::South),
+            map: openshard_protocol::world::MapSize::BRITANNIA,
+        })
+    }
+
+    /// Somebody else, as a `0x78` would have left them in the view.
+    fn seen(view: &mut WorldView, serial: u32, at: Point, body: Graphic) {
+        view.mobiles.insert(
+            Serial::new(serial).unwrap(),
+            openshard_client_net::view::Mobile {
+                body,
+                position: at,
+                facing: Facing::walking(Direction::South),
+                hue: Hue::NONE,
+                flags: StatusFlags::NONE,
+                notoriety: openshard_protocol::mobile::Notoriety::Innocent,
+                hits: None,
+                equipment: Vec::new(),
+            },
+        );
+    }
+
+    /// The ground with a crowd on it and nothing else — no map, no clutter — so
+    /// the only thing that can refuse a step is a body.
+    fn among(crowd: &[Point]) -> Footing<'_> {
+        Footing::new(None, &NOTHING_PLACED, Doors::AsTheyStand)
+            .among(openshard_movement::Bodies::standing(crowd))
+    }
+
+    static NOTHING_PLACED: std::sync::LazyLock<Overlay> = std::sync::LazyLock::new(Overlay::default);
+
+    /// The rubber-band, from the end that causes it: a step into a body is
+    /// refused *here*, so it is never sent and never answered with a `0x21`.
     #[test]
     fn a_step_into_an_npc_body_is_refused_by_this_end() {
-        let east = Point::new(HERE.x + 1, HERE.y, 0);
-        // Mobiles enter the shipping index with this same body-height span;
-        // keep the routing rule test independent of client art files.
-        let clutter = placed(&[(east, MOBILE_HEIGHT as u8)]);
-        let terrain = Footing::new(None, &clutter, Doors::AsTheyStand);
+        let mut view = viewed();
+        seen(&mut view, 2, Point::new(HERE.x + 1, HERE.y, 0), LIVING);
+        let crowd = crowd(Some(&view));
         assert!(
-            step_allowed(&terrain, HERE, Direction::East).is_none(),
+            step_allowed(&among(&crowd), HERE, Direction::East).is_none(),
             "an NPC due east did not stop the step"
         );
         assert!(
-            step_allowed(&terrain, HERE, Direction::North).is_some(),
+            step_allowed(&among(&crowd), HERE, Direction::North).is_some(),
             "an NPC due east stopped a step the other way"
         );
+    }
+
+    /// A body standing a storey up shares an `(x, y)` and is in nobody's way —
+    /// the span the crowd carries, and the reason a mezzanine is walkable with
+    /// somebody standing under it.
+    #[test]
+    fn a_body_a_storey_up_is_not_in_the_way() {
+        let mut view = viewed();
+        seen(&mut view, 2, Point::new(HERE.x + 1, HERE.y, 20), LIVING);
+        let crowd = crowd(Some(&view));
+        assert_eq!(crowd.len(), 1, "the body overhead is in the crowd");
+        assert!(
+            step_allowed(&among(&crowd), HERE, Direction::East).is_some(),
+            "a body on the floor above sealed the ground under it"
+        );
+    }
+
+    /// **The dead do not block.** Nothing on the wire says a stranger died —
+    /// their body id does, and it is the same pair the drawing reads.
+    #[test]
+    fn a_ghost_is_in_nobody_s_way() {
+        let mut view = viewed();
+        seen(&mut view, 2, Point::new(HERE.x + 1, HERE.y, 0), GHOST);
+        let crowd = crowd(Some(&view));
+        assert!(
+            crowd.is_empty(),
+            "a ghost was put in the way of the living, who cannot even see it"
+        );
+    }
+
+    /// **And the exemption arrives from the shard, not from a guess here.**
+    /// `IGNORE_MOBILES` on our own body is the shard saying this mover walks
+    /// through bodies — staff, or dead — so there is no crowd to get past. A
+    /// client that ignored the bit would refuse steps the shard allows, which is
+    /// the rubber-band with the ends swapped.
+    #[test]
+    fn a_mover_the_shard_exempted_has_no_crowd_at_all() {
+        let mut view = viewed();
+        seen(&mut view, 2, Point::new(HERE.x + 1, HERE.y, 0), LIVING);
+        assert_eq!(
+            crowd(Some(&view)).len(),
+            1,
+            "the body is in the way to begin with"
+        );
+        view.player.flags = StatusFlags::IGNORE_MOBILES;
+        assert!(
+            crowd(Some(&view)).is_empty(),
+            "a mover the shard exempted was still held to the rule"
+        );
+    }
+
+    /// `Bodies::standing` looks a tile up by binary search and debug-asserts the
+    /// order rather than imposing it, so the sort is this end's contract to keep.
+    /// A `FxHashMap`'s iteration order is not one.
+    #[test]
+    fn the_crowd_comes_back_sorted_by_tile() {
+        let mut view = viewed();
+        for (index, x) in [7_u16, 3, 9, 1, 5].into_iter().enumerate() {
+            seen(&mut view, index as u32 + 2, Point::new(x, 100, 0), LIVING);
+        }
+        let crowd = crowd(Some(&view));
+        assert!(
+            crowd
+                .windows(2)
+                .all(|pair| (pair[0].x, pair[0].y) <= (pair[1].x, pair[1].y)),
+            "the crowd came back in {crowd:?}, which Bodies::standing cannot search"
+        );
+    }
+
+    /// The offline map viewer: no shard, no view, and nobody to be in the way.
+    #[test]
+    fn a_client_with_no_shard_has_no_crowd() {
+        assert!(crowd(None).is_empty());
     }
 
     /// The bug as it was reported: a body walking at a barrel diagonally went
@@ -353,7 +551,7 @@ mod tests {
             "a water barrel's flags are no longer article-only"
         );
         assert!(!data.flags.is_blocking());
-        let clutter = of(&[item(100, 100, 0, water_barrel)], [], &tiles);
+        let clutter = of(&[item(100, 100, 0, water_barrel)], &tiles);
         assert!(
             clutter
                 .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AsTheyStand)
@@ -367,7 +565,7 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = of(&[item(100, 100, 0, BARREL)], [], &tiles);
+        let clutter = of(&[item(100, 100, 0, BARREL)], &tiles);
         assert!(
             clutter
                 .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AsTheyStand)
@@ -387,7 +585,7 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = of(&[item(100, 100, 40, BARREL)], [], &tiles);
+        let clutter = of(&[item(100, 100, 40, BARREL)], &tiles);
         assert!(
             clutter
                 .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AsTheyStand)
@@ -414,7 +612,7 @@ mod tests {
             !tiles.static_tile(gold.0).flags.is_blocking(),
             "gold's tiledata calls it impassable"
         );
-        let clutter = of(&[item(100, 100, 0, gold)], [], &tiles);
+        let clutter = of(&[item(100, 100, 0, gold)], &tiles);
         assert!(
             clutter
                 .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AsTheyStand)
@@ -461,7 +659,7 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = of(&[item(100, 100, 0, DOOR_OPEN)], [], &tiles);
+        let clutter = of(&[item(100, 100, 0, DOOR_OPEN)], &tiles);
         assert!(
             clutter
                 .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AsTheyStand)
@@ -477,7 +675,7 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = of(&[item(100, 100, 0, DOOR_SHUT)], [], &tiles);
+        let clutter = of(&[item(100, 100, 0, DOOR_SHUT)], &tiles);
         let doorway = Tile::new(100, 100);
         assert!(
             clutter
@@ -502,7 +700,7 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = of(&[item(100, 100, 0, BARREL)], [], &tiles);
+        let clutter = of(&[item(100, 100, 0, BARREL)], &tiles);
         assert!(
             clutter
                 .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AllOpen)
@@ -519,11 +717,7 @@ mod tests {
         let Some(tiles) = client_tiledata() else {
             return;
         };
-        let clutter = of(
-            &[item(100, 100, 0, DOOR_SHUT), item(100, 100, 0, BARREL)],
-            [],
-            &tiles,
-        );
+        let clutter = of(&[item(100, 100, 0, DOOR_SHUT), item(100, 100, 0, BARREL)], &tiles);
         assert!(
             clutter
                 .blocker_at(Tile::new(100, 100), standing_at(0), Doors::AllOpen)

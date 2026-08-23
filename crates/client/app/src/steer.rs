@@ -1433,7 +1433,7 @@ fn debug_detour(from: Point, around: &Around, step: Step) {
 mod tests {
     use super::*;
     use openshard_map::overlay::{Cover, Overlay};
-    use openshard_movement::step_from;
+    use openshard_movement::{Bodies, step_from};
     use std::sync::LazyLock;
 
     /// Open ground: no map, so no floor and no walls, and nothing placed on it.
@@ -1978,6 +1978,84 @@ mod tests {
         assert!(
             plan.barred.is_empty(),
             "an open doorway is a route, and a route has nothing barred about it"
+        );
+    }
+
+    /// **A route goes round whoever is standing in it.**
+    ///
+    /// The reason a plan takes a crowd at all, from this end. The shard refuses a
+    /// step onto an occupied tile, so a client that planned straight through a
+    /// bystander asked for a step it had already been shown would be refused —
+    /// a `0x21`, a rollback and a reset walk sequence, once a hold, for as long
+    /// as somebody stood there. The green line the HUD draws is this same plan,
+    /// so it went through the bystander too.
+    ///
+    /// Nothing here is `steer`'s own rule: the crowd is the fourth field of a
+    /// [`Footing`] and `find_path` asks it at every node. What this pins is that
+    /// the reading a route is planned over is the one carrying it.
+    #[test]
+    fn a_route_goes_round_a_body_standing_in_it() {
+        let bystander = [Point::new(here().x + 1, here().y, 0)];
+        let ground = open_ground().among(Bodies::standing(&bystander));
+        let plan =
+            plan(Readings::plain(ground), here(), BEYOND).expect("open ground has a way round one person");
+        assert!(
+            plan.barred.is_empty(),
+            "somebody in the way is a longer walk, not a barred one"
+        );
+        let mut at = here();
+        for &direction in &plan.open {
+            at = step_allowed(&ground, at, direction).expect("every step of the open half is walkable");
+            assert_ne!(
+                (at.x, at.y),
+                (bystander[0].x, bystander[0].y),
+                "the route walked over the bystander"
+            );
+        }
+        assert_eq!(
+            (at.x, at.y),
+            (BEYOND.x, BEYOND.y),
+            "and it still gets where it was sent"
+        );
+    }
+
+    /// **A body in a doorway is not a door**, and both readings have to say so.
+    ///
+    /// The pair of readings differ by exactly the shut leaves — that is what
+    /// makes the cut land on a door every time — so a crowd that reached only the
+    /// `AsTheyStand` half would leave the doors-open search walking *through* a
+    /// person and reporting the far side barred: a client drawing a red line past
+    /// somebody's shoulder and telling the player a leaf is in the way. It is
+    /// carried because [`Footing::reading`] rebuilds the pair from one another
+    /// rather than assembling it twice.
+    ///
+    /// The premise is the test above this one: with the doorway clear, the same
+    /// walk is five steps east.
+    #[test]
+    fn a_body_in_a_doorway_is_not_a_shut_leaf() {
+        let doorwall = doorwall();
+        let standing = [Point::new(DOORWAY.x, DOORWAY.y, 0)];
+        let ground = over(&doorwall)
+            .reading(Doors::AllOpen)
+            .among(Bodies::standing(&standing));
+        let plan =
+            plan(Readings::plain(ground), here(), BEYOND).expect("the walk goes as far as the doorway");
+        assert!(
+            plan.barred.is_empty(),
+            "a person standing in a doorway was reported to the player as a shut leaf"
+        );
+        let mut at = here();
+        for &direction in &plan.open {
+            at = step_allowed(&ground, at, direction).expect("every step of the open half is walkable");
+            assert!(
+                at.x < DOORWAY.x,
+                "the route crossed the wall whose only way through is blocked"
+            );
+        }
+        assert_eq!(
+            at.x,
+            DOORWAY.x - 1,
+            "and it is a walk up to whoever is standing there, not a refusal to move"
         );
     }
 

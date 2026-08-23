@@ -2035,6 +2035,10 @@ impl WorldState {
         let serial = self.registry.serial_of(entity);
         let body = self.registry.get::<Body>(entity).copied();
         let facing = self.registry.get::<Heading>(entity).map(|h| h.0);
+        // The same byte the `0x77`/`0x78` about this body would carry — see
+        // [`stance_of`](Self::stance_of), which is where the argument for the
+        // `0x20` carrying it at all lives.
+        let flags = self.stance_of(entity);
         if let (Some(serial), Some(body), Some(facing)) = (serial, body, facing) {
             self.send_packet(
                 connection,
@@ -2042,7 +2046,7 @@ impl WorldState {
                     serial,
                     body: body.id,
                     hue: body.hue,
-                    flags: StatusFlags::NONE,
+                    flags,
                     position: at,
                     facing,
                 }),
@@ -3020,9 +3024,18 @@ impl WorldState {
     /// every screen is rebuilt from these two functions, so there is one
     /// answer to "is this body at war" and no copy of it to fall behind.
     ///
+    /// **Every packet that carries the byte reads it here**, the `0x20`
+    /// included. That one is the player's own body, and it is the one the
+    /// exemption is actually *for*: a `0x77`/`0x78` tells a client about
+    /// somebody else, and a client only ever predicts its own step. It used to
+    /// send [`StatusFlags::NONE`] in all three of its call sites, so a game
+    /// master learned that every other staff member walks through bodies and
+    /// never that they do — and the `0x78` about their own body, which does say
+    /// so, is overwritten by the next `0x20` a step or a relocation sends.
+    ///
     /// [`walks_through_bodies`]: Self::walks_through_bodies
     #[must_use]
-    fn stance_of(&self, entity: EntityId) -> StatusFlags {
+    pub fn stance_of(&self, entity: EntityId) -> StatusFlags {
         let war = StatusFlags::of_stance(self.registry.get::<Combat>(entity).is_some_and(|c| c.warmode));
         if self.walks_through_bodies(entity) {
             war.with(StatusFlags::IGNORE_MOBILES)

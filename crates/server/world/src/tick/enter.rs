@@ -505,13 +505,18 @@ impl World {
                 play_sound: false,
             }),
         );
+        // The flag byte this body would be described to anybody else with —
+        // `WorldState::stance_of`, which says why the `0x20` carries it too.
+        // A game master logging in learns from this packet, and from nothing
+        // else that survives their first step, that they walk through bodies.
+        let flags = self.state.stance_of(entity);
         self.state.send_packet(
             connection,
             &ServerPacket::PlayerUpdate(PlayerUpdate {
                 serial,
                 body: body.id,
                 hue: body.hue,
-                flags: StatusFlags::NONE,
+                flags,
                 position,
                 facing,
             }),

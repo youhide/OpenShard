@@ -17,7 +17,7 @@ use std::time::Instant;
 
 use openshard_client_render::camera::{self, Camera};
 use openshard_client_render::{doors, items, mobiles};
-use openshard_movement::{Heading, Lean};
+use openshard_movement::{Bodies, Heading, Lean};
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::target::{TargetKind, TargetResponse};
 use openshard_protocol::wire::Layer;
@@ -449,9 +449,12 @@ impl App {
         let Some(tile) = self.pick_tile(*self.control.camera()) else {
             return false;
         };
+        // Who else is standing on it — built here and thrown away with the
+        // answer, which is the bargain `clutter::crowd` documents. A route
+        // planned through a body is one the shard refuses a step at a time.
+        let crowd = crate::clutter::crowd(self.world.authoritative.view.as_ref());
         let ground = steer::Readings {
-            live: footing(&self.resources, self.walking_doors()),
-
+            live: footing(&self.resources, self.walking_doors()).among(Bodies::standing(&crowd)),
             guide: guide(&self.resources),
             coarse: self.resources.coarse.as_ref(),
         };

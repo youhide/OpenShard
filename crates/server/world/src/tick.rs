@@ -43,7 +43,7 @@ use openshard_protocol::context::{ContextMenu, ContextMenuEntry};
 use openshard_protocol::gump::{ButtonId, CloseGump, GumpDisplay, GumpId, GumpKey, GumpPoint, GumpResponse};
 use openshard_protocol::identity::{AccountName, CharacterName};
 use openshard_protocol::login::{SupportedFeatures, encode_supported_features};
-use openshard_protocol::mobile::{MobileStatus, Notoriety, Stat, StatLockBits, StatusFlags, Vitals};
+use openshard_protocol::mobile::{MobileStatus, Notoriety, Stat, StatLockBits, Vitals};
 use openshard_protocol::serial::{RawSerial, Serial, SerialKind};
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::speech::{Font, RawFont, RawTalkMode, SpokenMessage, TalkMode};
