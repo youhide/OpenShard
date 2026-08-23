@@ -414,9 +414,15 @@ pub struct FacetState {
     /// Tokuno is 1448×1448. A shard that sends Britannia's size for every facet
     /// hands a character in Ilshenar a map three times too large, and the client
     /// draws the edge of the world wherever it likes.
-    pub width: u32,
-    /// How tall this facet's map is, in tiles. See [`FacetState::width`].
-    pub height: u32,
+    ///
+    /// **Private, and there is nothing to write it with.** It is set by
+    /// [`new`](Self::new) and never again: the sector grid and the region index
+    /// are sized from this pair, so a facet whose width is assigned after
+    /// construction has two indexes that disagree with it and no way to notice.
+    /// Read through [`width()`](Self::width).
+    width: u32,
+    /// How tall this facet's map is, in tiles. See [`width`](Self::width).
+    height: u32,
     /// Who is near what, on this facet.
     ///
     /// **Private, and written only through
@@ -452,6 +458,18 @@ pub struct FacetState {
     /// as [`obstructions`](Self::obstructions).
     boats: crate::boat::Boats,
     /// The named areas of this facet — towns, dungeons, guarded zones.
+    ///
+    /// **Public on purpose**, alone among the indexes here, and the distinction
+    /// is worth naming because the neighbours were all made private for the
+    /// opposite reason. [`Regions`] carries its own seam: its two mutators
+    /// ([`Regions::set`], [`Regions::clear`]) both rebuild the bucket grid that
+    /// accelerates [`Regions::at`], and the grid is private to that type, so a
+    /// caller holding `&mut` to this field still cannot leave it disagreeing
+    /// with the regions beside it. That is what [`sectors`](Self::sectors) did
+    /// not have — there the *field* was the API — and there is no follow-up
+    /// write here of the kind that makes [`obstructions`](Self::obstructions)
+    /// forgettable. Hiding it behind an accessor pair would rename the leak
+    /// rather than close one.
     pub regions: Regions,
     /// What each block of this facet's ground still has left to give: the
     /// mining, lumberjacking and fishing stock, per [`crate::harvest`] bank.
@@ -502,6 +520,19 @@ impl FacetState {
     #[must_use]
     pub const fn coarse_router(&self) -> Option<&NavigationGraph> {
         self.coarse.as_ref()
+    }
+
+    /// How wide this facet is, in tiles. See [`width`](Self::width) for why a
+    /// facet carries its own extent at all.
+    #[must_use]
+    pub const fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// How tall this facet is, in tiles.
+    #[must_use]
+    pub const fn height(&self) -> u32 {
+        self.height
     }
 
     /// What the live world has put in the way, with the entity that put it
@@ -2108,7 +2139,7 @@ impl WorldState {
                 if let Some(version) = self.version_of(connection) {
                     let size = {
                         let state = self.facet_state(facet);
-                        MapSize::for_client(facet, state.width, state.height, version)
+                        MapSize::for_client(facet, state.width(), state.height(), version)
                     };
                     // Which map to draw, then where on it and how big it is. No
                     // `0x1B`: that is the "entering the world" packet, and neither

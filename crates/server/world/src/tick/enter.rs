@@ -463,7 +463,7 @@ impl World {
         // `MapSize::for_client`/`ClientVersion::WIDE_MAP`.
         let map = {
             let state = self.state.facet_state(facet);
-            MapSize::for_client(facet, state.width, state.height, version)
+            MapSize::for_client(facet, state.width(), state.height(), version)
         };
         self.state.send_packet(
             connection,
