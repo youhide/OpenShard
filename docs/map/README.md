@@ -24,8 +24,10 @@ what moves where, in which commit, with a done-when and a risk per node. R1 the
 tile table leaves the file reader ✔ · R2 the live layer joins the type ✔ · R3 a
 house has floors ✔ · R4 the statics become one immutable run ✔ · R5 one install,
 one load ✂ struck. A session starts at **era P**, in
-[`navigation_spans.md`](navigation_spans.md): era R is over, N1 and N2 are
-built, and N3 is next.
+[`navigation_spans.md`](navigation_spans.md): era R is over, N1, N2 and N3 are
+built — the shard walks on the span layer at 208 ns a node instead of 1,105 —
+and **N3b** (the node stops being a tile) or **N4** (regions over spans) is
+next; nothing forces the order between them.
 
 [`handoffs/`](handoffs/) — where the work stands, one file per session. The
 plans hold intent; a handoff holds state.
@@ -49,7 +51,7 @@ backlog era R spends.
 | | |
 |---|---|
 | [`terrain_seam.md`](terrain_seam.md) | **Closed, and the record of how.** Six terrains, five of which were not terrains: a mask of what the live world put in the way, a rectangle, a memo table, the absence of a map. It ends at a search that takes explicit types with no trait on it, one `Overlay` both ends build, and a shard that owns its tile table. Its node 0 is the facet-0 oracle every number in the two plans beside it comes from — including the one-storey defect and `CachedTerrain`'s deletion. |
-| [`navigation_spans.md`](navigation_spans.md) | 🚩 **The first storey — era P in full.** The layer HPA\* assumes underneath it and this engine never built: a column is a *list* of standable surfaces rather than one height, so a castle plateau is its own span instead of an island. Measured first — 1,462 ns a node expansion, of which A\*'s own machinery is noise, and 92.1% of columns hold no statics at all. Three tiers, an oracle per node, a measured ×4 against a ×6.4 ceiling. **N0, N1 and N2 are built** — the layer is 16.5 MiB, bakes in 0.05 s, equals `stand_surfaces` on all 29.4 M columns, and the step rule over it answers what the step rule over the map answers on 248,268,125 steps and two whole-facet floods. The plan's one risk is retired; **N3, where the search stops asking the map, is next.** |
+| [`navigation_spans.md`](navigation_spans.md) | 🚩 **The first storey — era P in full.** The layer HPA\* assumes underneath it and this engine never built: a column is a *list* of standable surfaces rather than one height, so a castle plateau is its own span instead of an island. Measured first — 1,462 ns a node expansion, of which A\*'s own machinery is noise, and 92.1% of columns hold no statics at all. Three tiers, an oracle per node, a measured ×4 against a ×6.4 ceiling. **N0–N3 are built** — the layer is 16.5 MiB, bakes in 0.07 s, equals `stand_surfaces` on all 29.4 M columns, answers what the map answers on 248,268,125 steps, and **the shard now walks on it**: a node expansion is 208 ns where it was 1,105, a search from Britain's castle 0.168 ms where it was 0.793, and every arrival count bit-identical to the recorded run. **N3b or N4 is next** — the finer defect or the visible repair. |
 | [`coarse_pathfinding.md`](coarse_pathfinding.md) | Long routes over static terrain, and what a route is allowed to assume. Superseded, by its own first line. |
 | [`navigation_graph.md`](navigation_graph.md) | The graph itself: regions, components, portals. |
 | [`navigation_graph_bake.md`](navigation_graph_bake.md) | The baked artifact, its stamp and its validation. |

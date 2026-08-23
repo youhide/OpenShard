@@ -361,7 +361,9 @@ into `WorldMap`.
 - The **packed four-byte record** is not in this node. It changes accessors from
   handing back a reference to handing back a value, and it waits for
   [N3](navigation_spans.md#n3--the-search-takes-spans)'s measurement to say
-  whether the statics are still on a hot path. **It has a second gate now, and
+  whether the statics are still on a hot path. **N3 answered: they are not.**
+  A step reads the span bake now and never walks a column's statics, so the
+  packed record is a size argument and a `statics_at` argument, not a step one. **It has a second gate now, and
   it is the harder one:** a packed record is read with a shift and an unaligned
   load, so it is only an improvement if the unpack costs less than the cache
   lines it saves. Size alone does not buy it. The same gate governs the land's

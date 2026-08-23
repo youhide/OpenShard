@@ -131,7 +131,8 @@ Read off the workspace and the plans, so a session does not re-derive it:
 | both ends load the same install separately | ✂ R5 struck — a shard and a client *are* two processes; only the test harness is one |
 | a column is a *list* of standable surfaces | ✅ [N1](navigation_spans.md#n1--three-tiers-) — 16.5 MiB, baked in 0.05 s, equal to `stand_surfaces` on all 29.4 M columns |
 | the step rule reads them | ✅ [N2](navigation_spans.md#n2--the-step-rule-reads-them-) — 248,268,125 steps and two whole-facet floods, 0 disagreements |
-| regions over spans; the server reading the graph | ⬜ era P, from [N3](navigation_spans.md#n3--the-search-takes-spans) |
+| the search stops asking the map | ✅ [N3](navigation_spans.md#n3--the-search-takes-spans) — 208 ns a node against 1,105, arrivals bit-identical |
+| a column with two floors is two nodes; regions over spans; the server reading the graph | ⬜ era P, from [N3b](navigation_spans.md#n3b--the-node-stops-being-a-tile) or [N4](navigation_spans.md#n4--regions-over-spans) |
 | live publish, revisioned bakes, chunks to the client, the editor | ⬜ era S |
 
 ## Era R — the map you hold

@@ -1,11 +1,14 @@
 # The first storey
 
-> **Status: live — era P, started. N0, N1 and N2 are built.** The gate is gone:
-> [`realtime_map.md`](realtime_map.md)'s era R is over, the span layer is built
-> and measured against the whole facet, and **the step rule reads it and answers
-> the same number** — 248 million steps compared, 0 disagreements. The risk this
-> plan was carrying is retired. **N3 is next**, and it is where the search stops
-> asking the map. See [`map_rebuild.md`](map_rebuild.md) for the order and
+> **Status: live — era P, started. N0, N1, N2 and N3 are built.** The gate is
+> gone: [`realtime_map.md`](realtime_map.md)'s era R is over, the span layer is
+> built and measured against the whole facet, and **the shard now walks on it**
+> — a node expansion is 208 ns where it was 1,105, a search from the castle is
+> 0.168 ms where it was 0.793, and every arrival count is bit-identical to the
+> run [`terrain_seam.md`](terrain_seam.md#what-one-search-costs) recorded. The
+> risk this plan was carrying is retired and the win is banked. **N3b is next**
+> — the node stops being a tile — and it is the one node that *must* change the
+> routes. See [`map_rebuild.md`](map_rebuild.md) for the order and
 > [`handoffs/`](handoffs/) for where the work stands.
 
 Two defects were found in one session and they are the same omission seen from
@@ -220,15 +223,28 @@ after N3   ~380 =   ~150 terrain +   230 A*
    limit   230 =      0 terrain +   230 A*
 ```
 
+**N3 landed, and the estimate above was low on the terrain half and right about
+the shape.** A whole node expansion is **208 ns** where it was 1,105 on the same
+machine on the same day — ×5.3, against the ×5.3–6.4 named as the *ceiling* —
+and a real search is 0.168 ms for 601 nodes where it was 0.793, which is ×4.7
+and 280 ns a node. The estimate said ~150 ns of terrain and got ~208 including
+the overlay's own two checks; it said ×3.5–4 on the search and got ×4.7. The
+reason it beat its own estimate is the hoist below, which N3 took *as well as*
+the table rather than instead of it: the two compose, and neither alone is what
+the row says.
+
 Two things follow, and the second matters more than the first.
 
 **The hoist is not the plan's competitor.** Computing `start_surface` once per
 expansion instead of sixteen times is 1,372 → 523 ns on a node, measured — ×2.6
 on the terrain half, ×1.9 on a whole search. It is most of what a span grid
-gets, for a day's work and no new structure. It is still not taken, for the
-reason [terrain_seam](terrain_seam.md#-a-is-not-what-a-search-spends-its-time-on)
+gets, for a day's work and no new structure. It was still not taken *instead*,
+for the reason [terrain_seam](terrain_seam.md#-a-is-not-what-a-search-spends-its-time-on)
 gives: it repairs a query that should be a table lookup, and it does nothing at
 all for [N4](#n4--regions-over-spans), which is the node with a defect behind it.
+**N3 took it as well** — `steps_out_of` is the hoist, and the table is what it
+calls — because once the rule is a lookup, asking for it sixteen times instead
+of eight is simply asking twice.
 
 **Speed is not the capability.** A faster node makes a *refusal* cheaper; it does
 not turn one into a route. Four destinations in five from a town street are
@@ -385,7 +401,7 @@ declared by hand.
  terrain_seam.md ✅ ──> map_rebuild.md R1 + R2 ──┐
  (the signature)       (the map, in one type)   │
                                                 ▼
- N0. the census ✅ ──> N1. three tiers ✅ ──> N2. the step rule reads them ✅ ─┬─> N3. the search takes Spans
+ N0. the census ✅ ──> N1. three tiers ✅ ──> N2. the step rule reads them ✅ ─┬─> N3. the search takes Spans ✅
                                                     (the agreement oracle)   │        └─> N3b. the node stops
                                                                              │              being a tile
                                                                              │
@@ -441,8 +457,12 @@ the ability of the asker — built where it is asked, which is exactly
 `MapTerrain`'s shape. The split is forced by the middle tier rather than
 chosen: the bake deliberately does not store the 92% of columns the land grid
 can answer, so answering needs the map in hand, and a bake that borrowed the map
-could not be stored beside it in `FacetState`. `find_path(&Spans, &Overlay, …)`
-is unchanged as the shape N3 lands.
+could not be stored beside it in `FacetState`. ~~`find_path(&Spans, &Overlay,
+…)` is unchanged as the shape N3 lands.~~ **It is not the shape N3 landed**: a
+step still needs `MapTerrain` for `obstructed`, `can_fit`, `sight_clear` and
+`start_surface`, so the footing stayed the carrier and the bake went *inside*
+the terrain, as a third borrow that cannot be omitted. See
+[N3](#n3--the-search-takes-spans).
 
 **Done when** — and it is: `Spans::surfaces(x, y)` returns exactly what
 `stand_surfaces` returns for every column of facet 0 and both abilities. The
@@ -530,55 +550,108 @@ already stores the land it is standing on — which is the reason N1 gave for
 storing an exception column's ground where a bare column's is not stored, one
 node before anything needed it.
 
-### N3 — the search takes `Spans`
+### N3 — the search takes `Spans` ✅
 
-Needs N2, and needs [`terrain_seam.md`](terrain_seam.md)'s E for the other half
-of the signature.
+**Built.** Needed N2, and [`terrain_seam.md`](terrain_seam.md)'s E for the other
+half of the signature. What the shard walks on is the bake, and what that is
+worth is one table:
 
-`find_path`, `find_path_toward`, `search`, `step_allowed`, `corner_open`,
-`Around::read` take `&Spans` and `&Overlay`. The overlay is consulted after the
-static answer, exactly as it is designed to be: it subtracts a blocked tile and
-adds a moored deck, which is the one thing
-[`docs/boats.md`](../boats.md)'s B3 argued a mask alone cannot do.
+| facet 0 around (1500, 1900), 10,836 standable tiles, fastest of five | ns |
+|---|---:|
+| one node expansion, one direction at a time — **what a search did before this** | 1105.5 |
+| the same eight answers, landings over the map, work hoisted | 364.1 |
+| the same, landings off the bake | 167.1 |
+| **`steps_out_of` — what a search does now**, overlay included | **208.1** |
+| pure A\* with the terrain taken away | ~183–191 |
 
-**🚩 N2 found the one thing this node still has to decide: `start_surface` is
-not a span.** N2 moved the *landing* half of a step and left the start half on
-the map, because `MapTerrain::start_surface` returns a pair whose second element
-is the **crest** — the art's own full extent, ServUO's `zTop` — and a span
-carries neither the crest of a static nor the tile's *highest* corner. For a
-static the crest is recoverable from what is stored (`stand` for a flat one,
-`2·stand − reach` for a climbable, since a climbable's surface is halved from a
-base that `reach_z` *is*); for the land it is not, because an average and a
-minimum do not give a maximum. So this node picks one of three, and the pick is
-its own measurement rather than a preference:
+**5.3× a node**, and the terrain half of a node is now the same size as A\*'s
+own machinery rather than seven times it. One search, from the three origins
+[`terrain_seam.md`](terrain_seam.md#what-one-search-costs) recorded, 37,248
+destinations each:
 
-1. **A fourth height in the span**, taking the record from four bytes to five —
-   or to six with alignment, which is what would actually happen.
-2. **A `crest` byte only on the ground span**, which is the only span that needs
-   one, spending [`SpanFlags`](../../crates/common/movement/src/spans.rs)'s
-   remaining bits on saying so.
-3. **Leaving `start_surface` on the map.** It is asked *once per node
-   expansion* against sixteen landing checks, so it is 1/16th of what N2 just
-   made 2.2× cheaper — and `step_cost`'s rows say the whole landing half is now
-   under what A\* itself costs, which is the argument for not paying storage for
-   the other half at all.
+| origin | arrived @400 | arrived @600 | p50 @600 was | p50 @600 now |
+|---|---:|---:|---:|---:|
+| (1363, 1600, 30) the castle plateau | **4,036** | **4,436** | 0.793 ms | **0.168 ms** |
+| (1434, 1699, 2) the bank | **6,138** | **7,389** | 0.851 ms | **0.170 ms** |
+| (1500, 1900, 0) open country | **17,458** | **18,093** | 0.570 ms | **0.150 ms** |
 
-The measurement that decides it is the one this node already has to take: the
-node-expansion row with the start half hoisted, against the same row with it
-baked.
+**Every arrival count is the recorded one, to the unit**, and so is every
+per-class node distribution — `goal/region` 111/453, `goal/far` 165/558 from the
+bank, unchanged. A faster search that found different routes would be a
+different search; this one found the same ones.
 
-**Done when:** `map_path_probe` is re-run from the same three origins and the
-node-expansion cost is in this document beside 1,462 ns. Arrivals and node
-counts must be **bit-identical** to the run recorded in
-[`terrain_seam.md`](terrain_seam.md#what-one-search-costs) — a faster search
-that finds different routes is a different search.
+**`start_surface` stays on the map, and the measurement is why.** The section
+below set out three ways and asked for a number. It is **23.3 ns of a 170.8 ns
+node expansion** — one seventh, because it is asked once against the landing
+half's eight — so baking it could save at most that, minus what reading a baked
+one costs, against a fourth height on every one of 1.6 million spans. And there
+is a second reason the plan did not know: **`start_surface` is order-dependent
+in a way a span list cannot reproduce.** Its loop keeps a *running maximum* over
+the column's statics in the map file's own order and accumulates `z_top` over
+everything that passed on the way, so a climbable whose surface is low and whose
+art is tall is selected in file order and skipped in descending-surface order —
+which is the only order spans are stored in. Baking the start half means storing
+the file's order too, and that is not a fourth byte, it is a different table.
 
-**And the composition is asserted, not assumed.** A test that puts a `Stands`
-cover over bare ground and walks onto it, a `Blocks` cover in a body's span and
-is refused, and a shut door that both refuses under `Doors::AsTheyStand` and
-admits under `AllOpen` — over baked spans rather than over a scene built for the
-occasion. The overlay is consulted *after* the static answer and can overrule it
-in one direction only, which is the property this pins.
+**What the search calls is `steps_out_of`, and `step_allowed` is one slot of
+it.** A node expansion is now one call that resolves the tile being stepped
+*off* once and answers each neighbour once — sixteen landing checks become
+eight, because the four cardinals a diagonal asks about as flanks are the four
+it was already asking about as destinations. `step_allowed(footing, from, dir)`
+is defined as `steps_out_of(footing, from)[dir]`, so there is one rule and no
+second copy to drift; a caller that wants one direction pays for the expansion,
+which is the price of not having two rules.
+
+**The bake is not optional where the map is.** `MapTerrain::new` takes a
+`&SpanIndex` as its third argument, so there is no way to build a terrain that
+would silently re-derive every column, and `Footing::of` panics rather than
+accept a map without one. It sits *beside* the world rather than inside it —
+`FacetState::spans` on the shard, `Resources::spans` on the client — for a
+reason that is worth writing down because it is not a preference:
+`openshard_map` is underneath `openshard_movement`, and where a body may stand
+is a movement rule, so [`World`](../../crates/common/map/src/world.rs) cannot
+hold the projection of its own two layers. `FacetState::set_map` is the one seam
+that moves both, and `World::with_tiles` rebakes every facet already loaded, so
+the builder's argument order cannot produce a bake over the empty tile table.
+
+**`MapTerrain::check` is now an oracle and nothing else.** No production caller
+reaches it: `can_step`, `land_at`, `surface_at` and `predict_step` all read
+`Spans::check`. It stays because it is the only statement of the rule *in terms
+of the map files*, and the `span_check` example is 248 million comparisons of
+one against the other — an equality nothing would notice losing if both sides
+were the same code. Do not delete it as dead.
+
+**What the other rules do is unchanged.** `MapTerrain::obstructed`, `can_fit`
+and `sight_clear` still walk the column's statics, and `Footing` still carries a
+`MapTerrain`: this node moved the *landing* of a step, which is what a search
+asks sixteen times, and not the three rules that ask a different question. So
+`find_path(&Spans, &Overlay, …)` — the signature this section was written
+around — is not what landed. The footing is still the carrier, because four
+rules on it still need the tile table, and the bake travels inside the terrain
+rather than beside it.
+
+**N3 had to re-arm N2's own oracle, and that is the shape of every node after
+this one.** `span_check`'s coarse half flooded the facet twice — once through
+the shipped `step_allowed` and once through a written-out span rule. The moment
+`step_allowed` reads the bake, that flood compares the bake against itself and
+reports zero differences for the wrong reason. Both sides are now written out in
+the example — `map_step`/`map_land` beside `span_step`/`span_land`, identical
+but for which `check` answers the landing — and the oracle still holds over the
+whole facet: **248,268,125 steps, 0 disagreements; both floods reach 3,747,934
+tiles, 0 tiles differing** (the map flood 4.0 s, the bake flood 2.9 s). A test
+that calls the shipped rule stops being a test of the shipped rule the moment
+the rule moves under it.
+
+**And the composition is asserted, not assumed.**
+`the_live_world_adds_takes_away_and_hangs_a_door_over_baked_spans` in
+[`walk_scenes.rs`](../../crates/common/movement/tests/walk_scenes.rs) walks onto
+a `Stands` cover the bake has never heard of, is refused by a `Blocks` cover in
+its own span, and is refused by a shut door under `Doors::AsTheyStand` and
+admitted under `AllOpen` — over a `Scene`, which carries a real bake and keeps
+it in step with its own map. **All three claims were checked to bite**, by three
+mutations of `walk.rs` run one at a time: dropping the overlay's floor, dropping
+its veto, and ignoring the door reading each fail exactly the claim they should.
+
 
 ### N3b — the node stops being a tile
 
@@ -809,9 +882,13 @@ graph over spans names neither.
   zero. A per-block `u64` occupancy mask with counts for the occupied columns
   only is about 3.3 MB, and it replaces a 64-byte prefix sum with a
   `count_ones` — smaller *and* fewer bytes read. Not taken: it is a layout
-  change with a query change in it, and N3 is the measurement that says whether
-  the query is on a hot path at all. The same gate the packed static record is
-  under.
+  change with a query change in it, and N3 was the measurement that would say
+  whether the query is on a hot path at all. **N3 says it is**: the landing half
+  is 167 of a 208 ns expansion and `SpanIndex::stored` — a block lookup and that
+  64-byte prefix sum — is inside every one of its eight. Still not taken here,
+  because the gain is now against a number that is already the size of A\*'s own
+  machinery; it is the next thing to try if a node expansion has to get cheaper
+  again. The same gate the packed static record is under.
 - **N1 found: the map and the overlay disagree about a platform of no
   thickness.** `MapTerrain::is_obstructed` gives one a body from `base` to
   `base`, so it is in the way of anything *below* it whose head passes the
@@ -822,9 +899,12 @@ graph over spans names neither.
   because that is what N2's oracle compares against. **N2 did not settle which
   of the two is right**, and could not have: its whole content is that the
   answer did not change, so the one thing it may not do is change this one. It
-  stays open, and it is a finding about the step rule rather than about this
-  layer — the node that can take it is N3, where both layers are consulted
-  through one signature and the disagreement is finally visible in one place.
+  stays open, and **N3 did not settle it either**, for the same reason with a
+  different shape: N3's oracle is that the routes did not change, and changing
+  which of the two readings wins is a change to the routes. It is now visible in
+  one place, which is what N3 was expected to buy — `walk::landing` consults the
+  map and the overlay in six lines — so what it needs is a decision rather than
+  another node. It is a defect of the *step rule*, not of this layer.
 - **N2 corrected N1: a `clearance` of 255 was not by itself "nothing above".**
   N1's argument was that a base and a `stand_z` are both `i8`, so a gap can
   never exceed 255 and a saturated byte must therefore mean an absence. The
@@ -842,14 +922,54 @@ graph over spans names neither.
   remembering for N4 and N5 — a clause that seems to need the map often needs
   the *column*, and the column is already in the cache line the query is
   standing in.
+- **N3 found: `start_surface` cannot be baked without baking the map file's
+  order.** The plan offered three ways to move the start half and asked for a
+  measurement; the measurement said one seventh of an expansion, and the *code*
+  said something the plan had not seen. `MapTerrain::start_surface` keeps a
+  running maximum over the column's statics **in file order** and accumulates
+  `z_top` over everything that passed on the way — so a climbable with a low
+  surface and tall art is selected when it is met first and skipped when a
+  flatter, higher-surfaced static is met first. Spans are stored highest-first,
+  which is the other order. A fourth height per span therefore does not
+  reproduce the rule; storing the file's order does, and that is a different
+  table. Anybody returning to this — N3b, or a future `Stance` that wants to be
+  cheaper — should start here rather than from the three options above.
+- **N3 found: `WorldState::tiles` is a public field, and writing it does not
+  rebake.** `FacetState::set_map` moves the ground and its bake together, and
+  `World::with_tiles` rebakes every loaded facet, so both seams are safe. A
+  direct `state.tiles = table` is not: it leaves every facet holding a bake over
+  the old table, which is a shard deciding steps by the heights of a world it no
+  longer has. Three test fixtures do it today, harmlessly (they assign the same
+  table they just baked from). The repair is to make the field private behind a
+  setter that rebakes — the same shape `FacetState::obstructions` already has,
+  and for the same reason.
+- **N3 found: the interiors bake builds two facet-wide span indexes of its
+  own.** `PlanarTopology::bake` and `Buildings::bake` in
+  `client/render/src/interiors.rs` each take a map and a tile table and now
+  build a `SpanIndex` to get a terrain — 0.07 s each, inside a bake that already
+  walks the facet, and the client builds a third at startup. Threading one
+  through five `bake` signatures would put a movement index in the arguments of
+  a wall contour, which is why it was not done; the honest fix is for the
+  interiors bake to take the ground it is baking over as one value.
+- **N3 found: a `Scene` rebakes on every setter.** A fixture that places a
+  thousand statics pays a thousand bakes of its own blocks, and each one walks
+  `land_kinds`'s 16,384 land ids. Nothing in the suite is slow enough to notice
+  — `land_everywhere` was the one sweep that would have been, and it bakes once
+  — but a fixture that grows will notice. It is the price of `Scene::terrain`
+  taking `&self`: there is nowhere to notice staleness later, and a bake one
+  static behind its map is a fixture testing the wrong world.
 - **A dense `average_land_z` array.** 29.4 MB turns the bare-column case from
-  four corner reads into one. An obvious follow-up and exactly the kind of thing
-  that should wait for N3's measurement to say whether it is needed.
+  four corner reads into one. It waited for N3's measurement, and the
+  measurement is that the whole landing half is 167 ns for eight neighbours —
+  about 21 ns a tile, four corner reads among them. So it is real and it is
+  small: 29.4 MB to shave a fraction of a fifth of a node. Not now.
 - **Baked adjacency.** Recast stores neighbour links in the span; this plan does
   not, because the census says a neighbour lookup is already one bit test and a
-  land read for 92% of columns. If N3 measures a node expansion that is still
-  the search's whole cost, an 8-bit mask per span is the next move and the
-  census already proves it fits.
+  land read for 92% of columns. The trigger written here was "if N3 measures a
+  node expansion that is still the search's whole cost" — **it does not**: 208 ns
+  of terrain against ~190 ns of A\*, so a search is now half heap and hash. An
+  8-bit mask per span would attack the smaller half, and the census still proves
+  it fits.
 - **`sight_clear`'s own height blindness.** The same class of defect — a sight
   line reads the tiles it crosses and not the endpoints' columns, so two mobiles
   on one tile at different z see each other through a floor. It is
@@ -864,29 +984,28 @@ graph over spans names neither.
 
 ## Where a session starts
 
-**N3 — the search takes `Spans`.** N2 is built and the risk this plan was
-carrying is gone: `Spans::check` answers what `MapTerrain::check` answers, over
-248,268,125 steps of facet 0 and two whole-facet floods, with nothing to
-reconcile. What is left is that **nothing on the hot path calls it** — `find_path`
-and `step_allowed` still take a `Footing` over `MapTerrain`, and until they do
-not, the 169.1 ns landing half is a number in a benchmark rather than a shard
-that walks faster.
+**N3b — the node stops being a tile.** N3 is built and the win is banked: the
+shard's step rule reads the bake, a node expansion is 208 ns where it was 1,105,
+and the three recorded searches arrive on exactly the tiles they arrived on
+before. Which is precisely why the next node is the one that **must** change
+them — a column with two standing places still gets one slot in `closed`, and a
+route from a house's ground floor to its first floor is still answered with
+success and an empty route. Everything N3b needs is in
+[its own section](#n3b--the-node-stops-being-a-tile): the key widens to
+`(x, y, span)`, the goal becomes a node, and the four things that follow from
+that are enumerated there.
 
-**N3 has one decision to take before it writes anything**, and N2 is what put it
-there: `start_surface` is not a span. The three ways out and the measurement
-that picks between them are in
-[N3's own section](#n3--the-search-takes-spans). Take the measurement first —
-the whole landing half is already under what A\* costs, which is an argument
-that the cheapest answer is to leave the start half alone.
+**N4 is the alternative first move, and nothing forces the order.** N3b and N4
+both need only what is built; N3b is the finer defect and N4 is the one a player
+would notice — a creature that can route out of Britain's castle — with N7 the
+node where they actually notice it, because until then nothing on the server
+asks. If a session wants the visible repair, take N4 and leave N3b; they do not
+collide.
 
-**N3's oracle is the same shape as N2's and is stricter.** Arrivals and node
-counts bit-identical to
-[`terrain_seam.md`](terrain_seam.md#what-one-search-costs)'s recorded run: a
-faster search that finds different routes is a different search. The two floods
-[`span_check`](../../crates/common/movement/examples/span_check.rs) already runs
-are the coarse half of it and cost three seconds.
-
-**N4 is the one a player would notice**, and N7 is where they notice it.
-Everything before N4 is a structure and an oracle; N4 is the node where a
-creature can route out of Britain's castle, and N7 is the node where it actually
-does, because until then nothing on the server asks.
+**What a session should not do is re-open the landing rule.** `Spans::check` is
+what a step asks, `MapTerrain::check` is the map's own statement of the same
+rule and has no production caller, and the `span_check` example is the 248
+million comparisons between them. That pair is the thing that will notice a bake
+which has stopped describing its map — after a patch, after a base set, after
+the footprint work in [`footprints.md`](../footprints.md) changes what a static
+*is*. Keep both halves.
