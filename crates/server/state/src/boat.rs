@@ -195,6 +195,28 @@ impl Boats {
             .map(|plank| plank.surface())
             .min_by_key(|surface| (surface - near_z).abs())
     }
+
+    /// Whether a body standing at `(x, y, z)` has its feet on **`boat`'s** deck.
+    ///
+    /// The named half of [`deck_at`](Self::deck_at), and the two are not
+    /// interchangeable even though the arithmetic under them is nearly the same.
+    /// `deck_at` answers a body's question — *what am I standing on* — for which
+    /// whose ship it is could not matter less, so it looks at every plank on the
+    /// tile. This answers a ship's question — *is this one of mine* — and a ship
+    /// that accepts the answer `deck_at` gives sails away with its neighbour's
+    /// crew.
+    ///
+    /// No "nearest surface" here, because there is nothing to be near: the body
+    /// is already at `z`, and standing on a plank means standing on its top.
+    /// That is exactly what `deck_at(..) == Some(z)` tested, since a surface at
+    /// `z` is the unique nearest one to `z`.
+    #[must_use]
+    pub fn carries(&self, boat: EntityId, x: u16, y: u16, z: i32) -> bool {
+        self.at(x, y)
+            .iter()
+            .filter(|plank| plank.boat == boat && !plank.blocks)
+            .any(|plank| plank.surface() == z)
+    }
 }
 
 #[cfg(test)]
@@ -299,6 +321,54 @@ mod tests {
 
         boats.cast_off(second);
         assert!(boats.is_empty(), "the tile entry outlived both ships");
+    }
+
+    /// **A deck is not a deck in general.** Two ships sharing a tile is the case
+    /// the index already supports, and it is the sharpest statement of the
+    /// difference: `deck_at` says "there is a floor here" and `carries` says
+    /// whose it is. A ship that sails on the first answer takes the other's crew.
+    #[test]
+    fn a_deck_belongs_to_one_boat_and_carries_only_for_it() {
+        let (first, second) = two_entities();
+        let mut boats = Boats::default();
+        boats.moor(first, [((10, 10), deck(first, 2))]);
+        boats.moor(second, [((10, 10), deck(second, 9))]);
+
+        // A body standing at z 5 is on the first ship's deck and nobody else's,
+        // though `deck_at` is happy to call it a floor for either question.
+        assert_eq!(
+            boats.deck_at(10, 10, 5),
+            Some(5),
+            "the nearest floor is the lower deck"
+        );
+        assert!(boats.carries(first, 10, 10, 5));
+        assert!(
+            !boats.carries(second, 10, 10, 5),
+            "the second ship claimed the first's crew"
+        );
+
+        // And the upper deck, the other way round.
+        assert!(boats.carries(second, 10, 10, 12));
+        assert!(!boats.carries(first, 10, 10, 12));
+
+        // Between the two is not standing on either.
+        assert!(!boats.carries(first, 10, 10, 8));
+        assert!(!boats.carries(second, 10, 10, 8));
+    }
+
+    /// A hull is not a floor for its own ship either, which is what keeps a
+    /// swimmer at the waterline off the manifest.
+    #[test]
+    fn a_hull_carries_nobody() {
+        let ship = an_entity();
+        let mut boats = Boats::default();
+        boats.moor(ship, [((11, 10), hull(ship, 20))]);
+
+        assert!(
+            !boats.carries(ship, 11, 10, 30),
+            "a gunwale is not somewhere to stand"
+        );
+        assert!(!boats.carries(ship, 11, 10, 20));
     }
 
     /// The nearest surface to where the body already is, so a step down onto a

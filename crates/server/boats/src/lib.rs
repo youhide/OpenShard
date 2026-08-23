@@ -356,10 +356,34 @@ fn check_course(state: &WorldState, facet: Facet, boat: EntityId, berth: &[Berth
 
 /// Everyone standing on the deck right now, and the tile each is standing on.
 ///
-/// A mobile is aboard when it is on a tile the ship covers **and its feet are on
-/// a plank** — the second half matters, because a swimmer beside the hull and a
-/// body on a pier the ship is moored against are both on a covered tile and
-/// neither is a passenger.
+/// A mobile is aboard when its feet are on a plank **of this ship**. Each half
+/// of that has cost a defect:
+///
+/// - *on a plank*, because a swimmer beside the hull and a body on a pier the
+///   ship is moored against are both on a covered tile and neither is a
+///   passenger;
+/// - *of this ship*, because [`Boats::deck_at`] answers for the whole facet.
+///   Asking it here meant a ship under way took the crew of any other ship its
+///   sweep reached — see [`Boats::carries`], which is the same question asked
+///   with a name on it.
+///
+/// # The sweep is the ship's own box
+///
+/// One sector query for the whole ship rather than one per tile: the berth is a
+/// handful of tiles and a lookup is a block sweep, so asking it four times for a
+/// sloop would walk the same neighbourhood four times.
+///
+/// But a query is a *square around a point*, and the point used to be
+/// `covered.first()` — the north-west corner — with a radius reaching the far
+/// end of the hull. For a galleon lying east-west that is a square as wide as
+/// the ship is long in **both** axes, hung off one corner: twenty-odd tiles of
+/// open sea north of the bow, and as much again west of it. Centred on the
+/// berth's own box instead, the radius is half the longer span rather than all
+/// of it, and every tile of it is somewhere the ship actually is.
+///
+/// The square is still a superset either way, and [`Boats::carries`] is what
+/// makes the answer exact — but a sweep that names the wrong shape is a sweep
+/// whose surplus is where defects live, and the one above was found in it.
 ///
 /// Mobiles only. A crate lying on the deck is cargo and stays where it is until
 /// B4 gives the ship a hold; carrying it would need the item move path rather
@@ -367,25 +391,31 @@ fn check_course(state: &WorldState, facet: Facet, boat: EntityId, berth: &[Berth
 fn aboard(state: &WorldState, boat: EntityId, facet: Facet) -> Vec<(EntityId, Point)> {
     let facet_state = state.facet_state(facet);
     let covered = facet_state.boats().covered_by(boat);
-    let Some(&first) = covered.first() else {
+    let Some(&(first_x, first_y)) = covered.first() else {
         return Vec::new();
     };
-    // One sector query for the whole ship rather than one per tile: the berth is
-    // a handful of tiles and a lookup is a block sweep, so asking it four times
-    // for a sloop would walk the same neighbourhood four times.
-    let centre = Point::new(first.0, first.1, 0);
-    let reach = covered
-        .iter()
-        .map(|&(x, y)| u32::from(x.abs_diff(first.0)).max(u32::from(y.abs_diff(first.1))))
-        .max()
-        .unwrap_or(0);
+    // The berth's bounding box. `covered` is sorted, so the first tile is the
+    // lowest — but only in `(x, y)` order, which says nothing about the largest
+    // `y`, so both ends of both axes are swept for.
+    let (mut min_x, mut max_x) = (first_x, first_x);
+    let (mut min_y, mut max_y) = (first_y, first_y);
+    for &(x, y) in covered {
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+    // The box's middle, and the Chebyshev radius that just contains it: half the
+    // longer span, rounded up, which is what reaches the far corner from there.
+    let centre = Point::new(min_x + (max_x - min_x) / 2, min_y + (max_y - min_y) / 2, 0);
+    let reach = u32::from(max_x - min_x).max(u32::from(max_y - min_y)).div_ceil(2);
 
     facet_state
         .sectors()
         .mobiles_near(centre, reach)
         .filter(|&(entity, _)| entity != boat)
         .filter(|(entity, _)| state.registry.has::<Movement>(*entity))
-        .filter(|&(_, at)| facet_state.boats().deck_at(at.x, at.y, i32::from(at.z)) == Some(i32::from(at.z)))
+        .filter(|&(_, at)| facet_state.boats().carries(boat, at.x, at.y, i32::from(at.z)))
         .collect()
 }
 

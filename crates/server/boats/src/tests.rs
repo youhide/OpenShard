@@ -31,6 +31,15 @@ const HULL: u16 = 0x3E4E;
 /// that must not be folded into the hull, because a ship whose deck blocked
 /// would be a solid block of wood.
 const DECK: u16 = 0x3E4A;
+/// A second ship, and the only thing that distinguishes it from [`SLOOP`] is
+/// that it is **long**. See [`galley`].
+const GALLEY: u16 = 0x0D;
+/// An id [`multis`] does not hold, for the tests about being refused one.
+///
+/// Named rather than spelled `SLOOP + 1`, which is what it was: that made "an
+/// id nobody knows" a statement about the *neighbourhood* of a known one, and
+/// the second ship added to the table landed on it.
+const UNKNOWN_MULTI: u16 = 0x0E;
 
 /// The land id this sea is made of. Water is not a kind of tile the map knows —
 /// it is a flag on the tiledata row the tile points at, which is why the id and
@@ -79,9 +88,9 @@ fn sea() -> Scene {
     scene
 }
 
-/// A real multi table holding the sloop under the one id these tests place.
+/// A real multi table holding the two ships these tests place.
 fn multis() -> Multis {
-    Multis::of([Multi::new(SLOOP, sloop())])
+    Multis::of([Multi::new(SLOOP, sloop()), Multi::new(GALLEY, galley())])
 }
 
 fn component(graphic: u16, dx: i16, dy: i16, dz: i16, drawn: bool) -> Component {
@@ -106,6 +115,25 @@ fn sloop() -> Vec<Component> {
         component(DECK, 0, 1, 0, true),
         component(HULL, 1, 0, 0, true),
     ]
+}
+
+/// A galley: a single file of eight deck tiles, and the signature tile.
+///
+/// **Length is the whole point of it.** A three-tile sloop cannot express the
+/// property the manifest's sweep is sensitive to — how far the far end of a
+/// ship is from the near end — because at that size every sweep that contains
+/// the ship contains barely more than the ship. A real galleon is twenty-odd
+/// tiles long, and this is the shortest fixture that behaves like one.
+///
+/// No hull, deliberately: what these tests ask of it is who the *deck* carries,
+/// and a gunwale down each side would be sixteen more components saying nothing
+/// about that.
+fn galley() -> Vec<Component> {
+    let mut out = vec![component(1, 0, 0, 0, false)];
+    for dx in 0..8 {
+        out.push(component(DECK, dx, 0, 0, true));
+    }
+    out
 }
 
 fn a_sea() -> WorldState {
@@ -297,7 +325,7 @@ fn a_multi_that_is_not_a_ship_is_refused_and_leaves_nothing() {
             actor,
             Point::new(20, 20, 0),
             Facet(0),
-            SLOOP + 1,
+            UNKNOWN_MULTI,
             owner
         ),
         Err(Refusal::NoSuchMulti),
@@ -427,6 +455,47 @@ fn someone_in_the_water_beside_the_hull_is_left_behind() {
         state.registry.get::<Position>(swimmer).map(|p| p.0),
         Some(Point::new(20, 20, 0)),
         "the ship dragged somebody who was not standing on it",
+    );
+}
+
+/// **And neither is the crew of the ship moored beside it.** A deck is not a
+/// deck in general — it is *this* ship's deck, and the manifest asked the facet
+/// rather than the boat.
+///
+/// The galley is what makes this visible. The manifest finds its candidates with
+/// one sector sweep, and a sweep is a square; a ship eight tiles long put a
+/// square eight tiles wide on every side of its bow, which reaches a long way
+/// past its own stern. Everything caught in it that happened to be standing on
+/// *a* plank came back as a passenger — so a sloop moored a few tiles off the
+/// galley's beam lost its crew to whichever direction the galley sailed.
+#[test]
+fn a_ship_under_way_does_not_carry_the_crew_of_the_ship_beside_it() {
+    let mut state = a_sea();
+    let (actor, owner) = a_captain(&mut state);
+
+    // Eight deck tiles from (20, 20) to (27, 20), lying east-west.
+    let galley =
+        place(&mut state, actor, Point::new(20, 20, 0), Facet(0), GALLEY, owner).expect("open water");
+    // A sloop three tiles south of the galley's line and clear of every tile it
+    // covers, so the berth check is satisfied. It sits inside the sweep the
+    // manifest makes whichever shape that sweep is — which is the point: what
+    // decides this is *whose plank the sailor is on*, not how wide the net was.
+    place(&mut state, actor, Point::new(25, 23, 0), Facet(0), SLOOP, owner).expect("open water");
+
+    // Standing on the *sloop's* deck, which is nothing to do with the galley.
+    let sailor = a_walker(&mut state, Point::new(25, 23, 2));
+
+    step(&mut state, galley, Direction::North).expect("open water ahead");
+
+    assert_eq!(
+        state.registry.get::<Position>(sailor).map(|p| p.0),
+        Some(Point::new(25, 23, 2)),
+        "the galley sailed off with the sloop's crew",
+    );
+    assert_eq!(
+        state.facet_state(Facet(0)).sectors().position_of(sailor),
+        Some(Point::new(25, 23, 2)),
+        "and the sector grid believed it",
     );
 }
 
