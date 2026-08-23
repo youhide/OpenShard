@@ -1,6 +1,6 @@
 use super::*;
 use openshard_map::overlay::Doors;
-use openshard_movement::{Walker, step_from};
+use openshard_movement::Walker;
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::world::{Aggression, Sight};
 use openshard_state::components::{Brain, Heading, Hitpoints, Movement};
@@ -121,18 +121,25 @@ pub fn dismount(state: &mut WorldState, player: EntityId) {
         return;
     };
     let facet = state.facet_of(player);
-    let mut landing = rider_at;
-    for dir in 0..8u8 {
-        let dir = openshard_protocol::direction::Direction::from_bits(dir);
-        if let Some(tile) = step_from(rider_at, dir) {
-            if let Some(landed) =
-                openshard_movement::can_step(&state.footing(facet, Doors::AsTheyStand), rider_at, tile)
-            {
-                landing = landed;
-                break;
-            }
-        }
-    }
+    // `steps_out_of` and not eight `can_step` calls: the eight answers cost what
+    // one of them did, because the tile being stepped *off* is resolved once
+    // rather than per direction, and each cardinal neighbour is read once rather
+    // than as a destination and again as some diagonal's flank.
+    //
+    // It brings the corner rule with it, which is the part that had to be
+    // decided rather than swapped: a mount is *placed* beside its rider, not
+    // walked there, so the rule is not obviously owed here. It is taken
+    // deliberately. Every step the shard permits has carried the corner rule
+    // since `World::step` went through `step_allowed`, so a horse put down
+    // through a cut would be standing where nothing could have walked it — and
+    // where the same rule can refuse to walk it out again. "Nowhere beside the
+    // rider" is an answer this already has, and under the rider is the better of
+    // the two.
+    let landing = openshard_movement::steps_out_of(&state.footing(facet, Doors::AsTheyStand), rider_at)
+        .into_iter()
+        .flatten()
+        .next()
+        .unwrap_or(rider_at);
     state.registry.insert(mount, Position(landing));
     state.registry.insert(mount, facet);
 

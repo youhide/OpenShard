@@ -1358,12 +1358,31 @@ graph over spans names neither.
   rather than fixed — but it is a third reading of *can I go there* inside one
   client, and `step_allowed` is what it means.
 - **`items/mounts.rs` resolves the same stance eight times to put a mount
-  down.** Dismounting looks for somewhere beside the rider with eight `can_step`
-  calls, each re-deriving the tile being stepped off — the shape N4 found in
-  `component_labels` and `region_costs`, and the same one-line repair.
-  `steps_out_of` is those eight answers for the price of one. The thing to
-  decide before swapping it is the corner rule, which is not obviously wanted
-  here: a mount is *placed* beside its rider, not walked there.
+  down. ✅ Fixed, and the corner rule came with it.** Dismounting looked for
+  somewhere beside the rider with eight `can_step` calls, each re-deriving the
+  tile being stepped off — the shape N4 found in `component_labels` and
+  `region_costs`. It asks `steps_out_of` once now, which is those eight answers
+  for the price of one.
+  **The rule was the decision, not the swap.** A mount is *placed* beside its
+  rider rather than walked there, so a corner rule is not obviously owed. It is
+  taken anyway, because the alternative is worse than the cost: every step the
+  shard permits has carried the rule since `World::step` went through
+  `step_allowed`, so a horse put down through a cut stands where nothing could
+  have walked it and where the same rule can refuse to walk it out. "Nowhere
+  beside the rider" is an answer this code already had — under the rider — and
+  it is the better of the two.
+  **What fell out of it is worth knowing before reading that loop:** with the
+  corner rule in it, a diagonal is never what the loop picks. A legal diagonal
+  needs both flanking cardinals to be steppable, and both come earlier in
+  `Direction::to_bits` order — so the choice is the first open cardinal, or the
+  rider's own tile.
+  **Done when:** `a_dismount_does_not_put_a_horse_through_a_corner` in
+  `world/src/tick/tests.rs` — a rider boxed in by seven crates whose one open
+  neighbour is a corner cut, and a horse that lands under him. Reverted to
+  `can_step` it stands on the diagonal and the test fails there. The control in
+  the test is the northern crate taken away, where the same dismount uses it —
+  which is what says the refusal was the rule and not a loop that had stopped
+  finding anywhere.
 - **`a_creature_routes_past_its_exact_budget_over_the_coarse_graph` is
   load-sensitive by construction.** `walk_toward` re-plans from scratch on every
   beat, and every plan reads `MAX_LONG_PATH_TIME` — 50 ms of *wall clock*. A

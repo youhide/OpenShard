@@ -14549,6 +14549,102 @@ fn a_horse_is_mounted_and_dismounted_by_double_click() {
 }
 
 #[test]
+fn a_dismount_does_not_put_a_horse_through_a_corner() {
+    // Where a dismounted horse may stand is a step question, and the shard has
+    // one step rule since `World::step` went through `step_allowed`. The
+    // dismount asked eight `can_step` calls instead — one landing each, and a
+    // landing has no corner rule in it — so it could put a creature on a tile
+    // nothing could have walked to, and that the same rule may refuse to walk it
+    // off again. It asks `steps_out_of` now, which answers the eight for the
+    // price of one and brings the corner rule with it.
+    //
+    // Reverted to `can_step`, the horse stands at the south-east diagonal and
+    // this fails at the first assertion.
+    //
+    // A note for anyone reading the loop: with the corner rule in it, a diagonal
+    // is never what it picks. A legal diagonal needs both its flanking cardinals
+    // to be steppable, and both come earlier in `Direction::to_bits` order — so
+    // the choice is the first open cardinal, or under the rider.
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player = world.state.players[&gm];
+    let at = world.registry().get::<Position>(player).unwrap().0;
+    let (horse, horse_serial) = spawn_horse(&mut world, Point::new(at.x + 1, at.y, 0), now);
+    let player_serial = world.registry().serial_of(player).unwrap();
+    let mount = |world: &mut World| {
+        world.queue(Command::DoubleClick {
+            connection: gm,
+            request: UseRequest::Use(RawSerial(horse_serial.raw())),
+        });
+        world.tick(now);
+    };
+    let dismount = |world: &mut World| {
+        world.queue(Command::DoubleClick {
+            connection: gm,
+            request: UseRequest::Use(RawSerial(player_serial.raw())),
+        });
+        world.tick(now);
+    };
+
+    mount(&mut world);
+    assert!(world.registry().get::<Riding>(player).is_some(), "in the saddle");
+
+    // Every neighbour but the south-east diagonal is a crate, and the two that
+    // flank that diagonal — east and south — are among them. So the one tile
+    // beside the rider a body could *stand* on is one no body could reach.
+    let around: [(i16, i16); 7] = [(0, -1), (1, -1), (1, 0), (0, 1), (-1, 1), (-1, 0), (-1, -1)];
+    let crates: Vec<EntityId> = around
+        .iter()
+        .map(|(dx, dy)| {
+            let entity = world.state.registry.spawn();
+            world.state.facet_state_mut(Facet(0)).block(
+                at.x.wrapping_add_signed(*dx),
+                at.y.wrapping_add_signed(*dy),
+                entity,
+                openshard_map::overlay::Cover::blocking(0, openshard_state::DOOR_HEIGHT),
+            );
+            entity
+        })
+        .collect();
+
+    dismount(&mut world);
+    let horse_at = world
+        .registry()
+        .get::<Position>(horse)
+        .expect("back on the ground")
+        .0;
+    assert_eq!(
+        (horse_at.x, horse_at.y),
+        (at.x, at.y),
+        "the only open tile is one the corner rule refuses, so the horse lands under its rider"
+    );
+
+    // The control: it is not that the loop stopped finding anywhere. Take the
+    // crate to the north away and the identical dismount uses it.
+    world
+        .state
+        .facet_state_mut(Facet(0))
+        .unblock(at.x, at.y - 1, crates[0]);
+    mount(&mut world);
+    assert!(
+        world.registry().get::<Riding>(player).is_some(),
+        "back in the saddle"
+    );
+    dismount(&mut world);
+    let horse_at = world
+        .registry()
+        .get::<Position>(horse)
+        .expect("back on the ground")
+        .0;
+    assert_eq!(
+        (horse_at.x, horse_at.y),
+        (at.x, at.y - 1),
+        "with one neighbour open the horse takes it"
+    );
+}
+
+#[test]
 fn a_paperdoll_request_leaves_the_rider_mounted() {
     // The relogin bug: ClassicUO opens the paperdoll on login with a 0x06 whose
     // serial carries bit 31 — a paperdoll *request*, not a use. ServUO's `UseReq`
