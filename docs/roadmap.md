@@ -563,6 +563,26 @@ Left open, and none of it blocks anything:
 - **`Sectors::nearby` is still linear in a bucket**, and this entry is the second
   per-step reader that was predicted below. It is now real.
 
+#### Found while closing it
+
+- **`ai::step_toward` has no production caller.** Every body that walks goes
+  through `step_body_toward`, which is the sibling with somewhere to write a
+  refusal down; the only thing left calling the plain one is
+  `tick/tests.rs`'s `walk_toward`. It is `pub`, it carries the doc comment that
+  explains the two-search fall-back for both of them, and it gained a `mover`
+  argument this session for a crowd only its test will ever have. Either its
+  test uses `step_body_toward` and it goes, or its doc moves to the sibling and
+  it stays as the deliberate pure-function reading — but "public, documented,
+  and called once from a test" is not a state anybody chose.
+- **The crowd is now built on every walk request, and used on some of them.**
+  `mobile_occupies` was asked only when the walk had already succeeded; the
+  crowd has to exist before `Walker::request` is called, so a *turn* and a
+  pace-refused step pay a sector sweep for nothing. It is one `nearby` call and
+  turns are a small share of requests, so it was left alone deliberately — but
+  it is the same sweep the entry above says is linear in a decorated town, and
+  if that ever needs shrinking, `intend` is the shared function that says
+  whether a request steps at all.
+
 ### ~~Backlog: `can_step` does not check the corner, and two obstruct tests are red~~ — closed
 
 **Both are green**, and were closed by the corner-rule repair recorded in
@@ -4221,6 +4241,17 @@ work had to touch anyway:
   so nothing fires it. Either the workspace lint table gains it and `cargo doc`
   joins CI, or every `[`Type::member`]` in this repo is prose that happens to
   have brackets round it. They were found by reading, which does not scale.
+
+  > **Counted since, and it is not two.** `cargo doc --no-deps` over
+  > `openshard-movement` alone reports **15** — a mix of unresolved links and
+  > public docs pointing at private items (`can_step` → `climbed`,
+  > `Overlay::blocker_anywhere` from a path that does not resolve). `-state`,
+  > `-protocol` and `-ai` each have their own. So the gate is not a tidy-up
+  > before it is turned on: whoever adds the lint spends a session on the
+  > backlog first, and should decide separately whether
+  > `rustdoc::private_intra_doc_links` is wanted at all — a public doc naming
+  > the private function it delegates to is often the *right* thing to write,
+  > and half of these are that.
 - **`cargo clippy --workspace --all-targets` is still not silent**, and none of
   what is left is that session's: `common/uofiles/src/map.rs` (a needless
   borrow), `client/render/tests/traced.rs` (three borrowed expressions that
