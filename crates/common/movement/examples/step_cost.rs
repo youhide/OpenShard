@@ -97,6 +97,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cli.x, cli.y, cli.repeat
     );
 
+    // The two tiers, kept apart, because they are answered by different code at
+    // different costs and *any* per-span structure can only ever address one of
+    // them. `navigation_spans.md`'s *baked adjacency* is the case in point: a
+    // neighbour mask hangs on a span, and 92% of the facet's columns have no
+    // span to hang one on. What that entry is worth is this split times the gap
+    // between the two rows below, so the split is measured rather than assumed.
+    let (stored, bare): (Vec<Point>, Vec<Point>) =
+        standing.iter().partition(|p| index.stores(&map, p.x, p.y));
+    println!(
+        "  of which {} stand on a stored column ({:.1}%) and {} on bare land ({:.1}%)",
+        stored.len(),
+        100.0 * stored.len() as f64 / n as f64,
+        bare.len(),
+        100.0 * bare.len() as f64 / n as f64,
+    );
+    // How many of a node's eight neighbours the rule accepts. A *rejection*
+    // mask — one bit per direction and no landing height — is the cheap half of
+    // baked adjacency: it cannot answer where a step lands, but it can say which
+    // neighbours are not worth reading at all, and what that is worth is exactly
+    // the refused share of the eight scattered column reads the row below
+    // measures. Reported per tier, since only one of them could carry a mask.
+    for (label, tier) in [("a stored column", &stored), ("bare land", &bare)] {
+        if tier.is_empty() {
+            continue;
+        }
+        let allowed: usize = tier
+            .iter()
+            .map(|&p| steps_out_of(&footing, p).iter().flatten().count())
+            .sum();
+        println!(
+            "  from {label}: {:.2} of 8 neighbours allowed, {:.0}% refused",
+            allowed as f64 / tier.len() as f64,
+            100.0 - 100.0 * allowed as f64 / (8.0 * tier.len() as f64),
+        );
+    }
+
     println!("the pieces, once per tile:");
     measure(cli.repeat, n, "map.land", || {
         standing
@@ -161,6 +197,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             })
             .sum()
     });
+    // The same expansion, over each tier alone. The gap between these two rows
+    // is the *whole* of what a per-span neighbour mask could ever recover, and
+    // only over the tier that has spans: a bare column's expansion is already
+    // four corner reads and a compare, and giving it a mask would mean a dense
+    // array over all 29.4 M columns — which is the same 29.4 MB the plan's
+    // *dense `average_land_z`* entry priced and declined.
+    if !stored.is_empty() {
+        measure(cli.repeat, stored.len(), "  ... from a stored column", || {
+            stored
+                .iter()
+                .map(|&p| {
+                    steps_out_of(black_box(&footing), black_box(p))
+                        .into_iter()
+                        .flatten()
+                        .map(|p| u64::from(p.x))
+                        .sum::<u64>()
+                })
+                .sum()
+        });
+    }
+    if !bare.is_empty() {
+        measure(cli.repeat, bare.len(), "  ... from bare land", || {
+            bare.iter()
+                .map(|&p| {
+                    steps_out_of(black_box(&footing), black_box(p))
+                        .into_iter()
+                        .flatten()
+                        .map(|p| u64::from(p.x))
+                        .sum::<u64>()
+                })
+                .sum()
+        });
+    }
     // The same eight answers asked one direction at a time, which is what a
     // search did before N3 — and what a caller that wants exactly one direction
     // still pays, since `step_allowed` is now one slot of the row above. Eight
@@ -183,6 +252,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // the number the bake is worth measuring against.
     measure(cli.repeat, n, "the same, landings over the map", || {
         standing.iter().map(|&p| hoisted_expand(&terrain, p)).sum()
+    });
+    // The floor a per-span neighbour structure could ever reach: the same
+    // expansion with the landing half *free*. Nothing is looked up at all, so
+    // what is left on the clock is what a baked mask cannot remove — the tile
+    // being stepped off, resolved once, and the flank rule over eight slots.
+    //
+    // Its checksum differs from every row above on purpose: with every landing
+    // accepted, every direction is allowed, and that is what makes it a floor
+    // rather than an answer.
+    measure(cli.repeat, n, "the floor: landings free", || {
+        standing
+            .iter()
+            .map(|&p| {
+                expand(
+                    p,
+                    |to, start_z, _| {
+                        let _ = black_box(to);
+                        Some(start_z)
+                    },
+                    terrain.start_surface(p.x, p.y, i32::from(p.z)).1,
+                )
+            })
+            .sum()
     });
     // And the same again with the *landing* half answered off the span bake —
     // `navigation_spans.md`'s N2. The start half is still the map's: a span

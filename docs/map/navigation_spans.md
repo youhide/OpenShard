@@ -1431,13 +1431,57 @@ graph over spans names neither.
   measurement is that the whole landing half is 167 ns for eight neighbours —
   about 21 ns a tile, four corner reads among them. So it is real and it is
   small: 29.4 MB to shave a fraction of a fifth of a node. Not now.
-- **Baked adjacency.** Recast stores neighbour links in the span; this plan does
-  not, because the census says a neighbour lookup is already one bit test and a
-  land read for 92% of columns. The trigger written here was "if N3 measures a
-  node expansion that is still the search's whole cost" — **it does not**: 208 ns
-  of terrain against ~190 ns of A\*, so a search is now half heap and hash. An
-  8-bit mask per span would attack the smaller half, and the census still proves
-  it fits.
+- **Baked adjacency. ✅ Measured, and declined — the cheap half is refuted
+  outright.** Recast stores neighbour links in the span; this plan does not,
+  because the census says a neighbour lookup is already one bit test and a land
+  read for 92% of columns. The trigger written here was "if N3 measures a node
+  expansion that is still the search's whole cost" — **it does not**: 208 ns of
+  terrain against ~190 ns of A\*, so a search is now half heap and hash. What was
+  left was an 8-bit mask per span, which the census proves fits; `step_cost` now
+  splits its sample by tier and prices it.
+
+  **A mask hangs on a span, and 92% of the facet's columns have none** — that is
+  the whole of the finding, and it makes the *population* the number to measure
+  rather than the saving. Two origins, release, fastest of five:
+
+  | | open country (1500, 1900) | the castle (1363, 1600) |
+  |---|---|---|
+  | starts on a stored column | 16.0% | 46.3% |
+  | expansion, stored start | 204.5 ns | 240.4 ns |
+  | expansion, bare start | 204.6 ns | 196.9 ns |
+  | the floor — landings free | 39.4 ns | 44.0 ns |
+  | of 8 neighbours, refused from a stored column | 12% | 20% |
+
+  **Three readings, and each kills a different version of the idea:**
+
+  - **The two tiers cost the same** — 204.5 against 204.6 in open country. The
+    premise baked adjacency inherited from Recast is that the columns with
+    geometry in them are the expensive ones; after N1's three tiers they are not,
+    and at the castle the 43 ns that separates them is the whole prize on 46% of
+    expansions.
+  - **The rejection mask — one bit per direction, no heights, 1.6 MB — has
+    nothing to skip.** It can only save the reads it refuses, and a stored column
+    refuses **12–20% of its eight neighbours**: one read of eight, on 16–46% of
+    expansions. That is ~4 ns of a 209 ns expansion in open country and ~9 ns of
+    223 at the castle — **under 2% of a node** either way. This was the cheap,
+    census-approved half, and it is the one the number refuses.
+  - **The full record does work, and covers the wrong half.** The floor says the
+    landing half is ~165 ns of a ~210 ns expansion, so removing it is real — but
+    a record that answers *where* a step lands is a mask plus eight landing
+    heights, ~9 bytes on a 4-byte span: **~15 MB against the bake's 11.2 MiB,
+    more than doubling it**, to make 16% of open-country and 46% of castle
+    expansions ~4× cheaper. Weighted against a whole node — expansion plus
+    ~231 ns of A\* — that is **6% and 17%**. Nothing asks for 6%, and the 17%
+    is the case the coarse graph already routes around.
+
+  **What the floor turned up instead is worth more than the entry was.** The
+  landing half is ~165 ns for eight neighbours — ~21 ns each — where
+  `surface_at` measured *alone* on one column is 12.4 ns. The gap is not
+  arithmetic: it is that eight neighbours are eight walks of the addressing
+  chain — `extent().index_of`, `blocks`, `tables`, the occupancy word, the
+  prefix sum — for tiles that share a block in the ordinary case. **That is
+  N3's `Stance` hoist again** (1,105 → 171 ns), one tier down, and it costs no
+  bytes at all. Filed below as *the addressing is walked eight times*.
 - **`sight_clear`'s own height blindness.** The same class of defect — a sight
   line reads the tiles it crosses and not the endpoints' columns, so two mobiles
   on one tile at different z see each other through a floor. It is

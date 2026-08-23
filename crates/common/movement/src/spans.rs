@@ -425,6 +425,23 @@ impl SpanIndex {
         self.counts.len()
     }
 
+    /// Whether this one column owns a stored run, rather than being answered by
+    /// the land grid.
+    ///
+    /// [`column_count`](Self::column_count) for a single column, and it exists
+    /// for the same reason: the two tiers are answered by different code at
+    /// different costs, so *which tier a column is* is a thing a measurement has
+    /// to be able to ask. It is the population any per-span structure could ever
+    /// address — a bare column has no span to hang anything on — and
+    /// `step_cost` splits its sample by it.
+    ///
+    /// Not the same question as "does this column hold statics": a column whose
+    /// statics leave nothing to stand on owns no run.
+    #[must_use]
+    pub fn stores(&self, map: &WorldMap, x: u16, y: u16) -> bool {
+        !self.stored(map, x, y).is_empty()
+    }
+
     /// One column's stored spans, empty for a column with no statics — which
     /// is not the same as a column with nothing to stand on. See
     /// [`Spans::surfaces`], which is where the land answers for the empty case.
