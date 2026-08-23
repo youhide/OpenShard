@@ -461,6 +461,34 @@ the tile it is standing on, and staff walking through bodies is the same
 permission as walking through walls — see `gm.rs`, which has no such bypass
 either.
 
+### Backlog: `can_step` does not check the corner, and two obstruct tests are red
+
+Found while moving the tile table out of the file reader (R1), by running the
+whole suite after fixing the gate that used to abort it — these two failures had
+been hiding behind `facet_bare_fields`, which stops the run before
+`openshard-state` is reached.
+
+Both are in `state/src/obstruct.rs`'s tests and both came in with node E
+(`3aef249e`, `map/terrain_seam: node E — the trait goes, and a search takes a
+Footing`). Neither is a consequence of the tile-table move: R1's only edit to
+that file was the import line.
+
+- **`a_diagonal_is_refused_when_either_flank_is_blocked`** — panics with *"a
+  single blocked flank forbids the corner cut"*. `can_step`
+  (`movement/src/walk.rs:404`) asks the map and then the overlay for the
+  destination tile alone; `corner_open` (`walk.rs:512`) is consulted on the walk
+  path and not from `can_step`. So the rule that stops a body slipping past the
+  corner of a blocked tile is applied to a player's `0x02` and not to a caller
+  that asks `can_step` directly — which is what the server-driven creatures do.
+  The test's expectation is the old composition's, and the question it asks is
+  still the right one: **which layer owns the corner rule**. Whichever answer is
+  taken, it has to be the same one for both callers.
+- **`a_live_terrain_with_no_map_reports_no_water`** — panics on
+  `Option::unwrap()`. It builds `Footing::new(None, …)` and then reads
+  `live.map.unwrap()`. With no map there is no `MapTerrain` to ask, so the
+  assertion cannot be written that way at all; what it means to check is that a
+  shard with no client files has no sea, which is now `live.map.is_none()`.
+
 ### Backlog: a sector lookup is linear in a bucket, and a house makes the bucket fat
 
 `Sectors` (`state/src/sectors.rs`) is right where it was measured. Buckets are

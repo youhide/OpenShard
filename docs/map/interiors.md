@@ -195,7 +195,7 @@ it can hide a pixel.
 
 ### Implementation handoff — R1 in progress
 
-**Implemented, uncommitted:** `uofiles::surfaces::stand_surfaces` remains the
+**Implemented, uncommitted:** `movement::surfaces::stand_surfaces` remains the
 shared *movement* walk. The interior bake deliberately uses only land and
 static art marked `FLOOR`: a character can stand on a table, bed or crate, but
 none is a structural storey. `render::interiors` has lazy per-block `CellId`s,

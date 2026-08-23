@@ -1,5 +1,9 @@
 # The map you hold — era R, in order
 
+> **Status: R1 built; R2 next.** The tile table has its own crate and
+> `openshard-uofiles` is readers, formats and errors. Everything below R1 is
+> still a plan.
+
 The executable half of [`map_rebuild.md`](map_rebuild.md)'s era R. That document
 holds the model and the decisions — three layers, what may be baked, why a house
 is a layer and not a patch; **this one holds the work**: what moves where, in
@@ -41,14 +45,17 @@ R1 and R2 are the two the rest wait on; R3, R4 and R5 are independent of each
 other and can land in any order once R2 has.
 
 ```
-R1. the table leaves the file reader ──> R2. the third layer joins the type ──┬─> R3. a house has floors
+R1. the table leaves the file reader ✔ ──> R2. the third layer joins the type ──┬─> R3. a house has floors
                                                                               ├─> R4. statics become one run
                                                                               └─> R5. one install, one load
 ```
 
-## R1 — the table leaves the file reader
+## R1 — the table leaves the file reader ✔
 
 **Goal.** `openshard-uofiles` reads files and declares nothing.
+
+**Built**, in the four commits below plus two the plan did not foresee, both
+recorded under *What the move decided* at the end of this node.
 
 ### What moves
 
@@ -70,10 +77,10 @@ world nobody serialised that way."*
 
 ### The name collision this ends
 
-There are **two** types called `LandTile` today: the entry in
-[`uofiles::tiledata`](../../crates/common/uofiles/src/tiledata.rs#L292), and the
-*id* in [`openshard-map`](../../crates/common/map/src/map.rs#L38) that indexes
-it. They have coexisted because they were in different crates and never met.
+There were **two** types called `LandTile`: the entry in `uofiles::tiledata`,
+and the *id* in `openshard-map` that indexes it. They had coexisted because they
+were in different crates and never met. Both are in
+[`openshard-tiles`](../../crates/common/tiles/src/lib.rs) now.
 
 - The **id** moves to `openshard-tiles` and becomes `LandTileId`. An id belongs
   beside the table it indexes, and the pair then reads like the static side
@@ -85,7 +92,7 @@ it. They have coexisted because they were in different crates and never met.
 
 ### `surfaces` goes to movement, not to the table
 
-[`surfaces.rs`](../../crates/common/uofiles/src/surfaces.rs) is neither a file
+[`surfaces.rs`](../../crates/common/movement/src/surfaces.rs) is neither a file
 nor a table: `stand_surfaces` walks a column and answers *where could a body
 stand*, which is a movement rule that happens to have been parked beside the
 parser. It is also the seed [N1](navigation_spans.md#n1--three-tiers) builds
@@ -105,12 +112,39 @@ the interior index loses nothing.
    so the diff is readable.
 4. **`surfaces` to `openshard-movement`.**
 
+All four landed in that order, and the tree was broken for exactly one commit as
+the plan said it would be.
+
 **Done when:** no crate depends on `openshard-uofiles` to ask what a graphic is;
 `openshard-uofiles` exports readers, formats and errors only; the four checks are
-silent.
+silent. **Met.** The crates that still depend on `openshard-uofiles` depend on it
+for a *reader* — multis, art, the map importer — which is the line this node set
+out to draw.
 
 **Risk:** low, and it is the reason this goes first. Nothing changes behaviour;
-every failure is a compile error.
+every failure is a compile error. It ran that way: every failure the move
+produced was a compile error, and the only red test in the run was a gate that
+was already red — movement's `span_census` example takes a `--facet` on its
+command line and had never been added to `facet_bare_fields`' allowlist.
+
+### What the move decided
+
+Two questions the plan did not name, both settled by the same rule it set:
+
+- **`TextureId` moved too.** [`LandTile::texture`](../../crates/common/tiles/src/lib.rs)
+  holds one, so leaving it beside the reader of `texmaps.mul` would have made
+  the table depend on a file reader — the thing R1 exists to end. `AnimId` was
+  already in `tiledata.rs` for exactly this reason and is the precedent: **the
+  table declares the ids its entries name**, and the readers of those two files
+  take them as arguments.
+- **The layout left `TileData` with the reader.** `TileDataFormat` stays in
+  `uofiles` by the plan's own table, so the table cannot hold one. It is a fact
+  about a *file* rather than about a tile — a table built by hand has no layout
+  — so `tiledata::load` and `tiledata::parse` hand back a `Reading { tiles,
+  format }`, and the single caller that wanted the format writes it into the
+  boot log. Both are free functions now: `TileData` is not `uofiles`' type to
+  hang a constructor off, and `TileData::from_tables` is the one way to build a
+  populated table.
 
 ## R2 — the third layer joins the type
 

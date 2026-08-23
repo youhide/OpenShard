@@ -418,7 +418,7 @@ is N2's oracle.
 - The land surface of a bare column is *not* stored.
 
 **Done when:** `Spans::surfaces(x, y)` returns exactly what
-`openshard_uofiles::surfaces::stand_surfaces` returns, for every column of
+`openshard_movement::surfaces::stand_surfaces` returns, for every column of
 facet 0, for both abilities — asserted by a whole-facet test, not a sample —
 and the built size and build time are recorded in this document.
 

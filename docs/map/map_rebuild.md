@@ -113,7 +113,7 @@ Read off the workspace and the plans, so a session does not re-derive it:
 | no trait on the search; `MapTerrain` is two borrows; one `Overlay` both ends build | ✅ [`terrain_seam.md`](terrain_seam.md), nodes 0 and A–E |
 | the coarse graph is worth wiring up, and is wrong on raised ground | ✅ measured — [F, answered](terrain_seam.md#f--the-graph-nobody-reads) |
 | the span census: 92.1% of columns hold no statics, deepest column is 12 | ✅ [N0](navigation_spans.md#n0--the-census-) |
-| **the tile table lives in the file reader** | ⬜ R1 |
+| the tile table lives in the file reader | ✅ R1 — `openshard-tiles`, and `uofiles` is readers, formats and errors |
 | **the live layer is not in the map** | ⬜ R2 |
 | **a house has walls and no floors** | ⬜ R3 |
 | **the statics are 120,745 vectors** | ⬜ R4 |
@@ -130,7 +130,7 @@ era's shape and what each node owes; the two are the same split
 [`snapshot.md`](new_map_representation/snapshot.md) already use, and progress
 belongs in neither: it goes in [`handoffs/`](handoffs/).
 
-### R1 — the table leaves the file reader
+### R1 — the table leaves the file reader ✔ built
 
 **Goal.** `openshard-uofiles` reads files and does nothing else.
 
@@ -154,7 +154,7 @@ the live layer cannot build a `Cover` without one.
   High Seas widening and the arithmetic that detects it, the group headers. It
   fills a `TileData` and hands it back, exactly as `uofiles::map` fills a
   `WorldMap`.
-- [`surfaces.rs`](../../crates/common/uofiles/src/surfaces.rs) leaves too, and
+- [`surfaces.rs`](../../crates/common/movement/src/surfaces.rs) leaves too, and
   not to the same place. It is a **rule**, not a table and not a reader:
   `stand_surfaces` walks a column and says where a body could stand, which is
   movement's question and is the seed [N1](navigation_spans.md#n1--three-tiers)
@@ -503,11 +503,12 @@ waits for a measurement that says the statics are still on a hot path.
 
 ## Where a session starts
 
-**R1, commit 1 — and the plan to run it from is
-[`realtime_map.md`](realtime_map.md).** It is the one node with no incoming edge:
-a crate move, mechanical, and every era below it reaches the tile table through a
-crate that does not read files. R2 is next and is the type change this whole
-document is named for; R3 is the first thing a player would notice.
+**R2 — and the plan to run it from is
+[`realtime_map.md`](realtime_map.md).** R1 is built: the tile table is
+`openshard-tiles`, a crate with no dependencies at all, and every era below it
+reaches the table through something that does not read files. R2 is the type
+change this whole document is named for; R3 is the first thing a player would
+notice.
 
 **Where the work stands is [`handoffs/`](handoffs/)**, newest last — not here,
 and not in the plan.
