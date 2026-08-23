@@ -48,8 +48,8 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
+use openshard_tiles::TileData;
 use openshard_uofiles::anim::{AnimationFrameIndex, AnimationGroup, BodyKind};
-use openshard_uofiles::tiledata::TileData;
 
 /// The wire's list, as [`Mobile::equipment`] wants it.
 ///

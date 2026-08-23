@@ -198,7 +198,7 @@ impl Stance {
     /// picture was packed. `None` — a post, a tree, a graphic the client ships no
     /// readable wall for — falls back to [`Stance::Upright`], which is exactly
     /// what every static did before faces existed. Nothing gets worse anywhere.
-    pub fn of(tile: &openshard_uofiles::tiledata::StaticTile, facing: Option<crate::facing::Facing>) -> Self {
+    pub fn of(tile: &openshard_tiles::StaticTile, facing: Option<crate::facing::Facing>) -> Self {
         use crate::facing::{Face, Facing};
 
         if tile.flags.is_background() {
@@ -502,7 +502,7 @@ mod tests {
     fn a_corner_facing_becomes_a_corner_stance() {
         use crate::facing::{Face, Facing};
 
-        let wall = openshard_uofiles::tiledata::StaticTile::default();
+        let wall = openshard_tiles::StaticTile::default();
         assert_eq!(
             Stance::of(
                 &wall,

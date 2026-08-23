@@ -237,7 +237,7 @@ mod tests {
     use openshard_movement::scene::Scene;
     use openshard_movement::{Doors, Footing};
     use openshard_protocol::world::Point;
-    use openshard_uofiles::tiledata::TileFlags;
+    use openshard_tiles::TileFlags;
 
     /// The land id a scene paves with, which these fixtures declare to be water.
     ///

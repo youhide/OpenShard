@@ -59,7 +59,7 @@ const REACH: u16 = 48;
 /// The land id is set without a tiledata row on purpose. Harvesting matches the
 /// *id* against ServUO's tables — mountain, sand, water — and what the tile can
 /// do is a second question no test here asks; giving the sea a
-/// [`TileFlags::WATER`](openshard_uofiles::tiledata::TileFlags::WATER) row would
+/// [`TileFlags::WATER`](openshard_tiles::TileFlags::WATER) row would
 /// pull the player who is already standing on it under.
 fn ground(world: &mut World, land: u16, static_at: Option<(u16, i8)>) {
     let mut scene = Scene::flat_holding(START.0 + REACH, START.1 + REACH, 0);

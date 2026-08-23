@@ -33,7 +33,6 @@ use openshard_movement::{
 };
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::{Facet, Point};
-use openshard_uofiles::tiledata::TileData;
 
 /// Chebyshev distances the sampler aims at, in tiles.
 ///
@@ -241,7 +240,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         synthetic();
     }
     let facet = Facet(cli.facet);
-    let tiles = TileData::load(cli.client.join("tiledata.mul"))?;
+    let tiles = openshard_uofiles::tiledata::load(cli.client.join("tiledata.mul"))?.tiles;
     let map: MapSnapshot = openshard_uofiles::map::load_facet(&cli.client, facet)?;
     // The artifact the shard loads, validated the way the shard validates it: a
     // graph that no longer matches its inputs is not a slower answer, it is a

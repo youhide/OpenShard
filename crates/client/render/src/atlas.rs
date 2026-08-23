@@ -22,13 +22,13 @@ use std::fmt;
 use openshard_protocol::feedback::AnimationFrameCount;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::Graphic;
+use openshard_tiles::TileData;
 use openshard_uofiles::anim::{Anim, AnimError, AnimFrame, AnimationFrameIndex};
 use openshard_uofiles::art::{Art, ArtError, LAND_TILE_SIZE, land_row};
 use openshard_uofiles::color::Rgb8;
 use openshard_uofiles::font::{AsciiFonts, FONT_COUNT};
 use openshard_uofiles::image::Image;
 use openshard_uofiles::texmaps::{TexMapError, TexMaps};
-use openshard_uofiles::tiledata::TileData;
 use openshard_uofiles::ttf_font::{TtfFont, TtfGlyph};
 
 /// The atlas texture's side, in pixels.

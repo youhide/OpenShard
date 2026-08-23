@@ -43,7 +43,6 @@ use openshard_uofiles::animdata::AnimData;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::texmaps::TexMaps;
-use openshard_uofiles::tiledata::TileData;
 
 /// The house corner in Britain every lighting question in this repository has
 /// been asked at — `docs/parity.md`'s own coordinate, so the frame this dumps is
@@ -136,7 +135,9 @@ fn draw_britain(
 ) -> Drawn {
     let map = openshard_uofiles::map::read_facet(dir, 0).expect("Felucca");
     let art = Art::open(dir).expect("artLegacyMUL.uop");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
     let animdata = AnimData::load(dir).expect("animdata.mul");
     let animations = StaticAnimations::build(&animdata, &tiledata);
 

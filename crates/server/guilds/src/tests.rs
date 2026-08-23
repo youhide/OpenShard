@@ -38,7 +38,7 @@ fn world() -> WorldState {
         facets,
         default_facet: Facet(0),
         // A shard with no client files: an empty tiledata, not a missing one.
-        tiles: openshard_uofiles::tiledata::TileData::empty(),
+        tiles: openshard_tiles::TileData::empty(),
         multis: openshard_uofiles::multi::Multis::default(),
         players: HashMap::new(),
         connections: HashMap::new(),

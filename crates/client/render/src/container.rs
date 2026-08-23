@@ -24,7 +24,7 @@ use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Graphic;
-use openshard_uofiles::tiledata::TileData;
+use openshard_tiles::TileData;
 
 use crate::atlas::FontAtlas;
 use crate::gump::{GumpArt, GumpAtlas, GumpPixel, Picture};
@@ -467,14 +467,12 @@ mod tests {
     }
 
     /// A table in which the coin piles up and the candle does not.
-    fn stacking() -> openshard_uofiles::tiledata::TileData {
-        let mut tiledata = openshard_uofiles::tiledata::TileData::empty();
+    fn stacking() -> openshard_tiles::TileData {
+        let mut tiledata = openshard_tiles::TileData::empty();
         tiledata.set_static_tile(
             COIN.0,
-            openshard_uofiles::tiledata::StaticTile {
-                flags: openshard_uofiles::tiledata::TileFlags::new(
-                    openshard_uofiles::tiledata::TileFlags::STACKABLE,
-                ),
+            openshard_tiles::StaticTile {
+                flags: openshard_tiles::TileFlags::new(openshard_tiles::TileFlags::STACKABLE),
                 ..Default::default()
             },
         );

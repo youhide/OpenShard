@@ -1657,7 +1657,7 @@ fn the_merge_folds_the_scenes_this_crate_draws() {
 fn a_merged_run_answers_every_ray_the_way_its_own_pieces_did() {
     use openshard_client_render::camera::TileBounds;
     use openshard_client_render::light::{Ambient, Light};
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     /// The row the wall stands on, and the tiles of it.
     const ROW: u16 = 105;
@@ -1789,7 +1789,7 @@ fn a_merged_run_answers_every_ray_the_way_its_own_pieces_did() {
 fn a_ray_through_the_gap_between_two_walls_on_one_tile_passes() {
     use openshard_client_render::camera::TileBounds;
     use openshard_client_render::light::{Ambient, Light};
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     const WALL: (u16, u16) = (105, 105);
     /// The air between the two walls, and the height a ray is asked about.
@@ -1919,7 +1919,7 @@ fn a_ray_through_the_gap_between_two_walls_on_one_tile_passes() {
 fn a_segment_through_two_panes_on_one_tile_is_dimmed_by_both_of_them() {
     use openshard_client_render::camera::TileBounds;
     use openshard_client_render::light::{Ambient, Light};
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     const GLAZING: (u16, u16) = (105, 105);
     const HEIGHT: f32 = 5.0;
@@ -2005,7 +2005,7 @@ fn a_segment_through_two_panes_on_one_tile_is_dimmed_by_both_of_them() {
 fn wall_with_hole(hole: openshard_client_render::facing::Hole) -> occlusion::Occlusion {
     use openshard_client_render::camera::TileBounds;
     use openshard_client_render::facing::{Face, Facing};
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     let mut grid = occlusion::Builder::new(TileBounds {
         min_x: 95,
@@ -2260,7 +2260,7 @@ fn a_point_on_its_own_tiles_far_edge_reads_that_tile_not_the_next_one() {
     use openshard_client_render::facing::Prism;
     use openshard_client_render::occlusion::{Builder, Shape};
     use openshard_protocol::wire::Graphic;
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     let stair = StaticTile {
         flags: TileFlags::new(TileFlags::NO_SHOOT | TileFlags::CLIMBABLE),
@@ -2487,7 +2487,7 @@ fn a_vertical_ray_meets_what_stands_over_it_whatever_shape_it_is() {
     use openshard_client_render::camera::TileBounds;
     use openshard_client_render::facing::{Blocks, Facing};
     use openshard_client_render::light::{Ambient, Light, ShadowRays};
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     // One tile, and one point of it every ray starts from: inside a south
     // panel's own slab, which is the `y` a wall on that edge occupies, so that
@@ -2907,7 +2907,7 @@ impl Oracles {
 fn a_brute_force_oracle_agrees_with_the_walk_over_a_grid_of_lights() {
     use openshard_client_render::occlusion::{Builder, Shape};
     use openshard_protocol::wire::Graphic;
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     let wall = StaticTile {
         flags: TileFlags::new(TileFlags::NO_SHOOT),
@@ -3067,7 +3067,7 @@ fn a_brute_force_oracle_agrees_with_the_walk_over_a_grid_of_lights() {
 fn a_fuzzed_flame_near_a_row_edge_agrees_with_the_brute_force_oracle() {
     use openshard_client_render::occlusion::{Builder, Shape};
     use openshard_protocol::wire::Graphic;
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
     use proptest::prelude::*;
 
     proptest!(ProptestConfig::with_cases(512), |(
@@ -3191,7 +3191,7 @@ fn a_fuzzed_flame_near_a_row_edge_agrees_with_the_brute_force_oracle() {
 fn a_brute_force_oracle_agrees_with_the_exact_walk_over_a_grid_of_lights() {
     use openshard_client_render::occlusion::{Builder, Shape};
     use openshard_protocol::wire::Graphic;
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     let wall = StaticTile {
         flags: TileFlags::new(TileFlags::NO_SHOOT),
@@ -3313,7 +3313,7 @@ fn a_brute_force_oracle_agrees_with_the_exact_walk_over_a_grid_of_lights() {
 fn a_fuzzed_flame_near_a_row_edge_agrees_with_the_brute_force_oracle_through_the_exact_walk() {
     use openshard_client_render::occlusion::{Builder, Shape};
     use openshard_protocol::wire::Graphic;
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
     use proptest::prelude::*;
 
     proptest!(ProptestConfig::with_cases(512), |(
@@ -3611,7 +3611,7 @@ fn a_landing_cut_into_three_primitives_is_not_shadowed_by_its_own_pieces() {
 fn the_pinned_corner_graze_is_blocked_and_all_three_oracles_say_so() {
     use openshard_client_render::occlusion::{Builder, Shape};
     use openshard_protocol::wire::Graphic;
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     // The shrunk seed's own numbers, spelled out: `spot_dx = 3.6040761`,
     // `spot_frac = 0.94628215`, `spot_z = 2.0036669`, `flame_dx = 5.8166175`,
@@ -3760,7 +3760,7 @@ fn the_pinned_corner_graze_is_blocked_and_all_three_oracles_say_so() {
 fn the_second_corner_graze_is_blocked_and_the_sampler_is_the_blind_one() {
     use openshard_client_render::occlusion::{Builder, Shape};
     use openshard_protocol::wire::Graphic;
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     // The shrunk seed's own numbers, spelled out: `spot_dx = 2.3108275`,
     // `spot_frac = 0.14551114`, `spot_z = 6.487659`, `flame_dx = 2.2574825`,
@@ -3934,7 +3934,7 @@ fn a_segment_through_the_corner_two_leaves_meet_at_finds_what_stands_there() {
     use openshard_client_render::light::{Ambient, Light, ShadowRays};
     use openshard_client_render::occlusion::{Builder, Shape, SolidId};
     use openshard_protocol::wire::Graphic;
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     // Eight bodies down the diagonal from (100, 100). Eight because the split is
     // by the median of the centres, so an even run splits in the middle and the

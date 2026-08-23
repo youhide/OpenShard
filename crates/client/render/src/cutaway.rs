@@ -45,7 +45,7 @@ use std::collections::BTreeMap;
 use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
+use openshard_tiles::{StaticTile, TileData, TileFlags};
 
 use crate::depth;
 use crate::geometry::Rect;
@@ -564,7 +564,7 @@ pub fn hides_foliage_over(player_rect: Rect, screen_rect: Rect) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use openshard_uofiles::tiledata::TileFlags;
+    use openshard_tiles::TileFlags;
 
     use super::*;
 
@@ -687,7 +687,9 @@ mod tests {
             return;
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-        let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata.mul")
+            .tiles;
 
         // A block of Britain wide enough to hold whole buildings and the
         // streets between them.
@@ -768,7 +770,9 @@ mod tests {
             return;
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-        let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata.mul")
+            .tiles;
 
         let mut checked = 0;
         for y in 1600..1660u16 {

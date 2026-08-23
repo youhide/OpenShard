@@ -27,7 +27,7 @@
 //! with whatever draws it.
 
 use openshard_protocol::world::Point;
-use openshard_uofiles::tiledata::StaticTile;
+use openshard_tiles::StaticTile;
 
 /// Key units one step of tile depth (`x + y`) is worth.
 ///
@@ -143,7 +143,7 @@ pub fn static_priority_z(z: i8, tile: &StaticTile) -> i32 {
     // ClassicUO's `IsBackground` is `TileFlag.Background`, `0x00000001` — the
     // same bit this workspace named `FLOOR` after Sphere's `UFLAG1_FLOOR`. One
     // bit, two names, and the value is what is asserted.
-    if tile.flags.has(openshard_uofiles::tiledata::TileFlags::FLOOR) {
+    if tile.flags.has(openshard_tiles::TileFlags::FLOOR) {
         priority_z -= 1;
     }
     if tile.height != 0 {
@@ -204,7 +204,7 @@ pub fn mobile_tile(at: Point, from: Option<Point>) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use openshard_uofiles::tiledata::TileFlags;
+    use openshard_tiles::TileFlags;
 
     use super::*;
 

@@ -46,11 +46,11 @@ use openshard_map::map::{LandCell, WorldMap};
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
+use openshard_tiles::TileData;
 use openshard_uofiles::animdata::AnimData;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::texmaps::TexMaps;
-use openshard_uofiles::tiledata::TileData;
 
 /// The post's graphic, and a flame's.
 ///
@@ -314,7 +314,9 @@ fn a_posts_shadow_is_a_quarter_tiles_and_a_lost_footprint_makes_it_a_whole_tiles
         return;
     };
     let art = Art::open(&dir).expect("the client's art");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
     let animdata = AnimData::load(&dir).expect("animdata.mul");
     let animations = openshard_client_render::animate::StaticAnimations::build(&animdata, &tiledata);
 

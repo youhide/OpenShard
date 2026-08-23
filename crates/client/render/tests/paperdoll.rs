@@ -14,9 +14,9 @@ use openshard_client_render::gump::{GumpArt, GumpPixel, PictureIndex};
 use openshard_client_render::mobiles::EquipmentLayer;
 use openshard_client_render::paperdoll::{self, FEMALE_GUMP_OFFSET, MALE_GUMP_OFFSET, Wearer, Whose};
 use openshard_protocol::wire::{Graphic, Hue, Layer};
+use openshard_tiles::{AnimId, TileData};
 use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::gumpart::Gumps;
-use openshard_uofiles::tiledata::{AnimId, TileData};
 
 /// The three files a paperdoll needs, or `None` where no client is installed.
 fn client() -> Option<(Gumps, EquipConv, TileData)> {
@@ -26,7 +26,9 @@ fn client() -> Option<(Gumps, EquipConv, TileData)> {
     // failure — an empty one resolves nothing, which is the ordinary case for
     // most rows anyway.
     let equip_conv = EquipConv::load(dir.join("Equipconv.def")).unwrap_or_default();
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
     Some((gumps, equip_conv, tiledata))
 }
 

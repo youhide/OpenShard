@@ -55,7 +55,7 @@ use openshard_client_render::place::Stance;
 use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, Target};
 use openshard_map::grid::BlockExtent;
 use openshard_protocol::wire::Graphic;
-use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+use openshard_tiles::{StaticTile, TileFlags};
 
 use oracle::boxes::{BoxSpec, box_mesh, box_owner};
 

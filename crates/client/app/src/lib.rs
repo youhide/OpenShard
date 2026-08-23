@@ -182,7 +182,6 @@ use openshard_uofiles::radarcol::RadarColors;
 use openshard_uofiles::skillgrp::SkillGroups;
 use openshard_uofiles::skills::Skills as SkillNames;
 use openshard_uofiles::texmaps::TexMaps;
-use openshard_uofiles::tiledata::TileData;
 use openshard_uofiles::ttf_font::TtfFont;
 use winit::event_loop::{ControlFlow, EventLoop};
 
@@ -511,8 +510,8 @@ pub fn run<D: Dial + Send + 'static>(
         }
     };
     checkpoint("terrain textures opened");
-    let tiledata = match TileData::load(dir.join("tiledata.mul")) {
-        Ok(tiledata) => tiledata,
+    let tiledata = match openshard_uofiles::tiledata::load(dir.join("tiledata.mul")) {
+        Ok(read) => read.tiles,
         Err(error) => {
             eprintln!("opening tiledata.mul: {error}");
             return ExitCode::FAILURE;

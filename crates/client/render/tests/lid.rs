@@ -52,11 +52,11 @@ use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
+use openshard_tiles::TileData;
 use openshard_uofiles::animdata::AnimData;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::texmaps::TexMaps;
-use openshard_uofiles::tiledata::TileData;
 
 /// The pair `docs/parity.md`'s "shard's own furniture" section names by their
 /// real placement — `0x0A97`/`0x0A98` at `(1505, 1656)`/`(1506, 1656)`, both
@@ -90,7 +90,9 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 fn a_bookcases_measured_slab_is_narrower_than_the_whole_tile_and_a_lost_footprint_stands_it_back_up() {
     let Some(dir) = client() else { return };
     let art = Art::open(&dir).expect("the client's art");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
 
     for (id, x, y) in BOOKCASES {
         let image = art
@@ -290,7 +292,9 @@ fn a_real_frames_view_normal_draws_the_bookcases_lid_inside_that_slab() {
         return;
     };
     let art = Art::open(&dir).expect("the client's art");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
     let animdata = AnimData::load(&dir).expect("animdata.mul");
     let animations = openshard_client_render::animate::StaticAnimations::build(&animdata, &tiledata);
 

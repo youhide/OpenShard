@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::tiledata::TileData;
+use openshard_tiles::TileData;
 
 use crate::animate::StaticAnimations;
 #[cfg(test)]
@@ -764,7 +764,7 @@ fn collect_in_with_fades_profiled_with_interior(
 pub(crate) fn push_volumes(
     out: &mut Vec<crate::impostor::Volume>,
     at: Point,
-    tile: &openshard_uofiles::tiledata::StaticTile,
+    tile: &openshard_tiles::StaticTile,
     shape: &crate::occlusion::Shape,
     owner: crate::occlusion::Owner,
     occlusion: &crate::occlusion::Occlusion,
@@ -1262,10 +1262,8 @@ mod tests {
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
             graphic.0,
-            openshard_uofiles::tiledata::StaticTile {
-                flags: openshard_uofiles::tiledata::TileFlags::new(
-                    openshard_uofiles::tiledata::TileFlags::FOLIAGE,
-                ),
+            openshard_tiles::StaticTile {
+                flags: openshard_tiles::TileFlags::new(openshard_tiles::TileFlags::FOLIAGE),
                 ..Default::default()
             },
         );
@@ -1330,7 +1328,7 @@ mod tests {
         );
 
         let mut not_foliage = TileData::empty();
-        not_foliage.set_static_tile(graphic.0, openshard_uofiles::tiledata::StaticTile::default());
+        not_foliage.set_static_tile(graphic.0, openshard_tiles::StaticTile::default());
         assert!(
             super::place(
                 at,
@@ -1895,7 +1893,9 @@ mod tests {
             return;
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-        let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata.mul")
+            .tiles;
         let animdata = AnimData::load(&dir).expect("animdata.mul");
         let mut animations = StaticAnimations::build(&animdata, &tiledata);
 
@@ -2023,7 +2023,9 @@ mod tests {
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
         let art = openshard_uofiles::art::Art::open(&dir).expect("artLegacyMUL.uop");
-        let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata.mul")
+            .tiles;
 
         let camera = Camera::new(Point::new(1495, 1629, 0), 768, 512);
         let animations = StaticAnimations::default();
@@ -2090,7 +2092,9 @@ mod tests {
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
         let art = openshard_uofiles::art::Art::open(&dir).expect("artLegacyMUL.uop");
-        let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata.mul")
+            .tiles;
 
         // Britain by the bank: buildings, walls, floors and signs, which is
         // what makes the ordering worth checking here rather than in a field.
@@ -2152,25 +2156,25 @@ mod tests {
     /// A tiledata entry with the flags and height a test wants —
     /// `occlusion::tests::tile`'s own shape, which cannot be shared across two
     /// test modules and is two lines.
-    fn static_tile(flags: u64, height: u8) -> openshard_uofiles::tiledata::StaticTile {
-        openshard_uofiles::tiledata::StaticTile {
-            flags: openshard_uofiles::tiledata::TileFlags::new(flags),
+    fn static_tile(flags: u64, height: u8) -> openshard_tiles::StaticTile {
+        openshard_tiles::StaticTile {
+            flags: openshard_tiles::TileFlags::new(flags),
             height,
-            ..openshard_uofiles::tiledata::StaticTile::default()
+            ..openshard_tiles::StaticTile::default()
         }
     }
 
     /// A three-tread flight climbing north on tile `(100, 100)`, standing at
     /// `z = 0` — the scene every stair defect in this crate is found on, and the
     /// one `docs/lighting_rebuild.md`'s backlog wants turned into a constructor.
-    fn flight() -> (crate::facing::Prism, openshard_uofiles::tiledata::StaticTile) {
+    fn flight() -> (crate::facing::Prism, openshard_tiles::StaticTile) {
         (
             crate::facing::Prism::new(crate::facing::Face::North, &[1, 3, 5])
                 .expect("three treads is a legal profile"),
             static_tile(
-                openshard_uofiles::tiledata::TileFlags::CLIMBABLE
-                    | openshard_uofiles::tiledata::TileFlags::BLOCK
-                    | openshard_uofiles::tiledata::TileFlags::NO_SHOOT,
+                openshard_tiles::TileFlags::CLIMBABLE
+                    | openshard_tiles::TileFlags::BLOCK
+                    | openshard_tiles::TileFlags::NO_SHOOT,
                 5,
             ),
         )
@@ -2343,9 +2347,9 @@ mod tests {
     fn anything_that_is_not_a_fitted_climbable_stands_as_the_grid_s_own_boxes() {
         let graphic = Graphic(0x0006);
         let tile = static_tile(
-            openshard_uofiles::tiledata::TileFlags::WALL
-                | openshard_uofiles::tiledata::TileFlags::BLOCK
-                | openshard_uofiles::tiledata::TileFlags::NO_SHOOT,
+            openshard_tiles::TileFlags::WALL
+                | openshard_tiles::TileFlags::BLOCK
+                | openshard_tiles::TileFlags::NO_SHOOT,
             20,
         );
         let mut builder = crate::occlusion::Builder::new(grid_bounds());
@@ -2389,7 +2393,7 @@ mod tests {
         // A wall the grid will not hold: no `NO_SHOOT`, no `WINDOW`, so
         // `occlusion::opacity` answers `CLEAR` and `Builder::add` returns before
         // it pushes anything.
-        let tile = static_tile(openshard_uofiles::tiledata::TileFlags::WALL, 20);
+        let tile = static_tile(openshard_tiles::TileFlags::WALL, 20);
         let mut builder = crate::occlusion::Builder::new(grid_bounds());
         builder.add(100, 100, 0, graphic, &tile, crate::occlusion::Shape::UNREAD);
         let occlusion = builder.finish(&Cutaway::OPEN);

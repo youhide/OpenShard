@@ -59,9 +59,9 @@ use std::collections::BTreeMap;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::{Graphic, Hue, Layer};
+use openshard_tiles::AnimId;
 use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::gumpart::Gumps;
-use openshard_uofiles::tiledata::AnimId;
 
 use crate::gump::{GumpArt, GumpPixel, Picture, PictureIndex};
 use crate::items::HIGHLIGHT_HUE;

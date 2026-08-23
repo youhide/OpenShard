@@ -12,7 +12,7 @@ use openshard_map::map::{BLOCK_SIZE, WorldMap};
 use openshard_movement::{MapTerrain, PLAYER_HEIGHT};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
+use openshard_tiles::{StaticTile, TileData, TileFlags};
 
 /// The stable identity of a cell within a baked map block.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -2230,7 +2230,7 @@ fn wall_supports_low_platform(
 /// later graph. A wall normally names a planar barrier; a low wall directly
 /// supporting a platform is the riser of a stage and does not. In particular,
 /// furniture carrying `BLOCK` alone is not considered here.
-fn planar_wall_edges(tile: &openshard_uofiles::tiledata::StaticTile, shape: crate::occlusion::Shape) -> u8 {
+fn planar_wall_edges(tile: &openshard_tiles::StaticTile, shape: crate::occlusion::Shape) -> u8 {
     const WALLISH: u64 = TileFlags::WALL | TileFlags::NO_SHOOT;
     let flags = tile.flags;
     if !flags.has(WALLISH) || flags.is_roof() || flags.is_platform() || flags.has(TileFlags::DOOR) {
@@ -2455,7 +2455,7 @@ mod tests {
     use openshard_map::grid::BlockExtent;
     use openshard_map::map::{LandCell, LandTile, StaticItem};
     use openshard_protocol::wire::{Graphic, Hue};
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     use super::*;
 

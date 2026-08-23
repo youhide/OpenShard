@@ -182,7 +182,7 @@ use openshard_client_render::place::{Kind, Stance};
 use openshard_client_render::renderer::{self, GroundRenderer, MeshFaceRenderer, Target};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+use openshard_tiles::{StaticTile, TileFlags};
 
 use oracle::{Shade, dump, read_gbuffer, segment_clear_of_box};
 

@@ -7,7 +7,6 @@ use clap::Parser;
 use openshard_client_artscan::interiors;
 use openshard_client_render::doors;
 use openshard_protocol::world::Facet;
-use openshard_uofiles::tiledata::TileData;
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -49,7 +48,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let map = openshard_uofiles::map::load_facet(&cli.client, facet)?;
     let stamp = interiors::stamp_of(&cli.client, facet, map.revision())?;
     let graph = interiors::load_baked(&interiors::artifact_path(&cli.client, facet), &stamp)?;
-    let tiles = TileData::load(cli.client.join("tiledata.mul"))?;
+    let tiles = openshard_uofiles::tiledata::load(cli.client.join("tiledata.mul"))?.tiles;
     let table = openshard_client_artscan::load(&cli.client)?;
     for (x, y) in cli.points {
         println!(
@@ -96,7 +95,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 item.z,
                 tile.flags,
                 tile.height,
-                if tile.flags.has(openshard_uofiles::tiledata::TileFlags::DOOR) {
+                if tile.flags.has(openshard_tiles::TileFlags::DOOR) {
                     if doors::is_open(item.tile) {
                         " door=open"
                     } else {

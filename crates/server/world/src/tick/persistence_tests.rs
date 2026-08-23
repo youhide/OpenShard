@@ -1160,8 +1160,8 @@ fn a_classic_house_writes_no_design_rows() {
 #[test]
 fn a_boat_survives_a_restart_with_its_deck() {
     use openshard_movement::scene::Scene;
+    use openshard_tiles::TileFlags;
     use openshard_uofiles::multi::Component;
-    use openshard_uofiles::tiledata::TileFlags;
 
     const SLOOP: u16 = 0x0C;
     const HULL: u16 = 0x3E4E;

@@ -12,7 +12,7 @@ pub use openshard_movement::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
 mod tests {
     use openshard_movement::MapTerrain;
     use openshard_protocol::wire::Layer;
-    use openshard_uofiles::tiledata::TileData;
+    use openshard_tiles::TileData;
 
     /// Point `OPENSHARD_CLIENT` at a UO client install to run this. See
     /// `openshard_movement::terrain`'s own tests for the rest of the coverage —
@@ -38,7 +38,9 @@ mod tests {
             return None;
         }
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("the client's map0 should load");
-        let tiles = TileData::load(dir.join("tiledata.mul")).expect("tiledata should load");
+        let tiles = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata should load")
+            .tiles;
         Some(Install { map, tiles })
     }
 

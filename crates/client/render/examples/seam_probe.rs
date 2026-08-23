@@ -23,7 +23,6 @@ use openshard_client_render::atlas::StaticAtlas;
 use openshard_client_render::occlusion;
 use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
-use openshard_uofiles::tiledata::TileData;
 
 /// How many tiles either side of the named one to print.
 const AROUND: i32 = 1;
@@ -35,7 +34,9 @@ fn main() {
     let cy: i32 = args.next().expect("y").parse().expect("y is a number");
 
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
 
     // The atlas the grid would have: every graphic standing on the tiles below,

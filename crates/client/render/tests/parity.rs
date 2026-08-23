@@ -57,11 +57,11 @@ use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
+use openshard_tiles::TileData;
 use openshard_uofiles::animdata::AnimData;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::texmaps::TexMaps;
-use openshard_uofiles::tiledata::TileData;
 
 /// Three real places with a house on them, named in `docs/parity.md` itself:
 /// the corner `tests/dump.rs` already dumps, the stair corner phase 6 was
@@ -534,7 +534,9 @@ struct Client {
 fn load(dir: PathBuf) -> Client {
     let real_map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
     let animdata = AnimData::load(&dir).expect("animdata.mul");
     let animations = StaticAnimations::build(&animdata, &tiledata);
     let hue_ramp = HueRamp::build(&Hues::load(dir.join("hues.mul")).expect("hues.mul"));

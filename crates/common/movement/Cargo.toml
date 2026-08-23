@@ -19,6 +19,7 @@ openshard-map.workspace = true
 # facet that came out of our own format rather than out of an install, and the
 # stamp it records has to name what it was actually built from.
 openshard-basemap.workspace = true
+openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
 rustc-hash.workspace = true
 

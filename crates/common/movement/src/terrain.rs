@@ -14,7 +14,7 @@ use crate::Tile;
 use openshard_map::map::{LandTile, WorldMap};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::tiledata::{TileData, TileFlags};
+use openshard_tiles::{TileData, TileFlags};
 
 /// How far a walking human can step up.
 ///
@@ -762,7 +762,9 @@ mod tests {
     fn real_install() -> Option<Install> {
         let dir = client_dir()?;
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("the client's map0 should load");
-        let tiles = TileData::load(dir.join("tiledata.mul")).expect("tiledata should load");
+        let tiles = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata should load")
+            .tiles;
         Some(Install { map, tiles })
     }
 

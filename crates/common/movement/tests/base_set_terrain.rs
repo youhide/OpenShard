@@ -26,7 +26,6 @@ use std::path::PathBuf;
 
 use openshard_movement::{MapTerrain, Tile};
 use openshard_protocol::world::{Facet, Point};
-use openshard_uofiles::tiledata::TileData;
 
 /// The client directory, or `None` to skip.
 fn client_dir() -> Option<PathBuf> {
@@ -77,7 +76,9 @@ fn a_base_set_walks_and_sees_exactly_as_the_install_does() {
     // One tile table for both: `tiledata.mul` is not what a base set replaces,
     // and giving the two sides different tables would make this a test of the
     // table instead of a test of the map.
-    let tiles = TileData::load(dir.join("tiledata.mul")).expect("tiledata should load");
+    let tiles = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata should load")
+        .tiles;
     let was: MapTerrain<'_> = MapTerrain::new(installed.map(), &tiles);
     let is: MapTerrain<'_> = MapTerrain::new(restored.map(), &tiles);
 

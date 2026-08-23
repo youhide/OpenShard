@@ -38,8 +38,8 @@ use std::time::Duration;
 use rustc_hash::FxHashMap;
 
 use openshard_protocol::wire::Graphic;
+use openshard_tiles::TileData;
 use openshard_uofiles::animdata::{AnimData, Sequence};
-use openshard_uofiles::tiledata::TileData;
 
 /// How long one step of an animated static's cycle lasts, at an interval of one.
 ///
@@ -332,7 +332,9 @@ mod tests {
             return;
         };
         let animdata = AnimData::load(&dir).expect("animdata.mul");
-        let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata.mul")
+            .tiles;
         let mut animations = StaticAnimations::build(&animdata, &tiledata);
         assert!(animations.len() > 1_000, "only {} animate", animations.len());
 

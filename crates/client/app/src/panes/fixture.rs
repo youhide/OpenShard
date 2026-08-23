@@ -24,13 +24,13 @@ use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::serial::Serial;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::{MapSize, PlayerStart, Point};
+use openshard_tiles::TileData;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::color::Color16;
 use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::image::Image;
 use openshard_uofiles::skillgrp::SkillGroups;
 use openshard_uofiles::skills::Skills;
-use openshard_uofiles::tiledata::TileData;
 
 use crate::panes::{Modifiers, PaneCtx, PaneFiles, PaneFrame};
 use crate::windows::Drawn;

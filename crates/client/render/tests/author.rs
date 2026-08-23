@@ -48,7 +48,6 @@ use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::color::{Color16, Rgb8};
 use openshard_uofiles::image::Image;
-use openshard_uofiles::tiledata::TileData;
 
 /// The staircase's two statics — see `docs/lighting.md`'s backlog, "found on a
 /// staircase in Britain". The two graphics decision 41 was written to give a
@@ -111,7 +110,9 @@ fn what_the_table_says_against_what_the_artist_drew() {
         return;
     };
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
     let path = table_path();
     let text = fs::read_to_string(&path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
     let table = ArtTable::parse(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));

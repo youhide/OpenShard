@@ -31,7 +31,7 @@ use openshard_protocol::direction::Direction;
 use openshard_protocol::items::ItemAmount;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
-use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
+use openshard_tiles::{StaticTile, TileData, TileFlags};
 
 use crate::atlas::StaticAtlas;
 use crate::camera::Camera;

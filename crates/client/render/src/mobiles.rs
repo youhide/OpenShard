@@ -39,9 +39,9 @@
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::{Graphic, Hue, Layer};
 use openshard_protocol::world::Point;
+use openshard_tiles::AnimId;
 use openshard_uofiles::anim::{AnimationFrameIndex, AnimationGroup};
 use openshard_uofiles::equipconv::EquipConv;
-use openshard_uofiles::tiledata::AnimId;
 
 use std::rc::Rc;
 

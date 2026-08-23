@@ -32,7 +32,7 @@ use openshard_client_render::interiors::{BlockRooms, Buildings, Cell, StitchedRo
 use openshard_map::grid::BlockCoord;
 use openshard_map::map::{BLOCK_SIZE, WorldMap};
 use openshard_movement::PLAYER_HEIGHT;
-use openshard_uofiles::tiledata::TileData;
+use openshard_tiles::TileData;
 
 #[derive(Clone, Debug)]
 struct Region {
@@ -99,7 +99,9 @@ fn main() {
         .then_some(regions)
         .unwrap_or_else(Region::defaults);
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
 
     for region in regions {
         measure(&map, &tiledata, &region);
@@ -148,9 +150,8 @@ fn measure(map: &WorldMap, tiledata: &TileData, region: &Region) {
                 statics += 1;
                 let flags = tiledata.static_tile(item.tile.0).flags;
                 roofs += usize::from(flags.is_roof());
-                opaque_non_roofs += usize::from(
-                    !flags.is_roof() && flags.has(openshard_uofiles::tiledata::TileFlags::NO_SHOOT),
-                );
+                opaque_non_roofs +=
+                    usize::from(!flags.is_roof() && flags.has(openshard_tiles::TileFlags::NO_SHOOT));
             }
         }
     }

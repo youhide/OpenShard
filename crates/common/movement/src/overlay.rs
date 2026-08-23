@@ -36,7 +36,7 @@
 
 use rustc_hash::FxHashMap;
 
-use openshard_uofiles::tiledata::StaticTile;
+use openshard_tiles::StaticTile;
 
 use crate::terrain::PLAYER_HEIGHT;
 use crate::walk::Tile;
@@ -356,7 +356,7 @@ impl Cover {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openshard_uofiles::tiledata::TileFlags;
+    use openshard_tiles::TileFlags;
 
     const HERE: Tile = Tile::new(100, 100);
 

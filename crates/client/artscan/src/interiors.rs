@@ -13,7 +13,6 @@ use std::time::UNIX_EPOCH;
 use openshard_client_render::interiors::BuildingMap;
 use openshard_map::snapshot::MapRevision;
 use openshard_protocol::world::Facet;
-use openshard_uofiles::tiledata::TileData;
 
 use crate::{LoadError, load};
 
@@ -168,10 +167,12 @@ pub fn build(client_dir: &Path, facet: Facet) -> Result<(BuildingMap, MapRevisio
         path: client_dir.to_path_buf(),
         source: Box::new(source),
     })?;
-    let tiles = TileData::load(client_dir.join("tiledata.mul")).map_err(|source| Error::Read {
-        path: client_dir.join("tiledata.mul"),
-        source: Box::new(source),
-    })?;
+    let tiles = openshard_uofiles::tiledata::load(client_dir.join("tiledata.mul"))
+        .map_err(|source| Error::Read {
+            path: client_dir.join("tiledata.mul"),
+            source: Box::new(source),
+        })?
+        .tiles;
     let graph = BuildingMap::bake(map.map(), &tiles, &|graphic| table.shape(graphic));
     Ok((graph, map.revision()))
 }

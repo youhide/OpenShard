@@ -49,7 +49,7 @@ use openshard_map::snapshot::MapSnapshot;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
-use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
+use openshard_tiles::{StaticTile, TileData, TileFlags};
 
 use crate::footing::Footing;
 use crate::overlay::{Doors, Overlay};
@@ -204,9 +204,9 @@ impl Scene {
     pub fn land_art(&mut self, tile: u16, flags: u64) -> &mut Self {
         self.tiles.set_land_tile(
             tile,
-            openshard_uofiles::tiledata::LandTile {
+            openshard_tiles::LandTile {
                 flags: TileFlags::new(flags),
-                ..openshard_uofiles::tiledata::LandTile::default()
+                ..openshard_tiles::LandTile::default()
             },
         );
         self

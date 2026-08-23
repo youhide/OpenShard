@@ -23,4 +23,5 @@ openshard-state.workspace = true
 openshard-events.workspace = true
 # The shard's tile and multi tables are typed by the file reader, so a bare
 # `WorldState` literal names them even when it wants both empty.
+openshard-tiles.workspace = true
 openshard-uofiles.workspace = true

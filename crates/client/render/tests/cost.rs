@@ -76,7 +76,6 @@ use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::texmaps::TexMaps;
-use openshard_uofiles::tiledata::TileData;
 
 use openshard_client_render::hue::HueRamp;
 
@@ -309,7 +308,9 @@ fn what_the_lighting_pass_costs_at_the_widest_zoom() {
 
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
 
     let (point, zoom) = frame_point_and_zoom();
     let mut camera = Camera::new(point, VIEWPORT.0, VIEWPORT.1);

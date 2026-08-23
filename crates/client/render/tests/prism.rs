@@ -29,7 +29,6 @@ use openshard_protocol::wire::Graphic;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::color::Color16;
 use openshard_uofiles::image::Image;
-use openshard_uofiles::tiledata::TileData;
 
 use std::path::PathBuf;
 
@@ -68,7 +67,9 @@ fn which_prism_the_art_is_a_picture_of() {
         return;
     };
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
 
     for id in wanted() {
         let Some(picture) = art.static_art(Graphic(id)).expect("the art reads") else {
@@ -169,7 +170,9 @@ fn how_much_of_the_climbable_art_the_prism_model_covers() {
         return;
     };
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
 
     let mut climbable = 0;
     let mut fits = 0;

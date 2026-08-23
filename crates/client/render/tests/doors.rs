@@ -16,11 +16,15 @@
 
 use openshard_client_render::{doors, occlusion};
 use openshard_protocol::wire::Graphic;
-use openshard_uofiles::tiledata::{TileData, TileFlags};
+use openshard_tiles::{TileData, TileFlags};
 
 fn tiledata() -> Option<TileData> {
     let dir = std::env::var_os("OPENSHARD_CLIENT").map(std::path::PathBuf::from)?;
-    Some(TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul"))
+    Some(
+        openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata.mul")
+            .tiles,
+    )
 }
 
 /// Every graphic the table claims is a door in the client's own table.

@@ -18,8 +18,8 @@ use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::serial::SerialKind;
 use openshard_state::rng::Rng;
 use openshard_state::{Dialogue, FacetState, Gameplay, QuestDefs};
+use openshard_tiles::TileFlags;
 use openshard_uofiles::multi::{Component, Multi, Multis};
-use openshard_uofiles::tiledata::TileFlags;
 
 use super::*;
 

@@ -35,6 +35,7 @@ openshard-quests.workspace = true
 openshard-skills.workspace = true
 openshard-state.workspace = true
 openshard-map.workspace = true
+openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
 tracing.workspace = true
 

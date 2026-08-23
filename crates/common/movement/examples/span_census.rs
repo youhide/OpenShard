@@ -22,7 +22,6 @@ use std::time::Instant;
 use clap::Parser;
 use openshard_map::map::WorldMap;
 use openshard_uofiles::surfaces::stand_surfaces;
-use openshard_uofiles::tiledata::TileData;
 
 #[derive(Debug, Parser)]
 struct Cli {
@@ -63,7 +62,7 @@ const BLOCK: u32 = 8;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let tiles = TileData::load(cli.client.join("tiledata.mul"))?;
+    let tiles = openshard_uofiles::tiledata::load(cli.client.join("tiledata.mul"))?.tiles;
     let map: WorldMap = openshard_uofiles::map::read_facet(&cli.client, cli.facet)?;
     let (width, height) = (map.width(), map.height());
     let columns = u64::from(width) * u64::from(height);

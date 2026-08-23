@@ -24,7 +24,7 @@ use openshard_protocol::items::ItemAmount;
 use openshard_protocol::speech::Font;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
-use openshard_uofiles::tiledata::TileData;
+use openshard_tiles::TileData;
 
 use crate::animate::StaticAnimations;
 use crate::atlas::StaticArt;
@@ -127,7 +127,7 @@ pub const STACK_COUNT_FONT: Font = Font(9);
 /// what looks like a heap:
 ///
 /// - **The graphic stacks at all** — `tiledata`'s
-///   [`STACKABLE`](openshard_uofiles::tiledata::TileFlags::STACKABLE). A sword
+///   [`STACKABLE`](openshard_tiles::TileFlags::STACKABLE). A sword
 ///   the shard sent with an amount is one sword, and writing `2` on it would be
 ///   inventing a pile out of a field the wire happens to carry.
 /// - **There is more than one of it.** A single reagent is a reagent, not a
@@ -666,10 +666,8 @@ mod tests {
         let mut tiledata = TileData::empty();
         tiledata.set_static_tile(
             graphic.0,
-            openshard_uofiles::tiledata::StaticTile {
-                flags: openshard_uofiles::tiledata::TileFlags::new(
-                    openshard_uofiles::tiledata::TileFlags::STACKABLE,
-                ),
+            openshard_tiles::StaticTile {
+                flags: openshard_tiles::TileFlags::new(openshard_tiles::TileFlags::STACKABLE),
                 ..Default::default()
             },
         );

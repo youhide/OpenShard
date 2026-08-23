@@ -108,7 +108,7 @@ use openshard_protocol::world::Point;
 
 use crate::facing::{Face, Facing, Hole};
 use openshard_map::map::WorldMap;
-use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
+use openshard_tiles::{StaticTile, TileData, TileFlags};
 
 use crate::camera::TileBounds;
 use crate::cutaway::{self, Cutaway};
@@ -5007,7 +5007,9 @@ mod tests {
             return;
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-        let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata.mul")
+            .tiles;
         // The same block of Britain the cutaway's own tests walk: wide enough to
         // hold whole buildings and the streets between them.
         let (from, to) = ((1470u16, 1600u16), (1530u16, 1660u16));
@@ -5091,7 +5093,9 @@ mod tests {
             return;
         };
         let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
-        let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+        let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata.mul")
+            .tiles;
         let art = openshard_uofiles::art::Art::open(&dir).expect("artLegacyMUL.uop");
 
         // The same eye `tests/cost.rs` measures through, so the two sets of

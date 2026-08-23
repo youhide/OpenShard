@@ -200,7 +200,6 @@ use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Point;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::texmaps::TexMaps;
-use openshard_uofiles::tiledata::TileData;
 
 // The shard's own `items` and `decorations`, without which this tool draws the
 // client's art and none of the server's furniture — see its own doc, and
@@ -597,7 +596,9 @@ fn main() {
 
     let real_map = openshard_uofiles::map::read_facet(&dir, FACET).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
 
     let at = parse_point(&env("OPENSHARD_SCENE_AT"));
     let anchor = (at.x, at.y);

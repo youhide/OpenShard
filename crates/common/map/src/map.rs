@@ -278,7 +278,7 @@ impl WorldMap {
     /// both, and it is what `openshard_movement::scene` is built on.
     ///
     /// It is `pub` and not `#[cfg(test)]` for the reason
-    /// `openshard_uofiles::tiledata::TileData::set_static_tile` is: the tests that want it
+    /// `openshard_tiles::TileData::set_static_tile` is: the tests that want it
     /// are in other crates, and this repository ships no client files to build a
     /// fixture from.
     ///

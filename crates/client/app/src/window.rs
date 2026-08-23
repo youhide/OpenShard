@@ -38,11 +38,11 @@ use openshard_client_render::solids::SolidsRenderer;
 use openshard_client_render::{ground, light, statics};
 use openshard_map::map::WorldMap;
 use openshard_protocol::wire::Graphic;
+use openshard_tiles::TileData;
 use openshard_uofiles::anim::Anim;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::texmaps::TexMaps;
-use openshard_uofiles::tiledata::TileData;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 

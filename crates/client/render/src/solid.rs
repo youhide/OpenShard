@@ -438,7 +438,7 @@ mod tests {
         use crate::cutaway::Cutaway;
         use crate::occlusion::Builder;
         use openshard_protocol::wire::Graphic;
-        use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+        use openshard_tiles::{StaticTile, TileFlags};
 
         let tile = |flags: u64, height: u8| StaticTile {
             flags: TileFlags::new(flags),

@@ -6,7 +6,7 @@ use clap::Parser;
 use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::{Doors, Footing, MapTerrain, NavigationGraph, Overlay, bake};
 use openshard_protocol::world::Facet;
-use openshard_uofiles::tiledata::TileData;
+use openshard_tiles::TileData;
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Build navigation graphs outside shard startup")]
@@ -62,7 +62,7 @@ fn run(mut cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         "navigation bake: reading tiledata.mul from {}",
         cli.client.display()
     );
-    let tiles = TileData::load(cli.client.join("tiledata.mul"))?;
+    let tiles = openshard_uofiles::tiledata::load(cli.client.join("tiledata.mul"))?.tiles;
     for facet in cli.facet.clone() {
         bake_one(&cli, Facet(facet), &tiles)?;
     }

@@ -18,6 +18,7 @@ openshard-protocol.workspace = true
 openshard-state.workspace = true
 # A boat's shape is a multi like a house's, and this is the component type it
 # arrives as through `Terrain::multi_components`.
+openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
 
 [dev-dependencies]

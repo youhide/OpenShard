@@ -50,7 +50,7 @@ use openshard_map::map::WorldMap;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::tiledata::TileData;
+use openshard_tiles::TileData;
 
 use crate::camera::Camera;
 use crate::cutaway::{self, Cutaway};
@@ -815,7 +815,7 @@ pub fn flame(graphic: Graphic) -> Flame {
 /// stops four fifths and does not. A shard's custom lantern goes on burning for
 /// free, and a shard's custom glowing wall stops — which is the conservative
 /// direction, a missing pool being easier to see than sixty invented ones.
-pub fn burns(graphic: Graphic, tile: &openshard_uofiles::tiledata::StaticTile) -> bool {
+pub fn burns(graphic: Graphic, tile: &openshard_tiles::StaticTile) -> bool {
     tile.flags.is_light_source() && crate::occlusion::opacity(graphic, tile) == crate::occlusion::CLEAR
 }
 
@@ -3465,7 +3465,7 @@ mod tests {
     use openshard_map::grid::BlockExtent;
     use openshard_map::map::LandCell;
     use openshard_protocol::wire::Hue;
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     use super::*;
     use openshard_protocol::items::ItemAmount;

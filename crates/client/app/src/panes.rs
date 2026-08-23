@@ -217,7 +217,7 @@ pub struct PaneFiles<'a> {
     pub art: &'a openshard_uofiles::art::Art,
     /// What a graphic *is*: its name for a label, and its layer for a drop onto
     /// a body.
-    pub tiledata: &'a openshard_uofiles::tiledata::TileData,
+    pub tiledata: &'a openshard_tiles::TileData,
     /// The client's gump art, or `None` for an install this build could not
     /// open it from — the paperdoll is the one kind that reads the file itself,
     /// because a doll's body is drawn from a gump rather than from the atlas.

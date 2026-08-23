@@ -52,7 +52,7 @@ use std::collections::hash_map::Entry;
 use rustc_hash::FxHashMap;
 
 use openshard_map::map::{BLOCK_SIZE, WorldMap};
-use openshard_uofiles::tiledata::TileData;
+use openshard_tiles::TileData;
 
 use super::{Builder, Link, Occlusion, SKY_OPEN, Solid};
 use crate::atlas::StaticArt;
@@ -494,7 +494,7 @@ mod tests {
     use openshard_map::map::{LandCell, LandTile, StaticItem};
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_protocol::world::Point;
-    use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+    use openshard_tiles::{StaticTile, TileFlags};
 
     use super::*;
     use crate::facing::Hole;

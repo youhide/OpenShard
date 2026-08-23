@@ -548,7 +548,7 @@ impl App {
                             .tiledata
                             .static_tile(item.tile.0)
                             .flags
-                            .has(openshard_uofiles::tiledata::TileFlags::DOOR)
+                            .has(openshard_tiles::TileFlags::DOOR)
                     })
                     .map(|item| InteriorDoor {
                         at: Point::new(x, y, item.z),

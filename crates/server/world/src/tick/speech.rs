@@ -186,7 +186,7 @@ impl World {
             // Sphere's `GetNameFull`. The amount count decides both the markers and
             // the prefix.
             let amount = self.state.registry.get::<Amount>(target).map_or(1, |a| a.0);
-            let resolved = openshard_uofiles::tiledata::pluralize_name(name, amount > 1);
+            let resolved = openshard_tiles::pluralize_name(name, amount > 1);
             let text = if amount > 1 {
                 format!("{amount} {resolved}")
             } else {

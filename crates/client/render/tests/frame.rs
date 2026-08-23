@@ -53,6 +53,7 @@ use openshard_map::grid::BlockCoord;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
+use openshard_tiles::{StaticTile, TileFlags};
 use openshard_uofiles::anim::{Anim, AnimFrame, AnimationDirection, AnimationFrameIndex, AnimationGroup};
 use openshard_uofiles::art::{Art, LAND_TILE_SIZE, land_row};
 use openshard_uofiles::color::{Color16, Rgb8};
@@ -60,7 +61,6 @@ use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::hues::Hues;
 use openshard_uofiles::image::Image;
 use openshard_uofiles::texmaps::TexMaps;
-use openshard_uofiles::tiledata::{StaticTile, TileData, TileFlags};
 
 /// The client's files, or `None` when the environment does not point at any.
 fn client_dir() -> Option<PathBuf> {
@@ -73,7 +73,9 @@ fn client_dir() -> Option<PathBuf> {
 /// says which of them a land graphic uses.
 fn texmap_atlas(dir: &std::path::Path, wanted: impl IntoIterator<Item = Graphic>) -> TexmapAtlas {
     let texmaps = TexMaps::open(dir).expect("texidx.mul and texmaps.mul");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
     TexmapAtlas::build(&texmaps, &tiledata, wanted).expect("a screen of textures fits")
 }
 
@@ -943,7 +945,9 @@ fn real_map_block_producer_keeps_every_owned_map_tile_after_restore() {
     };
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
     // A dense central-Britain block: a quiet sea block proves only ground.
     let block = BlockCoord { x: 186, y: 203 };
     let key = CompositeKey {
@@ -3038,7 +3042,7 @@ fn a_corner_s_pixel_carries_the_face_of_the_half_it_is_drawn_on() {
             depth: 0.4,
             hue: 0,
             place: Place {
-                stance: Stance::of(&openshard_uofiles::tiledata::StaticTile::default(), sprite.facing),
+                stance: Stance::of(&openshard_tiles::StaticTile::default(), sprite.facing),
                 ..Place::of_static(at)
             },
             twin: 0,
@@ -5437,7 +5441,9 @@ fn britains_statics_cover_part_of_a_frame_that_is_still_whole() {
     };
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let art = Art::open(&dir).expect("artLegacyMUL.uop");
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
     let camera = Camera::new(Point::new(1495, 1629, 0), 768, 512);
 
     let wanted = ground::visible_graphics(&map, &camera);
@@ -5531,7 +5537,9 @@ fn dump_a_frame_of_britain() {
     let centre = Point::new(1495, 1629, 0);
     let camera = Camera::new(centre, 768, 512);
 
-    let tiledata = TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul");
+    let tiledata = openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+        .expect("tiledata.mul")
+        .tiles;
     let wanted = ground::visible_graphics(&map, &camera);
     let atlas = LandAtlas::build(&art, wanted.iter().copied()).expect("fits");
     let texmaps = texmap_atlas(&dir, wanted);
@@ -6984,13 +6992,12 @@ fn the_shader_does_not_stop_a_vertical_ray_with_a_lid_it_is_not_under() {
     // treads divide the tile up `y` — tread 0 over `100.667..101` capped at
     // `z 1`, tread 1 over `100.333..100.667` at `z 3`, tread 2 over
     // `100..100.333` at `z 5`.
-    let stair = openshard_uofiles::tiledata::StaticTile {
-        flags: openshard_uofiles::tiledata::TileFlags::new(
-            openshard_uofiles::tiledata::TileFlags::NO_SHOOT
-                | openshard_uofiles::tiledata::TileFlags::CLIMBABLE,
+    let stair = openshard_tiles::StaticTile {
+        flags: openshard_tiles::TileFlags::new(
+            openshard_tiles::TileFlags::NO_SHOOT | openshard_tiles::TileFlags::CLIMBABLE,
         ),
         height: 20,
-        ..openshard_uofiles::tiledata::StaticTile::default()
+        ..openshard_tiles::StaticTile::default()
     };
     let prism =
         openshard_client_render::facing::Prism::new(openshard_client_render::facing::Face::North, &[1, 3, 5])
@@ -7192,12 +7199,10 @@ fn the_shader_stops_a_vertical_ray_with_the_panel_it_stands_inside() {
         cy,
         0,
         Graphic(0),
-        &openshard_uofiles::tiledata::StaticTile {
-            flags: openshard_uofiles::tiledata::TileFlags::new(
-                openshard_uofiles::tiledata::TileFlags::NO_SHOOT,
-            ),
+        &openshard_tiles::StaticTile {
+            flags: openshard_tiles::TileFlags::new(openshard_tiles::TileFlags::NO_SHOOT),
             height: 20,
-            ..openshard_uofiles::tiledata::StaticTile::default()
+            ..openshard_tiles::StaticTile::default()
         },
         Shape {
             facing: Some(openshard_client_render::facing::Facing::One(
@@ -7259,10 +7264,10 @@ fn a_fragment_a_hair_inside_a_wall_is_shadowed_by_the_cell_it_drifted_into() {
         return;
     };
 
-    let wall = openshard_uofiles::tiledata::StaticTile {
-        flags: openshard_uofiles::tiledata::TileFlags::new(openshard_uofiles::tiledata::TileFlags::NO_SHOOT),
+    let wall = openshard_tiles::StaticTile {
+        flags: openshard_tiles::TileFlags::new(openshard_tiles::TileFlags::NO_SHOOT),
         height: 20,
-        ..openshard_uofiles::tiledata::StaticTile::default()
+        ..openshard_tiles::StaticTile::default()
     };
     let (cx, cy) = (
         openshard_client_render::scene::CENTRE.x,
@@ -8106,15 +8111,13 @@ fn the_shader_meets_what_stands_at_the_corner_two_leaves_meet_at() {
                 tile.1,
                 0,
                 Graphic(0x0100),
-                &openshard_uofiles::tiledata::StaticTile {
-                    flags: openshard_uofiles::tiledata::TileFlags::new(
-                        openshard_uofiles::tiledata::TileFlags::NO_SHOOT,
-                    ),
+                &openshard_tiles::StaticTile {
+                    flags: openshard_tiles::TileFlags::new(openshard_tiles::TileFlags::NO_SHOOT),
                     // Under the run's own eight tiles of extent, so the tree
                     // splits the diagonal in `x` rather than in `z`, where every
                     // one of these boxes sits at the same height.
                     height: 5,
-                    ..openshard_uofiles::tiledata::StaticTile::default()
+                    ..openshard_tiles::StaticTile::default()
                 },
                 Shape::UNREAD,
             );

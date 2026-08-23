@@ -13,6 +13,7 @@ use openshard_client_render::gump::GumpAtlas;
 use openshard_client_render::hue::HueRamp;
 use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::NavigationGraph;
+use openshard_tiles::TileData;
 use openshard_uofiles::anim::Anim;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::cliloc::Cliloc;
@@ -22,7 +23,6 @@ use openshard_uofiles::radarcol::RadarColors;
 use openshard_uofiles::skillgrp::SkillGroups;
 use openshard_uofiles::skills::Skills as SkillNames;
 use openshard_uofiles::texmaps::TexMaps;
-use openshard_uofiles::tiledata::TileData;
 use openshard_uofiles::ttf_font::TtfFont;
 
 /// The client's own asset files, read once at startup and held for the run.

@@ -42,13 +42,13 @@ use openshard_protocol::gump::{ButtonId, GumpButton, GumpLayout, GumpPoint, Swit
 use openshard_protocol::serial::Serial;
 use openshard_protocol::skill::SkillLock;
 use openshard_protocol::wire::{Graphic, Hue, Layer};
+use openshard_tiles::TileData;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::font::AsciiFonts;
 use openshard_uofiles::gumpart::Gumps;
 use openshard_uofiles::skillgrp::SkillGroups;
 use openshard_uofiles::skills::Skills as SkillNames;
-use openshard_uofiles::tiledata::TileData;
 
 /// The colour behind the window: one no gump pixel can be, so that "transparent"
 /// and "black" are two different things in the picture — [`artshot`]'s own
@@ -79,7 +79,9 @@ fn client() -> Option<Client> {
         // Optional in an install, and its absence resolves nothing — which is
         // the ordinary case for most rows anyway.
         equip_conv: EquipConv::load(dir.join("Equipconv.def")).unwrap_or_default(),
-        tiledata: TileData::load(dir.join("tiledata.mul")).expect("tiledata.mul"),
+        tiledata: openshard_uofiles::tiledata::load(dir.join("tiledata.mul"))
+            .expect("tiledata.mul")
+            .tiles,
         fonts: FontAtlas::build(&fonts).expect("ten faces of small glyphs fit an atlas"),
     })
 }

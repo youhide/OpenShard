@@ -1100,7 +1100,7 @@ mod tests {
     use openshard_protocol::speech::{Font, TalkMode};
     use openshard_protocol::wire::{Graphic, Hue, Layer};
     use openshard_protocol::world::Point;
-    use openshard_uofiles::tiledata::AnimId;
+    use openshard_tiles::AnimId;
 
     use super::*;
 

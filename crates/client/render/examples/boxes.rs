@@ -270,7 +270,7 @@ use openshard_client_pathtrace::light as pt_light;
 use openshard_client_pathtrace::trace as pt_trace;
 use openshard_map::grid::BlockExtent;
 use openshard_protocol::wire::Graphic;
-use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+use openshard_tiles::{StaticTile, TileFlags};
 use oracle::boxes::{BoxSpec, box_mesh, box_owner};
 use oracle::{Shade, dump, read_gbuffer, segment_clear_of_box};
 

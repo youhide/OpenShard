@@ -679,7 +679,7 @@ pub struct WorldState {
     /// a pack on a mapless facet.
     ///
     /// **There is always a table.** A shard with no client files gets
-    /// [`TileData::empty`](openshard_uofiles::tiledata::TileData::empty), which is
+    /// [`TileData::empty`](openshard_tiles::TileData::empty), which is
     /// not a stand-in for the file but the file saying nothing: every graphic
     /// defined, unremarkable and weightless. That is the same answer every caller
     /// used to reach for itself when the field was `None`, written once here
@@ -692,7 +692,7 @@ pub struct WorldState {
     /// the `Arc` was what stopped that from being a copy per facet. Nothing is
     /// boxed now — a `MapTerrain` borrows this and the facet's map together at
     /// the question — so there is one holder and nothing to share it with.
-    pub tiles: openshard_uofiles::tiledata::TileData,
+    pub tiles: openshard_tiles::TileData,
     /// Every multi the client knows: what a house or a ship is made of.
     ///
     /// Beside [`tiles`](Self::tiles) and for the same reason — a multi's

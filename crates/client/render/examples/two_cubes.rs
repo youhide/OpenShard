@@ -86,7 +86,7 @@ use openshard_client_render::solids::{Frame, SolidsRenderer, Style};
 use openshard_map::grid::BlockExtent;
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_uofiles::tiledata::{StaticTile, TileFlags};
+use openshard_tiles::{StaticTile, TileFlags};
 
 fn env_opt(name: &str) -> Option<String> {
     std::env::var(name).ok()

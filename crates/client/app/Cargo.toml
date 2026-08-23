@@ -32,6 +32,7 @@ openshard-commands.workspace = true
 # than guessed at again here.
 openshard-movement.workspace = true
 openshard-map.workspace = true
+openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
 # The binary's command line, and the `.env` its options fall back to. Only
 # `main.rs` uses them: the library takes an install and a plan, so a caller with

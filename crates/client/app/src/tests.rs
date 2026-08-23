@@ -479,7 +479,7 @@ fn a_frame_snapshot_reuses_a_mobiles_equipment() {
         false,
     );
     player.equipment = vec![openshard_client_render::mobiles::EquipmentLayer {
-        graphic: openshard_uofiles::tiledata::AnimId(7005),
+        graphic: openshard_tiles::AnimId(7005),
         hue: Hue::NONE,
         layer: openshard_protocol::wire::Layer::TUNIC,
     }]

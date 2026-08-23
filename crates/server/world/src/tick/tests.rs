@@ -48,8 +48,7 @@ pub(super) fn world() -> World {
 }
 
 /// The flags a fixture wall carries: impassable, and a wall for the sight line.
-pub(super) const WALL_FLAGS: u64 =
-    openshard_uofiles::tiledata::TileFlags::WALL | openshard_uofiles::tiledata::TileFlags::BLOCK;
+pub(super) const WALL_FLAGS: u64 = openshard_tiles::TileFlags::WALL | openshard_tiles::TileFlags::BLOCK;
 
 /// A tiledata a fixture can hand a house or a ship: whichever graphics the test
 /// names, with the flags and heights it means them to have.
@@ -59,15 +58,15 @@ pub(super) const WALL_FLAGS: u64 =
 /// agreed with itself about a question the shard asks `tiledata.mul`. One `.mul`
 /// row written here is the same indirection the real file has, so a fixture
 /// cannot test a shortcut the shard does not take.
-pub(super) fn tiles_with(entries: &[(u16, u64, u8)]) -> openshard_uofiles::tiledata::TileData {
-    let mut tiles = openshard_uofiles::tiledata::TileData::empty();
+pub(super) fn tiles_with(entries: &[(u16, u64, u8)]) -> openshard_tiles::TileData {
+    let mut tiles = openshard_tiles::TileData::empty();
     for &(graphic, flags, height) in entries {
         tiles.set_static_tile(
             graphic,
-            openshard_uofiles::tiledata::StaticTile {
-                flags: openshard_uofiles::tiledata::TileFlags::new(flags),
+            openshard_tiles::StaticTile {
+                flags: openshard_tiles::TileFlags::new(flags),
                 height,
-                ..openshard_uofiles::tiledata::StaticTile::default()
+                ..openshard_tiles::StaticTile::default()
             },
         );
     }
@@ -100,7 +99,7 @@ fn a_facet_keeps_the_coarse_router_it_was_given_and_no_other() {
     use openshard_map::snapshot::MapSnapshot;
     use openshard_movement::{LandTile, MapTerrain, NavigationGraph};
     use openshard_protocol::world::Facet;
-    use openshard_uofiles::tiledata::TileData;
+    use openshard_tiles::TileData;
 
     let flat = || {
         WorldMap::from_blocks(BlockExtent { wide: 1, down: 1 }, |_, _| LandCell {
@@ -12282,13 +12281,13 @@ fn single_clicking_a_named_mobile_draws_its_name() {
 /// A real `TileData` and not a hand-written `Terrain`: the name is a row in
 /// `tiledata.mul`, placeholders and all, and the reader that decides `"NoName"`
 /// means *no name* is the one under test.
-fn named(graphic: u16, name: &str) -> openshard_uofiles::tiledata::TileData {
-    let mut tiles = openshard_uofiles::tiledata::TileData::empty();
+fn named(graphic: u16, name: &str) -> openshard_tiles::TileData {
+    let mut tiles = openshard_tiles::TileData::empty();
     tiles.set_static_tile(
         graphic,
-        openshard_uofiles::tiledata::StaticTile {
+        openshard_tiles::StaticTile {
             name: name.to_owned(),
-            ..openshard_uofiles::tiledata::StaticTile::default()
+            ..openshard_tiles::StaticTile::default()
         },
     );
     tiles
@@ -12387,7 +12386,7 @@ fn a_raised_floor() -> Scene {
     // Land id `0` is what a flat scene is paved with, so flagging the id makes
     // the whole square ground nobody stands on — no pass over its cells.
     let mut scene = Scene::flat_holding(START.0 + 4, START.1 + 4, 0);
-    scene.land_art(0, openshard_uofiles::tiledata::TileFlags::BLOCK);
+    scene.land_art(0, openshard_tiles::TileFlags::BLOCK);
     scene.floor(START.0, START.1, 0, 7);
     scene
 }

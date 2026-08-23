@@ -253,7 +253,7 @@ impl World {
                 // files is one whose tiledata says nothing about every graphic,
                 // and saying it once here is what keeps every reader from having
                 // to decide what "no table" means. `with_tiles` replaces both.
-                tiles: openshard_uofiles::tiledata::TileData::empty(),
+                tiles: openshard_tiles::TileData::empty(),
                 multis: openshard_uofiles::multi::Multis::default(),
                 players: HashMap::new(),
                 connections: HashMap::new(),
@@ -390,7 +390,7 @@ impl World {
     #[must_use]
     pub fn with_tiles(
         mut self,
-        tiles: openshard_uofiles::tiledata::TileData,
+        tiles: openshard_tiles::TileData,
         multis: openshard_uofiles::multi::Multis,
     ) -> Self {
         self.state.tiles = tiles;

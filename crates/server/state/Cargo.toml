@@ -30,6 +30,7 @@ openshard-protocol.workspace = true
 # through a re-export. **No file reader comes with it**: D2a's rule is that this
 # crate never holds the multi *table*, and a design is world state that happens
 # to be shaped like one. See `docs/customisation.md`'s C1.
+openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
 
 # `build.rs` only: the body-type, mount and skill tables are `data/*.json` and

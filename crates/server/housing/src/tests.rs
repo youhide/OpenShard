@@ -22,8 +22,8 @@ use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
+use openshard_tiles::{TileData, TileFlags};
 use openshard_uofiles::multi::{Component, Multi, Multis};
-use openshard_uofiles::tiledata::{TileData, TileFlags};
 
 use super::*;
 use openshard_state::{Dialogue, FacetState, Gameplay, QuestDefs, Regions};

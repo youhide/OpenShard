@@ -33,7 +33,7 @@
 use openshard_map::map::WorldMap;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
-use openshard_uofiles::tiledata::TileData;
+use openshard_tiles::TileData;
 use std::time::{Duration, Instant};
 
 use crate::animate::StaticAnimations;

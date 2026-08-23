@@ -68,7 +68,7 @@ use openshard_client_net::view::Mobile;
 use openshard_client_render::doors;
 use openshard_client_render::items::GroundItem;
 use openshard_movement::{Cover, Overlay, Tile};
-use openshard_uofiles::tiledata::TileData;
+use openshard_tiles::TileData;
 
 /// A mobile's body height in z-units — how tall a span a blocker has to reach
 /// into to be in the way. `openshard_movement::PLAYER_HEIGHT`, and the server's
@@ -278,8 +278,11 @@ mod tests {
     fn client_tiledata() -> Option<TileData> {
         let dir = std::path::PathBuf::from(std::env::var_os("OPENSHARD_CLIENT")?);
         let file = dir.join("tiledata.mul");
-        file.exists()
-            .then(|| TileData::load(file).expect("tiledata should load"))
+        file.exists().then(|| {
+            openshard_uofiles::tiledata::load(file)
+                .expect("tiledata should load")
+                .tiles
+        })
     }
 
     #[test]

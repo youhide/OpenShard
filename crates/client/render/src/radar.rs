@@ -1941,7 +1941,7 @@ mod tests {
     use openshard_map::grid::BlockExtent;
     use openshard_map::map::{LandCell, LandTile, StaticItem};
     use openshard_protocol::wire::Hue;
-    use openshard_uofiles::tiledata::LAND_TILE_COUNT;
+    use openshard_tiles::LAND_TILE_COUNT;
     use std::collections::BTreeSet;
 
     /// Land id 1 is green, land id 2 is blue; static 1 is red, static 2 is

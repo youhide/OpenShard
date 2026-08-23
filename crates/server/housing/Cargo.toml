@@ -22,6 +22,7 @@ openshard-state.workspace = true
 # component type already arrives through `Terrain::multi_components`; this is the
 # arithmetic over it, and computing it here instead would be a second copy of
 # what `Multi::center` is derived from.
+openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
 
 [dev-dependencies]

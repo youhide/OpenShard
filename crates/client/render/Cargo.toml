@@ -17,6 +17,7 @@ description = "Draws what the client has been shown: isometric ground, and event
 [dependencies]
 openshard-client-model.workspace = true
 openshard-map.workspace = true
+openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
 openshard-protocol.workspace = true
 # For the walk's pace, and for nothing else: the camera bench walks a scripted

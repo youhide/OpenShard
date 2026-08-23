@@ -2552,6 +2552,7 @@ dependencies = [
  "openshard-movement",
  "openshard-protocol",
  "openshard-state",
+ "openshard-tiles",
  "openshard-uofiles",
 ]
 
@@ -2581,6 +2582,7 @@ dependencies = [
  "openshard-map",
  "openshard-movement",
  "openshard-protocol",
+ "openshard-tiles",
  "openshard-uofiles",
  "pollster",
  "proptest",
@@ -2605,6 +2607,7 @@ dependencies = [
  "openshard-client-render",
  "openshard-map",
  "openshard-protocol",
+ "openshard-tiles",
  "openshard-uofiles",
 ]
 
@@ -2644,6 +2647,7 @@ dependencies = [
  "openshard-map",
  "openshard-movement",
  "openshard-protocol",
+ "openshard-tiles",
  "openshard-uofiles",
  "pollster",
  "proptest",
@@ -2747,6 +2751,7 @@ dependencies = [
  "openshard-gateway",
  "openshard-protocol",
  "openshard-state",
+ "openshard-tiles",
  "openshard-uofiles",
 ]
 
@@ -2760,6 +2765,7 @@ dependencies = [
  "openshard-movement",
  "openshard-protocol",
  "openshard-state",
+ "openshard-tiles",
  "openshard-uofiles",
 ]
 
@@ -2816,6 +2822,7 @@ dependencies = [
  "openshard-basemap",
  "openshard-map",
  "openshard-protocol",
+ "openshard-tiles",
  "openshard-uofiles",
  "proptest",
  "rustc-hash 2.1.3",
@@ -2847,6 +2854,7 @@ dependencies = [
  "openshard-gateway",
  "openshard-protocol",
  "openshard-state",
+ "openshard-tiles",
  "openshard-uofiles",
 ]
 
@@ -2919,6 +2927,7 @@ dependencies = [
  "openshard-protocol",
  "openshard-quests",
  "openshard-state",
+ "openshard-tiles",
  "openshard-uofiles",
  "openshard-world",
  "tokio",
@@ -2951,6 +2960,7 @@ dependencies = [
  "openshard-map",
  "openshard-movement",
  "openshard-protocol",
+ "openshard-tiles",
  "openshard-uofiles",
  "serde",
  "serde_json",
@@ -3000,6 +3010,7 @@ dependencies = [
  "openshard-quests",
  "openshard-skills",
  "openshard-state",
+ "openshard-tiles",
  "openshard-uofiles",
  "serde",
  "serde_json",
