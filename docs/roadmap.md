@@ -543,14 +543,38 @@ second assertion is that the creature went round rather than through — reachin
 the quarry on its own would also pass on a shard that had forgotten bodies
 entirely.
 
+~~**The client plans through bodies.**~~ **Closed.** `clutter::crowd` is the
+client's `crowd_near`: the mobiles in its view, filtered, sorted by tile, built
+at the question and thrown away, and handed to every footing a *step* is decided
+against through `Footing::among` — the held arrow, the click-to-walk plan, and
+the route the HUD draws, which is the same plan. The guide reading keeps
+`Bodies::nobody`, because a bystander must not rewrite a corridor's topology.
+
+What the client had was not a crowd but a *disguise*: `clutter::fill` laid every
+mobile into the overlay as furniture a body's height tall, under a comment
+admitting it was "not a category the shared type names". Two things were wrong
+with it, and the second is why the disguise could never have been made right:
+
+- **Sixteen against fifteen.** A cover blocks `[z, z + height)` and a mobile was
+  given `PLAYER_HEIGHT`; the shard measures body against body with
+  `MOBILE_OVERLAP`, which is one less on purpose. At exactly the boundary this
+  end refused a step the shard allows.
+- **A cover cannot name an exemption.** The overlay has no idea who is asking, so
+  staff and the dead were held to a rule the shard exempts them from.
+
+And the bit that carries the exemption **did not reach the one client that needs
+it**. `stance_of` fills the `0x77`/`0x78`, which is how a client learns about
+*somebody else* — but a client only ever predicts its *own* step, and all three
+senders of the `0x20` wrote `StatusFlags::NONE` into it. A game master learned
+that every other staff member walks through bodies and never that they do. The
+`0x78` a player is sent about itself does carry the byte, which is what let the
+gap survive: it is true until the first step or relocation sends a `0x20` over
+it. All three now read `stance_of`, which is also how a *ghost* is told — death's
+own `0x20` — and that one is not a corner case: a ghost's walk home passes
+through the living, who cannot see it to move aside.
+
 Left open, and none of it blocks anything:
 
-- **The client plans through bodies.** Everything above is the shard's end.
-  `client/app`'s `steer.rs` builds its footings with `Bodies::nobody`, so a
-  click-to-walk route still threads a crowd and the shard refuses it step by
-  step — the same rubber-band, from the other side. The client already has the
-  mobile list (`Clutter` inserts every one at `PLAYER_HEIGHT` for the *drawn*
-  route); what it does not have is a `crowd_near`.
 - **A player does not shove, and in UO a player shoves.** This engine
   hard-blocks, which is not parity and is not invisible: the stock client has
   the mirror of the rule and draws the step we refuse. Its own entry follows.
@@ -579,6 +603,31 @@ Left open, and none of it blocks anything:
   it is the same sweep the entry above says is linear in a decorated town, and
   if that ever needs shrinking, `intend` is the shared function that says
   whether a request steps at all.
+- **Two client diagnostics quietly stopped counting bodies, and they are right
+  to.** `picking_query.rs`'s level marker and `terrain_overlay` both ask
+  `can_fit` over the cluttered footing, so while mobiles were covers a bystander
+  made a tile read "blocked" in a debug wash and on the height diagram. `can_fit`
+  has said all along that "a body is not what this places", so removing them puts
+  the two back in step with their own contract — a diagnostic about the *ground*
+  no longer flickers as people walk about. Written down because it is a visible
+  change nobody asked for, not because it wants undoing.
+- **The client's crowd is built per ask, not per view.** `clutter::fill` is a
+  projection rebuilt when the view changes; `clutter::crowd` is rebuilt at every
+  question, and `Steering::steer` is called on *every raw mouse-move*. It is a
+  screenful of points and a sort, so it does not matter yet — but the two
+  neighbouring functions read the same list on two different clocks, and only one
+  of them has a reason to.
+- **`is_ghost` is the client's whole answer to "is that one dead".** Nothing on
+  the wire says a stranger died; the body id does. That is fine for the crowd,
+  and it is the same pair the drawing reads — but it means a shard that gave a
+  living mobile a ghost body graphic would have it walked through. Worth knowing
+  before anybody writes a spectral NPC.
+- **The `0x20`'s flag byte is now sent and still half-ignored.** The client keeps
+  `Player::war` out of it deliberately (`0x72` is the one home for the stance), so
+  the byte now arrives carrying a war bit that is read from nowhere. That is the
+  honest arrangement — the packet says what the shard sent — but it is the second
+  place `WARMODE` travels, and the note in `view.rs` is the only thing saying
+  which one wins.
 
 ### Backlog: the shove — a rested player pushes past a body rather than stopping at it
 
