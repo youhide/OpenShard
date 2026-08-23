@@ -1656,4 +1656,248 @@ mod tests {
         assert_eq!(terrain.surface_at(0, 4096, 0), None, "past the south edge");
         assert_eq!(terrain.surface_at(u16::MAX, u16::MAX, 0), None);
     }
+
+    /// **The repro `roadmap.md`'s pier-and-bridge backlog asked for, and never
+    /// got.** A survey, not an assertion.
+    ///
+    /// That entry says the `landCheck` guard above "fires, the deck static is
+    /// discarded, and the walker lands on `land_center` — which for a structure
+    /// spanning a drop is often well below the deck", and holds itself back from
+    /// a fix until a repro confirms the fall. This is that repro, run over a
+    /// whole facet rather than over one hand-built pier: for every platform
+    /// static a body could be standing on, it asks whether the guard would
+    /// discard it for a body walking *along* it at its own height, and then asks
+    /// the whole rule where that body actually lands.
+    ///
+    /// The walk it models is the one the report describes — a player already on
+    /// the deck taking the next step along it — so `start_z` and `start_top` are
+    /// the deck's own surface. A body arriving from lower ground is a different
+    /// question and a kinder one: it has less reach, so fewer statics are in
+    /// range at all.
+    ///
+    /// Deliberately **not** asserted, for `boat_step_cost`'s reason one door
+    /// down: what is worth having is the count, on demand, and an assertion over
+    /// a facet's worth of shipped art is an assertion about the art.
+    ///
+    /// ```sh
+    /// cargo test --release -p openshard-movement land_check_survey -- --nocapture --ignored
+    /// ```
+    #[test]
+    #[ignore = "a survey of a whole facet, not an assertion — see the doc comment"]
+    fn land_check_survey() {
+        let Some(install) = real_install() else {
+            eprintln!("OPENSHARD_CLIENT is unset — nothing to survey");
+            return;
+        };
+        let t = install.terrain();
+        let (width, height) = (t.map().width(), t.map().height());
+
+        // Pairs of (tile, platform static) the guard would discard, split by
+        // whether the art is climbable — a pier and a bridge are, a floor is not,
+        // and the backlog entry is about the climbable half.
+        let mut fired = 0_u64;
+        let mut fired_climbable = 0_u64;
+        // Of those, where the whole rule then lands the body *below* the surface
+        // it discarded. This is the number the entry predicts is large, and the
+        // one the guard's own third condition — `land_center > our_z` — argues
+        // cannot happen at all.
+        let mut fell = 0_u64;
+        let mut worst_fall = 0_i32;
+        // And where the rule refuses the tile outright rather than answering with
+        // a height at all — the outcome the backlog entry did not predict.
+        let mut refused = 0_u64;
+        let mut refused_climbable = 0_u64;
+        // Of the refusals, the ones the guard *caused*: the body fits on the
+        // discarded surface, so dropping the guard would have let it stand.
+        let mut walled = 0_u64;
+        let mut walled_climbable = 0_u64;
+        let mut walls: Vec<(u16, u16, i32, i32)> = Vec::new();
+        let mut examples: Vec<(u16, u16, i32, Option<i32>, bool)> = Vec::new();
+
+        for y in 0..height as u16 {
+            for x in 0..width as u16 {
+                if t.map().land(x, y).is_none() || !t.land_is_ground(x, y) {
+                    continue;
+                }
+                let (land_z, land_center, _) = t.land_heights(x, y);
+                for item in t.map().statics_at(x, y) {
+                    let tile = t.tiles().static_tile(item.tile.0);
+                    if !tile.flags.is_platform() {
+                        continue;
+                    }
+                    let climbable = tile.flags.is_climbable();
+                    let base = i32::from(item.z);
+                    let art = i32::from(tile.height);
+                    let (item_top, our_z) = platform_surface(base, art, climbable);
+
+                    // A body standing on this very surface, stepping along it —
+                    // which is what walking a pier is, since the next plank is
+                    // the same art at the same height. `start_surface` and not
+                    // `(our_z, our_z)`: a step reaches from the *top of the art*
+                    // underfoot, so a climbable deck lends its full height to the
+                    // reach and a hand-written pair would model a stricter world
+                    // than the one that ships.
+                    let (start_z, start_top) = t.start_surface(x, y, our_z);
+                    if start_top + MAX_STEP_UP < item_top {
+                        // Out of reach even from its own height: the guard never
+                        // gets to speak, so it is not this entry's case.
+                        continue;
+                    }
+                    let test_top = (start_z + PLAYER_HEIGHT).max(our_z + PLAYER_HEIGHT);
+                    let land_check = base + MAX_STEP_UP.min(art);
+                    let discarded = land_check < land_center && land_center > our_z && test_top > land_z;
+                    if !discarded {
+                        continue;
+                    }
+
+                    fired += 1;
+                    fired_climbable += u64::from(climbable);
+                    let landed = t.check(x, y, start_z, start_top);
+                    let fall = landed.map_or(0, |z| our_z - z);
+                    if fall > 0 {
+                        fell += 1;
+                        worst_fall = worst_fall.max(fall);
+                    }
+                    // The outcome the survey did not go looking for: not a fall
+                    // but a refusal. A body on the deck cannot stand where the
+                    // deck is, so the plank ahead of it is a wall.
+                    if landed.is_none() {
+                        refused += 1;
+                        refused_climbable += u64::from(climbable);
+                        // And the counterfactual that prices the guard: without
+                        // it, this surface is taken exactly when the body fits on
+                        // it. Where that holds, the wall is the guard's own doing
+                        // rather than the art's.
+                        if !t.is_obstructed(x, y, our_z, test_top) {
+                            walled += 1;
+                            walled_climbable += u64::from(climbable);
+                            if walls.len() < 12 && climbable {
+                                walls.push((x, y, our_z, land_center));
+                            }
+                        }
+                    }
+                    if examples.len() < 12 && climbable {
+                        examples.push((x, y, our_z, landed, climbable));
+                    }
+                }
+            }
+        }
+
+        println!("landCheck survey over facet 0, {width}x{height}");
+        println!("  the guard discards a platform:      {fired}");
+        println!("    of those, climbable (pier/bridge): {fired_climbable}");
+        println!("  and the body then lands BELOW it:   {fell} (worst {worst_fall})");
+        println!("  and the tile is refused outright:   {refused} ({refused_climbable} climbable)");
+        println!("    of those, walled BY the guard:    {walled} ({walled_climbable} climbable)");
+        for (x, y, our_z, landed, climbable) in &examples {
+            println!("  ({x},{y}) surface {our_z} climbable={climbable} -> {landed:?}");
+        }
+        println!("  walls the guard makes, on climbable art:");
+        for (x, y, our_z, land_center) in &walls {
+            println!("  ({x},{y}) deck {our_z}, land centre {land_center}");
+        }
+    }
+
+    /// **Where the client draws a body and where the shard puts it, over every
+    /// bridge and pier on the facet.** A survey, not an assertion.
+    ///
+    /// The other half of the pier-and-bridge report, and the half with a
+    /// mechanism that can actually put a player under a deck.
+    /// [`predict_step`](MapTerrain::predict_step) is what the client draws with
+    /// the instant a key goes down, and [`check`](MapTerrain::check) is what the
+    /// shard decides with — and `predict_step` falls back to
+    /// [`predict_z`](MapTerrain::predict_z)'s *nearest surface* where `check`
+    /// refuses. A `0x22` carries no position, so where the two disagree the
+    /// client's guess is what the player keeps looking at until something sends
+    /// a `0x20`. A guess that lands below the deck is a player who watched
+    /// themselves fall through a pier.
+    ///
+    /// Walked over the climbable art specifically, because that is what a pier
+    /// and a bridge are made of and what the report names.
+    ///
+    /// ```sh
+    /// cargo test --release -p openshard-movement predicted_step_survey -- --nocapture --ignored
+    /// ```
+    #[test]
+    #[ignore = "a survey of a whole facet, not an assertion — see the doc comment"]
+    fn predicted_step_survey() {
+        let Some(install) = real_install() else {
+            eprintln!("OPENSHARD_CLIENT is unset — nothing to survey");
+            return;
+        };
+        let t = install.terrain();
+        let (width, height) = (t.map().width(), t.map().height());
+
+        // Steps taken from a climbable surface onto a neighbouring tile.
+        let mut steps = 0_u64;
+        // Where the two ends disagree at all, and where the client's guess is the
+        // lower of the two — the direction that reads as falling through.
+        let mut disagreed = 0_u64;
+        let mut client_lower = 0_u64;
+        let mut worst_drop = 0_i32;
+        let mut examples: Vec<(u16, u16, u16, u16, i32, i32, i32)> = Vec::new();
+
+        for y in 1..height as u16 - 1 {
+            for x in 1..width as u16 - 1 {
+                if t.map().land(x, y).is_none() {
+                    continue;
+                }
+                // Only tiles a body could be standing on a bridge or pier at.
+                let mut decks: Vec<i32> = Vec::new();
+                for item in t.map().statics_at(x, y) {
+                    let tile = t.tiles().static_tile(item.tile.0);
+                    if tile.flags.is_platform() && tile.flags.is_climbable() {
+                        decks.push(platform_surface(i32::from(item.z), i32::from(tile.height), true).1);
+                    }
+                }
+                for deck in decks {
+                    let Ok(deck_z) = i8::try_from(deck) else {
+                        continue;
+                    };
+                    let from = Point { x, y, z: deck_z };
+                    let (start_z, start_top) = t.start_surface(x, y, deck);
+                    for direction in Direction::ALL {
+                        let (dx, dy) = direction.step();
+                        let (nx, ny) = (i32::from(x) + dx, i32::from(y) + dy);
+                        let (Ok(nx), Ok(ny)) = (u16::try_from(nx), u16::try_from(ny)) else {
+                            continue;
+                        };
+                        if t.map().land(nx, ny).is_none() {
+                            continue;
+                        }
+                        // **Only a step the shard allows counts.** A refusal
+                        // comes back as a `0x21`, which carries x, y *and* z, so
+                        // the client is corrected and the disagreement is never
+                        // seen. It is the permitted step that goes uncorrected:
+                        // its `0x22` carries no position, so whatever the client
+                        // guessed is what the player keeps looking at.
+                        let Some(truth) = t.check(nx, ny, start_z, start_top) else {
+                            continue;
+                        };
+                        steps += 1;
+                        let client = t.predict_step(from, nx, ny);
+                        if client != truth {
+                            disagreed += 1;
+                            if client < truth {
+                                client_lower += 1;
+                                let drop = truth - client;
+                                worst_drop = worst_drop.max(drop);
+                                if examples.len() < 12 {
+                                    examples.push((x, y, nx, ny, deck, truth, client));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        println!("predicted-step survey over facet 0, {width}x{height}");
+        println!("  steps taken from a bridge or pier: {steps}");
+        println!("  client and shard disagree:         {disagreed}");
+        println!("  client draws the body LOWER:       {client_lower} (worst {worst_drop})");
+        for (x, y, nx, ny, deck, truth, client) in &examples {
+            println!("  ({x},{y}) deck {deck} -> ({nx},{ny}): shard {truth}, client {client}");
+        }
+    }
 }

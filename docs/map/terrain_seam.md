@@ -646,8 +646,15 @@ a named map, so `Charted` and `Sea` could not stay — and `Sea` was the last
 and its own doc says so: *"`Sea::can_step` below is a single integer comparison,
 so the boat lookup is very nearly the whole of the measured work."* That caveat
 is now obsolete and the recorded 15ns/55ns numbers are stale — the baseline is a
-real `MapTerrain::can_step` reading a real map. **The re-run is owed**, and it is
-one `--ignored` test.
+real `MapTerrain::can_step` reading a real map. ~~**The re-run is owed**, and it is
+one `--ignored` test.~~
+
+**It was run, 2026-08-22, and it came out as this section predicted.** Release,
+100,000 steps: **11.0 ms with no boats against 12.3 ms with one moored** — 110 ns
+against 123 ns a step, so a moored ship costs 13 ns and **12%**, where the reading
+over the `Sea` double said 267%. Both numbers are kept in `obstruct.rs`'s own doc
+comment, because the pair is the point: one probe against two baselines, and only
+one of them was a world.
 
 **Done when:** ~~`grep -rn "dyn Terrain" crates/server` is empty, every one of
 the remaining sites names what it takes, and the `Arc` around the tile table is

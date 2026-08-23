@@ -391,7 +391,7 @@ surfaced on stacked geometry (stairs, house floors). The whole of it is
 `MapTerrain::check` / `start_surface`, ported with the arithmetic audited as
 everywhere else.
 
-### Backlog: a pier or bridge over low ground can drop a walker under it
+### ~~Backlog: a pier or bridge over low ground can drop a walker under it~~ — the mechanism is refuted
 
 `MapTerrain::check`'s `landCheck` guard (`movement/src/terrain.rs:207-217`) is
 ServUO's own `Movement.cs` `landCheck`, ported variable-for-variable and
@@ -431,6 +431,63 @@ drop a boarding player into the sea, which is why that flag stays false. The
 deviation is still a deviation, and taking it is still a decision nobody has
 taken.
 
+#### 🚩 The repro was finally run, 2026-08-23, and **this mechanism does not exist**
+
+Two surveys over the whole of facet 0, both `#[ignore]`d in
+[`terrain.rs`](../crates/common/movement/src/terrain.rs) —
+`land_check_survey` and `predicted_step_survey`. Neither is an assertion, for
+`boat_step_cost`'s reason: an assertion over a facet's worth of shipped art is
+an assertion about the art.
+
+| | |
+|---|---|
+| the guard discards a platform | **2,381** pairs of (tile, static); **596** of them climbable |
+| and the body then lands **below** the surface it discarded | **0** |
+| and the tile is refused outright instead | 722 (378 climbable) |
+| of those, walled *by the guard* — the body would have fit | **242** (71 climbable) |
+
+**The fall cannot happen, and the guard's own third condition is why.**
+`landCenter > ourZ` means the guard only ever fires where the *land is higher
+than the deck*. So discarding the deck moves the body **up** onto the land, never
+down — which is the opposite of what this entry has claimed since it was
+written. The 2026-08-02 report is real; `landCheck` does not explain it.
+
+**And the client is not dropping the body either.** The second survey walks
+every step a body can take off a bridge or pier — 224,950 of them that the shard
+*allows* — and compares `predict_step`, which is what the client draws
+immediately, against `check`, which is what the shard decides. Only permitted
+steps count: a refusal comes back as a `0x21`, which carries x, y **and** z, so
+the client is corrected and never shows it. The permitted step is the one that
+goes uncorrected, because its `0x22` carries no position.
+
+| | |
+|---|---|
+| permitted steps off a bridge or pier | 224,950 |
+| client and shard disagree at all | **77** (0.03%) |
+| client draws the body **lower** | **0** |
+
+**What the guard actually costs is 242 tiles a body cannot enter** — an invisible
+wall, not a fall — and **that is parity, not a defect**: the port is
+character-for-character ServUO's
+(`Scripts/Services/Pathing/Movement.cs:238`, `landCheck = itemZ; if (Height >=
+StepHeight) landCheck += StepHeight; else landCheck += Height;` and the same
+four-clause guard), so the same 242 walls stand on a ServUO shard.
+
+**So the decision this entry was holding itself back for is not owed.** Nothing
+should exempt climbable statics from the guard on the strength of a fall that
+does not happen. What *is* still owed is the report's real cause, and these two
+surveys say where not to look. The suspects left, in order:
+
+- **A boat moored at a pier.** `walk.rs`'s `aboard` takes the *nearest* live
+  surface at any distance and has no reach filter — its own backlog entry, under
+  R3 below. A pier with a ship beside it is exactly the shape that puts a live
+  surface near a body standing on map terrain, and neither survey here can see
+  it: both walk the bare map with no overlay at all.
+- **A multi-step walk**, where a single step is right each time and the sequence
+  drifts. Both surveys measure one step from a known surface.
+- **Arriving rather than walking** — a login, a spawn, a gate or a teleport onto
+  a deck, which reach `spawn_z` and not `check`.
+
 ### Backlog: a mobile is not an obstacle
 
 The step check asks two things — `MapTerrain::check` for the client's files, and
@@ -461,33 +518,21 @@ the tile it is standing on, and staff walking through bodies is the same
 permission as walking through walls — see `gm.rs`, which has no such bypass
 either.
 
-### Backlog: `can_step` does not check the corner, and two obstruct tests are red
+### ~~Backlog: `can_step` does not check the corner, and two obstruct tests are red~~ — closed
 
-Found while moving the tile table out of the file reader (R1), by running the
-whole suite after fixing the gate that used to abort it — these two failures had
-been hiding behind `facet_bare_fields`, which stops the run before
-`openshard-state` is reached.
+**Both are green**, and were closed by the corner-rule repair recorded in
+[`navigation_spans.md`](map/navigation_spans.md#out-of-scope-named) — *"`can_step`
+has no corner rule, and the shard walked a creature with it"*. The two tests in
+`state/src/obstruct.rs` were what found it: they had been asking `can_step` for a
+rule that moved into `steps_out_of` in N3, and the answer taken was that
+**`step_allowed` owns the corner** — which is the "same one for both callers" this
+entry asked for. `a_diagonal_is_refused_when_either_flank_is_blocked` and
+`a_live_terrain_with_no_map_reports_no_water` both ask it now.
 
-Both are in `state/src/obstruct.rs`'s tests and both came in with node E
-(`3aef249e`, `map/terrain_seam: node E — the trait goes, and a search takes a
-Footing`). Neither is a consequence of the tile-table move: R1's only edit to
-that file was the import line.
-
-- **`a_diagonal_is_refused_when_either_flank_is_blocked`** — panics with *"a
-  single blocked flank forbids the corner cut"*. `can_step`
-  (`movement/src/walk.rs:390`) asks the map and then the overlay for the
-  destination tile alone; `corner_open` (`walk.rs:507`) is consulted on the walk
-  path and not from `can_step`. So the rule that stops a body slipping past the
-  corner of a blocked tile is applied to a player's `0x02` and not to a caller
-  that asks `can_step` directly — which is what the server-driven creatures do.
-  The test's expectation is the old composition's, and the question it asks is
-  still the right one: **which layer owns the corner rule**. Whichever answer is
-  taken, it has to be the same one for both callers.
-- **`a_live_terrain_with_no_map_reports_no_water`** — panics on
-  `Option::unwrap()`. It builds `Footing::new(None, …)` and then reads
-  `live.map.unwrap()`. With no map there is no `MapTerrain` to ask, so the
-  assertion cannot be written that way at all; what it means to check is that a
-  shard with no client files has no sea, which is now `live.map.is_none()`.
+Kept as a stub rather than deleted because the entry names the question — *which
+layer owns the corner rule* — and the answer is a deliberate divergence from
+ServUO, which keeps two rules and gives the lax one to creatures. That
+divergence is recorded where it was taken, not here.
 
 ### Backlog from R2, the live layer joining the map
 
@@ -518,6 +563,10 @@ R5.
   which is how `Tile` and `Overlay` came to look like movement's types from the
   outside for as long as they did. It is not R2's to fix — R2 removed the five
   that were lying — but the same reading applies to the rest.
+
+  > **Eight now, not thirty**, worn down by the nodes that came after — era P
+  > moved the search's own types to the modules that declare them. The reading
+  > still applies to the eight; the number in this entry does not.
 
 ### Backlog from R3, a house having floors
 
@@ -4080,6 +4129,12 @@ work had to touch anyway:
   `examples/interior_census.rs` (a useless `i32` conversion). They are warnings
   rather than denials, so CI is green and the claim is stale — either the
   warnings go or the claim does.
+
+  > **Those ten are gone**, swept since. What stands in their place is a
+  > different, shorter list, and it is the one below under *the last of
+  > `navigation_spans.md`'s filed observations* — three files, five findings.
+  > The *claim* is still stale, which is the half of this entry that has never
+  > been closed.
 
 ### Found while taking the last of `navigation_spans.md`'s filed observations
 
