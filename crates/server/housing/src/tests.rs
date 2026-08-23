@@ -11,23 +11,20 @@
 //! What a real file settles is the format, and `uofiles::multi` already gates
 //! that against one.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
-use openshard_entities::Registry;
-use openshard_events::EventBus;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::{Body, Doors};
 use openshard_movement::scene::Scene;
 use openshard_protocol::serial::{Serial, SerialKind};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::{Facet, Point};
-use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
 use openshard_tiles::{TileData, TileFlags};
 use openshard_uofiles::multi::{Component, Multi, Multis};
 
 use super::*;
-use openshard_state::{Dialogue, FacetState, Gameplay, QuestDefs, Regions};
+use openshard_state::{FacetState, Regions};
 
 /// A small world, and the multi id everything here places.
 const SIZE: u32 = 32;
@@ -147,32 +144,7 @@ fn ground_of(components: Vec<Component>, land: u16, fits: bool) -> WorldState {
     let (map, tiles) = ground_scene(land, fits).into_shard(Facet(0));
     let mut facets = BTreeMap::new();
     facets.insert(Facet(0), FacetState::new(Some(map), None, SIZE, SIZE, &tiles));
-    WorldState {
-        registry: Registry::new(),
-        bus: EventBus::new(),
-        facets,
-        default_facet: Facet(0),
-        tiles,
-        multis: multis(components),
-        players: HashMap::new(),
-        connections: HashMap::new(),
-        seen: HashMap::new(),
-        start: (0, 0),
-        rng: Rng::new(1),
-        ticks: 0,
-        hour: 0,
-        worn: Default::default(),
-        outbox: Vec::new(),
-        open_containers: HashMap::new(),
-        trades: Vec::new(),
-        quests: QuestDefs::default(),
-        dialogue: Dialogue::default(),
-        guilds: openshard_state::Guilds::default(),
-        alliances: openshard_state::Alliances::default(),
-        parties: openshard_state::Parties::default(),
-        gameplay: Gameplay::default(),
-        save_requested: false,
-    }
+    WorldState::new(facets, Facet(0), tiles, multis(components), (0, 0), 1)
 }
 
 /// An item on the ground, a container if asked for one.

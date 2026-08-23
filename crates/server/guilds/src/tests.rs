@@ -6,10 +6,9 @@
 //! first. The window's tests add a session row and a `Client`, which is all a
 //! gump needs; where those packets end up is the tick's business.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
-use openshard_entities::{EntityId, Registry};
-use openshard_events::EventBus;
+use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::access::AccessLevel;
 use openshard_protocol::gump::{ButtonId, GumpResponse, RawButtonId, RawGumpId, RawGumpKey};
@@ -18,10 +17,9 @@ use openshard_protocol::serial::SerialKind;
 use openshard_protocol::version::ClientVersion;
 use openshard_protocol::world::Facet;
 use openshard_state::connection::Connection;
-use openshard_state::rng::Rng;
 use openshard_state::{
-    Client, Dialogue, FacetState, Gameplay, GuildCandidate, GuildGumpContext, GuildId, GuildMember,
-    GuildPage, QuestDefs, Rank, TargetPurpose, WorldState,
+    Client, FacetState, GuildCandidate, GuildGumpContext, GuildId, GuildMember, GuildPage, Rank,
+    TargetPurpose, WorldState,
 };
 
 use crate::{Outcome, Refusal, may_lead, roster};
@@ -35,33 +33,15 @@ fn world() -> WorldState {
         Facet(0),
         FacetState::new(None, None, SIZE, SIZE, &openshard_tiles::TileData::empty()),
     );
-    WorldState {
-        registry: Registry::new(),
-        bus: EventBus::new(),
+    WorldState::new(
         facets,
-        default_facet: Facet(0),
+        Facet(0),
         // A shard with no client files: an empty tiledata, not a missing one.
-        tiles: openshard_tiles::TileData::empty(),
-        multis: openshard_uofiles::multi::Multis::default(),
-        players: HashMap::new(),
-        connections: HashMap::new(),
-        seen: HashMap::new(),
-        start: (0, 0),
-        rng: Rng::new(1),
-        ticks: 0,
-        hour: 0,
-        worn: Default::default(),
-        outbox: Vec::new(),
-        open_containers: HashMap::new(),
-        trades: Vec::new(),
-        quests: QuestDefs::default(),
-        dialogue: Dialogue::default(),
-        guilds: openshard_state::Guilds::default(),
-        alliances: openshard_state::Alliances::default(),
-        parties: openshard_state::Parties::default(),
-        gameplay: Gameplay::default(),
-        save_requested: false,
-    }
+        openshard_tiles::TileData::empty(),
+        openshard_uofiles::multi::Multis::default(),
+        (0, 0),
+        1,
+    )
 }
 
 /// A mobile with a serial, which is all a guild records about a member.

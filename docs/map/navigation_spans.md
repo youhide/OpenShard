@@ -1094,19 +1094,30 @@ graph over spans names neither.
   table. Anybody returning to this — N3b, or a future `Stance` that wants to be
   cheaper — should start here rather than from the three options above.
 - **N3 found: `WorldState::tiles` is a public field, and writing it does not
-  rebake.** `FacetState::set_map` moves the ground and its bake together, and
-  `World::with_tiles` rebakes every loaded facet, so both seams are safe. A
-  direct `state.tiles = table` is not: it leaves every facet holding a bake over
-  the old table, which is a shard deciding steps by the heights of a world it no
-  longer has. Three test fixtures do it today, harmlessly (they assign the same
-  table they just baked from). The repair is to make the field private behind a
-  setter that rebakes — the same shape `FacetState::obstructions` already has,
-  and for the same reason. **Still open, and now the only one left**: since
-  [`Ground`](../../crates/common/movement/src/ground.rs) the *ground* can no
-  longer move out from under its bake, so a table written past `with_tiles` is
-  the one remaining way to hold a bake that describes neither world in hand.
-  Six sites write it, all of them fixtures; the sixty-seven that read it are
-  what makes the field private rather than the write.
+  rebake. ✅ Fixed.** `FacetState::set_map` moved the ground and its bake
+  together and `World::with_tiles` rebaked every loaded facet, so both seams
+  were safe; a direct `state.tiles = table` was not, and since
+  [`Ground`](../../crates/common/movement/src/ground.rs) closed the other half
+  — the *ground* can no longer move out from under its bake — it was the one
+  remaining way to hold a bake that describes neither world in hand.
+  **The field is private now**, read through `WorldState::tiles()` and replaced
+  through `WorldState::set_tiles`, which is where the rebake loop moved from
+  `World::with_tiles`: the write and the rebake are one call, so there is
+  nowhere left to do the first without the second.
+  **What it cost is worth recording, because the finding did not see it.** A
+  struct with one private field cannot be written as a literal outside its own
+  module, and `WorldState` was written as one in **five** places — `World::new`
+  and a fixture in each of `party`, `guilds`, `boats`, `housing` — each naming
+  all twenty-four fields, so a field added here had to be added in five places
+  or nowhere. `WorldState::new` is what replaced them: `facets`,
+  `default_facet`, `tiles`, `multis`, `start` and a seed, with everything else
+  starting empty. The four fixtures shed twenty imports between them, which is
+  the measure of how much of each was ceremony.
+  **Done when:** `a_late_tile_table_rebakes_every_facet` in `state/src/runtime.rs`
+  — **two** facets over an empty table, each with a wall the table cannot see, and
+  a `set_tiles` that has to reach both. The control is the loop deleted by hand,
+  where it fails at the first facet; one facet would have passed a rebake that
+  only ever touched the default one.
 - **N3 found: the interiors bake builds two facet-wide span indexes of its
   own.** `PlanarTopology::bake` and `Buildings::bake` in
   `client/render/src/interiors.rs` each take a map and a tile table and now

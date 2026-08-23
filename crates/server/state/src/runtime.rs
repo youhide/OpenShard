@@ -3311,3 +3311,83 @@ impl std::fmt::Debug for WorldState {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use openshard_movement::scene::Scene;
+    use openshard_protocol::direction::Direction;
+    use openshard_tiles::TileData;
+
+    /// One block of flat ground with a wall on (4, 4), and the table that says
+    /// the wall is twenty tall and solid.
+    ///
+    /// Built per facet rather than cloned, because a facet holds its own map and
+    /// a snapshot names the facet it is for.
+    fn walled(facet: Facet) -> (MapSnapshot, TileData) {
+        let mut scene = Scene::flat_holding(7, 7, 0);
+        scene.wall(4, 4, 0, 20);
+        scene.into_shard(facet)
+    }
+
+    /// A tile table that arrives after the facets do rebakes every one of them.
+    ///
+    /// [`WorldState::tiles`] was a public field, and a write to it left each
+    /// loaded facet holding a span bake over the table that had just been
+    /// replaced — a shard deciding steps by the heights of a world it no longer
+    /// has. The wall is the visible half of that: to the empty table it is a
+    /// graphic of no height and no flags, so a body walks over where it stands.
+    ///
+    /// **Two facets, because the loop is the point.** A rebake of the default
+    /// facet alone passes every assertion a one-facet world can make.
+    #[test]
+    fn a_late_tile_table_rebakes_every_facet() {
+        let (first, tiles) = walled(Facet(0));
+        let (second, _) = walled(Facet(1));
+        let mut facets = BTreeMap::new();
+        facets.insert(
+            Facet(0),
+            FacetState::new(Some(first), None, 8, 8, &TileData::empty()),
+        );
+        facets.insert(
+            Facet(1),
+            FacetState::new(Some(second), None, 8, 8, &TileData::empty()),
+        );
+        let mut state = WorldState::new(
+            facets,
+            Facet(0),
+            TileData::empty(),
+            openshard_uofiles::multi::Multis::default(),
+            (0, 0),
+            1,
+        );
+
+        // The step onto the wall, which is the assertion in both directions.
+        let onto_the_wall = |state: &WorldState, facet: Facet| {
+            openshard_movement::step_allowed(
+                &state.footing(facet, Doors::AsTheyStand),
+                Point::new(4, 3, 0),
+                Direction::South,
+            )
+        };
+
+        for facet in [Facet(0), Facet(1)] {
+            assert!(
+                onto_the_wall(&state, facet).is_some(),
+                "the empty table has no wall in it, so facet {} has flat ground here",
+                facet.0
+            );
+        }
+
+        state.set_tiles(tiles);
+
+        for facet in [Facet(0), Facet(1)] {
+            assert!(
+                onto_the_wall(&state, facet).is_none(),
+                "facet {} is still baked over the table it no longer holds",
+                facet.0
+            );
+        }
+    }
+}

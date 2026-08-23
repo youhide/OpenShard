@@ -6,10 +6,8 @@
 //! test the same arithmetic a hundred times over while making the expected
 //! answer impossible to write down.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
-use openshard_entities::Registry;
-use openshard_events::EventBus;
 use openshard_movement::scene::Scene;
 // `Terrain` is in scope for its *methods*: the tests below ask a `LiveTerrain`
 // whether a step is allowed. Nothing here implements it any more.
@@ -17,8 +15,7 @@ use openshard_map::overlay::Doors;
 use openshard_movement::Walker;
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::serial::SerialKind;
-use openshard_state::rng::Rng;
-use openshard_state::{Dialogue, FacetState, Gameplay, QuestDefs};
+use openshard_state::FacetState;
 use openshard_tiles::TileFlags;
 use openshard_uofiles::multi::{Component, Multi, Multis};
 
@@ -104,32 +101,7 @@ fn a_sea() -> WorldState {
     let (map, tiles) = sea().into_shard(Facet(0));
     let mut facets = BTreeMap::new();
     facets.insert(Facet(0), FacetState::new(Some(map), None, SIZE, SIZE, &tiles));
-    WorldState {
-        registry: Registry::new(),
-        bus: EventBus::new(),
-        facets,
-        default_facet: Facet(0),
-        tiles,
-        multis: multis(),
-        players: HashMap::new(),
-        connections: HashMap::new(),
-        seen: HashMap::new(),
-        start: (0, 0),
-        rng: Rng::new(1),
-        ticks: 0,
-        hour: 0,
-        worn: Default::default(),
-        outbox: Vec::new(),
-        open_containers: HashMap::new(),
-        trades: Vec::new(),
-        quests: QuestDefs::default(),
-        dialogue: Dialogue::default(),
-        guilds: openshard_state::Guilds::default(),
-        alliances: openshard_state::Alliances::default(),
-        parties: openshard_state::Parties::default(),
-        gameplay: Gameplay::default(),
-        save_requested: false,
-    }
+    WorldState::new(facets, Facet(0), tiles, multis(), (0, 0), 1)
 }
 
 fn a_captain(state: &mut WorldState) -> (EntityId, Serial) {

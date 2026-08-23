@@ -808,7 +808,9 @@ fn a_house_survives_a_restart_with_its_walls() {
     }
 
     let mut world = World::new(START).with_save_every(0);
-    world.state.set_tiles(super::tests::tiles_with(&[(WALL, super::tests::WALL_FLAGS, 20)]));
+    world
+        .state
+        .set_tiles(super::tests::tiles_with(&[(WALL, super::tests::WALL_FLAGS, 20)]));
     world.state.multis = super::tests::multis_with(COTTAGE, cottage());
     let now = Instant::now();
     let connection = enter(&mut world, now);
@@ -831,7 +833,9 @@ fn a_house_survives_a_restart_with_its_walls() {
 
     // The shard comes back up on that save, with the same terrain.
     let mut restored = World::new(START);
-    restored.state.set_tiles(super::tests::tiles_with(&[(WALL, super::tests::WALL_FLAGS, 20)]));
+    restored
+        .state
+        .set_tiles(super::tests::tiles_with(&[(WALL, super::tests::WALL_FLAGS, 20)]));
     restored.state.multis = super::tests::multis_with(COTTAGE, cottage());
     restored.restore_houses(houses, Vec::new());
 

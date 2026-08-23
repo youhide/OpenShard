@@ -5,10 +5,9 @@
 //! guild rule almost every party rule *sends a packet*, and a test that could
 //! not read the outbox would be asserting half of each one.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
-use openshard_entities::{EntityId, Registry};
-use openshard_events::EventBus;
+use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::access::AccessLevel;
 use openshard_protocol::identity::AccountName;
@@ -17,10 +16,7 @@ use openshard_protocol::serial::{Serial, SerialKind};
 use openshard_protocol::version::ClientVersion;
 use openshard_protocol::world::Facet;
 use openshard_state::connection::Connection;
-use openshard_state::rng::Rng;
-use openshard_state::{
-    Client, Dialogue, FacetState, Gameplay, Name, PartyCandidate, PartyMember, QuestDefs, WorldState,
-};
+use openshard_state::{Client, FacetState, Name, PartyCandidate, PartyMember, WorldState};
 
 use crate::Refusal;
 
@@ -33,33 +29,15 @@ fn world() -> WorldState {
         Facet(0),
         FacetState::new(None, None, SIZE, SIZE, &openshard_tiles::TileData::empty()),
     );
-    WorldState {
-        registry: Registry::new(),
-        bus: EventBus::new(),
+    WorldState::new(
         facets,
-        default_facet: Facet(0),
+        Facet(0),
         // A shard with no client files: an empty tiledata, not a missing one.
-        tiles: openshard_tiles::TileData::empty(),
-        multis: openshard_uofiles::multi::Multis::default(),
-        players: HashMap::new(),
-        connections: HashMap::new(),
-        seen: HashMap::new(),
-        start: (0, 0),
-        rng: Rng::new(1),
-        ticks: 0,
-        hour: 0,
-        worn: Default::default(),
-        outbox: Vec::new(),
-        open_containers: HashMap::new(),
-        trades: Vec::new(),
-        quests: QuestDefs::default(),
-        dialogue: Dialogue::default(),
-        guilds: openshard_state::Guilds::default(),
-        alliances: openshard_state::Alliances::default(),
-        parties: openshard_state::Parties::default(),
-        gameplay: Gameplay::default(),
-        save_requested: false,
-    }
+        openshard_tiles::TileData::empty(),
+        openshard_uofiles::multi::Multis::default(),
+        (0, 0),
+        1,
+    )
 }
 
 /// A player: a serial, a name, and a connection to send packets down.

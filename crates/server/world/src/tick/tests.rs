@@ -16104,7 +16104,10 @@ fn a_designed_house_announces_its_revision_and_answers_the_ask() {
 
     let now = Instant::now();
     let mut world = world();
-    world.state.set_tiles(tiles_with(&[(WALL, WALL_FLAGS, 20), (VILLA_WALL, WALL_FLAGS, 20)]));
+    world.state.set_tiles(tiles_with(&[
+        (WALL, WALL_FLAGS, 20),
+        (VILLA_WALL, WALL_FLAGS, 20),
+    ]));
     world.state.multis = multis_with(COTTAGE, cottage());
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];

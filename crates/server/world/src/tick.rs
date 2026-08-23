@@ -253,36 +253,18 @@ impl World {
             ),
         );
         Self {
-            state: WorldState {
-                guilds: openshard_state::Guilds::default(),
-                alliances: openshard_state::Alliances::default(),
-                parties: openshard_state::Parties::default(),
-                registry: Registry::new(),
-                bus: EventBus::new(),
+            state: WorldState::new(
                 facets,
-                default_facet: Facet(DEFAULT_FACET),
+                Facet(DEFAULT_FACET),
                 // An empty table rather than no table: a shard with no client
                 // files is one whose tiledata says nothing about every graphic,
                 // and saying it once here is what keeps every reader from having
                 // to decide what "no table" means. `with_tiles` replaces both.
-                tiles: openshard_tiles::TileData::empty(),
-                multis: openshard_uofiles::multi::Multis::default(),
-                players: HashMap::new(),
-                connections: HashMap::new(),
-                seen: HashMap::new(),
+                openshard_tiles::TileData::empty(),
+                openshard_uofiles::multi::Multis::default(),
                 start,
-                rng: Rng::new(DEFAULT_SEED),
-                ticks: 0,
-                hour: 0,
-                worn: Default::default(),
-                outbox: Vec::new(),
-                open_containers: HashMap::new(),
-                trades: Vec::new(),
-                quests: openshard_state::QuestDefs::default(),
-                dialogue: openshard_state::Dialogue::default(),
-                gameplay: Gameplay::default(),
-                save_requested: false,
-            },
+                DEFAULT_SEED,
+            ),
             journal: Journal::new(),
             save_every: SAVE_EVERY_TICKS,
             saves: Vec::new(),
