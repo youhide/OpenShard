@@ -481,13 +481,27 @@ fn landing(footing: &Footing<'_>, stance: Stance, to: Point) -> Option<Point> {
 ///
 /// The nearest one to where the body already is, which is a deck's rule: you
 /// step onto it from a pier and down onto it from a mast, and either way you
-/// arrive at the deck. Not [`climbed`]'s rule, because there is nothing to be
-/// higher *than*: the map refused, so any surface at all is better than none.
+/// arrive at the deck. Not [`climbed`]'s rule about being *higher*, because
+/// there is nothing to be higher than: the map refused, so any surface at all is
+/// better than none.
+///
+/// **But the same climb limit**, which it did not always apply. This and
+/// [`climbed`] are the two entrances to the live layer, and which one a tile
+/// gets is decided by whether the *map* had anything to say about it — so a
+/// limit on one and not the other made the reachability of a house's third
+/// storey depend on whether there was water under it. `roadmap.md` filed that
+/// under R3 and doubted a reach filter could be the fix, on the grounds that
+/// `aboard` exists for a body stepping *down* from a mast. It can:
+/// [`Cover::reach`] of a flat surface is its own height, so everything below the
+/// body passes and only the climb is bounded. See
+/// `boarding_from_open_water_ignores_the_climb_limit`, which asserts both halves.
 fn aboard(footing: &Footing<'_>, stance: Stance, to: Point) -> Option<i32> {
     if footing.overlay.is_empty() {
         return None;
     }
-    footing.overlay.surface_at(Tile::new(to.x, to.y), stance.z)
+    footing
+        .overlay
+        .surface_at(Tile::new(to.x, to.y), stance.z, stance.top + MAX_STEP_UP)
 }
 
 /// The highest surface the live world put at `tile` that a body coming from
@@ -574,7 +588,17 @@ pub fn can_fit(footing: &Footing<'_>, tile: Tile, z: i32, height: i32) -> bool {
     }
     // A surface the live world put at exactly this height is a floor the map
     // does not have, so it answers for the map rather than alongside it.
-    if footing.overlay.surface_at(tile, z) == Some(z) {
+    //
+    // Asked directly rather than through `Overlay::surface_at`, which resolves
+    // the *nearest* surface within a reach: this is a placement and not a step,
+    // so there is no body climbing anything and no reach to bound it by. The two
+    // spellings agree — a surface exactly at `z` is the unique nearest — but one
+    // of them says what is being asked.
+    if footing
+        .overlay
+        .surfaces_at(tile)
+        .any(|cover| cover.surface() == z)
+    {
         return true;
     }
     footing.map.is_none_or(|map| map.can_fit(tile, z, height))
@@ -979,6 +1003,74 @@ mod tests {
             }
         );
         assert_eq!(walker.position.z, 2, "the walker believes the terrain");
+    }
+
+    /// **[`aboard`] and [`climbed`] apply one climb limit, not one each.**
+    ///
+    /// They are the two entrances to the live layer and which one a tile gets is
+    /// decided by whether the *map* had anything to say about it — so a limit on
+    /// one and not the other made the reachability of a storey depend on whether
+    /// there was water under it. `aboard` had none: it answered with
+    /// [`Overlay::surface_at`], which was nearest-z and nothing else, so a house
+    /// or a ship laying a surface twenty above the shore was stepped onto from
+    /// the shore in one step.
+    ///
+    /// Filed under R3 in `roadmap.md`, which doubted a reach filter could be the
+    /// fix because `aboard` exists for a body stepping *down* onto a deck from a
+    /// mast. The last two assertions are why that objection does not hold:
+    /// [`Cover::reach`] of a flat surface is its own height, so everything below
+    /// the body passes the filter and only the climb is bounded.
+    #[test]
+    fn boarding_from_open_water_obeys_the_climb_limit() {
+        const SEA: u16 = 0x00A8;
+        let mut scene = crate::scene::Scene::flat_holding(20, 20, 0);
+        scene.land_art(SEA, openshard_tiles::TileFlags::WATER);
+        // Two tiles of open sea, north and south of dry land at z 0.
+        scene.land(10, 9, SEA);
+        scene.land(10, 12, SEA);
+
+        // A storey twenty above the shore, on a tile the map refuses.
+        let mut out_of_reach = Overlay::default();
+        out_of_reach.set(Tile::new(10, 9), vec![Cover::standing(20, 0)]);
+        let high = Footing::new(Some(scene.terrain()), &out_of_reach, Doors::AsTheyStand);
+        assert_eq!(
+            can_step(&high, Point::new(10, 10, 0), Point::new(10, 9, 0)),
+            None,
+            "a body on the shore boarded a surface twenty above it in one step",
+        );
+
+        // A deck within a step of the shore is boarded, which is what `aboard`
+        // is for and what the limit must not take away.
+        let mut a_deck = Overlay::default();
+        a_deck.set(Tile::new(10, 9), vec![Cover::standing(2, 0)]);
+        let low = Footing::new(Some(scene.terrain()), &a_deck, Doors::AsTheyStand);
+        assert_eq!(
+            can_step(&low, Point::new(10, 10, 0), Point::new(10, 9, 0)),
+            Some(Point::new(10, 9, 2)),
+            "a deck two above the shore is within a step and is stepped onto",
+        );
+
+        // And a deck far *below* is still boarded, because reach bounds the
+        // climb and not the descent — the mast-to-deck case, over water.
+        let mut far_below = Overlay::default();
+        far_below.set(Tile::new(10, 12), vec![Cover::standing(-20, 0)]);
+        let down = Footing::new(Some(scene.terrain()), &far_below, Doors::AsTheyStand);
+        assert_eq!(
+            can_step(&down, Point::new(10, 11, 0), Point::new(10, 12, 0)),
+            Some(Point::new(10, 12, -20)),
+            "stepping down onto a deck is not a climb and may not be bounded like one",
+        );
+
+        // The control that says the limit is the *shared* one: the same storey
+        // over ground, where `climbed` is the entrance, is refused the same way.
+        let mut on_dry_land = Overlay::default();
+        on_dry_land.set(Tile::new(10, 11), vec![Cover::standing(20, 0)]);
+        let dry = Footing::new(Some(scene.terrain()), &on_dry_land, Doors::AsTheyStand);
+        assert_eq!(
+            can_step(&dry, Point::new(10, 10, 0), Point::new(10, 11, 0)),
+            Some(Point::new(10, 11, 0)),
+            "over ground the same storey is out of reach and the body stays on the ground",
+        );
     }
 
     #[test]

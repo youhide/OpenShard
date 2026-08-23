@@ -474,13 +474,24 @@ mod tests {
         boats.moor(
             boat,
             [
-                // Two deck tiles at z 2, and a hull tile beside them.
+                // Two deck tiles whose surface is z 2, and a hull tile beside
+                // them.
+                //
+                // **The deck stands two above the shore, and that is the most it
+                // may be.** A walk climbs at most `MAX_STEP_UP`, and these tests
+                // assert a body *walking* aboard from the shore at z 0. The
+                // fixture used to put the surface at 5 and pass, because
+                // `walk::aboard` applied no climb limit at all; it applies the
+                // same one `climbed` does now. See `walk.rs`'s
+                // `boarding_from_open_water_obeys_the_climb_limit`, and
+                // `docs/boats.md` for how a UO player really boards — over the
+                // plank, which teleports rather than steps.
                 (
                     (x, y),
                     Plank {
                         boat,
-                        z: 2,
-                        height: 3,
+                        z: 0,
+                        height: 2,
                         blocks: false,
                     },
                 ),
@@ -488,8 +499,8 @@ mod tests {
                     (x, y + 1),
                     Plank {
                         boat,
-                        z: 2,
-                        height: 3,
+                        z: 0,
+                        height: 2,
                         blocks: false,
                     },
                 ),
@@ -526,12 +537,12 @@ mod tests {
         );
         assert_eq!(
             openshard_movement::can_step(&live, Point::new(10, 0, 0), Point::new(10, 1, 0)),
-            Some(Point::new(10, 1, 5)),
+            Some(Point::new(10, 1, 2)),
             "stepping aboard from the shore lands on the deck, not in the water",
         );
         assert_eq!(
-            openshard_movement::can_step(&live, Point::new(10, 1, 5), Point::new(10, 2, 5)),
-            Some(Point::new(10, 2, 5)),
+            openshard_movement::can_step(&live, Point::new(10, 1, 2), Point::new(10, 2, 2)),
+            Some(Point::new(10, 2, 2)),
             "and walking along the deck stays on it",
         );
     }
@@ -548,7 +559,7 @@ mod tests {
         let live = Footing::new(Some(sea.terrain()), &live_overlay, Doors::AsTheyStand);
 
         assert!(
-            openshard_movement::can_step(&live, Point::new(10, 1, 5), Point::new(11, 1, 5)).is_none(),
+            openshard_movement::can_step(&live, Point::new(10, 1, 2), Point::new(11, 1, 2)).is_none(),
             "walked straight through the hull",
         );
     }

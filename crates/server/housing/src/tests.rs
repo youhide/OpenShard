@@ -26,6 +26,16 @@ use openshard_uofiles::multi::{Component, Multi, Multis};
 use super::*;
 use openshard_state::{FacetState, Regions};
 
+/// A reach no storey in these tests can be out of.
+///
+/// `Overlay::surface_at` bounds the climb as well as choosing the nearest
+/// surface, and what these tests ask is whether a house *laid* a surface at all
+/// — not whether a body standing on the ground could climb to it in one step. A
+/// first floor seven above the ground is deliberately out of a step's reach and
+/// is reached by its stair; asking with a real limit would make these assert the
+/// stair rather than the floor.
+const ANY_REACH: i32 = i32::MAX;
+
 /// A small world, and the multi id everything here places.
 const SIZE: u32 = 32;
 const COTTAGE: u16 = 0x64;
@@ -266,7 +276,7 @@ fn a_house_floor_is_a_surface_and_the_wall_over_it_is_not() {
     let facet = state.facet_state(Facet(0));
     let ground = facet.ground();
     // The first floor: somewhere to stand at z 7, and nothing in the way there.
-    assert_eq!(ground.live().surface_at(Tile::new(12, 12), 0), Some(7));
+    assert_eq!(ground.live().surface_at(Tile::new(12, 12), 0, ANY_REACH), Some(7));
     assert!(
         ground
             .live()
@@ -290,7 +300,7 @@ fn a_house_floor_is_a_surface_and_the_wall_over_it_is_not() {
             .is_some(),
         "the upper-storey wall lets a body walk through it"
     );
-    assert_eq!(ground.live().surface_at(Tile::new(12, 13), 7), None);
+    assert_eq!(ground.live().surface_at(Tile::new(12, 13), 7, ANY_REACH), None);
 }
 
 /// **The risk this node names.** A floor laid exactly on the ground it

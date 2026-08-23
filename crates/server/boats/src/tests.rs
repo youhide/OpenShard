@@ -59,9 +59,23 @@ fn sea() -> Scene {
     for x in 0..scene.width() {
         scene.land(x, 0, SHORE);
     }
-    // The hull is impassable and ten tall, the deck is walked on and three.
+    // The hull is impassable and ten tall, the deck is walked on and two.
+    //
+    // **Two and not three, and the difference is a rule rather than a taste.**
+    // These tests assert that a body *walks* from the shore onto the deck, and a
+    // walk climbs at most `MAX_STEP_UP` — two. A deck three above this sea's
+    // shore is a deck nothing can step onto, so a fixture that used one was
+    // asserting a boarding that the step rule does not permit. It passed because
+    // `walk::aboard` did not apply the limit at all; it does now, and the shape
+    // this fixture is *about* — the map refusing water, the deck overturning
+    // that, the hull refusing again — is unchanged by the height.
+    //
+    // What a real sloop's deck stands at over real water is a separate question
+    // and an open one, filed in `docs/boats.md`: a UO player boards over the
+    // plank, whose `OnMoveOver` teleports them aboard, and this shard has no
+    // plank yet.
     scene.art(HULL, TileFlags::WALL | TileFlags::BLOCK, 10);
-    scene.art(DECK, TileFlags::PLATFORM, 3);
+    scene.art(DECK, TileFlags::PLATFORM, 2);
     scene
 }
 
@@ -155,8 +169,8 @@ fn the_hull_blocks_and_the_deck_carries() {
     place(&mut state, actor, Point::new(20, 20, 0), Facet(0), SLOOP, owner).expect("open water");
 
     let boats = &state.facet_state(Facet(0)).boats();
-    assert_eq!(boats.deck_at(20, 20, 0), Some(3), "the deck plank's own top");
-    assert_eq!(boats.deck_at(20, 21, 0), Some(3), "and the tile behind it");
+    assert_eq!(boats.deck_at(20, 20, 0), Some(2), "the deck plank's own top");
+    assert_eq!(boats.deck_at(20, 21, 0), Some(2), "and the tile behind it");
     assert!(boats.hull_blocks(19, 20, 0), "the port hull");
     assert!(boats.hull_blocks(21, 20, 0), "the starboard hull");
     assert_eq!(boats.deck_at(19, 20, 0), None, "a hull is not a floor");
@@ -361,7 +375,7 @@ fn a_ship_sails_a_tile() {
         Some(Point::new(20, 21, 0)),
     );
     let boats = &state.facet_state(Facet(0)).boats();
-    assert_eq!(boats.deck_at(20, 21, 0), Some(3), "the deck came with it");
+    assert_eq!(boats.deck_at(20, 21, 0), Some(2), "the deck came with it");
     assert!(boats.hull_blocks(19, 21, 0), "and so did the port hull");
     assert!(
         boats.at(20, 20).is_empty() && boats.at(19, 20).is_empty(),
@@ -379,19 +393,19 @@ fn the_deck_carries_whoever_is_standing_on_it() {
     let (actor, owner) = a_captain(&mut state);
     let boat = place(&mut state, actor, Point::new(20, 20, 0), Facet(0), SLOOP, owner).expect("open water");
 
-    // Amidships, feet on the deck at z 3.
-    let sailor = a_walker(&mut state, Point::new(20, 20, 3));
+    // Amidships, feet on the deck at z 2.
+    let sailor = a_walker(&mut state, Point::new(20, 20, 2));
 
     step(&mut state, boat, Direction::South).expect("open water ahead");
 
     assert_eq!(
         state.registry.get::<Position>(sailor).map(|p| p.0),
-        Some(Point::new(20, 21, 3)),
+        Some(Point::new(20, 21, 2)),
         "the sailor stayed on the tile of the ship they were standing on",
     );
     assert_eq!(
         state.facet_state(Facet(0)).sectors.position_of(sailor),
-        Some(Point::new(20, 21, 3)),
+        Some(Point::new(20, 21, 2)),
         "and the sector grid was told, or every nearby query still finds them astern",
     );
 }
@@ -425,7 +439,7 @@ fn a_ship_steered_into_the_shore_stops_and_moves_nobody() {
     let (actor, owner) = a_captain(&mut state);
     // Bow one tile off the beach: north is the shore at y = 0.
     let boat = place(&mut state, actor, Point::new(20, 1, 0), Facet(0), SLOOP, owner).expect("open water");
-    let sailor = a_walker(&mut state, Point::new(20, 1, 3));
+    let sailor = a_walker(&mut state, Point::new(20, 1, 2));
 
     assert_eq!(step(&mut state, boat, Direction::North), Err(Refusal::NotOnWater));
 
@@ -435,12 +449,12 @@ fn a_ship_steered_into_the_shore_stops_and_moves_nobody() {
     );
     assert_eq!(
         state.registry.get::<Position>(sailor).map(|p| p.0),
-        Some(Point::new(20, 1, 3)),
+        Some(Point::new(20, 1, 2)),
         "the crew walked ashore without the ship",
     );
     assert_eq!(
         state.facet_state(Facet(0)).boats().deck_at(20, 1, 0),
-        Some(3),
+        Some(2),
         "the berth it was refused out of is still the berth it is in",
     );
 }
@@ -627,16 +641,16 @@ fn a_body_walks_from_the_shore_onto_the_deck_and_not_through_the_hull() {
     let live = state.footing(Facet(0), Doors::AsTheyStand);
     assert_eq!(
         openshard_movement::can_step(&live, Point::new(20, 0, 0), Point::new(20, 1, 0)),
-        Some(Point::new(20, 1, 3)),
+        Some(Point::new(20, 1, 2)),
         "stepping aboard lands on the deck and not in the water",
     );
     assert_eq!(
-        openshard_movement::can_step(&live, Point::new(20, 1, 3), Point::new(20, 2, 3)),
-        Some(Point::new(20, 2, 3)),
+        openshard_movement::can_step(&live, Point::new(20, 1, 2), Point::new(20, 2, 2)),
+        Some(Point::new(20, 2, 2)),
         "and walking aft stays on it",
     );
     assert!(
-        openshard_movement::can_step(&live, Point::new(20, 1, 3), Point::new(21, 1, 3)).is_none(),
+        openshard_movement::can_step(&live, Point::new(20, 1, 2), Point::new(21, 1, 2)).is_none(),
         "walked straight through the hull",
     );
     assert!(

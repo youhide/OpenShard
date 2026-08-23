@@ -574,18 +574,43 @@ Found while giving `Cover::of_static` its platform arm and teaching `can_step`
 to read the live layer's surfaces
 ([`realtime_map.md`](map/realtime_map.md)'s R3). None of them blocks R4 or R5.
 
-- **`aboard` has no reach filter, and now it lets a house in.** Where the map
-  refuses a tile outright, `walk.rs`'s `aboard` takes the *nearest* live surface
-  at any distance — a deck's rule, written when a deck was the only thing that
-  could be one. A house built over open water now lays surfaces on those tiles
-  too, so a body on the shore can step onto whichever storey happens to be
-  nearest its own z rather than onto the one it could climb to. The fix is not
-  simply to filter by reach: the case `aboard` exists for is a body stepping
-  *down* onto a deck from a mast, and reach does not describe that. What has to
-  be decided is whether "the map put nothing here" and "the map put something
-  here and the live world put something above it" are one rule with two
-  entrances or two rules — R3 built the second one (`climbed`) and left the
-  first alone.
+- **~~`aboard` has no reach filter, and now it lets a house in.~~ ✅ Fixed.**
+  Where the map refuses a tile outright, `walk.rs`'s `aboard` took the *nearest*
+  live surface at any distance — a deck's rule, written when a deck was the only
+  thing that could be one. A house built over open water lays surfaces on those
+  tiles too, so a body on the shore could step onto whichever storey happened to
+  be nearest its own z rather than onto the one it could climb to.
+
+  **The question this entry asked is answered: one rule, two entrances.**
+  `aboard` and `climbed` are reached according to whether the *map* had anything
+  to say about the tile, so a climb limit on one and not the other made the
+  reachability of a storey depend on whether there was water under it. There is
+  one limit now, and `Overlay::surface_at` takes the reach as an argument — the
+  caller's, because how far a body may climb is a *movement* rule and this is the
+  same layering argument that keeps `SpanIndex` out of `openshard-map`.
+
+  **And this entry's own objection to a reach filter does not hold.** It says the
+  filter cannot be the fix because `aboard` exists for a body stepping *down*
+  onto a deck from a mast. `Cover::reach` of a flat surface is its own height, so
+  everything below the body passes the filter at any value: the climb is bounded
+  and the descent is untouched. Asserted both ways in
+  `boarding_from_open_water_obeys_the_climb_limit`, whose control is the limit
+  removed by hand — it then fails at exactly the first assertion.
+
+  **What it cost is two fixtures, and both were asserting a boarding the step
+  rule does not permit.** `boats`'s deck stood three above its shore and
+  `obstruct`'s five, and both passed only because `aboard` applied no limit; a
+  walk climbs at most `MAX_STEP_UP`, which is two. Both now put the deck within a
+  step, which leaves what those tests are *about* — the map refusing water, the
+  deck overturning that, the hull refusing again — unchanged.
+
+  **What is now visible, and is `boats.md`'s:** this shard has no plank. A UO
+  player does not walk aboard over the gunwale — they step on the plank, whose
+  `OnMoveOver` sets `from.Location` and teleports them
+  (`ServUO/Scripts/Multis/Boats/Plank.cs:136`). So "can a body board a real sloop
+  from a real shore" is a question about real deck heights that no test here
+  answers, and the honest answer is that boarding is the plank's job and the
+  plank is not built.
 - **`standing_on` walks the map's start surface a second time.** `map.can_step`
   computes `start_surface(from)` internally and throws it away;
   `climbed` needs the same number to measure reach from, so on any tile with a

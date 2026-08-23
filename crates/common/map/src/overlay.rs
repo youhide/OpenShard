@@ -576,10 +576,20 @@ impl Overlay {
     }
 
     /// The surface a body coming from `near_z` would stand on at `tile`, if the
-    /// live world put one there.
+    /// live world put one within `reach` of it.
     ///
     /// The nearest one to where the body already is, so stepping up onto a deck
     /// from a pier and stepping down onto it from a mast are the same rule.
+    ///
+    /// **`reach` is the caller's, and that is deliberate.** How far a body may
+    /// climb is a *movement* rule — the same argument that keeps `SpanIndex` in
+    /// `openshard-movement` and out of this crate — so this takes the edge as a
+    /// number rather than reading `MAX_STEP_UP` itself. What it owns is the
+    /// choice among what qualifies, which is the half that must not be written
+    /// twice. [`Cover::reach`] is what is measured against it, so a surface
+    /// *below* the body always qualifies and only the climb is bounded: the
+    /// mast-to-deck descent this method exists for is untouched by any value of
+    /// `reach`.
     ///
     /// **A tie goes to the lower surface**, which is a rule rather than an
     /// accident: two surfaces equidistant from `near_z` — a floor a body's
@@ -590,8 +600,9 @@ impl Overlay {
     /// its reason is this one: a landing may not depend on which layer of the
     /// world was read first.
     #[must_use]
-    pub fn surface_at(&self, tile: Tile, near_z: i32) -> Option<i32> {
+    pub fn surface_at(&self, tile: Tile, near_z: i32, reach: i32) -> Option<i32> {
         self.surfaces_at(tile)
+            .filter(|cover| cover.reach() <= reach)
             .map(|cover| cover.surface())
             .min_by_key(|&surface| ((surface - near_z).abs(), surface))
     }
@@ -619,6 +630,17 @@ mod tests {
     use openshard_tiles::TileFlags;
 
     const HERE: Tile = Tile::new(100, 100);
+
+    /// A reach no surface in these tests can be out of.
+    ///
+    /// [`Overlay::surface_at`] answers two things at once — *which* surfaces are
+    /// candidates, and *which of them* is nearest — and the tests below are
+    /// about the second. Handing them a limit that refuses nothing is what keeps
+    /// them about it: a test of the tie-break that also happened to be applying a
+    /// climb limit would pass for the wrong reason the day the limit changed.
+    /// Movement's own limit is asserted where it belongs, in `walk.rs`'s
+    /// `boarding_from_open_water_ignores_the_climb_limit`.
+    const ANY_REACH: i32 = i32::MAX;
 
     /// A person, as `openshard-movement` asks about one. Spelled here so the
     /// tests read like the call sites do; the constant itself is movement's.
@@ -673,14 +695,18 @@ mod tests {
         let mut overlay = Overlay::default();
         overlay.set(HERE, vec![Cover::standing(-2, 5)]);
 
-        assert_eq!(overlay.surface_at(HERE, 0), Some(3));
+        assert_eq!(overlay.surface_at(HERE, 0, ANY_REACH), Some(3));
         assert!(
             overlay.blocker_at(HERE, person(3), Doors::AsTheyStand).is_none(),
             "a body standing on the deck is not blocked by the deck"
         );
 
         overlay.set(HERE, vec![Cover::standing(-2, 5), Cover::blocking(3, 12)]);
-        assert_eq!(overlay.surface_at(HERE, 0), Some(3), "the crate is not a surface");
+        assert_eq!(
+            overlay.surface_at(HERE, 0, ANY_REACH),
+            Some(3),
+            "the crate is not a surface"
+        );
         assert!(overlay.blocker_at(HERE, person(3), Doors::AsTheyStand).is_some());
     }
 
@@ -717,8 +743,8 @@ mod tests {
         let mut overlay = Overlay::default();
         overlay.set(HERE, vec![Cover::standing(-2, 5), Cover::standing(40, 2)]);
 
-        assert_eq!(overlay.surface_at(HERE, 0), Some(3));
-        assert_eq!(overlay.surface_at(HERE, 50), Some(42));
+        assert_eq!(overlay.surface_at(HERE, 0, ANY_REACH), Some(3));
+        assert_eq!(overlay.surface_at(HERE, 50, ANY_REACH), Some(42));
     }
 
     /// Two surfaces the same distance away, and the answer may not be the order
@@ -730,12 +756,12 @@ mod tests {
         let mut overlay = Overlay::default();
         // Floors at 0 and 20, asked about from the middle: 10 is ten from both.
         overlay.set(HERE, vec![Cover::standing(-1, 1), Cover::standing(19, 1)]);
-        assert_eq!(overlay.surface_at(HERE, 10), Some(0));
+        assert_eq!(overlay.surface_at(HERE, 10, ANY_REACH), Some(0));
 
         // The same two floors, registered the other way round.
         overlay.set(HERE, vec![Cover::standing(19, 1), Cover::standing(-1, 1)]);
         assert_eq!(
-            overlay.surface_at(HERE, 10),
+            overlay.surface_at(HERE, 10, ANY_REACH),
             Some(0),
             "the answer followed the order the components were registered in"
         );
@@ -849,7 +875,7 @@ mod tests {
 
         let mut overlay = Overlay::default();
         overlay.set(HERE, floor.into_iter().collect());
-        assert_eq!(overlay.surface_at(HERE, 0), Some(7));
+        assert_eq!(overlay.surface_at(HERE, 0, ANY_REACH), Some(7));
         assert!(
             overlay.blocker_at(HERE, person(7), Doors::AsTheyStand).is_none(),
             "a body standing on the floor is not blocked by it"
