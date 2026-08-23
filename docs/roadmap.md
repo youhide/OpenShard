@@ -4081,6 +4081,23 @@ work had to touch anyway:
   rather than denials, so CI is green and the claim is stale — either the
   warnings go or the claim does.
 
+### Found while taking the last of `navigation_spans.md`'s filed observations
+
+- **Nothing checks an intra-doc link.** `steer.rs` carried `[`Ground::real`]`
+  and `[`Ground::through_doors`]` — two fields that stopped existing when the
+  pair of terrains became one `Footing` — and both survived every `cargo test`,
+  `cargo clippy` and CI run since. `cargo doc` is not one of the three commands
+  `CLAUDE.md` names, and `rustdoc::broken_intra_doc_links` is a *rustdoc* lint,
+  so nothing fires it. Either the workspace lint table gains it and `cargo doc`
+  joins CI, or every `[`Type::member`]` in this repo is prose that happens to
+  have brackets round it. They were found by reading, which does not scale.
+- **`cargo clippy --workspace --all-targets` is still not silent**, and none of
+  what is left is that session's: `common/uofiles/src/map.rs` (a needless
+  borrow), `client/render/tests/traced.rs` (three borrowed expressions that
+  implement the trait already), and `client/app/src/link.rs` (a 640-byte
+  difference between enum variants). The first three are a parallel session's
+  open files, which is why they were left rather than swept.
+
 ## Later
 
 LLM NPCs, quest generation, GM assistant, Discord integration. All optional, all
