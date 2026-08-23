@@ -475,8 +475,8 @@ that file was the import line.
 
 - **`a_diagonal_is_refused_when_either_flank_is_blocked`** — panics with *"a
   single blocked flank forbids the corner cut"*. `can_step`
-  (`movement/src/walk.rs:404`) asks the map and then the overlay for the
-  destination tile alone; `corner_open` (`walk.rs:512`) is consulted on the walk
+  (`movement/src/walk.rs:390`) asks the map and then the overlay for the
+  destination tile alone; `corner_open` (`walk.rs:507`) is consulted on the walk
   path and not from `can_step`. So the rule that stops a body slipping past the
   corner of a blocked tile is applied to a player's `0x02` and not to a caller
   that asks `can_step` directly — which is what the server-driven creatures do.
@@ -488,6 +488,33 @@ that file was the import line.
   `live.map.unwrap()`. With no map there is no `MapTerrain` to ask, so the
   assertion cannot be written that way at all; what it means to check is that a
   shard with no client files has no sea, which is now `live.map.is_none()`.
+
+### Backlog from R2, the live layer joining the map
+
+Found while moving `Overlay` and its friends into `openshard-map`
+([`realtime_map.md`](map/realtime_map.md)'s R2). None of them blocks R3, R4 or
+R5.
+
+- **`Resources::map()` borrows the whole struct where a field borrowed itself.**
+  The client's map is behind a method now, because `World`'s base is optional
+  for a shard's sake and a client can never be that shard. A `&self` method is
+  opaque to the borrow checker's field disjointness, so a caller wanting
+  `&mut resources.<anything>` beside the map has to hoist — `window.rs`'s atlas
+  rebuild already did. If a second one appears, the answer is a free function
+  over `&Resources::world` rather than another hoist: that borrows one field,
+  exactly as the old `resources.map` did.
+- **`World` has no way to publish a patch.** `MapSnapshot::publish` wants
+  `&mut self` and `World::snapshot` hands out a `&`. Nothing in production
+  publishes yet — only `openshard-map`'s own tests do — so the accessor was left
+  unwritten rather than guessed at. Era S is what needs it, and what it should
+  look like is a question about who is allowed to move a facet's revision, not
+  about the borrow.
+- **`openshard-movement`'s `lib.rs` is still thirty `pub use` lines.**
+  [`style.md`](style.md) asks that a type be imported from the module that
+  declares it; the crate's root re-exports its own private modules wholesale,
+  which is how `Tile` and `Overlay` came to look like movement's types from the
+  outside for as long as they did. It is not R2's to fix — R2 removed the five
+  that were lying — but the same reading applies to the rest.
 
 ### Backlog: a sector lookup is linear in a bucket, and a house makes the bucket fat
 

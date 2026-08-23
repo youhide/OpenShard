@@ -50,23 +50,34 @@ means by *"an overlay is not a terrain"*, and what
 that it is stated once, for all three layers at once, by the type that holds
 them — instead of being remembered separately by each bake.
 
-### What is assembled at the reader today
+### What was assembled at the reader, and is not any more
 
-Both ends compose the layers themselves, and neither composes them the same way:
+Both ends used to compose the layers themselves, and neither composed them the
+same way:
 
 ```text
 server   FacetState { map: Option<MapSnapshot>, overlay: Overlay,
                       obstructions, boats, coarse, sectors, regions, … }
-client   Resources  { map: Arc<WorldMap>, … }  +  clutter::of(view) -> Overlay
+client   Resources  { map: MapSnapshot, … }  +  clutter::of(view) -> Overlay
 ```
 
 The server's overlay is a projection kept in step by `FacetState::refresh`; the
-client's is built whole and thrown away whole, per view. That much is *right* —
-they have different lifetimes because the two ends know different things. What
-is wrong is that the map and the layer over it are two values a caller carries
-in a pair, so every new reader is another place to forget one of them. E made
-the *contents* of that layer one type. This era makes the **holding** of it one
-type as well.
+client's is built whole and thrown away whole, per view. That much was always
+*right* — they have different lifetimes because the two ends know different
+things. What was wrong is that the map and the layer over it were two values a
+caller carried in a pair, so every new reader was another place to forget one of
+them. E made the *contents* of that layer one type;
+[`realtime_map.md`](realtime_map.md)'s **R2** made the **holding** of it one type
+as well, and both ends now hold a `World`:
+
+```text
+server   FacetState { world: World, obstructions, boats, coarse, sectors, … }
+client   Resources  { world: World, … }  +  clutter::fill(world.live_mut(), view)
+```
+
+The two remaining differences are the two that are real: who *owns* the indexes
+behind the live layer, and what the client does with a base that is optional
+only because a shard may have no files at all.
 
 ## The three eras, and why this order
 
