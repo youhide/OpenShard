@@ -930,7 +930,11 @@ Six changes, each of which was load-bearing for a number above:
   word. It is now `OffGraph`, `NoJoin`, `NoCorridor`, `NoLocalRoute` and
   `PortalsExhausted` — and the whole diagnosis above is one tally of them:
   **38 `NoCorridor` out of 45**, which ruled out the deadline, live refinement
-  and the endpoint joins in a single run and left the graph itself.
+  and the endpoint joins in a single run and left the graph itself. There are
+  four names since: `NoLocalRoute` was the verdict on two endpoints of one
+  region, and that refusal falls through to the graph now — see
+  [`navigation_spans.md`](navigation_spans.md#out-of-scope-named). The tally
+  above predates the repair and is left as it was measured.
 - **Min-of-three, interleaved.** Two consecutive runs of the same sweep measured
   40.6 s and 65.5 s of wall clock, worst-case 43 ms against 15 ms, with every
   node count bit-identical. This workstation cannot be asked for a tail. The

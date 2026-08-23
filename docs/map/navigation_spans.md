@@ -1186,17 +1186,23 @@ graph over spans names neither.
   its facets are rebaked. That is the right loudness for a graph that would
   otherwise answer with a one-storey world — it is recorded because it is a
   *deployment* step, not a defect.
-- **🚩 N7 found: the coarse router refuses outright when both endpoints share a
-  region.** `find_long_path` special-cases `from_region == to_region` into
-  `region_route`, which is *confined to that 32×32 rectangle* — so two points
-  twenty tiles apart whose only connection leaves the region and comes back get
-  `LongExit::NoLocalRoute` and the graph is never consulted. Measured while
-  sizing N7's fixture: a first shape put both ends in region 0 and the router
-  answered `None` at every width tried, while the flood said the ground was
-  walkable. It is not the *shard's* worst case — a body and its goal in one
-  region are what the exact search is for — but it is a refusal the graph could
-  answer, and the repair is to let the corridor leave the region when the local
-  route fails rather than instead of trying it.
+- **N7 found: the coarse router refused outright when both endpoints shared a
+  region. ✅ Fixed.** `find_long_path` special-cased `from_region == to_region`
+  into `region_route`, which is *confined to that 32×32 rectangle* — so two
+  points twenty tiles apart whose only connection leaves the region and comes
+  back got `LongExit::NoLocalRoute`, and the graph beside them was never
+  consulted. Found while sizing N7's fixture: a first shape put both ends in
+  region 0 and the router answered `None` at every width tried, while the flood
+  said the ground was walkable. **The local route is a first attempt now rather
+  than the verdict** — a refusal falls through to the same join, corridor and
+  refinement a cross-region query takes, and `NoLocalRoute` is gone with the
+  branch that named it. Asserted in `two_points_in_one_region_route_by_leaving_it`:
+  a wall the length of region 0 and no further, so the only way from (4, 4) to
+  (28, 4) is south into the region below and back north. The corridor answers
+  with the same 58 steps the exhaustive exact search walks, the route is checked
+  to leave the rectangle — which `region_route` cannot do, so it is the graph's
+  own work — and the control is the fall-through disabled by hand, where the
+  test fails at exactly that assertion. **What it costs is the finding below.**
 - **N7 found: the aggressive chase does not go through `step_toward`.**
   `ai::chase_step` plans its own route with a bare `find_path` at
   `PATH_BUDGET`, caches it as a `ChasePath` and, when it is refused, calls
@@ -1218,6 +1224,14 @@ graph over spans names neither.
   goal is unreachable and more than `COARSE_MIN_DISTANCE` away pays that on
   every beat. The 50 ms deadline bounds it and nothing here is on a tick's
   critical path, but the cost is new and it is per beat per body.
+  **The same-region repair above widens this class**: a refusal that used to be
+  one confined A\* now pays the join twice over one region. On a 64×64 fixture
+  with sixteen nodes, debug, repeatable to the tenth: **4.8 ms → 25 ms**. The
+  successful case is the same shape — 37 ms for a corridor whose 58 steps the
+  exhaustive exact search found in 6.7 ms, exploring 558 nodes at a budget of
+  4,096. The graph is what answers when the exact search is refused, and on
+  ground this size it is not cheaper than that search would have been with a
+  budget the shard does not grant it: `PATH_BUDGET` is 400.
 - **A second `Ground` now exists in `client/app`, and it is the misnamed one.**
   [`steer::Ground`](../../crates/client/app/src/steer.rs) is a pair of
   `Footing`s — the same map read twice, once with the doors shut and once open —
@@ -1259,11 +1273,13 @@ from any of the five recorded origins, and since N7 the shard reads it. What
 remains is N5 and N6, and both are gated rather than queued — see below.
 
 **What a session that wants work here should read first** is *Out of scope,
-named*, which is where six nodes filed what they saw and did not fix. The three
-with a defect behind them are N4's `local_costs` fan-out (the routing cost
-roughly doubled and the mechanism is measured), N7's same-region refusal (the
-graph is not consulted at all when both endpoints share a region), and N7's
-unremembered refusal (a sealed goal costs the whole join, every beat).
+named*, which is where six nodes filed what they saw and did not fix. N7's
+same-region refusal has since been repaired; the two with a defect behind them
+are N4's `local_costs` fan-out (the routing cost roughly doubled and the
+mechanism is measured) and N7's unremembered refusal (a sealed goal costs the
+whole join, every beat — and since the same-region repair, over more of the
+queries that reach it). **They are one repair**: both are the endpoint join
+paid in full for an answer nothing keeps.
 
 **Rebake before running anything.** `ROUTING_VERSION` is 4, so every artifact
 baked before N4 is refused — and refused *loudly*: the shard does not boot.

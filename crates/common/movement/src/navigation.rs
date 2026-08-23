@@ -895,7 +895,7 @@ impl NavigationGraph {
         }
         let last = *nodes
             .last()
-            .expect("different regions always need graph transitions");
+            .expect("an abstract route always names at least one node");
         if Instant::now() >= deadline {
             return Err(last);
         }
@@ -968,9 +968,6 @@ enum LongExit {
     NoJoin,
     /// Endpoints join the graph, and no corridor of portals connects them.
     NoCorridor,
-    /// Both endpoints are in one region and no route inside it joins them —
-    /// the graph was never consulted.
-    NoLocalRoute,
     /// A corridor existed and live refinement failed every hop it was given,
     /// until [`LIVE_REROUTES`] retries ran out.
     PortalsExhausted,
@@ -1036,13 +1033,19 @@ fn find_long_path_inner(
     let (Some(from_region), Some(to_region)) = (graph.region_at(from), graph.region_at(to)) else {
         return (None, LongExit::OffGraph);
     };
-    if from_region == to_region {
-        let route = region_route(footing, graph.regions[from_region.0], from, to, budget, deadline);
-        let exit = match route {
-            Some(_) => LongExit::Route,
-            None => LongExit::NoLocalRoute,
-        };
-        return (route, exit);
+    // One region is the exact search's own case, so it is asked first — and its
+    // refusal is not the answer, because a region is a rectangle and not a
+    // component. Two points inside one whose only connection leaves it and comes
+    // back are joined by a corridor and by nothing else, and the graph is what
+    // holds that corridor: a local refusal falls through to it rather than
+    // standing as the verdict. What that costs is `local_costs` over one region
+    // twice, which is the price of an answer where there used to be none.
+    let local = match from_region == to_region {
+        true => region_route(footing, graph.regions[from_region.0], from, to, budget, deadline),
+        false => None,
+    };
+    if let Some(route) = local {
+        return (Some(route), LongExit::Route);
     }
     let mut forbidden = vec![false; graph.nodes.len()];
     // Refinement can forbid several portals and retry the abstract route, but
@@ -1245,6 +1248,53 @@ mod tests {
             at = step_allowed(&terrain.footing(), at, direction).unwrap();
             assert!(at.x != 48 || at.y == 40);
         }
+    }
+
+    /// A region is a rectangle and not a component, so one of them may need a
+    /// corridor out of itself.
+    ///
+    /// `find_long_path` used to answer a query whose endpoints share a region
+    /// with `region_route` alone, and that search is *confined to the 32×32
+    /// rectangle* — so two points joined only by a way that leaves the region
+    /// and comes back were refused outright, over ground the exact search
+    /// walks, and the graph beside them was never consulted. The local route is
+    /// a first attempt now rather than the verdict.
+    #[test]
+    fn two_points_in_one_region_route_by_leaving_it() {
+        let mut terrain = Grid::open(64, 64);
+        // A wall the length of region 0 and no further, so the only way from
+        // its west half to its east half is south into the region below,
+        // across, and back north.
+        for y in 0..32 {
+            terrain.block(16, y);
+        }
+        let footing = terrain.footing();
+        let graph = NavigationGraph::build(&footing, 64, 64).unwrap();
+        let from = Point::new(4, 4, 0);
+        let to = Point::new(28, 4, 0);
+        assert_eq!(
+            graph.region_at(from),
+            graph.region_at(to),
+            "the case is two endpoints of one region"
+        );
+        // The oracle that the ground joins them at all, and it is the search
+        // this router is the fall-back for: exhaustive A* over the whole grid.
+        assert!(
+            find_path(&footing, from, to, 64 * 64).is_some(),
+            "the way round is walkable"
+        );
+
+        let route = find_long_path(&footing, &footing, &graph, from, to, 600).expect("a corridor answers");
+        assert_eq!(end(&footing, from, &route), to);
+        // And it is the corridor that answered rather than the local search:
+        // `region_route` cannot leave the rectangle, so a step outside it is
+        // the graph's own work.
+        let mut at = from;
+        let left_the_region = route.iter().any(|&direction| {
+            at = step_allowed(&footing, at, direction).unwrap();
+            at.y >= 32
+        });
+        assert!(left_the_region, "the way through is outside region 0");
     }
 
     #[test]
