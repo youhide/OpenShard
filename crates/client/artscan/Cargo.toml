@@ -16,6 +16,9 @@ description = "Measures a client's art once, off the clock, and writes the table
 # what makes it stale.
 [dependencies]
 openshard-client-render.workspace = true
+# For the span bake `interiors`' own bake reads a step through: the interiors
+# bake takes the terrain over a map now rather than building an index of its own.
+openshard-movement.workspace = true
 openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
 openshard-map.workspace = true

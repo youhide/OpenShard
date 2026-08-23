@@ -1119,17 +1119,26 @@ graph over spans names neither.
   where it fails at the first facet; one facet would have passed a rebake that
   only ever touched the default one.
 - **N3 found: the interiors bake builds two facet-wide span indexes of its
-  own.** `PlanarTopology::bake` and `Buildings::bake` in
-  `client/render/src/interiors.rs` each take a map and a tile table and now
-  build a `SpanIndex` to get a terrain — 0.07 s each, inside a bake that already
-  walks the facet, and the client builds a third at startup. Threading one
-  through five `bake` signatures would put a movement index in the arguments of
-  a wall contour, which is why it was not done; the honest fix is for the
-  interiors bake to take the ground it is baking over as one value. **That value
-  now exists** — [`Ground`](../../crates/common/movement/src/ground.rs), whose
-  `terrain(tiles)` is exactly what both of them build for themselves — so what
-  is left of this finding is the signature sweep, across `interiors.rs`'s five
-  bakes plus `artscan` and the examples that call them.
+  own. ✅ Fixed.** `PlanarTopology::bake` and `Buildings::bake` in
+  `client/render/src/interiors.rs` each took a map and a tile table and built a
+  `SpanIndex` to get a terrain — 0.07 s each, inside a bake that already walks
+  the facet, and the client built a third at startup. Threading an index through
+  five `bake` signatures would have put a movement index in the arguments of a
+  wall contour, which is why it was not done.
+  **The value that carries all three is `MapTerrain`, not `Ground`.** This
+  finding named `Ground`, and `Ground::terrain(tiles)` is what produces the
+  answer — but a bake does not want to own a facet, it wants the map, the table
+  and the index it reads them through. That is a `MapTerrain`, and taking it
+  made the signatures *shorter*: every `map: &WorldMap, tiledata: &TileData`
+  pair in `interiors.rs` — twenty of them, across the block bake, the room bake,
+  the stitch, the building bake, the wall helpers and the `Index` cache — is one
+  `terrain: &MapTerrain<'_>` now, and the two `SpanIndex::build` calls are gone
+  with them.
+  **Each caller hands over the bake it already has.** The client's is
+  `Resources::terrain`, which is its `Ground`'s own — the third index it used to
+  build at startup — and `artscan` and the census example build one apiece for
+  the run rather than one per bake. No timing was taken here: what is claimed is
+  the two builds removed and the client's reused, not a number.
 - **N3 found: a `Scene` rebakes on every setter.** A fixture that places a
   thousand statics pays a thousand bakes of its own blocks, and each one walks
   `land_kinds`'s 16,384 land ids. Nothing in the suite is slow enough to notice

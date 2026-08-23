@@ -62,6 +62,23 @@ impl Resources {
             .expect("a client that got as far as drawing opened a facet")
             .map()
     }
+
+    /// The same ground read through the table that says what its graphics are,
+    /// and the bake over the pair — which is what the interiors bake takes.
+    ///
+    /// The bake is [`Ground`]'s own, taken when the facet was loaded. It used to
+    /// be built twice more inside `interiors.rs`, once per bake, because the
+    /// three tables had no name to travel under; `MapTerrain` is that name.
+    ///
+    /// # Panics
+    ///
+    /// Never, and for [`map`](Self::map)'s reason.
+    #[must_use]
+    pub fn terrain(&self) -> openshard_movement::MapTerrain<'_> {
+        self.ground
+            .terrain(&self.tiledata)
+            .expect("a client that got as far as drawing opened a facet")
+    }
 }
 
 pub struct Resources {

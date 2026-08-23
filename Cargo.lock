@@ -2609,6 +2609,7 @@ dependencies = [
  "clap",
  "openshard-client-render",
  "openshard-map",
+ "openshard-movement",
  "openshard-protocol",
  "openshard-tiles",
  "openshard-uofiles",

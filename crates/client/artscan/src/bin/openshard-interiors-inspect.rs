@@ -50,6 +50,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let graph = interiors::load_baked(&interiors::artifact_path(&cli.client, facet), &stamp)?;
     let tiles = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
     let table = openshard_client_artscan::load(&cli.client)?;
+    // What the interiors bake reads its steps through: this map, this table and
+    // the bake over the pair, as one value.
+    let spans = openshard_movement::spans::SpanIndex::build(map.map(), &tiles);
+    let terrain = openshard_movement::MapTerrain::new(map.map(), &tiles, &spans);
     for (x, y) in cli.points {
         println!(
             "{x},{y}: building {:?}, land {:?}",
@@ -58,8 +62,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         );
         if graph.building_at(x, y).is_none() {
             if let Some(path) = openshard_client_render::interiors::BuildingMap::exterior_path(
-                map.map(),
-                &tiles,
+                &terrain,
                 &|graphic| table.shape(graphic),
                 (x, y),
             ) {

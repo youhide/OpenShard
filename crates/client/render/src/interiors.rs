@@ -12,7 +12,7 @@ use openshard_map::map::{BLOCK_SIZE, WorldMap};
 use openshard_movement::{MapTerrain, PLAYER_HEIGHT};
 use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
-use openshard_tiles::{StaticTile, TileData, TileFlags};
+use openshard_tiles::{StaticTile, TileFlags};
 
 /// The stable identity of a cell within a baked map block.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -453,7 +453,9 @@ pub struct BlockCells {
 
 impl BlockCells {
     /// Bake one valid map block, or return `None` when the block is off-map.
-    pub fn bake(map: &WorldMap, tiledata: &TileData, id: BlockCoord) -> Option<Self> {
+    pub fn bake(terrain: &MapTerrain<'_>, id: BlockCoord) -> Option<Self> {
+        let map = terrain.map();
+        let tiledata = terrain.tiles();
         let (origin_x, origin_y) = id.origin();
         // A block past the `u16` a tile coordinate is expressed in is a block
         // no facet has; `map.contains` below would refuse it anyway, and the
@@ -470,7 +472,7 @@ impl BlockCells {
             for local_x in 0..BLOCK_SIZE as u16 {
                 let x = origin_x.checked_add(local_x)?;
                 let y = origin_y.checked_add(local_y)?;
-                let mut floors = structural_surfaces(map, tiledata, x, y);
+                let mut floors = structural_surfaces(terrain, x, y);
                 floors.sort_unstable();
                 floors.dedup();
                 // A ceiling is not necessarily somewhere a body can stand.
@@ -558,8 +560,8 @@ pub struct BlockRooms {
 
 impl BlockRooms {
     /// Bake the closed-door room graph of one valid map block.
-    pub fn bake(map: &WorldMap, tiledata: &TileData, id: BlockCoord) -> Option<Self> {
-        Self::bake_with_shapes(map, tiledata, id, &|_| crate::occlusion::Shape::UNREAD)
+    pub fn bake(terrain: &MapTerrain<'_>, id: BlockCoord) -> Option<Self> {
+        Self::bake_with_shapes(terrain, id, &|_| crate::occlusion::Shape::UNREAD)
     }
 
     /// Bake with the measured wall-facing data for the client art.
@@ -568,12 +570,11 @@ impl BlockRooms {
     /// consulted while the flood graph is made; an unread graphic conservatively
     /// occupies every edge of its tile, the established renderer fallback.
     pub fn bake_with_shapes<F: Fn(Graphic) -> crate::occlusion::Shape>(
-        map: &WorldMap,
-        tiledata: &TileData,
+        terrain: &MapTerrain<'_>,
         id: BlockCoord,
         shape_of: &F,
     ) -> Option<Self> {
-        let cells = BlockCells::bake(map, tiledata, id)?;
+        let cells = BlockCells::bake(terrain, id)?;
         // Furniture can block a character but it never makes two rooms.  Only
         // a catalogued wall consumes the floor cell it stands on; the same
         // wall's measured edge is the predicate below that stops the flood
@@ -582,9 +583,7 @@ impl BlockRooms {
             .cells
             .iter()
             .copied()
-            .map(|cell| {
-                wall_edges(map, tiledata, shape_of, cell).raw() != 0 || door_occupies(map, tiledata, cell)
-            })
+            .map(|cell| wall_edges(terrain, shape_of, cell).raw() != 0 || door_occupies(terrain, cell))
             .collect();
         let mut by_tile: BTreeMap<(u16, u16), Vec<usize>> = BTreeMap::new();
         for (at, cell) in cells.cells.iter().enumerate() {
@@ -611,8 +610,7 @@ impl BlockRooms {
                 members.push(cell.id);
                 for neighbour in neighbours(cell.tile) {
                     for &other in by_tile.get(&neighbour).into_iter().flatten() {
-                        if room_of[other].is_none()
-                            && cells_join(map, tiledata, shape_of, cell, cells.cells[other])
+                        if room_of[other].is_none() && cells_join(terrain, shape_of, cell, cells.cells[other])
                         {
                             room_of[other] = Some(id);
                             pending.push(other);
@@ -766,14 +764,11 @@ impl StitchedRooms {
 
     /// Stitch with the same wall-edge predicate the block bakes used.
     pub fn bake_with_shapes<F: Fn(Graphic) -> crate::occlusion::Shape>(
-        map: &WorldMap,
-        tiledata: &TileData,
+        terrain: &MapTerrain<'_>,
         blocks: impl IntoIterator<Item = BlockRooms>,
         shape_of: &F,
     ) -> Self {
-        Self::bake_with_join(blocks, &|one, other| {
-            cells_join(map, tiledata, shape_of, one, other)
-        })
+        Self::bake_with_join(blocks, &|one, other| cells_join(terrain, shape_of, one, other))
     }
 
     fn bake_with_join<F: Fn(Cell, Cell) -> bool>(
@@ -1034,11 +1029,8 @@ impl BuildingMap {
     /// renderer, while the result contains only map topology and is safe to
     /// load without opening a sprite archive.
     #[must_use]
-    pub fn bake<F: Fn(Graphic) -> crate::occlusion::Shape>(
-        map: &WorldMap,
-        tiledata: &TileData,
-        shape_of: &F,
-    ) -> Self {
+    pub fn bake<F: Fn(Graphic) -> crate::occlusion::Shape>(terrain: &MapTerrain<'_>, shape_of: &F) -> Self {
+        let map = terrain.map();
         let width = map.width();
         let height = map.height();
         let cells = usize::try_from(width)
@@ -1047,7 +1039,7 @@ impl BuildingMap {
             .expect("map dimensions fit address space");
         let at = |x: u32, y: u32| usize::try_from(y * width + x).expect("map index fits usize");
 
-        let topology = PlanarTopology::bake(map, tiledata, shape_of);
+        let topology = PlanarTopology::bake(terrain, shape_of);
         let walls = topology.walls;
         let wall_tiles = topology.wall_tiles;
         let doors = topology.doors;
@@ -1270,15 +1262,15 @@ impl BuildingMap {
     /// or doorway the positive-space rule failed to cross, without making a
     /// camera frame reconstruct topology.
     pub fn exterior_path<F: Fn(Graphic) -> crate::occlusion::Shape>(
-        map: &WorldMap,
-        tiledata: &TileData,
+        terrain: &MapTerrain<'_>,
         shape_of: &F,
         start: (u16, u16),
     ) -> Option<Vec<(u16, u16)>> {
+        let map = terrain.map();
         let (width, height) = (map.width() as usize, map.height() as usize);
         let index = |x: usize, y: usize| y * width + x;
         let start = index(usize::from(start.0), usize::from(start.1));
-        let topology = PlanarTopology::bake(map, tiledata, shape_of);
+        let topology = PlanarTopology::bake(terrain, shape_of);
         if topology.wall_tiles[start] || topology.doors[start] {
             return None;
         }
@@ -1345,11 +1337,9 @@ struct PlanarTopology {
 }
 
 impl PlanarTopology {
-    fn bake<F: Fn(Graphic) -> crate::occlusion::Shape>(
-        map: &WorldMap,
-        tiledata: &TileData,
-        shape_of: &F,
-    ) -> Self {
+    fn bake<F: Fn(Graphic) -> crate::occlusion::Shape>(terrain: &MapTerrain<'_>, shape_of: &F) -> Self {
+        let map = terrain.map();
+        let tiledata = terrain.tiles();
         let (width, height) = (map.width() as usize, map.height() as usize);
         let cells = width
             .checked_mul(height)
@@ -1365,7 +1355,7 @@ impl PlanarTopology {
                 for item in map.statics_at(x, y) {
                     let tile = tiledata.static_tile(item.tile.0);
                     doors[index] |= tile.flags.has(TileFlags::DOOR);
-                    if !wall_supports_low_platform(map, tiledata, x, y, item.z, tile) {
+                    if !wall_supports_low_platform(terrain, x, y, item.z, tile) {
                         walls[index] |= planar_wall_edges(tile, shape_of(item.tile));
                     }
                 }
@@ -1379,13 +1369,13 @@ impl PlanarTopology {
         // hole in the wall contour.  Recover that immutable anchor with the
         // server's exact frame tables and equal-height guard; the leaf's
         // open/closed graphic remains a live item-layer fact.
-        // A terrain borrows the span bake over its two tables, so this builds
-        // one: it is a projection of exactly the `map` and `tiledata` in hand,
-        // it costs 0.07 s against a bake that already walks the whole facet,
-        // and threading the client's own through five `bake` signatures would
-        // put a movement index in the arguments of a wall contour.
-        let spans = openshard_movement::spans::SpanIndex::build(map, tiledata);
-        let terrain = MapTerrain::new(map, tiledata, &spans);
+        // Recovering a frame reads a *step*, which reads the span bake over the
+        // map. That bake arrives with the terrain now. It used to be built here
+        // — 0.07 s inside a bake that already walks the whole facet, and a
+        // second one in `Buildings::bake` beside it — because threading a map,
+        // a tile table and an index through these signatures would have put a
+        // movement index in the arguments of a wall contour. Taking the terrain
+        // itself takes all three as one, and the argument count went down.
         for y in 0..height {
             for x in 0..width {
                 let x16 = u16::try_from(x).expect("facet fits UO coordinates");
@@ -1401,7 +1391,7 @@ impl PlanarTopology {
                                 openshard_movement::door_frames::is_east_frame,
                             )
                         {
-                            generated_door_anchor(&terrain, &wall_tiles, &mut doors, x + 1, y, frame.z);
+                            generated_door_anchor(terrain, &wall_tiles, &mut doors, x + 1, y, frame.z);
                         } else if x + 3 < width
                             && generated_frame_at(
                                 map,
@@ -1411,8 +1401,8 @@ impl PlanarTopology {
                                 openshard_movement::door_frames::is_east_frame,
                             )
                         {
-                            generated_door_anchor(&terrain, &wall_tiles, &mut doors, x + 1, y, frame.z);
-                            generated_door_anchor(&terrain, &wall_tiles, &mut doors, x + 2, y, frame.z);
+                            generated_door_anchor(terrain, &wall_tiles, &mut doors, x + 1, y, frame.z);
+                            generated_door_anchor(terrain, &wall_tiles, &mut doors, x + 2, y, frame.z);
                         }
                     } else if openshard_movement::door_frames::is_north_frame(frame.tile.0) {
                         if y + 2 < height
@@ -1424,7 +1414,7 @@ impl PlanarTopology {
                                 openshard_movement::door_frames::is_south_frame,
                             )
                         {
-                            generated_door_anchor(&terrain, &wall_tiles, &mut doors, x, y + 1, frame.z);
+                            generated_door_anchor(terrain, &wall_tiles, &mut doors, x, y + 1, frame.z);
                         } else if y + 3 < height
                             && generated_frame_at(
                                 map,
@@ -1434,8 +1424,8 @@ impl PlanarTopology {
                                 openshard_movement::door_frames::is_south_frame,
                             )
                         {
-                            generated_door_anchor(&terrain, &wall_tiles, &mut doors, x, y + 1, frame.z);
-                            generated_door_anchor(&terrain, &wall_tiles, &mut doors, x, y + 2, frame.z);
+                            generated_door_anchor(terrain, &wall_tiles, &mut doors, x, y + 1, frame.z);
+                            generated_door_anchor(terrain, &wall_tiles, &mut doors, x, y + 2, frame.z);
                         }
                     }
                 }
@@ -1487,16 +1477,13 @@ fn generated_door_anchor(
 
 impl Buildings {
     /// Derive the structural buildings from an immutable stitched room graph.
-    pub fn bake(map: &WorldMap, tiledata: &TileData, rooms: &StitchedRooms) -> Self {
+    pub fn bake(terrain: &MapTerrain<'_>, rooms: &StitchedRooms) -> Self {
         let cells: Vec<_> = rooms.cells().collect();
         let mut by_tile: BTreeMap<(u16, u16), Vec<usize>> = BTreeMap::new();
         for (at, cell) in cells.iter().enumerate() {
             by_tile.entry(cell.tile).or_default().push(at);
         }
 
-        // Built here for the reason `PlanarTopology::bake`'s is.
-        let spans = openshard_movement::spans::SpanIndex::build(map, tiledata);
-        let terrain = MapTerrain::new(map, tiledata, &spans);
         let mut steps = BTreeSet::new();
         for (at, cell) in cells.iter().copied().enumerate() {
             let Ok(z) = i8::try_from(cell.floor_z) else {
@@ -2139,8 +2126,7 @@ fn bands_join(one: Cell, other: Cell) -> bool {
 /// art table's measured facing supplies the edge; an unread wall is the safe
 /// four-edge fallback in `named_edges`.
 fn cells_join<F: Fn(Graphic) -> crate::occlusion::Shape>(
-    map: &WorldMap,
-    tiledata: &TileData,
+    terrain: &MapTerrain<'_>,
     shape_of: &F,
     one: Cell,
     other: Cell,
@@ -2158,18 +2144,19 @@ fn cells_join<F: Fn(Graphic) -> crate::occlusion::Shape>(
         (-1, 0) => crate::occlusion::Edges::WEST,
         _ => return false,
     };
-    let one_edges = wall_edges(map, tiledata, shape_of, one);
-    let other_edges = wall_edges(map, tiledata, shape_of, other);
+    let one_edges = wall_edges(terrain, shape_of, one);
+    let other_edges = wall_edges(terrain, shape_of, other);
     !one_edges.contains(side) && !other_edges.contains(crate::occlusion::opposite(side))
 }
 
 /// The wall panels that occupy a cell at its floor band.
 fn wall_edges<F: Fn(Graphic) -> crate::occlusion::Shape>(
-    map: &WorldMap,
-    tiledata: &TileData,
+    terrain: &MapTerrain<'_>,
     shape_of: &F,
     cell: Cell,
 ) -> crate::occlusion::Edges {
+    let map = terrain.map();
+    let tiledata = terrain.tiles();
     const WALLISH: u64 = TileFlags::WALL | TileFlags::NO_SHOOT;
     map.statics_at(cell.tile.0, cell.tile.1)
         .fold(crate::occlusion::Edges::NONE, |edges, item| {
@@ -2181,7 +2168,7 @@ fn wall_edges<F: Fn(Graphic) -> crate::occlusion::Shape>(
             if !flags.has(WALLISH) || flags.is_roof() || flags.is_platform() || flags.has(TileFlags::DOOR) {
                 return edges;
             }
-            if !wall_supports_low_platform(map, tiledata, cell.tile.0, cell.tile.1, item.z, tile) {
+            if !wall_supports_low_platform(terrain, cell.tile.0, cell.tile.1, item.z, tile) {
                 let shape = shape_of(item.tile);
                 // `BLOCK` is a movement fact — a table, a bed or a crate — and
                 // cannot become a room boundary.  A measured facing is the wall
@@ -2205,13 +2192,14 @@ fn wall_edges<F: Fn(Graphic) -> crate::occlusion::Shape>(
 /// room graph or the facet-wide house contour. A normal wall made of short art
 /// courses remains structural unless it directly supports that platform.
 fn wall_supports_low_platform(
-    map: &WorldMap,
-    tiledata: &TileData,
+    terrain: &MapTerrain<'_>,
     x: u16,
     y: u16,
     wall_z: i8,
     wall: &StaticTile,
 ) -> bool {
+    let map = terrain.map();
+    let tiledata = terrain.tiles();
     let Some(floor_z) = map.average_land_z(x, y).map(i32::from) else {
         return false;
     };
@@ -2298,7 +2286,9 @@ fn planar_neighbours(
 
 /// A closed-door graph omits the floor cell occupied by its leaf; the portal
 /// below reconnects the two sides only when that leaf is open in the frame.
-fn door_occupies(map: &WorldMap, tiledata: &TileData, cell: Cell) -> bool {
+fn door_occupies(terrain: &MapTerrain<'_>, cell: Cell) -> bool {
+    let map = terrain.map();
+    let tiledata = terrain.tiles();
     map.statics_at(cell.tile.0, cell.tile.1).any(|item| {
         let tile = tiledata.static_tile(item.tile.0);
         if !tile.flags.has(TileFlags::DOOR) {
@@ -2316,7 +2306,9 @@ fn door_occupies(map: &WorldMap, tiledata: &TileData, cell: Cell) -> bool {
 /// A character may stand on a table or a chest; neither is a storey.  The
 /// interior index therefore takes land and static art explicitly marked FLOOR,
 /// while movement continues to use every PLATFORM in `stand_surfaces`.
-fn structural_surfaces(map: &WorldMap, tiledata: &TileData, x: u16, y: u16) -> Vec<i32> {
+fn structural_surfaces(terrain: &MapTerrain<'_>, x: u16, y: u16) -> Vec<i32> {
+    let map = terrain.map();
+    let tiledata = terrain.tiles();
     let mut surfaces = Vec::new();
     if let Some(land) = map.land(x, y) {
         let flags = tiledata.land(land.tile.0).flags;
@@ -2368,16 +2360,16 @@ pub struct Index {
 impl Index {
     /// Return a cached cell block, baking its room graph from the read-only map
     /// on first use.
-    pub fn block(&mut self, map: &WorldMap, tiledata: &TileData, id: BlockCoord) -> Option<&BlockCells> {
-        Some(self.rooms(map, tiledata, id)?.cells())
+    pub fn block(&mut self, terrain: &MapTerrain<'_>, id: BlockCoord) -> Option<&BlockCells> {
+        Some(self.rooms(terrain, id)?.cells())
     }
 
     /// Return a cached room graph, baking it from the read-only map on first
     /// use. Cells and rooms deliberately share this one cache entry: a second
     /// bake would give the two phases two opportunities to disagree about a
     /// wall or a doorway in the same map block.
-    pub fn rooms(&mut self, map: &WorldMap, tiledata: &TileData, id: BlockCoord) -> Option<&BlockRooms> {
-        self.rooms_with_shapes(map, tiledata, id, &|_| crate::occlusion::Shape::UNREAD)
+    pub fn rooms(&mut self, terrain: &MapTerrain<'_>, id: BlockCoord) -> Option<&BlockRooms> {
+        self.rooms_with_shapes(terrain, id, &|_| crate::occlusion::Shape::UNREAD)
     }
 
     /// Return a cached block baked with the install's measured wall faces.
@@ -2386,13 +2378,12 @@ impl Index {
     /// for one `Index`: changing it would make a cached map fact stale.
     pub fn rooms_with_shapes<F: Fn(Graphic) -> crate::occlusion::Shape>(
         &mut self,
-        map: &WorldMap,
-        tiledata: &TileData,
+        terrain: &MapTerrain<'_>,
         id: BlockCoord,
         shape_of: &F,
     ) -> Option<&BlockRooms> {
         if let Entry::Vacant(entry) = self.blocks.entry(id) {
-            entry.insert(BlockRooms::bake_with_shapes(map, tiledata, id, shape_of)?);
+            entry.insert(BlockRooms::bake_with_shapes(terrain, id, shape_of)?);
         }
         self.blocks.get(&id)
     }
@@ -2406,27 +2397,25 @@ impl Index {
     /// [`StitchedRooms::bake`] deliberately does not guess at an absent block.
     pub fn stitched(
         &mut self,
-        map: &WorldMap,
-        tiledata: &TileData,
+        terrain: &MapTerrain<'_>,
         ids: impl IntoIterator<Item = BlockCoord>,
     ) -> Option<StitchedRooms> {
-        self.stitched_with_shapes(map, tiledata, ids, &|_| crate::occlusion::Shape::UNREAD)
+        self.stitched_with_shapes(terrain, ids, &|_| crate::occlusion::Shape::UNREAD)
     }
 
     /// Stitch blocks using the measured faces of the install's wall art.
     pub fn stitched_with_shapes<F: Fn(Graphic) -> crate::occlusion::Shape>(
         &mut self,
-        map: &WorldMap,
-        tiledata: &TileData,
+        terrain: &MapTerrain<'_>,
         ids: impl IntoIterator<Item = BlockCoord>,
         shape_of: &F,
     ) -> Option<StitchedRooms> {
         let ids: BTreeSet<_> = ids.into_iter().collect();
         let mut blocks = Vec::with_capacity(ids.len());
         for id in ids {
-            blocks.push(self.rooms_with_shapes(map, tiledata, id, shape_of)?.clone());
+            blocks.push(self.rooms_with_shapes(terrain, id, shape_of)?.clone());
         }
-        Some(StitchedRooms::bake_with_shapes(map, tiledata, blocks, shape_of))
+        Some(StitchedRooms::bake_with_shapes(terrain, blocks, shape_of))
     }
 
     /// Derive the indexed buildings and floors for a caller-selected map region.
@@ -2435,21 +2424,16 @@ impl Index {
     /// seam composition for one debug frame or, later, one interior frame.
     pub fn buildings(
         &mut self,
-        map: &WorldMap,
-        tiledata: &TileData,
+        terrain: &MapTerrain<'_>,
         ids: impl IntoIterator<Item = BlockCoord>,
     ) -> Option<Buildings> {
-        Some(Buildings::bake(
-            map,
-            tiledata,
-            &self.stitched(map, tiledata, ids)?,
-        ))
+        Some(Buildings::bake(terrain, &self.stitched(terrain, ids)?))
     }
 
     /// Look up the cell containing a point, baking only that point's block.
-    pub fn cell_at(&mut self, map: &WorldMap, tiledata: &TileData, point: Point) -> Option<CellId> {
+    pub fn cell_at(&mut self, terrain: &MapTerrain<'_>, point: Point) -> Option<CellId> {
         let id = BlockCoord::containing(point.x, point.y);
-        self.block(map, tiledata, id)?.cell_at(point)
+        self.block(terrain, id)?.cell_at(point)
     }
 
     /// How many map blocks have been baked in this process.
@@ -2464,7 +2448,9 @@ mod tests {
     use openshard_map::map::{LandCell, StaticItem};
     use openshard_protocol::wire::{Graphic, Hue};
     use openshard_tiles::LandTileId;
-    use openshard_tiles::{StaticTile, TileFlags};
+    // The table itself is a fixture's to build; the bakes above read it through
+    // the terrain they are handed.
+    use openshard_tiles::{StaticTile, TileData, TileFlags};
 
     use super::*;
 
@@ -2517,7 +2503,9 @@ mod tests {
             hue: Hue(0),
         });
 
-        let block = BlockRooms::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("map block");
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        let block = BlockRooms::bake(&terrain, BlockCoord { x: 0, y: 0 }).expect("map block");
         let rooms = StitchedRooms::bake([block]);
         let lower = rooms
             .cells()
@@ -2528,7 +2516,7 @@ mod tests {
             .find(|cell| cell.tile == (1, 1) && cell.floor_z == 16)
             .expect("upper platform cell");
 
-        let buildings = Buildings::bake(&map, &tiledata, &rooms);
+        let buildings = Buildings::bake(&terrain, &rooms);
 
         assert_eq!(buildings.building_at(lower.id), buildings.building_at(upper.id));
         assert_ne!(buildings.floor_at(lower.id), buildings.floor_at(upper.id));
@@ -2557,7 +2545,9 @@ mod tests {
             hue: Hue(0),
         });
 
-        let cells = BlockCells::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("map block");
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        let cells = BlockCells::bake(&terrain, BlockCoord { x: 0, y: 0 }).expect("map block");
         let column: Vec<_> = cells
             .cells()
             .iter()
@@ -2597,7 +2587,9 @@ mod tests {
             hue: Hue(0),
         });
 
-        let cells = BlockCells::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("map block");
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        let cells = BlockCells::bake(&terrain, BlockCoord { x: 0, y: 0 }).expect("map block");
         let cell = cells
             .cells()
             .iter()
@@ -2654,7 +2646,9 @@ mod tests {
             hue: Hue(0),
         });
 
-        let block = BlockRooms::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("map block");
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        let block = BlockRooms::bake(&terrain, BlockCoord { x: 0, y: 0 }).expect("map block");
         let rooms = StitchedRooms::bake([block]);
         let centre = rooms
             .cells()
@@ -2669,7 +2663,7 @@ mod tests {
             "the roofed centre must not merge with outdoor sky"
         );
 
-        let buildings = Buildings::bake(&map, &tiledata, &rooms);
+        let buildings = Buildings::bake(&terrain, &rooms);
         assert!(buildings.building_at(centre.id).is_some());
     }
 
@@ -2736,8 +2730,10 @@ mod tests {
         let north_wall =
             |_| crate::occlusion::Shape::faced(crate::facing::Facing::One(crate::facing::Face::North));
 
-        assert!(!cells_join(&map, &tiledata, &north_wall, here, north));
-        assert!(cells_join(&map, &tiledata, &north_wall, here, east));
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        assert!(!cells_join(&terrain, &north_wall, here, north));
+        assert!(cells_join(&terrain, &north_wall, here, east));
     }
 
     #[test]
@@ -2772,7 +2768,9 @@ mod tests {
             }
         }
 
-        let graph = BuildingMap::bake(&map, &tiledata, &|_| crate::occlusion::Shape::UNREAD);
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        let graph = BuildingMap::bake(&terrain, &|_| crate::occlusion::Shape::UNREAD);
 
         assert!(
             graph.building_at(3, 3).is_some(),
@@ -2835,7 +2833,9 @@ mod tests {
             hue: Hue(0),
         });
 
-        let topology = PlanarTopology::bake(&map, &tiledata, &|_| crate::occlusion::Shape::UNREAD);
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        let topology = PlanarTopology::bake(&terrain, &|_| crate::occlusion::Shape::UNREAD);
         assert!(!topology.wall_tiles[9], "a stage riser is not a house contour");
         let cell = Cell {
             id: CellId {
@@ -2847,7 +2847,7 @@ mod tests {
             ceiling: Some(56),
         };
         assert_eq!(
-            wall_edges(&map, &tiledata, &|_| crate::occlusion::Shape::UNREAD, cell),
+            wall_edges(&terrain, &|_| crate::occlusion::Shape::UNREAD, cell),
             crate::occlusion::Edges::NONE,
             "the stage wall does not divide the room either"
         );
@@ -2891,7 +2891,9 @@ mod tests {
             }
         }
 
-        let graph = BuildingMap::bake(&map, &tiledata, &|_| crate::occlusion::Shape::UNREAD);
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        let graph = BuildingMap::bake(&terrain, &|_| crate::occlusion::Shape::UNREAD);
 
         assert_eq!(graph.building_at(3, 1), graph.building_at(3, 3));
         assert!(graph.building_at(3, 1).is_some());
@@ -2947,7 +2949,9 @@ mod tests {
             }
         }
 
-        let graph = BuildingMap::bake(&map, &tiledata, &|_| crate::occlusion::Shape::UNREAD);
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        let graph = BuildingMap::bake(&terrain, &|_| crate::occlusion::Shape::UNREAD);
 
         assert_eq!(graph.building_at(3, 1), graph.building_at(3, 3));
         assert_eq!(graph.building_at(4, 1), graph.building_at(3, 3));
@@ -2976,7 +2980,9 @@ mod tests {
             hue: Hue(0),
         });
 
-        let rooms = BlockRooms::bake_with_shapes(&map, &tiledata, BlockCoord { x: 0, y: 0 }, &|_| {
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        let rooms = BlockRooms::bake_with_shapes(&terrain, BlockCoord { x: 0, y: 0 }, &|_| {
             crate::occlusion::Shape::UNREAD
         })
         .expect("map block");
@@ -3012,7 +3018,10 @@ mod tests {
             tile: LandTileId(0),
             z: 0,
         });
-        assert!(BlockCells::bake(&map, &TileData::empty(), BlockCoord { x: 1, y: 0 }).is_none());
+        let tiledata = TileData::empty();
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        assert!(BlockCells::bake(&terrain, BlockCoord { x: 1, y: 0 }).is_none());
     }
 
     #[test]
@@ -3024,8 +3033,10 @@ mod tests {
         let tiledata = TileData::empty();
         let mut index = Index::default();
 
-        assert!(index.cell_at(&map, &tiledata, Point::new(2, 3, 0)).is_some());
-        assert!(index.cell_at(&map, &tiledata, Point::new(6, 7, 0)).is_some());
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        assert!(index.cell_at(&terrain, Point::new(2, 3, 0)).is_some());
+        assert!(index.cell_at(&terrain, Point::new(6, 7, 0)).is_some());
         assert_eq!(index.block_count(), 1);
     }
 
@@ -3038,8 +3049,10 @@ mod tests {
         let tiledata = TileData::empty();
         let mut index = Index::default();
 
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
         let buildings = index
-            .buildings(&map, &tiledata, [BlockCoord { x: 0, y: 0 }])
+            .buildings(&terrain, [BlockCoord { x: 0, y: 0 }])
             .expect("map block");
 
         assert!(buildings.buildings().is_empty());
@@ -3069,7 +3082,9 @@ mod tests {
             hue: Hue(0),
         });
 
-        let cells = BlockCells::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("map block");
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        let cells = BlockCells::bake(&terrain, BlockCoord { x: 0, y: 0 }).expect("map block");
         let column: Vec<_> = cells
             .cells()
             .iter()
@@ -3123,7 +3138,9 @@ mod tests {
             }
         }
 
-        let rooms = BlockRooms::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("map block");
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        let rooms = BlockRooms::bake(&terrain, BlockCoord { x: 0, y: 0 }).expect("map block");
 
         assert_eq!(rooms.rooms().len(), 2, "a shut door does not merge its rooms");
         assert_eq!(
@@ -3247,8 +3264,10 @@ mod tests {
             hue: Hue(0),
         });
 
-        let left = BlockRooms::bake(&map, &tiledata, BlockCoord { x: 0, y: 0 }).expect("left block");
-        let right = BlockRooms::bake(&map, &tiledata, BlockCoord { x: 1, y: 0 }).expect("right block");
+        let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+        let terrain = MapTerrain::new(&map, &tiledata, &spans);
+        let left = BlockRooms::bake(&terrain, BlockCoord { x: 0, y: 0 }).expect("left block");
+        let right = BlockRooms::bake(&terrain, BlockCoord { x: 1, y: 0 }).expect("right block");
         assert!(
             left.portals().is_empty(),
             "the other side is beyond this local bake"

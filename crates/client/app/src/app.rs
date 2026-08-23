@@ -347,8 +347,6 @@ impl App {
             let frame = openshard_client_render::interiors::InteriorFrame::outside(interiors.clone());
             return Some(z_slice.map_or(frame.clone(), |view| frame.with_z_slice(player, view)));
         };
-        let map = self.resources.map();
-        let tiledata = &self.resources.tiledata;
         let surfaces = &self.resources.surfaces;
         let shape_of = |graphic| {
             surfaces
@@ -360,10 +358,11 @@ impl App {
         let mut cache = self.world.presentation.interior_cache.borrow_mut();
         if !cache.buildings.contains_key(&label) {
             let blocks = self.resources.interiors.as_ref()?.blocks_for(label);
-            let rooms = cache
-                .index
-                .stitched_with_shapes(map, tiledata, blocks, &shape_of)?;
-            let buildings = openshard_client_render::interiors::Buildings::bake(map, tiledata, &rooms);
+            // One terrain for both bakes, and it is the ground's own: the map,
+            // the tile table and the span index over the pair travel together.
+            let terrain = self.resources.terrain();
+            let rooms = cache.index.stitched_with_shapes(&terrain, blocks, &shape_of)?;
+            let buildings = openshard_client_render::interiors::Buildings::bake(&terrain, &rooms);
             cache
                 .buildings
                 .insert(label, world::InteriorBuilding { rooms, buildings });

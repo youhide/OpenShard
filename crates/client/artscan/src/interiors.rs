@@ -184,7 +184,11 @@ pub fn build(client_dir: &Path, facet: Facet) -> Result<(BuildingMap, MapRevisio
                 source,
             }
         })?;
-    let graph = BuildingMap::bake(map.map(), &tiles, &|graphic| table.shape(graphic));
+    // The bake the interiors bake reads a step through. It is a projection of
+    // exactly this map and this table, which is the pairing `MapTerrain` is.
+    let spans = openshard_movement::spans::SpanIndex::build(map.map(), &tiles);
+    let terrain = openshard_movement::MapTerrain::new(map.map(), &tiles, &spans);
+    let graph = BuildingMap::bake(&terrain, &|graphic| table.shape(graphic));
     Ok((graph, map.revision()))
 }
 

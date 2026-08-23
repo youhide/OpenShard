@@ -31,6 +31,7 @@ use std::path::PathBuf;
 use openshard_client_render::interiors::{BlockRooms, Buildings, Cell, StitchedRooms};
 use openshard_map::grid::BlockCoord;
 use openshard_map::map::{BLOCK_SIZE, WorldMap};
+use openshard_movement::MapTerrain;
 use openshard_movement::PLAYER_HEIGHT;
 use openshard_tiles::TileData;
 
@@ -102,13 +103,20 @@ fn main() {
     };
     let map = openshard_uofiles::map::read_facet(&dir, 0).expect("Felucca");
     let tiledata = openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata.mul");
+    // The bake every interiors bake now takes, built once for the whole run:
+    // it is a projection of exactly this map and this table, and the census
+    // reads no other pair.
+    let spans = openshard_movement::spans::SpanIndex::build(&map, &tiledata);
+    let terrain = MapTerrain::new(&map, &tiledata, &spans);
 
     for region in regions {
-        measure(&map, &tiledata, &region);
+        measure(&terrain, &region);
     }
 }
 
-fn measure(map: &WorldMap, tiledata: &TileData, region: &Region) {
+fn measure(terrain: &MapTerrain<'_>, region: &Region) {
+    let map = terrain.map();
+    let tiledata = terrain.tiles();
     let max_x = region
         .x
         .checked_add(region.width - 1)
@@ -131,7 +139,7 @@ fn measure(map: &WorldMap, tiledata: &TileData, region: &Region) {
     let mut opaque_non_roofs = 0usize;
     for x in blocks_x {
         for y in blocks_y.clone() {
-            let block = BlockRooms::bake(map, tiledata, BlockCoord { x, y }).expect("selected map block");
+            let block = BlockRooms::bake(terrain, BlockCoord { x, y }).expect("selected map block");
             for cell in block
                 .cells()
                 .cells()
@@ -210,7 +218,7 @@ fn measure(map: &WorldMap, tiledata: &TileData, region: &Region) {
         .filter_map(|&id| stitched.cell(id))
         .filter(|cell| roof_above(map, tiledata, *cell))
         .count();
-    let buildings = Buildings::bake(map, tiledata, &stitched);
+    let buildings = Buildings::bake(terrain, &stitched);
     let floors: usize = buildings
         .buildings()
         .iter()
