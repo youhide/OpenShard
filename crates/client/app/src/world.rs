@@ -215,12 +215,6 @@ pub struct PresentationWorld {
     pub damage_numbers: Vec<DamageNumber>,
     /// Presentation-only delayed health, keyed by the mobile the shard named.
     pub health_estimates: BTreeMap<Serial, HealthEstimate>,
-    /// What the shard has put on the ground, as local movement reads it.
-    ///
-    /// The same type the shard keeps on the other end of the wire — built here
-    /// from the view rather than from an entity registry, and rebuilt whole
-    /// whenever the view changes. See [`clutter::of`].
-    pub overlay: openshard_map::overlay::Overlay,
     /// Animation and glide history, which belongs to presentation rather than
     /// authoritative state.
     pub crowd: Crowd,
@@ -905,14 +899,13 @@ impl WorldState {
 }
 
 /// The client's own map, unclutted by anything the shard has stood on it —
-/// [`cluttered`] is what a step decision should actually ask.
+/// [`footing`] is what a step decision should actually ask.
 ///
 /// A facade over [`resources::Resources::map`] and
 /// [`resources::Resources::tiledata`], which travel together in every caller
-/// that wants either: the split that put them in `Resources` and
-/// [`WorldState::clutter`] in `WorldState` is about what changes
-/// together (disk-read once against updated every packet), not about who
-/// asks for them together, and this is the seam that reunites the two.
+/// that wants either: the tile table's scope is the *install* and the map's is
+/// one facet, so the two are separate fields and this is the seam that reads
+/// them as the pair every caller wants.
 ///
 /// **A free function taking `&Resources`, not an `App` method taking
 /// `&self`.** A method on `App` borrows the whole of it, so a caller that
@@ -922,17 +915,9 @@ impl WorldState {
 /// a method call, which is opaque to it. Passing `&self.resources` here is
 /// the same projection the field access always was, just wrapped.
 pub(crate) fn terrain(resources: &resources::Resources) -> openshard_movement::MapTerrain<'_> {
-    openshard_movement::MapTerrain::new(resources.map.map(), &resources.tiledata)
+    openshard_movement::MapTerrain::new(resources.map(), &resources.tiledata)
 }
 
-/// [`terrain`] with the shard's own items laid over it — what every step
-/// decision on this end should actually ask. See [`clutter::of`], and
-/// `terrain`'s own docs for why this takes references rather than being an
-/// `App` method.
-///
-/// The two readings of the shut doors are the `doors` argument and not two
-/// functions: they are one facet at one moment, and the pair used to be two
-/// terrains a caller built side by side.
 /// Nothing placed, for a *map-only* reading to borrow.
 ///
 /// The coarse graph was baked over the bare map, so the guide has to be read
@@ -951,12 +936,17 @@ pub(crate) fn guide(resources: &resources::Resources) -> openshard_movement::Foo
     )
 }
 
-pub(crate) fn footing<'a>(
-    world: &'a WorldState,
-    resources: &'a resources::Resources,
+/// The facet as a step decision on this end reads it: the ground, what the
+/// shard has laid over it, and which way the shut doors are being read.
+///
+/// One argument's worth of world, because since era R's second node the two
+/// layers are one value — see [`crate::clutter::fill`], which is what puts the
+/// live half there.
+pub(crate) fn footing(
+    resources: &resources::Resources,
     doors: openshard_map::overlay::Doors,
-) -> openshard_movement::Footing<'a> {
-    openshard_movement::Footing::new(Some(terrain(resources)), &world.presentation.overlay, doors)
+) -> openshard_movement::Footing<'_> {
+    openshard_movement::Footing::of(&resources.world, &resources.tiledata, doors)
 }
 
 #[cfg(test)]
@@ -995,7 +985,6 @@ mod tests {
             multi_preview: Vec::new(),
             damage_numbers: Vec::new(),
             health_estimates: BTreeMap::new(),
-            overlay: openshard_map::overlay::Overlay::default(),
             crowd: Crowd::default(),
         };
         let update_interval = Duration::from_millis(750);

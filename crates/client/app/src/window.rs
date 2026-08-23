@@ -288,12 +288,12 @@ pub(crate) fn prepare_composite_job(
     window: &mut Screen,
     key: CompositeKey,
 ) -> Option<FlatGroundBlock> {
-    let map_width = resources.map.map().width() as i32;
-    let map_height = resources.map.map().height() as i32;
+    let map_width = resources.map().width() as i32;
+    let map_height = resources.map().height() as i32;
     if map_width <= 0 || map_height <= 0 {
         return None;
     }
-    let Some(ground) = FlatGroundBlock::inspect(resources.map.map(), key.block) else {
+    let Some(ground) = FlatGroundBlock::inspect(resources.map(), key.block) else {
         // This is a stable property of the immutable map, so treat it as a
         // completed LOD0 answer rather than retrying this producer request on
         // every camera frame.
@@ -320,7 +320,7 @@ pub(crate) fn prepare_composite_job(
     // LOD work cannot grow or mutate the static atlas and cannot bake a roof
     // outside its 8×8 source.
     let mut wanted = Wanted::default();
-    ground::graphics_in(resources.map.map(), owner, &mut wanted.land);
+    ground::graphics_in(resources.map(), owner, &mut wanted.land);
     if window
         .atlases
         .grow(
@@ -479,20 +479,24 @@ pub(crate) fn ready_atlases(
         // frame may not assume anything about what the atlases hold. Set
         // again below only if the rebuild succeeds.
         graphics.covered = None;
+        // Gathered before the build, not inside its argument list: `map()`
+        // borrows the whole of `resources` where the field it reads used to
+        // borrow only itself, and the build wants `&mut resources.anim`.
+        let wanted = wanted_in(
+            resources.map(),
+            [want],
+            &world.presentation.items,
+            &drawn.iter().map(|(_, mobile)| mobile.clone()).collect::<Vec<_>>(),
+            &world.presentation.tile_animations,
+            &resources.equip_conv,
+        );
         match Atlases::build(
             &resources.art,
             resources.surfaces.as_ref(),
             &resources.texmaps,
             &resources.tiledata,
             &mut resources.anim,
-            &wanted_in(
-                resources.map.map(),
-                [want],
-                &world.presentation.items,
-                &drawn.iter().map(|(_, mobile)| mobile.clone()).collect::<Vec<_>>(),
-                &world.presentation.tile_animations,
-                &resources.equip_conv,
-            ),
+            &wanted,
         ) {
             Ok(atlases) => {
                 // `install_atlases` creates fresh textures and uploads every
@@ -1339,7 +1343,7 @@ impl App {
             .map(|(_, mobile)| mobile)
             .collect();
         wanted_in(
-            self.resources.map.map(),
+            self.resources.map(),
             bands,
             &self.world.presentation.items,
             &drawn,

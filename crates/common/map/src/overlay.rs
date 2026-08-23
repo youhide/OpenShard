@@ -203,7 +203,7 @@ impl Cover {
     /// agree by construction rather than by resemblance. It used to be written
     /// twice: `world::tick::decor::place_decoration` filtered on
     /// `flags.is_blocking()` and took `tile.height`, and `client/app`'s
-    /// `clutter::of` did the same three lines a crate away. Same predicate,
+    /// `clutter::fill` did the same three lines a crate away. Same predicate,
     /// same span, two places to change one of them.
     ///
     /// **Not a door**, whichever way round that is. Which leaves are doors is
@@ -544,7 +544,7 @@ mod tests {
     ///
     /// This is the whole of the agreement `clutter.rs`'s header claims and that
     /// nothing checked before node E: the shard's `place_decoration` and the
-    /// client's `clutter::of` both call [`Cover::of_static`], so a step refused
+    /// client's `clutter::fill` both call [`Cover::of_static`], so a step refused
     /// at one end is refused at the other for the same reason rather than for a
     /// similar one. What is asserted here is the contract they share.
     #[test]

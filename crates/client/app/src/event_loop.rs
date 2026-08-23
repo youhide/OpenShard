@@ -277,7 +277,7 @@ impl ApplicationHandler<()> for App {
                                     // leaf into a usable next step; `walk`
 
                                     // sends its use before this step.
-                                    live: footing(&self.world, &self.resources, self.walking_doors()),
+                                    live: footing(&self.resources, self.walking_doors()),
 
                                     guide: guide(&self.resources),
                                     coarse: self.resources.coarse.as_ref(),
@@ -830,7 +830,7 @@ impl ApplicationHandler<()> for App {
             // reason the single terrain always was — they borrow the map and the
             // view, and the walk borrows `steer` mutably beside them.
             let ground = steer::Ground {
-                live: footing(&self.world, &self.resources, self.walking_doors()),
+                live: footing(&self.resources, self.walking_doors()),
 
                 guide: guide(&self.resources),
                 coarse: self.resources.coarse.as_ref(),

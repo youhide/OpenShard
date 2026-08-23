@@ -11,7 +11,8 @@ use std::sync::Arc;
 use openshard_client_render::atlas::FontAtlas;
 use openshard_client_render::gump::GumpAtlas;
 use openshard_client_render::hue::HueRamp;
-use openshard_map::snapshot::MapSnapshot;
+use openshard_map::map::WorldMap;
+use openshard_map::world::World;
 use openshard_movement::NavigationGraph;
 use openshard_tiles::TileData;
 use openshard_uofiles::anim::Anim;
@@ -27,15 +28,51 @@ use openshard_uofiles::ttf_font::TtfFont;
 
 /// The client's own asset files, read once at startup and held for the run.
 ///
-/// Nothing here changes because of a packet or a camera move — see
+/// Nothing here changes because of a camera move — see
 /// [`crate::graphics::GraphicsSettings`] and [`crate::world::WorldState`] for
 /// the fields that do. `App::resources` is the one place these are reached
 /// from; a field here that turns out to want its own invariant gets a method
 /// on this struct rather than a getter that hands the field out raw.
+///
+/// **One field here does change on a packet**, and deliberately:
+/// [`Resources::world`]'s live layer, which is what the shard has put on the
+/// ground. It is here because the ground is here — the two are one facet, and
+/// splitting them across two structs is exactly the arrangement
+/// `docs/map/realtime_map.md`'s era R exists to end. See [`crate::clutter`],
+/// which is the only writer.
+impl Resources {
+    /// The ground this client is drawing.
+    ///
+    /// A method rather than a field because of the shape of [`World`]: its base
+    /// is optional, for a *shard* that runs with no client files at all. A
+    /// client is not one — it opened the install to get this far, and `run`
+    /// fails before building a `Resources` if it could not — so the absence is
+    /// unreachable here, and every one of the forty readers below would
+    /// otherwise carry the same `expect` for it.
+    ///
+    /// # Panics
+    ///
+    /// Never: `run` loads the facet before anything can call this, and nothing
+    /// takes a client's ground away again.
+    #[must_use]
+    pub fn map(&self) -> &WorldMap {
+        self.world
+            .snapshot()
+            .expect("a client that got as far as drawing opened a facet")
+            .map()
+    }
+}
+
 pub struct Resources {
-    /// The facet, shared with the shard thread — see [`crate::link::connect`].
-    pub map: MapSnapshot,
-    /// Static long-distance connectivity over [`Resources::map`]. It is built
+    /// The facet: the ground read off the install, and what the shard has laid
+    /// over it. Its base is shared with the shard thread — see
+    /// [`crate::link::connect`].
+    ///
+    /// The live layer is rebuilt whole from the view whenever the view changes
+    /// and is never diffed; this end has no identities to address a finer edit
+    /// to. See [`crate::clutter::fill`].
+    pub world: World,
+    /// Static long-distance connectivity over [`Resources::world`]. It is built
     /// once, before the event loop starts, and only proposes a corridor; the
     /// live route still reads the map with the shard's clutter laid over it.
     pub coarse: Option<NavigationGraph>,
@@ -62,7 +99,7 @@ pub struct Resources {
     /// eviction otherwise waits for a full atlas to trigger.
     pub repack_forced: bool,
     pub texmaps: TexMaps,
-    /// Shared with the shard thread, the same way [`Resources::map`] is — see
+    /// Shared with the shard thread, the same way [`Resources::world`]'s base is — see
     /// [`crate::link::connect`]: the walk prediction weighs a pier's or a
     /// bridge's deck now, not only the land, and that needs `tiledata.mul` on
     /// both ends of the channel.

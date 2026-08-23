@@ -27,7 +27,9 @@
 //!
 //! It is a *projection* of the view, like [`App::items`](crate::App::items) and
 //! [`App::others`](crate::App::others): rebuilt whole whenever the view changes,
-//! with nothing to keep in step by hand.
+//! with nothing to keep in step by hand. Where it is written is the live layer
+//! of the facet's [`World`](openshard_map::world::World), beside the ground it
+//! is laid over — see [`fill`].
 //!
 //! # A door is not a crate, and the graphic does not say which
 //!
@@ -95,14 +97,20 @@ const MOBILE_HEIGHT: i32 = openshard_movement::PLAYER_HEIGHT;
 /// body walking through an open door — and a shut one goes in marked, which is
 /// what [`Doors::AllOpen`] reads.
 ///
-/// Built whole and thrown away whole. This end has no identities to address a
-/// finer edit to, which is the same fact that keeps [`Cover`] free of an owner
-/// — see `openshard_movement::overlay`.
-pub fn of<'a>(
+/// **Written into `live` rather than returned.** The live layer is one half of
+/// the facet's [`World`](openshard_map::world::World) and the map is the other;
+/// handing back a value the caller then has to remember to put somewhere is
+/// exactly the arrangement era R exists to end. It is still built whole and
+/// thrown away whole — this end has no identities to address a finer edit to,
+/// which is the same fact that keeps [`Cover`] free of an owner (see
+/// `openshard_map::overlay`), so `live` is cleared first and every tile in the
+/// view is written afresh.
+pub fn fill<'a>(
+    live: &mut Overlay,
     items: &[GroundItem],
     mobiles: impl IntoIterator<Item = &'a Mobile>,
     tiles: &TileData,
-) -> Overlay {
+) {
     let mut covers: HashMap<Tile, Vec<Cover>> = HashMap::new();
     for item in items {
         // What is drawn is what is in the way — see `GroundItem::displayed`.
@@ -136,22 +144,30 @@ pub fn of<'a>(
             .or_default()
             .push(Cover::blocking(mobile.position.z, MOBILE_HEIGHT as u8));
     }
-    let mut overlay = Overlay::default();
+    live.clear();
     for (tile, covers) in covers {
-        overlay.set(tile, covers);
+        live.set(tile, covers);
     }
-    overlay
+}
+
+/// [`fill`] into a fresh overlay, for the tests that are about what went in
+/// rather than about where it was written.
+#[cfg(test)]
+fn of<'a>(items: &[GroundItem], mobiles: impl IntoIterator<Item = &'a Mobile>, tiles: &TileData) -> Overlay {
+    let mut live = Overlay::default();
+    fill(&mut live, items, mobiles, tiles);
+    live
 }
 
 /// Index blockers by hand, with no tiledata to read flags from.
 ///
 /// For the tests that are about the *span* and the detour rather than about
-/// which art is impassable — the flag half is [`of`]'s and is covered against
+/// which art is impassable — the flag half is [`fill`]'s and is covered against
 /// the real `tiledata.mul` below.
 ///
 /// Nothing placed this way is a door: which art is a door is the other half
-/// [`of`] answers, and a fixture that could claim it would be claiming the very
-/// thing under test.
+/// [`fill`] answers, and a fixture that could claim it would be claiming the
+/// very thing under test.
 #[cfg(test)]
 fn placed(blockers: &[(openshard_protocol::world::Point, u8)]) -> Overlay {
     let mut covers: HashMap<Tile, Vec<Cover>> = HashMap::new();

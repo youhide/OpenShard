@@ -1597,7 +1597,6 @@ impl App {
                 interior.as_ref().is_none_or(|frame| {
                     let z = self
                         .resources
-                        .map
                         .map()
                         .land(tile.at.x, tile.at.y)
                         .map_or(0, |land| land.z);
@@ -1689,7 +1688,7 @@ impl App {
         let on_static = match owns_pointer && on_mobile.is_none() && on_item.is_none() {
             true => self.window.as_ref().and_then(|window| {
                 statics::pick_with_interior(
-                    self.resources.map.map(),
+                    self.resources.map(),
                     &camera,
                     &self.resources.tiledata,
                     &self.world.presentation.tile_animations,
@@ -1911,8 +1910,8 @@ impl App {
         // representation until an idle producer has completed its composite.
         // The completed image enters `Screen::composites` through this queue;
         // Work 4 owns drawing that ready texture in the depth-aware world pass.
-        let map_width = self.resources.map.map().width();
-        let map_height = self.resources.map.map().height();
+        let map_width = self.resources.map().width();
+        let map_height = self.resources.map().height();
         let map_tiles = openshard_client_render::camera::TileBounds {
             min_x: 0,
             max_x: map_width.saturating_sub(1) as i32,
@@ -1929,10 +1928,11 @@ impl App {
         // interior-frame fingerprint it cannot stand in for a room that has
         // deliberately become transparent, so the active building picture
         // keeps this frame on its detailed LOD0 path.
-        let composite_lod = interior
-            .is_some()
-            .then_some(openshard_client_render::lod::BlockLod::Lod0)
-            .unwrap_or_else(|| visible_composite_lod(selected_composite_lod));
+        let composite_lod = if interior.is_some() {
+            openshard_client_render::lod::BlockLod::Lod0
+        } else {
+            visible_composite_lod(selected_composite_lod)
+        };
         // A composite stores final map pixels and deferred facts, not atlas
         // UVs. Static-atlas pages are append-only, so packing art for a newly
         // entered block cannot alter a completed block composite. In
@@ -1972,8 +1972,8 @@ impl App {
         let window_scale = self.window_scale();
         let gump_scale = self.gump_scale();
         let radar_facet_extent = radar::RadarExtent::new(
-            u16::try_from(self.resources.map.map().width()).expect("a UO map width fits u16"),
-            u16::try_from(self.resources.map.map().height()).expect("a UO map height fits u16"),
+            u16::try_from(self.resources.map().width()).expect("a UO map width fits u16"),
+            u16::try_from(self.resources.map().height()).expect("a UO map height fits u16"),
         )
         .expect("a map has an extent");
         let player_tile = self.world.authoritative.view.as_ref().map(|view| {
@@ -2187,7 +2187,7 @@ impl App {
             let raster_started = Instant::now();
             let mut built = 0_usize;
             for key in self.radar_queue.take_for_producer_near(producer_centre) {
-                let chunk = build_chunk_reusing(self.resources.map.map(), colors, key, &mut scratch);
+                let chunk = build_chunk_reusing(self.resources.map(), colors, key, &mut scratch);
                 let Some(chunk) = chunk else {
                     // The slot goes back rather than being lost — see
                     // `RadarWorkQueue::abandon`.
@@ -2693,7 +2693,7 @@ impl App {
             audit_static_atlas_pages(window);
             audit_scene_instance_buffers(window);
             if manual_frame_diagnostic || std::env::var_os("OPENSHARD_LOD_SCREEN_AUDIT").is_some() {
-                audit_visible_ground_centres(window, self.resources.map.map(), camera);
+                audit_visible_ground_centres(window, self.resources.map(), camera);
             }
             let oracle_report = if manual_frame_diagnostic
                 || live_oracle_sample.is_some()

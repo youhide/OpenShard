@@ -319,7 +319,7 @@ pub(crate) fn assemble_geometry(
     // what this frame is can be compared against what a tool's frame is
     // rather than pieced together from two call sites.
     let inputs = frame::Inputs {
-        map: resources.map.map(),
+        map: resources.map(),
         items: &drawn_items,
         camera: &camera,
         tiledata: &resources.tiledata,

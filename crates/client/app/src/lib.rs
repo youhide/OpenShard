@@ -844,7 +844,6 @@ pub fn run<D: Dial + Send + 'static>(
                 multi_preview: Vec::new(),
                 damage_numbers: Vec::new(),
                 health_estimates: std::collections::BTreeMap::new(),
-                overlay: openshard_map::overlay::Overlay::default(),
                 crowd: {
                     // The body's ease, which is not the camera's — see `STARTUP_EASE`.
                     let mut crowd = Crowd::default();
@@ -864,7 +863,7 @@ pub fn run<D: Dial + Send + 'static>(
         updates,
         stall_on_update,
         resources: resources::Resources {
-            map,
+            world: openshard_map::world::World::new(Some(map)),
             coarse,
             interiors,
             art,

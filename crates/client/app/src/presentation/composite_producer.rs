@@ -44,7 +44,7 @@ pub(super) fn produce(
         max_y: i32::from(first_y) + openshard_map::map::BLOCK_SIZE as i32 - 1,
     };
     let ground: Vec<_> = ground::collect_in(
-        resources.map.map(),
+        resources.map(),
         &camera,
         owner,
         &window.atlases.land,
@@ -113,7 +113,7 @@ pub(super) fn produce(
         super::audit_captured_composite_ids(
             &window.device,
             &window.queue,
-            resources.map.map(),
+            resources.map(),
             captured,
             &window.composite_producer.world,
             window.composite_producer.gbuffer.ids(),

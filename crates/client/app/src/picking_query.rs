@@ -67,10 +67,9 @@ impl App {
     pub(crate) fn tile_info(&self, tile: Tile) -> PickedTile {
         let x = tile.x;
         let y = tile.y;
-        let land = self.resources.map.map().land(x, y);
+        let land = self.resources.map().land(x, y);
         let statics = self
             .resources
-            .map
             .map()
             .statics_at(x, y)
             .map(|item| {
@@ -82,7 +81,7 @@ impl App {
         // A server item (the shard's own decoration, not the client's map art)
         // sorts exactly like a static — `statics::place` reads it through the
         // same `depth::static_priority_z` — but lives in a different list:
-        // `self.resources.map.statics_at` only ever answers from the client's own files,
+        // `self.resources.map().statics_at` only ever answers from the client's own files,
         // so a sign or a prop the shard's script placed is invisible to it.
         // Missing it here is what let a static-only panel misname what was
         // actually drawing over a mobile on screen.
@@ -147,11 +146,11 @@ impl App {
         // exactly the land's average height is drawn sloped; it is level ground
         // wherever that coincidence is not one, and a corner off by a unit or
         // two is a better wrong answer than a marker that ignores the hill.
-        let corners = match self.resources.map.map().average_land_z(x, y) == Some(stand_z) {
+        let corners = match self.resources.map().average_land_z(x, y) == Some(stand_z) {
             // `land_corners` reads top, right, *left*, bottom, and the facet
             // wants top, right, bottom, left — swapping the pair is what keeps
             // the quad from being a bow tie.
-            true => match self.resources.map.map().land_corners(x, y) {
+            true => match self.resources.map().land_corners(x, y) {
                 Some([top, right, left, bottom]) => [top, right, bottom, left],
                 None => [stand_z; 4],
             },
@@ -168,11 +167,7 @@ impl App {
         // would be one of its own. The surfaces themselves come from the map:
         // where a floor *is* is a fact about the facet, and only whether a body
         // fits on it depends on what has been put there since.
-        let cluttered = footing(
-            &self.world,
-            &self.resources,
-            openshard_map::overlay::Doors::AsTheyStand,
-        );
+        let cluttered = footing(&self.resources, openshard_map::overlay::Doors::AsTheyStand);
         let mut levels: Vec<(Height, bool)> = terrain
             .surfaces(x, y)
             .into_iter()
@@ -228,7 +223,7 @@ impl App {
                 }
                 let x = i32::from(centre.at.x) + dx;
                 let y = i32::from(centre.at.y) + dy;
-                if let Some(tile) = Self::in_bounds(x, y, self.resources.map.map()) {
+                if let Some(tile) = Self::in_bounds(x, y, self.resources.map()) {
                     ring.push(self.tile_info(tile));
                 }
             }
@@ -262,13 +257,13 @@ impl App {
         let planning = self.world.motion.planning_state();
         let near = i32::from(planning.position.z);
         let (mut x, mut y) = camera::unproject(world_px, planning.position.z);
-        if let Some(tile) = Self::in_bounds(x, y, self.resources.map.map()) {
+        if let Some(tile) = Self::in_bounds(x, y, self.resources.map()) {
             let terrain = terrain(&self.resources);
             let z = terrain.predict_z(tile.x, tile.y, near);
             let z = z.clamp(i32::from(i8::MIN), i32::from(i8::MAX)) as i8;
             (x, y) = camera::unproject(world_px, z);
         }
-        let tile = Self::in_bounds(x, y, self.resources.map.map())?;
+        let tile = Self::in_bounds(x, y, self.resources.map())?;
         Some(self.tile_info(tile))
     }
 
@@ -418,20 +413,13 @@ impl App {
         use openshard_map::grid::Tile;
         use openshard_movement::PLAYER_HEIGHT;
 
-        let terrain = footing(
-            &self.world,
-            &self.resources,
-            openshard_map::overlay::Doors::AsTheyStand,
-        );
+        let terrain = footing(&self.resources, openshard_map::overlay::Doors::AsTheyStand);
         let near = i32::from(self.world.motion.planning_state().position.z);
         let mut open = Vec::new();
         let mut blocked = Vec::new();
         // The same clamp the ground pass uses, so the wash covers exactly the
         // tiles that were drawn and no strip of it hangs off the map.
-        if let Some((xs, ys)) = bounds.clamp_to(
-            self.resources.map.map().width(),
-            self.resources.map.map().height(),
-        ) {
+        if let Some((xs, ys)) = bounds.clamp_to(self.resources.map().width(), self.resources.map().height()) {
             for y in ys {
                 for x in xs.clone() {
                     let tile = Tile::new(x, y);
@@ -504,10 +492,10 @@ impl App {
                 buildings: 0,
             });
         };
-        let Some((xs, ys)) = camera.visible_tiles().clamp_to(
-            self.resources.map.map().width(),
-            self.resources.map.map().height(),
-        ) else {
+        let Some((xs, ys)) = camera
+            .visible_tiles()
+            .clamp_to(self.resources.map().width(), self.resources.map().height())
+        else {
             return Arc::new(InteriorOverlay {
                 cells: Vec::new(),
                 doors: Vec::new(),
@@ -524,7 +512,7 @@ impl App {
                 };
                 visible_buildings.insert(building);
                 cells.push(InteriorCell {
-                    at: Point::new(x, y, self.resources.map.map().land(x, y).map_or(0, |land| land.z)),
+                    at: Point::new(x, y, self.resources.map().land(x, y).map_or(0, |land| land.z)),
                     // This first artifact identifies a whole house.  The
                     // storey/room graph follows on top of these ids.
                     floor: 0,
@@ -541,7 +529,6 @@ impl App {
             .flat_map(|x| (*ys.start()..=*ys.end()).map(move |y| (x, y)))
             .filter_map(|(x, y)| {
                 self.resources
-                    .map
                     .map()
                     .statics_at(x, y)
                     .find(|item| {
@@ -645,11 +632,7 @@ impl App {
         let ground = steer::Ground {
             // The route the HUD draws is the one a step would take, so it reads
             // the doors as they stand whatever the auto-door setting is.
-            live: footing(
-                &self.world,
-                &self.resources,
-                openshard_map::overlay::Doors::AsTheyStand,
-            ),
+            live: footing(&self.resources, openshard_map::overlay::Doors::AsTheyStand),
             guide: guide(&self.resources),
             coarse: self.resources.coarse.as_ref(),
         };
@@ -690,7 +673,7 @@ impl App {
             return Arc::clone(&cached.surfaces);
         }
         let occlusion = occlusion::collect(
-            self.resources.map.map(),
+            self.resources.map(),
             &self.world.presentation.items,
             bounds,
             &self.resources.tiledata,

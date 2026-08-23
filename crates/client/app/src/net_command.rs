@@ -477,12 +477,9 @@ impl App {
             return;
         }
         let current = self.world.presentation.cutaway_at;
-        let reachable = openshard_movement::can_step(
-            &footing(&self.world, &self.resources, self.walking_doors()),
-            current,
-            next,
-        )
-        .is_some();
+        let reachable =
+            openshard_movement::can_step(&footing(&self.resources, self.walking_doors()), current, next)
+                .is_some();
         if reachable {
             self.world.presentation.cutaway_at = next;
         }
@@ -537,16 +534,16 @@ impl App {
         // misconfiguration and not an event.
         if !self.world.authoritative.facet_checked {
             self.world.authoritative.facet_checked = true;
-            if u32::from(view.map.width) != self.resources.map.map().width()
-                || u32::from(view.map.height) != self.resources.map.map().height()
+            if u32::from(view.map.width) != self.resources.map().width()
+                || u32::from(view.map.height) != self.resources.map().height()
             {
                 eprintln!(
                     "the shard's facet is {}x{} and {} is {}x{}: the ground drawn is not the ground you are standing on",
                     view.map.width,
                     view.map.height,
-                    self.resources.map.map().facet_name(),
-                    self.resources.map.map().width(),
-                    self.resources.map.map().height(),
+                    self.resources.map().facet_name(),
+                    self.resources.map().width(),
+                    self.resources.map().height(),
                 );
             }
         }
@@ -697,7 +694,8 @@ impl App {
         // a step cannot go through. Rebuilt here rather than per decision: one
         // click plans a route over hundreds of tiles, and each of them would
         // otherwise rescan everything on screen. See `clutter.rs`.
-        self.world.presentation.overlay = clutter::of(
+        clutter::fill(
+            self.resources.world.live_mut(),
             &self.world.presentation.items,
             view.mobiles.values(),
             &self.resources.tiledata,

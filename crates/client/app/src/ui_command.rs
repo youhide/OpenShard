@@ -240,7 +240,7 @@ impl App {
             // the body is, so there is nothing to step from.
             return;
         };
-        let terrain = openshard_movement::MapTerrain::new(self.resources.map.map(), &self.resources.tiledata);
+        let terrain = openshard_movement::MapTerrain::new(self.resources.map(), &self.resources.tiledata);
         let stepped = walk.step(facing, |from, tile| {
             i8::try_from(terrain.predict_step(from, tile.x, tile.y)).ok()
         });
@@ -329,10 +329,9 @@ impl App {
             true => (motion.position.x, motion.position.y),
             false => {
                 let (dx, dy) = facing.direction.step();
-                let x =
-                    (i32::from(motion.position.x) + dx).clamp(0, self.resources.map.map().width() as i32 - 1);
-                let y = (i32::from(motion.position.y) + dy)
-                    .clamp(0, self.resources.map.map().height() as i32 - 1);
+                let x = (i32::from(motion.position.x) + dx).clamp(0, self.resources.map().width() as i32 - 1);
+                let y =
+                    (i32::from(motion.position.y) + dy).clamp(0, self.resources.map().height() as i32 - 1);
                 (x as u16, y as u16)
             }
         };
@@ -451,7 +450,7 @@ impl App {
             return false;
         };
         let ground = steer::Ground {
-            live: footing(&self.world, &self.resources, self.walking_doors()),
+            live: footing(&self.resources, self.walking_doors()),
 
             guide: guide(&self.resources),
             coarse: self.resources.coarse.as_ref(),
