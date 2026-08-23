@@ -237,7 +237,7 @@ fn probe(state: &WorldState, facet: Facet, from: Point, dir: Direction) -> (bool
         .facet_state(facet)
         .obstructions()
         .blocker_at(target.x, target.y)
-        .filter(|o| o.door)
+        .filter(|o| o.door())
         .map(|o| o.entity);
     (false, door)
 }

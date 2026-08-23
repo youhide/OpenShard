@@ -281,7 +281,7 @@ fn walk_home(state: &mut WorldState, npc: EntityId, at: Point, post: Point) -> O
             .facet_state(facet)
             .obstructions()
             .blocker_at(tile.x, tile.y)
-            .filter(|o| o.door)
+            .filter(|o| o.door())
             .map(|o| o.entity);
         if let Some(door) = door {
             openshard_items::open_door(state, door);

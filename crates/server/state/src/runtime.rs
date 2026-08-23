@@ -20,7 +20,7 @@ use openshard_entities::{EntityId, Registry};
 use openshard_events::EventBus;
 use openshard_gateway::ConnectionId;
 use openshard_map::grid::Tile;
-use openshard_map::overlay::Doors;
+use openshard_map::overlay::{Cover, Doors};
 use openshard_map::snapshot::MapSnapshot;
 use openshard_map::world::World;
 use openshard_movement::{Footing, MapTerrain, NavigationGraph};
@@ -513,12 +513,12 @@ impl FacetState {
         self.world.set_base(map);
     }
 
-    /// Mark `entity` as blocking `(x, y)` through `[z, z + height)`.
+    /// Put `entity`'s `cover` on `(x, y)`.
     ///
     /// See [`Obstructions::block`] for what the identity is and why one entity
-    /// may hold several spans on one tile. The overlay follows.
-    pub fn block(&mut self, x: u16, y: u16, entity: EntityId, door: bool, z: i8, height: u8) {
-        self.obstructions.block(x, y, entity, door, z, height);
+    /// may hold several covers on one tile. The overlay follows.
+    pub fn block(&mut self, x: u16, y: u16, entity: EntityId, cover: Cover) {
+        self.obstructions.block(x, y, entity, cover);
         self.refresh(x, y);
     }
 

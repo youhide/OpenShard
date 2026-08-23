@@ -80,9 +80,7 @@ impl World {
                 door.position.x,
                 door.position.y,
                 entity,
-                true,
-                door.position.z,
-                openshard_state::DOOR_HEIGHT,
+                openshard_map::overlay::Cover::door(door.position.z, openshard_state::DOOR_HEIGHT),
             );
         }
         for container in containers {
@@ -167,9 +165,7 @@ impl World {
                 position.x,
                 position.y,
                 entity,
-                false,
-                position.z,
-                cover.height,
+                cover.based_at(position.z),
             );
         }
         self.state.facet_state_mut(facet).sectors.insert(entity, position);
@@ -297,9 +293,7 @@ impl World {
                     position.x,
                     position.y,
                     entity,
-                    true,
-                    position.z,
-                    openshard_state::DOOR_HEIGHT,
+                    openshard_map::overlay::Cover::door(position.z, openshard_state::DOOR_HEIGHT),
                 );
             }
         }

@@ -1652,9 +1652,7 @@ impl World {
                             position.x,
                             position.y,
                             entity,
-                            true,
-                            position.z,
-                            openshard_state::DOOR_HEIGHT,
+                            openshard_map::overlay::Cover::door(position.z, openshard_state::DOOR_HEIGHT),
                         );
                     }
                 }
@@ -1665,9 +1663,12 @@ impl World {
                         .filter(|tile| tile.flags.is_blocking())
                         .map(|tile| tile.height);
                     if let Some(height) = height {
-                        self.state
-                            .facet_state_mut(facet)
-                            .block(position.x, position.y, entity, false, position.z, height);
+                        self.state.facet_state_mut(facet).block(
+                            position.x,
+                            position.y,
+                            entity,
+                            openshard_map::overlay::Cover::blocking(position.z, height),
+                        );
                     }
                 }
             }

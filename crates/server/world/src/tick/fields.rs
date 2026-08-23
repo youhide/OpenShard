@@ -85,13 +85,12 @@ impl World {
         self.state.registry.insert(entity, field);
         self.state.facet_state_mut(facet).sectors.insert(entity, pos);
         if field.blocks {
+            // A wall, not a door: nothing routes through it.
             self.state.facet_state_mut(facet).block(
                 pos.x,
                 pos.y,
                 entity,
-                false, // a wall, not a door: nothing routes through it
-                pos.z,
-                FIELD_HEIGHT,
+                openshard_map::overlay::Cover::blocking(pos.z, FIELD_HEIGHT),
             );
         }
         self.state.reveal(entity);

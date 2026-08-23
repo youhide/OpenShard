@@ -241,9 +241,7 @@ pub(crate) fn set_door(state: &mut WorldState, door: EntityId, serial: Serial, o
             moved.x,
             moved.y,
             door,
-            true,
-            moved.z,
-            openshard_state::DOOR_HEIGHT,
+            openshard_map::overlay::Cover::door(moved.z, openshard_state::DOOR_HEIGHT),
         );
     }
     state.reveal(door);

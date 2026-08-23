@@ -873,7 +873,12 @@ fn block_footprint(facet_state: &mut FacetState, entity: EntityId, footprint: &[
         // Not a door: a house's own doors are entities of their own, placed on
         // top of it, and a wall a mobile could ask to open is a wall that stops
         // nobody who knows how.
-        facet_state.block(spot.tile.x, spot.tile.y, entity, false, spot.z, spot.height);
+        facet_state.block(
+            spot.tile.x,
+            spot.tile.y,
+            entity,
+            openshard_map::overlay::Cover::blocking(spot.z, spot.height),
+        );
     }
 }
 

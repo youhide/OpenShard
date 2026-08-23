@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use crate::boat::Boats;
 use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Cover, CoverKind, Overlay};
+use openshard_map::overlay::{Body, Cover, Overlay};
 
 /// A mobile's body height in z-units, for deciding what overlaps it. Matches the
 /// step check's `PLAYER_HEIGHT` in `world::terrain`.
@@ -36,37 +36,34 @@ const MOBILE_HEIGHT: i32 = 16;
 /// placer has no tiledata height to hand. A classic UO wall/door is 20 tall.
 pub const DOOR_HEIGHT: u8 = 20;
 
-/// One entity blocking a tile.
+/// One entity's one entry over a tile: what it does there, and who put it there.
+///
+/// **The cover is the whole of what it does.** This used to spell the span and
+/// the door flag out again — a `z`, a `height` and a `door: bool` beside the
+/// entity — and then convert them to a [`Cover`] on the way out, which is one
+/// idea written twice and a conversion that could drift from it. Now the
+/// identity is the only thing this adds: the overlay says a door is in the way,
+/// and this says *which* door.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Obstacle {
-    /// The blocking entity.
+    /// The entity that put this here.
     pub entity: EntityId,
-    /// A closed door: a mobile that knows how may open it rather than walk
-    /// around, so movement wants to know *what* blocked, not just that.
-    pub door: bool,
-    /// The base z the blocker sits at.
-    pub z: i8,
-    /// How tall it is: its body spans `[z, z + height)`. This is the z-span that
-    /// lets a wall on an upper floor block that floor and *not* the ground
-    /// beneath it — without it, a placed multi-storey building sealed every floor
-    /// below its highest impassable piece.
-    pub height: u8,
+    /// What it does to a body standing on the tile — the span, and which of the
+    /// two things it is. The z-span is what lets a wall on an upper floor block
+    /// that floor and *not* the ground beneath it: without it, a placed
+    /// multi-storey building sealed every floor below its highest impassable
+    /// piece.
+    pub cover: Cover,
 }
 
 impl Obstacle {
-    /// This obstacle as the overlay states it: the same span, minus the entity.
+    /// Whether this is a shut door somebody could open.
     ///
-    /// The projection [`FacetState`](crate::FacetState) maintains. Who put the
-    /// wall here is this crate's business and no reader of a step's outcome
-    /// needs it — see `openshard_movement::overlay`'s header for why the
-    /// shared type carries no owner.
+    /// A mobile that knows how may open one rather than walk around, so movement
+    /// wants to know *what* blocked and not just that something did.
     #[must_use]
-    pub const fn cover(&self) -> Cover {
-        Cover {
-            z: self.z,
-            height: self.height,
-            kind: CoverKind::Blocks { door: self.door },
-        }
+    pub const fn door(&self) -> bool {
+        self.cover.is_door()
     }
 }
 
@@ -77,32 +74,36 @@ pub struct Obstructions {
 }
 
 impl Obstructions {
-    /// Mark `entity` as blocking `(x, y)` through the z-span `[z, z + height)`.
-    /// Blocking twice at the same height is idempotent.
+    /// Put `entity`'s `cover` on `(x, y)`. Registering the same one twice is
+    /// idempotent.
     ///
-    /// # One entity may block one tile at several heights
+    /// # One entity may cover one tile several times over
     ///
-    /// The identity is the entity **and the z**, not the entity alone. A door is
-    /// one thing at one height and re-registering it refines it, which is what
-    /// the entity half is for. A *house* is one entity whose components stand on
-    /// top of each other: a wall on the ground floor and a wall directly above it
-    /// on the second are two obstacles at one tile, and keying by the entity alone
-    /// would let the second overwrite the first — sealing the upper floor and
-    /// opening the lower one, in whichever order they happened to be registered.
-    pub fn block(&mut self, x: u16, y: u16, entity: EntityId, door: bool, z: i8, height: u8) {
+    /// The identity is the entity, **the z, and which arm of the cover it is** —
+    /// not the entity alone.
+    ///
+    /// - A door is one thing at one height and re-registering it refines it,
+    ///   which is what the entity half is for.
+    /// - A *house* is one entity whose components stand on top of each other: a
+    ///   wall on the ground floor and a wall directly above it on the second are
+    ///   two entries at one tile, and keying by the entity alone would let the
+    ///   second overwrite the first — sealing the upper floor and opening the
+    ///   lower one, in whichever order they happened to be registered.
+    /// - A *platform* is two entries at one z from one entity: a stair tread is
+    ///   something a body beside it walks into and somewhere a body on top of it
+    ///   stands, and the two are not refinements of each other. That is the
+    ///   third part of the key.
+    pub fn block(&mut self, x: u16, y: u16, entity: EntityId, cover: Cover) {
         let tile = self.tiles.entry((x, y)).or_default();
-        if let Some(existing) = tile.iter_mut().find(|o| o.entity == entity && o.z == z) {
-            // Re-registering refines what the blocker is — a doorway placed as
-            // plain impassable art and then given its `Door` stays one obstacle.
-            existing.door = door;
-            existing.height = height;
+        let same = |o: &&mut Obstacle| {
+            o.entity == entity && o.cover.z == cover.z && o.cover.is_surface() == cover.is_surface()
+        };
+        if let Some(existing) = tile.iter_mut().find(same) {
+            // Re-registering refines what the cover is — a doorway placed as
+            // plain impassable art and then given its `Door` stays one entry.
+            existing.cover = cover;
         } else {
-            tile.push(Obstacle {
-                entity,
-                door,
-                z,
-                height,
-            });
+            tile.push(Obstacle { entity, cover });
         }
     }
 
@@ -119,29 +120,32 @@ impl Obstructions {
     /// The first thing blocking `(x, y)` at any height, if anything is. Used for
     /// door detection and sight, where a door is a full-height wall and its z
     /// does not matter.
+    ///
+    /// A *surface* is not something blocking: a house's floor is registered here
+    /// too, and a body looking through the tile it lies on is not looking
+    /// through a wall.
     #[must_use]
     pub fn blocker_at(&self, x: u16, y: u16) -> Option<Obstacle> {
-        self.tiles.get(&(x, y)).and_then(|t| t.first().copied())
+        self.tiles
+            .get(&(x, y))
+            .and_then(|t| t.iter().find(|o| o.cover.is_blocker()).copied())
     }
 
     /// The first thing blocking `(x, y)` in the vertical span a mobile standing
-    /// at `stand_z` occupies — its body `[z, z + height)` meeting the mobile's
+    /// at `stand_z` occupies — the cover's body meeting the mobile's
     /// `[stand_z, stand_z + MOBILE_HEIGHT)`. This is what movement asks, so an
     /// upper-floor blocker leaves the ground floor open.
     #[must_use]
     pub fn blocker_at_z(&self, x: u16, y: u16, stand_z: i32) -> Option<Obstacle> {
+        let body = Body::new(stand_z, MOBILE_HEIGHT);
         self.tiles.get(&(x, y)).and_then(|tile| {
             tile.iter()
-                .find(|o| {
-                    let bottom = i32::from(o.z);
-                    let top = bottom + i32::from(o.height).max(1);
-                    bottom < stand_z + MOBILE_HEIGHT && stand_z < top
-                })
+                .find(|o| o.cover.is_blocker() && o.cover.meets(body))
                 .copied()
         })
     }
 
-    /// Whether anything blocks `(x, y)`.
+    /// Whether anything is registered on `(x, y)` at all — a surface included.
     #[must_use]
     pub fn is_blocked(&self, x: u16, y: u16) -> bool {
         self.tiles.contains_key(&(x, y))
@@ -176,7 +180,7 @@ pub fn covers_at(obstructions: &Obstructions, boats: &Boats, x: u16, y: u16) -> 
     obstructions
         .at(x, y)
         .iter()
-        .map(Obstacle::cover)
+        .map(|obstacle| obstacle.cover)
         .chain(boats.at(x, y).iter().map(|plank| plank.cover()))
         .collect()
 }
@@ -209,8 +213,8 @@ mod tests {
     fn one_entity_blocks_one_tile_at_two_heights() {
         let house = an_entity();
         let mut obstructions = Obstructions::default();
-        obstructions.block(10, 10, house, false, 0, 20);
-        obstructions.block(10, 10, house, false, 20, 20);
+        obstructions.block(10, 10, house, Cover::blocking(0, 20));
+        obstructions.block(10, 10, house, Cover::blocking(20, 20));
 
         assert!(
             obstructions.blocker_at_z(10, 10, 0).is_some(),
@@ -225,9 +229,9 @@ mod tests {
 
         // Re-registering at a height already held still refines rather than adds:
         // that is what the entity half of the key is for.
-        obstructions.block(10, 10, house, true, 0, 20);
+        obstructions.block(10, 10, house, Cover::door(0, 20));
         assert!(
-            obstructions.blocker_at_z(10, 10, 0).is_some_and(|o| o.door),
+            obstructions.blocker_at_z(10, 10, 0).is_some_and(|o| o.door()),
             "the refinement did not land"
         );
     }
@@ -262,7 +266,7 @@ mod tests {
     fn a_blocked_tile_refuses_a_step_the_open_world_allows() {
         let mut obstructions = Obstructions::default();
         let door = an_entity();
-        obstructions.block(10, 10, door, true, 0, DOOR_HEIGHT);
+        obstructions.block(10, 10, door, Cover::door(0, DOOR_HEIGHT));
         let live_overlay = project(&obstructions, &NO_BOATS);
         let live = Footing::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(openshard_movement::can_step(&live, Point::new(10, 9, 0), Point::new(10, 10, 0)).is_none());
@@ -272,8 +276,8 @@ mod tests {
     #[test]
     fn a_door_opener_plans_through_a_door_but_not_through_a_crate() {
         let mut obstructions = Obstructions::default();
-        obstructions.block(10, 10, an_entity(), true, 0, DOOR_HEIGHT);
-        obstructions.block(12, 10, an_entity(), false, 0, DOOR_HEIGHT);
+        obstructions.block(10, 10, an_entity(), Cover::door(0, DOOR_HEIGHT));
+        obstructions.block(12, 10, an_entity(), Cover::blocking(0, DOOR_HEIGHT));
         let planner_overlay = project(&obstructions, &NO_BOATS);
         let planner = Footing::new(None, &planner_overlay, Doors::AllOpen);
         assert!(
@@ -288,7 +292,7 @@ mod tests {
     fn a_shut_door_is_opaque_and_an_open_one_is_not() {
         let mut obstructions = Obstructions::default();
         let door = an_entity();
-        obstructions.block(10, 10, door, true, 0, DOOR_HEIGHT);
+        obstructions.block(10, 10, door, Cover::door(0, DOOR_HEIGHT));
         let live_overlay = project(&obstructions, &NO_BOATS);
         let live = Footing::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(!openshard_movement::sight_clear(
@@ -323,7 +327,7 @@ mod tests {
         // slip past its corner, which the rule forbids even with the other flank
         // wide open. This is the case a server-driven creature used to exploit.
         let mut obstructions = Obstructions::default();
-        obstructions.block(11, 10, an_entity(), false, 0, DOOR_HEIGHT);
+        obstructions.block(11, 10, an_entity(), Cover::blocking(0, DOOR_HEIGHT));
         let live_overlay = project(&obstructions, &NO_BOATS);
         let live = Footing::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(
@@ -341,8 +345,8 @@ mod tests {
     fn unblocking_frees_the_tile_and_blocking_twice_is_one_obstacle() {
         let mut obstructions = Obstructions::default();
         let door = an_entity();
-        obstructions.block(5, 5, door, true, 0, DOOR_HEIGHT);
-        obstructions.block(5, 5, door, true, 0, DOOR_HEIGHT);
+        obstructions.block(5, 5, door, Cover::door(0, DOOR_HEIGHT));
+        obstructions.block(5, 5, door, Cover::door(0, DOOR_HEIGHT));
         obstructions.unblock(5, 5, door);
         assert!(!obstructions.is_blocked(5, 5));
     }
@@ -353,7 +357,7 @@ mod tests {
         // (z 20, a wall 20 tall) must not seal the ground beneath it, but one at
         // ground level must still block. The mobile steps at z 0.
         let mut obstructions = Obstructions::default();
-        obstructions.block(10, 10, an_entity(), false, 20, 20);
+        obstructions.block(10, 10, an_entity(), Cover::blocking(20, 20));
         let live_overlay = project(&obstructions, &NO_BOATS);
         let live = Footing::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(
@@ -361,7 +365,7 @@ mod tests {
             "an upper-floor wall does not block the floor below"
         );
 
-        obstructions.block(11, 10, an_entity(), false, 0, 20);
+        obstructions.block(11, 10, an_entity(), Cover::blocking(0, 20));
         let live_overlay = project(&obstructions, &NO_BOATS);
         let live = Footing::new(None, &live_overlay, Doors::AsTheyStand);
         assert!(

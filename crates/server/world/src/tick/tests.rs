@@ -13745,9 +13745,7 @@ fn fence_around(world: &mut World, center: Point) {
                 (i32::from(center.x) + dx) as u16,
                 (i32::from(center.y) + dy) as u16,
                 crate_entity,
-                false,
-                0,
-                openshard_state::DOOR_HEIGHT,
+                openshard_map::overlay::Cover::blocking(0, openshard_state::DOOR_HEIGHT),
             );
         }
     }
@@ -13804,9 +13802,7 @@ fn a_chase_rounds_a_wall_of_crates() {
             (i32::from(player_at.x) + dx) as u16,
             player_at.y + 2,
             crate_entity,
-            false,
-            0,
-            openshard_state::DOOR_HEIGHT,
+            openshard_map::overlay::Cover::blocking(0, openshard_state::DOOR_HEIGHT),
         );
     }
     let creature = spawn_brained(&mut world, 0x00D1, Point::new(START.0, START.1 + 4, 0), 10, now);
@@ -14943,9 +14939,7 @@ fn no_volley_passes_a_shut_door() {
                 (i32::from(den.x) + dx) as u16,
                 (i32::from(den.y) + dy) as u16,
                 crate_entity,
-                false,
-                0,
-                openshard_state::DOOR_HEIGHT,
+                openshard_map::overlay::Cover::blocking(0, openshard_state::DOOR_HEIGHT),
             );
         }
     }

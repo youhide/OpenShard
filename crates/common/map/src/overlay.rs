@@ -239,6 +239,21 @@ impl Cover {
         matches!(self.kind, CoverKind::Blocks { door: true })
     }
 
+    /// Whether this is something in the way rather than somewhere to stand.
+    ///
+    /// The two questions the enum partitions, asked as predicates so a reader
+    /// that only cares which arm it is does not have to name the arm's fields.
+    #[must_use]
+    pub const fn is_blocker(self) -> bool {
+        matches!(self.kind, CoverKind::Blocks { .. })
+    }
+
+    /// Whether this is somewhere to stand rather than something in the way.
+    #[must_use]
+    pub const fn is_surface(self) -> bool {
+        matches!(self.kind, CoverKind::Stands)
+    }
+
     /// The bottom of its body.
     #[must_use]
     pub const fn bottom(self) -> i32 {
