@@ -253,20 +253,20 @@ impl World {
             return;
         }
 
-        let Some(target) = step_from(walker.position, direction) else {
-            // Off the edge of the coordinate space — nowhere to go, and no client
-            // to snap back, so it is simply refused.
-            self.state.bus.send(StepRefused {
-                entity,
-                serial,
-                reason: RefusedReason::Blocked,
-            });
-            return;
-        };
-        let landed = openshard_movement::can_step(
+        // `step_allowed` and not `can_step`: a diagonal may not clip the corner
+        // where two blockers meet, and that half of the rule lives in
+        // `steps_out_of` rather than in one landing. A mobile the shard moves is
+        // held to the rule its own planner uses — `find_path` refuses to *plan*
+        // a corner cut, and a creature stepping straight at its quarry used to
+        // walk one. See `docs/map/navigation_spans.md`'s N3.
+        //
+        // It answers `None` off the edge of the coordinate space too, where
+        // there is nowhere to step at all: the same refusal, and there is no
+        // client to snap back either way.
+        let landed = openshard_movement::step_allowed(
             &self.state.footing(facet, Doors::AsTheyStand),
             walker.position,
-            target,
+            direction,
         );
         let Some(landed) = landed else {
             self.state.bus.send(StepRefused {

@@ -505,10 +505,10 @@ fn a_server_step_turns_first_then_moves() {
     let moves: Vec<MobileMoved> = world.bus().read(&mut moved).copied().collect();
     assert_eq!(moves.len(), 1, "second step moves");
     assert_eq!(moves[0].from, from);
-    assert_eq!(moves[0].to, step_from(from, dir).unwrap());
+    assert_eq!(moves[0].to, openshard_movement::step_from(from, dir).unwrap());
     assert_eq!(
         world.state.registry.get::<Position>(entity).unwrap().0,
-        step_from(from, dir).unwrap(),
+        openshard_movement::step_from(from, dir).unwrap(),
     );
     assert!(
         packets_for(&mut world, connection)
@@ -578,6 +578,66 @@ fn a_server_step_into_another_mobile_is_refused() {
     assert!(
         world.bus().read(&mut refused).any(|event| event.entity == entity),
         "the blocked server step is observable"
+    );
+}
+
+#[test]
+fn a_server_step_does_not_cut_a_corner() {
+    // A diagonal may not clip the corner where two blockers meet, and that half
+    // of the step rule lives in `steps_out_of` rather than in one landing. The
+    // decree used to ask `can_step`, which answers for the destination tile
+    // alone — so `find_path` refused to *plan* a corner cut and the shard then
+    // walked one on the next order. See `docs/map/navigation_spans.md`'s N3.
+    let now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    let entity = world.state.players[&connection];
+    let serial = serial_of(&world, connection);
+    let from = world.state.registry.get::<Position>(entity).unwrap().0;
+    // One crate due east. The south-east diagonal clips its corner, while the
+    // tile that step lands on and the other flank are both wide open.
+    let crate_entity = world.state.registry.spawn();
+    world.state.facet_state_mut(Facet(0)).block(
+        from.x + 1,
+        from.y,
+        crate_entity,
+        openshard_map::overlay::Cover::blocking(0, openshard_state::DOOR_HEIGHT),
+    );
+
+    let mut refused: Cursor<StepRefused> = world.bus().cursor();
+    // Twice: the first may only turn to face south-east, the second steps.
+    for _ in 0..2 {
+        world.queue(Command::Step {
+            serial,
+            direction: Direction::SouthEast.to_bits(),
+        });
+        world.tick(now);
+    }
+    assert_eq!(
+        world.state.registry.get::<Position>(entity).unwrap().0,
+        from,
+        "the corner cut is refused, however open its destination is"
+    );
+    assert!(
+        world.bus().read(&mut refused).any(|event| event.entity == entity),
+        "and the refusal is observable"
+    );
+
+    // The control, and it is why the destination was never the reason: take the
+    // flank away and the identical order is an ordinary step.
+    world
+        .state
+        .facet_state_mut(Facet(0))
+        .unblock(from.x + 1, from.y, crate_entity);
+    world.queue(Command::Step {
+        serial,
+        direction: Direction::SouthEast.to_bits(),
+    });
+    world.tick(now);
+    assert_eq!(
+        world.state.registry.get::<Position>(entity).unwrap().0,
+        Point::new(from.x + 1, from.y + 1, from.z),
+        "with the corner open the diagonal is a step like any other"
     );
 }
 
@@ -13821,6 +13881,68 @@ fn a_chase_rounds_a_wall_of_crates() {
     assert!(
         distance(reached, player_at) <= openshard_combat::MELEE_RANGE,
         "the creature went around the wall and reached its quarry (ended at {reached:?})"
+    );
+}
+
+/// Where a creature standing two tiles off both axes from its quarry first
+/// steps, with `blockers` in its way.
+///
+/// The quarry is the GM at `START` and the creature comes from the south-east,
+/// so `direction_toward` says north-west and the straight step at it is the
+/// diagonal — which is the step `probe` answers for. `None` when it never
+/// moved at all.
+fn first_chase_step(blockers: &[Point]) -> Option<Point> {
+    let now = Instant::now();
+    let mut world = world();
+    let _gm = enter_gm(&mut world, now);
+    let start = Point::new(START.0 + 2, START.1 + 2, 0);
+    for blocker in blockers {
+        let crate_entity = world.state.registry.spawn();
+        world.state.facet_state_mut(Facet(0)).block(
+            blocker.x,
+            blocker.y,
+            crate_entity,
+            openshard_map::overlay::Cover::blocking(0, openshard_state::DOOR_HEIGHT),
+        );
+    }
+    let creature = spawn_brained(&mut world, 0x00D1, start, 8, now);
+
+    let mut later = now;
+    for _ in 0..(AI_THINK_TICKS * 8) {
+        later += TICK_INTERVAL;
+        world.tick(later);
+        let at = world.registry().get::<Position>(creature).unwrap().0;
+        if at != start {
+            return Some(at);
+        }
+    }
+    None
+}
+
+#[test]
+fn a_chase_does_not_cut_a_corner() {
+    // `probe` is what a chase asks whether the way to its quarry is open, and
+    // it used to ask `can_step` — one landing, which has nothing to say about a
+    // diagonal's flanks. So a creature walking straight at its quarry cut the
+    // corner its own `find_path` refuses to plan through.
+    let cut = Point::new(START.0 + 1, START.1 + 1, 0);
+    // The crate on the diagonal's northern flank. Its own tile is not on the
+    // way anywhere: it is a flank and nothing else.
+    let flank = Point::new(START.0 + 2, START.1 + 1, 0);
+
+    let stepped = first_chase_step(&[flank]);
+    assert_ne!(stepped, Some(cut), "the straight step clipped the crate's corner");
+    assert!(
+        stepped.is_some(),
+        "and the rule refused a step rather than the whole chase"
+    );
+
+    // The control: the same chase with nothing flanking it takes the diagonal,
+    // so what the assertion above sees is the corner rule and not the ground.
+    assert_eq!(
+        first_chase_step(&[]),
+        Some(cut),
+        "an unflanked diagonal is the straight step at the quarry"
     );
 }
 

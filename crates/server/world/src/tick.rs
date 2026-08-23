@@ -33,7 +33,7 @@ use openshard_gateway::ConnectionId;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::Doors;
 use openshard_map::snapshot::MapSnapshot;
-use openshard_movement::{Walk, Walker, step_from};
+use openshard_movement::{Walk, Walker};
 use openshard_persistence::{
     CharacterRecord, DecorationRecord, DoorState, Inventory, ItemLocation, ItemRecord, Journal, MobileRecord,
     SCHEMA_VERSION, Snapshot,

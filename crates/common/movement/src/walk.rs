@@ -609,15 +609,23 @@ pub fn sight_clear(footing: &Footing<'_>, from: Point, to: Point) -> bool {
 /// clip the corner where two blockers meet: both cardinal tiles flanking it
 /// must themselves be steppable.
 ///
-/// It lives here, above every caller, because the three that need it are not
-/// one layer: [`find_path`](crate::find_path) planning a route, the shard
-/// validating a creature's step, and the client's own held-direction detour
-/// deciding whether the way ahead is open. **Every one of them goes through
-/// here, and that is now a property rather than a convention** — there is no
-/// longer a bare terrain to ask instead. A client that asked one used to
-/// believe a corner-cutting diagonal was walkable, send it, and be rubber-
-/// banded: a body stuck against a building corner for as long as the player
-/// held that direction.
+/// It lives here, above every caller, because the ones that need it are not one
+/// layer: [`find_path`](crate::find_path) planning a route, [`Walker::request`]
+/// approving a client's `0x02`, the shard's own decree stepping a creature, a
+/// chase asking whether the way to its quarry is open, and the client's
+/// held-direction detour deciding whether the way ahead is open. **Every one of
+/// them goes through here** — there is no longer a bare terrain to ask instead.
+/// A client that asked one used to believe a corner-cutting diagonal was
+/// walkable, send it, and be rubber-banded: a body stuck against a building
+/// corner for as long as the player held that direction.
+///
+/// **One rule, and it is the strict one.** ServUO keeps two — a player below GM
+/// needs both flanks and everything else needs only one, so its creatures cut
+/// corners its players cannot. This engine gives everybody the player's rule,
+/// which is also the rule the baked graph and every plan are made of. The
+/// divergence is deliberate and argued in `docs/map/navigation_spans.md`'s
+/// *Out of scope, named*; if the lax reading is ever wanted, this is where it
+/// goes.
 ///
 /// **One direction of [`steps_out_of`], and it costs the whole expansion.**
 /// That is deliberate: the corner rule already made a diagonal ask about three

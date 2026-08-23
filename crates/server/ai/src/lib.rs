@@ -396,12 +396,23 @@ fn will_move(state: &WorldState, creature: EntityId, dir: Direction) -> bool {
 
 /// Whether a step from `from` in `dir` is open on the live terrain; when it is
 /// not, the door standing there, if that is what blocks.
+///
+/// `step_allowed` and not `can_step`: a diagonal may not clip the corner where
+/// two blockers meet, and the flanks are not a question one landing can answer.
+/// This is the reading [`find_path`](openshard_movement::find_path) plans with,
+/// so a chase that walks straight at its quarry is held to the rule its own
+/// route already obeys — see `docs/map/navigation_spans.md`'s N3.
+///
+/// A diagonal refused by a *flank* has no door to name, even when a door stands
+/// in that flank: the door half below asks about the tile being stepped onto,
+/// which is what a creature would open to pass. A route round it is what the
+/// caller falls through to.
 fn probe(state: &WorldState, facet: Facet, from: Point, dir: Direction) -> (bool, Option<EntityId>) {
     let Some(target) = step_from(from, dir) else {
         return (false, None);
     };
     let live = state.footing(facet, Doors::AsTheyStand);
-    if openshard_movement::can_step(&live, from, target).is_some() {
+    if openshard_movement::step_allowed(&live, from, dir).is_some() {
         return (true, None);
     }
     // Which door, and not just that one is there: the overlay says a door is in

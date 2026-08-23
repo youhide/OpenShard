@@ -1260,25 +1260,52 @@ graph over spans names neither.
   search is refused, and on small ground it is not cheaper than that search would
   have been *with a budget the shard does not grant it* — `PATH_BUDGET` is 400
   and the 64×64 fixture's exhaustive search wanted 558 nodes.
-- **🚩 Found while repairing the join: `can_step` has no corner rule, and the
-  shard decides a player's step with it.** A diagonal may not clip the corner
-  where two blockers meet, and that rule lives in `steps_out_of` — which
+- **Found while repairing the join: `can_step` has no corner rule, and the
+  shard walked a creature with it. ✅ Fixed.** A diagonal may not clip the
+  corner where two blockers meet, and that rule lives in `steps_out_of` — which
   resolves all eight neighbours together precisely so a diagonal can read its
   two flanks, and where it moved in [N3](#n3--the-search-takes-spans).
   `can_step` is one landing: it answers whether a body may *stand* where a step
-  ends, and nothing else. Two production callers decide a **step** through it:
-  [`tick/motion.rs`](../../crates/server/world/src/tick/motion.rs)'s validator,
-  which is what approves a player's move, and
-  [`ai`'s `probe`](../../crates/server/ai/src/lib.rs), which is what a chase
-  asks whether a direction is open. So `find_path` refuses to plan a corner cut
-  and the shard then permits one walked by hand — a client sending steps itself
-  is not a client that plans them. Found by two tests in
-  `state/src/obstruct.rs` that had been asking `can_step` for the corner rule
-  and failing since it moved; those are repaired to ask `step_allowed`, which
-  is the reading every caller wants, and the two production sites are **not** —
-  changing what the shard permits is a gameplay rule and wants its own
-  measurement against both references. It is a defect of the *step rule*, not
-  of this layer.
+  ends, and nothing else. Found by two tests in `state/src/obstruct.rs` that had
+  been asking `can_step` for the corner rule and had been failing since it
+  moved.
+
+  **The player was never one of the sites, and the first writing of this finding
+  said otherwise.** A client's `0x02` is approved by `Walker::request`, which
+  asks `step_allowed` and has since N3; so does the client's own prediction. The
+  two callers that decided a step through `can_step` were both the shard moving
+  a body that is *not* a player:
+  [`World::step`](../../crates/server/world/src/tick/motion.rs), the decree every
+  creature, pet, townsperson and escort is stepped by, and
+  [`ai`'s `probe`](../../crates/server/ai/src/lib.rs), which is what a chase asks
+  whether the way to its quarry is open. The disagreement was inside one
+  creature: `find_path` refused to *plan* a corner cut and the same creature then
+  cut one walking straight at its quarry.
+
+  **What the references say**, which is the measurement this was held back for:
+
+  | | the diagonal |
+  |---|---|
+  | ServUO `MovementImpl.CheckMovement` | a **player** below GM needs **both** flanks (`!left \|\| !right` refuses); **everything else** — NPCs, GMs — needs only **one** (`!left && !right` refuses) |
+  | ClassicUO `Pathfinder.CanWalk`, which is both its auto-walk and `PlayerMobile.Walk`'s own prediction | **both** flanks (`dir ± 1`), and a refused diagonal is retried as one of the two cardinals |
+
+  So the reference keeps two rules and gives the lax one to creatures. **This
+  shard keeps one, and it is the strict one**: both sites ask `step_allowed`
+  now. The argument is that everything else here already speaks it — the baked
+  graph, `find_path`, the client, and the player — so a second rule would have
+  to be threaded through `steps_out_of`, `find_path` and the bake to buy a
+  behaviour nothing has asked for, and the creature's *routes* were strict
+  already. The lax reading is a knob that can be added later, and where it would
+  go is `steps_out_of`. Recorded here because it is a deliberate divergence from
+  ServUO and not an oversight.
+
+  The done-whens are in `world/src/tick/tests.rs`, one per site, and each
+  carries its control in the same test rather than by hand:
+  `a_server_step_does_not_cut_a_corner` (one crate due east, the south-east
+  decree refused, and allowed again the moment the crate is unblocked) and
+  `a_chase_does_not_cut_a_corner` (the same corner, walked by a creature: the
+  first step is not the cut, and with no crate at all it is). Reverted, both fail
+  at the corner assertion and nowhere else.
 - **A second `Ground` now exists in `client/app`, and it is the misnamed one.**
   [`steer::Ground`](../../crates/client/app/src/steer.rs) is a pair of
   `Footing`s — the same map read twice, once with the doors shut and once open —
