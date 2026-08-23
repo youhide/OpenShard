@@ -1,9 +1,9 @@
 # The map you hold — era R, in order
 
-> **Status: R1 and R2 built; R3, R4 and R5 next, in any order.** The tile table
-> has its own crate, `openshard-uofiles` is readers, formats and errors, and one
-> `World` is the map on both ends of the wire. Everything below R2 is still a
-> plan.
+> **Status: R1, R2 and R3 built; R4 and R5 next, in either order.** The tile
+> table has its own crate, `openshard-uofiles` is readers, formats and errors,
+> one `World` is the map on both ends of the wire, and a house has floors you
+> can stand on. R4 and R5 are still plans.
 
 The executable half of [`map_rebuild.md`](map_rebuild.md)'s era R. That document
 holds the model and the decisions — three layers, what may be baked, why a house
@@ -46,7 +46,7 @@ R1 and R2 are the two the rest wait on; R3, R4 and R5 are independent of each
 other and can land in any order once R2 has.
 
 ```
-R1. the table leaves the file reader ✔ ──> R2. the third layer joins the type ✔ ──┬─> R3. a house has floors
+R1. the table leaves the file reader ✔ ──> R2. the third layer joins the type ✔ ──┬─> R3. a house has floors ✔
                                                                                  ├─> R4. statics become one run
                                                                                  └─> R5. one install, one load
 ```
@@ -241,42 +241,99 @@ Three questions the plan did not name:
   the fact. What it must not be is a field a reader can take without the layer
   beside it, which is what the old `pub map` was.
 
-## R3 — a house has floors
+## R3 — a house has floors ✔
 
 **Goal.** You can stand on the second storey.
 
-`Cover::of_static` is `tile.flags.is_blocking().then(…)`, so a floor — a platform
-that does not block — produces nothing at all.
-[`housing::block_footprint`](../../crates/server/housing/src/lib.rs#L871) folds in
+**Built**, in the five commits below. What the node decided is at the end of it.
+
+`Cover::of_static` was `tile.flags.is_blocking().then(…)`, so a floor — a
+platform that does not block — produced nothing at all.
+[`housing::block_footprint`](../../crates/server/housing/src/lib.rs) folded in
 only the components whose tiledata says they block, and `Footprint { tile, z,
-height }` is a `Cover` with the kind left out.
+height }` was a `Cover` with the kind left out.
 
 - `Cover::of_static` grows the `Stands` arm: a platform tile yields
   `CoverKind::Stands` at `z + height`, halved for a climbable, which is the same
-  arithmetic `stand_surfaces` applies to a map static. One rule, two sources.
+  arithmetic `stand_surfaces` applies to a map static. One rule, two sources —
+  and it is now literally one rule: `platform_surface` and `stand_surfaces` both
+  come through `Cover`.
 - `housing::Footprint` becomes a `Cover` and stops being a second spelling of it.
 - The client's placement path does the same, so the two ends keep agreeing by
   construction — the property node E landed and the thing this must not undo.
-- **`net_command::multi_pieces`** ([client/app](../../crates/client/app/src/net_command.rs#L1044))
-  is the third expansion of a multi in this workspace, and the picture's. With
-  the components producing covers at placement, one expansion feeds both; folding
-  it in is part of this node rather than a follow-up, because two expansions of
-  one house is exactly the class of defect this document set exists about.
+- **`net_command::multi_pieces`** was the third expansion of a multi in this
+  workspace, and the picture's. `Component::placed_at` is the one arithmetic
+  now, in `openshard-uofiles` where all three callers can see it.
+
+### The commits
+
+1. **An obstacle is a cover.** `Obstacle` held a `z`, a `height` and a `door:
+   bool` and converted the three into a `Cover` on the way out; it holds the
+   cover. The identity gains a third part — the entity, the z, **and which arm
+   it is** — because a platform lays two covers on one tile from one entity.
+   `e21616ca`.
+2. **A platform is two covers.** The arm itself, `CoverKind::Stands
+   { climbable }`, `Cover::reach`, and `Covers` as the answer in transit.
+   `c485bedf`.
+3. **A house has floors.** `Footprint` holds a cover, `footprint_of` lays
+   whatever the art lays. `ce5c5097`.
+4. **You can stand on the second storey.** `can_step` reads the live layer's
+   surfaces where the map *allows* and not only where it refuses. `f5956a3b`.
+5. **One expansion of a multi.** `0042c08c`.
 
 **Done when:** a mobile walks up a placed villa's stairs and stands on its first
 floor; a test asserts a floor over open ground is `Stands` and a wall over it is
 `Blocks`, on both ends; `grep -rn "CoverKind::Stands" crates` has more than one
-producer.
+producer. **Met** — the walk is
+[`walk_scenes.rs`](../../crates/common/movement/tests/walk_scenes.rs)'s
+`a_villa_stair_carries_a_body_to_its_first_floor`, over multi `0x0064`'s real
+geometry measured off the shipped file; the floor-and-wall assertion is
+`openshard-housing`'s `a_house_floor_is_a_surface_and_the_wall_over_it_is_not`;
+the producers are `Cover::of_static` (a house, a decoration, the client's
+clutter) and `Plank::cover` (a ship).
 
-**Risk:** the interesting one. A house's ground floor is currently walkable
-*because the map's ground is under it*; adding a `Stands` cover at the same
-height must not change where a body stands there. `Overlay::surface_at` picks the
-nearest surface to the body, so the case to test is a floor laid exactly on the
-ground it duplicates.
+**Risk:** the interesting one, and it held. A house's ground floor is currently
+walkable *because the map's ground is under it*; adding a `Stands` cover at the
+same height must not change where a body stands there. Two things keep it: a
+platform of no thickness lays **no blocking half** (`Cover::top`'s `max(1)` is
+right for a wall and would have sealed every house), and `climbed` only takes a
+surface **strictly above** what the map answered. Tested as
+`a_ground_floor_laid_on_the_ground_seals_nothing`.
 
 **Not in this node:** which of a shipped multi's components are floors is a
 question about the tiledata, and if a real house has a floor the platform flag
-does not mark, that is a [`findings.md`](../findings.md) entry, not a rule change.
+does not mark, that is a [`findings.md`](../findings.md) entry, not a rule
+change.
+
+### What the node decided
+
+Four questions the plan did not name.
+
+- **A platform is two covers and not a third `CoverKind`.** The enum's own doc
+  said the two arms were exclusive because "no placed item has ever been both",
+  which a floor makes false — a stair tread is something a body beside it walks
+  into and somewhere a body on top of it stands. The alternative was one arm
+  that answers both, and it was refused for what it costs everything else:
+  `Stands` is the *positive* arm, the only thing that can overrule the map's
+  refusal, and a reader asking what is in the way would have had to learn that
+  some of the things in the way are floors. Two entries is also the shape a
+  ship's plank already had.
+- **`PLATFORM` is read before `BLOCK`.** Not a preference. `MapTerrain::
+  static_top` branches on `is_platform` and never asks `is_blocking` after, so
+  reading them the other way round would give one piece of art two heights
+  depending on which layer asked about it. A table is a platform.
+- **A platform of zero thickness lays no body.** This is the node's named risk
+  in one line, and it is also why the blocking half is derived from the
+  *surface* rather than from the art: a platform's body reaches exactly as far
+  as the surface it offers, so a body standing on one is never blocked by it —
+  which is the same `[bottom, item_top)` the map's own `is_obstructed` uses.
+- **A climbable needs three tops, so `Cover` has three.** `top` is the body
+  (never empty: a zero-tall wall is still a wall), `surface` is where feet go
+  (half way up a climbable), and `crest` is the art's own extent — what the
+  *next* step is measured from. They are ServUO's `itemTop`, `ourZ` and `zTop`,
+  and a staircase needs all three: met at its base, stood on half way up,
+  stepped off from the top of the whole tread. Without the third, a body on the
+  top tread cannot reach the floor it arrives at.
 
 ## R4 — statics become one run
 
@@ -331,12 +388,9 @@ The oracles that already exist, and which every node above runs:
 
 ## Where a session starts
 
-**R3, R4 or R5** — the three are independent of each other and R2 has landed, so
-any of them can go first. They are not the same size or the same kind of risk:
+**R4 or R5** — the two are independent of each other and R3 has landed, so either
+can go first. They are not the same size or the same kind of risk:
 
-- **R3** is the one with a *feature* in it — you can stand on the second storey —
-  and the one that can change where a body stands on ground it already walks on.
-  Its own node names the case to test.
 - **R4** is measured, bounded and has an oracle already written: the base-set
   round trip either stays byte-identical or it does not.
 - **R5** is the smallest, and the only one that changes what a process *holds*

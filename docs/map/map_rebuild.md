@@ -125,8 +125,8 @@ Read off the workspace and the plans, so a session does not re-derive it:
 | the coarse graph is worth wiring up, and is wrong on raised ground | ✅ measured — [F, answered](terrain_seam.md#f--the-graph-nobody-reads) |
 | the span census: 92.1% of columns hold no statics, deepest column is 12 | ✅ [N0](navigation_spans.md#n0--the-census-) |
 | the tile table lives in the file reader | ✅ R1 — `openshard-tiles`, and `uofiles` is readers, formats and errors |
-| **the live layer is not in the map** | ⬜ R2 |
-| **a house has walls and no floors** | ⬜ R3 |
+| the live layer is not in the map | ✅ R2 — one `World` on both ends |
+| a house has walls and no floors | ✅ R3 — a platform lays two covers, and `can_step` climbs onto them |
 | **the statics are 120,745 vectors** | ⬜ R4 |
 | **both ends load the same install separately** | ⬜ R5 |
 | spans, regions over spans, the server reading the graph | ⬜ era P |
@@ -218,9 +218,11 @@ silent.
 `grep -rn "Overlay" crates/common/movement` finds the rules that read one and
 not the type; a bake cannot reach the live layer from the value it is given.
 
-### R3 — a house is a layer, and it has floors
+### R3 — a house is a layer, and it has floors ✅
 
-**Goal.** You can stand on the second storey.
+**Goal.** You can stand on the second storey. **Built** — see
+[`realtime_map.md`](realtime_map.md#r3--a-house-has-floors) for the node and
+[`handoffs/`](handoffs/) for the session.
 
 The open row in
 [`mechanics.md`](new_map_representation/mechanics.md#open-with-what-would-close-it)
@@ -253,6 +255,15 @@ defect rather than pathfinding's; here is where it is owned.
   a house's first floor, a deck. `Overlay::surface_at` already picks the nearest
   to where the body is, which is the rule a two-storey house needs; what it has
   never had is a second entry to choose between. That is a test, not a design.
+
+  **It was a design.** `surface_at` is asked by `can_step` only where the *map*
+  refuses the tile outright — a deck over open water — and a house stands on
+  ground the map answers for, so no number of `Stands` entries would ever have
+  been read. R3 built the missing half as `climbed`: the highest live surface
+  **in reach** and **above** what the map answered, which is Sphere's
+  `GetFixPoint` rather than nearest-z. Nearest-z is still `aboard`'s rule for
+  the deck, and reconciling the two is filed in
+  [`roadmap.md`](../roadmap.md)'s *Backlog from R3*.
 - **The picture and the footprint stop expanding a multi twice.** `net_command`'s
   multi expansion is the third path over the map and is named as out of scope by
   [`terrain_seam.md`](terrain_seam.md#out-of-scope-named); with the components
@@ -260,7 +271,8 @@ defect rather than pathfinding's; here is where it is owned.
 
 **Done when:** a mobile walks up a house's stairs and stands on its second floor,
 refused nowhere the ground floor is not; a test asserts a floor over open ground
-is `Stands` and a wall over it is `Blocks`; the multi is expanded once.
+is `Stands` and a wall over it is `Blocks`; the multi is expanded once. **Met**,
+all three.
 
 **What it must not do:** bake a house. A live house must be removable in one
 operation, which is why it is a layer. Committing one into the base stays what
@@ -507,26 +519,28 @@ waits for a measurement that says the statics are still on a hot path.
 |---|---|
 | **Do bodies block?** The client refuses to route through an NPC, the shard permits it — deliberately, and the two ends have said so in comments for as long as both indexes have existed. It is a gameplay decision, not a map one | Whoever owns "may I walk into somebody" says which end is right; the layer carries either answer unchanged |
 | **Which components of a multi are floors** | R3 reads the platform flag, which is what a static floor already is. If a shipped house has a floor that flag does not mark, that is a finding about the table and belongs in [`findings.md`](../findings.md) |
-| **Two floors over one tile, for the picture** | The step check chooses by `surface_at`; the *renderer* choosing a storey is [`interiors.md`](interiors.md)'s own subject, and R3 gives it the second surface it currently lacks |
+| **Two floors over one tile, for the picture** | The step check chooses the highest surface in reach (`walk::climbed`, not `surface_at` as this table used to say); the *renderer* choosing a storey is [`interiors.md`](interiors.md)'s own subject, and R3 has given it the second surface it lacked |
 | **The packed static record** | N3's node-expansion measurement: whether the statics are still on a hot path once spans exist |
 | **The publish window** — a revision is visible before the rebake over its touched chunks finishes. Does routing there degrade to flat A\* until it lands, or does the publish carry the rebuild and pay the latency? | A measurement of one region's rebuild against the 96 s whole-facet bake. See [a tile of ground moved](#a-tile-of-ground-moved--rebake-and-never-an-overlay) |
 | **Residency** | [direction G](new_map_representation/plan.md#g--residency-and-size-deferred-on-purpose), unchanged: the working set a real session touches against the cost of a miss |
 
 ## Where a session starts
 
-**R2 — and the plan to run it from is
-[`realtime_map.md`](realtime_map.md).** R1 is built: the tile table is
-`openshard-tiles`, a crate with no dependencies at all, and every era below it
-reaches the table through something that does not read files. R2 is the type
-change this whole document is named for; R3 is the first thing a player would
-notice.
+**R4 or R5 — and the plan to run either from is
+[`realtime_map.md`](realtime_map.md).** R1, R2 and R3 are built: the tile table
+is `openshard-tiles`, a crate with no dependencies at all; one `World` is the map
+on both ends of the wire; and a house has floors a body can stand on, which was
+the first thing here a player would notice. What is left of era R is the two
+nodes about *how much* rather than *what*: the statics as one run, and one load
+per install.
 
 **Where the work stands is [`handoffs/`](handoffs/)**, newest last — not here,
 and not in the plan.
 
-**Nothing in era P starts until R2 lands**, for the reason `navigation_spans.md`
-already gives about its own gate: a structure written against a map that is about
-to gain a layer is a structure written twice.
+**Nothing in era P starts until R4 lands.** The gate was R2 for the *type* and
+that has landed; what era P still waits on is the shape of the layers `Spans` is
+a projection of, and R4 changes how the statics are held. R3 has settled the
+other half — what a house contributes to a surface.
 
 **Era S is resumed, not restarted.** Its first half is built and running; the
 handoffs in [`handoffs/`](new_map_representation/handoffs/) are where its state

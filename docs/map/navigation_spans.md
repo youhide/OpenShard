@@ -327,8 +327,8 @@ surface in reach*, which is how a staircase is climbed at all.
 standing places gets **one** slot in `closed`: whichever surface is reached first
 wins, and the other is unreachable for the rest of that search. A bridge and the
 ground under it are one node. A moored deck and the water beside it are one node.
-After [`map_rebuild.md`](map_rebuild.md)'s R3 a house's ground floor and its
-first floor will be one node. The coarse graph's one-storey defect — the reason
+Since [`map_rebuild.md`](map_rebuild.md)'s R3 landed, a house's ground floor and
+its first floor **are** one node. The coarse graph's one-storey defect — the reason
 this plan exists — has a quieter twin in the fine search, and both are the same
 sentence: *a tile is assumed to be one place.*
 

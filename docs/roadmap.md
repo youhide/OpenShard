@@ -516,6 +516,46 @@ R5.
   outside for as long as they did. It is not R2's to fix — R2 removed the five
   that were lying — but the same reading applies to the rest.
 
+### Backlog from R3, a house having floors
+
+Found while giving `Cover::of_static` its platform arm and teaching `can_step`
+to read the live layer's surfaces
+([`realtime_map.md`](map/realtime_map.md)'s R3). None of them blocks R4 or R5.
+
+- **`aboard` has no reach filter, and now it lets a house in.** Where the map
+  refuses a tile outright, `walk.rs`'s `aboard` takes the *nearest* live surface
+  at any distance — a deck's rule, written when a deck was the only thing that
+  could be one. A house built over open water now lays surfaces on those tiles
+  too, so a body on the shore can step onto whichever storey happens to be
+  nearest its own z rather than onto the one it could climb to. The fix is not
+  simply to filter by reach: the case `aboard` exists for is a body stepping
+  *down* onto a deck from a mast, and reach does not describe that. What has to
+  be decided is whether "the map put nothing here" and "the map put something
+  here and the live world put something above it" are one rule with two
+  entrances or two rules — R3 built the second one (`climbed`) and left the
+  first alone.
+- **`standing_on` walks the map's start surface a second time.** `map.can_step`
+  computes `start_surface(from)` internally and throws it away;
+  `climbed` needs the same number to measure reach from, so on any tile with a
+  live surface on it the walk happens twice. It is one static loop over one
+  tile, and it only runs where the overlay has a surface at the destination —
+  but the honest fix is for the map's step check to hand back what it already
+  knew, which is a signature change `can_step`'s three callers would all see.
+- **`Obstructions` is not obstructions any more.** It holds a house's floors,
+  which are the opposite of an obstruction — `is_blocked` had to become
+  `holds_anything` for exactly that reason. The type is the *identity* half of
+  the overlay (who put this here), and that is what it should be called. Not
+  renamed in R3 because the rename touches every server crate and none of R3's
+  behaviour depends on it.
+- **A house's placement checks got stricter, and nothing measured by how much.**
+  `footprint_of` now returns an entry for every component that lays a cover, so
+  the road test and the flat-ground test see a house's *interior* tiles for the
+  first time — they only ever saw its walls. Both are ServUO's rules over the
+  whole plot and both are more correct this way, but a plot that was legal
+  before and is refused now would look to a player like a regression. Worth a
+  pass over the shipped decoration data with a placement of each classic multi
+  before anyone is told housing is finished.
+
 ### Backlog: a sector lookup is linear in a bucket, and a house makes the bucket fat
 
 `Sectors` (`state/src/sectors.rs`) is right where it was measured. Buckets are

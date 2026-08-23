@@ -19,9 +19,9 @@ left of each, and it takes the decisions that were open between them.
 [`realtime_map.md`](realtime_map.md) — **era R, in order.** The executable half:
 what moves where, in which commit, with a done-when and a risk per node. R1 the
 tile table leaves the file reader ✔ · R2 the live layer joins the type ✔ · R3 a
-house has floors · R4 the statics become one immutable run · R5 one install, one
-load. A session starts at **R3, R4 or R5** — the three are independent of each
-other and R2 was the last thing any of them waited on.
+house has floors ✔ · R4 the statics become one immutable run · R5 one install,
+one load. A session starts at **R4 or R5** — the two are independent of each
+other and neither ever waited on R3.
 
 [`handoffs/`](handoffs/) — where the work stands, one file per session. The
 plans hold intent; a handoff holds state.

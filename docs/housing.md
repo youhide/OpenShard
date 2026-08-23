@@ -890,8 +890,19 @@ than waiting for a phase of its own:
   from the map at boot and poked at by doors since. Placing a house is the first
   bulk write, and whether it wants one it can undo cheaply — a demolition is the
   same hundred entries coming back out — has not been asked.
-- 🚩 **A house has no floors, for movement — the step check has nothing to pick
-  between.** This entry used to read *"a two-storey house has two floors over one
+- ~~🚩 **A house has no floors, for movement — the step check has nothing to pick
+  between.**~~ **Repaired 2026-08-23**, by
+  [`realtime_map.md`](map/realtime_map.md#r3--a-house-has-floors)'s R3.
+  `Cover::of_static` reads a platform now and lays two covers for one — the
+  surface a body on top stands on and the body a mobile beside it walks into —
+  and `walk::climbed` takes the highest of those *in reach and above what the
+  map answered*, which is how a body gets upstairs. The in-game confirmation
+  this entry asked for has an automated stand-in:
+  `a_villa_stair_carries_a_body_to_its_first_floor`, over multi `0x0064`'s real
+  geometry. **What stays housing's** is the content half named at the end of
+  this entry: which components a shipped house calls floors, and what a
+  demolition takes back out. The record of the defect follows.
+  This entry used to read *"a two-storey house has two floors over one
   tile and the step check has to pick the one the walker is on"*, which assumed
   the floors were in the step check at all. They are not.
   `grep -rn "CoverKind::Stands" crates` has exactly one producer in the whole
