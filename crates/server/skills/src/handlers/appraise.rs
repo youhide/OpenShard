@@ -170,7 +170,7 @@ pub(super) fn item_name(state: &WorldState, item: EntityId) -> Option<String> {
     let graphic = state.registry.get::<Drawn>(item)?.id;
     // The shard's table, not the facet the looker stands on: what a graphic is
     // called does not change when it is carried across a moongate.
-    state.tiles.item_name(graphic.0).map(str::to_owned)
+    state.tiles().item_name(graphic.0).map(str::to_owned)
 }
 
 /// The paperdoll layer `graphic` carries in the client's own tiledata — `0` on a
@@ -181,5 +181,5 @@ pub(super) fn item_name(state: &WorldState, item: EntityId) -> Option<String> {
 /// hands out the byte and this is where it becomes a layer — see
 /// `docs/protocol_newtypes.md` N4.
 fn tiledata_layer(state: &WorldState, graphic: Graphic) -> Layer {
-    Layer(state.tiles.static_tile(graphic.0).layer)
+    Layer(state.tiles().static_tile(graphic.0).layer)
 }

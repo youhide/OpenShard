@@ -106,7 +106,7 @@ pub fn planks_of(state: &WorldState, boat: EntityId, at: Point, multi: u16) -> R
     if components.is_empty() {
         return Err(Refusal::NoSuchMulti);
     }
-    let tiledata = &state.tiles;
+    let tiledata = state.tiles();
     let mut out = Vec::new();
     for component in components.iter().filter(|c| c.drawn()) {
         let graphic = Graphic(component.graphic);

@@ -808,7 +808,7 @@ fn a_house_survives_a_restart_with_its_walls() {
     }
 
     let mut world = World::new(START).with_save_every(0);
-    world.state.tiles = super::tests::tiles_with(&[(WALL, super::tests::WALL_FLAGS, 20)]);
+    world.state.set_tiles(super::tests::tiles_with(&[(WALL, super::tests::WALL_FLAGS, 20)]));
     world.state.multis = super::tests::multis_with(COTTAGE, cottage());
     let now = Instant::now();
     let connection = enter(&mut world, now);
@@ -831,7 +831,7 @@ fn a_house_survives_a_restart_with_its_walls() {
 
     // The shard comes back up on that save, with the same terrain.
     let mut restored = World::new(START);
-    restored.state.tiles = super::tests::tiles_with(&[(WALL, super::tests::WALL_FLAGS, 20)]);
+    restored.state.set_tiles(super::tests::tiles_with(&[(WALL, super::tests::WALL_FLAGS, 20)]));
     restored.state.multis = super::tests::multis_with(COTTAGE, cottage());
     restored.restore_houses(houses, Vec::new());
 
@@ -1207,7 +1207,7 @@ fn a_boat_survives_a_restart_with_its_deck() {
     let (map, tiles) = sea().into_shard(Facet(0));
     let mut world = World::new(START).with_save_every(0);
     world.state.facet_state_mut(Facet(0)).set_map(Some(map), &tiles);
-    world.state.tiles = tiles;
+    world.state.set_tiles(tiles);
     world.state.multis = super::tests::multis_with(SLOOP, sloop());
     let now = Instant::now();
     let connection = enter(&mut world, now);
@@ -1245,7 +1245,7 @@ fn a_boat_survives_a_restart_with_its_deck() {
         .state
         .facet_state_mut(Facet(0))
         .set_map(Some(map), &tiles);
-    restored.state.tiles = tiles;
+    restored.state.set_tiles(tiles);
     restored.state.multis = super::tests::multis_with(SLOOP, sloop());
     restored.restore_boats(boats);
 

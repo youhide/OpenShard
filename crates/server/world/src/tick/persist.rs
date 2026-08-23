@@ -1665,7 +1665,7 @@ impl World {
                     // third copy of that rule and would have been the one left
                     // behind when the platform arm landed.
                     let covers = openshard_map::overlay::Cover::of_static(
-                        self.state.tiles.static_tile(record.graphic),
+                        self.state.tiles().static_tile(record.graphic),
                     )
                     .based_at(position.z);
                     for cover in covers {

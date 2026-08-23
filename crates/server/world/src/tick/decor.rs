@@ -160,7 +160,7 @@ impl World {
         // client lays the same covers from the same table through the same
         // function, which is what "agree by construction" has to mean to be
         // worth saying. See `openshard_map::overlay`.
-        let covers = openshard_map::overlay::Cover::of_static(self.state.tiles.static_tile(graphic.0))
+        let covers = openshard_map::overlay::Cover::of_static(self.state.tiles().static_tile(graphic.0))
             .based_at(position.z);
         for cover in covers {
             self.state

@@ -125,7 +125,7 @@ fn hands_conflict(state: &WorldState, mobile: Serial, graphic: Graphic, layer: L
     // An empty table — a shard with no client files — gives every graphic layer
     // zero, so every weapon is one-handed: the same bargain a terrainless shard
     // makes by allowing every step.
-    let tile_layer = Layer(state.tiles.static_tile(graphic.0).layer);
+    let tile_layer = Layer(state.tiles().static_tile(graphic.0).layer);
     let expected = weapon_layer(weapon, tile_layer);
     if expected != Layer(0) && expected != layer {
         return true;

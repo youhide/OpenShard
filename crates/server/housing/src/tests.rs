@@ -1954,7 +1954,7 @@ fn a_foundation_blocks_where_its_design_says_and_not_where_its_platform_does() {
 fn a_shard_with_no_client_files_still_refuses_a_foundation() {
     let mut state = world_with(cottage());
     state.multis = Multis::default();
-    state.tiles = TileData::empty();
+    state.set_tiles(TileData::empty());
     let (actor, owner) = an_actor(&mut state);
 
     assert_eq!(

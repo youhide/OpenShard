@@ -699,7 +699,7 @@ pub fn footprint_of(
     // A house's walls are tiledata's answer about each component's art, and that
     // table is the shard's rather than the facet's — the ground a house stands on
     // is asked about separately, in `ground_under`.
-    let tiledata = &state.tiles;
+    let tiledata = state.tiles();
     let mut out = Vec::new();
     for component in components.iter().filter(|c| c.drawn()) {
         let graphic = Graphic(component.graphic);

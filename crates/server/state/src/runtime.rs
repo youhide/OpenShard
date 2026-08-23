@@ -742,7 +742,16 @@ pub struct WorldState {
     /// the `Arc` was what stopped that from being a copy per facet. Nothing is
     /// boxed now — a `MapTerrain` borrows this and the facet's map together at
     /// the question — so there is one holder and nothing to share it with.
-    pub tiles: openshard_tiles::TileData,
+    ///
+    /// **Private, read through [`tiles`](Self::tiles) and replaced through
+    /// [`set_tiles`](Self::set_tiles).** Every facet's span bake is a statement
+    /// about this table as much as about its ground — what a graphic is decides
+    /// how tall a wall is and whether a tile is water — so a write that does not
+    /// rebake leaves the shard deciding steps by the heights of a world it no
+    /// longer has. It was a public field, and a direct `state.tiles = table` was
+    /// the one remaining way to hold a bake that describes neither world in
+    /// hand: [`Ground`] closed the other, where the ground moved under the bake.
+    tiles: openshard_tiles::TileData,
     /// Every multi the client knows: what a house or a ship is made of.
     ///
     /// Beside [`tiles`](Self::tiles) and for the same reason — a multi's
@@ -1120,6 +1129,87 @@ pub enum TargetPurpose {
 }
 
 impl WorldState {
+    /// A world holding `facets`, over the install's `tiles` and `multis`, with
+    /// new characters appearing at `start` and every roll drawn from `seed`.
+    ///
+    /// Named rather than written as a literal because
+    /// [`tiles`](Self::tiles) is private, and there were five copies of that
+    /// literal — one per crate with a fixture — each naming twenty-four fields
+    /// so that a field added here had to be added in five places or nowhere.
+    /// Everything not named in the arguments starts empty: nobody connected,
+    /// nothing on a screen, no trade in progress, and no content tables, which
+    /// is the state a shard is in before it has read anything.
+    ///
+    /// The facets are taken already built, because a [`FacetState`] bakes its
+    /// ground against the same table. Either build them with `tiles` and hand
+    /// both over, or build them with [`TileData::empty`] and let
+    /// [`set_tiles`](Self::set_tiles) rebake them when the real one arrives —
+    /// which is the order `World::with_tiles` takes.
+    ///
+    /// [`TileData::empty`]: openshard_tiles::TileData::empty
+    #[must_use]
+    pub fn new(
+        facets: BTreeMap<Facet, FacetState>,
+        default_facet: Facet,
+        tiles: openshard_tiles::TileData,
+        multis: openshard_uofiles::multi::Multis,
+        start: (u16, u16),
+        seed: u64,
+    ) -> Self {
+        Self {
+            registry: Registry::new(),
+            bus: EventBus::new(),
+            facets,
+            default_facet,
+            tiles,
+            multis,
+            players: HashMap::new(),
+            connections: HashMap::new(),
+            seen: HashMap::new(),
+            start,
+            rng: Rng::new(seed),
+            ticks: 0,
+            worn: WornIndex {
+                version: 0,
+                by_mobile: HashMap::new(),
+            },
+            hour: 0,
+            outbox: Vec::new(),
+            open_containers: HashMap::new(),
+            trades: Vec::new(),
+            quests: QuestDefs::default(),
+            dialogue: Dialogue::default(),
+            guilds: crate::guild::Guilds::default(),
+            alliances: crate::guild::Alliances::default(),
+            parties: crate::party::Parties::default(),
+            gameplay: Gameplay::default(),
+            save_requested: false,
+        }
+    }
+
+    /// What the client's `tiledata.mul` says about a graphic. See
+    /// [`tiles`](Self::tiles) for why it is one table for the shard.
+    #[must_use]
+    pub const fn tiles(&self) -> &openshard_tiles::TileData {
+        &self.tiles
+    }
+
+    /// Give the shard the table the install actually has, and bring every
+    /// facet's span bake back in step with it.
+    ///
+    /// The rebake is the whole reason this is a method rather than a field. A
+    /// bake says where a body may stand on this ground, and it reads the table
+    /// to say it: a facet still holding a bake over the table being replaced
+    /// answers steps for a world of height-zero, flag-less statics.
+    /// [`FacetState::set_map`] is the same seam from the other side, where the
+    /// ground moves under the bake.
+    pub fn set_tiles(&mut self, tiles: openshard_tiles::TileData) {
+        self.tiles = tiles;
+        for facet in self.facets.values_mut() {
+            facet.rebake(&self.tiles);
+        }
+    }
+
     /// Which facet an entity is on: its [`Facet`] component, or the world default
     /// so callers can index [`facets`](Self::facets) with the result.
     #[must_use]

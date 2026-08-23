@@ -215,7 +215,7 @@ fn item_weight_hundredths(state: &WorldState, item: EntityId) -> u32 {
         // A shard with no client files holds an empty table, where every graphic
         // weighs nothing — no encumbrance, the same bargain a terrainless shard
         // already makes with its step checks.
-        u32::from(state.tiles.item_weight(id.0)) * 100
+        u32::from(state.tiles().item_weight(id.0)) * 100
     };
     each.saturating_mul(u32::from(amount))
 }

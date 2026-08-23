@@ -55,7 +55,7 @@ fn shop(world: &mut World, statics: &[(u16, i8)]) {
     }
     let (map, tiles) = scene.into_shard(Facet(0));
     world.state.facet_state_mut(Facet(0)).set_map(Some(map), &tiles);
-    world.state.tiles = tiles;
+    world.state.set_tiles(tiles);
 }
 
 /// Put an item in the player's pack, through the door a vendor's shelf uses.

@@ -405,17 +405,11 @@ impl World {
         tiles: openshard_tiles::TileData,
         multis: openshard_uofiles::multi::Multis,
     ) -> Self {
-        self.state.tiles = tiles;
+        // `set_tiles` and not a field write: every facet already loaded is
+        // holding a span bake over the *old* table, and rebaking there is what
+        // makes the builder's order not matter here.
+        self.state.set_tiles(tiles);
         self.state.multis = multis;
-        // Every facet already loaded is holding a span bake over the *old*
-        // table, and a span bake is a statement about both. Rebuilding here is
-        // what makes the builder's order not matter: what a graphic is decides
-        // how tall a wall is and whether a tile is water, so a facet baked
-        // against the empty table would answer steps for a world of
-        // height-zero, flag-less statics.
-        for facet in self.state.facets.values_mut() {
-            facet.rebake(&self.state.tiles);
-        }
         self
     }
 
@@ -445,7 +439,7 @@ impl World {
         );
         self.state.facets.insert(
             facet,
-            FacetState::new(Some(map), coarse, width, height, &self.state.tiles),
+            FacetState::new(Some(map), coarse, width, height, self.state.tiles()),
         );
         self
     }

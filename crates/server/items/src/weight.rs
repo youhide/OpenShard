@@ -273,7 +273,7 @@ pub fn total_weight_with(state: &WorldState, contents: &Contents, mobile: Entity
                 // A shard with no client files holds an empty table, where every
                 // graphic weighs nothing — no encumbrance, the same bargain a
                 // terrainless shard already makes with its step checks.
-                u32::from(state.tiles.item_weight(graphic.0)) * 100
+                u32::from(state.tiles().item_weight(graphic.0)) * 100
             };
             each.saturating_mul(u32::from(amount))
         })
@@ -314,7 +314,7 @@ pub fn weight_of(state: &WorldState, item: EntityId) -> u16 {
     let each = if graphic == GOLD_GRAPHIC {
         GOLD_WEIGHT_HUNDREDTHS
     } else {
-        u32::from(state.tiles.item_weight(graphic.0)) * 100
+        u32::from(state.tiles().item_weight(graphic.0)) * 100
     };
     u16::try_from(each.saturating_mul(amount) / 100).unwrap_or(u16::MAX)
 }

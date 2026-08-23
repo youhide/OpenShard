@@ -9532,7 +9532,7 @@ fn door_frames(walled: bool) -> Scene {
 fn stand_on(world: &mut World, scene: Scene) {
     let (map, tiles) = scene.into_shard(Facet(0));
     world.state.facet_state_mut(Facet(0)).set_map(Some(map), &tiles);
-    world.state.tiles = tiles;
+    world.state.set_tiles(tiles);
 }
 
 fn generate_britain_doors(world: &mut World, now: Instant) {
@@ -12360,7 +12360,7 @@ fn named(graphic: u16, name: &str) -> openshard_tiles::TileData {
 fn single_clicking_an_item_draws_its_tiledata_name() {
     let now = Instant::now();
     let mut world = world();
-    world.state.tiles = named(GOLD, "gold coins");
+    world.state.set_tiles(named(GOLD, "gold coins"));
     let connection = enter(&mut world, now);
     // A stack of three on the player's tile, so it is drawn and clickable.
     let serial = spawn_gold(&mut world, Point::new(START.0, START.1, 0), 3, now);
@@ -15989,7 +15989,7 @@ fn a_deed_raises_the_house_cursor_and_answering_it_builds() {
 
     let now = Instant::now();
     let mut world = world();
-    world.state.tiles = tiles_with(&[(WALL, WALL_FLAGS, 20)]);
+    world.state.set_tiles(tiles_with(&[(WALL, WALL_FLAGS, 20)]));
     world.state.multis = multis_with(COTTAGE, cottage());
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];
@@ -16104,7 +16104,7 @@ fn a_designed_house_announces_its_revision_and_answers_the_ask() {
 
     let now = Instant::now();
     let mut world = world();
-    world.state.tiles = tiles_with(&[(WALL, WALL_FLAGS, 20), (VILLA_WALL, WALL_FLAGS, 20)]);
+    world.state.set_tiles(tiles_with(&[(WALL, WALL_FLAGS, 20), (VILLA_WALL, WALL_FLAGS, 20)]));
     world.state.multis = multis_with(COTTAGE, cottage());
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];
@@ -16235,7 +16235,7 @@ fn a_deed_for_a_foundation_builds_a_house_with_a_design() {
 
     let now = Instant::now();
     let mut world = world();
-    world.state.tiles = tiles_with(&[(WALL, WALL_FLAGS, 20)]);
+    world.state.set_tiles(tiles_with(&[(WALL, WALL_FLAGS, 20)]));
     world.state.multis = multis_with(FOUNDATION, platform());
     let connection = enter(&mut world, now);
     let player = world.state.players[&connection];
