@@ -115,7 +115,7 @@ scope, named*. Neither blocks N2.
 
 ## What is next
 
-**[N2 — the step rule reads them](../navigation_spans.md#n2--the-step-rule-reads-them).**
+**[N2 — the step rule reads them](../navigation_spans.md#n2--the-step-rule-reads-them-).**
 `check(x, y, start_z, start_top)` becomes a walk of the target column's spans
 rather than of its statics, and the whole of the node is proving it did not
 change an answer. Both oracles already exist: per-step agreement against

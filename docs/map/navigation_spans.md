@@ -1,10 +1,12 @@
 # The first storey
 
-> **Status: live — era P, started. N0 and N1 are built.** The gate is gone:
-> [`realtime_map.md`](realtime_map.md)'s era R is over, and the span layer is
-> built and measured against the whole facet. **N2 is next**, and it is where
-> the risk in this plan lives. See [`map_rebuild.md`](map_rebuild.md) for the
-> order and [`handoffs/`](handoffs/) for where the work stands.
+> **Status: live — era P, started. N0, N1 and N2 are built.** The gate is gone:
+> [`realtime_map.md`](realtime_map.md)'s era R is over, the span layer is built
+> and measured against the whole facet, and **the step rule reads it and answers
+> the same number** — 248 million steps compared, 0 disagreements. The risk this
+> plan was carrying is retired. **N3 is next**, and it is where the search stops
+> asking the map. See [`map_rebuild.md`](map_rebuild.md) for the order and
+> [`handoffs/`](handoffs/) for where the work stands.
 
 Two defects were found in one session and they are the same omission seen from
 two sides. The coarse graph
@@ -383,14 +385,14 @@ declared by hand.
  terrain_seam.md ✅ ──> map_rebuild.md R1 + R2 ──┐
  (the signature)       (the map, in one type)   │
                                                 ▼
- N0. the census ✅ ──> N1. three tiers ✅ ──> N2. the step rule reads them ─┬─> N3. the search takes Spans
-                                                    (the agreement oracle) │        └─> N3b. the node stops
-                                                                           │              being a tile
-                                                                           │
-                                                                           └─> N4. regions over spans ──┬─> N5. off-mesh links
-                                                                                        │               │
-                                                                                        │               └─> N7. the server reads the graph
-                                                                                        └─> N6. an artifact, if measured        (inherited from F)
+ N0. the census ✅ ──> N1. three tiers ✅ ──> N2. the step rule reads them ✅ ─┬─> N3. the search takes Spans
+                                                    (the agreement oracle)   │        └─> N3b. the node stops
+                                                                             │              being a tile
+                                                                             │
+                                                                             └─> N4. regions over spans ──┬─> N5. off-mesh links
+                                                                                          │               │
+                                                                                          │               └─> N7. the server reads the graph
+                                                                                          └─> N6. an artifact, if measured        (inherited from F)
 ```
 
 N0 is done, and it is the one node that ran before the gate — a census reads the
@@ -451,64 +453,82 @@ own reason, that 29.4 million columns walked twice by two implementations is
 seconds in release and minutes in debug. `cargo test` carries the same oracle
 over a box of Britain, which runs in four seconds and takes all three tiers.
 
-### N2 — the step rule reads them
+### N2 — the step rule reads them ✅
 
-The rule moves from *deriving surfaces* to *choosing among stored ones*, and the
-whole of this node is proving it did not change an answer.
+**Built**, as [`Spans::check`](../../crates/common/movement/src/spans.rs), and
+the risk this plan was carrying is retired: `check`'s answer does **not** depend
+on the source in any way a per-span bake cannot carry. It reaches the source
+through exactly the two scalars this section expected, `start_z` and
+`start_top`, and the whole of the rule is now a walk of the target column's
+stored spans — highest first, first acceptance wins, which is the same choice
+`check` expresses as a running maximum over the map file's own order.
 
-`check(x, y, start_z, start_top)` becomes a walk of the target column's spans
-rather than of its statics: pick the highest whose `reach_z` is within
-`start_top + MAX_STEP_UP`, require `clearance` for the body, and apply the flags
-filter. Everything the current `check` computes from `tiledata` — the platform
-test, the climbable halving, the ServUO `landCheck` guard that lets low ground
-poke through a static — is resolved once, in N1, when the span list is built.
+**The measurement, on facet 0:**
 
-**The risk this node exists to retire** is that `check`'s answer depends on the
-source in some way a per-span bake cannot carry. It reaches the source through
-exactly two scalars, `start_z` and `start_top`, which is why this is expected to
-work — and expected is not measured. Where it turns out to be false, that is a
-finding about `check` and it is filed here rather than worked around.
+| | |
+|---|---:|
+| steps compared (every surface × both abilities × eight directions) | **248,268,125** |
+| …of which landed somewhere | 238,291,149 |
+| **disagreements** | **0** |
+| flood from (1363, 1600, 30), map rule | 3,747,934 tiles in 4.2 s |
+| flood from (1363, 1600, 30), span rule | **3,747,934 tiles** in 2.9 s |
+| tiles reached by one flood and not the other | **0** |
 
-**N1 read `check` before writing the builder**, which is what this section asked
-for, and the answer is *one clause* rather than none:
+Both oracles are the [`span_check`](../../crates/common/movement/examples/span_check.rs)
+example, which is where this table comes from; the suite carries the per-step
+half over a box of Britain, which is 1.9 M steps and runs in a third of a
+second. The scene sweep beside it is the one that runs without an install, and
+both were checked to *bite* — disabling the `landCheck` clause fails each of
+them, which is the property an oracle is worth having.
+
+**A node expansion's landing half**, on facet 0 around (1500, 1900), fastest of
+five passes over 10,836 standable tiles — `step_cost`'s own rows, all three with
+the same checksum:
+
+| | ns per tile |
+|---|---:|
+| 8 × `step_allowed` — what a search does today | 1070.2 |
+| the same, landings computed once, over the map | 366.1 |
+| **the same, landings off the bake** | **169.1** |
+| pure A\* with the terrain taken away | ~220 |
+
+The 1,462 ns [`terrain_seam.md`](terrain_seam.md#what-one-search-costs) records
+is the same measurement on a different run; the trio above is internally
+consistent because it is one run. What it says is that the landing half is now
+**under** what A\*'s own machinery costs — which is the point at which N3's
+question stops being "is the terrain the cost" and starts being "what is left".
+The start half is still the map's, and that is the next paragraph.
+
+**Three clauses became three flags**, and each is a property of the *column*
+rather than of the body or of where it came from:
 
 - **The reach test** is `step_top >= item_top`, and `item_top` is `reach_z`.
-  Carried.
-- **The obstruction test** is `is_obstructed(x, y, our_z, test_top)`, where
-  `test_top` varies per step because a body walks in at the height it left. A
-  byte carries it: what the test asks is whether anything overlaps
-  `[our_z, test_top)`, so the free height above `our_z` answers every `test_top`
-  at once. It is **exact and not an approximation**, and the reason is the
-  arithmetic rather than the range: a static's base and a span's `stand_z` are
-  both `i8`, so nothing can be more than 255 above a surface, and `clearance`
-  saturating at 255 therefore means *nothing above at all* rather than "at least
-  255".
-- **The ServUO `landCheck` guard** — the rule that a low static the ground pokes
-  through is not something you climb onto — is the clause that reaches further.
-  Three of its four conditions are properties of the column and are build-time
-  facts; the fourth, `test_top > land_z`, is start-dependent. It is
-  unconditionally true whenever `our_z + PLAYER_HEIGHT > land_z`, which fails
-  only for a candidate buried more than a body's height below the tile's lowest
-  corner. So the guard is **one flag bit, plus the land read the query already
-  knows how to make** in whatever is left of that residue.
+  Carried by the record N1 already stored, as expected.
+- **The obstruction test** is carried by `clearance`, and the byte is exact —
+  **with one correction to what N1 wrote.** N1 argued that a saturated 255 could
+  only mean "nothing above", because a base and a `stand_z` are both `i8` and so
+  a gap can never exceed 255. That is true up to the boundary, and the boundary
+  is reachable: a static based at 127 over a surface at −128 is a real gap of
+  exactly 255, and it answers differently from "nothing above" for a body that
+  needs more than 255 over its feet — which is a body that walked in more than
+  239 above where it is landing. `SpanFlags::CEILED` is what separates them, and
+  it costs a bit of a byte that had seven spare.
+- **The ServUO `landCheck` guard** is two flags rather than one, and the second
+  is what removes the land read this section budgeted for. `SpanFlags::LAND_WINS`
+  carries three of the guard's four conditions — the static's near edge against
+  the land's centre, and that centre against where a body would stand on it.
+  `SpanFlags::GROUND` marks the column's own land span, and the fourth condition
+  (`test_top > land_z`) is then a comparison against **that span's `reach_z`**,
+  which is the tile's lowest corner and is already in the column's own cache
+  line. The first condition, `land_is_ground`, needs no storage at all: it is
+  whether the ground span survives the asker's ability filter, which is exactly
+  what "water is a surface only to a swimmer" already means.
 
-That is N2's shape and not N1's: the bit is not stored yet, because a bit whose
-oracle has not run is a rule written twice. The span record has seven spare
-flags and the layout does not move to gain one.
-
-Two oracles, both already built this session:
-
-- **Per-step agreement.** For every span on a sampled block and all eight
-  directions, the new answer must equal `step_allowed`'s exactly — the landing
-  point, not merely whether one exists.
-- **Whole-facet flood equivalence.** The breadth-first flood
-  [`coarse_bench`](../../crates/common/movement/examples/coarse_bench.rs) uses
-  as ground truth, run over both, must reach the identical set of tiles. This is
-  the test that would have caught the one-storey defect, and it is the one that
-  makes the rest of this plan safe to build on.
-
-**Done when:** both pass on facet 0, and `step_cost`'s node-expansion row is
-re-run and recorded here.
+That last one is the shape worth keeping. The residue this section expected to
+pay a map read for turned out to be a read of the *column*, because the column
+already stores the land it is standing on — which is the reason N1 gave for
+storing an exception column's ground where a bare column's is not stored, one
+node before anything needed it.
 
 ### N3 — the search takes `Spans`
 
@@ -520,6 +540,32 @@ of the signature.
 static answer, exactly as it is designed to be: it subtracts a blocked tile and
 adds a moored deck, which is the one thing
 [`docs/boats.md`](../boats.md)'s B3 argued a mask alone cannot do.
+
+**🚩 N2 found the one thing this node still has to decide: `start_surface` is
+not a span.** N2 moved the *landing* half of a step and left the start half on
+the map, because `MapTerrain::start_surface` returns a pair whose second element
+is the **crest** — the art's own full extent, ServUO's `zTop` — and a span
+carries neither the crest of a static nor the tile's *highest* corner. For a
+static the crest is recoverable from what is stored (`stand` for a flat one,
+`2·stand − reach` for a climbable, since a climbable's surface is halved from a
+base that `reach_z` *is*); for the land it is not, because an average and a
+minimum do not give a maximum. So this node picks one of three, and the pick is
+its own measurement rather than a preference:
+
+1. **A fourth height in the span**, taking the record from four bytes to five —
+   or to six with alignment, which is what would actually happen.
+2. **A `crest` byte only on the ground span**, which is the only span that needs
+   one, spending [`SpanFlags`](../../crates/common/movement/src/spans.rs)'s
+   remaining bits on saying so.
+3. **Leaving `start_surface` on the map.** It is asked *once per node
+   expansion* against sixteen landing checks, so it is 1/16th of what N2 just
+   made 2.2× cheaper — and `step_cost`'s rows say the whole landing half is now
+   under what A\* itself costs, which is the argument for not paying storage for
+   the other half at all.
+
+The measurement that decides it is the one this node already has to take: the
+node-expansion row with the start half hoisted, against the same row with it
+baked.
 
 **Done when:** `map_path_probe` is re-run from the same three origins and the
 node-expansion cost is in this document beside 1,462 ns. Arrivals and node
@@ -773,9 +819,29 @@ graph over spans names neither.
   its doc says why. So a floor the map shipped and a floor the shard placed
   answer differently for a body underneath — a cellar under a shipped floor, and
   the same cellar under a built one. The span bake reproduces the map's reading,
-  because that is what N2's oracle compares against; which of the two is right
-  is N2's question and is a finding about the step rule rather than about this
-  layer.
+  because that is what N2's oracle compares against. **N2 did not settle which
+  of the two is right**, and could not have: its whole content is that the
+  answer did not change, so the one thing it may not do is change this one. It
+  stays open, and it is a finding about the step rule rather than about this
+  layer — the node that can take it is N3, where both layers are consulted
+  through one signature and the disagreement is finally visible in one place.
+- **N2 corrected N1: a `clearance` of 255 was not by itself "nothing above".**
+  N1's argument was that a base and a `stand_z` are both `i8`, so a gap can
+  never exceed 255 and a saturated byte must therefore mean an absence. The
+  bound is right and the conclusion is off by the boundary: a static based at
+  127 over a surface at −128 *is* a gap of exactly 255, and it answers
+  differently from an absence for a body needing more than 255 over its feet.
+  Fixed in N2 with `SpanFlags::CEILED` rather than argued away, because the
+  arithmetic that makes it unreachable on Britannia is not arithmetic this
+  layer gets to assume about a base set.
+- **N2 found: the guard's residue was a column read, not a map read.** N2's
+  section budgeted "one flag bit plus, in the residue, a land read the query
+  already knows how to make". There is no land read: the exception column
+  already stores its own ground, and the guard's fourth condition is a
+  comparison against that span's `reach_z`. The general shape is worth
+  remembering for N4 and N5 — a clause that seems to need the map often needs
+  the *column*, and the column is already in the cache line the query is
+  standing in.
 - **A dense `average_land_z` array.** 29.4 MB turns the bare-column case from
   four corner reads into one. An obvious follow-up and exactly the kind of thing
   that should wait for N3's measurement to say whether it is needed.
@@ -798,23 +864,27 @@ graph over spans names neither.
 
 ## Where a session starts
 
-**N2 — the step rule reads them.** Era R is over and N1 is built: the span layer
-exists, it is 16.5 MiB, it takes a twentieth of a second to bake, and it says
-exactly what `stand_surfaces` says for all 29,360,128 columns of facet 0 and
-both abilities. Nothing reads it yet, which is the whole of what N2 changes.
+**N3 — the search takes `Spans`.** N2 is built and the risk this plan was
+carrying is gone: `Spans::check` answers what `MapTerrain::check` answers, over
+248,268,125 steps of facet 0 and two whole-facet floods, with nothing to
+reconcile. What is left is that **nothing on the hot path calls it** — `find_path`
+and `step_allowed` still take a `Footing` over `MapTerrain`, and until they do
+not, the 169.1 ns landing half is a number in a benchmark rather than a shard
+that walks faster.
 
-**What N2 has to prove is the only risk in this plan**, and N1 read `check` in
-advance to find out what it would cost — the answer is in
-[N2's own section](#n2--the-step-rule-reads-them): the reach and the obstruction
-are carried by `reach_z` and `clearance`, exactly, and the ServUO `landCheck`
-guard is one flag bit plus a rare land read. That bit is deliberately not stored
-yet: it is a rule, and a rule whose oracle has not run is a rule written twice.
+**N3 has one decision to take before it writes anything**, and N2 is what put it
+there: `start_surface` is not a span. The three ways out and the measurement
+that picks between them are in
+[N3's own section](#n3--the-search-takes-spans). Take the measurement first —
+the whole landing half is already under what A\* costs, which is an argument
+that the cheapest answer is to leave the start half alone.
 
-**Both of N2's oracles already exist.** Per-step agreement against
-`step_allowed`, and the whole-facet flood
-[`coarse_bench`](../../crates/common/movement/examples/coarse_bench.rs) uses as
-ground truth. The second is the one that would have caught the one-storey
-defect, and it is the one that makes everything after N2 safe to build on.
+**N3's oracle is the same shape as N2's and is stricter.** Arrivals and node
+counts bit-identical to
+[`terrain_seam.md`](terrain_seam.md#what-one-search-costs)'s recorded run: a
+faster search that finds different routes is a different search. The two floods
+[`span_check`](../../crates/common/movement/examples/span_check.rs) already runs
+are the coarse half of it and cost three seconds.
 
 **N4 is the one a player would notice**, and N7 is where they notice it.
 Everything before N4 is a structure and an oracle; N4 is the node where a

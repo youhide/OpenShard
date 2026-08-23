@@ -130,7 +130,8 @@ Read off the workspace and the plans, so a session does not re-derive it:
 | the statics are 120,745 vectors | ✅ R4 — one run, two allocations, 38.2 → 29.5 MiB |
 | both ends load the same install separately | ✂ R5 struck — a shard and a client *are* two processes; only the test harness is one |
 | a column is a *list* of standable surfaces | ✅ [N1](navigation_spans.md#n1--three-tiers-) — 16.5 MiB, baked in 0.05 s, equal to `stand_surfaces` on all 29.4 M columns |
-| the step rule reads them; regions over spans; the server reading the graph | ⬜ era P, from [N2](navigation_spans.md#n2--the-step-rule-reads-them) |
+| the step rule reads them | ✅ [N2](navigation_spans.md#n2--the-step-rule-reads-them-) — 248,268,125 steps and two whole-facet floods, 0 disagreements |
+| regions over spans; the server reading the graph | ⬜ era P, from [N3](navigation_spans.md#n3--the-search-takes-spans) |
 | live publish, revisioned bakes, chunks to the client, the editor | ⬜ era S |
 
 ## Era R — the map you hold
@@ -361,9 +362,10 @@ the shard's own loader is the only production `load_facet` call.
 ## Era P — the map you search
 
 Inherited whole from [`navigation_spans.md`](navigation_spans.md), whose nodes,
-measurements and DoDs stand as written. **N1 is built** — the span layer exists,
-is 16.5 MiB, and says what `stand_surfaces` says for every column of facet 0 —
-and N2 is where a session starts. Three things this consolidation adds:
+measurements and DoDs stand as written. **N1 and N2 are built** — the span layer exists,
+is 16.5 MiB, says what `stand_surfaces` says for every column of facet 0, and
+the step rule over it answers what the step rule over the map answers — and N3
+is where a session starts. Three things this consolidation adds:
 
 - **`Spans` is movement's own map, and it stays in `openshard-movement`.** It is
   a projection of the two lower layers for one purpose — where a body may stand
@@ -376,8 +378,8 @@ and N2 is where a session starts. Three things this consolidation adds:
   onto a second storey comes from `surface_at`, and the graph never claims one.
 - **N4 is the node a player notices**, and N7 is where they notice it: the
   server plans with flat `find_path` at a budget of 400 while the graph that
-  would route it across a town sits loaded and unread. Both stay gated on N2's
-  oracles, as written.
+  would route it across a town sits loaded and unread. Both were gated on N2's
+  oracles; **those have run and passed**, so what gates them now is N3.
 - **The search's node has no z, and that turned out to be half a defect.** Asked
   in the session that wrote this document, answered in
   [what a node is](navigation_spans.md#what-a-node-is-and-the-z-that-is-already-gone):
@@ -538,7 +540,7 @@ waits for a measurement that says the statics are still on a hot path.
 | [`snapshot.md`](new_map_representation/snapshot.md) | **the record** of A0 and A, plus the crate rule this document strikes |
 | [`client_today.md`](new_map_representation/client_today.md) | **live** — the measured backlog era R spent. Finding 6 is R4 and is spent, finding 7 was R5 and is withdrawn, finding 10 is the readers' |
 | [`terrain_seam.md`](terrain_seam.md) | **closed.** The record of how the seam went, and where the facet-0 oracle's numbers live |
-| [`navigation_spans.md`](navigation_spans.md) | **live** — era P in full, N0 done |
+| [`navigation_spans.md`](navigation_spans.md) | **live** — era P in full, N0–N2 done |
 | [`navigation_graph*.md`](navigation_graph.md) | **live** — the graph, its artifact, and its efficiency phases 1/2/4 built, 3 gated on N4 |
 | [`coarse_pathfinding.md`](coarse_pathfinding.md) | **superseded**, by its own first line |
 | [`interiors.md`](interiors.md) · [`cutaway.md`](cutaway.md) · [`radar.md`](radar.md) · [`minimap_lod_*.md`](minimap_lod_plan.md) | **live**, and not in the eras: readers, repaired when they break |
@@ -576,9 +578,11 @@ and not in the plan.
 *type*, and after that the shape of the layers `Spans` is a projection of: what
 a house contributes to a surface (R3) and how the statics are held (R4). Both
 landed, R5 — the only node that was left — is struck, and
-[N1](navigation_spans.md#n1--three-tiers-) is built: the span layer is a real
-16.5 MiB structure that nothing reads yet. **N2 is the next node**, and it is
-where the only risk in that plan lives.
+[N1](navigation_spans.md#n1--three-tiers-) and
+[N2](navigation_spans.md#n2--the-step-rule-reads-them-) are built: the span
+layer is a real 16.5 MiB structure, and the step rule over it is proved to be
+the step rule over the map. **The only risk in that plan is retired**, and
+**N3 is the next node** — where the search stops asking the map at all.
 
 **Era S is resumed, not restarted.** Its first half is built and running; the
 handoffs in [`handoffs/`](new_map_representation/handoffs/) are where its state
