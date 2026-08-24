@@ -29,7 +29,6 @@ use openshard_client_render::cutaway::Cutaway;
 use openshard_client_render::lod::BlockLodSelector;
 use openshard_client_render::mobiles;
 use openshard_client_render::radar::{RadarCache, RadarLodSelector, RadarWorkQueue};
-use openshard_map::grid::Tile;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::world::Point;
@@ -279,7 +278,10 @@ pub(crate) struct App {
 /// A route snapshot and the world positions that make it valid.
 pub(crate) struct RouteCache {
     pub(crate) from: Point,
-    pub(crate) goal: Tile,
+    /// The place the route was planned to, height and all: two floors of one
+    /// column are two destinations, and a cache keyed by the tile would hand a
+    /// route to the street back for an order to the storey over it.
+    pub(crate) goal: Point,
     pub(crate) route: Option<Arc<Route>>,
 }
 

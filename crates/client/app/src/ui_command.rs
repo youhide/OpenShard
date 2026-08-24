@@ -25,6 +25,7 @@ use openshard_protocol::world::Point;
 use winit::window::CursorIcon;
 
 use crate::app::App;
+use crate::diagnostics::PickedTile;
 use crate::net_command::project_motion;
 use crate::world::{advance_presentation_to, footing, guide, terrain};
 use crate::{DEAD_ZONE, TURN_ZONE, steer};
@@ -434,7 +435,35 @@ impl App {
         }
     }
 
-    /// Send the body to whatever tile the cursor is over, answering whether
+    /// The place a move order names, which is the picture the cursor actually
+    /// hit and not the ground behind it.
+    ///
+    /// **A destination is a place**, and on a column with two floors in it the
+    /// height is the whole of the order: a house's second storey and the street
+    /// under it are one tile, and a click that carried only that tile was an
+    /// order to whichever of them the body was already level with. So a click
+    /// that landed on a static takes *that* static's place — the same
+    /// static-first precedence [`App::target_under_cursor`] answers a shard's
+    /// location cursor with, and the same one the reference client walks by. It
+    /// is also the only reading that can name an upper floor at all:
+    /// [`App::pick_tile`] unprojects at the body's own height, so a roof under
+    /// the cursor answers with the ground tile behind it.
+    ///
+    /// **The art's own z, not a surface.** What a body may stand on at that
+    /// height is the search's to resolve and `steer.rs`'s to compare arrival
+    /// against — both through [`openshard_movement::destination_place`], which
+    /// is why nothing here rounds the height itself: a table's top is six above
+    /// the graphic the cursor hit, and a click on something nothing stands on (a
+    /// wall, a tree) is the refusal it always was — the walk goes as close as the
+    /// ground allows and stops there.
+    pub(crate) fn walk_destination(&self, tile: &PickedTile) -> Point {
+        match self.picking.hover.static_ {
+            Some(picked) => picked.at,
+            None => Point::new(tile.at.x, tile.at.y, tile.stand_z.0),
+        }
+    }
+
+    /// Send the body to whatever the cursor is over, answering whether
     /// anything on screen changed.
     ///
     /// The mouse's whole share of walking: a click names a destination and a
@@ -447,8 +476,9 @@ impl App {
     /// `self.input.ctrl_held` says which. Without Ctrl this is a heading — no map
     /// touched, no route planned, the same "run toward the cursor" a strategy
     /// game's held mouse button means. With it, a move order: a route planned
-    /// with `find_path` to the exact tile. See `steer.rs`'s module docs for why
-    /// they are not the same thing wearing one name.
+    /// with `find_path` to the exact place [`App::walk_destination`] names. See
+    /// `steer.rs`'s module docs for why they are not the same thing wearing one
+    /// name.
     pub(crate) fn walk_toward_cursor(&mut self) -> bool {
         // As above: between frames, what is on screen is what the last frame drew.
         let Some(tile) = self.pick_tile(*self.control.camera()) else {
@@ -467,7 +497,7 @@ impl App {
         let motion = self.world.motion.planning_state();
         let facing = if self.input.ctrl_held {
             self.steer.go_to(
-                tile.at,
+                self.walk_destination(&tile),
                 motion.position,
                 Instant::now(),
                 motion.facing.direction,

@@ -10,8 +10,9 @@
 //! own: close in, the same button asks the body to *face* that way and go
 //! nowhere ([`Ask::Turn`], the classic client's ring — the only way a mouse can
 //! turn a character on the spot). A held right button *with* Ctrl says *where to*: the
-//! strategy game's move order, [`Steering::go_to`], a destination tile planned
-//! and walked to on its own.
+//! strategy game's move order, [`Steering::go_to`], a destination *place* —
+//! tile and height, because a column can hold two floors — planned and walked
+//! to on its own.
 //!
 //! These used to be one idiom stated twice — a drag restating a destination
 //! every move looks the same as a heading restated every move, right up until
@@ -130,9 +131,12 @@
 //! walk resumes on its own the moment the door opens.
 //!
 //! A destination (Ctrl+drag) is answered differently, because it names a
-//! specific tile rather than a heading: [`Steering::go_to`] plans a route with
+//! specific place rather than a heading: [`Steering::go_to`] plans a route with
 //! `common/movement`'s `find_path`, and the steps taken toward the destination
-//! are that route's, one per call.
+//! are that route's, one per call. A *place*, and the height in it is the click's
+//! own — a house's upper storey and the street under it are one tile and two
+//! orders, and an order that carried only the tile was always the one the body
+//! was already level with.
 //!
 //! What it plans over is a [`Readings`] — the same map read twice, once with
 //! everything the shard has put on it and once without (`clutter.rs`) — and the
@@ -178,11 +182,10 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use openshard_map::grid::Tile;
 use openshard_map::overlay::Doors;
 use openshard_movement::{
     Around, COARSE_MIN_DISTANCE, Detour, Footing, Heading, Lean, Leeway, NavigationGraph, RUN_HOLD, Step,
-    WALK_HOLD, Weight, find_long_path, find_path, find_path_toward, step_allowed,
+    WALK_HOLD, Weight, destination_place, find_long_path, find_path, find_path_toward, step_allowed,
 };
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::world::Point;
@@ -404,7 +407,7 @@ pub struct Plan {
 #[derive(Clone, Debug)]
 struct CachedPlan {
     from: Point,
-    goal: Tile,
+    goal: Point,
     plan: Option<Plan>,
     /// A preview has already performed this frame's query.  The next walk may
     /// consume it once, but successful plans are never retained across live
@@ -452,13 +455,25 @@ pub struct Steering {
     /// what decides a tie between two ways round an obstacle (see
     /// [`Detour::step`]).
     mouse: Option<Ask>,
-    /// The tile a Ctrl-held right button last asked for — a destination, not
+    /// The place a Ctrl-held right button last asked for — a destination, not
     /// a heading; see [`Steering::go_to`].
     ///
     /// Absent means absent: nobody has clicked, or the body has arrived. Not a
     /// "no destination yet" — a body standing where it was told to stand has
     /// genuinely nowhere left to go.
-    goal: Option<Tile>,
+    ///
+    /// **A place and not a tile.** A column can hold two floors — a house's
+    /// second storey over its ground floor, a bridge over a road — and an order
+    /// that named only the tile was an order to the *nearer* of them, since a
+    /// search handed no height resolves one against the body's own. Clicking the
+    /// upper floor of a building walked to the street underneath it and let go
+    /// there, which is the whole of the report this field is the repair for.
+    ///
+    /// The height is the one the click carried — a picture's own z — and not a
+    /// surface: [`destination_place`] is what turns it into somewhere to stand,
+    /// and both the search and the arrival test ask it rather than keeping a
+    /// resolved copy that the ground could move out from under.
+    goal: Option<Point>,
     /// The route planned to [`Steering::goal`], most-recent-plan first.
     ///
     /// Consumed one direction per step; emptied on a refusal and on every
@@ -673,7 +688,7 @@ impl Steering {
     /// `begin_frame` has already dropped any successful plan from the previous
     /// frame, so a matching plan may have been produced by movement earlier in
     /// the current frame even though it is no longer marked as a preview.
-    pub(crate) fn plan_for(&mut self, ground: Readings<'_>, from: Point, goal: Tile) -> Option<Plan> {
+    pub(crate) fn plan_for(&mut self, ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
         if let Some(cached) = self.cached_plan.as_ref() {
             if cached.from == from && cached.goal == goal {
                 return cached.plan.clone();
@@ -690,10 +705,16 @@ impl Steering {
         planned
     }
 
-    /// Walk to `tile`, from wherever the body is standing now, or as close to it
+    /// Walk to `at`, from wherever the body is standing now, or as close to it
     /// as the ground allows — see [`plan`]. Answers the step to send this
     /// instant, if the clock is free for one and there is one worth sending:
     /// `None` also means a body already standing as close as it can get.
+    ///
+    /// **`at` is a place**, height and all, and the caller is the one that knows
+    /// which: a click on a house's upper floor and a click on the street it
+    /// stands over are the same tile and different orders. The height is the
+    /// one the click carried; what stands there is resolved from it — see
+    /// [`Steering::goal`].
     ///
     /// Called on a click and again on every mouse move while the button is held,
     /// which is what makes dragging steer: the destination is replaced and the
@@ -701,21 +722,21 @@ impl Steering {
     /// not run here: a drag restates the destination on every raw mouse-move
     /// event, tens of times a second, and a fresh A* search on each of those is
     /// a freeze, not a feature. Only the stale route is dropped; [`Steering::take`]
-    /// plans the new one lazily, at most once per step, against whichever tile
+    /// plans the new one lazily, at most once per step, against whichever place
     /// is current when a step actually comes due.
     pub fn go_to(
         &mut self,
-        tile: Tile,
+        at: Point,
         from: Point,
         now: Instant,
         facing: Direction,
         ground: Readings<'_>,
     ) -> Option<Facing> {
         self.mouse = None;
-        if self.goal != Some(tile) {
+        if self.goal != Some(at) {
             self.route.clear();
         }
-        self.goal = Some(tile);
+        self.goal = Some(at);
         self.stalled = 0;
         self.was = None;
         // Only when the step in flight has run its course — otherwise a drag
@@ -836,8 +857,9 @@ impl Steering {
         self.asked = Some(facing);
     }
 
-    /// The tile being walked to, for the marker the HUD draws on it.
-    pub const fn goal(&self) -> Option<Tile> {
+    /// The place being walked to, for the marker the HUD draws on it and the
+    /// route it draws to it.
+    pub const fn goal(&self) -> Option<Point> {
         self.goal
     }
 
@@ -903,8 +925,19 @@ impl Steering {
         // plan left to walk, and the body is not already standing on it. This
         // is the only place a search runs — `go_to` never calls one — so a plan
         // costs at most once per step, never once per mouse-move.
-        if let Some(tile) = self.goal {
-            if Tile::new(from.x, from.y) == tile {
+        if let Some(at) = self.goal {
+            // The height is part of arriving, and not a detail of it: a route
+            // onto a house's second storey runs *through* the ground floor
+            // underneath it, so a body that compared only the tile would call
+            // that passage the arrival and stop in the wrong room.
+            //
+            // Against the place the destination *names* rather than the height
+            // it carries, and by the search's own rule: a click lands on a
+            // picture, and the art's z is not the surface a body's feet end up
+            // at wherever the static has height. Asked of the live reading each
+            // beat, so a deck that has moved under the order is still the same
+            // order.
+            if from == destination_place(&ground.live, from, at) {
                 // Arrived — the ordinary way this ends.
                 self.goal = None;
                 self.route.clear();
@@ -919,7 +952,7 @@ impl Steering {
                 // previous walk is not reusable: a door can have opened since
                 // then. Failed coarse searches remain held until invalidation.
                 let preview = self.cached_plan.as_ref().and_then(|cached| {
-                    (cached.from == from && cached.goal == tile && (cached.preview || cached.suppress_retry))
+                    (cached.from == from && cached.goal == at && (cached.preview || cached.suppress_retry))
                         .then(|| cached.plan.clone())
                 });
                 let planned = match preview {
@@ -930,10 +963,10 @@ impl Steering {
                         plan
                     }
                     None => {
-                        let planned = self.planned(ground, from, tile);
+                        let planned = self.planned(ground, from, at);
                         self.cached_plan = Some(CachedPlan {
                             from,
-                            goal: tile,
+                            goal: at,
                             preview: false,
                             suppress_retry: planned.is_none() && ground.coarse.is_some(),
                             plan: planned.clone(),
@@ -1248,14 +1281,14 @@ impl Steering {
 
 impl Steering {
     /// [`plan`], counted. The single place this module runs a search.
-    fn planned(&self, ground: Readings<'_>, from: Point, tile: Tile) -> Option<Plan> {
+    fn planned(&self, ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
         #[cfg(test)]
         self.plans.set(self.plans.get() + 1);
-        plan(ground, from, tile)
+        plan(ground, from, goal)
     }
 }
 
-/// Plan a route from `from` to `tile`, in the two halves a walk and a picture of
+/// Plan a route from `from` to `goal`, in the two halves a walk and a picture of
 /// it both need.
 ///
 /// **The world as it stands is asked first, and its route is the whole plan.** A
@@ -1298,10 +1331,17 @@ impl Steering {
 /// [`Steering::take`] stands on that rather than sending anything, and the
 /// destination's own patience is what ends the order. A plan with nothing in
 /// either half says the same for the one case that is not a refusal — `from`
-/// already standing on `tile`, a body that has arrived.
-pub fn plan(ground: Readings<'_>, from: Point, tile: Tile) -> Option<Plan> {
+/// already standing on `goal`, a body that has arrived.
+///
+/// **The goal is a place, and its height is the caller's.** This used to plant
+/// the body's own z on whatever tile it was handed, which made every order an
+/// order to the floor the body was already on: a click on a house's second
+/// storey planned a route to the street underneath it, arrived there, and let
+/// go. The search resolves an asked-for height against the surfaces that are
+/// really there ([`openshard_movement::destination_place`]), so what this owes
+/// it is the height the player actually pointed at.
+pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
     let started = Instant::now();
-    let goal = Point::new(tile.x, tile.y, from.z);
     // The two readings of one ground. Which one is "real" is the caller's —
     // `ground.live` as it was handed over — because an auto-door client walks
     // its own way through a shut leaf and its real half *is* the open one. The
@@ -1440,6 +1480,7 @@ fn debug_detour(from: Point, around: &Around, step: Step) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openshard_map::grid::Tile;
     use openshard_map::overlay::{Cover, Overlay};
     use openshard_movement::{Bodies, step_from};
     use std::sync::LazyLock;
@@ -1665,7 +1706,7 @@ mod tests {
         // Three tiles east, at the same row.
         assert_eq!(
             steering.go_to(
-                Tile::new(103, 100),
+                Point::new(103, 100, 0),
                 here(),
                 start,
                 Direction::East,
@@ -1711,7 +1752,7 @@ mod tests {
         let mut steering = Steering::default();
         assert_eq!(
             steering.go_to(
-                Tile::new(105, 105),
+                Point::new(105, 105, 0),
                 here(),
                 start,
                 Direction::SouthEast,
@@ -1719,6 +1760,106 @@ mod tests {
             ),
             Some(Facing::walking(Direction::SouthEast))
         );
+    }
+
+    /// One column with two floors in it and one tread up to the upper one: the
+    /// body stands under a mezzanine at `(100, 100, 0)`, the floor over it is at
+    /// 4, and `(101, 100)` carries the step between them.
+    ///
+    /// Nothing here reads a map, so every height is the overlay's own.
+    /// `Cover::standing` is not climbable, so a body meets each at its base —
+    /// two of them one `MAX_STEP_UP` apart are a staircase with one tread.
+    fn a_mezzanine() -> Overlay {
+        let mut overlay = Overlay::default();
+        overlay.set(Tile::new(100, 100), vec![Cover::standing(4, 0)]);
+        overlay.set(Tile::new(101, 100), vec![Cover::standing(2, 0)]);
+        overlay
+    }
+
+    /// A click on the storey above is an order to *that* storey — the report
+    /// this is the repair for: from the street, a route onto a building's
+    /// second floor came back as a walk to the ground under it.
+    ///
+    /// The two orders differ by their height alone, and both are answered here,
+    /// because the wrong one is a perfectly good answer to the other question:
+    /// the floor the body is already on is where it already stands.
+    #[test]
+    fn a_destination_on_the_floor_above_is_climbed_to_rather_than_stood_under() {
+        let world = a_mezzanine();
+        let ground = over(&world);
+        let under = Point::new(100, 100, 0);
+
+        let upstairs = plan(Readings::plain(ground), under, Point::new(100, 100, 4))
+            .expect("the mezzanine has a way up");
+        assert_eq!(
+            upstairs.open,
+            vec![Direction::East, Direction::West],
+            "the way up is out of the column and back over it"
+        );
+        // Walked by the shipped step rule: a plan is only worth anything if
+        // every step in it is one the ground allows.
+        let mut at = under;
+        for direction in &upstairs.open {
+            at = step_allowed(&ground, at, *direction).expect("the plan asked for a refused step");
+        }
+        assert_eq!(at, Point::new(100, 100, 4), "and it lands on the upper floor");
+
+        assert_eq!(
+            plan(Readings::plain(ground), under, under)
+                .expect("a body is always somewhere")
+                .open,
+            Vec::new(),
+            "the same tile at the body's own height is where it already stands"
+        );
+    }
+
+    /// And the order ends where it was aimed: standing on the ground floor of
+    /// the column it was sent to is not arriving at the storey above it.
+    ///
+    /// This is what a tile-deep destination could not say — `Tile == Tile` was
+    /// true the moment the body walked *under* the floor it was sent to, so the
+    /// walk let go there and the player stood in the wrong room.
+    #[test]
+    fn standing_under_the_destination_is_not_arriving_at_it() {
+        let start = Instant::now();
+        let world = a_mezzanine();
+        let ground = || Readings::plain(over(&world));
+        let mut steering = Steering::default();
+        let under = Point::new(100, 100, 0);
+        let upstairs = Point::new(100, 100, 4);
+
+        // Standing on the goal's own tile, one floor below it: the walk starts
+        // rather than declaring itself over, which is the whole of the repair.
+        assert_eq!(
+            steering.go_to(upstairs, under, start, Direction::East, ground()),
+            Some(Facing::walking(Direction::East)),
+            "the ground floor of the column is not the storey above it"
+        );
+        assert_eq!(
+            steering.goal(),
+            Some(upstairs),
+            "the order names the floor above, not the tile"
+        );
+        // Walked the way the server's `0x22` would report it: onto the tread,
+        // then back over the column a storey up.
+        let tread = step_allowed(&over(&world), under, Direction::East).expect("the tread is a step up");
+        assert_eq!(
+            steering.due(at(start, 400), tread, Direction::East, ground()),
+            Some(Facing::walking(Direction::West)),
+            "and back west, onto the floor over where it started"
+        );
+        assert_eq!(steering.goal(), Some(upstairs), "the order still stands");
+        assert_eq!(
+            step_allowed(&over(&world), tread, Direction::West),
+            Some(upstairs),
+            "which is a step that lands upstairs"
+        );
+        // On the floor itself it ends, and the marker goes out.
+        assert_eq!(
+            steering.due(at(start, 800), upstairs, Direction::West, ground()),
+            None
+        );
+        assert_eq!(steering.goal(), None, "arrived, and let go of");
     }
 
     /// A wall directly on the straight line to a destination, with a way around
@@ -1743,7 +1884,7 @@ mod tests {
         // stall on it; the plan detours around it instead.
         let first = steering
             .go_to(
-                Tile::new(104, 100),
+                Point::new(104, 100, 0),
                 here(),
                 start,
                 Direction::East,
@@ -1816,7 +1957,7 @@ mod tests {
         let mut now = start;
         assert_eq!(
             steering.go_to(
-                Tile::new(104, 100),
+                Point::new(104, 100, 0),
                 pos,
                 now,
                 Direction::East,
@@ -1862,7 +2003,7 @@ mod tests {
             );
             assert_eq!(
                 steering.goal(),
-                Some(Tile::new(104, 100)),
+                Some(Point::new(104, 100, 0)),
                 "and still hold the order"
             );
         }
@@ -1889,7 +2030,7 @@ mod tests {
 
         assert_eq!(
             steering.go_to(
-                Tile::new(101, 100),
+                Point::new(101, 100, 0),
                 here(),
                 start,
                 Direction::East,
@@ -1900,7 +2041,7 @@ mod tests {
         );
         assert_eq!(
             steering.goal(),
-            Some(Tile::new(101, 100)),
+            Some(Point::new(101, 100, 0)),
             "the order stands for now"
         );
         for step in 1..u64::from(STUCK_STEPS) {
@@ -1973,7 +2114,10 @@ mod tests {
     }
 
     /// Two tiles past the doorway: a destination only reachable through it.
-    const BEYOND: Tile = Tile::new(105, 100);
+    ///
+    /// A *place*, like every destination since a column can hold two floors —
+    /// at the one height this mapless ground has.
+    const BEYOND: Point = Point::new(105, 100, 0);
 
     /// With the door open there is nothing to cut: the world as it stands
     /// answers, and its answer is the whole plan.
@@ -2075,16 +2219,9 @@ mod tests {
     fn a_far_destination_uses_the_coarse_route_after_the_ordinary_budget_ends() {
         let router = NavigationGraph::build(&open_ground(), 704, 32).expect("a representable map");
         let from = Point::new(1, 1, 0);
-        let goal = Tile::new(702, 1);
+        let goal = Point::new(702, 1, 0);
         assert!(
-            find_path(
-                &open_ground(),
-                from,
-                Point::new(goal.x, goal.y, 0),
-                PLAN_BUDGET,
-                Weight::PLANNING
-            )
-            .is_none(),
+            find_path(&open_ground(), from, goal, PLAN_BUDGET, Weight::PLANNING).is_none(),
             "the flat plan is intentionally too short"
         );
         let plan = plan(
@@ -2108,7 +2245,7 @@ mod tests {
         let open = shut.reading(Doors::AllOpen);
         let router = NavigationGraph::build(&open_ground(), 704, 32).expect("a representable map");
         let from = Point::new(1, 1, 0);
-        let goal = Tile::new(702, 1);
+        let goal = Point::new(702, 1, 0);
         let plan = plan(
             Readings {
                 live: shut,
@@ -2215,7 +2352,7 @@ mod tests {
                 coarse: None,
             },
             here(),
-            Tile::new(104, 100),
+            Point::new(104, 100, 0),
         )
         .expect("there is a way round a single tile");
         assert!(
@@ -2366,7 +2503,7 @@ mod tests {
 
         steering
             .go_to(
-                Tile::new(110, 100),
+                Point::new(110, 100, 0),
                 here(),
                 start,
                 Direction::East,
@@ -2376,7 +2513,7 @@ mod tests {
         for tick in 1..20 {
             assert_eq!(
                 steering.go_to(
-                    Tile::new(110, 100 + tick as u16),
+                    Point::new(110, 100 + tick as u16, 0),
                     here(),
                     at(start, tick * 10),
                     Direction::East,
@@ -2400,7 +2537,7 @@ mod tests {
 
         steering
             .go_to(
-                Tile::new(110, 100),
+                Point::new(110, 100, 0),
                 here(),
                 start,
                 Direction::East,
@@ -2412,7 +2549,7 @@ mod tests {
 
         for tick in 1..20 {
             steering.go_to(
-                Tile::new(110, 100 + tick as u16),
+                Point::new(110, 100 + tick as u16, 0),
                 here(),
                 at(start, tick * 10),
                 Direction::East,
@@ -2435,7 +2572,7 @@ mod tests {
 
         steering
             .go_to(
-                Tile::new(200, 100),
+                Point::new(200, 100, 0),
                 here(),
                 start,
                 Direction::East,
@@ -2478,7 +2615,7 @@ mod tests {
         let mut steering = Steering::default();
         steering
             .go_to(
-                Tile::new(100, 130),
+                Point::new(100, 130, 0),
                 here(),
                 start,
                 Direction::South,
@@ -2498,7 +2635,7 @@ mod tests {
                 "row {y}"
             );
         }
-        assert_eq!(steering.goal(), Some(Tile::new(100, 130)));
+        assert_eq!(steering.goal(), Some(Point::new(100, 130, 0)));
     }
 
     /// Taking hold of the arrows is how a player says they no longer want to go
@@ -2511,7 +2648,7 @@ mod tests {
 
         steering
             .go_to(
-                Tile::new(200, 100),
+                Point::new(200, 100, 0),
                 here(),
                 start,
                 Direction::East,
@@ -3081,7 +3218,7 @@ mod tests {
             )
             .unwrap();
         steering.go_to(
-            Tile::new(200, 200),
+            Point::new(200, 200, 0),
             here(),
             start,
             Direction::South,

@@ -311,7 +311,7 @@ impl OpenEntry {
 /// **A destination is a place and not a tile**, so a body under a floor asked
 /// to be on it is given the route round the staircase, and a body on a floor it
 /// cannot get to is refused. Which place a caller's z names is
-/// [`goal_node`]'s to resolve, and it is generous about it — see there.
+/// [`destination_place`]'s to resolve, and it is generous about it — see there.
 ///
 /// The budget bounds the cost: a search that would explore more than `budget`
 /// standing places gives up rather than spend the tick. A few hundred is ample
@@ -523,8 +523,8 @@ fn explore(
     within: Option<Region>,
 ) -> PathSearch {
     // The destination as a *place*, which is what the search compares against:
-    // see `goal_node` for why the caller's own z is not it.
-    let goal = goal_node(footing, from, to);
+    // see `destination_place` for why the caller's own z is not it.
+    let goal = destination_place(footing, from, to);
     let start = from;
     if start == goal {
         return PathSearch {
@@ -922,7 +922,17 @@ fn node_key(at: Point) -> PathNodeKey {
 /// world does not list. A column nothing names a surface on keeps the height it
 /// was asked at, and nothing will ever land on it — a goal in a wall, which is
 /// the refusal it always was.
-fn goal_node(footing: &Footing<'_>, from: Point, to: Point) -> Point {
+///
+/// **Public because an order outlives the search that answers it.** A client
+/// holding a move order has to be able to say *the body has arrived*, and that
+/// comparison is against the place the destination named rather than the height
+/// the click carried — a table's top is 26 and the art the cursor hit is at 20.
+/// Resolving once, where the order is taken, is what keeps that test and this
+/// search agreeing; resolving it a second way would be the second policy
+/// [`parity.md`](../../../docs/parity.md) is about. Idempotent, so a place that
+/// has already been through here goes through again unchanged.
+#[must_use]
+pub fn destination_place(footing: &Footing<'_>, from: Point, to: Point) -> Point {
     let tile = Tile::new(to.x, to.y);
     let wanted = i32::from(to.z);
     let mapped = footing

@@ -593,13 +593,20 @@ impl App {
         // not infer it from either a renderer `Mobile` or Crowd's clock.
         let from = self.world.motion.route_origin();
         let goal = match self.steer.goal() {
-            Some(tile) => tile,
+            Some(at) => at,
             // No destination: the hover preview is the terrain overlay's own
             // question — "where would a click here take me" — and is asked only
             // while somebody has that overlay open to read the answer against.
+            //
+            // Asked exactly the way a click would ask it — `walk_destination`,
+            // the same static-first rule and the same height — because the
+            // preview's whole claim is "this is where clicking here takes you".
+            // A second rule here would draw a route to the street under the roof
+            // the cursor is on, which is `docs/parity.md`'s complaint in
+            // miniature.
             None => {
                 let tile = hover.filter(|_| self.graphics.show_terrain)?;
-                tile.at
+                self.walk_destination(tile)
             }
         };
         if let Some(cached) = self.route_cache.as_ref().filter(|cached| cached.goal == goal) {
@@ -1060,7 +1067,7 @@ impl App {
                 .selected
                 .map(|identity| self.resolve_selection(identity)),
             health_bars: self.health_bars(camera, drawn_mobiles),
-            goal: self.steer.goal().map(|tile| self.tile_info(tile)),
+            goal: self.steer.goal().map(|at| self.tile_info(Tile::new(at.x, at.y))),
             ttf_active: self.resources.ttf_font.is_some(),
             composites: self
                 .window

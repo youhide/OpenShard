@@ -4534,6 +4534,43 @@ whether or not the terrain overlay is switched on (`App::route_shown`,
   approach rather than a route — `find_path_toward` over the bare map, cut by the
   real one — which is a third case in `plan` and was not worth the branch until
   somebody hits it.
+- ~~**A destination is a tile, so a click on an upper floor walks under it.**~~
+  Fixed. A move order is a `Point` now, from the click all the way to the
+  arrival test: `Steering::goal`, `CachedPlan`, `RouteCache` and `steer::plan`
+  all carry the height, and `plan` no longer plants the body's own z on whatever
+  tile it was handed. Which place that height names is one rule in one place —
+  `movement::destination_place`, the search's own `goal_node`, made public for
+  the arrival test rather than restated beside it.
+
+  **Where the height comes from is the other half.** `App::pick_tile` unprojects
+  at the *body's* height, so a roof under the cursor answers with the ground tile
+  behind it; a click that landed on a static now takes that static's own place
+  (`App::walk_destination`), which is the precedence `target_under_cursor`
+  already answers a shard's location cursor with, and the preview
+  (`App::route_shown`) asks the same function so the drawn line cannot disagree
+  with the walk. Measured on facet 0 before the fix: from `(1375, 1673, 30)` a
+  click on the floor at `(1355, 1680, 52)` planned 21 steps to the street *under*
+  it; the route up the stairs is 68 steps and the coarse graph answers it.
+
+  **What it does not cover: a house somebody built.** The height comes off
+  `Hover::static_`, which is the *map's* furniture — a player house's floor is a
+  live item (`R3`'s `Cover::of_static`, `Hover::item`), so clicking the upper
+  storey of one still falls through to the ground under the cursor. The lookup is
+  the same one `auto_open_door` already does (serial → `presentation.items`);
+  what is missing is a reason to prefer one hover over the other, since the item
+  pick and the static pick are two independent hit tests and neither `Hover` nor
+  `FrameFacts` records which of them the frame drew in front. That is the thing
+  to settle before adding the arm, not after.
+- **The client's flat plan gives up well before the coarse one does, and the
+  fallback only runs past 8 tiles.** That same 68-step route costs ~1,600 node
+  expansions and `PLAN_BUDGET` is 600, so the flat search exits on budget and
+  `Readings::path` falls through to `find_long_path`, which answers it — but only
+  because the goal was 20 tiles away. A storey reached by a staircase *inside*
+  `COARSE_MIN_DISTANCE` (8 tiles) has no fallback at all: the flat search is the
+  whole answer, and a big enough building will run it out. Nothing measured is
+  hitting it yet; the fix, when something does, is to let the corridor answer a
+  short query whose flat search exited on `Budget` rather than on `Exhausted` —
+  the two failures are already told apart in `SearchExit` for exactly this.
 - **The preview replans per frame while a destination is live** — the walk plans
   at most once a step, and drawing from its stored route would blink the line out
   on every mouse-move (see `App::route_shown`). Bounded by `PLAN_BUDGET` and paid
