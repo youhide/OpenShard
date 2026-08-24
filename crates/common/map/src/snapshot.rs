@@ -93,7 +93,7 @@ impl MapSnapshot {
     /// [`MapSnapshot::restored`] instead, and between them they are the only
     /// two ways to make a snapshot at all.
     #[must_use]
-    pub fn new(facet: Facet, map: WorldMap) -> Self {
+    pub const fn new(facet: Facet, map: WorldMap) -> Self {
         Self {
             facet,
             revision: MapRevision::INITIAL,
@@ -116,7 +116,7 @@ impl MapSnapshot {
     /// against that revision stays valid across the round trip — which is the
     /// point of writing one.
     #[must_use]
-    pub fn restored(facet: Facet, revision: MapRevision, map: WorldMap) -> Self {
+    pub const fn restored(facet: Facet, revision: MapRevision, map: WorldMap) -> Self {
         Self { facet, revision, map }
     }
 
@@ -138,7 +138,7 @@ impl MapSnapshot {
 
     /// The immutable decoded map. Leaf readers continue to borrow a `WorldMap`.
     #[must_use]
-    pub fn map(&self) -> &WorldMap {
+    pub const fn map(&self) -> &WorldMap {
         &self.map
     }
 

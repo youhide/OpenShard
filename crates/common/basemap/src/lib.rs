@@ -290,11 +290,11 @@ pub fn write(path: impl AsRef<Path>, snapshot: &MapSnapshot) -> Result<Written, 
     }
 
     let bytes = offset as usize;
-    let write = |out: &[u8], blobs: &[Vec<u8>]| -> std::io::Result<()> {
+    let write = |header: &[u8], encoded_chunks: &[Vec<u8>]| -> std::io::Result<()> {
         let file = std::fs::File::create(path)?;
         let mut file = std::io::BufWriter::new(file);
-        file.write_all(out)?;
-        for blob in blobs {
+        file.write_all(header)?;
+        for blob in encoded_chunks {
             file.write_all(blob)?;
         }
         file.flush()

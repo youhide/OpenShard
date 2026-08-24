@@ -13,7 +13,7 @@ else about Sphere. Gameplay content lives in a second repository, the
 | [`docs/style.md`](docs/style.md) | How code here reads. Read it before writing Rust in this repo. |
 | [`docs/architecture.md`](docs/architecture.md) | The shape: layers, dependency rules, the crate map. |
 | [`docs/findings.md`](docs/findings.md) | What the client actually does. Every entry cost a day — don't re-derive them. |
-| [`docs/roadmap.md`](docs/roadmap.md) | The order, and what is built. Current status lives here, not in this file. |
+| [`docs/roadmap/README.md`](docs/roadmap/README.md) | The order, and what is built. Current status lives here, not in this file. |
 | [`docs/client.md`](docs/client.md) | Our own client, milestone by milestone. |
 | [`docs/client_versions.md`](docs/client_versions.md) | Which clients exist and which are played. |
 | [`docs/development.md`](docs/development.md) | The environment: commands, toolchain, `target/`, MSRV. |

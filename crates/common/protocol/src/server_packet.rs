@@ -158,6 +158,17 @@ pub enum ServerPacket {
     /// [`crate::access::AuthorityNotice`] for what the client does with it and
     /// why inventing a subcommand is safe here.
     AuthorityNotice(crate::access::AuthorityNotice),
+    /// `0xBF` subcommand `0xE003` — one fragment of one chunk of the world.
+    ///
+    /// This engine's own, like the three below and above it: see
+    /// [`crate::chunks`], which is the whole of how a client of ours draws the
+    /// shard's ground rather than its own disk's.
+    ChunkData(crate::chunks::ChunkData),
+    /// `0xBF` subcommand `0xE004` — which facet the connection is standing in,
+    /// how big it is and which revision of it the shard holds.
+    WorldNotice(crate::chunks::WorldNotice),
+    /// `0xBF` subcommand `0xE006` — a chunk that was asked for is not coming.
+    ChunkRefused(crate::chunks::ChunkRefused),
     /// `0xDC` — the tooltip revision for one object.
     TooltipRevision(TooltipRevision),
     /// `0xD6` — the property list itself, answering a client's batch query.
@@ -244,6 +255,9 @@ impl ServerPacket {
             Self::TooltipRevision(_) => <TooltipRevision as EncodePacket>::ID,
             Self::DesignRevision(_) => <crate::design::DesignRevision as EncodePacket>::ID,
             Self::AuthorityNotice(_) => <crate::access::AuthorityNotice as EncodePacket>::ID,
+            Self::ChunkData(_) => <crate::chunks::ChunkData as EncodePacket>::ID,
+            Self::WorldNotice(_) => <crate::chunks::WorldNotice as EncodePacket>::ID,
+            Self::ChunkRefused(_) => <crate::chunks::ChunkRefused as EncodePacket>::ID,
             Self::PropertyListReply(_) => <PropertyListReply as EncodePacket>::ID,
             Self::PartyMemberList(_) => <PartyMemberList as EncodePacket>::ID,
             Self::PartyRemoveMember(_) => <PartyRemoveMember as EncodePacket>::ID,
@@ -318,6 +332,9 @@ impl ServerPacket {
             Self::TooltipRevision(_) => TooltipRevision::LENGTH,
             Self::DesignRevision(_) => <crate::design::DesignRevision as EncodePacket>::LENGTH,
             Self::AuthorityNotice(_) => <crate::access::AuthorityNotice as EncodePacket>::LENGTH,
+            Self::ChunkData(_) => <crate::chunks::ChunkData as EncodePacket>::LENGTH,
+            Self::WorldNotice(_) => <crate::chunks::WorldNotice as EncodePacket>::LENGTH,
+            Self::ChunkRefused(_) => <crate::chunks::ChunkRefused as EncodePacket>::LENGTH,
             Self::PropertyListReply(_) => PropertyListReply::LENGTH,
             Self::PartyMemberList(_) => PartyMemberList::LENGTH,
             Self::PartyRemoveMember(_) => PartyRemoveMember::LENGTH,
@@ -394,6 +411,9 @@ impl ServerPacket {
             Self::TooltipRevision(packet) => packet.encode_body(out, version),
             Self::DesignRevision(packet) => packet.encode_body(out, version),
             Self::AuthorityNotice(packet) => packet.encode_body(out, version),
+            Self::ChunkData(packet) => packet.encode_body(out, version),
+            Self::WorldNotice(packet) => packet.encode_body(out, version),
+            Self::ChunkRefused(packet) => packet.encode_body(out, version),
             Self::PropertyListReply(packet) => packet.encode_body(out, version),
             Self::PartyMemberList(packet) => packet.encode_body(out, version),
             Self::PartyRemoveMember(packet) => packet.encode_body(out, version),
@@ -461,6 +481,15 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
         crate::access::AuthorityNotice::SUBCOMMAND => decode_server(packet, version)
             .map(ServerPacket::AuthorityNotice)
             .map_err(ServerDecodeError::AuthorityNotice)?,
+        crate::chunks::ChunkData::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::ChunkData)
+            .map_err(ServerDecodeError::ChunkData)?,
+        crate::chunks::WorldNotice::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::WorldNotice)
+            .map_err(ServerDecodeError::WorldNotice)?,
+        crate::chunks::ChunkRefused::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::ChunkRefused)
+            .map_err(ServerDecodeError::ChunkRefused)?,
         crate::party::SUBCOMMAND => return decode_party(packet, version),
         _ => return Ok(None),
     }))
@@ -789,6 +818,12 @@ pub enum ServerDecodeError {
     DesignRevision(DecodeError),
     /// `0xBF 0xE001` did not decode.
     AuthorityNotice(DecodeError),
+    /// `0xBF 0xE003` did not decode.
+    ChunkData(DecodeError),
+    /// `0xBF 0xE004` did not decode.
+    WorldNotice(DecodeError),
+    /// `0xBF 0xE006` did not decode.
+    ChunkRefused(DecodeError),
     /// `0xD6` did not decode.
     PropertyListReply(DecodeError),
     /// A `0xBF` subcommand `0x06` did not decode. One variant for all four,
@@ -824,6 +859,9 @@ impl fmt::Display for ServerDecodeError {
             Self::TooltipRevision(error) => ("0xDC tooltip revision", error),
             Self::DesignRevision(error) => ("0xBF 0x1D design revision", error),
             Self::AuthorityNotice(error) => ("0xBF 0xE001 authority notice", error),
+            Self::ChunkData(error) => ("0xBF 0xE003 chunk data", error),
+            Self::WorldNotice(error) => ("0xBF 0xE004 world notice", error),
+            Self::ChunkRefused(error) => ("0xBF 0xE006 chunk refused", error),
             Self::PropertyListReply(error) => ("0xD6 property list", error),
             Self::Party(error) => ("0xBF 0x06 party", error),
             Self::CloseGump(error) => ("0xBF 0x04 close gump", error),
@@ -1314,6 +1352,30 @@ mod tests {
                 at: crate::gump::GumpPoint::new(75, 25),
                 layout: "{ page 0 }".to_owned(),
                 lines: Vec::new(),
+            }),
+            ServerPacket::AuthorityNotice(crate::access::AuthorityNotice {
+                level: crate::access::AccessLevel::GameMaster,
+            }),
+            // The one variable-length 0xBF this engine invented, and the reason
+            // it is here: a fragment's length is its blob's, so the framing
+            // oracle below is the only thing that checks the two agree.
+            ServerPacket::ChunkData(crate::chunks::ChunkData {
+                facet: crate::world::Facet(0),
+                at: crate::chunks::ChunkAt { x: 12, y: 34 },
+                revision: crate::chunks::WorldRevision(2),
+                fragment: crate::chunks::Fragment::new(0, 1).expect("one of one"),
+                inflated: crate::chunks::InflatedLength(12_568),
+                blob: vec![0x78, 0x9C, 0x03, 0x00],
+            }),
+            ServerPacket::WorldNotice(crate::chunks::WorldNotice {
+                facet: crate::world::Facet(0),
+                blocks: crate::chunks::FacetBlocks { wide: 896, down: 512 },
+                revision: crate::chunks::WorldRevision(1),
+            }),
+            ServerPacket::ChunkRefused(crate::chunks::ChunkRefused {
+                facet: crate::world::Facet(0),
+                at: crate::chunks::ChunkAt { x: 900, y: 0 },
+                reason: crate::chunks::Refusal::PastTheEdge,
             }),
         ]
     }

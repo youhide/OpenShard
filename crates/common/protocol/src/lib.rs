@@ -56,6 +56,7 @@
 
 pub mod access;
 pub mod casting;
+pub mod chunks;
 pub mod client_packet;
 pub mod codec;
 pub mod combat;

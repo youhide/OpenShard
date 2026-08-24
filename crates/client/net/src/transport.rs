@@ -120,6 +120,7 @@ pub struct Tcp {
 
 impl Tcp {
     /// Dial `address` for the login, and whatever it relays us to for the game.
+    #[must_use]
     pub fn at(address: SocketAddrV4) -> Self {
         Self { login: address }
     }
@@ -244,15 +245,15 @@ pub async fn enter_world_with<D: Dial>(
 
     // The game connection. Compressed from its first byte, and the auth key
     // inside `opening` is the only thing that makes it this account's.
-    let mut socket = Socket::new(dial.game(endpoint).await?, Stream::Compressed, version);
-    socket.send(&opening).await?;
+    let mut game_socket = Socket::new(dial.game(endpoint).await?, Stream::Compressed, version);
+    game_socket.send(&opening).await?;
 
     loop {
-        let Some(event) = socket.next_event().await? else {
+        let Some(event) = game_socket.next_event().await? else {
             return Err(TransportError::Closed { stage: login.stage() });
         };
         match step(&mut login, event)? {
-            Some(Step::Send(bytes)) => socket.send(&bytes).await?,
+            Some(Step::Send(bytes)) => game_socket.send(&bytes).await?,
             Some(Step::Entered(start)) => {
                 let mut view = WorldView::entered(start);
                 // Wait for the 0x55: a client that starts drawing before it is
@@ -266,14 +267,14 @@ pub async fn enter_world_with<D: Dial>(
                 // that only waited would reach `Playing` with an empty view and
                 // draw an empty world.
                 loop {
-                    let Some(event) = socket.next_event().await? else {
+                    let Some(handover_event) = game_socket.next_event().await? else {
                         return Err(TransportError::Closed { stage: login.stage() });
                     };
-                    if let Event::Packet(packet) = &event {
+                    if let Event::Packet(packet) = &handover_event {
                         view.apply(packet);
                     }
-                    if let Some(Step::Playing) = step(&mut login, event)? {
-                        return Ok((socket, view));
+                    if let Some(Step::Playing) = step(&mut login, handover_event)? {
+                        return Ok((game_socket, view));
                     }
                 }
             }

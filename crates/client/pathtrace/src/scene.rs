@@ -179,9 +179,10 @@ impl Scene {
         if segment == Vec3::ZERO {
             return false;
         }
-        let stands_in_the_way = |crossing: Option<crate::aabb::Crossing>| match crossing {
-            Some(crossing) => crossing.far > 0.0 && crossing.near < 1.0 && crossing.far > crossing.near,
-            None => false,
+        let stands_in_the_way = |crossing: Option<crate::aabb::Crossing>| {
+            crossing.is_some_and(|crossing| {
+                crossing.far > 0.0 && crossing.near < 1.0 && crossing.far > crossing.near
+            })
         };
         if self
             .bodies

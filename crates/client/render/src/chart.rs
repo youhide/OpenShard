@@ -16,6 +16,8 @@
 //! plotting dependency is for ever — the same argument the bench's own
 //! SplitMix64 is here on.
 
+use std::fmt::Write;
+
 /// One named curve: `(x, y)` in whatever units the panel is about, `x` being
 /// seconds from the start of the run.
 #[derive(Clone, Debug)]
@@ -105,12 +107,15 @@ fn draw(panel: &Panel, top: f64, seconds: f64) -> String {
         top + PANEL_HEIGHT,
     );
     if let Some(baseline) = panel.baseline {
-        out.push_str(&format!(
+        write!(
+            &mut out,
             "<line x1=\"{left}\" y1=\"{0:.1}\" x2=\"{1}\" y2=\"{0:.1}\" \
-             stroke=\"#999\" stroke-dasharray=\"4 4\"/>\n",
+             stroke=\"#999\" stroke-dasharray=\"4 4\"/>",
             y(baseline),
             left + plot,
-        ));
+        )
+        .expect("writing to a String cannot fail");
+        out.push('\n');
     }
     for (index, series) in panel.series.iter().enumerate() {
         let colour = COLOURS[index % COLOURS.len()];
@@ -120,13 +125,15 @@ fn draw(panel: &Panel, top: f64, seconds: f64) -> String {
             .map(|(t, value)| format!("{:.1},{:.1}", x(*t), y(*value)))
             .collect::<Vec<_>>()
             .join(" ");
-        out.push_str(&format!(
+        write!(
+            &mut out,
             "<polyline fill=\"none\" stroke=\"{colour}\" stroke-width=\"1.2\" points=\"{path}\"/>\n\
              <text x=\"{}\" y=\"{}\" fill=\"{colour}\">{}</text>\n",
             left + plot - 90.0,
             top + 14.0 + index as f64 * 16.0,
             series.name,
-        ));
+        )
+        .expect("writing to a String cannot fail");
     }
     out
 }

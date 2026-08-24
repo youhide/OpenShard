@@ -2118,16 +2118,15 @@ pub struct GlyphKey {
 
 /// `fonts.mul`'s glyphs, packed into one texture.
 ///
-/// A fixed grid like [`LandAtlas`], not a shelf like [`StaticAtlas`]: a glyph
-/// is a few pixels and a bin packer's bookkeeping would cost more than the
-/// waste it saves. Unlike the land grid, the cell size is not the format's
-/// constant — a glyph's own three-byte header says its size, and the biggest
-/// one packed decides the cell every other glyph sits inside, corner to
-/// corner. Keyed by [`GlyphKey`] rather than the land atlas's `Graphic`,
-/// because a character is not a graphic and the two id spaces have nothing to
-/// do with each other.
+/// A shelf of `fonts.mul` glyphs, keyed by face and byte-sized character.
+///
+/// Shipped glyphs are tiny enough that the old largest-glyph grid looked cheap,
+/// but a high-density replacement makes its waste quadratic: one 100-pixel
+/// glyph turned every slot into 100x100. Tallest-first shelf packing keeps the
+/// original atlas just as compact and lets a 4x font use the space its actual
+/// rectangles require. Fully transparent glyphs retain their width as advance
+/// but allocate no texture rectangle.
 pub struct FontAtlas {
-    cell: u32,
     sprites: BTreeMap<GlyphKey, Sprite>,
     /// `ATLAS_SIDE * ATLAS_SIDE` RGBA8 pixels, row-major.
     pixels: Vec<u8>,
@@ -2137,7 +2136,6 @@ impl fmt::Debug for FontAtlas {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FontAtlas")
             .field("glyphs", &self.sprites.len())
-            .field("cell", &self.cell)
             .field("side", &ATLAS_SIDE)
             .finish()
     }
@@ -2180,32 +2178,50 @@ impl FontAtlas {
     /// [`StaticAtlas::pack`] is.
     pub fn pack(images: impl IntoIterator<Item = (GlyphKey, Image)>) -> Result<Self, AtlasError> {
         let images: BTreeMap<GlyphKey, Image> = images.into_iter().collect();
-        // Every glyph fits inside a square this large — the tallest and the
-        // widest packed, whichever is bigger. A grid needs one number for both
-        // axes, or the arithmetic below would have to track two.
-        let cell = images
-            .values()
-            .map(|image| u32::from(image.width()).max(u32::from(image.height())))
-            .max()
-            .unwrap_or(1)
-            .max(1);
-        let cells_per_row = ATLAS_SIDE / cell;
-        let capacity = (cells_per_row * cells_per_row) as usize;
-        if images.len() > capacity {
-            return Err(AtlasError::Full {
-                wanted: images.len(),
-                capacity,
-            });
-        }
-
         let side = ATLAS_SIDE as usize;
         let mut pixels = vec![0u8; side * side * 4];
         let mut sprites = BTreeMap::new();
+        let wanted = images.len();
+        let mut shelf = Shelf::default();
 
-        for (slot, (key, image)) in images.into_iter().enumerate() {
+        // The BTreeMap makes equal-height order deterministic; the stable sort
+        // preserves key order inside a height. Tallest first bounds shelf waste.
+        let mut order: Vec<_> = images.into_iter().collect();
+        order.sort_by_key(|(_, image)| std::cmp::Reverse(image.height()));
+
+        for (key, image) in order {
             let (width, height) = (image.width(), image.height());
-            let origin_x = (slot as u32 % cells_per_row) * cell;
-            let origin_y = (slot as u32 / cells_per_row) * cell;
+            if width == 0 || height == 0 {
+                continue;
+            }
+            if image.pixels().iter().all(|pixel| pixel.is_transparent()) {
+                // Width is still the character advance. Height zero keeps the
+                // text collectors from emitting a quad for a picture with no
+                // ink, so it needs neither UV area nor a reserved clear texel.
+                sprites.insert(
+                    key,
+                    Sprite {
+                        region: region_at(0, 0, 0, 0),
+                        width,
+                        height: 0,
+                        facing: None,
+                    },
+                );
+                continue;
+            }
+            if u32::from(width) > ATLAS_SIDE || u32::from(height) > ATLAS_SIDE {
+                return Err(AtlasError::Full {
+                    wanted,
+                    capacity: sprites.len(),
+                });
+            }
+            let Some((origin_x, origin_y)) = shelf.take(u32::from(width), u32::from(height)) else {
+                return Err(AtlasError::Full {
+                    wanted,
+                    capacity: sprites.len(),
+                });
+            };
+
             copy_sprite(&mut pixels, &image, origin_x, origin_y);
             sprites.insert(
                 key,
@@ -2218,11 +2234,7 @@ impl FontAtlas {
             );
         }
 
-        Ok(Self {
-            cell,
-            sprites,
-            pixels,
-        })
+        Ok(Self { sprites, pixels })
     }
 
     /// The atlas texture's side in pixels. Square, like every other atlas here.
@@ -3112,10 +3124,9 @@ mod tests {
         )
     }
 
-    /// The grid's cell is the biggest glyph packed, and two different sizes
-    /// both come back their own size rather than the cell's.
+    /// Two differently sized shelf entries both come back their own size.
     #[test]
-    fn the_cell_is_the_tallest_or_widest_glyph_and_a_small_glyph_keeps_its_own_size() {
+    fn shelf_packed_glyphs_keep_their_own_size() {
         let atlas = FontAtlas::pack([
             (
                 GlyphKey {
@@ -3133,14 +3144,56 @@ mod tests {
             ),
         ])
         .expect("two glyphs fit");
-        assert_eq!(atlas.cell, 12);
 
         let wide = atlas.glyph(Font(0), b'A').expect("packed");
         assert_eq!((wide.width, wide.height), (8, 12));
         let narrow = atlas.glyph(Font(0), b'i').expect("packed");
         assert_eq!((narrow.width, narrow.height), (3, 12));
-        // Neither samples the other: the grid gave each its own cell.
+        // Neither samples the other: the shelf gave each its own rectangle.
         assert_ne!((wide.region.u, wide.region.v), (narrow.region.u, narrow.region.v));
+    }
+
+    /// A single large glyph no longer makes every small glyph reserve a large
+    /// square. This set exceeds the old 100x100 grid's capacity of 400 while
+    /// using only a small fraction of the atlas as actual rectangles.
+    #[test]
+    fn one_large_glyph_does_not_make_a_large_cell_for_every_small_one() {
+        let images = (0..10u16).flat_map(|font| {
+            (0..100u8).map(move |char| {
+                let image = if font == 0 && char == 0 {
+                    glyph(100, 100, 0x1F)
+                } else {
+                    glyph(20, 20, 0x1F)
+                };
+                (
+                    GlyphKey {
+                        font: Font(font),
+                        char,
+                    },
+                    image,
+                )
+            })
+        });
+        let atlas = FontAtlas::pack(images).expect("actual glyph rectangles fit the shelf");
+        assert_eq!(atlas.len(), 1_000);
+    }
+
+    /// A blank rectangle carries spacing, not texture. Keeping its width and
+    /// making its drawable height zero preserves advance without spending the
+    /// 4x rectangle's area or issuing a transparent quad.
+    #[test]
+    fn a_transparent_glyph_keeps_advance_without_using_a_drawable_rectangle() {
+        let atlas = FontAtlas::pack([(
+            GlyphKey {
+                font: Font(0),
+                char: b' ',
+            },
+            Image::new(40, 80, vec![Color16::TRANSPARENT; 40 * 80]),
+        )])
+        .expect("a transparent glyph needs no shelf space");
+        let space = atlas.glyph(Font(0), b' ').expect("spacing entry is retained");
+        assert_eq!((space.width, space.height), (40, 0));
+        assert_eq!((space.region.du, space.region.dv), (0.0, 0.0));
     }
 
     /// The same character in two different faces is two different glyphs, not

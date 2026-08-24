@@ -11,6 +11,7 @@
 //! whichever body it names.
 
 use crate::casting::CastSpellRequest;
+use crate::chunks::ChunkRequest;
 use crate::context::{ContextMenuRequest, ContextMenuSelect};
 use crate::design::DesignDetailsRequest;
 use crate::error::{DecodeError, expect_id};
@@ -40,6 +41,11 @@ pub enum ExtendedRequest {
     /// lives in the body's first byte, not in the subcommand — see
     /// [`PartyRequest`].
     Party(PartyRequest),
+    /// Subcommand `0xE002` — "send me these chunks of the world". This
+    /// engine's own, and the only inbound one that is: no reference client has
+    /// a word for it, which is exactly what makes receiving one the whole of
+    /// the capability negotiation — see [`ChunkRequest`].
+    Chunks(ChunkRequest),
     /// Any subcommand this engine does not act on — screen size, close-gump
     /// and the rest of the family `0xBF` carries. Not an error:
     /// the same "logged fact, not a dropped connection" treatment
@@ -71,6 +77,7 @@ impl ExtendedRequest {
                 Self::DesignDetails(DesignDetailsRequest::decode_body(&mut reader)?)
             }
             crate::party::SUBCOMMAND => Self::Party(PartyRequest::decode_body(&mut reader)?),
+            ChunkRequest::SUBCOMMAND => Self::Chunks(ChunkRequest::decode_body(&mut reader)?),
             other => Self::Unknown(other),
         })
     }

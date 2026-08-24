@@ -40,15 +40,10 @@ pub fn meditation_offset(state: &WorldState, mobile: EntityId) -> u32 {
     let Some(serial) = state.registry.serial_of(mobile) else {
         return 0;
     };
-    let worn: Vec<(EntityId, Layer)> = state
+    let hundredths: u32 = state
         .registry
         .query::<Equipped>()
-        .filter(|(_, worn)| worn.mobile == serial)
-        .map(|(entity, worn)| (entity, worn.layer))
-        .collect();
-    let hundredths: u32 = worn
-        .into_iter()
-        .filter(|(_, layer)| MEDITATION_LAYERS.contains(layer))
+        .filter(|(_, worn)| worn.mobile == serial && MEDITATION_LAYERS.contains(&worn.layer))
         .map(|(item, _)| {
             let rating = u32::from(piece_rating(state, item)) * 100;
             match state

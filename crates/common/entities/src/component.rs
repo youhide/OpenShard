@@ -102,13 +102,13 @@ impl<T> SparseSet<T> {
 
     /// How many entities have this component.
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.dense_data.len()
     }
 
     /// True if no entity has this component.
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.dense_data.is_empty()
     }
 
@@ -124,11 +124,7 @@ impl<T> SparseSet<T> {
             return None;
         }
         let pos = pos as usize;
-        if self.dense_entities[pos] == entity {
-            Some(pos)
-        } else {
-            None
-        }
+        (self.dense_entities[pos] == entity).then_some(pos)
     }
 
     /// Whether `entity` has this component.

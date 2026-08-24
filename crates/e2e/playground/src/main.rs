@@ -255,12 +255,13 @@ fn main() -> ExitCode {
         Some((dial, plan)),
         cli.ttf_font,
         openshard_client_app::Opening {
+            at: None,
+            solids: false,
             stall_on_update: cli.stall_app_ms.map(Duration::from_millis),
             scenario: cli.scenario.map(|scenario| match scenario {
                 Scenario::ZoomSoak => openshard_client_app::Scenario::ZoomSoak,
                 Scenario::LodSweep => openshard_client_app::Scenario::LodSweep,
             }),
-            ..Default::default()
         },
     );
 

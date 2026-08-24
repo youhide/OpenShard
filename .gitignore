@@ -19,6 +19,10 @@ dist/
 *.db
 /data/
 /logs/
+# Local, redistributability-sensitive renders derived from an installed client.
+# Kept outside Cargo's disposable target directory so `cargo clean` does not
+# erase long-running asset experiments.
+/font-upscale-artifacts/
 .env
 .env.local
 

@@ -500,13 +500,10 @@ impl WorldMap {
     /// land's own [`LandGrid::index_of`] — which is what the offsets' doc
     /// comment means by the two arrays sharing an index.
     fn statics_of(&self, block: BlockCoord) -> &[StaticItem] {
-        match self.land.index_of(block) {
-            Some(block) => {
-                let (from, to) = self.span(block);
-                &self.statics[from..to]
-            }
-            None => NO_STATICS,
-        }
+        self.land.index_of(block).map_or(NO_STATICS, |block| {
+            let (from, to) = self.span(block);
+            &self.statics[from..to]
+        })
     }
 
     /// Where one block's items begin and end in the run.
@@ -569,8 +566,8 @@ impl WorldMap {
             return Some((quad[0], quad.map(|cell| cell.z)));
         }
         let own = self.land(x, y)?;
-        let at = |x: Option<u16>, y: Option<u16>| match (x, y) {
-            (Some(x), Some(y)) => self.land(x, y).map_or(own.z, |cell| cell.z),
+        let at = |corner_x: Option<u16>, corner_y: Option<u16>| match (corner_x, corner_y) {
+            (Some(corner_x), Some(corner_y)) => self.land(corner_x, corner_y).map_or(own.z, |cell| cell.z),
             _ => own.z,
         };
         let (east, south) = (x.checked_add(1), y.checked_add(1));

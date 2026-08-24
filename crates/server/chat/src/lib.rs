@@ -115,7 +115,6 @@ pub fn speak(state: &mut WorldState, entity: EntityId, mode: TalkMode, hue: Hue,
 
     let range = speech_range(mode, &state.gameplay);
     let sectors = state.facet_state(facet).sectors();
-    let listeners: Vec<EntityId> = sectors.mobiles_near(pos, range).map(|(id, _)| id).collect();
     // The living do not hear the dead — unless they have reached for them. A ghost
     // is drawn only to other ghosts and to staff (`can_see_mobile`, ServUO's
     // `CanSee`), and without a gate here it would be invisible but audible, which
@@ -123,9 +122,10 @@ pub fn speak(state: &mut WorldState, entity: EntityId, mode: TalkMode, hue: Hue,
     // (`can_hear_mobile`), which is the same question plus Spirit Speak: a living
     // mobile that has contacted the netherworld catches the voice without the
     // speaker becoming visible.
-    let listeners: Vec<EntityId> = listeners
-        .into_iter()
-        .filter(|&listener| state.can_hear_mobile(listener, entity))
+    let listeners: Vec<EntityId> = sectors
+        .mobiles_near(pos, range)
+        .filter(|&(listener, _)| state.can_hear_mobile(listener, entity))
+        .map(|(listener, _)| listener)
         .collect();
     for listener in listeners {
         if let Some(&Client { connection, .. }) = state.registry.get::<Client>(listener) {

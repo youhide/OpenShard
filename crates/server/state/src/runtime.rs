@@ -2011,7 +2011,7 @@ impl WorldState {
     /// builds the packet once and this fans it out. The feedback seam every
     /// gameplay system reaches for — a swing, a spell, a door — so the world is
     /// *felt*, not merely correct.
-    pub fn broadcast_from(&mut self, source: EntityId, packet: Vec<u8>) {
+    pub fn broadcast_from(&mut self, source: EntityId, packet: &[u8]) {
         let facet = self.facet_of(source);
         let sectors = self.facet_state(facet).sectors();
         let Some(centre) = sectors.position_of(source) else {
@@ -2027,7 +2027,7 @@ impl WorldState {
             if let Some(&Client { connection, .. }) = self.registry.get::<Client>(entity) {
                 self.outbox.push(Outbound {
                     connection,
-                    packet: packet.clone(),
+                    packet: packet.to_vec(),
                 });
             }
         }

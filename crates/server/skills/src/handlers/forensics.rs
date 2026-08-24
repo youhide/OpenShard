@@ -78,18 +78,17 @@ fn read_corpse(state: &mut WorldState, actor: EntityId, corpse: EntityId, value:
     // A second reader is told whose work they are repeating; the first puts their
     // own name on it. ServUO sets `m_Forensicist` on the first success and never
     // clears it.
-    match &story.examined_by {
-        Some(first) => state.localized_message(actor, ALREADY_READ, first),
-        None => {
-            let name = state
-                .registry
-                .get::<openshard_state::components::Name>(actor)
-                .map(|n| n.0.clone());
-            if let Some(name) = name {
-                let mut updated = story.clone();
-                updated.examined_by = Some(name);
-                state.registry.insert(corpse, updated);
-            }
+    if let Some(first) = &story.examined_by {
+        state.localized_message(actor, ALREADY_READ, first);
+    } else {
+        let name = state
+            .registry
+            .get::<openshard_state::components::Name>(actor)
+            .map(|n| n.0.clone());
+        if let Some(name) = name {
+            let mut updated = story.clone();
+            updated.examined_by = Some(name);
+            state.registry.insert(corpse, updated);
         }
     }
     // Only a person can be said to have been killed by somebody. A corpse draws as

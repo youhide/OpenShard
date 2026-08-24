@@ -14,6 +14,7 @@
 pub mod layout;
 
 use std::fmt;
+use std::fmt::Write as _;
 
 use crate::codec::{PacketReader, PacketWriter};
 use crate::error::DecodeError;
@@ -410,7 +411,7 @@ impl GumpLayout {
         let brace = self.layout.pop();
         debug_assert_eq!(brace, Some('}'));
         self.layout.pop(); // the space before it
-        self.layout.push_str(&format!(" hue={hue} }}"));
+        write!(&mut self.layout, " hue={hue} }}").expect("writing to a String cannot fail");
     }
 
     /// An image tiled to fill a rectangle.
@@ -670,7 +671,7 @@ impl GumpLayout {
         let brace = self.layout.pop();
         debug_assert_eq!(brace, Some('}'));
         self.layout.pop();
-        self.layout.push_str(&format!(" @{args}@ }}"));
+        write!(&mut self.layout, " @{args}@ }}").expect("writing to a String cannot fail");
     }
 
     /// An item, drawn from the art the world uses rather than the gump art.

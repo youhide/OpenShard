@@ -286,7 +286,7 @@ impl Chunk {
 
     /// How many statics stand in it.
     #[must_use]
-    pub fn static_count(&self) -> usize {
+    pub const fn static_count(&self) -> usize {
         self.items.len()
     }
 
@@ -323,7 +323,7 @@ impl Chunk {
     ///
     /// If `local` is not a block of this chunk.
     #[must_use]
-    pub fn world_block(&self, local: BlockIndex) -> BlockCoord {
+    pub const fn world_block(&self, local: BlockIndex) -> BlockCoord {
         world_block(self.key.at.block_origin(), self.extent, local)
     }
 
@@ -373,7 +373,7 @@ fn chunk_extent(facet: BlockExtent, origin: BlockCoord) -> Option<BlockExtent> {
 /// # Panics
 ///
 /// If `local` is not a block of `extent`.
-fn world_block(origin: BlockCoord, extent: BlockExtent, local: BlockIndex) -> BlockCoord {
+const fn world_block(origin: BlockCoord, extent: BlockExtent, local: BlockIndex) -> BlockCoord {
     let at = extent.coord_of(local).expect("a block of this chunk");
     BlockCoord {
         x: origin.x + at.x,

@@ -137,6 +137,21 @@ impl<'a> PacketReader<'a> {
         Ok(self.u32()? as i32)
     }
 
+    /// Read a big-endian `u64`.
+    ///
+    /// No packet of the reference protocol carries one — the widest field UO
+    /// ever wrote is a dword. This is here for the extensions in
+    /// [`OPENSHARD_SUBCOMMANDS`](crate::access::OPENSHARD_SUBCOMMANDS), where a
+    /// map revision is a `u64` because `openshard_map` counts revisions in one,
+    /// and splitting it into two dwords at the wire would be a second spelling
+    /// of the same number for a reader to reassemble wrongly.
+    pub fn u64(&mut self) -> CodecResult<u64> {
+        let bytes = self.take(8)?;
+        Ok(u64::from_be_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ]))
+    }
+
     /// Read exactly `count` raw bytes.
     pub fn bytes(&mut self, count: usize) -> CodecResult<&'a [u8]> {
         self.take(count)
@@ -221,12 +236,12 @@ impl PacketWriter {
     }
 
     /// How many bytes have been written.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.bytes.len()
     }
 
     /// Whether nothing has been written.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
 
@@ -262,6 +277,11 @@ impl PacketWriter {
 
     /// Write a big-endian `i32`.
     pub fn i32(&mut self, value: i32) {
+        self.bytes.extend_from_slice(&value.to_be_bytes());
+    }
+
+    /// Write a big-endian `u64`. See [`PacketReader::u64`] for why one exists.
+    pub fn u64(&mut self, value: u64) {
         self.bytes.extend_from_slice(&value.to_be_bytes());
     }
 
@@ -346,7 +366,7 @@ impl PacketWriter {
 }
 
 /// Narrow a character to one Latin-1 byte, substituting `?` when it does not fit.
-fn latin1_byte(character: char) -> u8 {
+const fn latin1_byte(character: char) -> u8 {
     let code = character as u32;
     if code <= 0xFF { code as u8 } else { b'?' }
 }
@@ -362,6 +382,29 @@ mod tests {
         assert_eq!(reader.u16().unwrap(), 0x3456);
         assert_eq!(reader.u16().unwrap(), 0x789A);
         assert!(reader.is_empty());
+    }
+
+    /// The widest field on the wire, and the one no reference packet has: a map
+    /// revision, written by one end and read by the other. A `u64` assembled
+    /// from the wrong end is a world that claims to be a different one.
+    #[test]
+    fn a_u64_survives_the_wire_the_way_the_narrower_fields_do() {
+        let mut writer = PacketWriter::new();
+        writer.u64(0x0123_4567_89AB_CDEF);
+        assert_eq!(
+            writer.as_bytes(),
+            &[0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
+            "big-endian, like every other field here"
+        );
+        let bytes = writer.into_bytes();
+        assert_eq!(
+            PacketReader::new(&bytes).u64().unwrap(),
+            0x0123_4567_89AB_CDEF
+        );
+        assert!(
+            PacketReader::new(&bytes[..7]).u64().is_err(),
+            "seven bytes is not a u64"
+        );
     }
 
     #[test]

@@ -628,7 +628,7 @@ impl<'a> Spans<'a> {
             .iter()
             .copied()
             .filter(|span| self.wants(*span))
-            .find(|&span| self.admits(span, ground, step_top, check_top))
+            .find(|&span| Self::admits(span, ground, step_top, check_top))
             .map(|span| i32::from(span.stand_z))
     }
 
@@ -646,7 +646,7 @@ impl<'a> Spans<'a> {
     ///   [`clearance`](Span::clearance) — obstructed exactly when the free height
     ///   is less than the height wanted, which is the same comparison
     ///   `is_obstructed` makes against every static at once.
-    fn admits(&self, span: Span, ground: Option<Span>, step_top: i32, check_top: i32) -> bool {
+    fn admits(span: Span, ground: Option<Span>, step_top: i32, check_top: i32) -> bool {
         let stand = i32::from(span.stand_z);
         if step_top < i32::from(span.reach_z) {
             return false;

@@ -14,6 +14,8 @@
 //! Something that lit its own copy of the world would answer about that copy —
 //! see `docs/lighting.md`, decisions 8 and 9.
 
+use std::fmt::Write;
+
 use crate::camera::TileBounds;
 use crate::light::{self, Lighting, Spot};
 use openshard_map::grid::Tile;
@@ -320,7 +322,7 @@ pub fn diagram(lighting: &Lighting, bounds: TileBounds, z: f32) -> String {
         out.push('\n');
     }
     for y in bounds.min_y..=bounds.max_y {
-        out.push_str(&format!("{y:5} "));
+        write!(&mut out, "{y:5} ").expect("writing to a String cannot fail");
         for x in bounds.min_x..=bounds.max_x {
             out.push(cell(lighting, x, y, z));
         }

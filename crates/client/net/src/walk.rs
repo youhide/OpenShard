@@ -196,11 +196,13 @@ pub const MAX_IN_FLIGHT: InFlightSteps = InFlightSteps::new(5);
 pub struct InFlightSteps(usize);
 
 impl InFlightSteps {
+    #[must_use]
     pub const fn new(steps: usize) -> Self {
         Self(steps)
     }
 
     /// Number of unanswered walk steps.
+    #[must_use]
     pub const fn steps(self) -> usize {
         self.0
     }
@@ -340,6 +342,7 @@ impl Walk {
     /// The application-side motion model uses this to pair its visual
     /// transition with the `WalkAck` that later retires it.  It is intentionally
     /// absent before the first accepted step.
+    #[must_use]
     pub fn newest_pending_sequence(&self) -> Option<StepSequence> {
         self.pending.back().map(|pending| pending.sequence)
     }

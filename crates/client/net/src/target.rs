@@ -10,7 +10,7 @@ pub fn answer(response: TargetResponse) -> Vec<u8> {
         out.u8(1); // the server already knows which kind it raised
         out.u32(response.cursor_id.0);
         out.u8(if response.cancelled { 3 } else { 0 });
-        out.u32(response.object.map_or(0, |serial| serial.raw()));
+        out.u32(response.object.map_or(0, openshard_protocol::serial::Serial::raw));
         out.u16(if response.cancelled {
             u16::MAX
         } else {

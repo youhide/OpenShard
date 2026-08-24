@@ -142,12 +142,12 @@ impl TexMaps {
     /// Open a named pair, for a client whose files are not laid out as one.
     pub fn from_files(index: impl AsRef<Path>, data: impl AsRef<Path>) -> Result<Self, TexMapError> {
         let index_path = index.as_ref();
-        let index = read(index_path)?;
+        let index_bytes = read(index_path)?;
         let data = read(data.as_ref())?;
-        if index.len() % INDEX_ENTRY != 0 {
+        if index_bytes.len() % INDEX_ENTRY != 0 {
             return Err(TexMapError::NotAnIndex {
                 path: index_path.to_owned(),
-                size: index.len(),
+                size: index_bytes.len(),
             });
         }
 
@@ -157,7 +157,7 @@ impl TexMaps {
         let mut entries = Vec::with_capacity(TEXTURE_COUNT);
         for id in 0..TEXTURE_COUNT {
             let at = id * INDEX_ENTRY;
-            entries.push(match index.get(at..at + INDEX_ENTRY) {
+            entries.push(match index_bytes.get(at..at + INDEX_ENTRY) {
                 Some(raw) => {
                     let offset = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
                     let length = u32::from_le_bytes([raw[4], raw[5], raw[6], raw[7]]);

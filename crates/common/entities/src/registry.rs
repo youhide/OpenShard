@@ -152,13 +152,13 @@ impl Registry {
 
     /// How many entities are alive.
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.entities.len()
     }
 
     /// Whether the registry holds no live entities.
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.entities.len() == 0
     }
 
@@ -261,7 +261,7 @@ impl Registry {
     /// was ever in and must not be handed to someone else before it is next
     /// played. This bumps the allocator past it so a fresh spawn never collides,
     /// with no entity to hang it on. Binding it to an entity later still succeeds.
-    pub fn reserve_serial(&mut self, serial: Serial) {
+    pub const fn reserve_serial(&mut self, serial: Serial) {
         self.serials.reserve(serial);
     }
 
@@ -374,14 +374,13 @@ impl Registry {
 
     fn column_or_insert<T: Component>(&mut self) -> &mut SparseSet<T> {
         let type_id = TypeId::of::<T>();
-        let index = match self.column_index.get(&type_id) {
-            Some(&index) => index,
-            None => {
-                let index = self.columns.len();
-                self.columns.push(Box::new(SparseSet::<T>::new()));
-                self.column_index.insert(type_id, index);
-                index
-            }
+        let index = if let Some(&index) = self.column_index.get(&type_id) {
+            index
+        } else {
+            let index = self.columns.len();
+            self.columns.push(Box::new(SparseSet::<T>::new()));
+            self.column_index.insert(type_id, index);
+            index
         };
         self.columns[index]
             .as_any_mut()

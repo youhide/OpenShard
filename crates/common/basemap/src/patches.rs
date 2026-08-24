@@ -363,11 +363,11 @@ pub fn append(path: &Path, facet: Facet, base: MapRevision, patch: &Patch) -> Re
     record.extend_from_slice(&fnv1a(&payload).to_le_bytes());
     record.extend_from_slice(&payload);
 
-    let append = |record: &[u8]| -> std::io::Result<()> {
+    let append = |frame: &[u8]| -> std::io::Result<()> {
         let mut file = std::fs::OpenOptions::new().append(true).open(path)?;
         // One `write_all` and one flush, so the frame and its payload go out
         // together as far as anything below here allows.
-        file.write_all(record)?;
+        file.write_all(frame)?;
         file.flush()
     };
     append(&record).map_err(|source| LogError::Write {

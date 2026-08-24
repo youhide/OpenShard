@@ -5669,7 +5669,7 @@ fn a_sprite_added_after_the_pass_was_built_is_drawn_from_the_rows_uploaded() {
         .expect("a second sprite fits");
     let rows = atlas.take_dirty().expect("the growth wrote something");
     assert!(
-        rows.start > 0,
+        rows.clone().into_range().start > 0,
         "the second sprite should have started a new shelf"
     );
     statics.upload_rows(&queue, atlas.pixels(), rows);

@@ -42,6 +42,7 @@
 //! being read out of the wrong byte.
 
 use std::collections::BTreeMap;
+use std::fmt::Write;
 
 use openshard_map::grid::BlockExtent;
 use openshard_map::map::{LandCell, StaticItem, WorldMap};
@@ -423,7 +424,7 @@ impl Scene {
                     Some(z) => z.to_string(),
                     None => "##".to_owned(),
                 };
-                out.push_str(&format!("{field:>3}"));
+                write!(&mut out, "{field:>3}").expect("writing to a String cannot fail");
             }
             out.push('\n');
         }

@@ -198,7 +198,7 @@ pub(crate) const START: Point = Point::new(1495, 1629, 0);
 /// checkbox, which is two variables moved between the picture and the claim it
 /// is about. Nothing here is remembered: this is where a window opens, not what
 /// it is.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct Opening {
     /// The tile to open the camera on, if not [`START`]. See the field's use in
     /// [`run`] for what it does when there is a shard.

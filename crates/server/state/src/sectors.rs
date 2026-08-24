@@ -396,7 +396,7 @@ impl Sectors {
         let (min_y, max_y) = (y.saturating_sub(1), (y + 1).min(self.down - 1));
         let down = self.down;
         (min_x..=max_x)
-            .flat_map(move |x| (min_y..=max_y).map(move |y| (x * down + y) as usize))
+            .flat_map(move |block_x| (min_y..=max_y).map(move |block_y| (block_x * down + block_y) as usize))
             .filter_map(move |bucket| self.buckets.get(bucket))
             .flat_map(|bucket| bucket.mobiles.iter())
             .copied()

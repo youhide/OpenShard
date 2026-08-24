@@ -152,6 +152,9 @@ dotenvy = "0.15"
 # nothing else, so the extra layer buys nothing, and `unsafe_code = "deny"`
 # workspace-wide rules out `flate2`'s C backend anyway.
 miniz_oxide = "0.9"
+# Small command-line asset tools emit and ingest lossless RGBA intermediates.
+# The game renderer itself does not decode PNGs; this is for offline conversion.
+png = "0.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

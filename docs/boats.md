@@ -187,7 +187,9 @@ B3's *positive* half.
 
 ### B5 — the deck is the open pier/bridge bug, and this is the phase that supplies its repro.
 
-`docs/roadmap.md:405-420` records an **open** movement defect: `MapTerrain::check`'s
+`docs/roadmap/03-world/movement-surface-investigation.md` records the
+investigated movement defect:
+`MapTerrain::check`'s
 `landCheck` guard, ported variable-for-variable from the reference and audited
 rather than slipped, discards a climbable platform static when the land beneath
 it is walkable and its average height reads close to the deck. What saves piers

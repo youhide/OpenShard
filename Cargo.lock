@@ -3000,6 +3000,7 @@ dependencies = [
  "openshard-map",
  "openshard-protocol",
  "openshard-tiles",
+ "png",
 ]
 
 [[package]]

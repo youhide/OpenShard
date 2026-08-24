@@ -200,9 +200,10 @@ fn decode_entry(
     one_based: bool,
 ) -> Result<SkillEntry, DecodeError> {
     let raw = reader.u16()?;
-    let id = match one_based {
-        true => raw - 1, // the caller has already refused a zero
-        false => raw,
+    let id = if one_based {
+        raw - 1 // the caller has already refused a zero
+    } else {
+        raw
     };
     let id = u8::try_from(id).map_err(|_| DecodeError::UnknownValue {
         field: "skill id",
@@ -383,12 +384,16 @@ impl UseSkillRequest {
         // "N" or "N 0" — the index, maybe with a trailing field the engine
         // ignores. A payload that is not a number is not a use we can act on.
         let command = reader.null_terminated_string()?;
-        match command.split(' ').next().unwrap_or("").trim().parse::<u8>() {
-            Ok(skill) => Ok(Some(Self {
+        Ok(command
+            .split(' ')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .parse::<u8>()
+            .ok()
+            .map(|skill| Self {
                 skill: RawSkillId(skill),
-            })),
-            Err(_) => Ok(None),
-        }
+            }))
     }
 
     /// Encode a whole `0x12` "use skill" text command. What `crates/client/net`

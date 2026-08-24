@@ -84,10 +84,11 @@ impl DecodePacket for BuyList {
             let price = reader.u32()?;
             let length = usize::from(reader.u8()?);
             let text = reader.bytes(length)?;
-            let name = String::from_utf8_lossy(match text.iter().position(|byte| *byte == 0) {
-                Some(end) => &text[..end],
-                None => text,
-            })
+            let name = String::from_utf8_lossy(
+                text.iter()
+                    .position(|byte| *byte == 0)
+                    .map_or(text, |end| &text[..end]),
+            )
             .into_owned();
             lines.push(BuyLine { price, name });
         }

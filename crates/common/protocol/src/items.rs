@@ -349,10 +349,7 @@ impl DecodePacket for WorldItem {
         // graphic: a corpse's facing, or a light source's id. A corpse described
         // without it faces north — the wire's own rule, not a fallback: north is
         // the zero the sender had nothing to write.
-        let byte = match directed {
-            true => Some(reader.u8()?),
-            false => None,
-        };
+        let byte = if directed { Some(reader.u8()?) } else { None };
         let corpse = graphic == CORPSE_GRAPHIC;
         let payload = if corpse {
             WorldItemPayload::Corpse {
@@ -365,16 +362,14 @@ impl DecodePacket for WorldItem {
         // ...and the same byte is not also a light: a corpse's is spoken for, so
         // reading it into both would make an encode of what was just decoded
         // send the facing twice over.
-        let light = match corpse {
-            true => None,
-            false => byte.map(LightId),
-        };
+        let light = if corpse { None } else { byte.map(LightId) };
 
         let z = reader.u8()? as i8;
         let hue = if hued { Hue(reader.u16()?) } else { Hue::NONE };
-        let flags = match flagged {
-            true => ItemFlags(reader.u8()?),
-            false => ItemFlags::NONE,
+        let flags = if flagged {
+            ItemFlags(reader.u8()?)
+        } else {
+            ItemFlags::NONE
         };
 
         Ok(Self {

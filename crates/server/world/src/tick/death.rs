@@ -575,14 +575,15 @@ impl World {
     /// bank box — those are worn containers it walks away (as a ghost) still
     /// holding, not loot for the corpse. The worn *gear* still drops.
     fn move_gear_to_corpse(&mut self, mobile: Serial, container: Serial, keep: &[Layer]) {
-        let worn: Vec<EntityId> = self
+        let worn: Vec<(usize, EntityId)> = self
             .state
             .registry
             .query::<Equipped>()
             .filter(|(_, equipped)| equipped.mobile == mobile && !keep.contains(&equipped.layer))
-            .map(|(entity, _)| entity)
+            .enumerate()
+            .map(|(slot, (entity, _))| (slot, entity))
             .collect();
-        for (slot, item) in worn.into_iter().enumerate() {
+        for (slot, item) in worn {
             self.state.registry.remove::<Equipped>(item);
             self.state.registry.insert(
                 item,

@@ -231,7 +231,7 @@ impl TerrainCells {
     }
 
     /// How many cells, for a diagnostic. Not a position anyone can index with.
-    fn len(&self) -> usize {
+    const fn len(&self) -> usize {
         self.0.len()
     }
 
@@ -401,7 +401,7 @@ impl LandGrid {
     }
 
     /// The block a tile falls in, or `None` off the facet.
-    pub fn block_of(&self, x: u16, y: u16) -> Option<BlockCoord> {
+    pub const fn block_of(&self, x: u16, y: u16) -> Option<BlockCoord> {
         match self.contains(x, y) {
             true => Some(BlockCoord::containing(x, y)),
             false => None,
@@ -448,7 +448,7 @@ impl LandGrid {
     /// The module header's strip identity written out: the column is the index
     /// divided by a column's length, and what is left over is a row-major image
     /// eight tiles wide.
-    pub fn tile_of(&self, at: CellIndex) -> Option<(u16, u16)> {
+    pub const fn tile_of(&self, at: CellIndex) -> Option<(u16, u16)> {
         if at.0 >= self.block_count() * CELLS_PER_BLOCK as u32 {
             return None;
         }

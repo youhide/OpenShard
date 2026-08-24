@@ -615,7 +615,7 @@ impl Overlay {
     pub fn surface_at(&self, tile: Tile, near_z: i32, reach: i32) -> Option<i32> {
         self.surfaces_at(tile)
             .filter(|cover| cover.reach() <= reach)
-            .map(|cover| cover.surface())
+            .map(Cover::surface)
             .min_by_key(|&surface| ((surface - near_z).abs(), surface))
     }
 }

@@ -743,7 +743,7 @@ pub fn encode_supported_features(flags: SupportedFeatures, extended: bool) -> Ve
 /// framer on the other end has to reach the same answer from the same rule
 /// rather than from a copy of the number.
 #[must_use]
-pub fn supported_features_length(extended: bool) -> PacketLength {
+pub const fn supported_features_length(extended: bool) -> PacketLength {
     PacketLength::Fixed(if extended { 5 } else { 3 })
 }
 

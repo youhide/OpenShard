@@ -167,7 +167,7 @@ impl PatchOp {
     /// # Errors
     ///
     /// [`PatchError::OffMap`] — the facet has no such tile.
-    pub fn add_static(map: &WorldMap, item: StaticItem) -> Result<Self, PatchError> {
+    pub const fn add_static(map: &WorldMap, item: StaticItem) -> Result<Self, PatchError> {
         if !map.contains(item.x, item.y) {
             return Err(PatchError::OffMap { x: item.x, y: item.y });
         }
@@ -267,7 +267,7 @@ impl Patch {
     /// invalidate every bake over the facet, so an editor should not publish
     /// one.
     #[must_use]
-    pub fn new(
+    pub const fn new(
         facet: Facet,
         parent: MapRevision,
         author: PatchAuthor,

@@ -331,22 +331,22 @@ impl Multis {
     pub fn load_mul(index: impl AsRef<Path>, data: impl AsRef<Path>) -> Result<Self, MultiError> {
         let index_path = index.as_ref().to_path_buf();
         let data_path = data.as_ref().to_path_buf();
-        let index = std::fs::read(&index_path).map_err(|source| MultiError::Read {
+        let index_bytes = std::fs::read(&index_path).map_err(|source| MultiError::Read {
             path: index_path.clone(),
             source,
         })?;
-        let data = std::fs::read(&data_path).map_err(|source| MultiError::Read {
+        let data_bytes = std::fs::read(&data_path).map_err(|source| MultiError::Read {
             path: data_path.clone(),
             source,
         })?;
 
         // Two passes over the index: the first only to settle the layout, because
         // a component's width has to be known before a single one can be read.
-        let entries: Vec<(u16, usize, usize)> = (0..index.len() / INDEX_ENTRY)
+        let entries: Vec<(u16, usize, usize)> = (0..index_bytes.len() / INDEX_ENTRY)
             .filter_map(|nth| {
                 let at = nth * INDEX_ENTRY;
-                let lookup = i32::from_le_bytes(index[at..at + 4].try_into().ok()?);
-                let length = i32::from_le_bytes(index[at + 4..at + 8].try_into().ok()?);
+                let lookup = i32::from_le_bytes(index_bytes[at..at + 4].try_into().ok()?);
+                let length = i32::from_le_bytes(index_bytes[at + 4..at + 8].try_into().ok()?);
                 let id = u16::try_from(nth).ok()?;
                 (lookup >= 0 && length > 0).then_some((
                     id,
@@ -360,16 +360,16 @@ impl Multis {
         let mut multis = BTreeMap::new();
         for (id, lookup, length) in entries {
             let end = lookup.saturating_add(length);
-            if end > data.len() {
+            if end > data_bytes.len() {
                 return Err(MultiError::Truncated {
                     path: data_path,
                     id,
                     wanted: end,
-                    had: data.len(),
+                    had: data_bytes.len(),
                 });
             }
             let components = (0..length / format.component())
-                .map(|nth| read_component(&data[lookup + nth * format.component()..], format))
+                .map(|nth| read_component(&data_bytes[lookup + nth * format.component()..], format))
                 .collect();
             multis.insert(id, Multi::new(id, components));
         }

@@ -100,7 +100,7 @@
 //! install would move every wall's face by a rule nobody could see.
 
 use std::collections::BTreeMap;
-use std::fmt;
+use std::fmt::{self, Write};
 
 use openshard_protocol::wire::Graphic;
 
@@ -376,11 +376,11 @@ impl ArtTable {
         out.push_str("# Measured off a client's own art by `openshard-client-artscan`.\n");
         out.push_str("# A row that is not here is a graphic that was measured and refused.\n");
         out.push_str("# `authored` marks a row a person wrote; re-deriving leaves it alone.\n");
-        out.push_str(&format!("table {FORMAT}\n"));
+        writeln!(&mut out, "table {FORMAT}").expect("writing to a String cannot fail");
         if let Some(stamp) = &self.stamp {
-            out.push_str(&format!("detector {}\n", stamp.detector));
-            out.push_str(&format!("art {} {}\n", stamp.art, stamp.bytes));
-            out.push_str(&format!("examined {}\n", self.examined));
+            writeln!(&mut out, "detector {}", stamp.detector).expect("writing to a String cannot fail");
+            writeln!(&mut out, "art {} {}", stamp.art, stamp.bytes).expect("writing to a String cannot fail");
+            writeln!(&mut out, "examined {}", self.examined).expect("writing to a String cannot fail");
         }
         for (graphic, row) in &self.rows {
             let verdict = match row.shape.facing {
@@ -399,17 +399,19 @@ impl ArtTable {
                 Some(prism) => {
                     let mut clause = format!(" prism {}", letter(prism.up()));
                     for tread in prism.treads() {
-                        clause.push_str(&format!(" {tread}"));
+                        write!(&mut clause, " {tread}").expect("writing to a String cannot fail");
                     }
                     clause
                 }
             };
             let mut blocks = String::new();
             for block in row.shape.blocks.blocks() {
-                blocks.push_str(&format!(
+                write!(
+                    &mut blocks,
                     " block {} {} {} {} {} {}",
                     block.x.min, block.x.max, block.y.min, block.y.max, block.z.min, block.z.max
-                ));
+                )
+                .expect("writing to a String cannot fail");
             }
             let footprint = match row.shape.footprint {
                 None => String::new(),
@@ -419,10 +421,12 @@ impl ArtTable {
                 ),
             };
             let authored = if row.authored { " authored" } else { "" };
-            out.push_str(&format!(
-                "{:#06X} {verdict}{hole}{prism}{blocks}{footprint}{authored}\n",
+            writeln!(
+                &mut out,
+                "{:#06X} {verdict}{hole}{prism}{blocks}{footprint}{authored}",
                 graphic.0
-            ));
+            )
+            .expect("writing to a String cannot fail");
         }
         out
     }

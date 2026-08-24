@@ -144,14 +144,11 @@ pub(super) fn detect_hidden(state: &mut WorldState, actor: EntityId) {
         return;
     };
     let facet = state.facet_of(actor);
-    let nearby: Vec<EntityId> = state
+    let hidden: Vec<EntityId> = state
         .facet_state(facet)
         .sectors()
         .mobiles_near(at, range)
         .map(|(entity, _)| entity)
-        .collect();
-    let hidden: Vec<EntityId> = nearby
-        .into_iter()
         .filter(|&entity| entity != actor && state.registry.has::<Hidden>(entity))
         .collect();
     let mut found = false;

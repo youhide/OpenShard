@@ -691,18 +691,18 @@ fn decode_frame(
         let word = raw
             .get(at..at + 4)
             .ok_or_else(|| malformed("runs off the end without a terminator".to_owned()))?;
-        let header = u32::from_le_bytes([word[0], word[1], word[2], word[3]]);
+        let run_header = u32::from_le_bytes([word[0], word[1], word[2], word[3]]);
         at += 4;
-        if header == END_OF_FRAME {
+        if run_header == END_OF_FRAME {
             break;
         }
 
         // Three fields in one word: a length, and two signed ten-bit offsets
         // that are *relative to the centre*. Sign-extending them is what makes
         // a frame's pixels land around the body rather than in the corner.
-        let run = (header & 0x0FFF) as usize;
-        let x = i32::from(sign_extend_10(((header >> 22) & 0x03FF) as u16)) + i32::from(center_x);
-        let y = i32::from(sign_extend_10(((header >> 12) & 0x03FF) as u16))
+        let run = (run_header & 0x0FFF) as usize;
+        let x = i32::from(sign_extend_10(((run_header >> 22) & 0x03FF) as u16)) + i32::from(center_x);
+        let y = i32::from(sign_extend_10(((run_header >> 12) & 0x03FF) as u16))
             + i32::from(center_y)
             + i32::from(height);
 

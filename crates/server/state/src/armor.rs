@@ -190,15 +190,11 @@ pub fn worn_armor_rating(state: &WorldState, mobile: EntityId) -> u16 {
     let Some(serial) = state.registry.serial_of(mobile) else {
         return 0;
     };
-    let worn: Vec<(EntityId, Layer)> = state
+    let hundredths: u32 = state
         .registry
         .query::<Equipped>()
         .filter(|(_, worn)| worn.mobile == serial)
-        .map(|(entity, worn)| (entity, worn.layer))
-        .collect();
-    let hundredths: u32 = worn
-        .into_iter()
-        .map(|(item, layer)| u32::from(piece_rating(state, item)) * layer_coverage(layer))
+        .map(|(item, worn)| u32::from(piece_rating(state, item)) * layer_coverage(worn.layer))
         .sum();
     u16::try_from(hundredths / 100).unwrap_or(u16::MAX)
 }

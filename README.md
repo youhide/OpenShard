@@ -27,7 +27,7 @@ checks.
 > world** saves itself to SQLite or PostgreSQL without ever pausing — every NPC,
 > every door, every debuff, every scribed spellbook — and survives a restart.
 > Gameplay is Rust, and its content is data in this repository. See
-> [`docs/roadmap.md`](docs/roadmap.md).
+> [`docs/roadmap/README.md`](docs/roadmap/README.md).
 
 See [release notes](docs/release_notes.md) for player-facing changes.
 

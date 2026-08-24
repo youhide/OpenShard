@@ -60,8 +60,8 @@ before reporting:
   purpose.** The classic UO scheme uses a per-client-version key table extracted
   from the client binary — anyone can read the stream, so it is obfuscation, not
   security. ClassicUO connects with encryption off and that is what shards use
-  in practice. See `docs/roadmap.md` §1. Do not mistake it for a security
-  feature if it ever lands.
+  in practice. See `docs/roadmap/01-protocol.md`. Do not mistake it for a
+  security feature if it ever lands.
 - **The UO protocol sends the password in plaintext.** There is no challenge and
   no nonce, and no server can fix that from this end. What a server can control
   is storage, and stored credentials are argon2 PHC hashes

@@ -53,7 +53,7 @@ impl SerialAllocator {
     }
 
     /// Take the next serial from `kind`'s pool.
-    pub fn alloc(&mut self, kind: SerialKind) -> Result<Serial, SerialPoolExhausted> {
+    pub const fn alloc(&mut self, kind: SerialKind) -> Result<Serial, SerialPoolExhausted> {
         let (next, max) = match kind {
             SerialKind::Mobile => (&mut self.next_mobile, MOBILE_MAX),
             SerialKind::Item => (&mut self.next_item, ITEM_MAX),
@@ -72,7 +72,7 @@ impl SerialAllocator {
     /// Ensure `serial` will never be handed out by [`SerialAllocator::alloc`].
     ///
     /// Call this for every serial loaded from persistence.
-    pub fn reserve(&mut self, serial: Serial) {
+    pub const fn reserve(&mut self, serial: Serial) {
         let raw = serial.raw();
         let next = match serial.kind() {
             SerialKind::Mobile => &mut self.next_mobile,

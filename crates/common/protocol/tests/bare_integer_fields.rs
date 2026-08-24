@@ -96,6 +96,21 @@ const ALLOWLIST: &[(&str, &str, &str)] = &[
         "GumpPoint: the same argument in gump-space pixels, signed for negative layout offsets",
     ),
     ("gump.rs", "y", "GumpPoint: same"),
+    (
+        "chunks.rs",
+        "x",
+        "ChunkAt: Point's argument in a third grid — one geometric quantity's own axis, and the \
+         pair is what a chunk is addressed by. openshard_map::chunk::ChunkCoord is the same place \
+         in the crate that owns the world, and that crate is above this one",
+    ),
+    ("chunks.rs", "y", "ChunkAt: same"),
+    (
+        "chunks.rs",
+        "wide",
+        "FacetBlocks: MapSize's argument, counted in map blocks rather than tiles because that \
+         is what openshard_map::chunk::assemble refuses a short set of chunks against",
+    ),
+    ("chunks.rs", "down", "FacetBlocks: same"),
     // -- current/max bars: N2 amendment 2 -----------------------------------
     (
         "mobile.rs",
@@ -284,6 +299,12 @@ const ALLOWLIST: &[(&str, &str, &str)] = &[
         "ClientPacket: the undecoded packet's own bytes; Vec<u8> is a buffer, not a number, and \
          the scan's deliberately broad type match cannot tell the two apart",
     ),
+    (
+        "chunks.rs",
+        "blob",
+        "ChunkData: one fragment of a deflated chunk record — the same buffer-not-a-number as \
+         ClientPacket::Unknown.body, and this crate never looks inside it",
+    ),
     // Class 2 — a diagnostic field on a typed error, the `WrongPacket::expected`
     // argument: the value is carried for `Display` after it was already
     // rejected, and is never read as wire data again.
@@ -311,6 +332,12 @@ const ALLOWLIST: &[(&str, &str, &str)] = &[
         "packet.rs",
         "UnknownPacket.0",
         "FrameError: same — the id this server cannot size",
+    ),
+    (
+        "chunks.rs",
+        "Incomplete.wanted",
+        "JoinError: how many fragments the set said there were, carried for Display after the \
+         set was already rejected — WrongPacket::expected's argument",
     ),
     // Class 3 — quantities, on the MobileStatus argument.
     (

@@ -79,6 +79,17 @@ pub enum AsciiFontError {
         /// Why.
         source: std::io::Error,
     },
+    /// A decoded set cannot be represented by `fonts.mul`'s byte dimensions.
+    Oversized {
+        /// Which face.
+        font: usize,
+        /// Which byte-sized character.
+        char: u8,
+        /// The unrepresentable width.
+        width: u16,
+        /// The unrepresentable height.
+        height: u16,
+    },
     /// The file ran out of bytes partway through a face or a glyph.
     Truncated {
         /// Which face, 0-based.
@@ -93,6 +104,15 @@ impl fmt::Display for AsciiFontError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
+            Self::Oversized {
+                font,
+                char,
+                width,
+                height,
+            } => write!(
+                f,
+                "font {font} character {char:#04X} is {width}x{height}; fonts.mul dimensions are bytes",
+            ),
             Self::Truncated {
                 font,
                 char: Some(char),
@@ -110,12 +130,13 @@ impl std::error::Error for AsciiFontError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Read { source, .. } => Some(source),
-            Self::Truncated { .. } => None,
+            Self::Oversized { .. } | Self::Truncated { .. } => None,
         }
     }
 }
 
 /// Every face `fonts.mul` defines, decoded.
+#[derive(Clone)]
 pub struct AsciiFonts {
     /// `FONT_COUNT` faces, each `CHARS_PER_FONT` glyphs indexed by code point.
     faces: Vec<Vec<Image>>,
@@ -213,6 +234,61 @@ impl AsciiFonts {
         let index = char.checked_sub(GLYPH_BASE)?;
         let face = self.faces.get(font.0 as usize)?;
         face.get(index as usize)
+    }
+
+    /// Replace one glyph while editing a decoded font set.
+    ///
+    /// Returns `false` when the face or character is not part of `fonts.mul`.
+    /// The image may temporarily be wider than the file can represent;
+    /// [`encode`](Self::encode) is the boundary that reports that as an error.
+    pub fn set_glyph(&mut self, font: Font, char: u8, image: Image) -> bool {
+        let Some(index) = char.checked_sub(GLYPH_BASE) else {
+            return false;
+        };
+        let Some(slot) = self
+            .faces
+            .get_mut(font.0 as usize)
+            .and_then(|face| face.get_mut(index as usize))
+        else {
+            return false;
+        };
+        *slot = image;
+        true
+    }
+
+    /// Encode all ten faces back into the classic `fonts.mul` layout.
+    ///
+    /// Header bytes that readers do not interpret are written as zero. This is
+    /// semantic round-tripping, not preservation of unused bytes from the
+    /// input file.
+    pub fn encode(&self) -> Result<Vec<u8>, AsciiFontError> {
+        let pixel_count: usize = self
+            .faces
+            .iter()
+            .flatten()
+            .map(|glyph| glyph.pixels().len())
+            .sum();
+        let mut bytes =
+            Vec::with_capacity(FONT_COUNT * (FONT_HEADER + CHARS_PER_FONT * CHAR_HEADER) + pixel_count * 2);
+        for (font, face) in self.faces.iter().enumerate() {
+            bytes.push(0);
+            for (index, glyph) in face.iter().enumerate() {
+                let (width, height) = (glyph.width(), glyph.height());
+                let (Ok(width_byte), Ok(height_byte)) = (u8::try_from(width), u8::try_from(height)) else {
+                    return Err(AsciiFontError::Oversized {
+                        font,
+                        char: GLYPH_BASE.wrapping_add(index as u8),
+                        width,
+                        height,
+                    });
+                };
+                bytes.extend_from_slice(&[width_byte, height_byte, 0]);
+                for pixel in glyph.pixels() {
+                    bytes.extend_from_slice(&pixel.0.to_le_bytes());
+                }
+            }
+        }
+        Ok(bytes)
     }
 }
 
@@ -359,5 +435,33 @@ mod tests {
         bytes.extend_from_slice(&[0xFF; 64]);
         let fonts = AsciiFonts::parse(&bytes).unwrap();
         assert_eq!(fonts.len(), FONT_COUNT);
+    }
+
+    #[test]
+    fn encoded_fonts_parse_back_to_the_same_images() {
+        let fonts = AsciiFonts::parse(&synthetic(FONT_COUNT, 2, 3)).unwrap();
+        let encoded = fonts.encode().unwrap();
+        let decoded = AsciiFonts::parse(&encoded).unwrap();
+        for font in 0..FONT_COUNT as u16 {
+            for index in 0..CHARS_PER_FONT {
+                let char = GLYPH_BASE.wrapping_add(index as u8);
+                assert_eq!(decoded.glyph(Font(font), char), fonts.glyph(Font(font), char));
+            }
+        }
+    }
+
+    #[test]
+    fn a_glyph_too_large_for_a_byte_dimension_is_not_silently_truncated() {
+        let mut fonts = AsciiFonts::parse(&synthetic(FONT_COUNT, 1, 1)).unwrap();
+        assert!(fonts.set_glyph(Font(2), b'A', Image::new(256, 1, vec![Color16(1); 256]),));
+        assert!(matches!(
+            fonts.encode(),
+            Err(AsciiFontError::Oversized {
+                font: 2,
+                char: b'A',
+                width: 256,
+                height: 1,
+            })
+        ));
     }
 }

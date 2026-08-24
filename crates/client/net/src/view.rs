@@ -664,9 +664,9 @@ impl WorldView {
         self.player.equipment.retain(|item| item.serial != serial);
         let mut changed = self.player.equipment.len() != before;
         for mobile in self.mobiles.values_mut() {
-            let before = mobile.equipment.len();
+            let mobile_equipment_before = mobile.equipment.len();
             mobile.equipment.retain(|item| item.serial != serial);
-            changed |= mobile.equipment.len() != before;
+            changed |= mobile.equipment.len() != mobile_equipment_before;
         }
         changed
     }

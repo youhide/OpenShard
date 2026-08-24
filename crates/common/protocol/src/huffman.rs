@@ -91,7 +91,7 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
     let mut accumulator: u8 = 0;
     let mut filled: u8 = 0;
 
-    let mut push_symbol = |symbol: usize, output: &mut Vec<u8>| {
+    let mut push_symbol = |symbol: usize, destination: &mut Vec<u8>| {
         let entry = CODES[symbol];
         let mut remaining = (entry & 0xF) as u8;
         let code = entry >> 4;
@@ -100,7 +100,7 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
             accumulator = (accumulator << 1) | ((code >> remaining) & 1) as u8;
             filled += 1;
             if filled == 8 {
-                output.push(accumulator);
+                destination.push(accumulator);
                 accumulator = 0;
                 filled = 0;
             }

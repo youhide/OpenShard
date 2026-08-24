@@ -103,19 +103,16 @@ const FIRST_GENERATION: NonZeroU32 = NonZeroU32::MIN;
 impl EntityAllocator {
     pub(crate) fn alloc(&mut self) -> EntityId {
         self.live_count += 1;
-        match self.free.pop() {
-            Some(index) => {
-                let slot = index.index() as usize;
-                self.alive[slot] = true;
-                EntityId::new(index.index(), self.generations[slot])
-            }
-            None => {
-                let index = u32::try_from(self.generations.len())
-                    .expect("OpenShard supports at most u32::MAX entity slots");
-                self.generations.push(FIRST_GENERATION);
-                self.alive.push(true);
-                EntityId::new(index, FIRST_GENERATION)
-            }
+        if let Some(index) = self.free.pop() {
+            let slot = index.index() as usize;
+            self.alive[slot] = true;
+            EntityId::new(index.index(), self.generations[slot])
+        } else {
+            let index = u32::try_from(self.generations.len())
+                .expect("OpenShard supports at most u32::MAX entity slots");
+            self.generations.push(FIRST_GENERATION);
+            self.alive.push(true);
+            EntityId::new(index, FIRST_GENERATION)
         }
     }
 

@@ -389,26 +389,23 @@ fn hand_over(state: &mut WorldState, items: &[EntityId], receiver: EntityId) {
     };
     let pack = backpack_of(state, mobile);
     for &item in items {
-        match pack {
-            Some(pack) => {
-                let grid = item_count(state, pack);
-                state.registry.insert(
-                    item,
-                    Contained {
-                        container: pack,
-                        position: GumpPoint::new(0, 0),
-                        grid: GridSlot(grid),
-                    },
-                );
-                tell_watchers_updated(state, pack, item);
-            }
-            None => {
-                // No pack to put it in — a corner ServUO does not have, since
-                // every player has one. Better on the floor than nowhere.
-                state.registry.remove::<Contained>(item);
-                if let Some(&Position(at)) = state.registry.get::<Position>(receiver) {
-                    place_on_ground(state, item, at, state.facet_of(receiver));
-                }
+        if let Some(pack) = pack {
+            let grid = item_count(state, pack);
+            state.registry.insert(
+                item,
+                Contained {
+                    container: pack,
+                    position: GumpPoint::new(0, 0),
+                    grid: GridSlot(grid),
+                },
+            );
+            tell_watchers_updated(state, pack, item);
+        } else {
+            // No pack to put it in — a corner ServUO does not have, since
+            // every player has one. Better on the floor than nowhere.
+            state.registry.remove::<Contained>(item);
+            if let Some(&Position(at)) = state.registry.get::<Position>(receiver) {
+                place_on_ground(state, item, at, state.facet_of(receiver));
             }
         }
     }

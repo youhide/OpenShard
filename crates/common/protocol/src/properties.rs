@@ -66,7 +66,7 @@ impl PropertyList {
     /// recomputes this; it only compares the revision it was told against the one
     /// it cached, so any stable-per-content function would do, but matching the
     /// reference keeps the arithmetic auditable.
-    fn add_hash(&mut self, value: u32) {
+    const fn add_hash(&mut self, value: u32) {
         self.hash ^= value & 0x03FF_FFFF;
         self.hash ^= (value >> 26) & 0x3F;
     }

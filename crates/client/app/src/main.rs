@@ -178,6 +178,7 @@ fn main() -> ExitCode {
     let opening = openshard_client_app::Opening {
         at: cli.at,
         solids: cli.solids,
+        stall_on_update: None,
         scenario: cli.scenario.map(|scenario| match scenario {
             Scenario::LodSweep => openshard_client_app::Scenario::LodSweep,
             Scenario::AtlasSoak => openshard_client_app::Scenario::AtlasSoak,
@@ -185,7 +186,6 @@ fn main() -> ExitCode {
             Scenario::ZoomSoakFreezeServer => openshard_client_app::Scenario::ZoomSoakFreezeServer,
             Scenario::LiveOracle => openshard_client_app::Scenario::LiveOracle,
         }),
-        ..Default::default()
     };
     // Which files the ground comes out of. `Install` is the arm every run before
     // base sets existed took, and it is a source rather than the absence of one.
