@@ -398,9 +398,14 @@ that patch touched.
   difference was asked about**, because the list is a statement about two
   particular revisions and a publish in between makes it a list of the wrong
   squares.
-- **`chunk::apply` is `assemble`'s other half and it rebuilds rather than
-  splices** — a block's statics are one run in a facet-wide vector, so a chunk
-  whose item count changed moves every static after it. E4 is its other caller.
+- **`chunk::apply` is `assemble`'s other half.** It rebuilt the facet at first,
+  on the grounds that a block's statics are one run in a facet-wide vector so a
+  chunk whose item count changed moves every static after it — there being no
+  splice that is not a copy of the tail. **Reversed on the measurement**: the
+  tail copy is a quarter of the rebuild, because what the rebuild added to it
+  was the land no splice touches and a re-sort of every block on the facet. It
+  now writes the squares in, through `WorldMap::replace_blocks`. See the backlog
+  entry, which has the numbers. E4 is its other caller.
 
 ### E4 — a publish reaches a connected client
 
@@ -602,7 +607,13 @@ Found while building E3:
   The client is told nothing changed, keeps the world it has, and does not
   re-stamp it — so it asks the same question on the next connection and is told
   the same thing. One packet, on a world nobody will ever publish; the fix is a
-  `MapSnapshot` that can be re-stamped without being rebuilt.
+  `MapSnapshot` that can be re-stamped without being rebuilt. **Half of that
+  exists now**: `MapSnapshot::take_chunks` moves the world and its number in one
+  call without rebuilding a facet to carry the new one. What is still missing is
+  the *empty* case, which never reaches that call — a world told `These([])` has
+  nothing to apply, so nothing re-stamps it. It wants the same door with no
+  chunks in it, and `apply`'s "applying no chunks is not a change" is the
+  sentence to reconsider when it is written.
 - **Nothing sweeps an orphaned world.** A shard that re-imports its facet leaves
   the client's old copy behind under the old identity, and 102 MiB is not
   nothing. The names of every world a client has kept are in one directory, so
@@ -677,14 +688,31 @@ Found while building E4:
   is the other 16, both still on the event-loop thread. The span half now has a
   node of its own —
   [`navigation_spans.md`](../navigation_spans.md#n8--the-bake-follows-a-patch)'s
-  N8, queued rather than gated. **The `chunk::apply` half stays here, and it is
-  smaller than it looks:** `WorldMap::offsets` is a prefix sum, so only a chunk
-  whose *static count changed* forces the facet-wide re-offsetting — and
-  `.setland`, which is the verb an operator uses most, never changes one. A
-  splice for the equal-count case is the whole of the cheap half.
-  The general shape is worth keeping: **"it is slow" is a claim about a binary,
-  and the profile that built it is the first thing to ask about**, before any
-  algorithm is blamed.
+  N8, queued rather than gated. ~~**The `chunk::apply` half stays here**~~ —
+  **done 2026-08-25.** It was smaller than it looked and for the reason this
+  entry named: `WorldMap::offsets` is a prefix sum, so only a chunk whose
+  *static count changed* forces the facet-wide re-offsetting, and `.setland`
+  never changes one. What the splice turned out to save was larger than that,
+  though, and the rebuild's own argument is where it was hiding. "There is no
+  splice that is not a copy of the tail" is true and it is not the cost: the
+  rebuild *added* to that tail copy 117 MiB of land no splice touches and a
+  re-sort of all 458,752 blocks rather than the sixty-four that arrived. On the
+  shipped Felucca, against **15.3 ms and a second 150 MiB facet resident**:
+  **0.1 ms** for a set that changed no block's item count — every edit to the
+  ground, which is the equal-count case this entry named — and **3.9–5.6 ms**
+  for one that did, most of it the reallocation `from_parts`' own
+  `shrink_to_fit` makes unavoidable for the first item added to a facet.
+  `WorldMap::replace_blocks` is the primitive: one span from the first replaced
+  block to the last, one memmove, one pass over the offsets, and the land
+  written where it stood. `MapSnapshot::take_chunks` is the door beside
+  `publish`, and it re-stamps the revision without the facet being rebuilt to
+  carry a new one — which is half of the empty-patch entry above, granted by the
+  same call. The window's hitch is `SpanIndex::build` and nothing else now.
+  The general shape is worth keeping twice: **"it is slow" is a claim about a
+  binary, and the profile that built it is the first thing to ask about**,
+  before any algorithm is blamed — and **an argument for a cost is not a
+  measurement of it**, which is how a 4× saving sat behind a sentence that was
+  true.
 - **A quarantined composite block is never un-quarantined.** `CompositeCache`
   permanently marks a block that `FlatGroundBlock::inspect` refused, on the
   stated grounds that "map terrain is immutable for the lifetime of this cache" —
