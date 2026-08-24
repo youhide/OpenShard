@@ -36,7 +36,7 @@ use clap::Parser;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::{Doors, Overlay};
 use openshard_movement::spans::{SpanIndex, Spans};
-use openshard_movement::{Footing, MapTerrain, SearchExit, search_path, step_allowed, steps_out_of};
+use openshard_movement::{Footing, MapTerrain, SearchExit, Weight, search_path, step_allowed, steps_out_of};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
 
@@ -339,7 +339,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut explored = 0;
         for _ in 0..cli.repeat.max(1) {
             let started = Instant::now();
-            let search = search_path(black_box(&plain), black_box(from), black_box(to), budget);
+            let search = search_path(
+                black_box(&plain),
+                black_box(from),
+                black_box(to),
+                budget,
+                Weight::EXACT,
+            );
             fastest = fastest.min(started.elapsed());
             explored = search.explored;
             assert!(

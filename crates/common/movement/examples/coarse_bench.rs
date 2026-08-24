@@ -31,7 +31,7 @@ use openshard_map::overlay::{Doors, Overlay};
 use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::reach::Reach;
 use openshard_movement::{
-    Footing, MapTerrain, NavigationGraph, bake, find_long_path, find_path, search_path,
+    Footing, MapTerrain, NavigationGraph, Weight, bake, find_long_path, find_path, search_path,
 };
 use openshard_protocol::world::{Facet, Point};
 
@@ -260,7 +260,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut flat_search = None;
             for _ in 0..cli.repeat.max(1) {
                 let started = Instant::now();
-                let search = search_path(&footing, origin, to, cli.budget);
+                let search = search_path(&footing, origin, to, cli.budget, Weight::EXACT);
                 flat = flat.min(started.elapsed());
                 flat_search = Some(search);
             }

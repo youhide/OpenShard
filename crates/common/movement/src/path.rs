@@ -102,6 +102,73 @@ impl Effort {
     }
 }
 
+/// How far the search is allowed to trust its own estimate over the cost it has
+/// actually paid.
+///
+/// A\* ranks a candidate by `g + h`, and the reason it can promise the shortest
+/// route is that `h` never overshoots. Multiplying `h` by more than one breaks
+/// that promise on purpose: the frontier stops spreading sideways along the
+/// plateau of equally-good detours and drives at the goal instead, which is
+/// **fewer nodes for a route that may be longer**. The bound is the classic one
+/// — a route this finds is at most the weight times the shortest — and it holds
+/// because a finalised place is never reopened here.
+///
+/// **A ratio and not a float**, because the tick is replayable: `h * 5 / 4` is
+/// the same number on every machine and in every build, and `h as f32 * 1.25`
+/// is not quite.
+///
+/// [`Self::EXACT`] is the only weight anything ships with. The type exists so
+/// that a caller which would rather have a route *now* than the best route can
+/// say so at the call, and so that the probe can price what that trade buys —
+/// see `map_path_probe`'s `--weight`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Weight {
+    numerator: u32,
+    denominator: u32,
+}
+
+impl Weight {
+    /// The heuristic taken at its word: the shortest route, and A\*'s promise
+    /// intact.
+    pub const EXACT: Self = Self {
+        numerator: 1,
+        denominator: 1,
+    };
+
+    /// A weight of `numerator / denominator`.
+    ///
+    /// # Panics
+    ///
+    /// If the denominator is zero, or the ratio is below one — a weight under
+    /// one is not a cheaper search but a slower one, and asking for it is a
+    /// caller with the fraction upside down.
+    #[must_use]
+    pub fn of(numerator: u32, denominator: u32) -> Self {
+        assert!(denominator > 0, "a weight is a ratio, not a division by zero");
+        assert!(
+            numerator >= denominator,
+            "a weight under one only makes the search wander further; {numerator}/{denominator}"
+        );
+        Self {
+            numerator,
+            denominator,
+        }
+    }
+
+    /// This weight applied to one estimate.
+    ///
+    /// `u64` in the middle: a facet's widest heuristic is 16 bits and the
+    /// numerator is a small integer, so nothing here can overflow in practice —
+    /// but the product of two `u32`s is the one place where "in practice" would
+    /// have to be argued rather than seen.
+    fn applied(self, h: u32) -> u32 {
+        if self == Self::EXACT {
+            return h;
+        }
+        (u64::from(h) * u64::from(self.numerator) / u64::from(self.denominator)) as u32
+    }
+}
+
 /// One entry on the open list, ordered so [`BinaryHeap`] with [`Reverse`] pops
 /// the cheapest-and-straightest first. See the note where this is pushed for
 /// why the Manhattan distance is in the ordering at all.
@@ -127,14 +194,26 @@ impl Effort {
 /// a place to stand, so the same tile reached at two heights is two entries —
 /// see [`PathNodeKey`]. It is stored with its sign bit flipped, which is what
 /// makes an unsigned compare of the whole word rank it the way `i8` does.
+///
+/// **The bottom forty bits are [`PathNodeKey`] with that one bit flipped**, and
+/// that is by construction rather than by coincidence: the key is what the
+/// table is keyed by and the coordinates are what the entry ranks by, so
+/// packing them twice would be packing the same three numbers twice. A push
+/// takes the key it has just made, and a pop hands one straight back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct OpenEntry(u128);
 
 /// The width of each of the three cost fields, as a mask.
 const FIELD: u32 = (1 << 24) - 1;
 
+/// The one bit between a [`PathNodeKey`]'s height byte and an [`OpenEntry`]'s:
+/// `i8::MIN` becomes 0 and `i8::MAX` becomes 255, so an unsigned compare of the
+/// whole word ranks the height the way `i8` does. The key wants no such thing —
+/// it is an identity, and only ever compared for equality.
+const HEIGHT_BIAS: u64 = 0x80;
+
 impl OpenEntry {
-    /// A candidate at `at`, ranked by `f`, then `h`, then `manhattan`.
+    /// A candidate standing at `at`, ranked by `f`, then `h`, then `manhattan`.
     ///
     /// The three costs are clamped rather than masked: a value past 24 bits
     /// would otherwise wrap into the field above it and rank a candidate as the
@@ -142,26 +221,23 @@ impl OpenEntry {
     /// widest heuristic a 65,536-tile map can produce is 16 bits — so this is a
     /// guard rather than a case, and the failure it guards against is a search
     /// that visibly wanders rather than one that crashes.
-    fn new(f: u32, h: u32, manhattan: u32, at: Point) -> Self {
+    fn new(f: u32, h: u32, manhattan: u32, at: PathNodeKey) -> Self {
         let f = u128::from(f.min(FIELD));
         let h = u128::from(h.min(FIELD));
         let manhattan = u128::from(manhattan.min(FIELD));
-        let x = u128::from(at.x);
-        let y = u128::from(at.y);
-        // The bias: `i8::MIN` becomes 0 and `i8::MAX` becomes 255, so unsigned
-        // order over the byte is signed order over the height.
-        let z = u128::from((at.z as u8) ^ 0x80);
-        Self((f << 88) | (h << 64) | (manhattan << 40) | (x << 24) | (y << 8) | z)
+        Self((f << 88) | (h << 64) | (manhattan << 40) | u128::from(at.0 ^ HEIGHT_BIAS))
     }
 
     /// The place this candidate stands on, and its distance to the goal — the
     /// two things a pop reads back out.
-    fn place(self) -> (Point, u32) {
-        let x = ((self.0 >> 24) & 0xffff) as u16;
-        let y = ((self.0 >> 8) & 0xffff) as u16;
-        let z = (((self.0 & 0xff) as u8) ^ 0x80) as i8;
+    ///
+    /// The place comes back as the *key*, which is what the pop does with it:
+    /// one table lookup, one comparison against the goal, and only then — for
+    /// the node that is actually being expanded — a [`PathNodeKey::place`].
+    fn place(self) -> (PathNodeKey, u32) {
+        let at = PathNodeKey(((self.0 & 0xff_ffff_ffff) as u64) ^ HEIGHT_BIAS);
         let h = ((self.0 >> 64) & u128::from(FIELD)) as u32;
-        (Point::new(x, y, z), h)
+        (at, h)
     }
 }
 
@@ -191,7 +267,7 @@ impl OpenEntry {
 #[must_use]
 pub fn find_path(footing: &Footing<'_>, from: Point, to: Point, budget: usize) -> Option<Vec<Direction>> {
     let started = debug_enabled().then(Instant::now);
-    let search = explore(footing, from, to, budget, None);
+    let search = explore(footing, from, to, budget, Weight::EXACT, None);
     debug_slow("find_path", from, to, budget, started, &search);
     search.arrived.then_some(search.route)
 }
@@ -225,7 +301,7 @@ pub fn find_path_toward(
     budget: usize,
 ) -> Option<Vec<Direction>> {
     let started = debug_enabled().then(Instant::now);
-    let search = explore(footing, from, to, budget, None);
+    let search = explore(footing, from, to, budget, Weight::EXACT, None);
     debug_slow("find_path_toward", from, to, budget, started, &search);
     (search.arrived || !search.route.is_empty()).then_some(search.route)
 }
@@ -238,9 +314,20 @@ pub fn find_path_toward(
 /// them can say. Nothing on the walking path calls this — a body is owed a
 /// route, and asking through here would only make it drop the same fields
 /// again. It exists for the measurement the node budgets are argued from.
+///
+/// The weight is named at the call here and nowhere else the search is asked
+/// from: [`Weight::EXACT`] is what the two entry points above pass and what
+/// every caller in the tree gets, and this is where a probe can price the
+/// alternative.
 #[must_use]
-pub fn search_path(footing: &Footing<'_>, from: Point, to: Point, budget: usize) -> PathSearch {
-    explore(footing, from, to, budget, None)
+pub fn search_path(
+    footing: &Footing<'_>,
+    from: Point,
+    to: Point,
+    budget: usize,
+    weight: Weight,
+) -> PathSearch {
+    explore(footing, from, to, budget, weight, None)
 }
 
 /// What one search found, before either entry point above reads it — and what
@@ -351,7 +438,7 @@ fn search(
     effort: &mut Effort,
     within: Option<Region>,
 ) -> PathSearch {
-    let search = explore(footing, from, to, effort.allowance(budget), within);
+    let search = explore(footing, from, to, effort.allowance(budget), Weight::EXACT, within);
     effort.spend(search.explored);
     search
 }
@@ -361,6 +448,7 @@ fn explore(
     from: Point,
     to: Point,
     budget: usize,
+    weight: Weight,
     within: Option<Region>,
 ) -> PathSearch {
     // The destination as a *place*, which is what the search compares against:
@@ -405,16 +493,32 @@ fn explore(
     // asked for a straight walk on stays a straight walk.
     let mut open: BinaryHeap<Reverse<OpenEntry>> = BinaryHeap::with_capacity(open_capacity(budget));
 
+    // The two places the search compares against, packed once. Everything in
+    // the loop below speaks keys — the table is keyed by one, the goal test is
+    // one `u64` compare, and the frontier's own bookkeeping carries one — so
+    // the only place a standing place is unpacked back into coordinates is
+    // where [`steps_out_of`] is asked for them.
+    let start_key = node_key(start);
+    let goal_key = node_key(goal);
     visited.insert(
-        node_key(start),
+        start_key,
         Visit {
             cost: 0,
             from: None,
             closed: false,
         },
     );
-    let h0 = heuristic(from, to);
-    open.push(Reverse(OpenEntry::new(h0, h0, manhattan(from, to), start)));
+    let (h0, manhattan) = estimate(from, to);
+    // The weight lands on `f` and nowhere else. The `h` the entry carries stays
+    // the true Chebyshev distance, because that is what the approach half of the
+    // search reports — *how close did the way get* is a measurement of the map,
+    // not a preference of the search.
+    open.push(Reverse(OpenEntry::new(
+        weight.applied(h0),
+        h0,
+        manhattan,
+        start_key,
+    )));
     // How close a finalised node has come to the goal, and what it cost to get
     // there. Seeded with the start, so a node takes the place only by being
     // *strictly* closer: walking to somewhere no nearer than here is not getting
@@ -425,7 +529,7 @@ fn explore(
     // the roof over the goal has "arrived" as far as the approach is concerned.
     // That is the right answer for a move order (it is as close as the ground
     // goes) and it is why `arrived` is a separate field rather than `h == 0`.
-    let mut closest = (h0, 0, start);
+    let mut closest = (h0, 0, start_key);
     let mut exit = SearchExit::Exhausted;
     // Finalised places, which is what the budget counts and what `PathSearch`
     // reports. Kept rather than read off a `closed` set's length, because the
@@ -434,8 +538,7 @@ fn explore(
     while let Some(Reverse(entry)) = open.pop() {
         // The key *is* the place, so the popped entry is the whole node and
         // nothing has to be looked up to find out where it was.
-        let (current, h) = entry.place();
-        let key = node_key(current);
+        let (key, h) = entry.place();
         // One lookup answers both halves of a pop: whether a cheaper pop already
         // finalised this place, and — where it did not — what the route to it
         // cost. Two tables asked that as two hashes of the same key.
@@ -448,10 +551,10 @@ fn explore(
         seen.closed = true;
         let here_cost = seen.cost;
         explored += 1;
-        if current == goal {
+        if key == goal_key {
             return PathSearch {
                 arrived: true,
-                route: reconstruct(&visited, start, goal),
+                route: reconstruct(&visited, start_key, goal_key),
                 explored,
                 written: visited.len(),
                 exit: SearchExit::Goal,
@@ -460,7 +563,7 @@ fn explore(
         // The first pop of a node is its cheapest, so this is its final cost —
         // see `Visit::closed`.
         if (h, here_cost) < (closest.0, closest.1) {
-            closest = (h, here_cost, current);
+            closest = (h, here_cost, key);
         }
         if explored > budget {
             exit = SearchExit::Budget;
@@ -471,29 +574,42 @@ fn explore(
         // each cardinal neighbour twice. Same answers, in the same order:
         // `step_allowed` is one slot of this. See `docs/map/navigation_spans.md`'s
         // N3 for what the difference is worth.
-        let steps = steps_out_of(footing, current);
-        for dir in Direction::ALL {
-            // `steps_out_of`, not `can_step` per neighbour: a diagonal may not
-            // clip a wall corner, and that half of the rule is not the terrain's
-            // to answer — see `step_allowed` for why it is shared with the shard
-            // and the client rather than restated here.
-            let Some(landing) = steps[dir.to_bits() as usize] else {
+        //
+        // `steps_out_of`, not `can_step` per neighbour: a diagonal may not clip
+        // a wall corner, and that half of the rule is not the terrain's to
+        // answer — see `step_allowed` for why it is shared with the shard and
+        // the client rather than restated here.
+        let steps = steps_out_of(footing, key.place());
+        // The region bound, where there is one: a search inside one region of
+        // the navigation graph may not wander out of it and back. It was a
+        // decorating terrain that answered `None` outside the rectangle, which
+        // made staying put a property of the *ground* rather than of the
+        // question being asked.
+        //
+        // **Asked once a node rather than once a neighbour.** Whether a search
+        // is bounded at all cannot change while it runs, so the `Option` is
+        // opened out here and the eight landings are filtered in one pass; the
+        // loop below then sees the same array either way. Testing it inside the
+        // loop made an always-`None` read of a 12-byte `Option` 1.9% of a
+        // profile of the whole probe.
+        let steps = match within {
+            Some(region) => steps.map(|landing| landing.filter(|&at| region.contains(at))),
+            None => steps,
+        };
+        let next_cost = here_cost + 1;
+        // The array is in `Direction::ALL`'s own order — `steps_out_of` fills it
+        // by `to_bits`, which is the discriminant — so zipping is the same
+        // pairing the index was, without the bounds check the index carried.
+        for (&dir, landing) in Direction::ALL.iter().zip(steps) {
+            let Some(landing) = landing else {
                 continue;
             };
-            // The region bound, where there is one: a search inside one region
-            // of the navigation graph may not wander out of it and back. It was
-            // a decorating terrain that answered `None` outside the rectangle,
-            // which made staying put a property of the *ground* rather than of
-            // the question being asked.
-            if within.is_some_and(|region| !region.contains(landing)) {
-                continue;
-            }
-            let next_cost = here_cost + 1;
+            let landing_key = node_key(landing);
             // One `entry` for what used to be four separate lookups of one key:
             // is the place closed, what did it cost before, and the two writes
             // that answer "cheaper this way". A neighbour is eight per node, so
             // this is where the three tables cost the most.
-            match visited.entry(node_key(landing)) {
+            match visited.entry(landing_key) {
                 Entry::Occupied(mut seen) => {
                     let seen = seen.get_mut();
                     if seen.closed || next_cost >= seen.cost {
@@ -510,21 +626,21 @@ fn explore(
                     });
                 }
             }
-            let h = heuristic(landing, to);
+            let (h, manhattan) = estimate(landing, to);
             open.push(Reverse(OpenEntry::new(
-                next_cost + h,
+                next_cost + weight.applied(h),
                 h,
-                manhattan(landing, to),
-                landing,
+                manhattan,
+                landing_key,
             )));
         }
     }
     // The goal was never popped: what there is to say is how far the way got.
     PathSearch {
         arrived: false,
-        route: match closest.2 == start {
+        route: match closest.2 == start_key {
             true => Vec::new(),
-            false => reconstruct(&visited, start, closest.2),
+            false => reconstruct(&visited, start_key, closest.2),
         },
         explored,
         written: visited.len(),
@@ -590,10 +706,13 @@ fn debug_slow(
 /// comes back to it higher up is a chain that visits `(x, y)` twice and
 /// terminates all the same — see [`PathNodeKey`]. Keyed by tile it would either
 /// stop short at the first visit or never have been found at all.
-fn reconstruct(visited: &FxHashMap<PathNodeKey, Visit>, start: Point, goal: Point) -> Vec<Direction> {
+fn reconstruct(
+    visited: &FxHashMap<PathNodeKey, Visit>,
+    start: PathNodeKey,
+    goal: PathNodeKey,
+) -> Vec<Direction> {
     let mut steps = Vec::new();
-    let start = node_key(start);
-    let mut at = node_key(goal);
+    let mut at = goal;
     while at != start {
         let (parent, dir) = visited[&at]
             .from
@@ -687,8 +806,19 @@ fn open_capacity(budget: usize) -> usize {
 /// Forty bits of a `u64`, laid out `x`, `y`, `z`, so hashing stays FxHash's
 /// integer fast path and no coordinate can be silently truncated the way a
 /// `u32` would have to truncate one.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct PathNodeKey(u64);
+
+impl PathNodeKey {
+    /// The place the key names, unpacked.
+    ///
+    /// A pop does this **once**, for the node it is about to expand — the
+    /// lookup, the goal test and the frontier's own bookkeeping all speak keys,
+    /// and only [`steps_out_of`] wants coordinates back.
+    fn place(self) -> Point {
+        Point::new((self.0 >> 24) as u16, (self.0 >> 8) as u16, self.0 as u8 as i8)
+    }
+}
 
 #[inline]
 fn node_key(at: Point) -> PathNodeKey {
@@ -745,20 +875,22 @@ fn goal_node(footing: &Footing<'_>, from: Point, to: Point) -> Point {
     Point::new(to.x, to.y, z)
 }
 
-/// The remaining distance estimate: Chebyshev, the count of eight-way steps, which
-/// never overshoots the true cost and so keeps A* optimal.
-fn heuristic(from: Point, to: Point) -> u32 {
+/// The two distances a candidate is ranked by, over the one pair of deltas both
+/// are made of.
+///
+/// The first is the **heuristic**: Chebyshev, the count of eight-way steps,
+/// which never overshoots the true cost and so keeps A* optimal. The second is
+/// the open list's **tie-breaker**: Manhattan distance, which — unlike
+/// Chebyshev — is not blind to a detour off an axis the goal is on. See the note
+/// on `open`.
+///
+/// One function because they are one subtraction: `max(dx, dy)` and `dx + dy`
+/// read the same two deltas, and asking for them separately took the difference
+/// of each coordinate twice, eight times a node.
+fn estimate(from: Point, to: Point) -> (u32, u32) {
     let dx = i32::from(from.x).abs_diff(i32::from(to.x));
     let dy = i32::from(from.y).abs_diff(i32::from(to.y));
-    dx.max(dy)
-}
-
-/// The open list's tie-breaker: Manhattan distance, which — unlike Chebyshev —
-/// is not blind to a detour off an axis the goal is on. See the note on `open`.
-fn manhattan(from: Point, to: Point) -> u32 {
-    let dx = i32::from(from.x).abs_diff(i32::from(to.x));
-    let dy = i32::from(from.y).abs_diff(i32::from(to.y));
-    dx + dy
+    (dx.max(dy), dx + dy)
 }
 
 #[cfg(test)]
@@ -803,11 +935,11 @@ mod tests {
                     other_at.z,
                 );
                 assert_eq!(
-                    OpenEntry::new(f, h, manhattan, at).cmp(&OpenEntry::new(
+                    OpenEntry::new(f, h, manhattan, node_key(at)).cmp(&OpenEntry::new(
                         other_f,
                         other_h,
                         other_manhattan,
-                        other_at
+                        node_key(other_at)
                     )),
                     fields.cmp(&other_fields),
                     "{fields:?} against {other_fields:?}"
@@ -815,8 +947,78 @@ mod tests {
             }
             // And a pop reads back what was pushed: the place is an identity the
             // search looks the node up by, so a bit lost here is a lookup that
-            // misses.
-            assert_eq!(OpenEntry::new(f, h, manhattan, at).place(), (at, h));
+            // misses. Both halves of that identity are checked — the key the
+            // table is looked up by, and the coordinates it unpacks to — because
+            // the entry now carries the key rather than the point.
+            let (key, popped) = OpenEntry::new(f, h, manhattan, node_key(at)).place();
+            assert_eq!((key, popped), (node_key(at), h));
+            assert_eq!(key.place(), at);
+        }
+    }
+
+    /// The exact weight is the estimate untouched — the one thing that must be
+    /// true for `Weight::EXACT` to be a *name* for today's search rather than a
+    /// multiplication by one that rounds.
+    #[test]
+    fn the_exact_weight_leaves_every_estimate_alone() {
+        for h in [0, 1, 7, 96, 65_535, FIELD] {
+            assert_eq!(Weight::EXACT.applied(h), h, "the exact weight moved {h}");
+        }
+        // And a real one multiplies, rounding down — so a weight never claims a
+        // hop is further than it is by more than it is wide.
+        assert_eq!(Weight::of(5, 4).applied(100), 125);
+        assert_eq!(Weight::of(5, 4).applied(3), 3);
+        assert_eq!(Weight::of(2, 1).applied(65_535), 131_070);
+    }
+
+    #[test]
+    #[should_panic = "a weight is a ratio"]
+    fn a_weight_is_not_a_division_by_zero() {
+        let _ = Weight::of(1, 0);
+    }
+
+    #[test]
+    #[should_panic = "only makes the search wander further"]
+    fn a_weight_under_one_is_the_fraction_upside_down() {
+        let _ = Weight::of(4, 5);
+    }
+
+    /// A weight trades nodes for route length, and both halves of that trade are
+    /// checked here: what comes back is a route a body can actually walk, and it
+    /// is no longer than the weight times the shortest one.
+    ///
+    /// The bound is what makes the weight a decision rather than a gamble — a
+    /// caller that says `5/4` is saying it will accept a quarter more walking,
+    /// and nothing may exceed that however the wall is shaped.
+    #[test]
+    fn a_weighted_search_walks_a_real_route_inside_its_own_bound() {
+        let world = walled_world(12, 8, 12, 8);
+        let footing = over(&world);
+        let from = Point::new(10, 10, 0);
+        let to = Point::new(14, 10, 0);
+        let shortest = find_path(&footing, from, to, 1000).expect("there is a way around");
+        for (numerator, denominator) in [(9_usize, 8_usize), (5, 4), (3, 2), (2, 1)] {
+            let weight = Weight::of(numerator as u32, denominator as u32);
+            let search = search_path(&footing, from, to, 1000, weight);
+            assert!(
+                search.arrived,
+                "whether there is a way around does not depend on the weight"
+            );
+            // Walked by the shipped step rule rather than by arithmetic over the
+            // directions: a search that looks at fewer nodes must not plan a step
+            // nobody may take.
+            let mut at = from;
+            for dir in &search.route {
+                at = crate::step_allowed(&footing, at, *dir)
+                    .expect("the weighted search planned a step nobody may take");
+            }
+            assert_eq!((at.x, at.y), (14, 10), "it still arrives");
+            assert!(
+                search.route.len() * denominator <= shortest.len() * numerator,
+                "{numerator}/{denominator} stretched {} steps past its bound over the shortest {}",
+                search.route.len(),
+                shortest.len(),
+            );
         }
     }
 

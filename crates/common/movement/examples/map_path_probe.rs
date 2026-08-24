@@ -26,8 +26,25 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use openshard_map::overlay::{Doors, Overlay};
-use openshard_movement::{Footing, MapTerrain, PathSearch, SearchExit, search_path, step_allowed};
+use openshard_movement::{Footing, MapTerrain, PathSearch, SearchExit, Weight, search_path, step_allowed};
 use openshard_protocol::world::Point;
+
+/// `N/D` off the command line, as the pair the run then prints back.
+///
+/// The pair rather than the [`Weight`] it makes, because a report has to name
+/// the weight it is reporting on and a ratio is not recoverable from the search
+/// parameter it becomes.
+fn ratio(text: &str) -> Result<(u32, u32), String> {
+    let (numerator, denominator) = text
+        .split_once('/')
+        .ok_or_else(|| format!("a weight is written `N/D`, not `{text}`"))?;
+    let numerator = numerator.trim().parse::<u32>().map_err(|e| e.to_string())?;
+    let denominator = denominator.trim().parse::<u32>().map_err(|e| e.to_string())?;
+    if denominator == 0 || numerator < denominator {
+        return Err(format!("a weight is one or more: {numerator}/{denominator}"));
+    }
+    Ok((numerator, denominator))
+}
 
 #[derive(Debug, Parser)]
 struct Cli {
@@ -57,6 +74,20 @@ struct Cli {
     /// not — and what showed they are the node budget rather than the rule.
     #[arg(long, value_name = "FILE")]
     dump: Option<PathBuf>,
+    /// How far the search may over-trust its own estimate, as `N/D` — repeat to
+    /// sweep several in one run.
+    ///
+    /// `1/1` is the shipped search: the heuristic taken at its word, and the
+    /// shortest route. Anything above it drives the frontier at the goal instead
+    /// of spreading it along the plateau of equally-good detours, which is fewer
+    /// nodes for a route that may be up to the weight times as long.
+    ///
+    /// The run prices exactly that trade against the `1/1` pass it always
+    /// makes first: how many more destinations arrive inside the same budget,
+    /// how many nodes each arrival cost, and — over the destinations *both*
+    /// weights reached — how much longer the routes got.
+    #[arg(long, value_name = "N/D", value_parser = ratio)]
+    weight: Vec<(u32, u32)>,
     /// Times to repeat each search, keeping the fastest.
     ///
     /// A shared workstation drifts: the same sweep measured 40.6 s and 65.5 s
@@ -228,6 +259,122 @@ fn report_class(label: &str, readings: &[Reading]) {
     );
 }
 
+/// One pass over every destination at one budget and one weight.
+///
+/// The destinations are walked in the order they were built, and the order is
+/// what makes two passes comparable: [`report_weight`] pairs them by index
+/// rather than by looking a place up.
+fn sweep(
+    footing: &Footing<'_>,
+    terrain: &MapTerrain<'_>,
+    from: Point,
+    destinations: &[(u16, u16, u32)],
+    budget: usize,
+    weight: Weight,
+    repeat: usize,
+) -> Vec<Reading> {
+    let mut readings = Vec::with_capacity(destinations.len());
+    for &(x, y, distance) in destinations {
+        let to = Point::new(x, y, from.z);
+        let mut fastest = Duration::MAX;
+        let mut last = None;
+        for _ in 0..repeat.max(1) {
+            let started = Instant::now();
+            let search = search_path(footing, from, to, budget, weight);
+            fastest = fastest.min(started.elapsed());
+            last = Some(search);
+        }
+        let search = last.expect("at least one repeat");
+        // Where the route actually ends, and whether it ever returns to a
+        // column it has already stood on — walked by the shipped step rule
+        // rather than by arithmetic over the directions.
+        let mut end = Some(from);
+        let mut columns = HashSet::from([(from.x, from.y)]);
+        let mut revisits = false;
+        for &direction in &search.route {
+            let Some(at) = end.and_then(|at| step_allowed(footing, at, direction)) else {
+                end = None;
+                break;
+            };
+            revisits |= !columns.insert((at.x, at.y));
+            end = Some(at);
+        }
+        let column = Column {
+            reached: !search.arrived && end.is_some_and(|end| (end.x, end.y) == (x, y)),
+            surfaces: terrain.spans().surfaces(x, y).count(),
+        };
+        readings.push(Reading::new(x, y, distance, fastest, &search, column, revisits));
+    }
+    readings
+}
+
+/// What one weight bought and what it cost, against the exact pass.
+///
+/// Three questions, and they are the whole of the trade:
+///
+/// - **arrivals** — how many destinations reached the goal inside the same
+///   budget that did not before. This is what the weight is *for*: a search that
+///   arrives at node 250 instead of exhausting 400 both answers the question and
+///   costs less than the one that did not.
+/// - **nodes** — over the destinations *both* passes reached, so the comparison
+///   is between two answers to the same question rather than between an answer
+///   and a refusal.
+/// - **route length** — over the same shared set. A weighted route is at most
+///   the weight times the shortest; what matters is not the bound but how often
+///   it is anywhere near it.
+fn report_weight(label: &str, exact: &[Reading], weighted: &[Reading]) {
+    assert_eq!(exact.len(), weighted.len(), "the two passes walk one list");
+    let arrived_exact = exact.iter().filter(|r| r.arrived).count();
+    let arrived_weighted = weighted.iter().filter(|r| r.arrived).count();
+    let both = exact
+        .iter()
+        .zip(weighted)
+        .filter(|(a, b)| a.arrived && b.arrived)
+        .collect::<Vec<_>>();
+    let lost = exact
+        .iter()
+        .zip(weighted)
+        .filter(|(a, b)| a.arrived && !b.arrived)
+        .count();
+    let mut longer = both
+        .iter()
+        .map(|(a, b)| b.route_steps as i64 - a.route_steps as i64)
+        .collect::<Vec<_>>();
+    let mut saved = both
+        .iter()
+        .map(|(a, b)| a.explored as i64 - b.explored as i64)
+        .collect::<Vec<_>>();
+    let mut all_nodes = weighted.iter().map(|r| r.explored).collect::<Vec<_>>();
+    longer.sort_unstable();
+    saved.sort_unstable();
+    all_nodes.sort_unstable();
+    let stretched = longer.iter().filter(|&&steps| steps > 0).count();
+    let exact_steps: i64 = both.iter().map(|(a, _)| a.route_steps as i64).sum();
+    let weighted_steps: i64 = both.iter().map(|(_, b)| b.route_steps as i64).sum();
+    let mut elapsed = weighted.iter().map(|r| r.elapsed).collect::<Vec<_>>();
+    elapsed.sort_unstable();
+    println!(
+        "  weight {label:<5} arrived={arrived_weighted} ({:+}) lost={lost} nodes p50={} p95={} ms p50={:.3}",
+        arrived_weighted as i64 - arrived_exact as i64,
+        percentile(&all_nodes, 50),
+        percentile(&all_nodes, 95),
+        ms(percentile(&elapsed, 50)),
+    );
+    if both.is_empty() {
+        return;
+    }
+    println!(
+        "    over the {} both reached: nodes saved p50={} p95={} worst={}; steps longer in {stretched} of them, p95={} worst={}, total {exact_steps} -> {weighted_steps} ({:+.2}%)",
+        both.len(),
+        percentile(&saved, 50),
+        percentile(&saved, 95),
+        saved.first().expect("both is non-empty"),
+        percentile(&longer, 95),
+        longer.last().expect("both is non-empty"),
+        (weighted_steps - exact_steps) as f64 * 100.0 / exact_steps as f64,
+    );
+}
+
 fn report(title: &str, readings: &[Reading]) {
     let mut elapsed = readings.iter().map(|r| r.elapsed).collect::<Vec<_>>();
     elapsed.sort_unstable();
@@ -344,38 +491,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("each search repeated {} times, fastest kept", cli.repeat,);
     for &budget in &cli.budget {
-        let mut bare = Vec::with_capacity(destinations.len());
-        for &(x, y, distance) in &destinations {
-            let to = Point::new(x, y, from.z);
-            let mut fastest = Duration::MAX;
-            let mut last = None;
-            for _ in 0..cli.repeat.max(1) {
-                let started = Instant::now();
-                let search = search_path(&footing, from, to, budget);
-                fastest = fastest.min(started.elapsed());
-                last = Some(search);
-            }
-            let search = last.expect("at least one repeat");
-            // Where the route actually ends, and whether it ever returns to a
-            // column it has already stood on — walked by the shipped step rule
-            // rather than by arithmetic over the directions.
-            let mut end = Some(from);
-            let mut columns = HashSet::from([(from.x, from.y)]);
-            let mut revisits = false;
-            for &direction in &search.route {
-                let Some(at) = end.and_then(|at| step_allowed(&footing, at, direction)) else {
-                    end = None;
-                    break;
-                };
-                revisits |= !columns.insert((at.x, at.y));
-                end = Some(at);
-            }
-            let column = Column {
-                reached: !search.arrived && end.is_some_and(|end| (end.x, end.y) == (x, y)),
-                surfaces: terrain.spans().surfaces(x, y).count(),
-            };
-            bare.push(Reading::new(x, y, distance, fastest, &search, column, revisits));
-        }
+        let mut bare = sweep(
+            &footing,
+            &terrain,
+            from,
+            &destinations,
+            budget,
+            Weight::EXACT,
+            cli.repeat,
+        );
 
         if let Some(path) = &cli.dump {
             use std::io::Write as _;
@@ -396,6 +520,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         report(&format!("budget={budget} bare"), &bare);
+        // Every other weight is read against the exact pass above, destination
+        // by destination — the two sweeps walk the same list in the same order,
+        // so a reading at index `i` is the same place asked twice.
+        for &(numerator, denominator) in &cli.weight {
+            let weighted = sweep(
+                &footing,
+                &terrain,
+                from,
+                &destinations,
+                budget,
+                Weight::of(numerator, denominator),
+                cli.repeat,
+            );
+            report_weight(&format!("{numerator}/{denominator}"), &bare, &weighted);
+        }
         bare.sort_unstable_by_key(|reading| std::cmp::Reverse(reading.elapsed));
         println!("  slowest destinations:");
         for reading in bare.iter().take(10) {

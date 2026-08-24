@@ -14734,7 +14734,13 @@ fn a_creature_routes_past_its_exact_budget_over_the_coarse_graph() {
     // What the shard had before this node: an exact search that refuses, and
     // refuses for want of *budget* rather than for want of a way.
     for from in [FLAT, RAISED] {
-        let search = openshard_movement::search_path(&scene.footing(), from, GOAL, ai::PATH_BUDGET);
+        let search = openshard_movement::search_path(
+            &scene.footing(),
+            from,
+            GOAL,
+            ai::PATH_BUDGET,
+            openshard_movement::Weight::EXACT,
+        );
         assert!(!search.arrived, "flat A* must not find this route from {from:?}");
         assert_eq!(
             search.exit,
@@ -14817,7 +14823,13 @@ fn a_refused_long_route_is_remembered_until_it_lapses() {
         Some(&GOAL.z),
         "the goal is walkable ground once the door is open"
     );
-    let search = openshard_movement::search_path(&scene.footing(), FROM, GOAL, ai::PATH_BUDGET);
+    let search = openshard_movement::search_path(
+        &scene.footing(),
+        FROM,
+        GOAL,
+        ai::PATH_BUDGET,
+        openshard_movement::Weight::EXACT,
+    );
     assert!(!search.arrived, "flat A* must not find this route");
 
     let graph = openshard_movement::NavigationGraph::build(&scene.footing(), 96, 64)
