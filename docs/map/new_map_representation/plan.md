@@ -229,12 +229,23 @@ a free optimisation, until `Order` is made total across distinct tiles.
 
 **Goal.** Our client draws a world it was given, not one it found on disk.
 
+> **Being executed, and it has an executable plan of its own:**
+> [`to_the_client.md`](to_the_client.md) — five phases, the measurements the
+> pipe was chosen off, and what each phase's "done" is. **E0 is built**: the
+> client's world is a parameter, and `--base-set` is the arm that is not the
+> install.
+
 - Client-side disk cache keyed by chunk and revision; on connect it offers what
   it holds and receives what is missing or stale; on a publish it is told which
   chunks died.
 - The pipe is chosen here and not before — the `0xBF` envelope
   ([`extended.rs:27`](../../../crates/common/protocol/src/extended.rs#L27)) or a
   second stream over [`Dial`](../../../crates/client/net/src/transport.rs#L100).
+  **Taken: the `0xBF` envelope**, in the `0xE000` range
+  [`access.rs`](../../../crates/common/protocol/src/access.rs#L75) already
+  reserved, with the chunk deflated first. The argument is a measurement — a
+  deflated chunk of Felucca is at most 16,050 bytes and every one of them fits
+  in a packet, which is what retired the case for a second stream.
 - **Done when** our client starts with no UO map or statics files present and
   draws the shard's world, including a patch published while it was connected.
 

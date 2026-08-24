@@ -73,60 +73,37 @@ fn run(mut cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 /// Where a facet's world comes from, and how a graph built over it is stamped.
 ///
 /// The two cases differ in more than which reader runs: they name different
-/// inputs, and they put the artifact in different places. Keeping that in one
-/// place is what stops a base-set graph from being written beside an install it
-/// has nothing to do with.
+/// inputs, and they put the artifact in different places. That is
+/// [`bake::FacetWorld`]'s, shared with the shard's boot and the client; what is
+/// left here is the reporting, which is this binary's alone.
 fn source(
     cli: &Cli,
     facet: Facet,
 ) -> Result<(MapSnapshot, bake::Stamp, PathBuf), Box<dyn std::error::Error>> {
-    let tiledata = cli.client.join("tiledata.mul");
     match cli.base_set.as_deref() {
-        Some(base_set) => {
-            eprintln!(
-                "navigation bake: loading facet {facet} from {}",
-                base_set.display()
-            );
-            // The base set *and* the log beside it, through the one call the
-            // shard resolves a world with: a graph built over the base alone
-            // would be a graph of a world the shard is not running.
-            let openshard_basemap::Loaded {
-                snapshot: map,
-                log,
-                patches,
-                ..
-            } = openshard_basemap::load(base_set)?;
-            if map.facet() != facet {
-                return Err(format!(
-                    "{} is facet {}, and --facet says {facet}",
-                    base_set.display(),
-                    map.facet().0
-                )
-                .into());
-            }
-            if patches != 0 {
-                eprintln!(
-                    "navigation bake: {patches} patch(es) applied; facet {facet} is at revision {}",
-                    map.revision().get()
-                );
-            }
-            let stamp = bake::stamp_of_base_set(base_set, log.as_deref(), &tiledata, facet, map.revision())?;
-            // Beside the base set: the world is what the graph is derived from,
-            // and an artifact in the install directory would be found by a
-            // shard reading the install and refused for reasons it cannot see.
-            let path = bake::artifact_path(bake::beside(base_set), facet);
-            Ok((map, stamp, path))
-        }
-        None => {
-            eprintln!("navigation bake: loading facet {facet}");
-            // The map first, then the stamp: the revision recorded in the
-            // artifact is the revision the graph is about to be built from.
-            let map = openshard_uofiles::map::load_facet(&cli.client, facet)?;
-            let stamp = bake::stamp_of(&cli.client, facet, map.revision())?;
-            let path = bake::artifact_path(&cli.client, facet);
-            Ok((map, stamp, path))
-        }
+        Some(base_set) => eprintln!(
+            "navigation bake: loading facet {facet} from {}",
+            base_set.display()
+        ),
+        None => eprintln!("navigation bake: loading facet {facet}"),
     }
+    let source = cli
+        .base_set
+        .as_deref()
+        .map_or(bake::WorldSource::Install, bake::WorldSource::BaseSet);
+    // The map first, then the stamp: the revision recorded in the artifact is
+    // the revision the graph is about to be built from.
+    let world = bake::FacetWorld::read(&cli.client, source, facet)?;
+    if world.patches != 0 {
+        eprintln!(
+            "navigation bake: {} patch(es) applied; facet {facet} is at revision {}",
+            world.patches,
+            world.snapshot.revision().get()
+        );
+    }
+    let stamp = world.stamp(&cli.client, facet)?;
+    let path = bake::artifact_path(world.artifacts(&cli.client), facet);
+    Ok((world.snapshot, stamp, path))
 }
 
 fn bake_one(cli: &Cli, facet: Facet, tiles: &TileData) -> Result<(), Box<dyn std::error::Error>> {

@@ -49,9 +49,10 @@ pub enum Error {
         path: PathBuf,
         source: io::Error,
     },
-    Map {
-        path: PathBuf,
-        source: openshard_uofiles::map::MapError,
+    /// The facet could not be read from the source it was named from — the
+    /// install's own files, or a base set of ours.
+    Source {
+        source: openshard_movement::bake::SourceError,
     },
     TileData {
         path: PathBuf,
@@ -77,9 +78,7 @@ impl fmt::Display for Error {
             Self::Art(error) => write!(f, "wall catalogue: {error}"),
             Self::Missing { path } => write!(f, "interior artifact {} does not exist", path.display()),
             Self::Io { path, source } => write!(f, "interior artifact {}: {source}", path.display()),
-            Self::Map { path, source } => {
-                write!(f, "interior input {}: {source}", path.display())
-            }
+            Self::Source { source } => write!(f, "interior input: {source}"),
             Self::TileData { path, source } => {
                 write!(f, "interior input {}: {source}", path.display())
             }
@@ -105,7 +104,7 @@ impl std::error::Error for Error {
         match self {
             Self::Art(error) => Some(error),
             Self::Io { source, .. } => Some(source),
-            Self::Map { source, .. } => Some(source),
+            Self::Source { source } => Some(source),
             Self::TileData { source, .. } => Some(source),
             _ => None,
         }
@@ -122,27 +121,59 @@ pub fn artifact_path(client_dir: &Path, facet: Facet) -> PathBuf {
 /// Files whose contents determine the map labels, including the authored wall
 /// catalogue.  Metadata stamps deliberately match the navigation artifact's
 /// policy: inexpensive at startup and enough to distinguish client installs.
-pub fn stamp_of(client_dir: &Path, facet: Facet, revision: MapRevision) -> Result<Stamp, Error> {
-    let uop_name = format!("map{}LegacyMUL.uop", facet.0);
-    let map_name = if client_dir.join(&uop_name).exists() {
-        uop_name
-    } else {
-        format!("map{}.mul", facet.0)
-    };
+///
+/// `world` is what the flood ran over, and it decides which files are named
+/// here: a facet read from a base set is not derived from `map0LegacyMUL.uop`
+/// and `statics0.mul` any more, so stamping those would validate a flood
+/// against inputs that are no longer its source — and they still exist with
+/// their old mtimes, so the check would *pass*. That is
+/// `openshard_movement::bake::stamp_of_base_set`'s argument, and this is the
+/// same one for the second artifact keyed to a world.
+///
+/// The two inputs a base set does **not** replace are named either way:
+/// `tiledata.mul`, because what a tile means is still the table's, and the wall
+/// catalogue, because what a *wall* is was measured off the art.
+pub fn stamp_of(
+    client_dir: &Path,
+    world: &openshard_movement::bake::FacetWorld,
+    facet: Facet,
+) -> Result<Stamp, Error> {
     let table = crate::table_path(client_dir);
-    let inputs_at = [
-        (map_name.clone(), client_dir.join(map_name)),
-        (
-            format!("staidx{}.mul", facet.0),
-            client_dir.join(format!("staidx{}.mul", facet.0)),
-        ),
-        (
-            format!("statics{}.mul", facet.0),
-            client_dir.join(format!("statics{}.mul", facet.0)),
-        ),
-        ("tiledata.mul".into(), client_dir.join("tiledata.mul")),
+    let shared = [
+        ("tiledata.mul".to_owned(), client_dir.join("tiledata.mul")),
         (format!("art-table: {}", table.display()), table),
     ];
+    let inputs_at: Vec<(String, PathBuf)> = match &world.base_set {
+        Some(base_set) => [Some(base_set.clone()), world.log.clone()]
+            .into_iter()
+            .flatten()
+            .map(|path| (openshard_movement::bake::file_name_of(&path), path))
+            .chain(shared)
+            .collect(),
+        None => {
+            let uop_name = format!("map{}LegacyMUL.uop", facet.0);
+            let map_name = if client_dir.join(&uop_name).exists() {
+                uop_name
+            } else {
+                format!("map{}.mul", facet.0)
+            };
+            [
+                (map_name.clone(), client_dir.join(map_name)),
+                (
+                    format!("staidx{}.mul", facet.0),
+                    client_dir.join(format!("staidx{}.mul", facet.0)),
+                ),
+                (
+                    format!("statics{}.mul", facet.0),
+                    client_dir.join(format!("statics{}.mul", facet.0)),
+                ),
+            ]
+            .into_iter()
+            .chain(shared)
+            .collect()
+        }
+    };
+    let revision = world.snapshot.revision();
     let mut inputs = Vec::with_capacity(inputs_at.len());
     for (name, path) in inputs_at {
         let metadata = fs::metadata(&path).map_err(|source| io_error(path.clone(), source))?;
@@ -165,18 +196,22 @@ pub fn stamp_of(client_dir: &Path, facet: Facet, revision: MapRevision) -> Resul
     })
 }
 
-/// Read the wall catalogue, map and tile data, then calculate a whole facet.
+/// Read the wall catalogue, the facet and the tile data, then calculate a whole
+/// facet's building space.
 ///
-/// The revision comes back with the graph rather than being asked of the caller
-/// afterwards: this function is what decides which world the flood ran over, so
-/// it is the only place that can answer honestly. The caller stamps the
-/// artifact with what it is handed here.
-pub fn build(client_dir: &Path, facet: Facet) -> Result<(BuildingMap, MapRevision), Error> {
+/// The **world** comes back with the graph rather than being asked of the caller
+/// afterwards: this function is what decides which one the flood ran over, so it
+/// is the only place that can answer honestly, and [`stamp_of`] takes exactly
+/// what it hands back. It used to answer with a revision alone, which was enough
+/// while there was one possible source for it.
+pub fn build(
+    client_dir: &Path,
+    source: openshard_movement::bake::WorldSource<'_>,
+    facet: Facet,
+) -> Result<(BuildingMap, openshard_movement::bake::FacetWorld), Error> {
     let table = load(client_dir).map_err(Error::Art)?;
-    let map = openshard_uofiles::map::load_facet(client_dir, facet).map_err(|source| Error::Map {
-        path: client_dir.to_path_buf(),
-        source,
-    })?;
+    let world = openshard_movement::bake::FacetWorld::read(client_dir, source, facet)
+        .map_err(|source| Error::Source { source })?;
     let tiles =
         openshard_uofiles::tiledata::load_tiles(client_dir.join("tiledata.mul")).map_err(|source| {
             Error::TileData {
@@ -186,10 +221,11 @@ pub fn build(client_dir: &Path, facet: Facet) -> Result<(BuildingMap, MapRevisio
         })?;
     // The bake the interiors bake reads a step through. It is a projection of
     // exactly this map and this table, which is the pairing `MapTerrain` is.
-    let spans = openshard_movement::spans::SpanIndex::build(map.map(), &tiles);
-    let terrain = openshard_movement::MapTerrain::new(map.map(), &tiles, &spans);
+    let map = world.snapshot.map();
+    let spans = openshard_movement::spans::SpanIndex::build(map, &tiles);
+    let terrain = openshard_movement::MapTerrain::new(map, &tiles, &spans);
     let graph = BuildingMap::bake(&terrain, &|graphic| table.shape(graphic));
-    Ok((graph, map.revision()))
+    Ok((graph, world))
 }
 
 /// Atomically write a fully-built map and its validating stamp.

@@ -19,6 +19,10 @@ workspace = true
 [dependencies]
 openshard-client-app.workspace = true
 openshard-e2e-shard.workspace = true
+# For one enum: which world the window reads — the install's map, or the base
+# set the shard in this process is about to run on. It is named here because
+# this binary is the one place that has both answers in front of it.
+openshard-movement.workspace = true
 clap.workspace = true
 tracing-subscriber.workspace = true
 

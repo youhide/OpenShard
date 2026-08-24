@@ -1,4 +1,13 @@
-//! Stable, validated files containing an already-built [`NavigationGraph`].
+//! Stable, validated files containing an already-built [`NavigationGraph`], and
+//! **what a file like that was built from**.
+//!
+//! The second half is why [`FacetWorld`] lives here rather than beside a reader.
+//! A facet has two sources now — a client install, or a base set of ours with
+//! its patch log — and the difference is not which loader runs: it is which
+//! files a derived artifact names in its stamp and which directory it lands in.
+//! Getting that wrong produces a bake that validates happily against inputs it
+//! was never built from, which is the one failure a stamp exists to stop, so the
+//! resolution is one function and not one per caller.
 
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
@@ -6,7 +15,7 @@ use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use openshard_map::snapshot::MapRevision;
+use openshard_map::snapshot::{MapRevision, MapSnapshot};
 use openshard_protocol::world::{Facet, Point};
 
 use crate::NavigationGraph;
@@ -185,11 +194,211 @@ pub fn stamp_of_base_set(
 /// A path would make moving the shard's directory invalidate every artifact in
 /// it, and the length and mtime beside it already separate two different files
 /// that happen to share a name.
-fn file_name_of(path: &Path) -> String {
+///
+/// Public because the interiors flood is a second artifact keyed to a world and
+/// stamps the same base set under the same rule — two spellings of "what is this
+/// input called" would be two artifacts that disagree about one file.
+#[must_use]
+pub fn file_name_of(path: &Path) -> String {
     path.file_name().map_or_else(
         || path.display().to_string(),
         |name| name.to_string_lossy().into_owned(),
     )
+}
+
+/// Where a facet's world is read from.
+///
+/// Two arms and not an `Option<&Path>`: the install is a *source*, not the
+/// absence of one, and a shard converts one facet at a time — so both answers
+/// are ordinary and neither is a value nobody has supplied yet.
+#[derive(Clone, Copy, Debug)]
+pub enum WorldSource<'a> {
+    /// The client install's own `map*` and `statics*`, as every reader before
+    /// base sets existed.
+    Install,
+    /// A base set of ours, and the append-only patch log beside it.
+    BaseSet(&'a Path),
+}
+
+/// A facet cannot be read from the source it was pointed at.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum SourceError {
+    /// The install's map or statics could not be read.
+    Install {
+        /// The install directory.
+        path: PathBuf,
+        /// Why.
+        source: openshard_uofiles::map::MapError,
+    },
+    /// The base set, or the log beside it, could not be resolved.
+    BaseSet {
+        /// Why.
+        source: openshard_basemap::BaseError,
+    },
+    /// The file is a facet, and not the facet it was named for.
+    ///
+    /// Two answers to one question is a config that loads Tokuno as Felucca:
+    /// every coordinate plausible, every place wrong.
+    WrongFacet {
+        /// Which file said so.
+        path: PathBuf,
+        /// The facet the caller asked for.
+        wanted: Facet,
+        /// The facet the file holds.
+        found: Facet,
+    },
+}
+
+impl fmt::Display for SourceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Install { path, source } => {
+                write!(f, "reading a facet from {}: {source}", path.display())
+            }
+            Self::BaseSet { source } => source.fmt(f),
+            Self::WrongFacet { path, wanted, found } => write!(
+                f,
+                "{} holds facet {}, and it was named for facet {wanted}",
+                path.display(),
+                found.0,
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SourceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Install { source, .. } => Some(source),
+            Self::BaseSet { source } => Some(source),
+            Self::WrongFacet { .. } => None,
+        }
+    }
+}
+
+/// One facet as the source it was named from resolved it, plus everything a
+/// bake over it has to record about where it came from.
+///
+/// The fields travel together because a caller that has one wants all of them:
+/// the shard's boot, both bake binaries and the client each need the world, the
+/// stamp over it and the directory its artifacts belong in, and each of them
+/// used to derive all three for itself.
+#[derive(Debug)]
+pub struct FacetWorld {
+    /// The facet, at the revision its source resolved to — the base set's own
+    /// if nothing has been committed, or the revision the last patch produced.
+    pub snapshot: MapSnapshot,
+    /// The base set it came out of, or `None` for a facet read from the install.
+    ///
+    /// This is what decides the stamp and the artifact directory, which is why
+    /// it is kept rather than being consumed by the read.
+    pub base_set: Option<PathBuf>,
+    /// The patch log beside that base set, when there is one on disk.
+    ///
+    /// `None` is a world nobody has edited, and it is not the same as an empty
+    /// log: an empty log is a file, and a file is an input to a stamp.
+    pub log: Option<PathBuf>,
+    /// The revision the base set itself is at, before any patch — `None` for
+    /// the install. What the log's header names, and what a caller appending a
+    /// patch has to name.
+    pub base: Option<MapRevision>,
+    /// How many patches were applied on the way. Zero for the install.
+    pub patches: usize,
+}
+
+impl FacetWorld {
+    /// Read `facet` from `source`.
+    ///
+    /// `client_dir` is the install, and it is required either way: a base set
+    /// holds the map, and `tiledata.mul` still holds what a tile *is*.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] — the source could not be read, or the file it named
+    /// turned out to be a different facet.
+    pub fn read(client_dir: &Path, source: WorldSource<'_>, facet: Facet) -> Result<Self, SourceError> {
+        match source {
+            WorldSource::Install => {
+                let snapshot = openshard_uofiles::map::load_facet(client_dir, facet).map_err(|source| {
+                    SourceError::Install {
+                        path: client_dir.to_owned(),
+                        source,
+                    }
+                })?;
+                Ok(Self {
+                    snapshot,
+                    base_set: None,
+                    log: None,
+                    base: None,
+                    patches: 0,
+                })
+            }
+            WorldSource::BaseSet(base_set) => {
+                // The base set *and* the log beside it, through the one call
+                // every reader of a world of ours resolves it with: a caller
+                // that read the base alone would be holding a world the shard
+                // is not running.
+                let openshard_basemap::Loaded {
+                    snapshot,
+                    base,
+                    log,
+                    patches,
+                } = openshard_basemap::load(base_set).map_err(|source| SourceError::BaseSet { source })?;
+                if snapshot.facet() != facet {
+                    return Err(SourceError::WrongFacet {
+                        path: base_set.to_owned(),
+                        wanted: facet,
+                        found: snapshot.facet(),
+                    });
+                }
+                Ok(Self {
+                    snapshot,
+                    base_set: Some(base_set.to_owned()),
+                    log,
+                    base: Some(base),
+                    patches,
+                })
+            }
+        }
+    }
+
+    /// Where artifacts derived from this world live.
+    ///
+    /// Beside the base set when there is one, and in the install otherwise. An
+    /// artifact of a base-set world left in the install directory would be found
+    /// by a shard reading the install and refused for reasons it cannot see.
+    #[must_use]
+    pub fn artifacts<'a>(&'a self, client_dir: &'a Path) -> &'a Path {
+        match &self.base_set {
+            Some(base_set) => beside(base_set),
+            None => client_dir,
+        }
+    }
+
+    /// The stamp a navigation artifact built over this world records.
+    ///
+    /// The choice between [`stamp_of`] and [`stamp_of_base_set`] is made here
+    /// and nowhere else: a caller that picked for itself could stamp a base-set
+    /// world with the install's files, which still exist and still have their
+    /// old mtimes — so the check would *pass*.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Io`] if one of the inputs cannot be inspected.
+    pub fn stamp(&self, client_dir: &Path, facet: Facet) -> Result<Stamp, Error> {
+        let revision = self.snapshot.revision();
+        match &self.base_set {
+            Some(base_set) => stamp_of_base_set(
+                base_set,
+                self.log.as_deref(),
+                &client_dir.join("tiledata.mul"),
+                facet,
+                revision,
+            ),
+            None => stamp_of(client_dir, facet, revision),
+        }
+    }
 }
 
 /// Read length and mtime for each named input, in the order given.

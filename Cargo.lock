@@ -2895,6 +2895,7 @@ dependencies = [
  "clap",
  "openshard-client-app",
  "openshard-e2e-shard",
+ "openshard-movement",
  "tracing-subscriber",
 ]
 

@@ -23,6 +23,7 @@ use clap::{Parser, ValueEnum};
 use openshard_client_net::session::{Pick, Plan};
 use openshard_client_net::transport::Tcp;
 use openshard_map::grid::Tile;
+use openshard_movement::bake::WorldSource;
 use openshard_protocol::identity::{RawAccountName, RawPlaintextPassword};
 use tracing_subscriber::EnvFilter;
 
@@ -52,6 +53,22 @@ struct Cli {
     /// The client install to read.
     #[arg(short, long, env = "OPENSHARD_CLIENT", value_name = "DIR")]
     client: PathBuf,
+
+    /// Take the ground from a base set of ours instead of the install's map.
+    ///
+    /// The same file `world.base_sets` names in a shard's `openshard.toml`, made
+    /// by `openshard-map-import`, and the patch log beside it is read with it —
+    /// so a client and a shard pointed at one base set draw and enforce the same
+    /// revision of the same world. `--client` is still required: what a base set
+    /// replaces is `map0LegacyMUL.uop`, `staidx0.mul` and `statics0.mul`, and
+    /// the art, the hues, the multis and `tiledata.mul` are the install's either
+    /// way.
+    ///
+    /// The navigation graph and the interiors flood are then read from beside
+    /// the base set rather than from the install, because they are derived from
+    /// this world and not from that one.
+    #[arg(long, env = "OPENSHARD_BASE_SET", value_name = "FILE")]
+    base_set: Option<PathBuf>,
 
     /// The account to log in as. Without one this is an offline map viewer.
     #[arg(short, long, env = "OPENSHARD_ACCOUNT")]
@@ -170,5 +187,11 @@ fn main() -> ExitCode {
         }),
         ..Default::default()
     };
-    openshard_client_app::run(&cli.client, shard, cli.ttf_font, opening)
+    // Which files the ground comes out of. `Install` is the arm every run before
+    // base sets existed took, and it is a source rather than the absence of one.
+    let world = cli
+        .base_set
+        .as_deref()
+        .map_or(WorldSource::Install, WorldSource::BaseSet);
+    openshard_client_app::run(&cli.client, world, shard, cli.ttf_font, opening)
 }

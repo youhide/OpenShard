@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use clap::Parser;
 use openshard_client_artscan::interiors;
 use openshard_client_render::doors;
+use openshard_movement::bake;
 use openshard_protocol::world::Facet;
 
 #[derive(Debug, Parser)]
@@ -15,6 +16,13 @@ struct Cli {
     client: PathBuf,
     #[arg(long, default_value_t = 0)]
     facet: u8,
+    /// Inspect the artifact of a base-set world instead of the install's.
+    ///
+    /// The same file `openshard-interiors-bake --base-set` flooded: without it
+    /// this reads the install's map and looks for the artifact beside the
+    /// install, so a base-set world's flood is invisible to it.
+    #[arg(long, value_name = "FILE")]
+    base_set: Option<PathBuf>,
     /// Map point as X,Y. May be repeated.
     #[arg(long = "at", required = true, value_parser = parse_point)]
     points: Vec<(u16, u16)>,
@@ -45,9 +53,15 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let facet = Facet(cli.facet);
-    let map = openshard_uofiles::map::load_facet(&cli.client, facet)?;
-    let stamp = interiors::stamp_of(&cli.client, facet, map.revision())?;
-    let graph = interiors::load_baked(&interiors::artifact_path(&cli.client, facet), &stamp)?;
+    let source = cli
+        .base_set
+        .as_deref()
+        .map_or(bake::WorldSource::Install, bake::WorldSource::BaseSet);
+    let world = bake::FacetWorld::read(&cli.client, source, facet)?;
+    let map = &world.snapshot;
+    let stamp = interiors::stamp_of(&cli.client, &world, facet)?;
+    let path = interiors::artifact_path(world.artifacts(&cli.client), facet);
+    let graph = interiors::load_baked(&path, &stamp)?;
     let tiles = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
     let table = openshard_client_artscan::load(&cli.client)?;
     // What the interiors bake reads its steps through: this map, this table and

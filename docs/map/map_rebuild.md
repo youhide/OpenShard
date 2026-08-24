@@ -418,7 +418,7 @@ waits is the rest of
 |---|---|
 | ~~**C, second half**~~ | **Built.** A running shard edits its own ground — `.tile`, `.setland`, `.addstatic`, `.rmstatic` — through [`mapedit::commit`](../../crates/server/world/src/mapedit.rs), which is the answer to "who calls it and where in the tick": a staff verb, in the tick that read the command. The world moves before the log because applying a patch is how you find out whether it applies, and a log that refuses puts the world back. The span bake follows; the coarse router is dropped, and that is the cost D retires. **What is left of C is the connected client, which is E** |
 | **D** | derived data keyed by the source revision instead of by file mtimes — the navigation bake and the building flood **already carry a `MapRevision` and refuse themselves on a mismatch**; the occluder measurements and the radar do not, and the radar's revision dimension has no production writer at all |
-| **E** | whole chunks to our client, over a pipe chosen there and not before |
+| **E** | whole chunks to our client, over a pipe now chosen: the `0xBF` envelope in the `0xE000` range, deflated. **Started** — [`to_the_client.md`](new_map_representation/to_the_client.md) is the executable plan and E0 is built, so the client's world is a parameter rather than always the install |
 | **F** | the editor, and committing a house into the base as its one-way operation |
 | **G** | residency and compression, still a constraint rather than a step |
 
@@ -597,4 +597,5 @@ running — a world of ours, a history, and an edit that lands between two ticks
 the handoffs in [`handoffs/`](new_map_representation/handoffs/) are where its
 state lives, and the plan holds the intent. **What C still owes is the picture**:
 an edit changes what the shard allows and reaches no screen at all, because both
-ends draw the facet they loaded off disk. That is E.
+ends draw the facet they loaded off disk. That is E, it has started, and
+[`to_the_client.md`](new_map_representation/to_the_client.md) is the plan.

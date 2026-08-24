@@ -448,18 +448,6 @@ struct FacetSource {
     home: Option<openshard_state::WorldHome>,
 }
 
-/// The base set configured for `facet`, if the operator named one.
-///
-/// `world.base_sets` is a table keyed by facet, and a facet not in it comes out
-/// of the install exactly as before — so a shard converts one facet at a time.
-fn base_set_of(config: &Config, facet: Facet) -> Option<&Path> {
-    config
-        .world
-        .base_sets
-        .get(&openshard_config::FacetKey(facet))
-        .map(std::path::PathBuf::as_path)
-}
-
 /// The ruleset `facet` runs under: the operator's answer where there is one, and
 /// the answer the facet's number meant in retail where there is not.
 ///
@@ -490,75 +478,53 @@ fn facet_source(
     facet: Facet,
 ) -> Result<FacetSource, Box<dyn std::error::Error>> {
     let bake = "cargo run --release -p openshard-movement --bin openshard-navigation-bake";
-    let Some(base_set) = base_set_of(config, facet) else {
-        let map = openshard_uofiles::map::load_facet(dir, facet)?;
-        let stamp = openshard_movement::bake::stamp_of(dir, facet, map.revision())?;
-        return Ok(FacetSource {
-            navigation_path: openshard_movement::bake::artifact_path(dir, facet),
-            stamp,
-            map,
-            rebake: format!("OPENSHARD_CLIENT={dir:?} {bake} -- --facet {facet}"),
-            home: None,
-        });
-    };
-
-    eprintln!("world load: reading facet {facet} from {}", base_set.display());
-    // The base set and the patch log beside it, in one call — the world is the
-    // pair, and `openshard-navigation-bake` resolves it through the same one so
-    // that the two cannot arrive at different revisions of it.
-    let openshard_basemap::Loaded {
-        snapshot: map,
-        log,
-        patches,
-        base,
-    } = openshard_basemap::load(base_set)?;
-    // The file says which facet it is, and the config says which facet it was
-    // named for. Two answers to one question is a config that loads Tokuno as
-    // Felucca — every coordinate plausible, every place wrong.
-    if map.facet() != facet {
-        return Err(format!(
-            "world.base_sets names {} for facet {facet}, and the file is facet {}",
-            base_set.display(),
-            map.facet().0,
-        )
-        .into());
+    // A facet not in `world.base_sets` comes out of the install exactly as
+    // before, so a shard converts one facet at a time.
+    let base_set = config.world.base_set(facet);
+    if let Some(base_set) = base_set {
+        eprintln!("world load: reading facet {facet} from {}", base_set.display());
     }
-    // `tiledata.mul` is still the install's, and still an input: a base set
-    // holds the map, and what a tile *means* is the tile table's. The config
-    // refuses a base set without client files for this reason, so the directory
-    // here is a real one.
-    if patches != 0 {
+    // The one resolution the navigation bake and the client also go through: it
+    // reads the base set *and* the log beside it, refuses a file that turns out
+    // to be another facet, and answers where things derived from this world
+    // live. `tiledata.mul` is still the install's either way — a base set holds
+    // the map, and what a tile *means* is the tile table's — which is why the
+    // config refuses a base set without client files and `dir` is a real one
+    // here.
+    let source = base_set.map_or(
+        openshard_movement::bake::WorldSource::Install,
+        openshard_movement::bake::WorldSource::BaseSet,
+    );
+    let world = openshard_movement::bake::FacetWorld::read(dir, source, facet)?;
+    if world.patches != 0 {
         eprintln!(
-            "world load: {patches} patch(es) applied to facet {facet}; it is at revision {}",
-            map.revision().get()
+            "world load: {} patch(es) applied to facet {facet}; it is at revision {}",
+            world.patches,
+            world.snapshot.revision().get()
         );
     }
-    let stamp = openshard_movement::bake::stamp_of_base_set(
-        base_set,
-        log.as_deref(),
-        &dir.join("tiledata.mul"),
-        facet,
-        map.revision(),
-    )?;
-    // Beside the base set, not beside the install: the artifact belongs to the
-    // world it was built from, and two worlds of one facet must not share it.
-    Ok(FacetSource {
-        navigation_path: openshard_movement::bake::artifact_path(
-            openshard_movement::bake::beside(base_set),
-            facet,
-        ),
-        stamp,
-        map,
-        rebake: format!(
+    let stamp = world.stamp(dir, facet)?;
+    let navigation_path = openshard_movement::bake::artifact_path(world.artifacts(dir), facet);
+    let rebake = match base_set {
+        Some(base_set) => format!(
             "OPENSHARD_CLIENT={dir:?} {bake} -- --facet {facet} --base-set {:?}",
             base_set.display()
         ),
+        None => format!("OPENSHARD_CLIENT={dir:?} {bake} -- --facet {facet}"),
+    };
+    Ok(FacetSource {
+        navigation_path,
+        stamp,
         // The base set's own revision, not the world's: it is the log's header,
         // and a patch committed while the shard runs is appended to that log.
-        home: Some(openshard_state::WorldHome {
+        // `None` for a facet read out of the install, which is a facet nothing
+        // can edit while the shard runs.
+        home: base_set.map(|base_set| openshard_state::WorldHome {
             base_set: base_set.to_owned(),
-            base,
+            base: world.base.expect("a facet read from a base set has one"),
         }),
+        map: world.snapshot,
+        rebake,
     })
 }
 
@@ -690,7 +656,7 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
             size = format!("{}x{}", map.map().width(), map.map().height()),
             statics = map.map().static_count(),
             revision = map.revision().get(),
-            source = %base_set_of(config, facet).map_or_else(
+            source = %config.world.base_set(facet).map_or_else(
                 || "client files".to_owned(),
                 |path| path.display().to_string()
             ),

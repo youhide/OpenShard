@@ -1448,13 +1448,21 @@ impl WorldState {
     ///
     /// # Errors
     ///
-    /// [`PatchError`] — including [`PatchError::NoGround`] for a facet with no
-    /// map at all. On any of them nothing has moved.
+    /// [`PatchError`] — including [`PatchError::NoGround`] for a facet that is
+    /// loaded and has no map. On any of them nothing has moved.
+    ///
+    /// # Panics
+    ///
+    /// If `facet` is not loaded at all. It used to answer `NoGround` for that,
+    /// which is *true* — there is no ground — and is not what the caller got
+    /// wrong: every other reader of a missing facet in this file panics with the
+    /// same sentence, and dressing a caller's bug as a map with no ground sends
+    /// whoever reads the error looking at the world instead of at the call.
     pub fn publish(&mut self, facet: Facet, patch: &Patch) -> Result<FacetUndo, PatchError> {
         let Self { facets, tiles, .. } = self;
         facets
             .get_mut(&facet)
-            .ok_or(PatchError::NoGround)?
+            .expect("an entity's facet is always loaded")
             .publish(patch, tiles)
     }
 

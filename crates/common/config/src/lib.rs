@@ -589,6 +589,23 @@ impl Default for WorldConfig {
     }
 }
 
+impl WorldConfig {
+    /// The base set configured for `facet`, if the operator named one.
+    ///
+    /// A facet not in the table comes out of the install exactly as before, so
+    /// `None` is *the install* rather than an answer nobody has given yet — and
+    /// every caller turns it straight into
+    /// `openshard_movement::bake::WorldSource`, which is the enum that says so.
+    ///
+    /// An accessor rather than three call sites reaching into the map with a
+    /// `FacetKey` of their own: the shard's boot, the playground's window and
+    /// anything else that has to agree with them are asking one question.
+    #[must_use]
+    pub fn base_set(&self, facet: Facet) -> Option<&Path> {
+        self.base_sets.get(&FacetKey(facet)).map(PathBuf::as_path)
+    }
+}
+
 /// A facet number, as the key of a `world.base_sets` table.
 ///
 /// TOML has no integer keys — a table's keys are strings, always — and serde

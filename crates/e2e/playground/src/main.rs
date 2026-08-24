@@ -198,6 +198,17 @@ fn main() -> ExitCode {
         );
     }
 
+    // Which world the shard is about to run on, read out of the config before it
+    // moves into the closure. The window takes the same one: two ends of one
+    // process reading two different worlds is the disagreement this playground
+    // exists to make impossible, and a base set is a *different world* from the
+    // install it was imported from the moment one patch is committed to the log
+    // beside it. See `docs/map/new_map_representation/to_the_client.md`.
+    let base_set = openshard_e2e_shard::window_base_set(operator.as_ref());
+    if let Some(base_set) = &base_set {
+        eprintln!("both ends read facet 0 from {}", base_set.display());
+    }
+
     // The shard reads the same install the window does, and that is not a
     // convenience: `world.client_files` is what gives the server a map, and
     // without one every step is allowed at whatever height the client guessed.
@@ -237,6 +248,10 @@ fn main() -> ExitCode {
     // thing it just logged in to play. `--at` is the offline viewer's.
     let code = openshard_client_app::run(
         &dir,
+        base_set.as_deref().map_or(
+            openshard_movement::bake::WorldSource::Install,
+            openshard_movement::bake::WorldSource::BaseSet,
+        ),
         Some((dial, plan)),
         cli.ttf_font,
         openshard_client_app::Opening {

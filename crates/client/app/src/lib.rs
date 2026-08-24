@@ -399,11 +399,20 @@ pub(crate) fn scaled_gump_quads(labels: &[GumpLabel<'_>], atlas: &FontAtlas, sca
 
 /// Open a window on `dir`'s files, and log in to `shard` if one is given.
 ///
-/// The three arguments are the whole of what this run was asked for: which
-/// client install to read, whether there is a shard to play, and which face
-/// draws overhead speech. Everything else — the facet, the version claimed,
-/// where the camera starts — is a constant above, because none of it is a
-/// decision a caller has ever needed to make differently.
+/// The four arguments are the whole of what this run was asked for: which client
+/// install to read, **where the ground comes from**, whether there is a shard to
+/// play, and which face draws overhead speech. Everything else — the facet, the
+/// version claimed, where the camera starts — is a constant above, because none
+/// of it is a decision a caller has ever needed to make differently.
+///
+/// `world` is the second of those and is new: the install used to be the only
+/// possible answer, and now a base set of ours is the other one. It is an enum
+/// with two arms rather than an `Option<PathBuf>` because the install is a
+/// *source* and not the absence of one. What a base set replaces is
+/// `map0LegacyMUL.uop`, `staidx0.mul` and `statics0.mul`; `dir` is still
+/// required either way, because the art, the hues, the multis and — the one
+/// that decides what a tile *means* — `tiledata.mul` are not in a base set and
+/// are not going to be.
 ///
 /// A shard is a [`Dial`] and a [`Plan`] rather than an address and a plan: how
 /// the connection is opened is the caller's, which is what lets
@@ -429,6 +438,7 @@ pub(crate) fn scaled_gump_quads(labels: &[GumpLabel<'_>], atlas: &FontAtlas, sca
 /// the event loop it builds is what enforces it.
 pub fn run<D: Dial + Send + 'static>(
     dir: &Path,
+    world: openshard_movement::bake::WorldSource<'_>,
     shard: Option<(D, Plan)>,
     ttf_font: Option<PathBuf>,
     opening: Opening,
@@ -457,13 +467,28 @@ pub fn run<D: Dial + Send + 'static>(
     // Reading the whole facet takes a moment and a few hundred megabytes. That
     // is the shape `uofiles` has today — see the backlog in docs/client.md — and
     // it is honest to do it up front rather than to stall on the first frame.
-    let map = match openshard_uofiles::map::load_facet(dir, openshard_protocol::world::Facet(FACET)) {
-        Ok(map) => map,
-        Err(error) => {
-            eprintln!("loading facet {FACET}: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
+    //
+    // Which files that reads is `world`'s: the install's own map and statics, or
+    // a base set of ours and the patch log beside it. It goes through the same
+    // resolution the shard's boot and the two bakes use, so a client and a shard
+    // pointed at one base set cannot arrive at different revisions of it —
+    // `docs/map/new_map_representation/to_the_client.md`'s E0.
+    let world =
+        match openshard_movement::bake::FacetWorld::read(dir, world, openshard_protocol::world::Facet(FACET))
+        {
+            Ok(world) => world,
+            Err(error) => {
+                eprintln!("loading facet {FACET}: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+    if world.patches != 0 {
+        eprintln!(
+            "facet {FACET}: {} patch(es) applied; it is at revision {}",
+            world.patches,
+            world.snapshot.revision().get()
+        );
+    }
     checkpoint("facet loaded");
     let art = match Art::open(dir) {
         Ok(art) => art,
@@ -632,9 +657,9 @@ pub fn run<D: Dial + Send + 'static>(
     };
     eprintln!(
         "{} loaded: {}x{} tiles",
-        map.map().facet_name(),
-        map.map().width(),
-        map.map().height()
+        world.snapshot.map().facet_name(),
+        world.snapshot.map().width(),
+        world.snapshot.map().height()
     );
 
     // User events are wake-ups only. The shard thread puts updates in the
@@ -701,7 +726,9 @@ pub fn run<D: Dial + Send + 'static>(
     let start = Point::new(
         start_tile.x,
         start_tile.y,
-        map.map()
+        world
+            .snapshot
+            .map()
             .land(start_tile.x, start_tile.y)
             .map_or(START.z, |cell| cell.z),
     );
@@ -732,7 +759,25 @@ pub fn run<D: Dial + Send + 'static>(
     // the viewer remains useful, but long routes are disabled.
     // The facet comes from the snapshot rather than from `FACET` again: one
     // answer per process is the whole point of the snapshot owning it.
-    let facet = map.facet();
+    let facet = world.snapshot.facet();
+    // Both stamps are taken here, before the snapshot moves into `Ground`, and
+    // both are taken *from the world* rather than from `dir`: a facet read from
+    // a base set is not derived from `map0LegacyMUL.uop` any more, and that file
+    // still sits there with its old mtime — so a stamp naming it would pass and
+    // hand this client a graph of a world it has never seen.
+    //
+    // The artifacts go with the world for the same reason, which is why the two
+    // paths below are `world.artifacts(dir)` and not `dir`.
+    let artifacts = world.artifacts(dir).to_owned();
+    let navigation_stamp = world.stamp(dir, facet);
+    let interior_stamp = openshard_client_artscan::interiors::stamp_of(dir, &world, facet);
+    // What a rebake command has to be told, so the two hints below name the
+    // world this client is actually running on.
+    let rebake_world = match &world.base_set {
+        Some(base_set) => format!(" --base-set {:?}", base_set.display()),
+        None => String::new(),
+    };
+    let map = world.snapshot;
     // Where a body may stand, baked before anything can ask: this end predicts
     // every step it draws, and since `navigation_spans.md`'s N3 a step reads
     // this rather than re-deriving each column from `tiledata`. One pass over
@@ -747,8 +792,8 @@ pub fn run<D: Dial + Send + 'static>(
     let map = ground.snapshot().expect("it was given a facet a line ago");
     checkpoint("span index baked");
 
-    let navigation_path = openshard_movement::bake::artifact_path(dir, facet);
-    let coarse = openshard_movement::bake::stamp_of(dir, facet, map.revision())
+    let navigation_path = openshard_movement::bake::artifact_path(&artifacts, facet);
+    let coarse = navigation_stamp
         .and_then(|stamp| openshard_movement::bake::load(&navigation_path, &stamp))
         .and_then(|graph| {
             if graph.dimensions() == (map.map().width(), map.map().height()) {
@@ -770,15 +815,15 @@ pub fn run<D: Dial + Send + 'static>(
             eprintln!(
                 "{error}; long-distance routing disabled\ncreate it with: \
                  OPENSHARD_CLIENT={:?} cargo run --release -p openshard-movement --bin \
-                 openshard-navigation-bake -- --facet {FACET}",
+                 openshard-navigation-bake -- --facet {FACET}{rebake_world}",
                 dir
             );
         })
         .ok();
     checkpoint("navigation graph loaded");
 
-    let interior_path = openshard_client_artscan::interiors::artifact_path(dir, facet);
-    let interiors = openshard_client_artscan::interiors::stamp_of(dir, facet, map.revision())
+    let interior_path = openshard_client_artscan::interiors::artifact_path(&artifacts, facet);
+    let interiors = interior_stamp
         .and_then(|stamp| openshard_client_artscan::interiors::load_baked(&interior_path, &stamp))
         .and_then(|graph| {
             if graph.dimensions() == (map.map().width(), map.map().height()) {
@@ -800,7 +845,7 @@ pub fn run<D: Dial + Send + 'static>(
             eprintln!(
                 "{error}; interior diagnostic disabled\ncreate it with: \\
                  OPENSHARD_CLIENT={:?} cargo run --release -p openshard-client-artscan --bin \\
-                 openshard-interiors-bake -- --facet {FACET}",
+                 openshard-interiors-bake -- --facet {FACET}{rebake_world}",
                 dir
             );
         })

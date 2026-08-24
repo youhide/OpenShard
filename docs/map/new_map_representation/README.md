@@ -12,6 +12,7 @@ chunk to an editor that commits.
 | [`mechanics.md`](mechanics.md) | How a changeable map works: base, patch, snapshot; chunks; what goes stale; how a chunk reaches the client. Where a decision is not made, it says so and names what would settle it. |
 | [`plan.md`](plan.md) | Seven directions with the code each one touches, in order, with what "done" means for each, plus one deferred on purpose. A0 and A are refactors with no feature in them. |
 | [`snapshot.md`](snapshot.md) | 🚩 **The plan being executed first.** Directions A0 and A on their own — the block order gets a type, and the map gets one revisioned owner. No format, no patches, no network. Start a session here. |
+| [`to_the_client.md`](to_the_client.md) | 🚩 **The plan being executed now.** Direction E on its own: the pipe, chosen off measurements rather than preference, and five phases from "the client's world is a parameter" to "an operator types `.setland` and a connected screen changes". |
 | [`client_today.md`](client_today.md) | What direction A takes a handle to, measured: the layout `WorldMap` actually has, what each bake costs in memory and on disk, and the ranked backlog found while inventorying the readers. |
 
 Read them in that order. `overview.md` is the only one that has to be read to
@@ -74,6 +75,14 @@ written against a layout that is still moving.
 What is left of C is the **client**: an edit reaches a running shard's rules and
 no picture at all, because both ends still draw the facet they loaded off disk.
 That is direction E, and it is now the only thing between here and C's own
-"done". The decisions and the leftovers are in the newest
-[handoff](handoffs/2026-08-24-the-ground-moves-while-people-stand-on-it.md); the
-plan itself records intent, not progress.
+"done".
+
+**E has started**, and its plan is [`to_the_client.md`](to_the_client.md). The
+pipe is chosen — the `0xBF` envelope in the `0xE000` range this engine already
+reserved for its own subcommands, with the chunk deflated before it is framed,
+because a deflated chunk of Felucca is at most 16,050 bytes and every one of the
+7,168 fits in a packet. **E0 is built**: the client takes a `WorldSource` rather
+than always reading the install, `--base-set` is the other arm, and the
+resolution that used to be spelled out in the shard's boot and both bake binaries
+is one function all four now go through. The decisions and the leftovers are in
+the [handoffs](handoffs/); the plan itself records intent, not progress.

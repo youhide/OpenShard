@@ -29,7 +29,7 @@
 pub mod in_process;
 
 use std::net::{SocketAddr, SocketAddrV4};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread::JoinHandle;
 
 use openshard_client_net::session::{Pick, Plan};
@@ -141,6 +141,26 @@ pub fn operator_config(path: impl AsRef<Path>) -> Result<Option<Config>, ConfigE
         return Ok(None);
     }
     Config::load(path).map(Some)
+}
+
+/// The base set the *window* should read, given the config the shard will run
+/// on — or `None` for the install, which is what a config naming none means.
+///
+/// Facet 0, because that is the facet the window draws: `openshard_client_app`
+/// pins `FACET` and one process opens one facet. A playground whose two ends
+/// read two different worlds is the disagreement it exists to make impossible,
+/// and after one committed patch a base set *is* a different world from the
+/// install it was imported from.
+///
+/// Here rather than in the playground because the config is here: the playground
+/// depends on this crate and on the client, and on nothing else that could
+/// answer the question.
+#[must_use]
+pub fn window_base_set(config: Option<&Config>) -> Option<PathBuf> {
+    config?
+        .world
+        .base_set(openshard_protocol::world::Facet(0))
+        .map(Path::to_owned)
 }
 
 /// A shard running on a thread of its own, and the way to end it.
