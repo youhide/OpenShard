@@ -793,3 +793,16 @@ Found while closing the fetch that straddles a publish
 - **`link::play`'s wiring has a fourth decision now.** The publish arm is a
   four-way match on what the connection is in the middle of, and two of its arms
   are new *states* rather than new packets. Same fix, four handoffs old.
+
+Found while sweeping the four entries above:
+
+- **`CompositeCache::latest_quarantine` outlives the quarantine it names.** Now
+  that a block can be un-quarantined, a field dump can say `quarantine_count=0`
+  and `latest_quarantine=Some(block …)` in the same breath — and the HUD line in
+  `shell.rs` reads the second as if it were current. `clear` drops it, since a
+  replaced facet makes every verdict meaningless at once; the block-wise doors do
+  not, because the field is documented as *the most recent safety decision* and
+  that is a thing that happened rather than a thing that is true. Which of the two
+  it should be is the question: a decision this cache has since gone back on is
+  worth keeping in a dump and worth *not* showing on a strip, and those want two
+  different fields.
