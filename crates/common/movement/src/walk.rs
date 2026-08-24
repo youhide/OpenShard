@@ -541,7 +541,7 @@ fn landing(footing: &Footing<'_>, stance: Stance, to: Point) -> Option<Point> {
 /// `aboard` exists for a body stepping *down* from a mast. It can:
 /// [`Cover::reach`] of a flat surface is its own height, so everything below the
 /// body passes and only the climb is bounded. See
-/// `boarding_from_open_water_ignores_the_climb_limit`, which asserts both halves.
+/// `boarding_from_open_water_obeys_the_climb_limit`, which asserts both halves.
 fn aboard(footing: &Footing<'_>, stance: Stance, to: Point) -> Option<i32> {
     if footing.overlay.is_empty() {
         return None;
@@ -729,7 +729,11 @@ pub fn arrival_z(footing: &Footing<'_>, tile: Tile, near_z: i32, height: i32) ->
     // nobody asked about. The candidate arm below has no such trouble: it
     // measures distances and never has to name a point.
     if let Ok(z) = i8::try_from(near_z) {
-        let here = Point { x: tile.x, y: tile.y, z };
+        let here = Point {
+            x: tile.x,
+            y: tile.y,
+            z,
+        };
         if let Some(landed) = can_step(footing, here, here) {
             return Some(i32::from(landed.z));
         }
@@ -1326,10 +1330,7 @@ mod tests {
         // of it so the candidate arm is what answers.
         for order in [[0, 20], [20, 0]] {
             let mut decks = Overlay::default();
-            decks.set(
-                berth,
-                order.map(|z| Cover::standing(z, 0)).to_vec(),
-            );
+            decks.set(berth, order.map(|z| Cover::standing(z, 0)).to_vec());
             let footing = Footing::new(Some(scene.terrain()), &decks, Doors::AsTheyStand);
             assert_eq!(
                 arrival_z(&footing, berth, 10, PLAYER_HEIGHT),

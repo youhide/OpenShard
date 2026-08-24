@@ -896,7 +896,7 @@ fn a_ban_puts_out_whoever_is_already_inside() {
     assert_eq!(where_of(friend), at, "a friend was put out");
     assert_ne!(where_of(unwelcome), at, "the banned player stayed inside");
     // Just outside the box's west edge, which is where the doorstep is.
-    assert_eq!(where_of(unwelcome), doorstep(&state, at, COTTAGE));
+    assert_eq!(where_of(unwelcome), doorstep(&state, Facet(0), at, COTTAGE));
 }
 
 /// The sign hangs on the box's west-south corner, seven above the house's z.

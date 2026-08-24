@@ -70,8 +70,13 @@ impl World {
             let x = area.x.wrapping_add(dx as u16);
             let y = area.y.wrapping_add(dy as u16);
 
-            // Stand it on the ground the client will compute, or a flat default
-            // where there is no map.
+            // **The height to spawn *near*, not the height to spawn at.** A
+            // spawner names a rectangle and no storey at all, so the ground is
+            // the honest seed — a rat belongs on the floor of the dungeon and
+            // not on the walkway over it — and `npc::spawn` is what turns a seed
+            // into a surface (`movement::arrival_z`, which reads the pier, the
+            // deck and the house floor this cannot). A flat default where there
+            // is no map.
             let z = self
                 .state
                 .map_terrain(facet)

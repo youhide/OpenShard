@@ -429,18 +429,38 @@ pub fn adopt_doors(state: &mut WorldState, house: EntityId, facet: Facet, at: Po
 
 /// Where a banned player is put out to.
 ///
-/// One tile west of the house's box, at the ground the house stands on.
+/// One tile west of the house's box, on whatever a body put there stands on.
 ///
 /// **Not** the sign's tile, now that there is one: [`sign_spot`] hangs it on the
 /// wall at z+7, which is a place for a plaque and not for a person. ServUO moves
 /// the banned to a `BaseBanLocation` each house class declares — a third
 /// hand-written table, alongside the doors and the sign offsets — and "just
 /// outside, on the side the box ends" is the same intent from data that exists.
+///
+/// **The height is the world's and not the house's.** It used to be `at.z`
+/// carried verbatim: a house on a rise puts its own floor a good way over the
+/// slope outside it, and an eviction to that height is a body standing inside
+/// the hill next door — the same defect as every other arrival that named a
+/// height instead of asking for one (`movement::arrival_z`, and `roadmap.md`'s
+/// third pier suspect). The house's z is still what the question is asked
+/// *near*: out of the door and down the step, not up onto the roof.
+/// The `facet` is the whole reason this takes one: every other question in this
+/// module is about a multi's *shape*, which is the same on every facet, and this
+/// one is about the ground.
 #[must_use]
-pub fn doorstep(state: &WorldState, at: Point, multi: u16) -> Point {
+pub fn doorstep(state: &WorldState, facet: Facet, at: Point, multi: u16) -> Point {
     let tiles = tiles_of(state, at, multi, None);
     let west = tiles.iter().map(|tile| tile.x).min().unwrap_or(at.x);
-    Point::new(west.saturating_sub(1), at.y, at.z)
+    let outside = Tile::new(west.saturating_sub(1), at.y);
+    let z = openshard_movement::arrival_z(
+        &state.footing(facet, openshard_map::overlay::Doors::AsTheyStand),
+        outside,
+        i32::from(at.z),
+        openshard_movement::PLAYER_HEIGHT,
+    )
+    .and_then(|z| i8::try_from(z).ok())
+    .unwrap_or(at.z);
+    Point::new(outside.x, outside.y, z)
 }
 
 /// Put every banned player standing inside a house out of it.
@@ -460,7 +480,7 @@ pub fn evict_the_banned(state: &mut WorldState, house: EntityId) -> Vec<EntityId
     };
     let facet = state.facet_of(house);
     let area = tiles_of(state, at, entry.multi, None);
-    let out = doorstep(state, at, entry.multi);
+    let out = doorstep(state, facet, at, entry.multi);
 
     let caught: Vec<EntityId> = state
         .registry

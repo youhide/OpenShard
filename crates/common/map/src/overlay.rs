@@ -651,7 +651,7 @@ mod tests {
     /// them about it: a test of the tie-break that also happened to be applying a
     /// climb limit would pass for the wrong reason the day the limit changed.
     /// Movement's own limit is asserted where it belongs, in `walk.rs`'s
-    /// `boarding_from_open_water_ignores_the_climb_limit`.
+    /// `boarding_from_open_water_obeys_the_climb_limit`.
     const ANY_REACH: i32 = i32::MAX;
 
     /// A person, as `openshard-movement` asks about one. Spelled here so the
