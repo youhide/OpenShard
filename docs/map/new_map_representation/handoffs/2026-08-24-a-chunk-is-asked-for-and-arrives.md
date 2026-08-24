@@ -142,10 +142,23 @@ not a dropped packet, and which has already been caught short an id twice
 in the plan's backlog. A `match` in a helper returning one sample per variant
 would make the doc's claim true, where a `vec!` cannot.
 
+**Fixed since**, in the shape that note asked for: an `every_variant!` macro
+writes `VARIANT_NAMES` and a wildcard-free `variant_name` match from a single
+list, so a variant added to the enum and not to the list does not compile, and
+`the_fixture_holds_one_of_every_variant` holds the fixture to the list. All ten
+are in it and all ten framed correctly on the first run — the table was right,
+and now something asks.
+
 **`WorldState::facet_state` panics on a facet nothing loaded, and there is no
 accessor that does not.** Right for every caller that got the number off an
 entity, wrong for the one that got it off the wire — so `chunk_answers` indexes
 `state.facets` directly and says why. Filed.
+
+**Fixed since**: `facet_state_if_loaded` is the `Option` accessor, and
+`chunk_answers` reads the world through it rather than through the field. Both
+accessors' docs now name which question they answer, and
+`a_facet_the_shard_never_loaded_is_refused_rather_than_panicked_on` pins the
+distinction from the client's end.
 
 **The plan said `WorldNotice` was "six bytes of body".** It is seventeen, in a
 twenty-two byte packet. Corrected in place; the point it was making — that a

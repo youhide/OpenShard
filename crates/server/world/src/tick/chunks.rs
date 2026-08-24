@@ -97,13 +97,12 @@ impl World {
     /// One or more [`ServerPacket::ChunkData`] per chunk, or exactly one
     /// [`ServerPacket::ChunkRefused`]. Never nothing — see the module header.
     pub(crate) fn chunk_answers(&self, facet: Facet, wanted: &[ChunkAt]) -> Vec<ServerPacket> {
-        // `facets.get` and not `facet_state`: the number came off the wire, and
-        // the accessor that indexes is documented for facets an entity carries,
-        // which are loaded by construction. A client's byte is not.
+        // `facet_state_if_loaded` and not `facet_state`: the number came off the
+        // wire, and the accessor that panics is documented for facets an entity
+        // carries, which are loaded by construction. A client's byte is not.
         let ground = self
             .state
-            .facets
-            .get(&facet)
+            .facet_state_if_loaded(facet)
             .and_then(|state| state.ground().snapshot());
         let Some(snapshot) = ground else {
             return wanted

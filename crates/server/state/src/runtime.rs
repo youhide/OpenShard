@@ -1492,13 +1492,37 @@ impl WorldState {
     }
 
     /// The state of a facet the world is known to have.
+    ///
+    /// # Panics
+    ///
+    /// On a facet the shard did not load. That is the right answer for a number
+    /// that came off an entity — [`facet_of`](Self::facet_of) and `enter` keep
+    /// every live entity on a loaded facet, so a miss here is a broken
+    /// invariant and not a case to handle. It is the wrong answer for a number
+    /// that came off the wire, where a client naming a facet nobody loaded is an
+    /// ordinary thing to be told no about:
+    /// [`facet_state_if_loaded`](Self::facet_state_if_loaded) is that question.
     #[must_use]
     pub fn facet_state(&self, facet: Facet) -> &FacetState {
-        &self.facets[&facet]
+        self.facets
+            .get(&facet)
+            .expect("an entity's facet is always loaded")
     }
 
-    /// The same, mutably. Panics only on a facet no entity should carry —
-    /// `facet_of` and `enter` keep every live entity on a loaded facet.
+    /// The state of a facet, or `None` where the shard loaded no such facet.
+    ///
+    /// The accessor for a facet number this shard did not choose — one off a
+    /// client's packet, or off a save file written by a shard configured
+    /// differently. Every reader of one of those used to index
+    /// [`facets`](Self::facets) itself, because the alternative was a panic on a
+    /// byte a client is free to send.
+    #[must_use]
+    pub fn facet_state_if_loaded(&self, facet: Facet) -> Option<&FacetState> {
+        self.facets.get(&facet)
+    }
+
+    /// The same as [`facet_state`](Self::facet_state), mutably, and it panics for
+    /// the same reason.
     pub fn facet_state_mut(&mut self, facet: Facet) -> &mut FacetState {
         self.facets
             .get_mut(&facet)

@@ -107,9 +107,20 @@ fn every_chunk() -> Vec<ChunkAt> {
 /// includes that a `0xBF 0xE002` becomes a command and that the command is
 /// answered out of a tick like every other reply.
 fn ask(world: &mut World, connection: ConnectionId, wanted: Vec<ChunkAt>) -> Vec<ServerPacket> {
+    ask_on(world, connection, Facet(0), wanted)
+}
+
+/// The same, for a facet the caller names — including one the shard has never
+/// heard of, which is a thing a client is free to ask about.
+fn ask_on(
+    world: &mut World,
+    connection: ConnectionId,
+    facet: Facet,
+    wanted: Vec<ChunkAt>,
+) -> Vec<ServerPacket> {
     world.queue(Command::RequestChunks {
         connection,
-        facet: Facet(0),
+        facet,
         chunks: wanted,
     });
     world.tick(Instant::now());
@@ -281,6 +292,44 @@ fn a_facet_with_no_ground_refuses_every_chunk_asked_for() {
             .collect::<Vec<_>>()
     );
     assert_eq!(refused.len(), answers.len(), "and nothing else was sent");
+}
+
+/// A facet byte naming a facet this shard never loaded is refused, not indexed.
+///
+/// The client picks that byte, so it is an input and not an invariant — which is
+/// why the reader goes through
+/// [`facet_state_if_loaded`](openshard_state::WorldState::facet_state_if_loaded)
+/// and not through the accessor that panics for a facet an *entity* carries. The
+/// difference between the two is a shard that says no and a shard that drops the
+/// connection.
+#[test]
+fn a_facet_the_shard_never_loaded_is_refused_rather_than_panicked_on() {
+    let mut world = world_with_ground();
+    let connection = enter_as(&mut world, connection(), Instant::now());
+    let _entry = packets_for(&mut world, connection);
+
+    let elsewhere = Facet(3);
+    assert!(
+        world.state.facet_state_if_loaded(elsewhere).is_none(),
+        "the fixture loads facet 0 alone"
+    );
+    let wanted = vec![ChunkAt { x: 0, y: 0 }, ChunkAt { x: 1, y: 0 }];
+    let answers = ask_on(&mut world, connection, elsewhere, wanted.clone());
+    let refused: Vec<_> = answers
+        .iter()
+        .filter_map(|packet| match packet {
+            ServerPacket::ChunkRefused(refused) => Some((refused.facet, refused.at, refused.reason)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        refused,
+        wanted
+            .into_iter()
+            .map(|at| (elsewhere, at, Refusal::NoWorld))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(refused.len(), answers.len(), "and no ground came back");
 }
 
 /// The rule the whole conversation rests on, over a request that mixes both

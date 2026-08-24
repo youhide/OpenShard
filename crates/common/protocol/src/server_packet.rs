@@ -1068,8 +1068,106 @@ mod tests {
         ClientVersion::new(7, 0, 45, 65)
     }
 
-    /// One of every variant, so a new variant that lies about its id or length
-    /// has to be added here to compile.
+    /// Every variant of [`ServerPacket`], named once — and the compiler is what
+    /// holds this list to the enum.
+    ///
+    /// This exists because [`one_of_each`] used to *say* it held one of each and
+    /// nothing checked it: ten of the sixty-two were missing, and each one
+    /// missing is a packet outside `every_packet_frames_to_its_own_length`, the
+    /// only oracle [`server_packet_length`] has. A wrong entry there is a dropped
+    /// connection rather than a dropped packet, so "somebody will remember" is
+    /// not a good enough guarantee.
+    ///
+    /// The two halves below are what make the claim checkable. `variant_name` is
+    /// a `match` with no wildcard, so a variant added to the enum and not to this
+    /// list does not compile; `VARIANT_NAMES` is built from the same list, so it
+    /// cannot drift from it. What is left — that the fixture actually carries one
+    /// of each — is `the_fixture_holds_one_of_every_variant` below.
+    macro_rules! every_variant {
+        ($($variant:ident,)*) => {
+            /// Every variant's name, in declaration order.
+            const VARIANT_NAMES: &[&str] = &[$(stringify!($variant),)*];
+
+            /// Which variant a packet is, so a test can say which one is absent.
+            fn variant_name(packet: &ServerPacket) -> &'static str {
+                match packet {
+                    $(ServerPacket::$variant(_) => stringify!($variant),)*
+                }
+            }
+        };
+    }
+
+    every_variant![
+        TargetCursor,
+        MultiTarget,
+        WarMode,
+        AttackTarget,
+        Health,
+        PlaySound,
+        Animation,
+        NewAnimation,
+        Effect,
+        HuedEffect,
+        LoginDenied,
+        ShardList,
+        Relay,
+        CharacterList,
+        DeleteReject,
+        CharacterListUpdate,
+        PlayerStart,
+        PlayerUpdate,
+        DeathStatus,
+        DeathAnimation,
+        WalkAck,
+        WalkReject,
+        LoginComplete,
+        LightLevel,
+        PlayMusic,
+        SeasonChange,
+        LogoutAck,
+        MapChange,
+        Remove,
+        OpenPaperdoll,
+        MobileStatus,
+        MobileMove,
+        MobileIncoming,
+        StatLocks,
+        WorldItem,
+        DragCancel,
+        EquipUpdate,
+        OpenContainer,
+        AddToContainer,
+        ContainerContents,
+        BuyList,
+        SellList,
+        DesignRevision,
+        AuthorityNotice,
+        ChunkData,
+        WorldNotice,
+        ChunkRefused,
+        TooltipRevision,
+        PropertyListReply,
+        PartyMemberList,
+        PartyRemoveMember,
+        PartyTextMessage,
+        PartyInvitation,
+        SkillsFull,
+        SkillUpdate,
+        SpokenMessage,
+        LocalizedMessage,
+        UnicodeMessage,
+        ContextMenu,
+        SpellbookContent,
+        CloseGump,
+        GumpDisplay,
+    ];
+
+    /// One of every variant, which is checked rather than asserted: see
+    /// [`every_variant`] and `the_fixture_holds_one_of_every_variant`.
+    ///
+    /// Every test below runs over this list, so a variant absent from it is a
+    /// variant whose id, whose declared length and whose framing nothing looks
+    /// at.
     fn one_of_each() -> Vec<ServerPacket> {
         let serial = Serial::new(0x0000_002A).unwrap();
         let effect = GraphicalEffect {
@@ -1088,6 +1186,12 @@ mod tests {
             ServerPacket::TargetCursor(TargetCursor {
                 cursor_id: CursorId(1),
                 kind: TargetKind::Object,
+            }),
+            ServerPacket::MultiTarget(MultiTargetRequest {
+                cursor_id: CursorId(2),
+                kind: TargetKind::Location,
+                multi: crate::wire::MultiId(0x0064),
+                offset: (0, 0, 0),
             }),
             ServerPacket::WarMode(WarMode { war: true }),
             ServerPacket::AttackTarget(AttackTarget { target: Some(serial) }),
@@ -1163,6 +1267,11 @@ mod tests {
                 facing: crate::direction::Facing::walking(crate::direction::Direction::South),
             }),
             ServerPacket::DeathStatus(DeathStatus { dead: true }),
+            ServerPacket::DeathAnimation(DeathAnimation {
+                killed: serial,
+                corpse: Serial::new(0x4000_0003),
+                running: true,
+            }),
             ServerPacket::WalkAck(WalkAck {
                 sequence: crate::world::StepSequence(1),
                 notoriety: crate::mobile::Notoriety::Innocent,
@@ -1256,6 +1365,25 @@ mod tests {
                 mobile: crate::serial::Serial::new(0x0000_0001).unwrap(),
                 hue: crate::wire::Hue(0x0021),
             }),
+            // `0x24` and `0x25` are two lengths each, and the version picks —
+            // which is why neither is an `EncodePacket` and why both being
+            // outside this list left `open_container_length` and
+            // `add_to_container_length` with no oracle at all.
+            ServerPacket::OpenContainer(OpenContainer {
+                container: crate::serial::Serial::new(0x4000_0001).unwrap(),
+                gump: crate::wire::Graphic(0x003C),
+            }),
+            ServerPacket::AddToContainer(AddToContainer {
+                item: crate::containers::ContainedItem {
+                    serial: crate::serial::Serial::new(0x4000_0002).unwrap(),
+                    graphic: crate::wire::Graphic(0x0EED),
+                    amount: crate::items::ItemAmount(3),
+                    at: crate::gump::GumpPoint::new(44, 65),
+                    grid: crate::containers::GridSlot(7),
+                    hue: crate::wire::Hue::NONE,
+                },
+                container: crate::serial::Serial::new(0x4000_0001).unwrap(),
+            }),
             ServerPacket::ContainerContents(crate::containers::ContainerContents {
                 container: Some(crate::serial::Serial::new(0x4000_0001).unwrap()),
                 items: Vec::new(),
@@ -1282,6 +1410,34 @@ mod tests {
                 serial: crate::serial::Serial::new(0x0000_00AB).unwrap(),
                 hash: 0x1234_5678,
             }),
+            // `0xD6` and `0xD8` are both in the framing table because it was
+            // short an id twice; this is the half of that pair which has a
+            // variant to encode.
+            ServerPacket::PropertyListReply(PropertyListReply {
+                serial: crate::serial::Serial::new(0x0000_00AB).unwrap(),
+                hash: 0x1234_5678,
+                entries: vec![crate::properties::PropertyEntry {
+                    cliloc: crate::wire::ClilocId(1_042_971),
+                    arguments: "a katana".to_owned(),
+                }],
+            }),
+            ServerPacket::DesignRevision(crate::design::DesignRevision {
+                serial: crate::serial::RawSerial(0x4000_0100),
+                revision: crate::design::Revision(7),
+            }),
+            ServerPacket::PartyMemberList(PartyMemberList {
+                members: vec![serial, crate::serial::Serial::new(0x0000_002B).unwrap()],
+            }),
+            ServerPacket::PartyRemoveMember(PartyRemoveMember {
+                removed: crate::serial::Serial::new(0x0000_002B).unwrap(),
+                members: vec![serial],
+            }),
+            ServerPacket::PartyTextMessage(PartyTextMessage {
+                to_all: true,
+                from: serial,
+                text: "on my way".to_owned(),
+            }),
+            ServerPacket::PartyInvitation(PartyInvitation { leader: serial }),
             ServerPacket::SkillsFull(crate::skill::SkillsFull {
                 entries: vec![crate::skill::SkillEntry {
                     id: 0,
@@ -1381,6 +1537,25 @@ mod tests {
     }
 
     #[test]
+    fn the_fixture_holds_one_of_every_variant() {
+        // The other half of `every_variant!`: that macro makes the *list* of
+        // variants impossible to get wrong, and this makes the fixture cover it.
+        // Failing here means a variant is encoded by nothing below — not that it
+        // is broken, which is worse, because nothing would say either way.
+        let present: Vec<&str> = one_of_each().iter().map(variant_name).collect();
+        let missing: Vec<&&str> = VARIANT_NAMES
+            .iter()
+            .filter(|name| !present.contains(name))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "one_of_each is short {} of the {} variants: {missing:?}",
+            missing.len(),
+            VARIANT_NAMES.len()
+        );
+    }
+
+    #[test]
     fn every_variant_writes_the_id_it_claims() {
         for packet in one_of_each() {
             let bytes = packet.encode(version());
@@ -1448,9 +1623,12 @@ mod tests {
 
     #[test]
     fn the_hand_written_packets_are_in_the_table() {
-        // 0x24, 0x25, 0xB9 and 0x76 are not `EncodePacket`s, so `one_of_each`
-        // cannot reach them — and a client that cannot frame them stops dead on
-        // the first container it opens.
+        // 0xB9 and 0x76 have no variant at all, so `one_of_each` cannot reach
+        // them however complete it is — and a client that cannot frame them
+        // stops dead on the first login. 0x24 is here for a smaller reason: it
+        // *is* a variant now, but `encode_open_container` writes its own header
+        // rather than going through `frame_body`, and a second writer is a
+        // second chance to disagree with the table.
         let serial = Serial::new(0x0000_002A).unwrap();
         let bytes = crate::containers::encode_open_container(serial, crate::wire::Graphic(0x3C), version());
         assert_eq!(

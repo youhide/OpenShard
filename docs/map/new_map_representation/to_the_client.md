@@ -361,24 +361,29 @@ Found while writing this, and each is somebody's.
 
 Found while building E1:
 
-- **`ServerPacket`'s `one_of_each` does not hold one of each, and its own doc
-  says it does** — *"so a new variant that lies about its id or length has to be
-  added here to compile"*, which is false: nothing checks it, and **ten of the
-  sixty-two variants are missing** (`MultiTarget`, `DeathAnimation`,
+- ~~**`ServerPacket`'s `one_of_each` does not hold one of each, and its own doc
+  says it does**~~ — *"so a new variant that lies about its id or length has to be
+  added here to compile"* was false: nothing checked it, and **ten of the
+  sixty-two variants were missing** (`MultiTarget`, `DeathAnimation`,
   `OpenContainer`, `AddToContainer`, `DesignRevision`, `PropertyListReply` and
-  all four party packets). Every one of them is therefore outside
+  all four party packets). Every one of them was therefore outside
   `every_packet_frames_to_its_own_length`, which is the oracle for
   `server_packet_length` — the table whose entire job is to be right, and whose
   being wrong is a dropped connection rather than a dropped packet
   (`0xD6` and `0xD8` are both in that table because it was short an id twice).
-  The claim can be made true: a `match` in a helper that returns one sample per
-  variant *is* checked by the compiler, where a `vec!` is not.
-- **`WorldState::facet_state` panics on a facet nothing loaded, and there is no
-  accessor that does not.** Its doc says "a facet the world is known to have",
-  which is right for every caller that got the number off an entity and wrong for
-  the one that got it off the wire — so the chunk reader indexes
-  `state.facets` directly. A named `Option`-returning accessor is a small thing,
-  and the next packet carrying a facet byte will want it too.
+  **Fixed**, in the two halves the claim needs: an `every_variant!` macro writes
+  both the list of variant names and a wildcard-free `match` over them from one
+  source, so the compiler refuses a variant missing from the list; and
+  `the_fixture_holds_one_of_every_variant` is what then holds the fixture to that
+  list. The ten are in it, and the table was right about all ten — which is a
+  result and not a formality, because nothing had asked.
+- ~~**`WorldState::facet_state` panics on a facet nothing loaded, and there is no
+  accessor that does not.**~~ **Fixed**: `facet_state_if_loaded` is the
+  `Option`-returning one, `chunk_answers` goes through it instead of indexing
+  `state.facets`, and both accessors now say in their docs which question they
+  are for — a facet number off an *entity* is an invariant and panics, one off
+  the *wire* is an input and is refused. A test asks for chunks on a facet the
+  shard never loaded, which nothing covered before.
 - **`PacketReader`/`PacketWriter` had no `u64` until this phase.** Added, because
   a map revision is one and splitting it into two dwords at the wire would be a
   second spelling of the same number. Worth noting only because it means no
