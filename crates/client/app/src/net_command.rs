@@ -178,7 +178,11 @@ impl App {
             // Nothing derived is thrown away here, and nothing needs to be: no
             // frame has been drawn yet, because drawing is one of the two things
             // that gate was put in front of, so every cache the ground feeds is
-            // still empty. A *second* one of these is E4's — a publish reaching
+            // still empty. The one thing the ground feeds that is built *before*
+            // it arrives is the atlases, and `App::create_window` packs them
+            // empty and leaves `graphics.covered` unset for exactly this moment:
+            // the first frame after this line grows them over the whole lit
+            // rectangle. A *second* one of these is E4's — a publish reaching
             // a connected client — and that is where the invalidation has a way
             // to be tested.
             link::Update::Ground { snapshot } => {

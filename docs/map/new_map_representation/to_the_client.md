@@ -547,3 +547,27 @@ Found while building E3:
 - **`world_of_ours` is now written twice and a half**, since `e2e/shard`'s
   `chunks.rs` grew a copy of `map_edit.rs`'s `say_and_hear` as well. Same lift,
   one caller worse.
+
+Found while accepting E3 — by running the playground, which is what E2 and E3
+both left owed:
+
+- ~~**`App::create_window` reads the map, and it is neither of the two doors
+  `Resources::grounded` is checked at.**~~ **Fixed.** It packs the atlases for
+  the frame that has not happened yet, and it packed them out of
+  `wanted_now` → `Resources::map` — so
+  `cargo run -p openshard-playground -- --world-from-shard` panicked at the
+  window, every time, before a single chunk had landed. It is E2's defect and
+  not E3's: the gate went on the frame and on the window's events, and the
+  *third* reader ran once before either of them existed. It packs nothing when
+  there is no ground now, and leaves `graphics.covered` unset, which is already
+  what tells `ready_atlases` to grow over the whole lit rectangle on the first
+  frame that has one — the same work, one frame later.
+- **This is what an untested startup path costs, and the entry above it named the
+  fix a phase ago.** Two handoffs recorded "not run: the playground itself" and
+  both moved on; the panic was on the first line of the first acceptance. A
+  `tests/` in `e2e/playground` would not have caught *this* one — it is a GPU
+  path and a test has no window — but the same absence is why nothing between
+  `run` and the first frame is exercised by anything except a person watching.
+  The cheap half is worth naming separately: **the startup order is only ever
+  proven by starting**, so a phase that changes it owes the run, and neither of
+  the two that did paid it.

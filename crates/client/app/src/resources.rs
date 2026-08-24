@@ -58,6 +58,13 @@ impl Resources {
     /// one place a *packet* asks one, which is `App::cutaway`. Everything
     /// downstream of those three is inside a frame or inside an event, and can
     /// read the map without asking again.
+    ///
+    /// And at one door that is none of those: `App::create_window`, which packs
+    /// the atlases for the frame that has not happened yet. It is the odd one
+    /// out because it runs *once*, before any frame and before any event, so
+    /// nothing above it has had the chance to ask — and it read the map to know
+    /// what to pack. It packs nothing when there is no ground, and leaves
+    /// `covered` unset so the first frame that has one packs the lot.
     #[must_use]
     pub fn grounded(&self) -> bool {
         self.ground.snapshot().is_some()

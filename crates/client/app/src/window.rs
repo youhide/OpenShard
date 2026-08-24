@@ -139,7 +139,6 @@ pub(crate) struct AtlasOverflow {
 /// graphic and a static graphic are both a `Graphic` and are different index
 /// spaces, which is a mistake a positional argument list would accept in
 /// silence.
-#[derive(Default)]
 pub(crate) struct Wanted {
     /// Land graphics, which feed the land atlas and the texture atlas both.
     pub(crate) land: BTreeSet<Graphic>,
@@ -148,6 +147,20 @@ pub(crate) struct Wanted {
     pub(crate) statics: BTreeSet<Graphic>,
     /// Body, group and stored direction for everyone on screen.
     pub(crate) animations: BTreeSet<AnimationKey>,
+}
+
+impl Wanted {
+    /// Nothing wanted at all — the value the two gatherers below start from,
+    /// and what a client with no facet yet asks its atlases for. Named rather
+    /// than derived, for `docs/style.md`'s reason: a field added here has to be
+    /// answered for in one place instead of arriving empty by itself.
+    pub(crate) fn empty() -> Self {
+        Self {
+            land: BTreeSet::new(),
+            statics: BTreeSet::new(),
+            animations: BTreeSet::new(),
+        }
+    }
 }
 
 impl Atlases {
@@ -261,7 +274,7 @@ pub(crate) fn wanted_in(
     animations: &StaticAnimations,
     equip_conv: &EquipConv,
 ) -> Wanted {
-    let mut wanted = Wanted::default();
+    let mut wanted = Wanted::empty();
     for band in bands {
         ground::graphics_in(map, band, &mut wanted.land);
         // Every graphic of every cycle, and not the frame on screen: an atlas
@@ -319,7 +332,7 @@ pub(crate) fn prepare_composite_job(
     // Map statics (animated or otherwise) stay in the live pass, so background
     // LOD work cannot grow or mutate the static atlas and cannot bake a roof
     // outside its 8×8 source.
-    let mut wanted = Wanted::default();
+    let mut wanted = Wanted::empty();
     ground::graphics_in(resources.map(), owner, &mut wanted.land);
     if window
         .atlases
@@ -1052,7 +1065,23 @@ impl App {
             .set_max_texture(device.limits().max_texture_dimension_2d);
         self.control.resize(config.width, config.height);
 
-        let wanted = self.wanted_now();
+        // What the first frame will need, packed before there is a frame — and
+        // only when there is ground to read it off. This is the **third** door
+        // [`Resources::grounded`](resources::Resources::grounded) is asked at,
+        // beside the frame and the window's events: since `to_the_client.md`'s
+        // E2 a client can have a window, a GPU and every one of its own files
+        // while its facet is still on the wire, and `wanted_now` reads the map.
+        //
+        // Packing nothing is not a lost picture. The atlases are built empty —
+        // each one is a fixed-side texture whether anything went into it or not
+        // — and `covered` stays `None` below, which is exactly what tells the
+        // band walk in [`ready_atlases`] to grow over the whole lit rectangle
+        // on the first frame after `Ground::set_base`. The work is the same
+        // work, moved one frame later.
+        let wanted = match self.grounded() {
+            true => self.wanted_now(),
+            false => Wanted::empty(),
+        };
         let atlases = Atlases::build(
             &self.resources.art,
             self.resources.surfaces.as_ref(),
@@ -1063,8 +1092,12 @@ impl App {
         )
         .map_err(StartupError::Atlas)?;
         // What the atlases were built for, which is what the band walk in
-        // `draw` subtracts from on the next frame.
-        self.graphics.covered = Some(light::lit_tiles(self.control.camera(), &self.tuning()));
+        // `draw` subtracts from on the next frame — and `None` when they were
+        // built for nothing, because a rectangle claimed as covered by an atlas
+        // that never saw it is a rectangle whose art is never packed.
+        self.graphics.covered = self
+            .grounded()
+            .then(|| light::lit_tiles(self.control.camera(), &self.tuning()));
         // The world passes draw into the world texture, so they take *its*
         // format and not the surface's — the two differ on an HDR display,
         // where the first non-sRGB surface format is `Rgba16Float`.
