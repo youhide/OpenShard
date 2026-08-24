@@ -1534,6 +1534,44 @@ graph over spans names neither.
   [direction B](new_map_representation/plan.md#b--our-own-chunk-format-and-a-uo-importer)'s.
   This plan makes it matter less by taking the statics off the hot path, and
   does not fix it.
+- **🚩 The graph is a forest, and nothing in it says which tree a node is in.**
+  A facet is islands — Britain and Moonglow have no walk between them at any
+  budget — so the coarse graph's 71,545 nodes fall into components with no edge
+  across, and `abstract_path` cannot know that. Its heuristic points at a goal
+  in another component, so it settles **every node reachable from the start**
+  before it can say no, and that walk is charged to nothing:
+  `LONG_PATH_EFFORT` is spent by `local_costs` and `refine`, not by the abstract
+  search. Measured from Britain on facet 0 (`tests/real_routes.rs`, release):
+  Moonglow **4.1 ms**, Skara Brae **3.4**, Magincia **3.4** — every one of them a
+  refusal, and every one of them *dearer than the 1,464-step route to Trinsic
+  that succeeds in 2.5*. A component label per node — one `u32` in the artifact,
+  a flood at bake time — turns each of those into two loads and a comparison,
+  and it is the same label `local_costs` recovers per region and throws away.
+  What it cannot answer is a *reachable* refusal (a walled courtyard on the same
+  island), which stays the search's own.
+- **A client that gets its world off the wire had no coarse graph at all.
+  ✅ Fixed.** Under `WorldSource::Shard` the client built a `Ground` with no base
+  and took no artifacts with it — `client/app/src/lib.rs`'s own comment said why:
+  they are bakes of a world this end has no file for. What it cost was
+  measurable and was not small: from the upper storey at (1340, 1676) on facet
+  0, of the 1,681 places in a 41×41 square around it, a shipped plan reaches
+  **895 with the graph and 415 without** — the bounded 600-node search alone
+  cannot get out of a building, and a person standing upstairs reported exactly
+  that as "the pathfinder does not compute to here".
+  **The world does have a file**: `client/net`'s cache keeps it as a base set of
+  ours, `openshard-world-<id>-<facet>.osbase`, so the thing a stamp needs was
+  there all along. `Update::Ground` now carries that path, and `client/app`
+  starts a worker on it: read the world, take the stamp, load the artifact
+  beside it — or build one (`bake::build`, the same construction the bake binary
+  and the shard's boot use), keep it, and hand it back as `Update::Navigation`.
+  Eleven seconds on facet 0, once per world, off the frame loop; the remembered
+  route refusal is dropped when it lands, so the click that was refused works on
+  the next one.
+  **It needed the artifact to be named after its world.** One name per facet put
+  a client's bake and the shard's own in the same working directory under the
+  same path — see [`navigation_graph_bake.md`](navigation_graph_bake.md)'s
+  artifact contract, which is where the rule now lives. Bakes made before that
+  are not found and are rebuilt once.
 
 ## Where a session starts
 

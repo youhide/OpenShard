@@ -90,7 +90,45 @@ pub(crate) struct ServerUpdateAudit {
     dropped: u64,
 }
 
+/// How work done off the frame loop gets back into it.
+///
+/// The pair the shard thread's own reporting closure is made of, named so that
+/// a *second* worker can be given one: the mailbox that keeps order, and the
+/// platform wake-up that makes the loop drain it. `link` deliberately knows
+/// nothing about `winit` — it hands back "you must wake the loop" and lets the
+/// caller do it — so the two halves are joined here rather than there.
+///
+/// `Clone` because that is the whole point: a worker takes one with it.
+#[derive(Clone)]
+pub(crate) struct Post {
+    updates: crate::link::Updates,
+    proxy: winit::event_loop::EventLoopProxy<()>,
+}
+
+impl Post {
+    pub(crate) const fn new(
+        updates: crate::link::Updates,
+        proxy: winit::event_loop::EventLoopProxy<()>,
+    ) -> Self {
+        Self { updates, proxy }
+    }
+
+    /// Stage one update and wake the loop if this is the one that has to.
+    ///
+    /// A closed event loop is not an error: a worker that finishes while the
+    /// window is going away has nowhere to put its answer and nothing to do
+    /// about it.
+    pub(crate) fn publish(&self, update: crate::link::Update) {
+        if self.updates.publish(update) {
+            let _ = self.proxy.send_event(());
+        }
+    }
+}
+
 pub(crate) struct App {
+    /// How this side's own workers report back — see [`Post`]. The shard thread
+    /// has its own copy of the same pair, made in `run`.
+    pub(crate) post: Post,
     /// The optional output mixer. It hears packet feedback but never owns game
     /// state, which stays in `world`.
     pub(crate) audio: crate::audio::Audio,
@@ -611,12 +649,15 @@ impl App {
                 sweep.server_updates.new_animations += 1;
                 true
             }
-            // And not the ground: it arrives once, before the world does and so
-            // long before the zoom this soak is counting traffic after. Counting
-            // it as a server update would also let `freeze_server` swallow the
-            // one update the client cannot draw without.
+            // And not the ground, nor the graph baked over it: neither is the
+            // shard talking. The ground arrives once, long before the zoom this
+            // soak counts traffic after, and the graph comes from a thread of
+            // this client's own — counting either as a server update would also
+            // let `freeze_server` swallow updates the client cannot work
+            // without.
             crate::link::Update::Design(_)
             | crate::link::Update::Ground { .. }
+            | crate::link::Update::Navigation { .. }
             | crate::link::Update::Lost(_) => false,
         };
         let freeze = sweep.freeze_server && is_server_update;

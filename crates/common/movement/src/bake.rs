@@ -111,10 +111,36 @@ pub fn beside(path: &Path) -> &Path {
 }
 
 /// Default destination, overridable for read-only installs.
-pub fn artifact_path(client_dir: &Path, facet: Facet) -> PathBuf {
-    std::env::var_os("OPENSHARD_NAVIGATION")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| client_dir.join(format!("openshard-navigation-{}.bin", facet.0)))
+///
+/// **The name says which world the graph is a bake of**, because a directory can
+/// hold more than one. A shard's base set and the world a client keeps off the
+/// wire live side by side in a working directory — `felucca.osbase` and
+/// `openshard-world-<id>-0.osbase` — and under one name per facet the second
+/// bake silently overwrites the first. The stamp then does its job and both
+/// sides ask for a rebake, in turn, forever: neither artifact is wrong, they
+/// just cannot both exist. So the world's own file name goes in front, and an
+/// install — which has no one file to be named after — keeps the name it always
+/// had.
+///
+/// `world` is the file the facet was read from, or `None` for the install.
+pub fn artifact_path(dir: &Path, world: Option<&Path>, facet: Facet) -> PathBuf {
+    if let Some(named) = std::env::var_os("OPENSHARD_NAVIGATION") {
+        return PathBuf::from(named);
+    }
+    match world {
+        Some(world) => dir.join(format!("{}-navigation-{}.bin", stem_of(world), facet.0)),
+        None => dir.join(format!("openshard-navigation-{}.bin", facet.0)),
+    }
+}
+
+/// A world file's name without its extension, for naming what is baked from it.
+///
+/// The file name and not the path, for [`file_name_of`]'s reason: an artifact
+/// that had the directory in its name would be invalidated by moving the
+/// directory, and it is already in that directory.
+fn stem_of(path: &Path) -> String {
+    path.file_stem()
+        .map_or_else(|| file_name_of(path), |stem| stem.to_string_lossy().into_owned())
 }
 
 /// Inspect exactly the files `WorldMap::load_facet` selects, plus tile data.
@@ -399,6 +425,49 @@ impl FacetWorld {
             None => stamp_of(client_dir, facet, revision),
         }
     }
+
+    /// Where a navigation graph baked over this world belongs.
+    ///
+    /// The directory and the name in one answer, because they are one decision
+    /// and getting either half from somewhere else is how two artifacts of two
+    /// worlds end up sharing a path — see [`artifact_path`]. The facet is the
+    /// snapshot's own: a world knows which facet it is, and a caller that passed
+    /// a second opinion could name a file for a facet the world is not.
+    #[must_use]
+    pub fn navigation_path(&self, client_dir: &Path) -> PathBuf {
+        artifact_path(
+            self.artifacts(client_dir),
+            self.base_set.as_deref(),
+            self.snapshot.facet(),
+        )
+    }
+}
+
+/// Build the coarse graph over one world — the one construction every baker
+/// uses.
+///
+/// The bake binary, the shard's boot and a client that was handed a world off
+/// the wire all want this same sequence, and it has two decisions in it that
+/// must not be made twice: **nothing live** (a baked graph is a facet's static
+/// connectivity, so a door that happened to be shut when the bake ran is not a
+/// property of the ground) and **the span index first** (a graph is a flood over
+/// `step_allowed`, which since `navigation_spans.md`'s N3 reads spans — 0.16 s
+/// against a graph bake measured in seconds).
+///
+/// `None` is a facet whose dimensions the graph cannot represent, which is
+/// [`NavigationGraph::build`]'s own answer and not a failure this can describe
+/// any better.
+#[must_use]
+pub fn build(snapshot: &MapSnapshot, tiles: &openshard_tiles::TileData) -> Option<NavigationGraph> {
+    let map = snapshot.map();
+    let spans = crate::spans::SpanIndex::build(map, tiles);
+    let nothing_placed = openshard_map::overlay::Overlay::default();
+    let footing = crate::Footing::new(
+        Some(crate::MapTerrain::new(map, tiles, &spans)),
+        &nothing_placed,
+        openshard_map::overlay::Doors::AsTheyStand,
+    );
+    NavigationGraph::build(&footing, map.width(), map.height())
 }
 
 /// Read length and mtime for each named input, in the order given.
@@ -1071,5 +1140,48 @@ mod tests {
         // empty answer is not good enough.
         assert!(File::open(beside(Path::new("felucca.osbase"))).is_ok());
         assert!(File::open(Path::new("")).is_err());
+    }
+
+    /// Two worlds in one directory are two artifacts.
+    ///
+    /// The pair that made this necessary is the real one: a shard runs
+    /// `felucca.osbase` out of its working directory, and a client that took
+    /// that same world off the wire keeps it beside it as
+    /// `openshard-world-<id>-0.osbase`. Under one name per facet, whichever
+    /// baked last owned the file and the other side asked for a rebake — each
+    /// one correct, each one undoing the other.
+    #[test]
+    fn a_bake_is_named_after_the_world_it_is_a_bake_of() {
+        // The environment overrides everything, and a test that inherited one
+        // would agree with itself no matter what this function does.
+        assert!(
+            std::env::var_os("OPENSHARD_NAVIGATION").is_none(),
+            "OPENSHARD_NAVIGATION is set, so this test would be reading it instead",
+        );
+        let here = Path::new(".");
+        let shard = artifact_path(here, Some(Path::new("felucca.osbase")), Facet(0));
+        let client = artifact_path(
+            here,
+            Some(Path::new("openshard-world-688b7d838063f8c4-0.osbase")),
+            Facet(0),
+        );
+        assert_ne!(shard, client, "two worlds shared one artifact path");
+        assert_eq!(shard, Path::new("./felucca-navigation-0.bin"));
+        assert_eq!(
+            client,
+            Path::new("./openshard-world-688b7d838063f8c4-0-navigation-0.bin"),
+        );
+        // And a facet is a facet: one world's two facets are two artifacts as
+        // they always were.
+        assert_ne!(
+            artifact_path(here, Some(Path::new("felucca.osbase")), Facet(1)),
+            shard,
+        );
+        // An install has no one file to be named after, and keeps the name
+        // every bake had before base sets existed.
+        assert_eq!(
+            artifact_path(here, None, Facet(0)),
+            Path::new("./openshard-navigation-0.bin"),
+        );
     }
 }

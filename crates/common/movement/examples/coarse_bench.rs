@@ -224,7 +224,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // graph that no longer matches its inputs is not a slower answer, it is a
     // different world's answer.
     let stamp = bake::stamp_of(&cli.client, facet, map.revision())?;
-    let graph = bake::load(&bake::artifact_path(&cli.client, facet), &stamp)?;
+    let graph = bake::load(&bake::artifact_path(&cli.client, None, facet), &stamp)?;
     let (regions, nodes, edges) = graph.counts();
     let index = openshard_movement::spans::SpanIndex::build(map.map(), &tiles);
     let terrain = MapTerrain::new(map.map(), &tiles, &index);

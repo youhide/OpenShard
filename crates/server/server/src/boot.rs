@@ -504,7 +504,7 @@ fn facet_source(
         );
     }
     let stamp = world.stamp(dir, facet)?;
-    let navigation_path = openshard_movement::bake::artifact_path(world.artifacts(dir), facet);
+    let navigation_path = world.navigation_path(dir);
     let rebake = match base_set {
         Some(base_set) => format!(
             "OPENSHARD_CLIENT={dir:?} {bake} -- --facet {facet} --base-set {:?}",

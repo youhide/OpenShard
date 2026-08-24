@@ -278,6 +278,7 @@ answered with something.
 - The span bake follows (0.07 s); the coarse graph and the interiors flood are
   artifacts of a world this client has no bake of, so they are absent, exactly as
   they are absent today for an install with no artifact beside it.
+  **The graph did not stay absent, and could not** — see the last entry below.
 
 **Done when** the client runs against a shard with no `map*` or `statics*` files
 present at all and draws the same world an install-fed client draws, sampled over
@@ -316,6 +317,22 @@ the facet.
 - **Every failure of the fetch ends the connection.** A client told to take the
   shard's ground and given something that is not a facet has nothing to draw and
   no second source, so the honest thing is one line saying which chunk and why.
+- **🚩 "No coarse graph" is not a thing a player can be asked to live with.**
+  This section wrote the absent graph down as a cost like the interiors flood,
+  and it is not the same kind of cost at all: the flood is a diagnostic, and the
+  graph is *how a click gets out of a building*. Measured on Felucca from an
+  upper storey at (1340, 1676): of the 1,681 places in a 41×41 square around it,
+  the shipped plan reaches **895 with the graph and 415 without**, because the
+  bounded 600-node search cannot see round a house. A person playing E2 reported
+  it as the pathfinder not computing, which is exactly what it is.
+  **What it wanted was already here.** E3 keeps the world as a base set of ours,
+  and a base set is a world an artifact can be stamped against — so
+  `Update::Ground` carries the kept file's path and the client takes the graph up
+  from beside it: load it, or build it off the frame loop (11 s on this facet,
+  once per world) and keep it there. It arrives as `Update::Navigation`.
+  This is also what made an artifact's name have to say **which world** it is a
+  bake of: a client's world and a shard's base set share a working directory —
+  see [`navigation_graph_bake.md`](../navigation_graph_bake.md).
 
 ### E3 — the client keeps what it was given
 

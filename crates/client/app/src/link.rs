@@ -212,6 +212,30 @@ pub enum Update {
     /// sized for it.
     Ground {
         snapshot: Box<openshard_map::snapshot::MapSnapshot>,
+        /// Where this world is on disk, when it is anywhere.
+        ///
+        /// A world off the wire is kept as a base set of ours (see
+        /// [`openshard_client_net::cache`]), and that file is the only thing a
+        /// bake can be built beside: a navigation graph is stamped against the
+        /// world it was built from, and a world with no file has nothing to
+        /// stamp. `None` is a cache that could not be written — the ground is
+        /// still perfectly good to walk on, and it is the long routes that go
+        /// without.
+        kept: Option<std::path::PathBuf>,
+    },
+    /// The coarse navigation graph, once something on this side has one.
+    ///
+    /// Loaded beside the world or baked from it, and either way off the frame
+    /// loop: a facet's graph is ~11 s of flood, which is not a thing to do
+    /// between two frames. Until it arrives, long routes are the bounded search
+    /// alone — a client plans out of a building with 600 nodes or does not plan
+    /// at all.
+    ///
+    /// `Box` for [`Ground`](Update::Ground)'s reason: it is the second largest
+    /// thing that crosses this seam, and every other variant would be sized for
+    /// it.
+    Navigation {
+        graph: Box<openshard_movement::NavigationGraph>,
     },
     /// The connection ended, and why. Nothing further will arrive.
     ///
@@ -858,6 +882,9 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                     // facet on its own disk.
                     report(Update::Ground {
                         snapshot: Box::new(held),
+                        // The file it was just read out of, which is where a
+                        // graph baked over it lives too.
+                        kept: openshard_client_net::cache::path_for(cache, notice).ok(),
                     });
                     None
                 }
@@ -946,6 +973,15 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                             Ok(WhatMoved::Nothing(held)) => {
                                 report(Update::Ground {
                                     snapshot: Box::new(held),
+                                    // Unchanged, so the kept file still is this
+                                    // world — and a graph beside it still is a
+                                    // graph of it.
+                                    kept: match &ground {
+                                        GroundSource::Fetched { cache } => {
+                                            openshard_client_net::cache::path_for(cache, notice).ok()
+                                        }
+                                        GroundSource::OwnDisk => None,
+                                    },
                                 });
                             }
                             Ok(WhatMoved::These(mut fetch)) => {
@@ -1012,16 +1048,25 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                                 // will not be written costs the next connection
                                 // the same fetch and nothing else, so it is a
                                 // line rather than a lost connection.
+                                let mut kept = None;
                                 if let (GroundSource::Fetched { cache }, Some(notice)) =
                                     (&ground, world_notice)
                                 {
                                     match openshard_client_net::cache::write(cache, notice, &snapshot) {
-                                        Ok(path) => eprintln!("the ground is kept at {}", path.display()),
+                                        Ok(path) => {
+                                            eprintln!("the ground is kept at {}", path.display());
+                                            kept = Some(path);
+                                        }
                                         Err(error) => eprintln!("the ground was not kept: {error}"),
                                     }
                                 }
                                 report(Update::Ground {
                                     snapshot: Box::new(snapshot),
+                                    // The write above, and not the path it would
+                                    // have used: a bake belongs beside a world
+                                    // that is really on the disk, and a cache
+                                    // that failed to write left none there.
+                                    kept,
                                 });
                             }
                             Err(error) => {

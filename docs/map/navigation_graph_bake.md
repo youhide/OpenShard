@@ -49,14 +49,30 @@ these operations:
 - `load(path, expected_stamp)`: validate and return a `NavigationGraph`;
 - typed errors for absence, incompatibility, staleness, and corruption.
 
-The default path is beside the client install:
+The default path is beside the world the graph is a bake of, and **named after
+it**:
 
 ```text
-openshard-navigation-<facet>.bin
+openshard-navigation-<facet>.bin        # a facet read from the install
+<world>-navigation-<facet>.bin          # a facet read from a base set of ours
 ```
+
+The install has no one file to be named after, so it keeps the original name.
+Everything else does: a directory holds more than one world now — a shard's
+`felucca.osbase` and the `openshard-world-<id>-<facet>.osbase` a client keeps of
+the world it was handed off the wire live side by side in a working directory —
+and under one name per facet the second bake overwrites the first. Nothing is
+then *wrong*: both stamps do their job, and both sides ask for a rebake, in
+turn, forever.
 
 An environment variable and a CLI `--out` option override that path, for
 read-only installs.
+
+**The interiors flood is still on the old rule** —
+`openshard-interiors-<facet>.bin`, `client/artscan`'s own. Nothing collides
+today, because only the client bakes one and it bakes it beside whichever world
+it opened; the day a second world shares that directory it is the same defect,
+and the repair is the line above.
 
 The binary header contains:
 

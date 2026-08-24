@@ -6,6 +6,7 @@
 //! `App::resources`'s own doc for why the split stops there and does not
 //! reach for a getter per field.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use openshard_client_render::atlas::FontAtlas;
@@ -116,6 +117,14 @@ impl Resources {
 }
 
 pub struct Resources {
+    /// The client install everything here was read from.
+    ///
+    /// Kept because two questions outlive the reading: `tiledata.mul` is an
+    /// input to every artifact's stamp — a graph built under one tile table is
+    /// not valid under another — and a world that arrives *after* startup has
+    /// to be able to ask both. Before that world existed, every reader had `dir`
+    /// on the stack in `run` and none of them needed it again.
+    pub dir: PathBuf,
     /// The facet: the ground read off the install, what the shard has laid over
     /// it, and where a body may stand on the two. Its base is shared with the
     /// shard thread — see [`crate::link::connect`].

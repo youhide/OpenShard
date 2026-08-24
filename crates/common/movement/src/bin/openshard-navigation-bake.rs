@@ -3,9 +3,8 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use clap::Parser;
-use openshard_map::overlay::{Doors, Overlay};
 use openshard_map::snapshot::MapSnapshot;
-use openshard_movement::{Footing, MapTerrain, NavigationGraph, bake};
+use openshard_movement::bake;
 use openshard_protocol::world::Facet;
 use openshard_tiles::TileData;
 
@@ -102,7 +101,7 @@ fn source(
         );
     }
     let stamp = world.stamp(&cli.client, facet)?;
-    let path = bake::artifact_path(world.artifacts(&cli.client), facet);
+    let path = world.navigation_path(&cli.client);
     Ok((world.snapshot, stamp, path))
 }
 
@@ -114,27 +113,11 @@ fn bake_one(cli: &Cli, facet: Facet, tiles: &TileData) -> Result<(), Box<dyn std
         "navigation bake +{:.3}s: building facet {facet} ({width}x{height})",
         started.elapsed().as_secs_f64(),
     );
-    // Nothing live: a baked graph is the *static* connectivity of a facet, and
-    // a door that happened to be shut when the bake ran is not a property of
-    // the ground. See `docs/map/navigation_graph_bake.md`.
-    let nothing_placed = Overlay::default();
-    // The span bake first: the coarse graph is a flood over `step_allowed`, so
-    // it reads the same layer a step does — and building it here is 0.07 s
-    // against a graph bake measured in minutes.
-    let spans = openshard_movement::spans::SpanIndex::build(map.map(), tiles);
-    eprintln!(
-        "navigation bake +{:.3}s: {} spans, {} B resident",
-        started.elapsed().as_secs_f64(),
-        spans.span_count(),
-        spans.resident_bytes(),
-    );
-    let footing = Footing::new(
-        Some(MapTerrain::new(map.map(), tiles, &spans)),
-        &nothing_placed,
-        Doors::AsTheyStand,
-    );
-    let graph =
-        NavigationGraph::build(&footing, width, height).ok_or("facet dimensions cannot be represented")?;
+    // The construction itself is `bake::build` — the span index, nothing live
+    // over it, and the flood — because a client that was handed a world off the
+    // wire bakes one too, and two spellings of "what a baked graph is built
+    // from" are two graphs that disagree about the same facet.
+    let graph = bake::build(&map, tiles).ok_or("facet dimensions cannot be represented")?;
     let (regions, nodes, edges) = graph.counts();
     let path = cli.out.clone().unwrap_or(default_path);
     if cli.dry_run {

@@ -848,13 +848,16 @@ pub fn run<D: Dial + Send + 'static>(
             cache: PathBuf::from("."),
         },
     };
+    // The mailbox and the wake-up, as one value: the shard thread takes a copy
+    // and so does every worker this side starts later — the navigation bake over
+    // a world that arrives on the connection is the first of those. See
+    // [`app::Post`].
+    let post = app::Post::new(updates.clone(), update_proxy);
     let shard = shard.map(|(dial, plan)| {
         eprintln!("logging in as {}", plan.account.0);
-        let reports = updates.clone();
+        let reports = post.clone();
         link::connect(dial, plan, VERSION, ground_source, move |update| {
-            if reports.publish(update) {
-                let _ = update_proxy.send_event(());
-            }
+            reports.publish(update);
         })
     });
 
@@ -862,11 +865,14 @@ pub fn run<D: Dial + Send + 'static>(
     //
     // All three at once, because all three are the same question — *which world
     // is this* — and under [`WorldSource::Shard`] all three answers are the same
-    // one: there is no world yet. A facet that arrives on the connection has no
-    // file on this disk to have baked anything beside, so the coarse graph and
-    // the interiors flood are absent exactly as they are absent today for an
-    // install with nothing baked next to it. Long routes and the interior
-    // diagnostic are what that costs, and both already have an off state.
+    // one **at this point in the run**: there is no world yet, so there is
+    // nothing to have baked anything beside.
+    //
+    // The coarse graph does not stay absent. A world off the wire is kept as a
+    // base set of ours, and that file is a world a bake can be stamped against:
+    // `App::take_up_navigation` looks for the artifact beside it and builds one
+    // when it is not there. What is still missing under this arm is the
+    // interiors flood, which is a diagnostic and has an off state.
     let facet = world
         .as_ref()
         .map_or(openshard_protocol::world::Facet(FACET), |world| {
@@ -878,8 +884,8 @@ pub fn run<D: Dial + Send + 'static>(
     let (ground, coarse, interiors) = match world {
         None => {
             eprintln!(
-                "no navigation graph and no interiors flood: they are bakes of a world this \
-                 client has no file for"
+                "no interiors flood: it is a bake of a world this client has no file for yet. \
+                 The navigation graph is taken up when the ground arrives"
             );
             // Where a body may stand cannot be baked over a facet nobody has
             // handed over yet. `Ground::set_base` is the seam it arrives
@@ -903,6 +909,10 @@ pub fn run<D: Dial + Send + 'static>(
             // the two paths below are `world.artifacts(dir)` and not `dir`.
             let artifacts = world.artifacts(dir).to_owned();
             let navigation_stamp = world.stamp(dir, facet);
+            // Taken before the snapshot moves into `Ground` below, because the
+            // path is the world's own: the directory it lives in and the name
+            // that says which world it is a bake of.
+            let navigation_path = world.navigation_path(dir);
             let interior_stamp = openshard_client_artscan::interiors::stamp_of(dir, &world, facet);
             // What a rebake command has to be told, so the two hints below name
             // the world this client is actually running on.
@@ -927,7 +937,6 @@ pub fn run<D: Dial + Send + 'static>(
             };
             checkpoint("span index baked");
 
-            let navigation_path = openshard_movement::bake::artifact_path(&artifacts, facet);
             let coarse = navigation_stamp
                 .and_then(|stamp| openshard_movement::bake::load(&navigation_path, &stamp))
                 .and_then(|graph| {
@@ -1059,7 +1068,9 @@ pub fn run<D: Dial + Send + 'static>(
         },
         updates,
         stall_on_update,
+        post,
         resources: resources::Resources {
+            dir: dir.to_owned(),
             ground,
             coarse,
             interiors,

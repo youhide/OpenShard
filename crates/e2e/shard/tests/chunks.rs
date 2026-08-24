@@ -164,7 +164,7 @@ fn world_of_ours(dir: &Path, client: &Path, blocks: u32) -> PathBuf {
     let stamp = bake::stamp_of_base_set(&base_set, None, &tiledata, FACET, snapshot.revision())
         .expect("the two inputs exist");
     bake::save(
-        &bake::artifact_path(bake::beside(&base_set), FACET),
+        &bake::artifact_path(bake::beside(&base_set), Some(&base_set), FACET),
         &graph,
         &stamp,
     )

@@ -26,6 +26,80 @@ use crate::app::App;
 use crate::world::{MotionRenderState, advance_presentation_to, footing};
 use crate::{clutter, crowd, link};
 
+/// The navigation worker's whole body: find the graph beside this world, or
+/// build it and keep it there.
+///
+/// A free function rather than a method because it runs on a thread of its own
+/// and holds none of the window: the install directory (for `tiledata.mul`,
+/// which every stamp names), the world's file, the tile table it shares with the
+/// window, and somewhere to put the answer.
+///
+/// The world is read here rather than passed in for the reason
+/// [`App::take_up_navigation`] gives, and the sequence after it is
+/// [`bake::build`](openshard_movement::bake::build) — the same construction the
+/// bake binary and the shard's own boot use, so a graph this client builds is
+/// the graph they would have built.
+fn navigation_bake(
+    dir: &std::path::Path,
+    world_file: &std::path::Path,
+    facet: openshard_protocol::world::Facet,
+    tiles: &openshard_tiles::TileData,
+    post: &crate::app::Post,
+) {
+    use openshard_movement::bake;
+
+    let started = Instant::now();
+    let world = match bake::FacetWorld::read(dir, bake::WorldSource::BaseSet(world_file), facet) {
+        Ok(world) => world,
+        Err(error) => {
+            eprintln!("no navigation graph: {error}");
+            return;
+        }
+    };
+    let stamp = match world.stamp(dir, facet) {
+        Ok(stamp) => stamp,
+        Err(error) => {
+            eprintln!("no navigation graph: {error}");
+            return;
+        }
+    };
+    let path = world.navigation_path(dir);
+    // The artifact first: a client that has played this world before pays a
+    // read rather than a bake, which is the whole reason the graph is written
+    // out at all.
+    match bake::load(&path, &stamp) {
+        Ok(graph) => {
+            eprintln!(
+                "the navigation graph beside this world is current: {}",
+                path.display()
+            );
+            post.publish(link::Update::Navigation {
+                graph: Box::new(graph),
+            });
+            return;
+        }
+        Err(error) => eprintln!("{error}; baking one over the world the shard sent"),
+    }
+    let Some(graph) = bake::build(&world.snapshot, tiles) else {
+        eprintln!("no navigation graph: this facet's dimensions cannot be represented");
+        return;
+    };
+    // Kept before it is handed over, so the next connection to this world pays
+    // the read above instead. A graph that cannot be written is still a graph
+    // this run can route with, so the failure is a line and not a return.
+    match bake::save(&path, &graph, &stamp) {
+        Ok(bytes) => eprintln!(
+            "the navigation graph took {:.1}s and {bytes} bytes; kept at {}",
+            started.elapsed().as_secs_f64(),
+            path.display(),
+        ),
+        Err(error) => eprintln!("the navigation graph was not kept: {error}"),
+    }
+    post.publish(link::Update::Navigation {
+        graph: Box::new(graph),
+    });
+}
+
 /// Fold one locally predicted step into the presentation that ages it.
 ///
 /// A prediction is not merely a new tile for the static `Mobile` snapshot.
@@ -59,6 +133,51 @@ pub(crate) fn project_motion(
 }
 
 impl App {
+    /// Get a coarse graph for a world that arrived on the connection: the one
+    /// beside it, or one built from it.
+    ///
+    /// **Everything here happens off the frame loop**, including the *look*.
+    /// Reading the artifact needs the stamp, the stamp needs the world's own
+    /// revision and log, and resolving those goes through
+    /// [`FacetWorld::read`](openshard_movement::bake::FacetWorld::read) — which
+    /// reads the whole base set. A hundred megabytes and eleven seconds of
+    /// flood are both far past a frame, and the second one is why the client
+    /// starts without a graph in the first place.
+    ///
+    /// The worker holds a second copy of the facet for as long as it runs. That
+    /// is the cost of not borrowing the one this end is drawing from: a
+    /// `MapSnapshot` has one owner per process by construction, and a bake that
+    /// borrowed it would hold the ground still while the window walked on it.
+    ///
+    /// Nothing here is fatal. A world with no file, a stamp that cannot be
+    /// taken, a directory that cannot be written: each costs the long routes
+    /// and says so, exactly as an install with nothing baked beside it does.
+    fn take_up_navigation(
+        &mut self,
+        kept: Option<std::path::PathBuf>,
+        facet: openshard_protocol::world::Facet,
+    ) {
+        if self.resources.coarse.is_some() {
+            return;
+        }
+        let Some(world_file) = kept else {
+            eprintln!(
+                "no navigation graph: the ground this shard sent was not kept on disk, and a graph \
+                 is stamped against the world it was built from"
+            );
+            return;
+        };
+        let dir = self.resources.dir.clone();
+        let tiles = std::sync::Arc::clone(&self.resources.tiledata);
+        let post = self.post.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("navigation".to_owned())
+            .spawn(move || navigation_bake(&dir, &world_file, facet, &tiles, &post))
+        {
+            eprintln!("no navigation graph: {error}");
+        }
+    }
+
     /// Rebuild the presentation from the same authoritative snapshot after a
     /// local item-transfer state change. The transfer is a projection, not a
     /// mutation of `WorldView`, so its source subtraction is visible now,
@@ -120,7 +239,7 @@ impl App {
             link::Update::Animation(_) => ("animation", String::new()),
             link::Update::NewAnimation(_) => ("new animation", String::new()),
             link::Update::Design(bytes) => ("design", format!("bytes={}", bytes.len())),
-            link::Update::Ground { snapshot } => (
+            link::Update::Ground { snapshot, .. } => (
                 "ground",
                 format!(
                     "facet={} revision={} {}x{}",
@@ -130,6 +249,13 @@ impl App {
                     snapshot.map().height(),
                 ),
             ),
+            link::Update::Navigation { graph } => {
+                let (regions, nodes, edges) = graph.counts();
+                (
+                    "navigation",
+                    format!("regions={regions} nodes={nodes} edges={edges}"),
+                )
+            }
             link::Update::Lost(_) => ("lost", String::new()),
         };
         match update {
@@ -185,7 +311,7 @@ impl App {
             // rectangle. A *second* one of these is E4's — a publish reaching
             // a connected client — and that is where the invalidation has a way
             // to be tested.
-            link::Update::Ground { snapshot } => {
+            link::Update::Ground { snapshot, kept } => {
                 eprintln!(
                     "{} arrived from the shard: {}x{} tiles at revision {}",
                     snapshot.map().facet_name(),
@@ -193,6 +319,7 @@ impl App {
                     snapshot.map().height(),
                     snapshot.revision().get(),
                 );
+                let facet = snapshot.facet();
                 // Both in one statement, because a `Ground` is the facet *and*
                 // the bake over it — see `Ground::set_base`, which is the seam
                 // arrival goes through precisely so that there is no moment in
@@ -200,6 +327,22 @@ impl App {
                 self.resources
                     .ground
                     .set_base(Some(*snapshot), &self.resources.tiledata);
+                // And the coarse graph over it, which the span bake above is
+                // not: one is 0.16 s and the other is eleven seconds of flood,
+                // so it is looked for on disk and built off this thread when it
+                // is not there. See `App::take_up_navigation`.
+                self.take_up_navigation(kept, facet);
+            }
+            // A graph the bake worker finished, or one it found already written.
+            link::Update::Navigation { graph } => {
+                let (regions, nodes, edges) = graph.counts();
+                eprintln!("the navigation graph is ready: {regions} regions, {nodes} nodes, {edges} edges");
+                self.resources.coarse = Some(*graph);
+                // A route refused for want of a corridor is worth asking again
+                // now that there is one. A remembered refusal is kept across
+                // frames on purpose — see `Steering::begin_frame` — so nothing
+                // else would drop it until the player clicked somewhere new.
+                self.steer.clear_plan_cache();
             }
             link::Update::Lost(reason) => {
                 eprintln!("disconnected: {reason}");
