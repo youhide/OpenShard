@@ -66,7 +66,11 @@ const CROWD_REACH: u32 = 32;
 
 /// How long a planned route stays trusted before it is re-planned, in ticks —
 /// the references' two-second repath cadence.
-const REPATH_TICKS: u64 = 40;
+///
+/// Public for the same reason [`PATH_BUDGET`] is: the test that pins the
+/// blindness a kept route buys has to wait exactly this long for one to lapse,
+/// and a copy of `40` in the test would be a second place to change it.
+pub const REPATH_TICKS: u64 = 40;
 
 /// How far the quarry may drift from a route's goal before the route is stale.
 const GOAL_DRIFT: u32 = 2;

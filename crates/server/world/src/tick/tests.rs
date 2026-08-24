@@ -14881,6 +14881,273 @@ fn a_refused_long_route_is_remembered_until_it_lapses() {
     );
 }
 
+/// The gap in the divider a shut door stands in, close to the walker.
+const NEAR_WAY: (u16, u16) = (46, 32);
+/// And the one at the far end of it, which is only ever open ground.
+const FAR_WAY: (u16, u16) = (90, 32);
+
+/// A facet split by one wall with two ways through it: a far one that is open
+/// ground, and a near one a shut door stands in.
+///
+/// The two are an oracle between them. With the door shut the only way round is
+/// the far one and a route to it heads east; with it open the near one is a
+/// third of the distance and the route heads the other way. So *which way a body
+/// steps* says which plan it is walking, without the test having to know a
+/// single step of either.
+fn two_ways_through() -> Scene {
+    let mut scene = Scene::flat_holding(95, 63, 0);
+    for x in 0..=95u16 {
+        if x != NEAR_WAY.0 && x != FAR_WAY.0 {
+            scene.wall(x, NEAR_WAY.1, 0, 20);
+        }
+    }
+    scene
+}
+
+/// A body walks the route it planned, and does not plan another until that one
+/// goes stale.
+///
+/// **The exact half of the waste [`RouteRefused`] took out of the coarse half.**
+/// A search that arrives hands back every step of the way there;
+/// `step_body_toward` kept the first and dropped the rest, so a body walking
+/// twenty tiles planned twenty routes and walked one step of each. It keeps the
+/// route now — a [`Route`], the same component and the same repath cadence a
+/// chase has always followed its own by.
+///
+/// **What a test can see of that is the blindness**, exactly as for the refusal
+/// memory above: a better way that opens while a route stands is not taken until
+/// the route lapses. The oracle is [`ai::step_toward`], which is the same
+/// decision with nowhere to keep it — so it says what a body with no route would
+/// do, on the same ground, in the same instant.
+#[test]
+fn a_planned_route_is_walked_rather_than_planned_again() {
+    /// North of the divider, between the two ways through it.
+    const FROM: Point = Point::new(48, 20, 0);
+    /// South of it, straight ahead through the wall.
+    const GOAL: Point = Point::new(48, 48, 0);
+
+    let now = Instant::now();
+    let scene = two_ways_through();
+    // The flood is the oracle for the ground itself: both sides join, once round
+    // the far end, and they join with the near door shut.
+    assert_eq!(
+        scene.reachable(FROM).get(&(GOAL.x, GOAL.y)),
+        Some(&GOAL.z),
+        "the goal is walkable ground the long way round"
+    );
+
+    let graph = openshard_movement::NavigationGraph::build(&scene.footing(), 96, 64)
+        .expect("a 96x64 facet has a graph");
+    let mut world = shard_over(two_ways_through(), Some(graph));
+    let (door, _) = place_door(&mut world, Point::new(NEAR_WAY.0, NEAR_WAY.1, 0), now);
+    let walker = spawn_brained(&mut world, 0x0190, FROM, 8, now);
+    // Facing away from wherever it is about to go, so every beat below is a
+    // *turn* and the body stands where it was put: a route that has not been
+    // walked is still due from where it was planned, which is what makes the
+    // three decisions here comparable at all.
+    world
+        .state
+        .registry
+        .insert(walker, Heading(Facing::walking(Direction::North)));
+
+    // Shut: the way round is the far one, and a route to it is what gets kept.
+    let planned = ai::step_body_toward(&mut world.state, walker, Facet(0), FROM, GOAL, Doors::AsTheyStand)
+        .expect("there is a way round the far end");
+    let route = world
+        .registry()
+        .get::<Route>(walker)
+        .cloned()
+        .expect("the route was written on the body");
+    assert_eq!(
+        route.steps.first().copied(),
+        Some(planned),
+        "the step taken is the route's own first"
+    );
+    assert!(
+        route.steps.len() > 1,
+        "a route worth keeping is more than the step it starts with"
+    );
+    assert_eq!(route.goal, GOAL, "and it is aimed at what was asked for");
+
+    // The near way opens, and it is a third of the distance — but the body has
+    // a route, and a body with a route does not ask.
+    openshard_items::open_door(&mut world.state, door);
+    let fresh = ai::step_toward(&world.state, walker, Facet(0), FROM, GOAL, Doors::AsTheyStand);
+    assert_ne!(fresh, Some(planned), "the open door really is a different way");
+    let walked = ai::step_body_toward(&mut world.state, walker, Facet(0), FROM, GOAL, Doors::AsTheyStand);
+    assert_eq!(walked, Some(planned), "the body walks the route it has");
+    assert_eq!(
+        world.registry().get::<Route>(walker).map(|kept| kept.planned_at),
+        Some(route.planned_at),
+        "and it planned nothing to do it"
+    );
+
+    // It lapses on its own beat, and the shortcut is taken.
+    for _ in 0..=ai::REPATH_TICKS {
+        world.tick(now);
+    }
+    let lapsed = ai::step_body_toward(&mut world.state, walker, Facet(0), FROM, GOAL, Doors::AsTheyStand);
+    assert_eq!(
+        lapsed, fresh,
+        "a lapsed route is planned again, and the near door is in the new one"
+    );
+}
+
+/// A route says nothing from anywhere except where its next step starts, and a
+/// body that did not move is not standing there.
+///
+/// **The half of a kept route that is not the saving.** A body advances its
+/// route on the beat it hands the direction out, which is before the world has
+/// applied it — and the world may refuse it: a mobile stepped into the way, the
+/// body is frozen, a decree moved it elsewhere. The route then runs from a place
+/// the body is not in, and every step of it stays legal one at a time, so what
+/// that costs is not a wall walked through but a body quietly walking a plan
+/// nobody made. [`Route::at`] is what catches it.
+#[test]
+fn a_body_that_did_not_move_plans_its_route_again() {
+    const FROM: Point = Point::new(20, 20, 0);
+    const GOAL: Point = Point::new(20, 40, 0);
+
+    let now = Instant::now();
+    let mut world = shard_over(Scene::flat_holding(63, 63, 0), None);
+    let walker = spawn_brained(&mut world, 0x0190, FROM, 8, now);
+
+    // The first beat plans, with the body facing the wrong way: turn-as-step, so
+    // it stands still and the route's first step is still due.
+    world
+        .state
+        .registry
+        .insert(walker, Heading(Facing::walking(Direction::North)));
+    let first = ai::step_body_toward(&mut world.state, walker, Facet(0), FROM, GOAL, Doors::AsTheyStand)
+        .expect("open ground is always reachable");
+    let turning = world
+        .registry()
+        .get::<Route>(walker)
+        .cloned()
+        .expect("the route was written on the body");
+    assert_eq!(
+        (turning.next, turning.at),
+        (0, FROM),
+        "a turn is not a step, and the route waits where it was planned"
+    );
+
+    // Facing it now: the same step, and this time the route moves on with it.
+    world
+        .state
+        .registry
+        .insert(walker, Heading(Facing::walking(first)));
+    let walked = ai::step_body_toward(&mut world.state, walker, Facet(0), FROM, GOAL, Doors::AsTheyStand);
+    assert_eq!(walked, Some(first), "the same step is due, and it is taken");
+    let landing = {
+        let footing = world.state.footing(Facet(0), Doors::AsTheyStand);
+        openshard_movement::step_allowed(&footing, FROM, first).expect("the shard would allow that step")
+    };
+    let advanced = world
+        .registry()
+        .get::<Route>(walker)
+        .cloned()
+        .expect("the route was written on the body");
+    assert_eq!(
+        (advanced.next, advanced.at),
+        (1, landing),
+        "the route moved on, and it is due from where that step lands"
+    );
+
+    // And the step never happened — the body is still at `FROM`, which is not
+    // where the route it is holding starts.
+    world.tick(now);
+    let replanned = ai::step_body_toward(&mut world.state, walker, Facet(0), FROM, GOAL, Doors::AsTheyStand);
+    assert_eq!(
+        replanned,
+        Some(first),
+        "it plans again from where it actually is, which is the same way"
+    );
+    assert_ne!(
+        world.registry().get::<Route>(walker).map(|kept| kept.planned_at),
+        Some(advanced.planned_at),
+        "and what it walks is that new route, not the one it was not standing on"
+    );
+}
+
+/// The saving, counted: a body crossing open ground plans once a repath window
+/// and not once a beat.
+///
+/// **The factor is two constants and neither of them is the route's length.** A
+/// route is trusted for [`ai::REPATH_TICKS`] and a creature acts every
+/// `creature_step_ticks`, so one plan covers the whole of the first against the
+/// second — five beats at the shipped two-second cadence and 400 ms beat. Each
+/// of the four it saves was a full [`ai::PATH_BUDGET`] search.
+///
+/// The tick is deterministic and its dice are seeded, so the number below is a
+/// count rather than a sample. Twenty-four tiles of open ground is deliberately
+/// the easy case for the *old* code — a straight walk with nothing to route
+/// around — and it is still twenty-five searches against six.
+#[test]
+fn a_long_walk_plans_once_a_repath_window() {
+    const FROM: Point = Point::new(20, 20, 0);
+    const GOAL: Point = Point::new(20, 44, 0);
+    /// Slack, not the answer: the walk is 24 steps and a turn, and a cap that
+    /// stops a broken route from looping is not a claim about how long it takes.
+    const MOST: usize = 64;
+
+    let now = Instant::now();
+    let mut world = shard_over(Scene::flat_holding(63, 63, 0), None);
+    let walker = spawn_brained(&mut world, 0x0190, FROM, 8, now);
+    let beat = world.state.gameplay.creature_step_ticks;
+
+    let mut at = FROM;
+    let mut beats = 0;
+    let mut plans = 0;
+    let mut planned_at = None;
+    while at != GOAL && beats < MOST {
+        for _ in 0..beat {
+            world.tick(now);
+        }
+        beats += 1;
+        let Some(direction) =
+            ai::step_body_toward(&mut world.state, walker, Facet(0), at, GOAL, Doors::AsTheyStand)
+        else {
+            break;
+        };
+        // A route is planned exactly when the one on the body is a new one, and
+        // the tick it was planned on is what says so.
+        let kept = world.registry().get::<Route>(walker).map(|route| route.planned_at);
+        if kept != planned_at {
+            plans += 1;
+            planned_at = kept;
+        }
+        // Applied the way `motion.rs` applies one, because that is what the
+        // route is written down against: a body not yet facing this way turns
+        // and stays put, and only then does a step move it.
+        let facing = world.state.registry.get::<Heading>(walker).map(|h| h.0.direction);
+        if facing == Some(direction) {
+            let footing = world.state.footing(Facet(0), Doors::AsTheyStand);
+            at = openshard_movement::step_allowed(&footing, at, direction)
+                .expect("the shard would allow the step its own planner planned");
+        } else {
+            world
+                .state
+                .registry
+                .insert(walker, Heading(Facing::walking(direction)));
+        }
+    }
+
+    assert_eq!(at, GOAL, "the walk arrives");
+    // Twenty-four and not twenty-five: the body is spawned facing south already,
+    // so the first beat is a step rather than the turn a body facing elsewhere
+    // would spend.
+    assert_eq!(beats, 24, "one beat a tile, due south");
+    assert_eq!(
+        plans,
+        1 + (beats - 1) * beat as usize / ai::REPATH_TICKS as usize,
+        "and it planned once to start with, then once a window"
+    );
+    assert!(
+        plans * 4 <= beats,
+        "which is {plans} searches for {beats} beats, and it used to be one each"
+    );
+}
+
 #[test]
 fn a_human_chaser_opens_the_door_in_its_way() {
     let now = Instant::now();
