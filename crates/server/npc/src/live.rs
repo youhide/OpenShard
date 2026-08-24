@@ -271,9 +271,23 @@ fn wander_step(state: &mut WorldState, npc: EntityId, at: Point) -> Option<Direc
 /// A step back toward the post — pathed around the counter, not into it. A
 /// townsperson is human: a shut door on the way is opened, not an obstacle (the
 /// auto-close swings it shut again behind them).
+///
+/// The post does not move, so the route to it is planned once and walked
+/// ([`openshard_ai::Goal::Fixed`]). That matters here more than anywhere else:
+/// this is the caller whose beat is [`BEAT_TICKS`], and a route with the old
+/// time window on it was stale on every beat this function ever read one —
+/// see `Goal` for the arithmetic.
 fn walk_home(state: &mut WorldState, npc: EntityId, at: Point, post: Point) -> Option<Direction> {
     let facet = state.facet_of(npc);
-    let dir = openshard_ai::step_body_toward(state, npc, facet, at, post, Doors::AllOpen)?;
+    let dir = openshard_ai::step_body_toward(
+        state,
+        npc,
+        facet,
+        at,
+        post,
+        Doors::AllOpen,
+        openshard_ai::Goal::Fixed,
+    )?;
     if let Some(tile) = openshard_movement::step_from(at, dir) {
         // The obstruction index and not the terrain: the overlay a step reads
         // says a door is in the way, and only this says which door to open.

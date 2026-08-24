@@ -64,8 +64,11 @@ pub const PATH_BUDGET: usize = 400;
 /// which is as far as anything a creature is chasing can be.
 const CROWD_REACH: u32 = 32;
 
-/// How long a planned route stays trusted before it is re-planned, in ticks —
-/// the references' two-second repath cadence.
+/// How long a route to a *moving* goal stays trusted before it is re-planned,
+/// in ticks — the references' two-second repath cadence.
+///
+/// A route to a place has no such window at all: see [`Goal`], which is the
+/// caller's statement of which of the two it is walking.
 ///
 /// Public for the same reason [`PATH_BUDGET`] is: the test that pins the
 /// blindness a kept route buys has to wait exactly this long for one to lapse,
@@ -74,6 +77,40 @@ pub const REPATH_TICKS: u64 = 40;
 
 /// How far the quarry may drift from a route's goal before the route is stale.
 const GOAL_DRIFT: u32 = 2;
+
+/// What a body is walking toward — a place, or somebody.
+///
+/// The only thing it decides is whether the route the body keeps carries a
+/// *time* window, and the reason the caller has to say is that the window is
+/// worth something to one of the two and nothing at all to the other.
+///
+/// **What a time window buys is noticing a better way**, and nothing else.
+/// Every other way a kept route could go wrong is caught on its own and
+/// without a search: the body standing somewhere else is [`Route::at`], the
+/// goal having moved is [`GOAL_DRIFT`], and the ground having changed under
+/// the next step is [`probe`], which puts every step of every route to the
+/// live world before it is taken. So a route to a post is re-planned to learn
+/// that a shorter way opened — for a townsperson walking home, an answer
+/// nobody asked for at the price of a whole [`PATH_BUDGET`] search.
+///
+/// **And for that caller the window never fired anyway.** [`REPATH_TICKS`] is
+/// 40 ticks and `npc::BEAT_TICKS` is 40 ticks, arrived at in two files that do
+/// not mention one another, and `npc::next_beat` never arms a gap *shorter*
+/// than its interval — so the route of the caller this cache would help most
+/// was stale on every beat it was ever read on. A bigger number would have
+/// hidden that behind a different one; naming the two cases is what stops the
+/// question being about numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Goal {
+    /// A place: a post, a night home, the spot a pet was sent to. It does not
+    /// move, so the route to it is walked to its end — however many beats that
+    /// is, and it is a townsperson's whole minute-long walk.
+    Fixed,
+    /// Somebody: a quarry, an owner, a master being escorted. The whole route
+    /// is a guess about where that body will be, so it is re-planned every
+    /// [`REPATH_TICKS`] even while the goal stays inside [`GOAL_DRIFT`].
+    Moving,
+}
 
 /// How long a creature stands watch after a chase found no way through, in
 /// ticks (~10s) — ServUO's guard timeout. Watching, not wall-shuffling; when it
@@ -91,18 +128,30 @@ const CHASE_RANGE_FACTOR: u32 = 2;
 const CHASE_RANGE_MIN: u32 = 12;
 
 /// How long a refused coarse query stands before the graph is asked about that
-/// goal again, in ticks (~2s).
+/// goal again, in ticks (~10s).
 ///
-/// The same cadence a planned route is trusted for, and for the same reason: it
-/// is how long an answer about the shape of the world stays worth believing. A
-/// body is not held still by it the way [`GUARD_TICKS`] holds a chaser — only
+/// It is how long an answer about the shape of the world stays worth believing,
+/// and the *floor* under the number is that it must outlive a beat of everything
+/// that reads it. **It used to be [`REPATH_TICKS`] and therefore did not.** A
+/// townsperson beats every 40 ticks and `npc::next_beat` never arms a gap
+/// shorter than its interval, so a memory that lapsed after 40 had always
+/// lapsed by the time the body woke up to use it — and a townsperson whose post
+/// is walled off is the caller this memory was written for. The same collision
+/// [`Goal`] exists for, one layer down.
+///
+/// Ten seconds is four of a townsperson's beats and twenty-five of a creature's.
+/// It is also what [`GUARD_TICKS`] is, which is the same judgement about the
+/// same fact — but the two are *not* written as one number, because a shared
+/// value arrived at separately is exactly what went wrong above.
+///
+/// A body is not held still by it the way [`GUARD_TICKS`] holds a chaser — only
 /// the facet-wide search waits, while the exact one is asked again as soon as
 /// there is no [`Route`] left to walk.
 ///
 /// Public for the same reason [`PATH_BUDGET`] is: the test that pins the memory
 /// has to wait exactly this long for it to lapse, and a copy of the number in
 /// the test would be a second place to change it.
-pub const REFUSAL_TICKS: u64 = REPATH_TICKS;
+pub const REFUSAL_TICKS: u64 = 200;
 
 /// A creature this tough never runs — ServUO's "500 hits does not flee" rule.
 const BRAVE_HITS: u16 = 500;
@@ -181,7 +230,9 @@ pub fn step_toward(
 /// always walked its own by and the references' own pattern.
 ///
 /// `facet` and `from` are the body's own, and are arguments rather than reads
-/// because every caller has just read them.
+/// because every caller has just read them. `goal` is the caller's statement of
+/// *what* it is walking to — see [`Goal`], which is what decides how long the
+/// route it plans here is worth keeping.
 #[must_use]
 pub fn step_body_toward(
     state: &mut WorldState,
@@ -190,11 +241,12 @@ pub fn step_body_toward(
     from: Point,
     to: Point,
     doors: Doors,
+    goal: Goal,
 ) -> Option<Direction> {
     // A route already planned and still worth walking is one step and no search
     // at all. This is the whole of what a body has that `step_toward` has not:
     // somewhere to keep an answer.
-    match cached_step(state, mover, facet, from, to, doors) {
+    match cached_step(state, mover, facet, from, to, doors, goal) {
         Cached::Step(direction) => return Some(direction),
         Cached::Opening => return None,
         Cached::Stale => {}
@@ -395,8 +447,12 @@ enum Cached {
 ///
 /// **Four ways a route stops being one**, and they are the references' own list:
 /// the body is no longer standing where the next step starts, the goal has moved
-/// past [`GOAL_DRIFT`], the steps have run out, or [`REPATH_TICKS`] have passed
-/// since it was planned. A route that survives all four is still only a *plan* —
+/// past [`GOAL_DRIFT`], the steps have run out, or — for a [`Goal::Moving`] only
+/// — [`REPATH_TICKS`] have passed since it was planned. A route to a place is
+/// held to the first three and walked to its end; see [`Goal`] for why the
+/// fourth is about somebody rather than about time.
+///
+/// A route that survives them all is still only a *plan* —
 /// the step it offers is put to the live ground through [`probe`] before it is
 /// taken, so a crate dropped on the way, a door swung shut or a body standing in
 /// it costs a re-plan and never a step the shard would refuse.
@@ -415,14 +471,19 @@ fn cached_step(
     from: Point,
     to: Point,
     doors: Doors,
+    goal: Goal,
 ) -> Cached {
     let Some(route) = state.registry.get::<Route>(body).cloned() else {
         return Cached::Stale;
     };
+    let lapsed = match goal {
+        Goal::Fixed => false,
+        Goal::Moving => state.ticks.saturating_sub(route.planned_at) >= REPATH_TICKS,
+    };
     let stale = route.at != from
         || distance(route.goal, to) > GOAL_DRIFT
         || route.next >= route.steps.len()
-        || state.ticks.saturating_sub(route.planned_at) >= REPATH_TICKS;
+        || lapsed;
     if stale {
         state.registry.remove::<Route>(body);
         return Cached::Stale;
@@ -689,9 +750,10 @@ fn chase_step(
     to: Point,
     brain: Brain,
 ) -> Option<Direction> {
-    // A cached route first: planned once, followed a step per beat.
+    // A cached route first: planned once, followed a step per beat. The quarry
+    // is a body, so the route carries the repath window as well as the drift.
     let doors = Doors::for_opener(brain.opens_doors);
-    match cached_step(state, creature, facet, from, to, doors) {
+    match cached_step(state, creature, facet, from, to, doors, Goal::Moving) {
         Cached::Step(direction) => return Some(direction),
         Cached::Opening => return None,
         Cached::Stale => {}
@@ -931,7 +993,7 @@ pub fn pet_beat(state: &mut WorldState, pet: EntityId) -> Option<Direction> {
             if openshard_state::in_range(at, target_at, 1) {
                 return None;
             }
-            step_body_toward(state, pet, facet, at, target_at, Doors::AllOpen)
+            step_body_toward(state, pet, facet, at, target_at, Doors::AllOpen, Goal::Moving)
         }
         PetOrder::Guard | PetOrder::Follow | PetOrder::Come => {
             let &Position(owner_at) = state.registry.get::<Position>(owner)?;
@@ -943,7 +1005,7 @@ pub fn pet_beat(state: &mut WorldState, pet: EntityId) -> Option<Direction> {
                 // than pathing across the map, the same give-up the chase has.
                 return None;
             }
-            step_body_toward(state, pet, facet, at, owner_at, Doors::AllOpen)
+            step_body_toward(state, pet, facet, at, owner_at, Doors::AllOpen, Goal::Moving)
         }
     }
 }

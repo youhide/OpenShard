@@ -183,9 +183,17 @@ pub fn advance_escorts(state: &mut WorldState) -> Vec<(Serial, Direction)> {
             .registry
             .get::<openshard_state::components::Body>(npc)
             .is_some_and(|body| openshard_state::components::body_opens_doors(body.id));
-        if let Some(direction) =
-            openshard_ai::step_body_toward(state, npc, facet, here, there, Doors::for_opener(opens_doors))
-        {
+        // The goal is the escorter, who walks: the route is a guess about where
+        // they will be, and it carries the repath window that says so.
+        if let Some(direction) = openshard_ai::step_body_toward(
+            state,
+            npc,
+            facet,
+            here,
+            there,
+            Doors::for_opener(opens_doors),
+            openshard_ai::Goal::Moving,
+        ) {
             if let Some(serial) = state.registry.serial_of(npc) {
                 steps.push((serial, direction));
             }
