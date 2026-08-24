@@ -84,5 +84,12 @@ because a deflated chunk of Felucca is at most 16,050 bytes and every one of the
 7,168 fits in a packet. **E0 is built**: the client takes a `WorldSource` rather
 than always reading the install, `--base-set` is the other arm, and the
 resolution that used to be spelled out in the shard's boot and both bake binaries
-is one function all four now go through. The decisions and the leftovers are in
-the [handoffs](handoffs/); the plan itself records intent, not progress.
+is one function all four now go through.
+
+**E1 is built too**: the wire carries a chunk. Four subcommands — a request, a
+deflated chunk in fragments of at most 8,192 bytes, a notice on world entry
+saying which facet at which revision, and a refusal — with the deflating and the
+joining as one pair of functions in `openshard-protocol`, so the two ends of the
+wire are a round trip rather than two implementations. Nothing draws it yet;
+that is E2, and it is where the real cost is. The decisions and the leftovers are
+in the [handoffs](handoffs/); the plan itself records intent, not progress.

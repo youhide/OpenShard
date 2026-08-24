@@ -124,6 +124,24 @@ generated world is a path that is wrong the first time it runs. The cap also
 bounds how long a bulk transfer can sit in front of a movement packet on the one
 stream this direction just chose.
 
+**Every chunk named in a request is answered exactly once — with its bytes, or
+with a refusal.** *Taken in E1, and it is the one thing this document did not
+foresee.* Silence is what the house-design request does for a house that is not
+there, and it is right there because a client that never hears about a house
+simply draws no house. It is wrong here: nothing in this conversation is
+self-terminating — no total, no end marker, and no timeout that would not also
+fire on a slow link — so a client waiting on one chunk that is never coming is a
+client that never finishes fetching a facet. Hence `0xE006 ChunkRefused` below,
+with two reasons that are two different facts: the shard has no ground for that
+facet, or the facet it has stops short of that chunk.
+
+**One request names at most 64 chunks.** *Also E1's.* A bound on one *answer* —
+64 is a megabyte at Felucca's worst chunk and 111 KiB at its median — and not on
+how fast a facet may be fetched, which is the client's to pace with as many
+requests as it likes. The decoder refuses a larger count rather than truncating
+it: a count no encoder of ours can write did not come from a client of ours, and
+answering half of what was asked for would be the shard inventing a request.
+
 **Whole chunks, never a stream of operations.** Inherited from
 [`map_rebuild.md`](../map_rebuild.md#a-tile-of-ground-moved--rebake-and-never-an-overlay)
 and not reopened. It costs less than it looks: a publish touches the chunks
@@ -194,7 +212,8 @@ the install stops being the only answer.
 
 **Goal.** The wire carries one chunk, correctly, with nothing drawing it yet.
 
-Three subcommands in the `0xE000` range, in `openshard-protocol`:
+Four subcommands in the `0xE000` range, in `openshard-protocol` — three of them
+foreseen here and the fourth argued for above:
 
 ```text
 0xE002  ChunkRequest   client -> server
@@ -206,13 +225,21 @@ Three subcommands in the `0xE000` range, in `openshard-protocol`:
 
 0xE004  WorldNotice    server -> client, on world entry
         facet u8, blocks wide u32, blocks down u32, revision u64
+
+0xE006  ChunkRefused   server -> client
+        facet u8, chunk x u16, chunk y u16, reason u8
 ```
+
+`0xE005` is skipped rather than taken: it is E4's publish notice below, and an id
+chosen by which was written first is an id that has to be renumbered later.
 
 - `WorldNotice` is what a client needs *before* it can ask for anything: the
   facet's extent is what `chunk::assemble` refuses a short set against, and the
   revision is what a cache is compared with. It is sent where `AuthorityNotice`
   is sent, for the same reason — the world entry is when a connection learns what
-  it is standing in.
+  it is standing in. A facet with no ground sends none at all: a notice of nought
+  blocks by nought would be a world a client could ask for chunks of, described
+  as though it could.
 - **Only a client that asked is answered.** A stock client never sends `0xE002`,
   so nothing about this reaches one. That is the whole capability negotiation and
   it is deliberately not a feature flag.
@@ -220,6 +247,13 @@ Three subcommands in the `0xE000` range, in `openshard-protocol`:
   `Chunk::of(snapshot, at)`, `codec::encode`, deflate, fragment. Nothing is
   cached on the shard — the encode is cheap against the socket write, and a cache
   keyed by a world that moves is direction D's problem, not this one's.
+- **The deflate and the fragmenting live in `openshard-protocol`, as one pair.**
+  `ChunkData::fragments` cuts a record up and `chunks::join` puts it back, so the
+  two halves of the wire are one round-trip test rather than a shard function and
+  a client function that agree by inspection. Neither looks inside a blob: the
+  chunk record is `openshard_map::codec`'s, and that crate is *above* the
+  protocol — which is also why `ChunkAt` and `WorldRevision` are the wire's own
+  types, converted at the seam from `ChunkCoord` and `MapRevision`.
 
 **Done when** an `e2e` test logs in over a real socket, asks for a named chunk,
 reassembles it, and finds it equal to `Chunk::of` over the shard's own snapshot —
@@ -298,7 +332,8 @@ last clause of it.
 ## What this must not do
 
 - **Send anything to a client that did not ask.** `WorldNotice` is the one
-  exception and it is six bytes of body.
+  exception, and it is seventeen bytes of body in a twenty-two byte packet — a
+  stock client reads its length out of the envelope and drops it.
 - **Open direction G.** The facet stays whole and resident; a chunk fetched on
   approach is a different plan with a different risk.
 - **Grow a second assembly path.** Whatever the client builds a world out of, it
@@ -323,3 +358,28 @@ Found while writing this, and each is somebody's.
 - **`World` derives `Default`** ([`world.rs`](../../../crates/common/map/src/world.rs#L45)),
   which `docs/style.md` bans, and `World::new(None)` is the named constructor it
   already has.
+
+Found while building E1:
+
+- **`ServerPacket`'s `one_of_each` does not hold one of each, and its own doc
+  says it does** — *"so a new variant that lies about its id or length has to be
+  added here to compile"*, which is false: nothing checks it, and **ten of the
+  sixty-two variants are missing** (`MultiTarget`, `DeathAnimation`,
+  `OpenContainer`, `AddToContainer`, `DesignRevision`, `PropertyListReply` and
+  all four party packets). Every one of them is therefore outside
+  `every_packet_frames_to_its_own_length`, which is the oracle for
+  `server_packet_length` — the table whose entire job is to be right, and whose
+  being wrong is a dropped connection rather than a dropped packet
+  (`0xD6` and `0xD8` are both in that table because it was short an id twice).
+  The claim can be made true: a `match` in a helper that returns one sample per
+  variant *is* checked by the compiler, where a `vec!` is not.
+- **`WorldState::facet_state` panics on a facet nothing loaded, and there is no
+  accessor that does not.** Its doc says "a facet the world is known to have",
+  which is right for every caller that got the number off an entity and wrong for
+  the one that got it off the wire — so the chunk reader indexes
+  `state.facets` directly. A named `Option`-returning accessor is a small thing,
+  and the next packet carrying a facet byte will want it too.
+- **`PacketReader`/`PacketWriter` had no `u64` until this phase.** Added, because
+  a map revision is one and splitting it into two dwords at the wire would be a
+  second spelling of the same number. Worth noting only because it means no
+  reference packet has ever carried a field this wide.

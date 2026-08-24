@@ -563,6 +563,16 @@ impl World {
                 level: self.state.access_level(entity),
             }),
         );
+        // And what world this shard thinks it is standing in, for the same
+        // reason and in the same place: this engine's own `0xBF`, sent once,
+        // because it is what a client of ours needs *before* it can ask for a
+        // chunk of ground. See `openshard_protocol::chunks`, and
+        // `docs/map/new_map_representation/to_the_client.md` for the plan it
+        // opens.
+        if let Some(notice) = self.world_notice(entity) {
+            self.state
+                .send_packet(connection, &ServerPacket::WorldNotice(notice));
+        }
         self.state
             .send_packet(connection, &ServerPacket::LoginComplete(LoginComplete));
 

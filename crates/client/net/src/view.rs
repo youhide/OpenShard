@@ -29,6 +29,7 @@ use std::collections::{BTreeMap, VecDeque};
 use rustc_hash::FxHashMap;
 
 use openshard_protocol::access::AccessLevel;
+use openshard_protocol::chunks::WorldNotice;
 use openshard_protocol::containers::ContainedItem;
 use openshard_protocol::direction::Facing;
 use openshard_protocol::gump::layout::{Element, parse};
@@ -485,6 +486,24 @@ pub struct WorldView {
     /// It is never a *permission*: nothing here is checked before a line goes
     /// out, and the shard refuses what it refuses regardless of what this says.
     pub authority: AccessLevel,
+    /// Which world the shard says this connection is standing in — the facet,
+    /// its size in blocks, and the revision it is published at.
+    ///
+    /// [`authority`](Self::authority)'s twin: another `0xBF` of this engine's
+    /// own, sent once on world entry, that nothing enforces and one thing reads.
+    /// What reads it is a client that means to fetch the ground rather than
+    /// open it off its own disk — see
+    /// [`openshard_protocol::chunks`], and `to_the_client.md` for the plan.
+    ///
+    /// **`None` is a real answer and not an unknown**: a shard with no ground
+    /// for the facet sends no notice, and so does a shard that predates the
+    /// packet or belongs to somebody else. All three mean the same thing to this
+    /// end — there is no world here to ask for — so they are one state rather
+    /// than three.
+    ///
+    /// It is *not* the same question as [`map`](Self::map), which is the size in
+    /// tiles the `0x1B` carried and which every client, ours or stock, is told.
+    pub world: Option<WorldNotice>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -720,6 +739,9 @@ impl WorldView {
             designs: FxHashMap::default(),
             // Nothing until the shard says so — see the field's own doc.
             authority: AccessLevel::default(),
+            // And nothing at all unless this shard has a world of its own to
+            // hand over, which most do not.
+            world: None,
         }
     }
 
@@ -1535,6 +1557,14 @@ impl WorldView {
             ServerPacket::AuthorityNotice(notice) => {
                 let changed = self.authority != notice.level;
                 self.authority = notice.level;
+                changed
+            }
+            // And which world it is. Recorded and nothing more: fetching the
+            // ground is a later phase of `to_the_client.md`, and this is the
+            // fact that phase starts from.
+            ServerPacket::WorldNotice(notice) => {
+                let changed = self.world != Some(*notice);
+                self.world = Some(*notice);
                 changed
             }
             // The list. Arrives either as the answer to our `0xD6` or, in the

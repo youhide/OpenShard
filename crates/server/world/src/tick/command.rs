@@ -901,6 +901,24 @@ pub enum Command {
         /// The house, as the client named it.
         serial: RawSerial,
     },
+    /// A client of ours asked for some of the ground (`0xBF` `0xE002`).
+    ///
+    /// Only a client of ours ever sends this — no reference client has a word
+    /// for it — so receiving one *is* the capability negotiation. Every chunk
+    /// named is answered exactly once, with its bytes or with a refusal; see
+    /// [`openshard_protocol::chunks`].
+    RequestChunks {
+        /// Which connection asked.
+        connection: ConnectionId,
+        /// Which facet's ground, as the client named it. Not checked here: a
+        /// facet this shard does not hold is a refusal the tick sends, and the
+        /// queue is a delivery rather than a checkpoint.
+        facet: Facet,
+        /// Which chunks of it, already capped at
+        /// [`MAX_CHUNKS`](openshard_protocol::chunks::MAX_CHUNKS) by the
+        /// decoder — a request over the cap never became a command.
+        chunks: Vec<openshard_protocol::chunks::ChunkAt>,
+    },
     /// A client picked a context-menu entry (`0xBF` `0x15`).
     ContextMenuSelect {
         /// Which connection asked.

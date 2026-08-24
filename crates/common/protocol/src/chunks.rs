@@ -727,11 +727,24 @@ mod tests {
         ClientVersion::new(7, 0, 45, 65)
     }
 
-    /// A record shaped like a real one: long enough to deflate to more than one
-    /// fragment, and compressible rather than random, because a blob that grew
-    /// under deflate would be testing a case no chunk produces.
+    /// A record that does not compress.
+    ///
+    /// Deliberately unlike a real chunk, which deflates to about a fifth of
+    /// itself: a fixture made of pattern bytes comes back as **one** fragment
+    /// however long it is, so the reassembly path — the whole reason
+    /// [`FRAGMENT_BYTES`] is below the packet cap — would go untested while the
+    /// suite stayed green. A cheap LCG makes the deflated length track the raw
+    /// one, so a size that ought to fragment does.
     fn a_record(bytes: usize) -> Vec<u8> {
-        (0..bytes).map(|n| (n % 37) as u8).collect()
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        (0..bytes)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u8
+            })
+            .collect()
     }
 
     /// Every subcommand here is out of reach of every client version's own — all
@@ -769,7 +782,9 @@ mod tests {
             chunks: vec![ChunkAt { x: 0, y: 0 }, ChunkAt { x: 111, y: 63 }],
         };
         let bytes = sent.encode();
-        assert_eq!(&bytes[..5], &[0xBF, 0x00, 0x0E, 0xE0, 0x02]);
+        // id, length, subcommand, facet, count, and four bytes a chunk.
+        assert_eq!(bytes.len(), 1 + 2 + 2 + 1 + 2 + 2 * 4);
+        assert_eq!(&bytes[..5], &[0xBF, 0x00, 0x10, 0xE0, 0x02]);
         assert_eq!(
             ExtendedRequest::decode(&bytes).unwrap(),
             ExtendedRequest::Chunks(sent)
@@ -937,10 +952,14 @@ mod tests {
         );
         // The right number of fragments and the wrong set of indices: one
         // arrived twice and one never did.
-        let doubled = vec![mine[0].clone(), mine[0].clone(), mine[2].clone()];
+        let mut doubled = mine.clone();
+        doubled[1] = mine[0].clone();
         assert_eq!(
             join(&doubled),
-            Err(JoinError::Incomplete { wanted: 3, found: 2 })
+            Err(JoinError::Incomplete {
+                wanted: mine.len() as u8,
+                found: mine.len() - 1,
+            })
         );
     }
 

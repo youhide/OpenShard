@@ -90,6 +90,7 @@ use crate::events::{
 use crate::gm;
 
 mod ambient;
+mod chunks;
 mod command;
 mod context;
 mod death;
@@ -1254,6 +1255,11 @@ impl World {
             Command::DesignDetails { connection, serial } => {
                 self.design_details_request(connection, serial);
             }
+            Command::RequestChunks {
+                connection,
+                facet,
+                chunks,
+            } => self.chunk_request(connection, facet, &chunks),
             Command::ContextMenuSelect {
                 connection,
                 serial,
@@ -1645,6 +1651,8 @@ impl World {
     }
 }
 
+#[cfg(test)]
+mod chunks_tests;
 #[cfg(test)]
 mod crafting_tests;
 #[cfg(test)]

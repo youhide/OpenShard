@@ -215,6 +215,15 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
                 connection: id,
                 serial: request.serial,
             }),
+            // Whole, like the party request above: the facet is a byte the tick
+            // has to look up anyway, and a chunk it cannot cut is answered with
+            // a refusal rather than dropped — so there is nothing for a seam
+            // with no world in hand to decide.
+            ExtendedRequest::Chunks(request) => Some(Command::RequestChunks {
+                connection: id,
+                facet: request.facet,
+                chunks: request.chunks,
+            }),
             ExtendedRequest::Unknown(subcommand) => {
                 debug!(%id, subcommand = format!("0x{subcommand:02X}"), "unhandled 0xBF");
                 None

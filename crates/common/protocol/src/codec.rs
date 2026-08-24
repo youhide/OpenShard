@@ -397,10 +397,7 @@ mod tests {
             "big-endian, like every other field here"
         );
         let bytes = writer.into_bytes();
-        assert_eq!(
-            PacketReader::new(&bytes).u64().unwrap(),
-            0x0123_4567_89AB_CDEF
-        );
+        assert_eq!(PacketReader::new(&bytes).u64().unwrap(), 0x0123_4567_89AB_CDEF);
         assert!(
             PacketReader::new(&bytes[..7]).u64().is_err(),
             "seven bytes is not a u64"
