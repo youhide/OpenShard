@@ -63,6 +63,14 @@ Moved onto it: `WorldState::start_position`, `gm`'s `.go`, `npc::spawn`,
 `Map.CanSpawnMobile` (`CanFit(x, y, z, 16)`) and what its own comment already
 claimed to do and did not.
 
+That last one is the only change with a *gameplay* consequence a player meets,
+so it is the one with a shard-level test:
+`a_recall_onto_a_moored_deck_is_allowed_and_the_open_sea_is_not` in
+`travel_tests.rs` marks a rune three units over open water, recalls to it with no
+ship there (refused) and with one moored (allowed, on the deck). It was run
+against the retired rule and fails on the second half — a rune marked on your own
+ship used to refuse its owner with "Something is blocking the location."
+
 ## What was decided
 
 **The seed stays the caller's.** `arrival_z` answers *near a height*, and three
@@ -91,7 +99,7 @@ numbers whatever it did, and this one would notice a caller quietly moved back.
 ## What is clean
 
 `cargo test -p openshard-movement -p openshard-map -p openshard-state -p
-openshard-world -p openshard-npc -p openshard-housing`: **1,100 passed, 0
+openshard-world -p openshard-npc -p openshard-housing`: **1,101 passed, 0
 failed, 4 ignored.** `cargo clippy` silent on those and on
 `openshard-client-app`. `cargo fmt --check` silent on every touched file. The
 workspace as a whole was not run: a parallel session has `world`'s `tick/tests.rs`

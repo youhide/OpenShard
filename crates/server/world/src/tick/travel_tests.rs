@@ -567,6 +567,95 @@ fn a_rune_on_the_floor_cannot_be_marked_but_can_be_recalled_from() {
     );
 }
 
+/// **A rune marked on a ship's deck, and the arrival test that read the wrong
+/// world.**
+///
+/// `travel`'s `can_stand_at` is ServUO's `Map.CanSpawnMobile` — `CanFit(x, y, z,
+/// 16)` — and it used to ask `MapTerrain::stand_z`, the **bare map**. Under a
+/// deck the map is open sea, so a rune marked on a moored ship refused its own
+/// owner with "Something is blocking the location", and a wall the world put up
+/// since the rune was marked did not count for anything either. The comment
+/// above it said "the live floor" and had said so since it was written.
+///
+/// Both halves are asserted from one fixture, because the interesting property
+/// is that they *differ*: the same rune, the same tile, the same height, refused
+/// with no ship there and allowed with one. A test that only moored the ship
+/// would pass equally well against a rule that allowed everything.
+#[test]
+fn a_recall_onto_a_moored_deck_is_allowed_and_the_open_sea_is_not() {
+    use openshard_movement::scene::Scene;
+    use openshard_tiles::TileFlags;
+    use openshard_uofiles::multi::Component;
+
+    const SLOOP: u16 = 0x0C;
+    const HULL: u16 = 0x3E4E;
+    const DECK: u16 = 0x3E4A;
+    /// The land id a flat scene is paved with, flagged into the whole sea.
+    const WATER: u16 = 0;
+    /// One tile of it that is not — the shore the caster casts from.
+    const JETTY: u16 = 1;
+
+    let now = Instant::now();
+    let (mut world, connection, caster, rune_serial) = caster_with_rune(now);
+
+    // Open water everywhere but the tile the caster is standing on. The hull is
+    // a wall and the deck is a platform three tall: which is which is the
+    // tiledata's answer here, exactly as it is on a real install.
+    let mut scene = Scene::flat_holding(START.0 + 8, START.1 + 8, 0);
+    scene.land_art(WATER, TileFlags::WATER);
+    scene.land(START.0, START.1, JETTY);
+    scene.art(HULL, super::tests::WALL_FLAGS, 10);
+    scene.art(DECK, TileFlags::PLATFORM, 3);
+    let (map, tiles) = scene.into_shard(Facet(0));
+    world.state.facet_state_mut(Facet(0)).set_map(Some(map), &tiles);
+    world.state.set_tiles(tiles);
+    world.state.multis = super::tests::multis_with(
+        SLOOP,
+        [(HULL, -1), (DECK, 0)]
+            .into_iter()
+            .map(|(graphic, dx)| Component {
+                graphic,
+                dx,
+                dy: 0,
+                dz: 0,
+                flags: 1,
+            })
+            .collect(),
+    );
+
+    // The rune points at where the deck will be. Written rather than cast,
+    // because Mark writes the caster's own position and the caster cannot be
+    // standing on a ship that has not been launched.
+    let berth = Point::new(START.0 + 3, START.1, 0);
+    let deck = Point::new(berth.x, berth.y, 3);
+    let rune = world.state.registry.entity_of(rune_serial).unwrap();
+    world.state.registry.insert(
+        rune,
+        RuneMark {
+            facet: Facet(0),
+            destination: deck,
+        },
+    );
+
+    let shore = world.registry().get::<Position>(caster).unwrap().0;
+    cast_at(&mut world, connection, RECALL, rune_serial, now);
+    assert_eq!(
+        world.registry().get::<Position>(caster).unwrap().0,
+        shore,
+        "three units over open water is not somewhere to arrive"
+    );
+
+    // And with the ship moored, the same rune is the same rune.
+    let owner = serial_of(&world, connection);
+    openshard_boats::place(&mut world.state, caster, berth, Facet(0), SLOOP, owner).expect("open water");
+    cast_at(&mut world, connection, RECALL, rune_serial, now);
+    assert_eq!(
+        world.registry().get::<Position>(caster).unwrap().0,
+        deck,
+        "the deck is a floor, and the arrival test reads the layer that knows it"
+    );
+}
+
 #[test]
 fn a_no_recall_region_bars_arriving_and_marking_but_not_leaving() {
     // ServUO's matrix collapsed: `RecallFrom` is the one permissive row, so a
