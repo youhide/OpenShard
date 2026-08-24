@@ -479,6 +479,28 @@ That is a real choice with a latency cost, it is C's and D's to take together,
 and it should be taken with a measurement of a single-region rebuild rather than
 by preference.
 
+**The window crosses a restart, and there the rule changes. (Found 2026-08-25.)**
+A running shard answers a publish by dropping the coarse graph and carrying on —
+[`FacetState::publish`](../../crates/server/state/src/runtime.rs#L712) says so.
+A shard *restarted* inside the same window does not degrade: `boot.rs` loads the
+artifact against the world's revision, gets `Stale`, and refuses to boot at all.
+So six statics placed through the GM verbs (`gm.rs`'s `commit_one`, revision 1 →
+7 in four minutes) left a playground that could not come back up until someone
+ran the bake by hand — the shard's own sanctioned action made its next boot
+impossible. (That bake measured **11.6 s** over Felucca on 2026-08-25, not the
+52–96 s this document and `FacetState::publish` still quote; the numbers above
+predate the span bake and should be re-read with that in mind.) The hard `Err` was decided for `ROUTING_VERSION`
+([N4's finding](navigation_spans.md), a *deployment* step) before a world could
+move while the shard ran, and it now covers a case it was not weighed against.
+Two honest shapes, neither taken yet: (a) boot treats a revision-stale artifact
+the way a publish does — `coarse: None`, one loud warning, the same degradation
+the live rule already accepts — which needs `Error::Stale` to say *why* in a
+type rather than a string, since a bumped `ROUTING_VERSION` must keep refusing;
+(b) the launcher (playground, not the shard) rebakes on its own when the world
+has moved past the artifact, paying the ~12 s at start instead of at a panic.
+Direction D's local rebake retires both. Until it lands, (a) is the consistent
+one and (b) is the convenient one, and they are not exclusive.
+
 **To the client, whole chunks — never a stream of operations.** A client that
 lost the connection mid-stream would hold a world that never existed. That is
 [direction E](new_map_representation/plan.md#e--to-the-client), and the classic

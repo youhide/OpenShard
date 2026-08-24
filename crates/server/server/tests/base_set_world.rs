@@ -92,8 +92,11 @@ fn a_base_set_filed_under_the_wrong_facet_is_refused() {
     let error = openshard_server::boot::load_world(&config)
         .expect_err("facet 0's world must not load as facet 1")
         .to_string();
+    // The wording is `FacetWorld::read`'s, in `openshard_movement::bake`. This
+    // test only runs with two files nobody ships, so a reworded message is not
+    // caught by CI — it was found by hand on 2026-08-25, a rewording later.
     assert!(
-        error.contains("the file is facet 0"),
+        error.contains("holds facet 0"),
         "the message has to say which facet the file really is: {error}"
     );
 }
