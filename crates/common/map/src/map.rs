@@ -476,10 +476,19 @@ impl WorldMap {
     /// - blocks holding as many statics as the ones they replace — which is
     ///   every edit to the *ground* — cost **0.1 ms**. The span is written where
     ///   it was, nothing after it moves, and the offsets are not touched at all.
-    /// - blocks that changed the count cost **3.9–5.6 ms**, and most of that is
-    ///   neither the span nor the tail: [`WorldMap::from_parts`] shrinks the
-    ///   statics to fit, so the first item added to a facet reallocates all
-    ///   29 MiB of them wherever it lands.
+    /// - blocks that changed the count cost the tail, and only the tail:
+    ///   **0.02 ms** at the end of the statics run against **1.3 ms** at its
+    ///   start, in proportion to how much of the facet stands after them.
+    /// - and **once per world**, whichever of those it is, the reallocation:
+    ///   [`WorldMap::from_parts`] shrinks the statics to fit, so the first item
+    ///   *added* to a facet has to move all 29 MiB of them somewhere with room.
+    ///   Measured as three adds into one world: **7.05 ms, then 0.36, then
+    ///   0.04**. Taking an item away never pays it — the run only shortens, and
+    ///   the capacity it leaves behind is what the next add spends.
+    ///
+    /// So a removal is cheaper than an addition exactly once, and after that
+    /// they are the same call. Neither is worth a caller's attention beside the
+    /// bake over the facet, which is 55 ms.
     ///
     /// The case with no saving in it is two blocks at opposite corners, whose
     /// span is the facet; a caller with scattered blocks and no need of

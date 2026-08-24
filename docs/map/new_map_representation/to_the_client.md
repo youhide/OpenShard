@@ -732,9 +732,13 @@ Found while building E4:
   re-sort of all 458,752 blocks rather than the sixty-four that arrived. On the
   shipped Felucca, against **15.3 ms and a second 150 MiB facet resident**:
   **0.1 ms** for a set that changed no block's item count — every edit to the
-  ground, which is the equal-count case this entry named — and **3.9–5.6 ms**
-  for one that did, most of it the reallocation `from_parts`' own
-  `shrink_to_fit` makes unavoidable for the first item added to a facet.
+  ground, which is the equal-count case this entry named — and, for a set that
+  did change a count, the tail and only the tail: **0.02 ms** at the end of the
+  statics run against **1.3 ms** at its start. Plus, **once per world**, the
+  reallocation `from_parts`' own `shrink_to_fit` makes unavoidable for the first
+  item *added* to a facet — three adds into one world are 7.05 ms, then 0.36,
+  then 0.04. A removal never pays it, so *taking a static away is cheaper than
+  putting one in exactly once*, and after that they are the same call.
   `WorldMap::replace_blocks` is the primitive: one span from the first replaced
   block to the last, one memmove, one pass over the offsets, and the land
   written where it stood. `MapSnapshot::take_chunks` is the door beside
