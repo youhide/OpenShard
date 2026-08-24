@@ -15122,6 +15122,79 @@ fn a_route_to_a_place_is_walked_past_the_window_that_would_have_lapsed() {
     );
 }
 
+/// A door standing on the first step of a *freshly planned* route is opened,
+/// and not walked into.
+///
+/// **The rule was written in three places and this was the one it was missing
+/// from.** A cached route's door has been `ai`'s since routes were kept; a
+/// chase opened its own; and `step_body_toward` handed back a step it had just
+/// watched the live world refuse, leaving the opening to whoever called it.
+/// One caller did it (`npc::walk_home`, out of the obstruction index, for the
+/// first step only) and the other did not — so an escortable following its
+/// master through a shop door planned the same route into the same shut door on
+/// every beat of its walk.
+///
+/// The wall is what makes the assertion about the door rather than about
+/// tie-breaking: with one way through, the route has to go through it.
+#[test]
+fn a_door_on_a_freshly_planned_step_is_opened_rather_than_walked_into() {
+    /// Standing north of the divider, on the doorway's own column.
+    const FROM: Point = Point::new(DOORWAY.0, DOORWAY.1 - 1, 0);
+    /// And the goal is the far side of it, one step past the door.
+    const GOAL: Point = Point::new(DOORWAY.0, DOORWAY.1 + 1, 0);
+
+    let now = Instant::now();
+    let mut world = shard_over(one_doorway(), None);
+    let (door, _) = place_door(&mut world, Point::new(DOORWAY.0, DOORWAY.1, 0), now);
+    let walker = spawn_brained(&mut world, 0x0190, FROM, 8, now);
+
+    // A body that means to open its way plans through the shut door, so the
+    // route's first step is the door tile and the live world refuses it.
+    let step = ai::step_body_toward(
+        &mut world.state,
+        walker,
+        Facet(0),
+        FROM,
+        GOAL,
+        Doors::AllOpen,
+        ai::Goal::Fixed,
+    );
+    assert_eq!(step, None, "the beat went on the door, so there is no step");
+    assert!(
+        world
+            .registry()
+            .get::<openshard_state::components::Door>(door)
+            .is_some_and(|d| d.is_open),
+        "and what it went on is opening it"
+    );
+    let route = world
+        .registry()
+        .get::<Route>(walker)
+        .cloned()
+        .expect("the route it planned is kept for the beat that walks it");
+    assert_eq!(
+        (route.next, route.at),
+        (0, FROM),
+        "with its first step still due, from where the body is standing"
+    );
+
+    // The beat after it: the way is open and the step is the one that was due.
+    let through = ai::step_body_toward(
+        &mut world.state,
+        walker,
+        Facet(0),
+        FROM,
+        GOAL,
+        Doors::AllOpen,
+        ai::Goal::Fixed,
+    );
+    assert_eq!(
+        through,
+        route.steps.first().copied(),
+        "and it walks the step it opened the door for"
+    );
+}
+
 /// A route says nothing from anywhere except where its next step starts, and a
 /// body that did not move is not standing there.
 ///

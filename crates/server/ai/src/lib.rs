@@ -286,8 +286,17 @@ pub fn step_body_toward(
             // ([`Doors::AllOpen`]) has a first step the world may still refuse.
             // The landing is what the route is written down against, so it has
             // to come from the rule the world will actually apply.
-            let (landing, _) = probe(state, mover, facet, from, first);
-            let taken = landing.filter(|_| will_move(state, mover, first));
+            let taken = match way_ahead(state, mover, facet, from, first, doors) {
+                Way::Open(landing) => will_move(state, mover, first).then_some(landing),
+                // The beat is spent on the door and the body stands where it
+                // is, so the route is kept with its first step still due —
+                // exactly what the beat after a cached step's door does.
+                Way::Opening => {
+                    remember(state, mover, steps, from, None, to);
+                    return None;
+                }
+                Way::Shut => None,
+            };
             remember(state, mover, steps, from, taken, to);
             Some(first)
         }
@@ -489,25 +498,25 @@ fn cached_step(
         return Cached::Stale;
     }
     let direction = route.steps[route.next];
-    let (landing, door) = probe(state, body, facet, from, direction);
-    if let Some(landing) = landing {
-        // Turn-as-step: a body not yet facing this way spends the beat turning
-        // and stands where it was, so the same step is due again.
-        if will_move(state, body, direction) {
-            let mut advanced = route;
-            advanced.next += 1;
-            advanced.at = landing;
-            state.registry.insert(body, advanced);
+    match way_ahead(state, body, facet, from, direction, doors) {
+        Way::Open(landing) => {
+            // Turn-as-step: a body not yet facing this way spends the beat
+            // turning and stands where it was, so the same step is due again.
+            if will_move(state, body, direction) {
+                let mut advanced = route;
+                advanced.next += 1;
+                advanced.at = landing;
+                state.registry.insert(body, advanced);
+            }
+            Cached::Step(direction)
         }
-        return Cached::Step(direction);
+        Way::Opening => Cached::Opening,
+        Way::Shut => {
+            // The world changed under the route; the caller plans again.
+            state.registry.remove::<Route>(body);
+            Cached::Stale
+        }
     }
-    if let (Some(door), Doors::AllOpen) = (door, doors) {
-        items::open_door(state, door);
-        return Cached::Opening;
-    }
-    // The world changed under the route; the caller plans again.
-    state.registry.remove::<Route>(body);
-    Cached::Stale
 }
 
 /// Write down a route a body has just planned, so the beats after this one walk
@@ -739,6 +748,56 @@ fn probe(
     (None, door)
 }
 
+/// What the live world does with the step a body is about to take.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Way {
+    /// Open, and this is where the step lands.
+    Open(Point),
+    /// A door was in the way and this body works latches: it is open now, and
+    /// the beat went on opening it. The step itself is still due.
+    Opening,
+    /// Refused, with nothing there this body can do anything about.
+    Shut,
+}
+
+/// [`probe`] with the door policy applied — the one place a body meets a door
+/// standing on the step in front of it.
+///
+/// **It was three places**, which is one more than the number of times the rule
+/// can be right. [`cached_step`] opened a door on the route it was following;
+/// [`step_body_toward`] did not open one standing on the step it had just
+/// planned, so `npc::walk_home` re-derived the door for itself out of the
+/// obstruction index afterwards — and an escortable, which has no such code of
+/// its own, planned through a shut door every beat and butted into it for ever.
+/// [`chase_step`] had a fourth spelling for each of its two steps.
+///
+/// **The policy is `doors` and not the body**, for the reason that argument
+/// exists: [`Doors::AllOpen`] is the reading of a body that intends to open its
+/// way (see that type), so a door refusing a step planned on it is a door this
+/// body meant to open rather than the world changing under the plan. A body
+/// walking on [`Doors::AsTheyStand`] planned round shut doors in the first
+/// place, and one in the way of it is news.
+fn way_ahead(
+    state: &mut WorldState,
+    body: EntityId,
+    facet: Facet,
+    from: Point,
+    direction: Direction,
+    doors: Doors,
+) -> Way {
+    let (landing, door) = probe(state, body, facet, from, direction);
+    if let Some(landing) = landing {
+        return Way::Open(landing);
+    }
+    match (door, doors) {
+        (Some(door), Doors::AllOpen) => {
+            items::open_door(state, door);
+            Way::Opening
+        }
+        _ => Way::Shut,
+    }
+}
+
 /// One step of a chase: follow the cached route, walk straight when nothing is
 /// in the way, plan when something is, and give up — guard, then wander — when
 /// there is no way at all.
@@ -762,15 +821,10 @@ fn chase_step(
     // Nothing cached: walk straight at the quarry until something is in the
     // way — the naive-step-first shape both references use.
     let dir = direction_toward(from, to)?;
-    let (open, door) = probe(state, creature, facet, from, dir);
-    if open.is_some() {
-        return Some(dir);
-    }
-    if let Some(door) = door {
-        if brain.opens_doors {
-            items::open_door(state, door);
-            return None;
-        }
+    match way_ahead(state, creature, facet, from, dir, doors) {
+        Way::Open(_) => return Some(dir),
+        Way::Opening => return None,
+        Way::Shut => {}
     }
 
     // Blocked: plan a route around. A door-opener plans through doors and
@@ -787,22 +841,21 @@ fn chase_step(
     match planned {
         Some(steps) if !steps.is_empty() => {
             let first = steps[0];
-            let (landing, door) = probe(state, creature, facet, from, first);
-            let Some(landing) = landing else {
-                if let Some(door) = door {
-                    if brain.opens_doors {
-                        items::open_door(state, door);
-                        remember(state, creature, steps, from, None, to);
-                        return None;
-                    }
+            match way_ahead(state, creature, facet, from, first, doors) {
+                Way::Open(landing) => {
+                    let taken = will_move(state, creature, first).then_some(landing);
+                    remember(state, creature, steps, from, taken, to);
+                    Some(first)
+                }
+                // The beat goes on the door and the route waits for the step.
+                Way::Opening => {
+                    remember(state, creature, steps, from, None, to);
+                    None
                 }
                 // Planned into something that is neither open nor a door it can
                 // work: give up rather than lunge.
-                return give_up(state, creature);
-            };
-            let taken = will_move(state, creature, first).then_some(landing);
-            remember(state, creature, steps, from, taken, to);
-            Some(first)
+                Way::Shut => give_up(state, creature),
+            }
         }
         _ => give_up(state, creature),
     }

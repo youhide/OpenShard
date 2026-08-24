@@ -268,9 +268,15 @@ fn wander_step(state: &mut WorldState, npc: EntityId, at: Point) -> Option<Direc
         .or_else(|| Some(Direction::from_bits(state.rng.below(8) as u8)))
 }
 
-/// A step back toward the post — pathed around the counter, not into it. A
-/// townsperson is human: a shut door on the way is opened, not an obstacle (the
-/// auto-close swings it shut again behind them).
+/// A step back toward the post — pathed around the counter, not into it.
+///
+/// A townsperson is human, so it walks on [`Doors::AllOpen`]: a shut door on
+/// the way is planned through and opened when it is reached, rather than being
+/// an obstacle to route round (the auto-close swings it shut again behind
+/// them). The opening itself is `ai`'s, on whichever step meets the door —
+/// this used to re-derive the door out of the obstruction index for the *first*
+/// step only, which was a second reading of a rule `ai` already applied to
+/// every other step of the same route.
 ///
 /// The post does not move, so the route to it is planned once and walked
 /// ([`openshard_ai::Goal::Fixed`]). That matters here more than anywhere else:
@@ -279,7 +285,7 @@ fn wander_step(state: &mut WorldState, npc: EntityId, at: Point) -> Option<Direc
 /// see `Goal` for the arithmetic.
 fn walk_home(state: &mut WorldState, npc: EntityId, at: Point, post: Point) -> Option<Direction> {
     let facet = state.facet_of(npc);
-    let dir = openshard_ai::step_body_toward(
+    openshard_ai::step_body_toward(
         state,
         npc,
         facet,
@@ -287,22 +293,7 @@ fn walk_home(state: &mut WorldState, npc: EntityId, at: Point, post: Point) -> O
         post,
         Doors::AllOpen,
         openshard_ai::Goal::Fixed,
-    )?;
-    if let Some(tile) = openshard_movement::step_from(at, dir) {
-        // The obstruction index and not the terrain: the overlay a step reads
-        // says a door is in the way, and only this says which door to open.
-        let door = state
-            .facet_state(facet)
-            .obstructions()
-            .blocker_at(tile.x, tile.y)
-            .filter(|o| o.door())
-            .map(|o| o.entity);
-        if let Some(door) = door {
-            openshard_items::open_door(state, door);
-            return None;
-        }
-    }
-    Some(dir)
+    )
 }
 
 /// Where this NPC should be at this hour.
