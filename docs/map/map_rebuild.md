@@ -484,10 +484,13 @@ A running shard answers a publish by dropping the coarse graph and carrying on �
 [`FacetState::publish`](../../crates/server/state/src/runtime.rs#L712) says so.
 A shard *restarted* inside the same window does not degrade: `boot.rs` loads the
 artifact against the world's revision, gets `Stale`, and refuses to boot at all.
-So six statics placed through the GM verbs (`gm.rs`'s `commit_one`, revision 1 →
-7 in four minutes) left a playground that could not come back up until someone
-ran the bake by hand — the shard's own sanctioned action made its next boot
-impossible. (That bake measured **11.6 s** over Felucca on 2026-08-25, not the
+So **six ground repaints** — `.setland` through `gm.rs`'s `commit_one`, four of
+the six the same two tiles painted over again, 112 seconds from the first to the
+last, revision 1 → 7 — left a playground that could not come back up until
+someone ran the bake by hand. The shard's own sanctioned action made its next
+boot impossible, and the cheapest edit the engine offers was enough to do it:
+this needs no statics, no house, and no operator who thought they were changing
+much. (That bake measured **11.6 s** over Felucca on 2026-08-25, not the
 52–96 s this document and `FacetState::publish` still quote; the numbers above
 predate the span bake and should be re-read with that in mind.) The hard `Err` was decided for `ROUTING_VERSION`
 ([N4's finding](navigation_spans.md), a *deployment* step) before a world could
