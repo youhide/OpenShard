@@ -141,13 +141,12 @@ by 15%.** Deflate-then-Huffman is still 0.241 of raw, so the whole facet is
 intuition "the stream is already compressed" is the one that would skip the
 deflate.
 
-**`World` derives `Default`** ([`world.rs`](../../../../crates/common/map/src/world.rs#L45)),
-which `docs/style.md` bans, and `World::new(None)` is the named constructor it
-already has. Left alone: it is one derive and a sweep of the callers, and it is
-not E's.
+**`World` no longer derives `Default`**; `World::new(None)` is the named
+constructor for a mapless facet. `Ground` likewise requires its map and tiles
+through `Ground::new`, so its span-index invariant cannot be skipped by a
+defaulted inner world.
 
-**`Opening` is constructed with `..Default::default()` in both binaries**, which
-is the failure mode the style rule names — a field added later is silently
-filled in rather than named at each call. Not touched here, and the reason `run`
-grew a *parameter* rather than a field on `Opening`: a new parameter is one the
-compiler makes every caller answer.
+**Both binaries name every `Opening` field.** The struct has no `Default`, so a
+field added later makes each binary answer for its starting value. This is why
+`run` takes an `Opening` parameter rather than keeping diagnostic inputs as
+unnoticed state inside the client.

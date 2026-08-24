@@ -428,11 +428,62 @@ colour on a connected client's screen without a reconnect — which is
 [direction C's own "done"](plan.md#c--patches-and-the-resolved-snapshot), and the
 last clause of it.
 
+**Taken in E4:**
+
+- **The notice goes to everyone standing on the facet**, and there is no
+  subscription. The obvious alternative is to remember which connections have
+  sent a `0xE002` and tell only those, and it is wrong for the reason
+  `WorldNotice` is sent unasked in the first place: *a client cannot ask about
+  something nobody told it happened*. E3's best case — a kept world already at
+  the shard's revision — asks for **nothing at all** on the way in, so a
+  subscription built out of "who asked" would leave the client whose cache works
+  best the one that never hears about an edit. A stock client drops the
+  subcommand, and a client of ours drawing its own disk's facet ignores it.
+- **The body is `ChangesReply`'s**, so the two are one encoder and two
+  subcommands. They are the same three facts — a facet, the revision it is at,
+  and what moved to get there — said for two different reasons, and `Everything`
+  means the same thing in both: *more than a packet can name*, take the facet
+  again. That is the only one of the reply's four reasons a notice can have.
+- **The chunks cross the seam, not the world.** By the time a publish reaches a
+  client that is drawing, the facet belongs to the *window* — a `MapSnapshot` has
+  one owner per process — so the thread that owns the socket has nothing to apply
+  them over. `Fetch::moved` therefore ends in `Fetched::Chunks`, and `finish`
+  answers with an enum rather than panicking for the arm it was not built for.
+  `World::take_chunks` is the far end, and `Ground::take_chunks` wraps it with
+  the span rebake in the same statement, exactly as `publish` does.
+- **The kept file is left at the revision it was written at.** Rewriting it would
+  mean the world coming back across that seam to be written from, and what it
+  saves is one small fetch on the next connection — which is exactly the
+  mechanism E3 built and this client runs anyway. The next start asks what moved,
+  is told these same chunks, and writes the file then.
+- **The invalidation is by block, except the radar, which is by revision** — and
+  that asymmetry is the caches' own. The composited pictures are keyed by where
+  they are, so what is dropped is named by the blocks the chunks cover; the
+  radar's products carry the source revision in their key, so naming the new one
+  makes every one of them unreachable at once while the stale-exact path keeps a
+  minimap from blinking empty. `RadarCache` was built with that field and *no
+  writer for it* — "this path has no production writer today, the client's
+  `WorldMap` cannot change at runtime" — and this is the writer it was waiting
+  for.
+- **The coarse graph is dropped and not rebuilt.** Eleven seconds of flood, the
+  same trade the shard makes when it publishes and the same answer it gives its
+  operator: long routes are the bounded search until the client reconnects, which
+  is when a graph is looked for beside the kept world again.
+- **A publish that lands while ground is still arriving ends the connection.**
+  The answers to the fetch in flight are on the wire at the revision the publish
+  has just moved past, and nothing tells them apart from the answers a second
+  fetch would ask for. So it ends *here*, naming the publish, rather than seconds
+  later inside `assemble` naming a mixed set of chunks. Draining the abandoned
+  fetch is what would make this a recovery, and it is in the backlog.
+
 ## What this must not do
 
-- **Send anything to a client that did not ask.** `WorldNotice` is the one
-  exception, and it is seventeen bytes of body in a twenty-two byte packet — a
-  stock client reads its length out of the envelope and drops it.
+- **Send anything to a client that did not ask.** The two *notices* are the
+  exception and they are one exception, taken for one reason: a client cannot ask
+  about a world nobody told it about, and it cannot ask what moved unless
+  somebody says something did. `WorldNotice` is seventeen bytes of body in a
+  twenty-two byte packet and `PublishNotice` is twenty-two for a one-chunk edit —
+  a stock client reads the length out of the envelope and drops both.
 - **Open direction G.** The facet stays whole and resident; a chunk fetched on
   approach is a different plan with a different risk.
 - **Grow a second assembly path.** Whatever the client builds a world out of, it
@@ -588,3 +639,38 @@ both left owed:
   The cheap half is worth naming separately: **the startup order is only ever
   proven by starting**, so a phase that changes it owes the run, and neither of
   the two that did paid it.
+
+Found while building E4:
+
+- **A fetch that straddles a publish is ended and not recovered.** The finding E2
+  left and E3 handed on: a client is now *told* a publish happened, which is what
+  a recovery needs, and it still does not make one. The obstacle is that the
+  abandoned fetch's answers are already on the wire and are indistinguishable
+  from the answers a restarted fetch would ask for. The shape it wants is
+  **drain-and-restart**: keep the abandoned `Fetch` beside the new one, route
+  chunk packets to it while it is still owed any — `outstanding.len()` is exactly
+  how many — and discard what completes, then start again. It needs a
+  `Fetch::discard` that eats a packet without decoding it (a refusal has to come
+  out of `outstanding` too, which `on_packet` does not do), a way to get a held
+  world back out of a `Fetch` for the E3 arm, and a rule for a publish that lands
+  while a client is *asking* what moved — where the reply is already stale and
+  the honest answer is to ask again rather than fetch against it.
+- **A quarantined composite block is never un-quarantined.** `CompositeCache`
+  permanently marks a block that `FlatGroundBlock::inspect` refused, on the
+  stated grounds that "map terrain is immutable for the lifetime of this cache" —
+  which is exactly what E4 stops being true. A publish that flattens a block
+  leaves it on the direct path for the rest of the session, which is slower and
+  not wrong; the reverse is handled, since the invalidation drops the composite
+  and the next preparation rejects it again. What is missing is one line of API,
+  `rejected.retain(…)` under the same block invalidation.
+- **The client never takes up an interiors bake for a world off the wire**, so
+  E4's invalidation has nothing to say about one. `Update::Ground` takes up the
+  navigation graph and not the interiors flood — the artifact is looked for only
+  in `run`, from an install path — so `Resources::interiors` is `None` for the
+  whole of a `--world-from-shard` session. Worth writing down because the day it
+  is taken up, it is a third thing a publish makes stale.
+- **`link::play`'s wiring has grown a third decision and still has no test.** E2
+  and E3 both recorded this; E4 adds the publish arm — which is the one that runs
+  *while the connection is doing something else*, and therefore the one whose
+  ordering against a fetch in flight is hardest to get right by reading. Same
+  fix, one caller worse: a `tests/` in `e2e/playground`, which links both ends.

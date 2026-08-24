@@ -80,6 +80,13 @@ Ranked by what a person would notice first.
    `invalidate_tile` are called only from tests, because the client's `WorldMap`
    cannot change at runtime. It is the right preparation for direction D and it
    must not be mistaken for working invalidation.
+
+   > **Half spent** by [E4](to_the_client.md#e4--a-publish-reaches-a-connected-client):
+   > the client's `WorldMap` *does* change at runtime now, and a publish reaching
+   > a connected one calls `set_revision` with the facet's new revision — one bump
+   > for a whole edit, which is what makes every product of the old one
+   > unreachable at once. `invalidate_tile` is still testonly, and deliberately:
+   > a chunk is sixteen thousand tiles and it bumps the revision once per call.
 5. **The building flood's artifact is 112 MiB of raw `u32`** — one label per
    tile, overwhelmingly zero (the exterior), written and read four bytes at a
    time ([`interiors.rs:240`](../../../crates/client/artscan/src/interiors.rs#L240)),

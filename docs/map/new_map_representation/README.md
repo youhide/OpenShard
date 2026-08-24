@@ -115,5 +115,20 @@ over a world an operator edited asks the shard what moved and fetches exactly
 that. The open question the plan left — rewrite whole or grow a tail — was closed
 by measurement: writing all of Felucca is 0.10–0.13 s, so it is rewritten whole.
 
-What is left is **E4**, a publish reaching a connected client — which is direction
-C's own "done", and the last clause of it.
+**And E4: a publish reaches a connected client**, which is direction C's own
+"done" and the last clause of it. `mapedit::commit` sends `0xE005` after the log
+has taken the patch, to every connection standing on the facet — the same
+exception `WorldNotice` already is, because a client cannot ask about something
+nobody told it happened. What a client of ours does with it is fetch the named
+chunks and hand them to its *window*, since by then the facet belongs there and a
+`MapSnapshot` has one owner per process: `Fetch::moved` ends in the squares
+themselves and `Ground::take_chunks` puts them in, rebaking the spans in the same
+statement. Everything derived over the ground they replaced goes with them — the
+composited blocks by name, the radar's products by naming a revision they were
+not built at, and the coarse graph outright, which is the trade the shard already
+makes when it publishes.
+
+What is left of E is its backlog, and the largest entry is **the fetch that
+straddles a publish**: a client told the ground moved while it is still arriving
+ends the connection and says so, where draining the abandoned answers would let
+it start again at the new revision instead.

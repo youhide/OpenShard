@@ -1108,10 +1108,15 @@ impl RadarCache {
     /// a facet-wide revision bump already leaves every coarse product reachable
     /// only through [`Self::select_ready`]'s stale-exact path, because a parent
     /// needs four children at the *new* revision and an edit rebuilds one. The
-    /// clamp does not create that; it declines to hide it behind a stall. This
-    /// path has no production writer today — the client's `WorldMap` cannot
-    /// change at runtime — and the shard that gives it one owes the coarse
-    /// ladder a revision model, not a bigger frame budget.
+    /// clamp does not create that; it declines to hide it behind a stall.
+    ///
+    /// **This per-tile path still has no production writer**, and the *revision*
+    /// beside it now does: a publish reaching a connected client names the
+    /// facet's new revision through [`set_revision`](Self::set_revision) — see
+    /// `to_the_client.md`'s E4 — which is one bump for a whole edit rather than
+    /// one per tile, and is what a bulk change wants. A caller with a genuinely
+    /// single-tile edit is what this is for, and the shard that grows one owes
+    /// the coarse ladder a revision model rather than a bigger frame budget.
     ///
     /// Returns `None` only if the facet revision has exhausted `u64`.  The map
     /// itself must not be changed in that case, because the cache can no longer

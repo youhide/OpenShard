@@ -229,11 +229,13 @@ a free optimisation, until `Order` is made total across distinct tiles.
 
 **Goal.** Our client draws a world it was given, not one it found on disk.
 
-> **Being executed, and it has an executable plan of its own:**
+> **Built, and it has an executable plan of its own:**
 > [`to_the_client.md`](to_the_client.md) — five phases, the measurements the
-> pipe was chosen off, and what each phase's "done" is. **E0 is built**: the
-> client's world is a parameter, and `--base-set` is the arm that is not the
-> install.
+> pipe was chosen off, and what each phase's "done" is. **All five are built**:
+> the client's world is a parameter (E0), the wire carries a chunk (E1), a client
+> with no map files takes the facet off it (E2), keeps what it was given (E3),
+> and is told when the shard's own ground moves under it (E4). What is left is
+> that plan's backlog.
 
 - Client-side disk cache keyed by chunk and revision; on connect it offers what
   it holds and receives what is missing or stale; on a publish it is told which
