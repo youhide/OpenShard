@@ -101,8 +101,7 @@ impl Selection {
     /// the current presentation.
     pub fn tile(&self) -> Option<&PickedTile> {
         match self {
-            Self::Tile(tile) => Some(tile),
-            Self::Static { tile, .. } => Some(tile),
+            Self::Tile(tile) | Self::Static { tile, .. } => Some(tile),
             Self::Mobile(live) => live.as_ref().map(|(_, tile)| tile),
             Self::Item(live) => live.as_ref().map(|(_, tile)| tile),
         }

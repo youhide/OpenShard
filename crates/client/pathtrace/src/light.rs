@@ -179,7 +179,6 @@ impl Light {
         let distance = towards.length();
         let falloff = self.falloff.at(distance)?;
         let at = match self.emitter {
-            Emitter::Point => self.at,
             Emitter::Sphere { radius } if radius < distance => {
                 let (u, v) = (towards / distance).orthonormal_basis();
                 // Uniform over the disc's *area*: the square root is what keeps
@@ -189,7 +188,7 @@ impl Light {
                 let azimuth = std::f64::consts::TAU * stream.unit();
                 self.at + u * (spread * azimuth.cos()) + v * (spread * azimuth.sin())
             }
-            Emitter::Sphere { .. } => self.at,
+            Emitter::Point | Emitter::Sphere { .. } => self.at,
         };
         let scale = self.intensity * falloff;
         Some(Sample {

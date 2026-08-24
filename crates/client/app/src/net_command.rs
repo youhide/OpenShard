@@ -140,7 +140,7 @@ impl App {
                 // answered and would block the same objects being asked about
                 // again. See `Tooltips::reset`.
                 self.tooltips.reset();
-                self.entered(view, None);
+                self.entered(*view, None);
             }
             link::Update::Mutation { packet } => self.fold_incoming(&packet),
             link::Update::Animation(animation) => self.world.presentation.crowd.play(animation),

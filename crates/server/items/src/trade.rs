@@ -174,12 +174,13 @@ pub fn offer(state: &mut WorldState, connection: ConnectionId, held: HeldItem, t
     }
     // ServUO's `CheckTrade`: a partner with something on its own cursor cannot be
     // handed anything, because the item it is holding has no settled home yet.
-    let partner_connection = match state.registry.get::<Client>(target) {
-        Some(&Client { connection, .. }) => connection,
-        None => {
-            bounce(state, connection, held, DragCancelReason::Other);
-            return;
-        }
+    let Some(&Client {
+        connection: partner_connection,
+        ..
+    }) = state.registry.get::<Client>(target)
+    else {
+        bounce(state, connection, held, DragCancelReason::Other);
+        return;
     };
     if state.held_of(partner_connection).is_some() {
         state.localized_message(player, CLILOC_PARTNER_IS_DRAGGING, "");

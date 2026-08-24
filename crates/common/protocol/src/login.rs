@@ -1549,7 +1549,7 @@ mod tests {
 
         // Through `ServerPacket::decode`, which is the client's own route in:
         // `decode_packet` reads the *client* length table and 0xA8 is not in it.
-        let mut forged = bytes.clone();
+        let mut forged = bytes;
         forged[40] = 250;
         let Ok(Some(crate::server_packet::ServerPacket::ShardList(decoded))) =
             crate::server_packet::ServerPacket::decode(&forged, ClientVersion::TOL)

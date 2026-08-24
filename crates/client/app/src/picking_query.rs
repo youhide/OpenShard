@@ -403,8 +403,8 @@ impl App {
     /// Passability is asked per *tile* and not per step: `spawn_z` finds the
     /// surface a body would stand on regardless of how far that is from the
     /// player's own height — so a building's upper floor reads open from the
-    /// street rather than blocked — and `can_fit` is what says nothing solid is
-    /// standing in the body's space there, the clutter included.
+    /// street rather than blocked — and `can_stand` is what says this body may
+    /// occupy that space, including its own reading of shut doors.
     ///
     /// The way *through* it is not here. A route is drawn whether this overlay
     /// is on or not, so that a Ctrl-drag shows where the body is about to go
@@ -413,7 +413,7 @@ impl App {
         use openshard_map::grid::Tile;
         use openshard_movement::PLAYER_HEIGHT;
 
-        let terrain = footing(&self.resources, openshard_map::overlay::Doors::AsTheyStand);
+        let terrain = footing(&self.resources, self.walking_doors());
         let near = i32::from(self.world.motion.planning_state().position.z);
         let mut open = Vec::new();
         let mut blocked = Vec::new();
@@ -437,7 +437,8 @@ impl App {
                     // drawn at the wrong height is a better answer than a panic
                     // in a debugging overlay.
                     let drawn_z = |z: i32| z.clamp(i32::from(i8::MIN), i32::from(i8::MAX)) as i8;
-                    match surface.filter(|&z| openshard_movement::can_fit(&terrain, tile, z, PLAYER_HEIGHT)) {
+                    match surface.filter(|&z| openshard_movement::can_stand(&terrain, tile, z, PLAYER_HEIGHT))
+                    {
                         Some(z) => open.push(Point { x, y, z: drawn_z(z) }),
                         None => blocked.push(Point {
                             x,

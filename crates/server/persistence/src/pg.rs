@@ -1697,9 +1697,8 @@ mod tests {
         // Older code connecting to a newer save must refuse, not read it and write
         // the loss back on the next save.
         let _guard = LOCK.lock().await;
-        let url = match std::env::var("OPENSHARD_POSTGRES").ok() {
-            Some(url) => url,
-            None => return,
+        let Some(url) = std::env::var("OPENSHARD_POSTGRES").ok() else {
+            return;
         };
         let (client, connection) = tokio_postgres::connect(&url, NoTls).await.expect("connect");
         tokio::spawn(async move {

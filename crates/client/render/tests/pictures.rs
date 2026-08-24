@@ -326,7 +326,7 @@ fn a_wall_lit_from_one_end_has_no_dark_stroke_at_its_seam() {
         })
         .collect();
 
-    let mut marked = drawn.clone();
+    let mut marked = drawn;
     marked.mark_seams();
     written(&slug(&scene), View::Flames, "elevation", &marked);
 

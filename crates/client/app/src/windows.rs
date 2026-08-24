@@ -685,10 +685,9 @@ pub fn reconcile_own_windows(
         }
         WindowSubject::Paperdoll(serial) => view.paperdolls.contains_key(&serial),
         WindowSubject::Dialog(gump_id) => view.gumps.iter().any(|gump| gump.gump_id == gump_id),
-        WindowSubject::Skills => false,
-        WindowSubject::Status => false,
-        WindowSubject::Minimap => false,
-        WindowSubject::WorldMap => false,
+        WindowSubject::Skills | WindowSubject::Status | WindowSubject::Minimap | WindowSubject::WorldMap => {
+            false
+        }
         WindowSubject::Spellbook(serial) => view.spellbooks.contains_key(&serial),
         // Nothing in the view holds the picker open, so there is nothing for an
         // overlay entry to be ahead *of* — the same as the two kinds above.

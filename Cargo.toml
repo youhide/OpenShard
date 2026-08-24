@@ -171,6 +171,12 @@ rust_2018_idioms = { level = "warn", priority = -1 }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+manual_is_multiple_of = "warn"
+manual_let_else = "warn"
+needless_for_each = "warn"
+manual_range_contains = "warn"
+unnecessary_sort_by = "warn"
+option_as_ref_deref = "warn"
 todo = "warn"
 dbg_macro = "warn"
 

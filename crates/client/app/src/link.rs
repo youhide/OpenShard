@@ -125,7 +125,7 @@ pub enum Update {
         /// belongs to the event-loop owner, and a world entered is exactly
         /// where that walk starts. The owner builds one from this view rather
         /// than being handed a second opinion about it.
-        view: WorldView,
+        view: Box<WorldView>,
     },
     /// A decoded server packet, for the event-loop owner to apply.
     ///
@@ -372,11 +372,10 @@ impl Link {
     /// replay stale input later. The server remains authoritative either way.
     fn send(&self, command: Command) {
         match self.commands.try_send(command) {
-            Ok(()) => {}
+            Ok(()) | Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
             Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
                 tracing::warn!("shard command queue is full; dropping stale input");
             }
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
         }
     }
 
@@ -619,7 +618,7 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
     let player_serial = view.player.serial;
     // Where the server put us. The owner starts its `Walk` from this view, and
     // every `0x02` after it is computed there.
-    report(Update::World { view });
+    report(Update::World { view: Box::new(view) });
 
     loop {
         tokio::select! {

@@ -169,10 +169,9 @@ impl LodThresholds {
             BlockLod::Lod0 if pixels <= self.lod2_enter_pixels => BlockLod::Lod2,
             BlockLod::Lod0 if pixels <= self.lod1_enter_pixels => BlockLod::Lod1,
             BlockLod::Lod0 => BlockLod::Lod0,
-            BlockLod::Lod1 if pixels >= self.lod1_leave_pixels => BlockLod::Lod0,
+            BlockLod::Lod1 | BlockLod::Lod2 if pixels >= self.lod1_leave_pixels => BlockLod::Lod0,
             BlockLod::Lod1 if pixels <= self.lod2_enter_pixels => BlockLod::Lod2,
             BlockLod::Lod1 => BlockLod::Lod1,
-            BlockLod::Lod2 if pixels >= self.lod1_leave_pixels => BlockLod::Lod0,
             BlockLod::Lod2 if pixels >= self.lod2_leave_pixels => BlockLod::Lod1,
             BlockLod::Lod2 => BlockLod::Lod2,
         }

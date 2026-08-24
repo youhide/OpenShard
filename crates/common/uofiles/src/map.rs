@@ -194,7 +194,7 @@ pub fn read_facet(client_dir: impl AsRef<Path>, facet: u8) -> Result<WorldMap, M
     // Whichever file was actually read is the one an error should name.
     let (source_path, bytes) = if uop.exists() {
         let pattern = |index: usize| format!("build/map{facet}legacymul/{index:08}.dat");
-        let bytes = crate::uop::read_concatenated(&uop, &pattern).map_err(|source| MapError::Uop {
+        let bytes = crate::uop::read_concatenated(&uop, pattern).map_err(|source| MapError::Uop {
             path: uop.clone(),
             source,
         })?;

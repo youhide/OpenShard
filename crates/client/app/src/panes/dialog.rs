@@ -905,7 +905,7 @@ mod tests {
         pane.focus = Some(TextEntryId::new(7));
 
         let mut view = fixture::world(Serial::new(0x0000_0001).unwrap());
-        view.gumps.push(gump.clone());
+        view.gumps.push(gump);
         // No art is needed to pin this: `Field`s and `Caption`s come straight
         // out of the layout's own coordinates, never out of the atlas — see
         // `gump_art::window`'s `Element::TextEntry` arm.

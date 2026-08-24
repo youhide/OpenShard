@@ -2642,8 +2642,8 @@ impl Marked {
             Some(Marked::Static {
                 graphic: g,
                 height: h,
-            }) => (g, h) == (graphic, height),
-            Some(Marked::Item {
+            })
+            | Some(Marked::Item {
                 graphic: g,
                 height: h,
             }) => (g, h) == (graphic, height),
@@ -3000,7 +3000,7 @@ fn draw_tile_highlight(
         // nothing across the top of it, which reads as an unfinished column
         // rather than as a ceiling.
         if lid.is_some() {
-            painter.add(egui::Shape::closed_line(top.clone(), edge));
+            painter.add(egui::Shape::closed_line(top, edge));
         }
     }
     // Every standable height, under the marker so the marker stays the answer to

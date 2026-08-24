@@ -34,17 +34,6 @@ pub fn toggle_door(state: &mut WorldState, player: EntityId, door: EntityId, ser
     let Some(is_open) = state.registry.get::<Door>(door).map(|d| d.is_open) else {
         return;
     };
-    // A ghost has no hands. ServUO gates every double-click on `CheckAlive`
-    // before the item is ever asked (`Server/Mobile.cs:4402`, answering with
-    // `Item.OnDoubleClickDead`), and a door is not the exception — it is the
-    // place a dead player would most want to be one, which is exactly why the
-    // dead walk *through* a shut leaf instead. See `WorldState::walking_doors`;
-    // the two rules are one mechanic, and a ghost that could work a latch would
-    // be opening doors for the living who cannot see it.
-    if state.registry.has::<openshard_state::components::Ghost>(player) {
-        state.system_message(player, DEAD_HANDS);
-        return;
-    }
     // A house door opens for the people the house trusts. Asked before the lock,
     // because a stranger at a friend's door is refused for *being* a stranger and
     // saying "that is locked" would send them looking for a key.

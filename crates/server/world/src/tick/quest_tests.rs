@@ -78,6 +78,25 @@ fn place_giver(world: &mut World, keys: &[&str], now: Instant) -> Serial {
     serial
 }
 
+/// Tell the quest system that `killer` slew a rat without making the player
+/// who gets credit into the dead mobile. The death tick consumes the same event
+/// as the quest listener, so the victim must be a real, separate entity.
+fn slay_rat(world: &mut World, killer: EntityId, now: Instant) {
+    let serial = spawn_mobile_at(world, Point::new(START.0 + 10, START.1, 0), 1, now);
+    let entity = world.state.registry.entity_of(serial).expect("the rat spawned");
+    let killer = world
+        .state
+        .registry
+        .serial_of(killer)
+        .expect("the killer has a serial");
+    world.state.bus.send(openshard_combat::MobileDied {
+        entity,
+        serial,
+        body: openshard_protocol::wire::Graphic(RAT),
+        killer: Some(killer),
+    });
+}
+
 /// The player's quest log, or an empty one.
 fn log_of(world: &World, connection: ConnectionId) -> QuestLog {
     let player = world.state.players[&connection];
@@ -251,13 +270,7 @@ fn a_slain_body_advances_only_the_killers_objective() {
     world.tick(now);
 
     let player = world.state.players[&connection];
-    let killer = world.state.registry.serial_of(player).unwrap();
-    world.state.bus.send(openshard_combat::MobileDied {
-        entity: player,
-        serial: killer,
-        body: openshard_protocol::wire::Graphic(RAT),
-        killer: Some(killer),
-    });
+    slay_rat(&mut world, player, now);
     world.tick(now);
 
     assert_eq!(log_of(&world, connection).active[0].progress, vec![1]);
@@ -515,13 +528,7 @@ fn a_done_once_quest_is_never_offered_again() {
 
     // Finish it.
     let player = world.state.players[&connection];
-    let killer = world.state.registry.serial_of(player).unwrap();
-    world.state.bus.send(openshard_combat::MobileDied {
-        entity: player,
-        serial: killer,
-        body: openshard_protocol::wire::Graphic(RAT),
-        killer: Some(killer),
-    });
+    slay_rat(&mut world, player, now);
     world.tick(now);
     world.queue(Command::DoubleClick {
         connection,
@@ -567,13 +574,7 @@ fn a_completed_quest_reaches_the_pack() {
     press(&mut world, connection, QUEST_GUMP, 4);
     world.tick(now);
     let player = world.state.players[&connection];
-    let killer = world.state.registry.serial_of(player).unwrap();
-    world.state.bus.send(openshard_combat::MobileDied {
-        entity: player,
-        serial: killer,
-        body: openshard_protocol::wire::Graphic(RAT),
-        killer: Some(killer),
-    });
+    slay_rat(&mut world, player, now);
     world.tick(now);
     world.queue(Command::DoubleClick {
         connection,
@@ -633,7 +634,7 @@ fn a_quest_giver_is_still_a_giver_after_a_restart() {
     let giver = place_giver(&mut world, &["rat_cull"], now);
     world.take_snapshot();
     let snapshot = world.drain_saves().next().expect("a snapshot");
-    let mobiles = snapshot.mobiles.clone().expect("the mobile sweep");
+    let mobiles = snapshot.mobiles.expect("the mobile sweep");
     assert!(
         mobiles
             .iter()
@@ -675,7 +676,6 @@ fn restoring_a_mobile_announces_it_as_restored_not_as_spawned() {
         .next()
         .expect("a snapshot")
         .mobiles
-        .clone()
         .expect("the mobile sweep");
 
     let mut shard = super::tests::world();
@@ -731,7 +731,6 @@ fn a_restore_announces_the_post_an_npc_belongs_to_not_where_it_wandered() {
         .next()
         .expect("a snapshot")
         .mobiles
-        .clone()
         .expect("the mobile sweep");
 
     let mut shard = super::tests::world();
@@ -768,12 +767,7 @@ fn a_quest_log_survives_a_restart_with_its_progress_and_cooldowns() {
 
     let player = world.state.players[&connection];
     let killer = world.state.registry.serial_of(player).unwrap();
-    world.state.bus.send(openshard_combat::MobileDied {
-        entity: player,
-        serial: killer,
-        body: openshard_protocol::wire::Graphic(RAT),
-        killer: Some(killer),
-    });
+    slay_rat(&mut world, player, now);
     world.tick(now);
     assert_eq!(log_of(&world, connection).active[0].progress, vec![1]);
 
@@ -1360,13 +1354,7 @@ fn an_any_of_these_quest_completes_on_one_objective() {
     world.tick(now);
 
     let player = world.state.players[&connection];
-    let killer = world.state.registry.serial_of(player).unwrap();
-    world.state.bus.send(openshard_combat::MobileDied {
-        entity: player,
-        serial: killer,
-        body: openshard_protocol::wire::Graphic(RAT),
-        killer: Some(killer),
-    });
+    slay_rat(&mut world, player, now);
     world.tick(now);
 
     // The rat alone is enough; the silk was never touched.

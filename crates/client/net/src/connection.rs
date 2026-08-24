@@ -418,7 +418,7 @@ mod tests {
         list.add(openshard_protocol::wire::ClilocId(1_020_000));
         let (tooltip, hash) = list.finish();
 
-        let mut bytes = tooltip.clone();
+        let mut bytes = tooltip;
         bytes.extend(ServerPacket::LoginComplete(LoginComplete).encode(version()));
         let mut connection = Connection::new(Stream::Plain, version());
         connection.receive(&bytes);

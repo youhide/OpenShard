@@ -1285,10 +1285,10 @@ impl Solid {
         // `far` is whether this axis's degenerate plane sits at its tile's
         // high boundary rather than its low one — see the doc above.
         fn axis(min: f64, max: f64, far: bool) -> std::ops::RangeInclusive<i32> {
-            let lo = match max > min {
-                true => min.floor() as i32,
-                false if far && min.fract() == 0.0 => min.floor() as i32 - 1,
-                false => min.floor() as i32,
+            let lo = if max <= min && far && min.fract() == 0.0 {
+                min.floor() as i32 - 1
+            } else {
+                min.floor() as i32
             };
             let hi = if max > min { max.ceil() as i32 - 1 } else { lo };
             lo..=hi

@@ -62,8 +62,8 @@ use tracing::{debug, info, warn};
 
 use openshard_state::components::{
     Access, Account, Amount, Body, Brain, Client, Combat, Contained, Container, DamageType, Decoration, Door,
-    Drawn, Equipped, Ghost, Heading, Hitpoints, Mana, MeleeDamage, Movement, Name, Position, Resistance,
-    Ridden, Riding, SpawnedBy, Spellbook, Stackable, Stamina, Stats, Vendor,
+    Drawn, Equipped, Ghost, Heading, Healer, Hitpoints, Mana, MeleeDamage, Movement, Name, Position,
+    Resistance, Ridden, Riding, SpawnedBy, Spellbook, Stackable, Stamina, Stats, Vendor,
 };
 use openshard_state::facet_rules::FacetRules;
 use openshard_state::rng::Rng;
@@ -1121,6 +1121,23 @@ impl World {
                 // past the item pool address no object, and the client is owed
                 // no answer for asking.
                 if let Some(serial) = raw.validate() {
+                    // ServUO asks `CheckAlive` before it dispatches a use, so
+                    // every new double-click begins closed to the dead. This
+                    // shard has one deliberate exception: its healer click is
+                    // an extra resurrection path (ServUO offers on movement).
+                    if let (Some(&player), Some(target)) = (
+                        self.state.players.get(&connection),
+                        self.state.registry.entity_of(serial),
+                    ) {
+                        if self.state.registry.has::<Ghost>(player) {
+                            if self.state.registry.has::<Healer>(target) {
+                                self.click_healer(player, target);
+                            } else {
+                                self.state.system_message(player, items::DEAD_HANDS);
+                            }
+                            return;
+                        }
+                    }
                     // Every double-clicked mobile reaches the rules layered over
                     // it, whatever the engine itself then does with the click.
                     // This used to fire only where the click fell through to the

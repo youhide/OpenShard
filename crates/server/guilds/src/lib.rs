@@ -157,13 +157,12 @@ impl Refusal {
             Self::NotYourPlaceTo => "Your rank does not allow that.",
             Self::TheyOutrankYou => "They outrank you.",
             Self::NoFurtherRank => "There is no rank beyond that one.",
-            Self::NoAllies => "Your guild is in no alliance.",
+            Self::NoAllies | Self::NotAllied => "Your guild is in no alliance.",
             Self::AlreadyAllied => "Your guild is already in an alliance.",
             Self::TheyAreAllied => "They are already in an alliance.",
             Self::NotAsked => "Nobody has asked your guild into an alliance.",
             Self::AtWarWithThem => "You are at war with them.",
             Self::AlliedWithThem => "You are allied with them.",
-            Self::NotAllied => "Your guild is in no alliance.",
         }
     }
 }

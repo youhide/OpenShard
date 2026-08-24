@@ -1470,6 +1470,42 @@ fn double_clicking_a_plain_item_fires_the_use_trigger() {
 }
 
 #[test]
+fn a_ghost_cannot_use_a_plain_item() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let player_serial = serial_of(&world, player);
+    let item = spawn_plain_item_at(&mut world, Point::new(START.0, START.1, 0), now);
+
+    world.queue(Command::Damage {
+        serial: player_serial,
+        amount: 500,
+        damage_type: 0,
+        by: None,
+    });
+    world.tick(now);
+    let _ = packets_for(&mut world, player);
+    let mut used: Cursor<crate::ItemUsed> = world.bus().cursor();
+
+    world.queue(Command::DoubleClick {
+        connection: player,
+        request: UseRequest::Use(RawSerial(item.raw())),
+    });
+    world.tick(now);
+
+    assert!(
+        world.bus().read(&mut used).next().is_none(),
+        "the generic use trigger is behind the dead-use gate too"
+    );
+    assert!(
+        packets_for(&mut world, player)
+            .iter()
+            .any(|p| { (p[0] == 0x1C || p[0] == 0xAE) && String::from_utf8_lossy(p).contains("I am dead") }),
+        "and the central gate says why"
+    );
+}
+
+#[test]
 fn the_use_trigger_respects_reach() {
     // Reach is server-authoritative: a double-click on an item across the map
     // fires nothing, the same guard a lift uses. Otherwise a pack could be made
@@ -6276,7 +6312,7 @@ fn a_poisoned_creature_comes_back_poisoned() {
 
     home.take_snapshot();
     let snapshot = home.drain_saves().next_back().expect("a snapshot");
-    let mobiles = snapshot.mobiles.clone().expect("a mobile sweep");
+    let mobiles = snapshot.mobiles.expect("a mobile sweep");
     assert!(
         mobiles
             .iter()
@@ -10893,7 +10929,7 @@ fn a_vendor_and_its_priced_stock_survive_a_restart() {
         .iter()
         .flat_map(|inventory| inventory.items.clone())
         .collect();
-    items.extend(snapshot.ground.clone().unwrap_or_default());
+    items.extend(snapshot.ground.unwrap_or_default());
 
     // The restart: a fresh world restored from the records alone. No characters
     // are on file — the owners here are a vendor and its stock crate — but the
@@ -11005,7 +11041,7 @@ fn a_wounded_spawner_creature_survives_a_restart_and_is_counted() {
     home.take_snapshot();
     let snapshot = home.drain_saves().next_back().expect("a snapshot");
     let mobiles = snapshot.mobiles.clone().expect("a mobile sweep");
-    let spawners = snapshot.spawners.clone().expect("a spawner sweep");
+    let spawners = snapshot.spawners.expect("a spawner sweep");
 
     let mut shard = world();
     shard.restore_spawners(spawners);
@@ -11096,7 +11132,7 @@ fn decoration_and_door_state_survive_a_restart() {
 
     home.take_snapshot();
     let snapshot = home.drain_saves().next_back().expect("a snapshot");
-    let decorations = snapshot.decorations.clone().expect("a decoration sweep");
+    let decorations = snapshot.decorations.expect("a decoration sweep");
     assert_eq!(decorations.len(), 3, "one static, two doors");
 
     let mut shard = world();

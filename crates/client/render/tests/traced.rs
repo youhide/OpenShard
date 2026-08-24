@@ -308,8 +308,8 @@ fn wall_run_twin(
             flame_radius: openshard_client_render::light::FLAME_RADIUS,
         }
     }
-    let one = wall_run_scene(&|_| 7);
-    let three = wall_run_scene(&|x| x);
+    let one = wall_run_scene(|_| 7);
+    let three = wall_run_scene(|x| x);
     let merged = render(device, queue, shot(&one, at, view));
     let pieces = render(device, queue, shot(&three, at, view));
     assert_eq!(merged.primitives, 1, "the run of one graphic did not merge");
@@ -1038,7 +1038,7 @@ fn the_frame_and_the_path_tracer_agree_about_a_merged_run_of_wall() {
         eprintln!("no GPU adapter; skipping");
         return;
     };
-    let boxes = wall_run_scene(&|_| 7);
+    let boxes = wall_run_scene(|_| 7);
     let at = wall_run_flame();
     let radius = 8.0_f32;
     let frame = render(

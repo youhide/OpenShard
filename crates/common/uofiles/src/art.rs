@@ -456,7 +456,7 @@ mod tests {
             assert!(error.is_err(), "a sprite cut to {cut} bytes parsed");
         }
         // A row index pointing past the data is the same class of lie.
-        let mut bad = full.clone();
+        let mut bad = full;
         bad[10..12].copy_from_slice(&999u16.to_le_bytes());
         assert!(decode_static(Graphic(1), &bad).is_err());
     }

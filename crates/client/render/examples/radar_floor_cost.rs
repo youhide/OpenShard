@@ -175,8 +175,7 @@ fn main() {
             let direct = radar::build_chunk(&map, &colors, key).expect("a coarse key is addressable");
             match cache.get(key) {
                 Some(climbed) if climbed.pixels() == direct.pixels() => agree += 1,
-                Some(_) => differ.push(*chunk),
-                None => differ.push(*chunk),
+                _ => differ.push(*chunk),
             }
         }
         let verdict = if differ.is_empty() {

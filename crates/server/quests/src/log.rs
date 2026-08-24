@@ -198,7 +198,7 @@ pub(crate) fn begin_escort(state: &mut WorldState, player: EntityId, giver: Seri
     let destination = if escort.destination.is_empty() {
         random_town(state, npc)?
     } else {
-        escort.destination.clone()
+        escort.destination
     };
     make_escortable(state, giver, destination.clone());
     if start_escort(state, giver, player_serial) {

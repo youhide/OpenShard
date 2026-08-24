@@ -331,7 +331,9 @@ pub fn render(
                 });
                 continue;
             };
-            tally.iter_mut().for_each(|counter| *counter = Tally::default());
+            for counter in &mut tally {
+                *counter = Tally::default();
+            }
             let mut total = [0.0; 3];
             for _ in 0..settings.samples {
                 let path = walk(scene, lights, settings, first, &mut stream, &mut tally);

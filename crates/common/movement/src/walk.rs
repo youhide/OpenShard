@@ -651,6 +651,30 @@ pub fn can_fit(footing: &Footing<'_>, tile: Tile, z: i32, height: i32) -> bool {
     footing.map.is_none_or(|map| map.can_fit(tile, z, height))
 }
 
+/// Whether a body can stand at `tile, z` under this footing's door policy.
+///
+/// Unlike [`can_fit`], this is a question about a walking body rather than an
+/// object being placed. A ghost reads shut doors as open, so its footing may
+/// admit the doorway; placement must always keep the leaf in the gap.
+#[must_use]
+pub fn can_stand(footing: &Footing<'_>, tile: Tile, z: i32, height: i32) -> bool {
+    if footing
+        .overlay
+        .blocker_at(tile, Body::new(z, height), footing.doors)
+        .is_some()
+    {
+        return false;
+    }
+    if footing
+        .overlay
+        .surfaces_at(tile)
+        .any(|cover| cover.surface() == z)
+    {
+        return true;
+    }
+    footing.map.is_none_or(|map| map.can_fit(tile, z, height))
+}
+
 /// Whether a straight sight line from `from` to `to` is clear.
 ///
 /// The map's walls, and then the live world's doors. A shut door is opaque; a
@@ -856,6 +880,23 @@ mod tests {
     /// a kind of map.
     fn open_world() -> Overlay {
         Overlay::default()
+    }
+
+    #[test]
+    fn standing_reads_doors_from_the_footing_but_placement_does_not() {
+        let tile = Tile::new(100, 100);
+        let mut overlay = Overlay::default();
+        overlay.set(tile, vec![Cover::door(0, PLAYER_HEIGHT as u8)]);
+
+        let ghost = Footing::new(None, &overlay, Doors::AllOpen);
+        assert!(
+            can_stand(&ghost, tile, 0, PLAYER_HEIGHT),
+            "a ghost stands through a shut door"
+        );
+        assert!(
+            !can_fit(&ghost, tile, 0, PLAYER_HEIGHT),
+            "a generated thing still cannot be placed through that door"
+        );
     }
 
     fn walker() -> Walker {
