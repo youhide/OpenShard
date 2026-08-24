@@ -167,6 +167,7 @@ fn ground_sized(components: Vec<Component>, land: u16, fits: bool, width: u32, h
             width,
             height,
             openshard_state::facet_rules::FacetRules::classic(Facet(0)),
+            None,
             &tiles,
         ),
     );

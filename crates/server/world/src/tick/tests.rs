@@ -134,8 +134,13 @@ fn a_facet_keeps_the_coarse_router_it_was_given_and_no_other() {
     let spans = openshard_movement::spans::SpanIndex::build(&map, &empty);
     let baked =
         NavigationGraph::build(&nothing_over(&map, &empty, &spans), 8, 8).expect("an 8x8 facet has a graph");
-    let loaded =
-        World::new(START).with_facet(Facet(0), snapshot(), Some(baked), FacetRules::classic(Facet(0)));
+    let loaded = World::new(START).with_facet(
+        Facet(0),
+        snapshot(),
+        Some(baked),
+        FacetRules::classic(Facet(0)),
+        None,
+    );
     assert_eq!(
         loaded
             .state
@@ -13352,6 +13357,7 @@ pub(super) fn add_empty_facet_sized(world: &mut World, facet: Facet, width: u32,
             width,
             height,
             FacetRules::classic(facet),
+            None,
             &openshard_tiles::TileData::empty(),
         ),
     );
@@ -14637,7 +14643,7 @@ fn shard_over(scene: Scene, coarse: Option<openshard_movement::NavigationGraph>)
     let (map, tiles) = scene.into_shard(Facet(0));
     world()
         .with_tiles(tiles, openshard_uofiles::multi::Multis::default())
-        .with_facet(Facet(0), map, coarse, FacetRules::classic(Facet(0)))
+        .with_facet(Facet(0), map, coarse, FacetRules::classic(Facet(0)), None)
 }
 
 /// How many beats the walk below is given. The route is 168 steps; this is

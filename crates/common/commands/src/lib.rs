@@ -53,6 +53,8 @@ pub enum StaffCommand {
     Add,
     /// `.addgold <amount>`
     AddGold,
+    /// `.addstatic <graphic> [z]`
+    AddStatic,
     /// `.admin`
     Admin,
     /// `.boat <multi id>`
@@ -85,18 +87,24 @@ pub enum StaffCommand {
     Poison,
     /// `.quests`
     Quests,
+    /// `.rmstatic [nth]`
+    RmStatic,
     /// `.sail <direction|stop> [fast]`
     Sail,
     /// `.save`
     Save,
     /// `.set <str|dex|int> <value>`
     Set,
+    /// `.setland <tile id> [z]`
+    SetLand,
     /// `.skill <name> <value>`
     Skill,
     /// `.spellbook`
     Spellbook,
     /// `.tele`
     Tele,
+    /// `.tile`
+    Tile,
     /// `.trap <kind> [power]`
     Trap,
     /// `.where`
@@ -108,9 +116,10 @@ impl StaffCommand {
     ///
     /// An array and not a `Vec`: it is a constant, and the client walks it on
     /// every keystroke while a command is being typed.
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 30] = [
         Self::Add,
         Self::AddGold,
+        Self::AddStatic,
         Self::Admin,
         Self::Boat,
         Self::Deed,
@@ -127,12 +136,15 @@ impl StaffCommand {
         Self::Key,
         Self::Poison,
         Self::Quests,
+        Self::RmStatic,
         Self::Sail,
         Self::Save,
         Self::Set,
+        Self::SetLand,
         Self::Skill,
         Self::Spellbook,
         Self::Tele,
+        Self::Tile,
         Self::Trap,
         Self::Where,
     ];
@@ -144,6 +156,7 @@ impl StaffCommand {
         match self {
             Self::Add => "add",
             Self::AddGold => "addgold",
+            Self::AddStatic => "addstatic",
             Self::Admin => "admin",
             Self::Boat => "boat",
             Self::Deed => "deed",
@@ -160,12 +173,15 @@ impl StaffCommand {
             Self::Key => "key",
             Self::Poison => "poison",
             Self::Quests => "quests",
+            Self::RmStatic => "rmstatic",
             Self::Sail => "sail",
             Self::Save => "save",
             Self::Set => "set",
+            Self::SetLand => "setland",
             Self::Skill => "skill",
             Self::Spellbook => "spellbook",
             Self::Tele => "tele",
+            Self::Tile => "tile",
             Self::Trap => "trap",
             Self::Where => "where",
         }
@@ -183,6 +199,9 @@ impl StaffCommand {
         match self {
             Self::Add => "<graphic> [amount]",
             Self::AddGold => "<amount>",
+            Self::AddStatic => "<graphic> [z]",
+            Self::RmStatic => "[nth]",
+            Self::SetLand => "<tile id> [z]",
             Self::Boat | Self::Deed | Self::HDesign | Self::House => "<multi id>",
             Self::Gm => "[on|off]",
             Self::Go => "<x> <y> [z] [facet]",
@@ -203,6 +222,7 @@ impl StaffCommand {
             | Self::Save
             | Self::Spellbook
             | Self::Tele
+            | Self::Tile
             | Self::Where => "",
         }
     }
@@ -217,6 +237,7 @@ impl StaffCommand {
         match self {
             Self::Add => "drop an item at your feet",
             Self::AddGold => "put gold in your pack",
+            Self::AddStatic => "build a static into the map under you",
             Self::Admin => "open the administration menu",
             Self::Boat => "put a ship on the water at your feet",
             Self::Deed => "put a house deed in your pack",
@@ -233,12 +254,15 @@ impl StaffCommand {
             Self::Key => "put a key in your pack, and lock what you click",
             Self::Poison => "drop a bottle of poison at your feet",
             Self::Quests => "open your quest log",
+            Self::RmStatic => "take a static out of the map under you",
             Self::Sail => "steer the ship you are standing on",
             Self::Save => "save the world now",
             Self::Set => "change one of your stats",
+            Self::SetLand => "change the ground under you, for good",
             Self::Skill => "set one of your skills, in whole points",
             Self::Spellbook => "drop a full spellbook into your pack",
             Self::Tele => "click a spot, and jump to it",
+            Self::Tile => "say what the map holds under you",
             Self::Trap => "click a container, and trap it",
             Self::Where => "say where you are standing",
         }

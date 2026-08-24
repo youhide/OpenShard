@@ -3001,6 +3001,7 @@ name = "openshard-world"
 version = "0.0.1"
 dependencies = [
  "openshard-ai",
+ "openshard-basemap",
  "openshard-boats",
  "openshard-chat",
  "openshard-combat",

@@ -36,6 +36,7 @@ mod doorgen;
 pub mod events;
 pub mod gm;
 pub mod loot;
+pub mod mapedit;
 pub mod spawner;
 pub mod terrain;
 pub mod tick;

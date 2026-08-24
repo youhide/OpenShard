@@ -140,6 +140,103 @@ impl PatchOp {
             Self::AddStatic { item } | Self::RemoveStatic { was: item, .. } => (item.x, item.y),
         }
     }
+
+    /// Replace the ground at one tile, reading what is there now out of `map`.
+    ///
+    /// The `was` half of an op is not the caller's to type: an op that recorded
+    /// a cell nobody read is an op that describes a place that does not exist,
+    /// and the whole point of the field is that such a patch is refused. So
+    /// every op is built against a world, and these three are the only
+    /// constructors that exist — the enum's fields are public for the *reader*,
+    /// and a writer comes through here.
+    ///
+    /// # Errors
+    ///
+    /// [`PatchError::OffMap`] — the facet has no such tile.
+    pub fn set_land(map: &WorldMap, x: u16, y: u16, now: LandCell) -> Result<Self, PatchError> {
+        let was = map.land(x, y).ok_or(PatchError::OffMap { x, y })?;
+        Ok(Self::SetLand { x, y, was, now })
+    }
+
+    /// Put a static on the map, at the coordinates the item carries.
+    ///
+    /// Nothing is read here — an addition replaces nothing — but the tile is
+    /// still checked, because [`apply`] would refuse it later and a refusal at
+    /// the point of building is one a caller can say something useful about.
+    ///
+    /// # Errors
+    ///
+    /// [`PatchError::OffMap`] — the facet has no such tile.
+    pub fn add_static(map: &WorldMap, item: StaticItem) -> Result<Self, PatchError> {
+        if !map.contains(item.x, item.y) {
+            return Err(PatchError::OffMap { x: item.x, y: item.y });
+        }
+        Ok(Self::AddStatic { item })
+    }
+
+    /// Take the `which`th static off a tile, reading what is standing there.
+    ///
+    /// # Errors
+    ///
+    /// [`PatchError::OffMap`] — the facet has no such tile.
+    /// [`PatchError::NoSuchStatic`] — fewer things stand there than that.
+    pub fn remove_static(map: &WorldMap, x: u16, y: u16, which: StaticId) -> Result<Self, PatchError> {
+        if !map.contains(x, y) {
+            return Err(PatchError::OffMap { x, y });
+        }
+        let standing = map.statics_at(x, y).count();
+        let was = *map
+            .statics_at(x, y)
+            .nth(which.0 as usize)
+            .ok_or(PatchError::NoSuchStatic {
+                x,
+                y,
+                which,
+                standing,
+            })?;
+        Ok(Self::RemoveStatic { which, was })
+    }
+}
+
+/// What puts the world back where it was, if a publish has to be taken back.
+///
+/// **It is not a patch, and that distinction is the model.** A revert an
+/// operator *asks* for is a new patch with a new revision, committed to the log
+/// like any other — the history is append-only and a mistake is part of it. This
+/// is the other case: a publish that never became history at all, because
+/// writing it down failed after the world had already moved. Taking that back
+/// leaves no trace, because there is nothing to leave a trace of.
+///
+/// It carries the revision as well as the ops, so a world put back is at the
+/// number it was at rather than one further along. Two ways to spell an undo
+/// would be two ways for the revision to drift from the map.
+///
+/// Ops come out of [`apply`] in the order they must be replayed, which is the
+/// reverse of the order they were made in — each inverse was computed against
+/// the world as it stood *after* the op before it.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Undo {
+    /// The inverses, in the order they apply.
+    ops: Vec<PatchOp>,
+    /// The revision the world was at before the publish.
+    to: MapRevision,
+}
+
+impl Undo {
+    /// Record the way back from a publish that produced `ops` over `to`.
+    pub(crate) const fn new(ops: Vec<PatchOp>, to: MapRevision) -> Self {
+        Self { ops, to }
+    }
+
+    /// The inverses, in the order they apply.
+    pub(crate) fn ops(&self) -> &[PatchOp] {
+        &self.ops
+    }
+
+    /// The revision the world goes back to.
+    pub(crate) const fn to(&self) -> MapRevision {
+        self.to
+    }
 }
 
 /// One committed unit of change.
@@ -302,6 +399,14 @@ pub enum PatchError {
         /// What is there.
         found: LandCell,
     },
+    /// The facet has no map at all, so there is nothing to change.
+    ///
+    /// A shard with no client files and no base set is a real configuration —
+    /// no floor, no walls, every step allowed — and it is the one world a patch
+    /// cannot be about. Unreachable from [`MapSnapshot::publish`], which is
+    /// handed the map by holding it; it is [`crate::world::World::publish`]'s,
+    /// one level up, where the ground is optional.
+    NoGround,
     /// The static an op recorded is not the static that is there.
     StaticNotAsRecorded {
         /// Which one on its tile.
@@ -328,6 +433,7 @@ impl std::fmt::Display for PatchError {
                 holding.get()
             ),
             Self::OffMap { x, y } => write!(f, "tile ({x}, {y}) is not on this facet"),
+            Self::NoGround => write!(f, "this facet has no map, so there is nothing to patch"),
             Self::NoSuchStatic {
                 x,
                 y,
@@ -370,10 +476,18 @@ impl std::error::Error for PatchError {}
 /// takes a bare `WorldMap` because it is the half that touches cells, and keeping it
 /// separate is what lets the rollback below be about ops alone.
 ///
+/// On success it hands back the way *back*: the inverses, in the order they
+/// would have to be replayed. A caller that will never need it — a load
+/// replaying a committed history, where the failure is a world that does not
+/// open — drops it; a live publish holds it until the patch is safely written
+/// down. It is a return value rather than something a caller could derive,
+/// because [`PatchOp::AddStatic`]'s inverse names an ordinal only the applier
+/// knows.
+///
 /// # Errors
 ///
 /// The first op that cannot apply, after undoing the ones that already did.
-pub(crate) fn apply(map: &mut WorldMap, ops: &[PatchOp]) -> Result<(), PatchError> {
+pub(crate) fn apply(map: &mut WorldMap, ops: &[PatchOp]) -> Result<Vec<PatchOp>, PatchError> {
     let mut undo: Vec<PatchOp> = Vec::with_capacity(ops.len());
     for op in ops {
         match apply_op(map, op) {
@@ -383,14 +497,30 @@ pub(crate) fn apply(map: &mut WorldMap, ops: &[PatchOp]) -> Result<(), PatchErro
                 // as it stood *after* the op before it. Nothing here can fail:
                 // every one of these was true a moment ago, in the reverse
                 // order it is being undone in.
-                for inverse in undo.iter().rev() {
-                    apply_op(map, inverse).expect("an op this function itself just inverted");
-                }
+                revert(map, &reversed(undo));
                 return Err(error);
             }
         }
     }
-    Ok(())
+    Ok(reversed(undo))
+}
+
+/// The same inverses, in the order they must be replayed.
+fn reversed(mut undo: Vec<PatchOp>) -> Vec<PatchOp> {
+    undo.reverse();
+    undo
+}
+
+/// Replay inverses this module itself produced.
+///
+/// Infallible by construction and not by check: every op here was true of this
+/// world a moment ago, and they are replayed in the one order that keeps each of
+/// them true. A failure is this module disagreeing with itself, which is a bug
+/// rather than a state a caller could be handed.
+pub(crate) fn revert(map: &mut WorldMap, ops: &[PatchOp]) {
+    for op in ops {
+        apply_op(map, op).expect("an op this module itself inverted");
+    }
 }
 
 /// Apply one op, and hand back the op that would undo it.
@@ -503,7 +633,7 @@ mod tests {
             tile: LandTileId(9),
             z: 40,
         };
-        let revision = world
+        world
             .publish(&patch(
                 world.revision(),
                 vec![
@@ -520,10 +650,110 @@ mod tests {
             ))
             .expect("a patch against the revision in hand");
 
-        assert_eq!(revision, MapRevision::INITIAL.after());
-        assert_eq!(world.revision(), revision);
+        assert_eq!(world.revision(), MapRevision::INITIAL.after());
         assert_eq!(world.map().land(10, 10), Some(now));
         assert_eq!(world.map().statics_at(10, 10).count(), 1);
+    }
+
+    /// A publish taken back leaves the world at the number it left, not one
+    /// further along — and every op of it undone, including the addition whose
+    /// inverse names an ordinal nobody could have written down in advance.
+    #[test]
+    fn an_undone_publish_leaves_no_trace_of_itself() {
+        let mut world = flat();
+        let before = world.revision();
+        let land = world.map().land(4, 4).expect("on the map");
+        assert_eq!(
+            world.map().statics_at(4, 4).count(),
+            0,
+            "the fixture starts empty"
+        );
+
+        let undo = world
+            .publish(&patch(
+                before,
+                vec![
+                    PatchOp::SetLand {
+                        x: 4,
+                        y: 4,
+                        was: land,
+                        now: LandCell {
+                            tile: LandTileId(1),
+                            z: 60,
+                        },
+                    },
+                    PatchOp::AddStatic { item: rock(4, 4, 60) },
+                    PatchOp::AddStatic { item: rock(4, 4, 61) },
+                ],
+            ))
+            .expect("a patch against the revision in hand");
+        assert_eq!(world.map().statics_at(4, 4).count(), 2);
+
+        world.undo(&undo);
+
+        assert_eq!(world.revision(), before, "the revision goes back too");
+        assert_eq!(world.map().land(4, 4), Some(land));
+        assert_eq!(world.map().statics_at(4, 4).count(), 0);
+    }
+
+    /// The three constructors are the only way a writer builds an op, and the
+    /// `was` half is the world's answer rather than the caller's claim.
+    #[test]
+    fn an_op_reads_what_it_replaces_out_of_the_world() {
+        let mut world = flat();
+        world
+            .publish(&patch(
+                world.revision(),
+                vec![PatchOp::AddStatic { item: rock(7, 7, 3) }],
+            ))
+            .expect("a patch against the revision in hand");
+        let map = world.map();
+
+        assert_eq!(
+            PatchOp::set_land(
+                map,
+                7,
+                7,
+                LandCell {
+                    tile: LandTileId(5),
+                    z: 9
+                }
+            ),
+            Ok(PatchOp::SetLand {
+                x: 7,
+                y: 7,
+                was: LandCell {
+                    tile: LandTileId(3),
+                    z: 0
+                },
+                now: LandCell {
+                    tile: LandTileId(5),
+                    z: 9
+                },
+            })
+        );
+        assert_eq!(
+            PatchOp::remove_static(map, 7, 7, StaticId(0)),
+            Ok(PatchOp::RemoveStatic {
+                which: StaticId(0),
+                was: rock(7, 7, 3),
+            })
+        );
+        assert_eq!(
+            PatchOp::remove_static(map, 7, 7, StaticId(1)),
+            Err(PatchError::NoSuchStatic {
+                x: 7,
+                y: 7,
+                which: StaticId(1),
+                standing: 1,
+            })
+        );
+        // Off the map is refused by all three, at the point of building.
+        let far = u16::try_from(map.width()).unwrap_or(u16::MAX);
+        assert_eq!(
+            PatchOp::add_static(map, rock(far, 0, 0)),
+            Err(PatchError::OffMap { x: far, y: 0 })
+        );
     }
 
     /// The conflict model, and the only one there is.

@@ -21,6 +21,7 @@ use openshard_events::EventBus;
 use openshard_gateway::ConnectionId;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::{Cover, Doors};
+use openshard_map::patch::{Patch, PatchError, Undo};
 use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::ground::Ground;
 use openshard_movement::{Footing, MapTerrain, NavigationGraph};
@@ -474,6 +475,13 @@ pub struct FacetState {
     /// it is declared by *which* of the two calls is made, so there is no third
     /// spelling to get wrong.
     sectors: Sectors,
+    /// Where this facet's world lives on disk, when it is a world of ours.
+    ///
+    /// Private, and read only through [`home`](Self::home): it is a fact about
+    /// where the facet came from, set once at construction, and a facet that
+    /// could be told a *second* home is a facet whose edits could be written
+    /// into somebody else's world.
+    home: Option<WorldHome>,
     /// What the live world has put in the way: closed doors, placed decoration.
     ///
     /// **Private, and mutated only through this facet.** Every write here has to
@@ -544,6 +552,10 @@ impl FacetState {
     /// The tile table is the one argument that is not a fact about this facet:
     /// it is the install's, and it is here because the span bake inside
     /// [`Ground`] is built from the pair.
+    ///
+    /// `home` says whether this facet is a world of ours and where it lives —
+    /// see [`WorldHome`], and [`publish`](Self::publish), which is the only
+    /// thing that ever needs it.
     #[must_use]
     pub fn new(
         map: Option<MapSnapshot>,
@@ -551,6 +563,7 @@ impl FacetState {
         width: u32,
         height: u32,
         rules: FacetRules,
+        home: Option<WorldHome>,
         tiles: &TileData,
     ) -> Self {
         Self {
@@ -564,7 +577,17 @@ impl FacetState {
             regions: Regions::new(width, height),
             banks: Banks::default(),
             rules,
+            home,
         }
+    }
+
+    /// Where this facet's world lives, for a caller that means to change it.
+    ///
+    /// `None` is a facet read out of the install, which cannot be patched at
+    /// all — see [`WorldHome`].
+    #[must_use]
+    pub const fn home(&self) -> Option<&WorldHome> {
+        self.home.as_ref()
     }
 
     /// What this facet allows. See [`FacetRules`].
@@ -664,6 +687,45 @@ impl FacetState {
         self.ground.rebake(tiles);
     }
 
+    /// Publish a patch into this facet's ground, while players stand on it.
+    ///
+    /// Two things move and they move together. The span bake follows the ground
+    /// inside [`Ground`], which is that type's whole invariant. **The coarse
+    /// graph does not follow: it is dropped**, because there is no such thing as
+    /// rebuilding it here — it is a 52-second offline bake — and a graph built
+    /// over the world as it stood before the edit is a graph of somewhere else.
+    /// Dropping it costs long routes until the shard is rebaked and restarted;
+    /// keeping it would cost a router that confidently plans through a wall
+    /// somebody just published. `docs/map/new_map_representation/plan.md`'s
+    /// direction D is what makes the rebuild local and cheap enough to do here,
+    /// and until then this is the honest half of the trade.
+    ///
+    /// What comes back is the way back — see [`FacetUndo`]. A caller that has
+    /// nowhere durable to write the patch down **must** use it: a world that
+    /// moved without its log is a world that loses the edit at the next restart,
+    /// and whose next patch has a parent no log can reach.
+    ///
+    /// # Errors
+    ///
+    /// [`PatchError`], from [`Ground::publish`] — and on any of them nothing
+    /// here has moved, the coarse graph included.
+    pub fn publish(&mut self, patch: &Patch, tiles: &TileData) -> Result<FacetUndo, PatchError> {
+        let map = self.ground.publish(patch, tiles)?;
+        Ok(FacetUndo {
+            map,
+            coarse: self.coarse.take(),
+        })
+    }
+
+    /// Take back a publish that was never written down, coarse graph and all.
+    ///
+    /// The graph goes back because it was never stale: the world it describes is
+    /// the world this call restores.
+    pub fn undo(&mut self, undo: FacetUndo, tiles: &TileData) {
+        self.ground.undo(&undo.map, tiles);
+        self.coarse = undo.coarse;
+    }
+
     /// Put `entity`'s `cover` on `(x, y)`.
     ///
     /// See [`Obstructions::block`] for what the identity is and why one entity
@@ -709,6 +771,46 @@ impl FacetState {
         let covers = crate::obstruct::covers_at(&self.obstructions, &self.boats, x, y);
         self.ground.live_mut().set(Tile::new(x, y), covers);
     }
+}
+
+/// Where a facet's world lives on disk, for the one caller that writes to it.
+///
+/// **A facet has one only if it is a world of ours.** A facet still read out of
+/// a UO install has nowhere to keep a patch log and no guarantee the operator
+/// will not replace the files under it — `openshard_map::patch`'s header argues
+/// that at length — so `None` here is not "not known yet", it is "this facet
+/// cannot be edited", which is a fact about the facet and the reason
+/// [`FacetState::new`] takes it rather than a setter.
+///
+/// It is a *path and a number*, not a file handle and not an opened log: this
+/// crate holds no I/O, and the crate that commits a patch resolves both against
+/// `openshard_basemap` — which is also where the log's own path is derived from
+/// the base set's, by a rule rather than by a second line of configuration.
+#[derive(Clone, Debug)]
+pub struct WorldHome {
+    /// The base set this facet was read out of.
+    pub base_set: std::path::PathBuf,
+    /// The revision the base set *file* is at, which is what a patch log's
+    /// header records — not the revision the world reached by replaying it.
+    pub base: openshard_map::snapshot::MapRevision,
+}
+
+/// Everything a facet has to put back if a publish is taken back.
+///
+/// [`Undo`] is the map's half and it is the whole of what `openshard-map` can
+/// know about; the coarse graph is this crate's, and it is here for the same
+/// reason the two travel together in [`FacetState::publish`] — a facet holding
+/// the old world and no router, or the new world and the old router, are both
+/// states nobody should be able to spell.
+///
+/// It is deliberately not `Clone`: there is exactly one way back from one
+/// publish, and a second copy of it would be a second attempt to walk it.
+#[derive(Debug)]
+pub struct FacetUndo {
+    /// The ground's way back, and the revision it goes back to.
+    map: Undo,
+    /// The router the publish dropped, if there was one.
+    coarse: Option<NavigationGraph>,
 }
 
 /// An item on a cursor: the entity, and where it was lifted from.
@@ -1327,6 +1429,48 @@ impl WorldState {
         for facet in self.facets.values_mut() {
             facet.rebake(&self.tiles);
         }
+    }
+
+    /// Publish a patch into a facet's ground while the shard is running.
+    ///
+    /// [`FacetState::publish`] is the whole of what happens; this exists because
+    /// the tile table is the *world's* and the facet is a field beside it, so a
+    /// caller holding both would be borrowing this struct twice. The same reason
+    /// [`set_tiles`](Self::set_tiles) reaches into the facets rather than
+    /// handing them out.
+    ///
+    /// **This does not write the patch down anywhere.** A world that moved
+    /// without its log is a world that loses the edit at the next restart, so a
+    /// caller that cannot durably record the patch has to hand the
+    /// [`FacetUndo`] back to [`undo_publish`](Self::undo_publish);
+    /// `openshard_world::mapedit` is the one caller that does both, in the one
+    /// order that is safe.
+    ///
+    /// # Errors
+    ///
+    /// [`PatchError`] — including [`PatchError::NoGround`] for a facet with no
+    /// map at all. On any of them nothing has moved.
+    pub fn publish(&mut self, facet: Facet, patch: &Patch) -> Result<FacetUndo, PatchError> {
+        let Self { facets, tiles, .. } = self;
+        facets
+            .get_mut(&facet)
+            .ok_or(PatchError::NoGround)?
+            .publish(patch, tiles)
+    }
+
+    /// Take back a publish that could not be written down. See
+    /// [`FacetState::undo`].
+    ///
+    /// # Panics
+    ///
+    /// If the facet went away between the publish and the undo, which nothing
+    /// can do: both happen inside one call, on one `&mut`.
+    pub fn undo_publish(&mut self, facet: Facet, undo: FacetUndo) {
+        let Self { facets, tiles, .. } = self;
+        facets
+            .get_mut(&facet)
+            .expect("the facet that published a patch a moment ago")
+            .undo(undo, tiles);
     }
 
     /// Which facet an entity is on: its [`Facet`] component, or the world default
@@ -3841,7 +3985,15 @@ mod tests {
         let mut facets = BTreeMap::new();
         facets.insert(
             Facet(0),
-            FacetState::new(Some(map), None, 16, 16, FacetRules::classic(Facet(0)), &tiles),
+            FacetState::new(
+                Some(map),
+                None,
+                16,
+                16,
+                FacetRules::classic(Facet(0)),
+                None,
+                &tiles,
+            ),
         );
         WorldState::new(
             facets,
@@ -4033,6 +4185,7 @@ mod tests {
                 8,
                 8,
                 FacetRules::classic(Facet(0)),
+                None,
                 &TileData::empty(),
             ),
         );
@@ -4044,6 +4197,7 @@ mod tests {
                 8,
                 8,
                 FacetRules::classic(Facet(1)),
+                None,
                 &TileData::empty(),
             ),
         );

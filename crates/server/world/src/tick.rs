@@ -68,7 +68,9 @@ use openshard_state::components::{
 use openshard_state::facet_rules::FacetRules;
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
-use openshard_state::{FacetState, Gameplay, Outbound, TICKS_PER_SECOND, TooltipMode, WorldState};
+use openshard_state::{
+    FacetState, Gameplay, Outbound, TICKS_PER_SECOND, TooltipMode, WorldHome, WorldState,
+};
 
 use openshard_ai as ai;
 use openshard_chat as chat;
@@ -247,6 +249,9 @@ impl World {
                 FACET_WITHOUT_A_MAP.0,
                 FACET_WITHOUT_A_MAP.1,
                 FacetRules::classic(Facet(DEFAULT_FACET)),
+                // No map, so no world of ours behind it either: there is nothing
+                // to patch and nowhere to write a patch down.
+                None,
                 // No map, so nothing to bake — the table this would be baked
                 // over is the empty one `WorldState` starts with, and
                 // `with_tiles` rebakes every facet that has ground when the
@@ -398,9 +403,13 @@ impl World {
     }
 
     /// Give the default facet a map, under the ruleset its number ran in retail.
+    ///
+    /// A map and no home: a caller handing over a snapshot it built itself — a
+    /// test, the playground — has no base set behind it, so the facet is one
+    /// nothing can commit a patch to.
     pub fn with_map(self, map: MapSnapshot) -> Self {
         let facet = self.state.default_facet;
-        self.with_facet(facet, map, None, FacetRules::classic(facet))
+        self.with_facet(facet, map, None, FacetRules::classic(facet), None)
     }
 
     /// Load `map` and its already-baked coarse router as facet `facet`, under
@@ -412,12 +421,17 @@ impl World {
     /// reason and not folded into that: a caller doing exactly that — Malas into
     /// slot three — is precisely the one whose facet number no longer says what
     /// its rules are, so [`FacetRules::classic`] is offered rather than applied.
+    ///
+    /// `home` is where that world lives on disk, and it is `Some` exactly for a
+    /// facet read out of a base set of ours — the one kind that can be edited
+    /// while the shard runs. See [`WorldHome`].
     pub fn with_facet(
         mut self,
         facet: Facet,
         map: MapSnapshot,
         coarse: Option<openshard_movement::NavigationGraph>,
         rules: FacetRules,
+        home: Option<WorldHome>,
     ) -> Self {
         debug_assert_eq!(map.facet(), facet, "a snapshot loaded into another facet's slot");
         let (width, height) = (map.map().width(), map.map().height());
@@ -428,7 +442,7 @@ impl World {
         );
         self.state.facets.insert(
             facet,
-            FacetState::new(Some(map), coarse, width, height, rules, self.state.tiles()),
+            FacetState::new(Some(map), coarse, width, height, rules, home, self.state.tiles()),
         );
         self
     }

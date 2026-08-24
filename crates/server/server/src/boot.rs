@@ -440,6 +440,12 @@ struct FacetSource {
     navigation_path: std::path::PathBuf,
     /// The command that makes it, for the error that says it is missing.
     rebake: String,
+    /// Where this facet's world lives, when it is a world of ours.
+    ///
+    /// `None` for a facet read out of the install: there is nowhere beside it to
+    /// keep a patch log, so it is a facet nothing can edit while the shard runs.
+    /// See [`openshard_state::WorldHome`].
+    home: Option<openshard_state::WorldHome>,
 }
 
 /// The base set configured for `facet`, if the operator named one.
@@ -492,6 +498,7 @@ fn facet_source(
             stamp,
             map,
             rebake: format!("OPENSHARD_CLIENT={dir:?} {bake} -- --facet {facet}"),
+            home: None,
         });
     };
 
@@ -503,7 +510,7 @@ fn facet_source(
         snapshot: map,
         log,
         patches,
-        ..
+        base,
     } = openshard_basemap::load(base_set)?;
     // The file says which facet it is, and the config says which facet it was
     // named for. Two answers to one question is a config that loads Tokuno as
@@ -544,6 +551,12 @@ fn facet_source(
             "OPENSHARD_CLIENT={dir:?} {bake} -- --facet {facet} --base-set {:?}",
             base_set.display()
         ),
+        // The base set's own revision, not the world's: it is the log's header,
+        // and a patch committed while the shard runs is appended to that log.
+        home: Some(openshard_state::WorldHome {
+            base_set: base_set.to_owned(),
+            base,
+        }),
     })
 }
 
@@ -636,6 +649,7 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
             stamp,
             navigation_path,
             rebake,
+            home,
         } = source;
         let coarse = openshard_movement::bake::load(&navigation_path, &stamp)
             .map_err(|error| format!("{error}\ncreate it with: {rebake}"))?;
@@ -680,7 +694,7 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
             ),
             "facet loaded"
         );
-        world = world.with_facet(facet, map, Some(coarse), rules_of(config, facet));
+        world = world.with_facet(facet, map, Some(coarse), rules_of(config, facet), home);
     }
     info!(
         facets = config.world.facets.len(),

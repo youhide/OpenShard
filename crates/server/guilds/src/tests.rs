@@ -37,6 +37,7 @@ fn world() -> WorldState {
             SIZE,
             SIZE,
             openshard_state::facet_rules::FacetRules::classic(Facet(0)),
+            None,
             &openshard_tiles::TileData::empty(),
         ),
     );

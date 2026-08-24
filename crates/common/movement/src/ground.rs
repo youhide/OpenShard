@@ -42,6 +42,7 @@
 //! did needs [`Ground::rebake`].
 
 use openshard_map::overlay::Overlay;
+use openshard_map::patch::{Patch, PatchError, Undo};
 use openshard_map::snapshot::MapSnapshot;
 use openshard_map::world::World;
 use openshard_tiles::TileData;
@@ -52,10 +53,11 @@ use crate::terrain::MapTerrain;
 /// One facet's world, and where a body may stand on it.
 ///
 /// **The invariant, in one line:** [`spans`](Self::spans) is `Some` exactly when
-/// the world has a base. Both fields are private and the three functions that
-/// write either — [`new`](Self::new), [`set_base`](Self::set_base) and
-/// [`rebake`](Self::rebake) — write both, so there is no sequence of calls that
-/// separates them.
+/// the world has a base, and it is a bake of *that* base. Both fields are
+/// private and every function that writes either — [`new`](Self::new),
+/// [`set_base`](Self::set_base), [`rebake`](Self::rebake),
+/// [`publish`](Self::publish) and [`undo`](Self::undo) — writes both, so there
+/// is no sequence of calls that separates them.
 #[derive(Debug, Default)]
 pub struct Ground {
     /// The two lower layers and what the live world has laid over them.
@@ -114,6 +116,43 @@ impl Ground {
             .world
             .snapshot()
             .map(|base| SpanIndex::build(base.map(), tiles));
+    }
+
+    /// Publish a patch to the ground, and rebake over it in the same statement.
+    ///
+    /// **The rebake is the reason this method exists.** [`spans`](Self::spans)
+    /// is a projection of the base, so a base that moves without it is exactly
+    /// the state this type was built to make unspellable — and a patch is the
+    /// one thing that moves the base while the shard is running. A caller that
+    /// could publish through the world alone would be a caller that could forget
+    /// it.
+    ///
+    /// **It rebakes the whole facet**, which is 0.07 s on Felucca — measured in
+    /// `docs/map/navigation_spans.md`, and paid by whoever committed the edit
+    /// rather than by a step. A patch touches
+    /// [`Patch::touched_chunks`](openshard_map::patch::Patch::touched_chunks)
+    /// and no more, so a bake local to those chunks is the obvious next thing;
+    /// it is direction D's, and it needs a span layer that can be rebuilt in
+    /// pieces, which this one cannot.
+    ///
+    /// # Errors
+    ///
+    /// [`PatchError`], from [`World::publish`] — and on any of them nothing has
+    /// moved, so the bake is still the bake of the world in hand.
+    pub fn publish(&mut self, patch: &Patch, tiles: &TileData) -> Result<Undo, PatchError> {
+        let undo = self.world.publish(patch)?;
+        self.rebake(tiles);
+        Ok(undo)
+    }
+
+    /// Take back a publish that was never written down, bake and all.
+    ///
+    /// The other half of [`publish`](Self::publish), and it pays the same 0.07 s
+    /// — the world it puts back is a different world from the one baked a moment
+    /// ago, by exactly the same argument.
+    pub fn undo(&mut self, undo: &Undo, tiles: &TileData) {
+        self.world.undo(undo);
+        self.rebake(tiles);
     }
 
     /// The ground, the statics and the revision they are at — and no way from
@@ -227,6 +266,68 @@ mod tests {
             Some(20),
             "the bake followed the ground it is a projection of"
         );
+    }
+
+    /// The same failure, arriving the way it will actually arrive: a patch
+    /// published into a running shard. The bake has to move with it, or the
+    /// steps a player takes are decided by the heights of a world nobody holds
+    /// any more.
+    #[test]
+    fn a_published_patch_moves_the_bake_with_the_ground() {
+        let tiles = TileData::empty();
+        let mut ground = Ground::new(Some(facet(0)), &tiles);
+        let at = Tile::new(3, 3);
+        // Read through the span index rather than off the map: `surface_at` is
+        // the bake's own answer, so a stale bake shows up here and nowhere else.
+        let read = |ground: &Ground| {
+            ground
+                .terrain(&tiles)
+                .expect("it was given a map")
+                .surface_at(at.x, at.y, 30)
+        };
+        let before = read(&ground);
+        assert_ne!(before, Some(30), "the fixture is flat at zero");
+
+        let world = ground.snapshot().expect("it was given a map");
+        // A land tile's height is its four corners, and a body stands on their
+        // average — so raising one cell raises no tile at all. The four cells
+        // that meet at this tile's corners are the edit.
+        let raised = |x: u16, y: u16| {
+            openshard_map::patch::PatchOp::set_land(
+                world.map(),
+                x,
+                y,
+                LandCell {
+                    tile: LandTileId(0),
+                    z: 30,
+                },
+            )
+            .expect("a tile on the map")
+        };
+        let patch = Patch::new(
+            Facet(0),
+            world.revision(),
+            openshard_map::patch::PatchAuthor("a test".into()),
+            openshard_map::patch::PatchTime(0),
+            vec![
+                raised(at.x, at.y),
+                raised(at.x + 1, at.y),
+                raised(at.x, at.y + 1),
+                raised(at.x + 1, at.y + 1),
+            ],
+        );
+
+        let undo = ground.publish(&patch, &tiles).expect("the world in hand");
+
+        assert_eq!(
+            read(&ground),
+            Some(30),
+            "the bake followed the patch, not the map it was taken over"
+        );
+
+        ground.undo(&undo, &tiles);
+
+        assert_eq!(read(&ground), before, "and it follows the way back too");
     }
 
     /// The live layer is orthogonal: writing it leaves the bake alone, because

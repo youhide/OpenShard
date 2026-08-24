@@ -90,6 +90,269 @@ pub fn run(state: &mut WorldState, actor: EntityId, rest: &str) {
         StaffCommand::Sail => sail_boat(state, actor, &args),
         StaffCommand::Admin => crate::admin::open_menu(state, actor),
         StaffCommand::Save => save_world(state, actor),
+        StaffCommand::Tile => describe_tile(state, actor),
+        StaffCommand::SetLand => set_land(state, actor, &args),
+        StaffCommand::AddStatic => add_static(state, actor, &args),
+        StaffCommand::RmStatic => remove_static(state, actor, &args),
+    }
+}
+
+/// `.tile` — say what the map holds under you, with the ordinal of each static.
+///
+/// The thing to run before [`remove_static`], because an ordinal is only an
+/// identity against a stated revision — which is why the revision is on the
+/// first line. `openshard-map-patch`'s `list` and `show` in one, for the world
+/// the shard is actually holding rather than the one on disk.
+fn describe_tile(state: &mut WorldState, actor: EntityId) {
+    let Some(&Position(at)) = state.registry.get::<Position>(actor) else {
+        return;
+    };
+    let facet = state.facet_of(actor);
+    let ground = state.facet_state(facet).ground();
+    let Some(world) = ground.snapshot() else {
+        notify(state, actor, "This facet has no map.");
+        return;
+    };
+    let (x, y) = (at.x, at.y);
+    let mut lines = vec![match world.map().land(x, y) {
+        Some(cell) => format!(
+            "({x}, {y}) on facet {} at revision {}: land {} at z {}",
+            facet.0,
+            world.revision().get(),
+            cell.tile.0,
+            cell.z
+        ),
+        None => format!("({x}, {y}) is not on facet {}.", facet.0),
+    }];
+    lines.extend(world.map().statics_at(x, y).enumerate().map(|(nth, item)| {
+        format!(
+            "  {nth}: graphic {:#06x} at z {}, hue {}",
+            item.tile.0, item.z, item.hue.0
+        )
+    }));
+    if lines.len() == 1 {
+        lines.push("  nothing stands on it".to_owned());
+    }
+    // The live layer is deliberately not listed: a door, a crate or a house
+    // floor is an *entity*, and none of them is something a patch can name.
+    if state.facet_state(facet).home().is_none() {
+        lines.push("  (read from the client's files, so it cannot be edited)".to_owned());
+    }
+    for line in lines {
+        notify(state, actor, &line);
+    }
+}
+
+/// `.setland <tile id> [z]` — change the ground under you, in the world itself.
+///
+/// Not a decoration and not an item: this commits a patch to the shard's own
+/// map, so it survives a restart and changes what every player is allowed to
+/// walk on. `z` defaults to the height that is already there, which is the
+/// common case — repainting a tile without moving it.
+fn set_land(state: &mut WorldState, actor: EntityId, args: &[&str]) {
+    let Some(tile) = args.first().and_then(parse_u16) else {
+        notify(
+            state,
+            actor,
+            "Usage: .setland <tile id> [z], e.g. .setland 0x03 5",
+        );
+        return;
+    };
+    let Some((facet, x, y)) = standing_on(state, actor) else {
+        return;
+    };
+    let Some(was) = ground_at(state, facet, x, y) else {
+        notify(state, actor, "There is no map under you.");
+        return;
+    };
+    let z = match args.get(1) {
+        Some(word) => match word.parse::<i8>() {
+            Ok(z) => z,
+            Err(_) => {
+                notify(state, actor, "The height has to be a number from -128 to 127.");
+                return;
+            }
+        },
+        None => was.z,
+    };
+    let op = openshard_map::patch::PatchOp::SetLand {
+        x,
+        y,
+        was,
+        now: openshard_map::map::LandCell {
+            tile: openshard_tiles::LandTileId(tile),
+            z,
+        },
+    };
+    commit_one(state, actor, facet, op, &format!("land {tile} at z {z}"));
+}
+
+/// `.addstatic <graphic> [z]` — build a static into the map under you.
+///
+/// The difference from `.add` is the whole point: `.add` spawns an *item*, which
+/// is an entity with a serial that can be picked up and that the client is told
+/// about. This puts a static into the terrain, where it is part of the world and
+/// nothing on the wire mentions it — so the shard treats it as a wall, and every
+/// picture keeps drawing what the player's own files say until direction E.
+fn add_static(state: &mut WorldState, actor: EntityId, args: &[&str]) {
+    let Some(graphic) = args.first().and_then(parse_u16) else {
+        notify(
+            state,
+            actor,
+            "Usage: .addstatic <graphic> [z], e.g. .addstatic 0x0edd",
+        );
+        return;
+    };
+    let Some((facet, x, y)) = standing_on(state, actor) else {
+        return;
+    };
+    let Some(&Position(at)) = state.registry.get::<Position>(actor) else {
+        return;
+    };
+    let z = match args.get(1) {
+        Some(word) => match word.parse::<i8>() {
+            Ok(z) => z,
+            Err(_) => {
+                notify(state, actor, "The height has to be a number from -128 to 127.");
+                return;
+            }
+        },
+        // Where the operator is standing, which is what "under you" means for
+        // something that has a height of its own.
+        None => at.z,
+    };
+    let op = openshard_map::patch::PatchOp::AddStatic {
+        item: openshard_map::map::StaticItem {
+            tile: Graphic(graphic),
+            x,
+            y,
+            z,
+            hue: Hue::NONE,
+        },
+    };
+    commit_one(
+        state,
+        actor,
+        facet,
+        op,
+        &format!("graphic {graphic:#06x} at z {z}"),
+    );
+}
+
+/// `.rmstatic [nth]` — take one static out of the map under you.
+///
+/// The ordinal is `.tile`'s, and it is only an identity against the revision
+/// that command printed: a patch committed in between renumbers what follows it.
+/// That is not a race this has to guard, because both are one tick.
+fn remove_static(state: &mut WorldState, actor: EntityId, args: &[&str]) {
+    let nth = match args.first() {
+        Some(word) => match parse_u16(word) {
+            Some(nth) => nth,
+            None => {
+                notify(state, actor, "Usage: .rmstatic [nth], as printed by .tile");
+                return;
+            }
+        },
+        None => 0,
+    };
+    let Some((facet, x, y)) = standing_on(state, actor) else {
+        return;
+    };
+    let which = openshard_map::patch::StaticId(nth);
+    let built = state
+        .facet_state(facet)
+        .ground()
+        .snapshot()
+        .ok_or(openshard_map::patch::PatchError::NoGround)
+        .and_then(|world| openshard_map::patch::PatchOp::remove_static(world.map(), x, y, which));
+    match built {
+        Ok(op) => commit_one(state, actor, facet, op, &format!("static {nth} removed")),
+        Err(refusal) => notify(state, actor, &format!("Nothing to remove: {refusal}")),
+    }
+}
+
+/// The facet and tile the actor is standing on.
+fn standing_on(state: &mut WorldState, actor: EntityId) -> Option<(Facet, u16, u16)> {
+    let &Position(at) = state.registry.get::<Position>(actor)?;
+    Some((state.facet_of(actor), at.x, at.y))
+}
+
+/// The land cell at a tile of a facet, or `None` where there is no map.
+fn ground_at(state: &WorldState, facet: Facet, x: u16, y: u16) -> Option<openshard_map::map::LandCell> {
+    state
+        .facet_state(facet)
+        .ground()
+        .snapshot()
+        .and_then(|world| world.map().land(x, y))
+}
+
+/// Commit one op as a patch of its own, and say what happened.
+///
+/// One op per patch because a command line has no spelling for "and also" — the
+/// model holds a list and the applier walks it in order, so a brush that batches
+/// them is direction F's and needs nothing here.
+///
+/// The author is the operator's own account name: a history whose every entry
+/// says "staff" is a history that cannot answer who raised the hill.
+fn commit_one(
+    state: &mut WorldState,
+    actor: EntityId,
+    facet: Facet,
+    op: openshard_map::patch::PatchOp,
+    what: &str,
+) {
+    let author = state
+        .registry
+        .get::<openshard_state::components::Name>(actor)
+        .map_or_else(|| "staff".to_owned(), |name| name.0.clone());
+    let Some(parent) = state
+        .facet_state(facet)
+        .ground()
+        .snapshot()
+        .map(openshard_map::snapshot::MapSnapshot::revision)
+    else {
+        notify(state, actor, "There is no map under you.");
+        return;
+    };
+    let patch = openshard_map::patch::Patch::new(
+        facet,
+        parent,
+        openshard_map::patch::PatchAuthor(author),
+        // The wall clock, and it is not the tick's business: a patch's time is
+        // for a person reading the history, and the *order* is the chain of
+        // revisions — see `PatchTime`. Nothing in the simulation reads it.
+        openshard_map::patch::PatchTime(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_secs()),
+        ),
+        vec![op],
+    );
+
+    match crate::mapedit::commit(state, facet, &patch) {
+        Ok(revision) => {
+            notify(
+                state,
+                actor,
+                &format!(
+                    "Committed: {what}. Facet {} is at revision {}.",
+                    facet.0,
+                    revision.get()
+                ),
+            );
+            // Said every time, because it is true every time and the cost of
+            // forgetting it is a shard that will not boot: the navigation
+            // artifact is stamped against the world, and this moved the world.
+            if let Some(rebake) = crate::mapedit::rebake_command(state, facet) {
+                notify(
+                    state,
+                    actor,
+                    "Long routes are off until the graph is rebuilt and the shard restarted:",
+                );
+                notify(state, actor, &rebake);
+            }
+        }
+        Err(refusal) => notify(state, actor, &format!("{refusal}")),
     }
 }
 

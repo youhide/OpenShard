@@ -159,7 +159,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     // does not apply is not a patch, and a log is append-only, so the check has
     // to happen before the append rather than at the next boot.
     let mut world = snapshot;
-    let revision = world.publish(&patch)?;
+    // The way back is dropped here on purpose: this world is a copy that goes
+    // out of scope, so a failed append leaves nothing to put back. A shard
+    // publishing into the world players are standing in is the caller that
+    // holds it — see `openshard_world::mapedit`.
+    world.publish(&patch)?;
+    let revision = world.revision();
     let touched = patch.touched_chunks();
 
     if cli.dry_run {
@@ -193,55 +198,40 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// The op, read against the world it is being made against.
+///
+/// Every arm is one of [`PatchOp`]'s three constructors: reading the world is
+/// what fills in the `was` half, and doing it here as well as in the shard would
+/// be two spellings of one rule. What this adds is the *message* — a refusal
+/// from a command line names the tile it was given.
 fn build(world: &MapSnapshot, what: &What) -> Result<PatchOp, Box<dyn std::error::Error>> {
     let map = world.map();
     Ok(match *what {
-        What::SetLand { x, y, tile, z } => {
-            let was = map
-                .land(x, y)
-                .ok_or_else(|| format!("({x}, {y}) is not on this facet"))?;
-            PatchOp::SetLand {
-                x,
-                y,
-                was,
-                now: LandCell {
-                    tile: LandTileId(tile),
-                    z,
-                },
-            }
-        }
+        What::SetLand { x, y, tile, z } => PatchOp::set_land(
+            map,
+            x,
+            y,
+            LandCell {
+                tile: LandTileId(tile),
+                z,
+            },
+        )?,
         What::AddStatic {
             x,
             y,
             graphic,
             z,
             hue,
-        } => {
-            if !map.contains(x, y) {
-                return Err(format!("({x}, {y}) is not on this facet").into());
-            }
-            PatchOp::AddStatic {
-                item: StaticItem {
-                    tile: Graphic(graphic),
-                    x,
-                    y,
-                    z,
-                    hue: Hue(hue),
-                },
-            }
-        }
-        What::RemoveStatic { x, y, nth } => {
-            let was = *map.statics_at(x, y).nth(nth as usize).ok_or_else(|| {
-                format!(
-                    "({x}, {y}) has {} statics on it, and there is no number {nth}",
-                    map.statics_at(x, y).count()
-                )
-            })?;
-            PatchOp::RemoveStatic {
-                which: StaticId(nth),
-                was,
-            }
-        }
+        } => PatchOp::add_static(
+            map,
+            StaticItem {
+                tile: Graphic(graphic),
+                x,
+                y,
+                z,
+                hue: Hue(hue),
+            },
+        )?,
+        What::RemoveStatic { x, y, nth } => PatchOp::remove_static(map, x, y, StaticId(nth))?,
         What::List { .. } | What::Show => unreachable!("handled before the world is read"),
     })
 }

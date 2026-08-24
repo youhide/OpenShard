@@ -35,6 +35,12 @@ openshard-quests.workspace = true
 openshard-skills.workspace = true
 openshard-state.workspace = true
 openshard-map.workspace = true
+# The patch log, for `mapedit`: a map edit made in a running shard has to reach
+# the same `.ospatch` file the offline tool writes, or the world loses it at the
+# next restart. `openshard-basemap` owns that file, and it is the *only* thing
+# read from it here — the world itself arrives through `boot`, which resolves the
+# base set and its log in one call so the two cannot disagree about a revision.
+openshard-basemap.workspace = true
 openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
 tracing.workspace = true

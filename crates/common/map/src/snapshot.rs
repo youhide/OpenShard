@@ -12,7 +12,7 @@
 use openshard_protocol::world::Facet;
 
 use crate::map::WorldMap;
-use crate::patch::{Patch, PatchError};
+use crate::patch::{Patch, PatchError, Undo};
 
 /// Which published version of a facet a reader holds.
 ///
@@ -157,12 +157,15 @@ impl MapSnapshot {
     /// bake over [`crate::patch::Patch::touched_chunks`], and that is direction
     /// D's to notice.
     ///
+    /// What it hands back is the way *back*: see [`Undo`], and
+    /// [`MapSnapshot::undo`] for the one case that needs it.
+    ///
     /// # Errors
     ///
     /// [`PatchError`] — the patch is for another facet, was made against a
     /// revision this snapshot has left, or disagrees with the world about what
     /// it is changing. On any of them the world is exactly as it was.
-    pub fn publish(&mut self, patch: &Patch) -> Result<MapRevision, PatchError> {
+    pub fn publish(&mut self, patch: &Patch) -> Result<Undo, PatchError> {
         if patch.facet() != self.facet {
             return Err(PatchError::WrongFacet {
                 wanted: self.facet,
@@ -175,9 +178,27 @@ impl MapSnapshot {
                 parent: patch.parent(),
             });
         }
-        crate::patch::apply(&mut self.map, patch.ops())?;
+        let ops = crate::patch::apply(&mut self.map, patch.ops())?;
+        let was = self.revision;
         self.revision = patch.revision();
-        Ok(self.revision)
+        Ok(Undo::new(ops, was))
+    }
+
+    /// Take back a publish that was never written down.
+    ///
+    /// **Not a revert.** A revert an operator asks for is a new patch over the
+    /// world as it now stands, and it is history like anything else. This is the
+    /// case a live publisher has and an offline one does not: the world moved,
+    /// and then committing it to the log failed. What is put back here was never
+    /// a revision anybody could have seen — the borrow that made the publish
+    /// atomic is the same borrow that has not been given up yet — so the
+    /// revision goes back to the number it left rather than forward to a third.
+    ///
+    /// Infallible, and [`crate::patch::revert`] says why: every op in an [`Undo`]
+    /// was true of this world a moment ago.
+    pub fn undo(&mut self, undo: &Undo) {
+        crate::patch::revert(&mut self.map, undo.ops());
+        self.revision = undo.to();
     }
 }
 

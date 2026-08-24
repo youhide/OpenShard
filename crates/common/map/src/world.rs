@@ -32,6 +32,7 @@
 //! reader already handles because a facet starts that way.
 
 use crate::overlay::Overlay;
+use crate::patch::{Patch, PatchError, Undo};
 use crate::snapshot::MapSnapshot;
 
 /// One facet as its owner holds it.
@@ -96,6 +97,36 @@ impl World {
     /// the whole picture when the shard sends it a new one.
     pub const fn live_mut(&mut self) -> &mut Overlay {
         &mut self.live
+    }
+
+    /// Publish a patch to this world's base, and leave the live layer alone.
+    ///
+    /// **The live layer is untouched, and that is the model rather than an
+    /// omission.** A patch is a change to the *ground*; a door standing in a
+    /// doorway that a patch just deleted is still a door standing there, and
+    /// what it means is a question for whoever put it there. The two layers move
+    /// on different clocks, which is what this type is for.
+    ///
+    /// # Errors
+    ///
+    /// [`PatchError::NoGround`] — this facet has no map to patch at all.
+    /// Otherwise [`MapSnapshot::publish`]'s, unchanged.
+    pub fn publish(&mut self, patch: &Patch) -> Result<Undo, PatchError> {
+        self.base.as_mut().ok_or(PatchError::NoGround)?.publish(patch)
+    }
+
+    /// Take back a publish that was never written down. See
+    /// [`MapSnapshot::undo`], which this is.
+    ///
+    /// # Panics
+    ///
+    /// If the ground went away between the publish and the undo, which nothing
+    /// can do while the caller holds the `&mut` that published.
+    pub fn undo(&mut self, undo: &Undo) {
+        self.base
+            .as_mut()
+            .expect("a world that published a patch a moment ago still has its ground")
+            .undo(undo);
     }
 }
 

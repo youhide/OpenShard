@@ -150,6 +150,7 @@ fn a_sea() -> WorldState {
             SIZE,
             SIZE,
             openshard_state::facet_rules::FacetRules::classic(Facet(0)),
+            None,
             &tiles,
         ),
     );
