@@ -29,6 +29,76 @@ tick takes a snapshot handle at its start and every step, sight line and route
 inside that tick answers from that one revision. A frame does the same. A new
 revision becomes visible between ticks, not during one.
 
+## A fourth thing, which is not a fourth word
+
+The three above are all about the *base*. A shard also has a barrel on the
+ground, a shut door and a ship's deck, and none of them is a patch. They are the
+**live layer**, and *"why not just keep those in the map too"* is asked often
+enough — and answered in three different files — to be worth answering here once.
+
+**They are in the map.** [`World`](../../../crates/common/map/src/world.rs) is
+`base + live` in one value, which is what
+[`map_rebuild.md`](../map_rebuild.md)'s *"the map, in one type"* means: the
+ground, the statics, and what the live world has laid over them. A reader takes
+one world, not a map and an overlay it remembered to carry together — two
+arguments that could be handed different facets without anything noticing, which
+is what that type was made to stop.
+
+**What they are not in is the base**, and six things follow from that. The first
+five are ours to weigh; the sixth is not.
+
+- **A static has no identity and an item needs one.** A `StaticItem` is a
+  graphic, an x, a y, a z and a hue — there is nothing to address. An item is
+  picked up by serial (`0x07`), put down by serial (`0x08`) and forgotten by
+  serial (`0x1D`).
+- **Every drop would be a revision**, and a revision is history: durable,
+  attributable, and what a client fetches by. A barrel dropped and picked up five
+  seconds later would be two entries in the `.ospatch` log forever, and no
+  client's kept world would ever be current.
+- **Every drop would be a rebake.** Moving the base invalidates the span index,
+  the composited blocks, the radar and the coarse graph — 115 ms and 11.6 s of it
+  measured. A dropped barrel costs one hash-map entry today *because* the bake is
+  a projection of the two lower layers and cannot see the live one.
+- **The layout is a run, not a set.** A facet's statics are one sorted vector
+  with a prefix sum of offsets; inserting one item re-offsets the tail.
+- **The base is one thing everyone holds, whole. Items are told by interest** —
+  eighteen tiles, forgotten on the way out — and carry what a static cannot be
+  given: an owner, a container, a weight, a decay timer. A static can only lie on
+  a tile; it cannot lie in a backpack.
+- **🚩 And the base is ours, which the stock client is not.** A 2D client and
+  ClassicUO draw statics from their own `statics0.mul` and never see a byte of
+  ours — [`map_rebuild.md`](../map_rebuild.md) puts it plainly, *"the classic 2D
+  client is out of it by design: it reads its own files and does not see our
+  changes"*, and `.addstatic`'s own doc says the same from the other end. So the
+  rule underneath all of the above is one line:
+
+> **Anything that must be visible to a stock client has to be an entity on the
+> wire.** The base is what only the shard and a client of ours can see.
+
+**Which is why the decoration is entities**, and it is worth saying because it
+looks like a mistake and is not. `data/deco.json` is the largest dataset in the
+tree — 18,832 statics, 5,598 containers, 638 doors for one facet — and the
+18,832 never move, never decay and cannot be picked up. They are statics in
+everything but storage, and they are entities anyway, costing serials, registry
+rows, interest sweeps and `0x1A`s, for exactly the reason above.
+
+Committing them into the base is a real option, newly possible — before era S
+there was nothing to commit *into* — and it already has a shape in the plan:
+[direction F](plan.md#f--the-editor)'s *"committing a house into the base as its
+one-way operation"* is the same gesture. What it is not is an optimisation. It
+trades away every stock client's view of that furniture, so it is a decision
+about **who plays here**, and it belongs to an operator rather than to us.
+
+**One note on where the seam sits**, since the tempting move is to push the live
+layer one level further down, into `WorldMap` beside the land and the statics.
+The grouping is by *clock*, not by resemblance: land and statics move together —
+one patch moves both, one revision stamps both, one chunk carries both — and the
+live layer moves when a door swings. Putting it inside `WorldMap` would also put
+it inside `MapSnapshot`, and then a bake could reach a door: today it cannot,
+because it is handed a snapshot with no field to reach one through. That
+invariant is a borrow rather than a rule somebody has to remember, and it is the
+thing the current seam buys.
+
 ## Chunks
 
 The map is cut into fixed blocks because nobody reloads a facet to move a rock:
