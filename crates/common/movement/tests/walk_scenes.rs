@@ -634,14 +634,14 @@ fn a_villa_stair_carries_a_body_to_its_first_floor() {
 #[test]
 fn a_route_climbs_from_a_villas_ground_floor_to_its_first_floor() {
     use openshard_map::overlay::Doors;
-    use openshard_movement::{Footing, find_path, step_allowed};
+    use openshard_movement::{Footing, Weight, find_path, step_allowed};
 
     let (scene, live) = a_villa();
     let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
     let under = Point::new(4, 4, 0);
     let upstairs = Point::new(4, 4, 7);
 
-    let route = find_path(&footing, under, upstairs, 200).expect("the villa has a staircase");
+    let route = find_path(&footing, under, upstairs, 200, Weight::EXACT).expect("the villa has a staircase");
     assert_eq!(
         route,
         vec![Direction::SouthEast, Direction::NorthWest],
@@ -658,7 +658,7 @@ fn a_route_climbs_from_a_villas_ground_floor_to_its_first_floor() {
     // Both directions, because the step rule is not symmetric and the closed
     // set is what used to decide this: coming down, the boards are climbed
     // again from the tread, so the way back to the ground is round the house.
-    let down = find_path(&footing, upstairs, under, 200).expect("there is a way down");
+    let down = find_path(&footing, upstairs, under, 200, Weight::EXACT).expect("there is a way down");
     let mut at = upstairs;
     for &dir in &down {
         at = step_allowed(&footing, at, dir).expect("the search planned a step nobody may take");

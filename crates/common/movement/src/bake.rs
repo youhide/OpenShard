@@ -670,7 +670,7 @@ mod tests {
 
     use super::*;
     use crate::scene::Scene;
-    use crate::{Footing, find_long_path};
+    use crate::{Footing, Weight, find_long_path};
     use openshard_map::grid::Tile;
     use openshard_map::overlay::{Cover, Doors, Overlay};
 
@@ -740,8 +740,24 @@ mod tests {
         let from = Point::new(2, 2, 0);
         let to = Point::new(93, 2, 0);
         assert_eq!(
-            find_long_path(&terrain.footing(), &terrain.footing(), &graph, from, to, 100),
-            find_long_path(&terrain.footing(), &terrain.footing(), &loaded, from, to, 100),
+            find_long_path(
+                &terrain.footing(),
+                &terrain.footing(),
+                &graph,
+                from,
+                to,
+                100,
+                Weight::EXACT
+            ),
+            find_long_path(
+                &terrain.footing(),
+                &terrain.footing(),
+                &loaded,
+                from,
+                to,
+                100,
+                Weight::EXACT
+            ),
         );
         let _ = fs::remove_file(path);
     }

@@ -15,7 +15,9 @@ use openshard_combat::MobileDamaged;
 use openshard_entities::EntityId;
 use openshard_items as items;
 use openshard_map::overlay::Doors;
-use openshard_movement::{COARSE_MIN_DISTANCE, direction_toward, find_long_path, find_path, step_from};
+use openshard_movement::{
+    COARSE_MIN_DISTANCE, Weight, direction_toward, find_long_path, find_path, step_from,
+};
 use openshard_protocol::direction::Direction;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::world::{Facet, Point, Sight};
@@ -281,7 +283,7 @@ fn plan_step(
     let planner = state
         .footing(facet, doors)
         .among(openshard_movement::Bodies::standing(&crowd));
-    if let Some(path) = find_path(&planner, from, to, PATH_BUDGET) {
+    if let Some(path) = find_path(&planner, from, to, PATH_BUDGET, Weight::PLANNING) {
         return StepPlan {
             direction: path.first().copied(),
             coarse: Coarse::NotAsked,
@@ -298,7 +300,7 @@ fn plan_step(
         };
     };
     let guide = state.guide(facet);
-    match find_long_path(&guide, &planner, graph, from, to, PATH_BUDGET) {
+    match find_long_path(&guide, &planner, graph, from, to, PATH_BUDGET, Weight::PLANNING) {
         Some(path) => StepPlan {
             direction: path.first().copied(),
             coarse: Coarse::Routed,
@@ -563,7 +565,7 @@ fn chase_step(
         let planner = state
             .footing(facet, Doors::for_opener(brain.opens_doors))
             .among(openshard_movement::Bodies::standing(&crowd));
-        find_path(&planner, from, to, PATH_BUDGET)
+        find_path(&planner, from, to, PATH_BUDGET, Weight::PLANNING)
     };
     match planned {
         Some(steps) if !steps.is_empty() => {

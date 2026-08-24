@@ -183,15 +183,21 @@ fn synthetic() {
     let built = built_at.elapsed();
 
     let flat_at = Instant::now();
-    let flat = find_path(&open, FROM, TO, usize::from(WIDTH) * usize::from(HEIGHT))
-        .expect("open ground has a flat route");
+    let flat = find_path(
+        &open,
+        FROM,
+        TO,
+        usize::from(WIDTH) * usize::from(HEIGHT),
+        Weight::EXACT,
+    )
+    .expect("open ground has a flat route");
     let flat_elapsed = flat_at.elapsed();
 
     let mut coarse_samples = Vec::with_capacity(SAMPLES);
     let mut coarse_steps = None;
     for _ in 0..SAMPLES {
         let coarse_at = Instant::now();
-        let coarse = find_long_path(&open, &open, &router, FROM, TO, 600)
+        let coarse = find_long_path(&open, &open, &router, FROM, TO, 600, Weight::EXACT)
             .expect("the coarse corridor has bounded exact hops");
         coarse_steps = Some(coarse.len());
         coarse_samples.push(coarse_at.elapsed());
@@ -272,7 +278,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut coarse_route = None;
             for _ in 0..cli.repeat.max(1) {
                 let started = Instant::now();
-                let route = find_long_path(&footing, &footing, &graph, origin, to, cli.budget);
+                let route = find_long_path(&footing, &footing, &graph, origin, to, cli.budget, Weight::EXACT);
                 coarse = coarse.min(started.elapsed());
                 coarse_route = Some(route);
             }

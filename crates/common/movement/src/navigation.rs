@@ -33,7 +33,7 @@ use crate::footing::Footing;
 use openshard_map::grid::Tile;
 
 use crate::walk::steps_out_of;
-use crate::{Effort, debug_enabled, find_path_toward_within, find_path_within, step_allowed};
+use crate::{Effort, Rigour, Weight, debug_enabled, find_path_toward_within, find_path_within, step_allowed};
 
 /// The whole work one long query may do, in node expansions.
 ///
@@ -1024,7 +1024,7 @@ impl NavigationGraph {
         from: Point,
         to: Point,
         nodes: &[NodeId],
-        budget: usize,
+        rigour: Rigour,
         effort: &mut Effort,
     ) -> Result<Vec<Direction>, NodeId> {
         let mut route = Vec::new();
@@ -1039,7 +1039,7 @@ impl NavigationGraph {
             let next = self.nodes[node.0];
             let next_region = self.node_region(node);
             let segment = match next_region == region {
-                true => region_route(footing, self.regions[region.0], at, next.point, budget, effort),
+                true => region_route(footing, self.regions[region.0], at, next.point, rigour, effort),
                 false => cross_portal(footing, at, next.point),
             };
             let Some(segment) = segment else {
@@ -1057,7 +1057,7 @@ impl NavigationGraph {
         if effort.spent_out() {
             return Err(last);
         }
-        let Some(segment) = region_route(footing, self.regions[region.0], at, to, budget, effort) else {
+        let Some(segment) = region_route(footing, self.regions[region.0], at, to, rigour, effort) else {
             return Err(last);
         };
         append(footing, at, &segment, &mut route).ok_or(last)?;
@@ -1308,6 +1308,11 @@ const LIVE_REROUTES: usize = 8;
 pub const COARSE_MIN_DISTANCE: u32 = 8;
 
 /// Refine a route proposed by a static navigation graph through live terrain.
+///
+/// The weight is the refinement's, and it reaches every exact search this
+/// query makes — a corridor hop is a body's own walking, so it is planned the
+/// way a body's walking is. It does **not** reach the graph: an edge cost is
+/// baked, and what it says about the facet is what the corridor picks by.
 #[must_use]
 pub fn find_long_path(
     guide: &Footing<'_>,
@@ -1316,6 +1321,7 @@ pub fn find_long_path(
     from: Point,
     to: Point,
     budget: usize,
+    weight: Weight,
 ) -> Option<Vec<Direction>> {
     let started = debug_enabled().then(Instant::now);
     // One wallet for the whole query, and the only ceiling over it. What used to
@@ -1324,7 +1330,8 @@ pub fn find_long_path(
     // ceiling cannot be passed *between* two reads of it, so a route that comes
     // back is a route that was paid for.
     let mut effort = Effort::of(LONG_PATH_EFFORT);
-    let (result, exit) = find_long_path_inner(guide, footing, graph, from, to, budget, &mut effort);
+    let rigour = Rigour { budget, weight };
+    let (result, exit) = find_long_path_inner(guide, footing, graph, from, to, rigour, &mut effort);
     debug_long_path(
         from,
         to,
@@ -1343,7 +1350,7 @@ fn find_long_path_inner(
     graph: &NavigationGraph,
     from: Point,
     to: Point,
-    budget: usize,
+    rigour: Rigour,
     effort: &mut Effort,
 ) -> (Option<Vec<Direction>>, LongExit) {
     let (Some(from_region), Some(to_region)) = (graph.region_at(from), graph.region_at(to)) else {
@@ -1357,7 +1364,7 @@ fn find_long_path_inner(
     // standing as the verdict. What that costs is `local_costs` over one region
     // twice, which is the price of an answer where there used to be none.
     let local = match from_region == to_region {
-        true => region_route(footing, graph.regions[from_region.0], from, to, budget, effort),
+        true => region_route(footing, graph.regions[from_region.0], from, to, rigour, effort),
         false => None,
     };
     if let Some(route) = local {
@@ -1383,7 +1390,7 @@ fn find_long_path_inner(
         let Some(path) = graph.abstract_path(from, to, &forbidden, &source, &target) else {
             return (None, LongExit::NoCorridor);
         };
-        match graph.refine(footing, from, to, &path, budget, effort) {
+        match graph.refine(footing, from, to, &path, rigour, effort) {
             Ok(route) => return (Some(route), LongExit::Route),
             Err(node) if !forbidden[node.0] => graph.forbid_portal(node, &mut forbidden),
             Err(_) => return (None, LongExit::PortalsExhausted),
@@ -1445,10 +1452,10 @@ fn region_route(
     region: Region,
     from: Point,
     to: Point,
-    budget: usize,
+    rigour: Rigour,
     effort: &mut Effort,
 ) -> Option<Vec<Direction>> {
-    let hop = u16::try_from((budget / 2).max(1)).unwrap_or(u16::MAX);
+    let hop = u16::try_from((rigour.budget / 2).max(1)).unwrap_or(u16::MAX);
     let mut route = Vec::new();
     let mut at = from;
     while distance(at, to) > u32::from(hop) {
@@ -1458,10 +1465,10 @@ fn region_route(
         // Aim at the real destination and keep the closest result when the
         // bounded search runs out. A synthetic point exactly `hop` tiles away
         // can itself be a tree, which must not make a whole forest unroutable.
-        let segment = find_path_toward_within(footing, at, to, budget, effort, Some(region))?;
+        let segment = find_path_toward_within(footing, at, to, rigour, effort, Some(region))?;
         at = append(footing, at, &segment, &mut route)?;
     }
-    let segment = find_path_within(footing, at, to, budget, effort, Some(region))?;
+    let segment = find_path_within(footing, at, to, rigour, effort, Some(region))?;
     append(footing, at, &segment, &mut route)?;
     Some(route)
 }
@@ -1546,7 +1553,16 @@ mod tests {
         assert_eq!(graph.nodes.len(), 84);
         let from = Point::new(1, 1, 0);
         let to = Point::new(702, 30, 0);
-        let route = find_long_path(&terrain.footing(), &terrain.footing(), &graph, from, to, 100).unwrap();
+        let route = find_long_path(
+            &terrain.footing(),
+            &terrain.footing(),
+            &graph,
+            from,
+            to,
+            100,
+            Weight::EXACT,
+        )
+        .unwrap();
         assert_eq!(end(&terrain.footing(), from, &route), to);
     }
 
@@ -1561,7 +1577,16 @@ mod tests {
         let graph = NavigationGraph::build(&terrain.footing(), 96, 64).unwrap();
         let from = Point::new(2, 2, 0);
         let to = Point::new(93, 2, 0);
-        let route = find_long_path(&terrain.footing(), &terrain.footing(), &graph, from, to, 100).unwrap();
+        let route = find_long_path(
+            &terrain.footing(),
+            &terrain.footing(),
+            &graph,
+            from,
+            to,
+            100,
+            Weight::EXACT,
+        )
+        .unwrap();
         assert_eq!(end(&terrain.footing(), from, &route), to);
         let mut at = from;
         for direction in route {
@@ -1600,11 +1625,12 @@ mod tests {
         // The oracle that the ground joins them at all, and it is the search
         // this router is the fall-back for: exhaustive A* over the whole grid.
         assert!(
-            find_path(&footing, from, to, 64 * 64).is_some(),
+            find_path(&footing, from, to, 64 * 64, Weight::EXACT).is_some(),
             "the way round is walkable"
         );
 
-        let route = find_long_path(&footing, &footing, &graph, from, to, 600).expect("a corridor answers");
+        let route = find_long_path(&footing, &footing, &graph, from, to, 600, Weight::EXACT)
+            .expect("a corridor answers");
         assert_eq!(end(&footing, from, &route), to);
         // And it is the corridor that answered rather than the local search:
         // `region_route` cannot leave the rectangle, so a step outside it is
@@ -1634,7 +1660,16 @@ mod tests {
         );
         let from = Point::new(1, 1, 0);
         let to = Point::new(126, 126, 0);
-        let route = find_long_path(&terrain.footing(), &terrain.footing(), &graph, from, to, 600).unwrap();
+        let route = find_long_path(
+            &terrain.footing(),
+            &terrain.footing(),
+            &graph,
+            from,
+            to,
+            600,
+            Weight::EXACT,
+        )
+        .unwrap();
         assert_eq!(end(&terrain.footing(), from, &route), to);
     }
 
@@ -1653,7 +1688,16 @@ mod tests {
         assert_eq!(graph.nodes.len(), 4);
         let from = Point::new(2, 2, 0);
         let to = Point::new(61, 29, 0);
-        let route = find_long_path(&terrain.footing(), &terrain.footing(), &graph, from, to, 600).unwrap();
+        let route = find_long_path(
+            &terrain.footing(),
+            &terrain.footing(),
+            &graph,
+            from,
+            to,
+            600,
+            Weight::EXACT,
+        )
+        .unwrap();
         assert_eq!(end(&terrain.footing(), from, &route), to);
     }
 
@@ -1723,11 +1767,11 @@ mod tests {
             "and cannot climb back onto it"
         );
 
-        let route = find_long_path(&footing, &footing, &graph, high, low, 600)
+        let route = find_long_path(&footing, &footing, &graph, high, low, 600, Weight::EXACT)
             .expect("the drop off the walkway is a route");
         assert_eq!(end(&footing, high, &route), low);
         assert!(
-            find_long_path(&footing, &footing, &graph, low, high, 600).is_none(),
+            find_long_path(&footing, &footing, &graph, low, high, 600, Weight::EXACT).is_none(),
             "nothing climbs back onto a five-unit ledge"
         );
 
@@ -1793,10 +1837,11 @@ mod tests {
 
         // And the router says the same thing, from a region away.
         let low = Point::new(60, 12, 0);
-        let down = find_long_path(&footing, &footing, &graph, high, low, 600).expect("the drop is a route");
+        let down = find_long_path(&footing, &footing, &graph, high, low, 600, Weight::EXACT)
+            .expect("the drop is a route");
         assert_eq!(end(&footing, high, &down), low);
         assert!(
-            find_long_path(&footing, &footing, &graph, low, high, 600).is_none(),
+            find_long_path(&footing, &footing, &graph, low, high, 600, Weight::EXACT).is_none(),
             "nothing climbs back onto a five-unit ledge"
         );
     }
@@ -1829,11 +1874,11 @@ mod tests {
         );
         let plain = Point::new(60, 12, 0);
         let plateau = Point::new(2, 12, 30);
-        let route = find_long_path(&footing, &footing, &graph, plain, plateau, 600)
+        let route = find_long_path(&footing, &footing, &graph, plain, plateau, 600, Weight::EXACT)
             .expect("the stair is a route onto the plateau");
         assert_eq!(end(&footing, plain, &route), plateau);
-        let down =
-            find_long_path(&footing, &footing, &graph, plateau, plain, 600).expect("and a route back down");
+        let down = find_long_path(&footing, &footing, &graph, plateau, plain, 600, Weight::EXACT)
+            .expect("and a route back down");
         assert_eq!(end(&footing, plateau, &down), plain);
     }
 
@@ -1856,9 +1901,10 @@ mod tests {
             }
             let from = Point::new(1, 1, 0);
             let to = Point::new(18, 12, 0);
-            let exact = find_path(&terrain.footing(), from, to, 20 * 14);
+            let exact = find_path(&terrain.footing(), from, to, 20 * 14, Weight::EXACT);
             let graph = NavigationGraph::build(&terrain.footing(), 20, 14).unwrap();
-            let route = find_long_path(&terrain.footing(), &terrain.footing(), &graph, from, to, 20 * 14);
+            let route =
+                find_long_path(&terrain.footing(), &terrain.footing(), &graph, from, to, 20 * 14, Weight::EXACT);
             prop_assert_eq!(route.is_some(), exact.is_some());
             if let Some(route) = route {
                 prop_assert_eq!(end(&terrain.footing(), from, &route), to);

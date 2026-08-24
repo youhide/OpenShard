@@ -182,7 +182,7 @@ use openshard_map::grid::Tile;
 use openshard_map::overlay::Doors;
 use openshard_movement::{
     Around, COARSE_MIN_DISTANCE, Detour, Footing, Heading, Lean, Leeway, NavigationGraph, RUN_HOLD, Step,
-    WALK_HOLD, find_long_path, find_path, find_path_toward, step_allowed,
+    WALK_HOLD, Weight, find_long_path, find_path, find_path_toward, step_allowed,
 };
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::world::Point;
@@ -340,7 +340,7 @@ impl Readings<'_> {
     /// chosen by the caller: real ground for a player's open half, or the
     /// existing doors-open reading for the route that is later cut at a leaf.
     fn path(&self, footing: &Footing<'_>, from: Point, to: Point) -> Option<Vec<Direction>> {
-        let local = find_path(footing, from, to, PLAN_BUDGET);
+        let local = find_path(footing, from, to, PLAN_BUDGET, Weight::PLANNING);
         if local.is_some() {
             return local;
         }
@@ -353,7 +353,15 @@ impl Readings<'_> {
         self.coarse.and_then(|coarse| {
             // Graph and endpoint joins are both the bare map. Live terrain
             // only approves or rejects the resulting exact steps.
-            find_long_path(&self.guide, footing, coarse, from, to, PLAN_BUDGET)
+            find_long_path(
+                &self.guide,
+                footing,
+                coarse,
+                from,
+                to,
+                PLAN_BUDGET,
+                Weight::PLANNING,
+            )
         })
     }
 }
@@ -1316,7 +1324,7 @@ pub fn plan(ground: Readings<'_>, from: Point, tile: Tile) -> Option<Plan> {
         // far side of anything: no route through this destination's own tile is
         // known, and drawing one would be inventing it. What is left is how
         // close the world as it stands can get, which is a walk and not a guess.
-        let Some(open) = find_path_toward(&real, from, goal, PLAN_BUDGET) else {
+        let Some(open) = find_path_toward(&real, from, goal, PLAN_BUDGET, Weight::PLANNING) else {
             debug_plan(from, goal, started.elapsed(), None);
             return None;
         };
@@ -2069,7 +2077,14 @@ mod tests {
         let from = Point::new(1, 1, 0);
         let goal = Tile::new(702, 1);
         assert!(
-            find_path(&open_ground(), from, Point::new(goal.x, goal.y, 0), PLAN_BUDGET).is_none(),
+            find_path(
+                &open_ground(),
+                from,
+                Point::new(goal.x, goal.y, 0),
+                PLAN_BUDGET,
+                Weight::PLANNING
+            )
+            .is_none(),
             "the flat plan is intentionally too short"
         );
         let plan = plan(
@@ -2130,7 +2145,14 @@ mod tests {
         let shut = over(&doorwall);
         let open = shut.reading(Doors::AllOpen);
         assert!(
-            find_path(&shut, here(), Point::new(BEYOND.x, BEYOND.y, 0), PLAN_BUDGET).is_none(),
+            find_path(
+                &shut,
+                here(),
+                Point::new(BEYOND.x, BEYOND.y, 0),
+                PLAN_BUDGET,
+                Weight::PLANNING
+            )
+            .is_none(),
             "the premise: as the world stands there is no way through at all"
         );
         let plan = plan(

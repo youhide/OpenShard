@@ -117,10 +117,12 @@ impl Effort {
 /// the same number on every machine and in every build, and `h as f32 * 1.25`
 /// is not quite.
 ///
-/// [`Self::EXACT`] is the only weight anything ships with. The type exists so
-/// that a caller which would rather have a route *now* than the best route can
-/// say so at the call, and so that the probe can price what that trade buys —
-/// see `map_path_probe`'s `--weight`.
+/// Two ship, and which one a call names is the difference between *walking* and
+/// *measuring*: a body's own route is planned at [`Self::PLANNING`], and
+/// anything that has to be able to compare two answers — a baked edge cost, a
+/// probe, a test that means "the shortest" — asks at [`Self::EXACT`]. There is
+/// no third, and `map_path_probe`'s `--weight` is how a fourth would be argued
+/// for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Weight {
     numerator: u32,
@@ -130,9 +132,51 @@ pub struct Weight {
 impl Weight {
     /// The heuristic taken at its word: the shortest route, and A\*'s promise
     /// intact.
+    ///
+    /// What the *graph* is built at, and what a measurement is taken against.
+    /// A baked edge cost is a statement about the facet — the corridor picks
+    /// between hops by comparing them — so it may not be the length of a route
+    /// that merely happens to be short enough.
     pub const EXACT: Self = Self {
         numerator: 1,
         denominator: 1,
+    };
+
+    /// What a **body's own route** is planned at: a quarter more walking
+    /// accepted, in exchange for a search that reaches a quarter more of the
+    /// map inside the same node budget.
+    ///
+    /// **Measured, over 33,280 destinations from two origins on facet 0**, at
+    /// both shipped budgets. Against the exact search:
+    ///
+    /// | | castle, 400 | castle, 600 | open country, 400 |
+    /// |---|---|---|---|
+    /// | destinations reached | +24.7% | +23.3% | +6.8% |
+    /// | total route length | +0.20% | +0.32% | +0.19% |
+    /// | routes that got longer at all | 195 of 2,828 | 352 of 3,223 | 613 of 10,143 |
+    /// | the worst one | +2 steps | +4 steps | +3 steps |
+    /// | arrivals *lost* | 0 | 0 | 0 |
+    ///
+    /// The two origins are the two shapes of ground and they answer different
+    /// halves: at the castle the budget is what refuses, and a weight spends it
+    /// better; in open country the *map* is what refuses — water and cliff — and
+    /// the weight saturates by 9/8 because there is nothing left to reach.
+    ///
+    /// **Why not more.** 3/2 reaches +36% at the castle for +0.34%, and 2/1
+    /// reaches +49% for +2.36% and a worst route 12 steps long over the
+    /// shortest. 5/4 is where the cost is still under a quarter of a percent
+    /// and no single route is stretched past a step or two — a player who
+    /// clicks across a courtyard cannot see it, and one who could would be
+    /// looking at 2/1.
+    ///
+    /// **Why not less.** 9/8 buys 14% for 0.09%, which is the same trade at
+    /// half scale; the castle's numbers say the curve has not turned by 5/4.
+    ///
+    /// The bound holds whatever the ground: a route planned at this weight is
+    /// never longer than five quarters of the shortest one.
+    pub const PLANNING: Self = Self {
+        numerator: 5,
+        denominator: 4,
     };
 
     /// A weight of `numerator / denominator`.
@@ -167,6 +211,21 @@ impl Weight {
         }
         (u64::from(h) * u64::from(self.numerator) / u64::from(self.denominator)) as u32
     }
+}
+
+/// How thoroughly one exact search inside a long query looks: how many standing
+/// places it may finalise, and how far it may trust its own estimate.
+///
+/// The two travel together everywhere a corridor is refined — every hop of it is
+/// asked the same way — and separately they are eight arguments where the
+/// functions carrying them already have seven of their own.
+///
+/// Not on [`find_path`]'s own signature, where the two are named at the call and
+/// there is nothing to bundle them for.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Rigour {
+    pub(crate) budget: usize,
+    pub(crate) weight: Weight,
 }
 
 /// One entry on the open list, ordered so [`BinaryHeap`] with [`Reverse`] pops
@@ -264,10 +323,20 @@ impl OpenEntry {
 /// a move order a player gave, which is owed a body that walks up to whatever
 /// stops it — wants [`find_path_toward`], which is the same search read for that
 /// question instead.
+/// The weight is named at the call and never assumed: a body's own route is
+/// planned at [`Weight::PLANNING`], and anything measuring the map — a baked
+/// edge cost, a probe, a test that means *the shortest* — asks at
+/// [`Weight::EXACT`].
 #[must_use]
-pub fn find_path(footing: &Footing<'_>, from: Point, to: Point, budget: usize) -> Option<Vec<Direction>> {
+pub fn find_path(
+    footing: &Footing<'_>,
+    from: Point,
+    to: Point,
+    budget: usize,
+    weight: Weight,
+) -> Option<Vec<Direction>> {
     let started = debug_enabled().then(Instant::now);
-    let search = explore(footing, from, to, budget, Weight::EXACT, None);
+    let search = explore(footing, from, to, budget, weight, None);
     debug_slow("find_path", from, to, budget, started, &search);
     search.arrived.then_some(search.route)
 }
@@ -299,9 +368,10 @@ pub fn find_path_toward(
     from: Point,
     to: Point,
     budget: usize,
+    weight: Weight,
 ) -> Option<Vec<Direction>> {
     let started = debug_enabled().then(Instant::now);
-    let search = explore(footing, from, to, budget, Weight::EXACT, None);
+    let search = explore(footing, from, to, budget, weight, None);
     debug_slow("find_path_toward", from, to, budget, started, &search);
     (search.arrived || !search.route.is_empty()).then_some(search.route)
 }
@@ -404,11 +474,11 @@ pub(crate) fn find_path_within(
     footing: &Footing<'_>,
     from: Point,
     to: Point,
-    budget: usize,
+    rigour: Rigour,
     effort: &mut Effort,
     within: Option<Region>,
 ) -> Option<Vec<Direction>> {
-    let search = search(footing, from, to, budget, effort, within);
+    let search = search(footing, from, to, rigour, effort, within);
     search.arrived.then_some(search.route)
 }
 
@@ -416,11 +486,11 @@ pub(crate) fn find_path_toward_within(
     footing: &Footing<'_>,
     from: Point,
     to: Point,
-    budget: usize,
+    rigour: Rigour,
     effort: &mut Effort,
     within: Option<Region>,
 ) -> Option<Vec<Direction>> {
-    let search = search(footing, from, to, budget, effort, within);
+    let search = search(footing, from, to, rigour, effort, within);
     (search.arrived || !search.route.is_empty()).then_some(search.route)
 }
 
@@ -434,11 +504,12 @@ fn search(
     footing: &Footing<'_>,
     from: Point,
     to: Point,
-    budget: usize,
+    rigour: Rigour,
     effort: &mut Effort,
     within: Option<Region>,
 ) -> PathSearch {
-    let search = explore(footing, from, to, effort.allowance(budget), Weight::EXACT, within);
+    let allowance = effort.allowance(rigour.budget);
+    let search = explore(footing, from, to, allowance, rigour.weight, within);
     effort.spend(search.explored);
     search
 }
@@ -996,7 +1067,7 @@ mod tests {
         let footing = over(&world);
         let from = Point::new(10, 10, 0);
         let to = Point::new(14, 10, 0);
-        let shortest = find_path(&footing, from, to, 1000).expect("there is a way around");
+        let shortest = find_path(&footing, from, to, 1000, Weight::EXACT).expect("there is a way around");
         for (numerator, denominator) in [(9_usize, 8_usize), (5, 4), (3, 2), (2, 1)] {
             let weight = Weight::of(numerator as u32, denominator as u32);
             let search = search_path(&footing, from, to, 1000, weight);
@@ -1060,8 +1131,14 @@ mod tests {
         // Three tiles east: the route is three steps (any equal-cost mix of due-east
         // and diagonals), never a detour.
         let from = Point::new(10, 10, 0);
-        let path = find_path(&over(&open_world()), from, Point::new(13, 10, 0), 100)
-            .expect("open ground is always reachable");
+        let path = find_path(
+            &over(&open_world()),
+            from,
+            Point::new(13, 10, 0),
+            100,
+            Weight::EXACT,
+        )
+        .expect("open ground is always reachable");
         assert_eq!(path.len(), 3, "no detour on open ground");
         let end = walk_path(from, &path);
         assert_eq!((end.x, end.y), (13, 10), "it arrives");
@@ -1074,6 +1151,7 @@ mod tests {
             Point::new(5, 5, 0),
             Point::new(5, 5, 0),
             100,
+            Weight::EXACT,
         )
         .unwrap();
         assert!(path.is_empty());
@@ -1085,8 +1163,8 @@ mod tests {
         // to the east must detour up to the gap rather than push into the wall.
         let world = walled_world(12, 8, 12, 8);
         let from = Point::new(10, 10, 0);
-        let path =
-            find_path(&over(&world), from, Point::new(14, 10, 0), 1000).expect("there is a way around");
+        let path = find_path(&over(&world), from, Point::new(14, 10, 0), 1000, Weight::EXACT)
+            .expect("there is a way around");
         // It must never stand on a blocked tile, and reach the far side.
         let mut at = from;
         for dir in &path {
@@ -1105,7 +1183,16 @@ mod tests {
     fn an_unreachable_goal_within_budget_is_none() {
         // Seal the goal behind a wall with no opening: no route exists.
         let world = walled_world(12, 0, u16::MAX, u16::MAX);
-        assert!(find_path(&over(&world), Point::new(10, 10, 0), Point::new(14, 10, 0), 500).is_none());
+        assert!(
+            find_path(
+                &over(&world),
+                Point::new(10, 10, 0),
+                Point::new(14, 10, 0),
+                500,
+                Weight::EXACT
+            )
+            .is_none()
+        );
     }
 
     /// The move order's answer to that same sealed wall: not "no", but "this
@@ -1117,8 +1204,8 @@ mod tests {
         let world = walled_world(12, 0, u16::MAX, u16::MAX);
         let from = Point::new(10, 10, 0);
         let to = Point::new(14, 10, 0);
-        let path =
-            find_path_toward(&over(&world), from, to, 500).expect("there is somewhere closer to stand");
+        let path = find_path_toward(&over(&world), from, to, 500, Weight::EXACT)
+            .expect("there is somewhere closer to stand");
         let end = walk_path(from, &path);
         assert_eq!(
             (end.x, end.y),
@@ -1137,7 +1224,7 @@ mod tests {
         // Standing against the wall, sent to the tile on its far side.
         let from = Point::new(11, 10, 0);
         assert_eq!(
-            find_path_toward(&over(&world), from, Point::new(12, 10, 0), 500),
+            find_path_toward(&over(&world), from, Point::new(12, 10, 0), 500, Weight::EXACT),
             None
         );
     }
@@ -1171,7 +1258,8 @@ mod tests {
         let footing = over(&world);
         let under = Point::new(5, 5, 0);
         let over_head = Point::new(5, 5, 4);
-        let route = find_path(&footing, under, over_head, 100).expect("the mezzanine has a way up");
+        let route =
+            find_path(&footing, under, over_head, 100, Weight::EXACT).expect("the mezzanine has a way up");
         assert_eq!(
             route,
             vec![Direction::East, Direction::West],
@@ -1198,7 +1286,13 @@ mod tests {
         let mut world = a_mezzanine();
         world.set(Tile::new(6, 5), Vec::new());
         assert_eq!(
-            find_path(&over(&world), Point::new(5, 5, 0), Point::new(5, 5, 4), 100),
+            find_path(
+                &over(&world),
+                Point::new(5, 5, 0),
+                Point::new(5, 5, 4),
+                100,
+                Weight::EXACT
+            ),
             None,
             "an unreachable floor of one's own column is not an arrival"
         );
@@ -1217,12 +1311,12 @@ mod tests {
         let footing = over(&world);
         let under = Point::new(5, 5, 0);
         assert_eq!(
-            find_path(&footing, under, Point::new(5, 5, 3), 100),
+            find_path(&footing, under, Point::new(5, 5, 3), 100, Weight::EXACT),
             Some(vec![Direction::East, Direction::West]),
             "three of four units up is the mezzanine, and it is climbed"
         );
         assert_eq!(
-            find_path(&footing, under, Point::new(5, 5, 1), 100),
+            find_path(&footing, under, Point::new(5, 5, 1), 100, Weight::EXACT),
             Some(Vec::new()),
             "one unit up is the ground the body is already standing on"
         );
@@ -1237,8 +1331,8 @@ mod tests {
         let from = Point::new(10, 10, 0);
         let to = Point::new(14, 10, 0);
         assert_eq!(
-            find_path_toward(&over(&world), from, to, 1000),
-            find_path(&over(&world), from, to, 1000),
+            find_path_toward(&over(&world), from, to, 1000, Weight::EXACT),
+            find_path(&over(&world), from, to, 1000, Weight::EXACT),
             "the approach must not second-guess a route that arrives"
         );
     }
