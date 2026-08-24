@@ -12,9 +12,11 @@
 > and its edges are directed, so `refused_but_walkable` is **0 in every band
 > from all five recorded origins** where the castle plateau alone used to refuse
 > 37 of 44. **N7 has put it under a player**: the shard reads the artifact, and
-> a creature rounds a town block the exact search cannot see past. **Nothing in
-> this plan is open** and every finding with a defect behind it is repaired —
-> what is left is N5 and N6, both gated rather than queued. See
+> a creature rounds a town block the exact search cannot see past. Every finding
+> with a defect behind it is repaired, and what is left is N5 and N6, both gated
+> rather than queued — **and [N8](#n8--the-bake-follows-a-patch), which is not**:
+> era S made a facet something that *moves while the shard runs*, and this layer
+> answers one tile by rebaking all of it. See
 > [`map_rebuild.md`](map_rebuild.md) for the order and
 > [`handoffs/`](handoffs/) for where the work stands.
 
@@ -954,6 +956,86 @@ build that reading itself out of an empty overlay it kept alive somewhere. It is
 overlay for the process — with `world::guide` on the client and
 `WorldState::guide` on the shard as its two callers.
 
+### N8 — the bake follows a patch
+
+Needs N1. **Not gated** — it is the one node here with its measurement in front
+of it rather than behind it, and the thing it measures is a person waiting.
+
+`SpanIndex::build` walks the whole facet, and that was free advice until era S:
+nothing could move a facet while the shard ran. Now `.setland` can, and **both
+ends pay the full bake on the thread that noticed** — `Ground::publish` on the
+shard's tick, `Ground::take_chunks` on the window's event-loop thread. Measured
+on Felucca by
+[`publish_cost`](../../crates/common/movement/tests/publish_cost.rs):
+
+| | |
+|---|---|
+| `SpanIndex::build`, the whole facet | **115.4 ms** |
+| what one `.setland` actually moved | one 64×64 chunk of 7,168 |
+
+(The 10× before that one was the build profile — `openshard-movement` was
+compiled at `opt-level = 0` in every `cargo run`, which made the same bake
+1166.9 ms. That is fixed in the root `Cargo.toml` and is not this node's.)
+
+**The input exists at both doors and neither needs a new one.**
+`Patch::touched_chunks` names what a publish moved, deduplicated; a set of
+chunks names its own. Both are already in the hand of the method that rebakes.
+
+**The obstacle is the layout, and it is the same obstacle `chunk::apply` has.**
+[`spans`](#the-shape) and `counts` are facet-wide packed runs in block order, so
+re-laying one block's run in place moves every run after it. `WorldMap`'s statics
+are the same shape — one run, addressed by a prefix sum of offsets — which is why
+a chunk whose *item count* changed costs `chunk::apply` a whole facet (16.3 ms of
+the window's 132). Two artefacts, one cause. They are worth reading together even
+though only the first is this node's.
+
+**But this layer already owns the indirection the other one lacks.** `blocks`
+names a `BlockTable`, and a table carries its own `base` and `counts` offsets
+rather than deriving them from a running total. So a rebuilt block's spans can be
+**appended at the end and the table repointed** — O(the block), not O(the facet)
+— at the price of leaving the old run unreachable. `WorldMap::offsets` cannot do
+this, because a prefix sum *is* the ordering.
+
+**Take that over a per-block arena**, which
+[What the census decides](#what-the-census-decides) already rejected once and for
+a reason that has not changed: the packed layout exists so that a node expansion
+does not chase a pointer, and it makes sixteen calls. Appending leaves the read
+path byte-for-byte what it is. Overturn it only with a measurement.
+
+**The garbage rule, so it is not left to whoever writes it.** Dead runs
+accumulate at one chunk per publish and a publish is an operator typing, so the
+default is *never compact during a session*, with one bound: **when dead spans
+exceed live ones, rebake the facet whole**. The next load builds from the map
+anyway. If [N6](#n6--an-artifact-if-a-measurement-asks-for-one) ever opens, an
+appended index must be compacted before it is written, or the file records the
+garbage.
+
+**What must not change is `Ground`'s invariant** — `spans` is `Some` exactly when
+the world has a base, and it is a bake of *that* base. A partial rebake makes
+"a bake of most of the base" spellable for the first time, so the partial path is
+**not public**: `publish` and `take_chunks` stay the only writers and pass the
+chunks they already hold.
+
+**Done when** three things, and the third is the one that is not a number:
+
+- `publish_cost` reports both halves at the cost of the touched chunks rather
+  than the facet, with the readings written here;
+- the install-versus-base-set oracles still pass unchanged;
+- **and a facet patched into shape answers identically to the same facet baked
+  whole.** A differential test that cannot exist today, because until era S there
+  was one way to arrive at a `SpanIndex`. It is the oracle for every offset
+  above, and what it catches is a column reading its neighbour's run — the
+  failure this layer's packing has always been one mistake away from, and which
+  [the bake's own comment](#the-shape) says would be silent.
+
+**Out of scope, named.** The *coarse graph*, which is a different artefact at a
+different scale — 11.6 s over Felucca on 2026-08-25 — and whose locality is
+`map_rebuild.md`'s "A tile of ground moved" and direction D's. And
+`chunk::apply`'s splice, which is `openshard-map`'s and is filed in
+[`to_the_client.md`](new_map_representation/to_the_client.md#backlog)'s backlog;
+the cheap half of it is worth naming because `.setland` is entirely inside it —
+**a chunk whose static count did not change needs no re-offsetting at all**.
+
 ## Decisions, taken here
 
 **Three tiers, because the map has three populations.** 73.7% of blocks and
@@ -1578,7 +1660,11 @@ graph over spans names neither.
 **Nothing in this plan is open, and nothing forces what is left.** N0–N4, N3b
 and N7 are built: the coarse graph refuses nothing the flood says is walkable
 from any of the five recorded origins, and since N7 the shard reads it. What
-remains is N5 and N6, and both are gated rather than queued — see below.
+remains is N5 and N6, both gated rather than queued — and
+[N8](#n8--the-bake-follows-a-patch), which is **queued rather than gated** and is
+where a session that wants work here should start: era S gave this layer a
+caller it was not designed for, a world that moves while the shard is running,
+and the bake answers a one-tile edit by walking 29,360,128 of them.
 
 **What a session that wants work here should read first** is *Out of scope,
 named*, which is where six nodes filed what they saw and did not fix. **Every

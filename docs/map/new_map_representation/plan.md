@@ -222,6 +222,30 @@ a free optimisation, until `Order` is made total across distinct tiles.
 - First version may rebuild a whole facet's graph on a publish; the chunk keys
   and revisions must make a local rebuild possible later without a format
   change.
+- **The local rebuild is no longer "later" for one of the three bakes, and it has
+  a node of its own.** This bullet said *may rebuild a whole facet's graph*, and
+  that was written when a publish was a command line. Era S made it a staff verb,
+  so the whole-facet answer is now paid on the shard's tick and, since E4, on the
+  window's event-loop thread as well. The three bakes are not one problem and
+  should not be scheduled as one:
+  - the **span layer** is 115.4 ms of it, at *both* ends, and is
+    [`navigation_spans.md`](../navigation_spans.md#n8--the-bake-follows-a-patch)'s
+    N8 — queued, with the layout decision taken and a differential oracle as its
+    "done";
+  - the **coarse graph** is the 11.6 s one, and its locality is what
+    [`map_rebuild.md`](../map_rebuild.md)'s *"A tile of ground moved — rebake,
+    and never an overlay"* works out: `touched_chunks`, 32×32 regions, and the
+    half a naive implementation forgets — the neighbours whose answer *crossed*
+    into the changed chunk. **This is D's own**;
+  - the **client's `chunk::apply`** is 16.3 ms and is not a bake at all — it is
+    `openshard-map` rebuilding a facet-wide statics run because one block's
+    length may have moved. Filed in
+    [`to_the_client.md`](to_the_client.md#backlog), where E left it.
+- **Nothing here may be answered with a ground overlay.**
+  [`map_rebuild.md`](../map_rebuild.md) refuses one by name and on three counts,
+  and the third is the load-bearing one: an overlay of ground would have to be
+  *inside* the bake for the bake to be right, so it is not a live layer at all —
+  it is the base with a slower spelling. The live layer is entities.
 - **Done when** a publish makes every stale bake refuse itself rather than
   answer from the old world.
 

@@ -667,9 +667,14 @@ Found while building E4:
   The root `Cargo.toml` now names the three, which takes both halves to ~0.13 s.
   What is left after that is the real entry, and it is small enough to rank
   honestly: `SpanIndex::build` is 115 ms of the window's 132 and `chunk::apply`
-  is the other 16, both still on the event-loop thread. Retiring them is the same
-  thing direction D wants for the shard — a span layer that rebuilds in pieces —
-  plus an `apply` that can splice a chunk whose static count did not change.
+  is the other 16, both still on the event-loop thread. The span half now has a
+  node of its own —
+  [`navigation_spans.md`](../navigation_spans.md#n8--the-bake-follows-a-patch)'s
+  N8, queued rather than gated. **The `chunk::apply` half stays here, and it is
+  smaller than it looks:** `WorldMap::offsets` is a prefix sum, so only a chunk
+  whose *static count changed* forces the facet-wide re-offsetting — and
+  `.setland`, which is the verb an operator uses most, never changes one. A
+  splice for the equal-count case is the whole of the cheap half.
   The general shape is worth keeping: **"it is slow" is a claim about a binary,
   and the profile that built it is the first thing to ask about**, before any
   algorithm is blamed.
