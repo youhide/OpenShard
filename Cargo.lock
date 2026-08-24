@@ -2883,6 +2883,7 @@ version = "0.0.1"
 dependencies = [
  "openshard-entities",
  "openshard-protocol",
+ "openshard-state",
  "rusqlite",
  "serde",
  "serde_json",

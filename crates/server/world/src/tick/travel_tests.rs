@@ -287,7 +287,7 @@ fn the_same_region_id_on_two_facets_is_still_a_crossing() {
         name: name.to_owned(),
         priority: 50,
         rects: vec![RegionRect::new(START.0 - 20, START.1 - 20, 40, 40)],
-        flags: RegionFlags::default(),
+        flags: RegionFlags::none(),
         music: None,
         light: None,
     };
@@ -614,7 +614,7 @@ fn a_recall_onto_a_moored_deck_is_allowed_and_the_open_sea_is_not() {
         [(HULL, -1), (DECK, 0)]
             .into_iter()
             .map(|(graphic, dx)| Component {
-                graphic,
+                graphic: Graphic(graphic),
                 dx,
                 dy: 0,
                 dz: 0,
@@ -647,7 +647,15 @@ fn a_recall_onto_a_moored_deck_is_allowed_and_the_open_sea_is_not() {
 
     // And with the ship moored, the same rune is the same rune.
     let owner = serial_of(&world, connection);
-    openshard_boats::place(&mut world.state, caster, berth, Facet(0), SLOOP, owner).expect("open water");
+    openshard_boats::place(
+        &mut world.state,
+        caster,
+        berth,
+        Facet(0),
+        openshard_protocol::wire::MultiId(SLOOP),
+        owner,
+    )
+    .expect("open water");
     cast_at(&mut world, connection, RECALL, rune_serial, now);
     assert_eq!(
         world.registry().get::<Position>(caster).unwrap().0,
@@ -673,7 +681,10 @@ fn a_no_recall_region_bars_arriving_and_marking_but_not_leaving() {
             rects: vec![RegionRect::new(inside.x - 1, inside.y - 1, 3, 3)],
             flags: RegionFlags {
                 no_recall: true,
-                ..RegionFlags::default()
+                guarded: false,
+                no_teleport: false,
+                no_housing: false,
+                safe: false,
             },
             music: None,
             light: None,
@@ -767,7 +778,12 @@ fn a_criminal_cannot_recall_away_and_it_costs_them_nothing_to_find_out() {
             destination: Point::new(START.0 + 9, START.1, 0),
         },
     );
-    world.state.registry.insert(caster, CriminalUntil { tick: 9_999 });
+    world.state.registry.insert(
+        caster,
+        CriminalUntil {
+            tick: openshard_state::WorldTick::from_raw(9_999),
+        },
+    );
     let mana_before = world.registry().get::<Mana>(caster).unwrap().current;
     let at = world.registry().get::<Position>(caster).unwrap().0;
 
@@ -877,7 +893,7 @@ fn a_gate_closes_on_its_own_and_leaves_nothing_behind() {
             Moongate {
                 facet: Facet(0),
                 destination: Point::new(START.0 + 9, START.1, 0),
-                expires_at: Some(3),
+                expires_at: Some(openshard_state::WorldTick::from_raw(3)),
             },
         )
         .expect("a gate");
@@ -913,7 +929,7 @@ fn a_gate_is_not_swept_into_the_save() {
         Moongate {
             facet: Facet(0),
             destination: Point::new(START.0 + 9, START.1, 0),
-            expires_at: Some(9_999),
+            expires_at: Some(openshard_state::WorldTick::from_raw(9_999)),
         },
     );
     world.tick(now);

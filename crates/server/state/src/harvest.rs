@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use openshard_protocol::wire::{ClilocId, Graphic, Hue, SoundId};
 use openshard_protocol::world::Facet;
 
+use crate::WorldTick;
 use crate::rng::Rng;
 use crate::runtime::TICKS_PER_SECOND;
 use crate::skill::Skill;
@@ -325,7 +326,7 @@ pub struct Bank {
     /// What is left.
     pub current: u16,
     /// The tick it repays on, once something has been taken.
-    pub next_respawn: u64,
+    pub next_respawn: WorldTick,
     /// Which vein this block holds, as an index into the definition's `veins`.
     pub vein: VeinIdx,
 }
@@ -354,7 +355,7 @@ impl Banks {
         x: u16,
         y: u16,
         facet: Facet,
-        now: u64,
+        now: WorldTick,
         rng: &mut Rng,
     ) -> &mut Bank {
         let key = (def.kind, x / def.bank_w, y / def.bank_h);
@@ -364,7 +365,7 @@ impl Banks {
             Bank {
                 maximum,
                 current: maximum,
-                next_respawn: 0,
+                next_respawn: WorldTick::ZERO,
                 vein: default_vein(def, key.1, key.2, facet),
             }
         });
@@ -388,7 +389,7 @@ impl Banks {
 impl Bank {
     /// Repay the bank if its clock has run out — ServUO's `CheckRespawn`, called
     /// before every read.
-    fn check_respawn(&mut self, def: &HarvestDef, now: u64, rng: &mut Rng) {
+    fn check_respawn(&mut self, def: &HarvestDef, now: WorldTick, rng: &mut Rng) {
         if self.current == self.maximum || now < self.next_respawn {
             return;
         }
@@ -401,7 +402,7 @@ impl Bank {
     /// Take `amount` out, starting the respawn clock on the first bite out of a
     /// full bank — ServUO's `Consume`, where a bank already being worked keeps the
     /// clock it started with rather than pushing it back on every swing.
-    pub fn consume(&mut self, def: &HarvestDef, amount: u16, now: u64, rng: &mut Rng) {
+    pub fn consume(&mut self, def: &HarvestDef, amount: u16, now: WorldTick, rng: &mut Rng) {
         if self.current == self.maximum {
             let span = u32::try_from(def.max_respawn - def.min_respawn).unwrap_or(0) + 1;
             self.next_respawn = now + def.min_respawn + u64::from(rng.below(span));
@@ -907,20 +908,32 @@ mod tests {
         let mut rng = Rng::new(1);
         let mut banks = Banks::default();
         let full = {
-            let bank = banks.get(def, 10, 10, Facet(0), 0, &mut rng);
+            let bank = banks.get(def, 10, 10, Facet(0), WorldTick::ZERO, &mut rng);
             bank.maximum
         };
         // Empty it a swing at a time, from tick zero.
         for _ in 0..full {
-            let bank = banks.get(def, 10, 10, Facet(0), 0, &mut rng);
+            let bank = banks.get(def, 10, 10, Facet(0), WorldTick::ZERO, &mut rng);
             assert!(bank.current > 0);
-            bank.consume(def, 1, 0, &mut rng);
+            bank.consume(def, 1, WorldTick::ZERO, &mut rng);
         }
-        assert_eq!(banks.get(def, 10, 10, Facet(0), 0, &mut rng).current, 0);
-        // Still empty a minute later; full again after the longest window.
-        assert_eq!(banks.get(def, 10, 10, Facet(0), MINUTE, &mut rng).current, 0);
         assert_eq!(
-            banks.get(def, 10, 10, Facet(0), 20 * MINUTE, &mut rng).current,
+            banks
+                .get(def, 10, 10, Facet(0), WorldTick::ZERO, &mut rng)
+                .current,
+            0
+        );
+        // Still empty a minute later; full again after the longest window.
+        assert_eq!(
+            banks
+                .get(def, 10, 10, Facet(0), WorldTick::from_raw(MINUTE), &mut rng)
+                .current,
+            0
+        );
+        assert_eq!(
+            banks
+                .get(def, 10, 10, Facet(0), WorldTick::from_raw(20 * MINUTE), &mut rng,)
+                .current,
             full
         );
     }
@@ -933,14 +946,14 @@ mod tests {
         let mut rng = Rng::new(7);
         let mut banks = Banks::default();
         banks
-            .get(def, 16, 16, Facet(0), 0, &mut rng)
-            .consume(def, 5, 0, &mut rng);
+            .get(def, 16, 16, Facet(0), WorldTick::ZERO, &mut rng)
+            .consume(def, 5, WorldTick::ZERO, &mut rng);
         assert_eq!(banks.len(), 1);
-        let neighbour = banks.get(def, 23, 23, Facet(0), 0, &mut rng);
+        let neighbour = banks.get(def, 23, 23, Facet(0), WorldTick::ZERO, &mut rng);
         assert_eq!(neighbour.current, neighbour.maximum - 5);
         assert_eq!(banks.len(), 1);
         // And the next block along is its own.
-        banks.get(def, 24, 16, Facet(0), 0, &mut rng);
+        banks.get(def, 24, 16, Facet(0), WorldTick::ZERO, &mut rng);
         assert_eq!(banks.len(), 2);
     }
 

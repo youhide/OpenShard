@@ -527,7 +527,11 @@ impl World {
     /// `+10` at grandmaster, the duration to a couple of minutes. A debuff kind
     /// takes the same magnitude with the sign flipped — the negation the `magic`
     /// crate then folds in and, later, backs out.
-    fn stat_buff_terms(&self, caster: EntityId, kind: openshard_state::StatEffectKind) -> (i16, u64) {
+    fn stat_buff_terms(
+        &self,
+        caster: EntityId,
+        kind: openshard_state::StatEffectKind,
+    ) -> (i16, openshard_state::WorldTick) {
         let magery = self
             .state
             .registry
@@ -548,7 +552,11 @@ impl World {
     /// a Reactive Armor reflect percent — and is unused for the bare markers. All
     /// scale from the caster's Magery (in tenths, grandmaster `1000`), ServUO's
     /// classic pre-AoS shape approximated.
-    fn behaviour_buff_terms(&self, caster: EntityId, kind: openshard_state::BehaviourBuffKind) -> (i16, u64) {
+    fn behaviour_buff_terms(
+        &self,
+        caster: EntityId,
+        kind: openshard_state::BehaviourBuffKind,
+    ) -> (i16, openshard_state::WorldTick) {
         use openshard_state::BehaviourBuffKind;
         let magery = i32::from(
             self.state
@@ -580,7 +588,7 @@ impl World {
     /// `7 + Magery*0.2` seconds (grandmaster `1000` tenths → 27s). Reused by both
     /// the Paralyze spell and a Paralyze Field's pulse; a missing caster (a field
     /// whose caster has gone) falls to the 7-second floor.
-    pub(super) fn paralyze_until(&self, caster: Option<EntityId>) -> u64 {
+    pub(super) fn paralyze_until(&self, caster: Option<EntityId>) -> openshard_state::WorldTick {
         let magery = caster
             .and_then(|c| self.state.registry.get::<Skills>(c))
             .map_or(0, |s| s.get(MAGERY_SKILL));

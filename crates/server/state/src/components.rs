@@ -13,6 +13,7 @@
 //! with extra steps.
 
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
@@ -25,6 +26,8 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::skill::SkillLock;
 use openshard_protocol::wire::{Graphic, Hue, Layer, SoundId};
 
+use crate::WorldTick;
+use crate::quest::QuestKey;
 use crate::skill::Skill;
 pub use openshard_protocol::items::CORPSE_GRAPHIC;
 pub use openshard_protocol::world::{Aggression, DamageType, PoisonLevel, RangedRange};
@@ -201,7 +204,7 @@ pub struct Stackable;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Decays {
     /// The tick at or after which it rots.
-    pub at_tick: u64,
+    pub at_tick: WorldTick,
 }
 
 /// What something is called.
@@ -217,7 +220,7 @@ pub struct Name(pub String);
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct QuestState {
     /// Which quest, by the pack's key.
-    pub key: String,
+    pub key: QuestKey,
     /// How far each objective has got.
     pub progress: Vec<u16>,
     /// Ticks left on each timed objective; `0` on the untimed ones.
@@ -235,9 +238,9 @@ pub struct QuestState {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct DoneQuest {
     /// Which quest, by the pack's key.
-    pub key: String,
+    pub key: QuestKey,
     /// The tick it may be offered again at. [`u64::MAX`] never.
-    pub restart_at: u64,
+    pub restart_at: WorldTick,
 }
 
 /// A player's quest log: what they are doing, and what they have done.
@@ -252,13 +255,13 @@ pub struct QuestLog {
 impl QuestLog {
     /// The state of an active quest, if it is one.
     #[must_use]
-    pub fn active_quest(&self, key: &str) -> Option<&QuestState> {
-        self.active.iter().find(|quest| quest.key == key)
+    pub fn active_quest(&self, key: &QuestKey) -> Option<&QuestState> {
+        self.active.iter().find(|quest| &quest.key == key)
     }
 
     /// The state of an active quest, to change.
-    pub fn active_quest_mut(&mut self, key: &str) -> Option<&mut QuestState> {
-        self.active.iter_mut().find(|quest| quest.key == key)
+    pub fn active_quest_mut(&mut self, key: &QuestKey) -> Option<&mut QuestState> {
+        self.active.iter_mut().find(|quest| &quest.key == key)
     }
 }
 
@@ -271,7 +274,7 @@ impl QuestLog {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct QuestGiver {
     /// Which quests it may offer, by key, in preference order.
-    pub keys: Vec<String>,
+    pub keys: Vec<QuestKey>,
 }
 
 /// An NPC that can be escorted somewhere — ServUO's `BaseEscortable`.
@@ -286,7 +289,7 @@ pub struct Escortable {
     pub escorter: Option<Serial>,
     /// The last tick its escorter was within sight. An escortable left behind
     /// gives up rather than following a ghost across the map.
-    pub last_seen: u64,
+    pub last_seen: WorldTick,
 }
 
 /// The account a player character belongs to.
@@ -313,8 +316,10 @@ pub struct Decoration;
 /// A UO door is two graphics and a small position shift. Closed it draws
 /// `closed`; opened it draws `open` (always `closed + 1` in the client's art) and
 /// hops one tile off its frame by `(offset_x, offset_y)` — the hinge swing. The
-/// same double-click toggles it back. `open_at` is the tick the door auto-closes
-/// on, mirroring the real client's self-closing door; `0` means it is shut.
+/// same double-click toggles it back. `close_at` is the tick the door auto-closes
+/// on, mirroring the real client's self-closing door; `0` means it is shut. A
+/// generated double door names its other leaf by stable serial, so the pair
+/// swings together and the relationship survives a restart.
 ///
 /// The graphic and offset are the client's, computed once from ServUO's door
 /// tables when the pack places the door, so the engine stays a generic toggle and
@@ -329,10 +334,12 @@ pub struct Door {
     pub offset_x: i16,
     /// How far it hops north/south.
     pub offset_y: i16,
+    /// The other leaf of a generated double door, if this is one.
+    pub link: Option<Serial>,
     /// Whether the door is currently open.
     pub is_open: bool,
     /// The tick it auto-closes on when open; `0` when shut.
-    pub close_at: u64,
+    pub close_at: WorldTick,
 }
 
 /// How widely known a mobile is — ServUO's `Mobile.Fame`, `0..=32000`.
@@ -362,12 +369,13 @@ pub struct Karma(pub i32);
 /// locked.") and the AI's decree, which is what stops a townsperson strolling
 /// through a locked shopfront on its way home.
 ///
-/// `key_value` is ServUO's: a key fits when its own value matches, and `0` is a lock
-/// no key in the world opens — a set-piece door, not a mistake.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+/// A locked thing either names the key that opens it or deliberately names no
+/// key at all. The latter is a set-piece lock, not the `0` sentinel used by
+/// content and persistence for an unlocked thing.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Lock {
-    /// Which key opens it. `0` fits no key.
-    pub key_value: u32,
+    /// How this lock may be opened.
+    pub kind: LockKind,
     /// The Lockpicking a thief needs before the lock will even be tried, in tenths
     /// — ServUO's `LockLevel`. Zero is a lock anybody may attempt.
     pub required_skill: u16,
@@ -376,13 +384,40 @@ pub struct Lock {
     pub max_skill: u16,
 }
 
+/// How a lock may be opened.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum LockKind {
+    /// A matching key opens it.
+    Key(KeyValue),
+    /// No key opens it.
+    Unopenable,
+}
+
 /// A key, and what it opens — ServUO's `Key.KeyValue`.
 ///
-/// Using a key raises a target cursor; clicking a [`Lock`] whose `key_value` matches
-/// turns it. The value and not the item is what matters, so a copied key works and a
-/// key to another door does not.
+/// Using a key raises a target cursor; clicking a [`LockKind::Key`] with the same
+/// value turns it. The value and not the item is what matters, so a copied key
+/// works and a key to another door does not.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct KeyValue(pub u32);
+pub struct KeyValue(NonZeroU32);
+
+impl KeyValue {
+    /// Make a key value from content or persistence. `0` is reserved for an
+    /// unlocked boundary representation and is never a key.
+    #[must_use]
+    pub const fn new(value: u32) -> Option<Self> {
+        match NonZeroU32::new(value) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+
+    /// The number written at the content/persistence boundary.
+    #[must_use]
+    pub const fn raw(self) -> u32 {
+        self.0.get()
+    }
+}
 
 /// Which spawn region put this mobile here — the region's id, which *is* its
 /// index in the world's spawner list. The two are one number by construction;
@@ -398,7 +433,7 @@ pub struct KeyValue(pub u32);
 /// may not be a counter of its own: the tag written last week is read against the
 /// list rebuilt this morning, and only a slot survives that trip.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct SpawnedBy(pub u32);
+pub struct SpawnedBy(pub crate::SpawnerId);
 
 /// A mobile's staff authority — what privileged commands it may run.
 ///
@@ -476,7 +511,7 @@ pub struct Hitpoints {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CriminalUntil {
     /// The tick the flag lifts.
-    pub tick: u64,
+    pub tick: WorldTick,
 }
 
 /// A mobile that cannot move until its tick — paralysis, from the Paralyze spell
@@ -488,7 +523,7 @@ pub struct CriminalUntil {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Frozen {
     /// The tick the mobile can move again.
-    pub until: u64,
+    pub until: WorldTick,
 }
 
 /// Poison working through a mobile: its strength, the tick its next pulse lands,
@@ -500,7 +535,7 @@ pub struct Poisoned {
     /// The poison level, 0 (lesser) .. 4 (lethal) — sets the damage per pulse.
     pub level: PoisonLevel,
     /// The tick the next pulse of damage lands.
-    pub next_pulse: u64,
+    pub next_pulse: WorldTick,
     /// Pulses left before the poison wears off.
     pub pulses_left: u8,
 }
@@ -568,14 +603,14 @@ pub struct Harvesting {
     /// Beats still to come. The last one delivers.
     pub beats_left: u16,
     /// The tick the next beat falls on.
-    pub next_beat: u64,
+    pub next_beat: WorldTick,
     /// The tick this beat's *sound* falls on, or [`u64::MAX`] once it has played.
     ///
     /// A second clock rather than one, because ServUO gives the swing and the
     /// noise it makes different delays (`EffectDelay` against `EffectSoundDelay`):
     /// a pick is raised, and the chink comes most of a second later. Collapsing
     /// them makes a miner sound like a metronome.
-    pub next_sound: u64,
+    pub next_sound: WorldTick,
 }
 
 /// A craft in progress — ServUO's `CraftItem.InternalTimer`.
@@ -600,7 +635,7 @@ pub struct Crafting {
     /// Beats still to come. The last one resolves.
     pub beats_left: u8,
     /// The tick the next beat falls on.
-    pub next_beat: u64,
+    pub next_beat: WorldTick,
 }
 
 /// How well a crafted item came out — ServUO's `IQuality.Quality`.
@@ -636,7 +671,7 @@ pub struct CraftedBy(pub String);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Pacified {
     /// The tick the calm lifts.
-    pub until: u64,
+    pub until: WorldTick,
 }
 
 /// A mobile a bard has put out of tune — ServUO's Discordance.
@@ -651,7 +686,7 @@ pub struct Discorded {
     /// How much worse at everything, as a percentage.
     pub penalty: u16,
     /// The tick the song wears off.
-    pub until: u64,
+    pub until: WorldTick,
 }
 
 /// What a trap on a container does when it goes off — ServUO's `TrapType`.
@@ -743,9 +778,9 @@ pub struct Field {
     /// kill counts.
     pub caster: Serial,
     /// The tick the next pulse of harm lands (Fire, Poison); unused for a wall.
-    pub next_pulse: u64,
+    pub next_pulse: WorldTick,
     /// The tick the tile vanishes.
-    pub expires_at: u64,
+    pub expires_at: WorldTick,
     /// Whether the tile is registered in the obstruction index (Energy, Stone).
     pub blocks: bool,
 }
@@ -898,7 +933,7 @@ pub struct StatMod {
     /// The signed magnitude applied to each stat the kind selects.
     pub offset: i16,
     /// The tick it wears off.
-    pub expires_at: u64,
+    pub expires_at: WorldTick,
 }
 
 /// The stat modifiers working through a mobile — the Bless/Curse family.
@@ -931,7 +966,7 @@ pub struct BehaviourBuff {
     /// or `0` for a bare marker.
     pub amount: i16,
     /// The tick it wears off.
-    pub expires_at: u64,
+    pub expires_at: WorldTick,
 }
 
 /// The behaviour buffs working through a mobile — the non-stat magical family.
@@ -965,7 +1000,7 @@ pub struct Murders(pub u16);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct MurderDecay {
     /// The tick the next count fades.
-    pub at_tick: u64,
+    pub at_tick: WorldTick,
 }
 
 /// The ceiling one skill trains to when nothing has raised or lowered it, in
@@ -1126,7 +1161,7 @@ impl StatLock {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SkillCooldown {
     /// The tick the next use is allowed on.
-    pub until: u64,
+    pub until: WorldTick,
 }
 
 /// Which way each of a mobile's three stats trains.
@@ -1151,11 +1186,11 @@ pub struct StatLocks {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct LastStatGain {
     /// The tick strength last rose.
-    pub strength: u64,
+    pub strength: WorldTick,
     /// The tick dexterity last rose.
-    pub dexterity: u64,
+    pub dexterity: WorldTick,
     /// The tick intelligence last rose.
-    pub intelligence: u64,
+    pub intelligence: WorldTick,
 }
 
 /// A living mobile that can hear the dead, until `until` — ServUO's
@@ -1173,7 +1208,7 @@ pub struct LastStatGain {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct HearsGhosts {
     /// The tick the contact fades.
-    pub until: u64,
+    pub until: WorldTick,
 }
 
 /// A creature that can be tamed, and what it takes — ServUO's `BaseCreature`
@@ -1256,7 +1291,7 @@ pub struct Bandaging {
     /// Who is being patched up.
     pub patient: EntityId,
     /// The tick the work is done.
-    pub done_at: u64,
+    pub done_at: WorldTick,
 }
 
 /// A mobile sitting in a meditative trance — ServUO's `Mobile.Meditating`.
@@ -1278,7 +1313,7 @@ pub struct Casting {
     /// The spell being cast, by id.
     pub spell: SpellId,
     /// The tick the cast finishes and resolves.
-    pub complete_at: u64,
+    pub complete_at: WorldTick,
 }
 
 /// Marks a mobile as run by the server rather than a person: it has a brain.
@@ -1296,11 +1331,11 @@ pub struct Brain {
     /// Whether it drifts around when it has nothing to fight.
     pub wander: bool,
     /// The tick it next gets to act — brains think in beats, not every tick.
-    pub next_think: u64,
+    pub next_think: WorldTick,
     /// Standing watch until this tick after a chase found no way through —
     /// the give-up both reference emulators use instead of wall-shuffling.
     /// Zero means not guarding.
-    pub guard_until: u64,
+    pub guard_until: WorldTick,
     /// Whether it opens a shut door in its way rather than treating it as
     /// wall. Humanoids do; animals do not — ServUO's `CanOpenDoors`.
     pub opens_doors: bool,
@@ -1406,7 +1441,7 @@ pub struct Runebook {
     ///
     /// Not saved: it is a couple of seconds long, and a restart re-arming it at
     /// zero errs in the generous direction.
-    pub next_use: u64,
+    pub next_use: WorldTick,
 }
 
 /// How many destinations one runebook holds — ServUO's `Runebook.MaxEntries`.
@@ -1432,7 +1467,7 @@ pub struct Moongate {
     /// The tile it leads to.
     pub destination: Point,
     /// The tick it closes, or `None` for one that never does.
-    pub expires_at: Option<u64>,
+    pub expires_at: Option<WorldTick>,
 }
 
 /// How tall a gate stands, for the reach test on a double-click. ServUO's
@@ -1682,7 +1717,7 @@ pub struct Route {
     /// Where the route was aimed; a goal that strays invalidates it.
     pub goal: Point,
     /// When it was planned, for the repath clock.
-    pub planned_at: u64,
+    pub planned_at: WorldTick,
 }
 
 /// A goal the coarse navigation graph refused, and how long that answer stands.
@@ -1707,7 +1742,7 @@ pub struct RouteRefused {
     /// different question and this says nothing about it.
     pub goal: Point,
     /// The tick the graph is asked about it again.
-    pub until: u64,
+    pub until: WorldTick,
 }
 
 /// Which guild a mobile belongs to, and the title it wears inside it.
@@ -1862,7 +1897,7 @@ pub struct Title(pub String);
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Restock {
     /// The tick at or after which the next shop-open refills the shelf.
-    pub at: u64,
+    pub at: WorldTick,
     /// What the shelf holds when full.
     pub lines: Vec<StockRecord>,
 }
@@ -1879,9 +1914,9 @@ pub struct StockRecord {
     /// Their hue.
     pub hue: Hue,
     /// How many the shelf holds when full.
-    pub amount: u16,
+    pub amount: Amount,
     /// What one unit costs.
-    pub price: u32,
+    pub price: Price,
     /// The label the client shows.
     pub name: String,
 }
@@ -1908,11 +1943,11 @@ pub struct Npc {
     /// How many tiles it may stray from `home`; `0` stands perfectly still.
     pub wander: u8,
     /// The tick it next gets a beat.
-    pub next_beat: u64,
+    pub next_beat: WorldTick,
     /// The earliest tick it may greet or bark again, so it welcomes rather than
     /// natters. It sat on [`Banker`] while bankers were the only townsfolk that
     /// spoke; every trade greets now, so it belongs on the base.
-    pub next_greet: u64,
+    pub next_greet: WorldTick,
 }
 
 /// A mobile's fighting state: whether it is in war mode, whom it is attacking,
@@ -1929,7 +1964,7 @@ pub struct Combat {
     /// The mobile being attacked, if any.
     pub target: Option<Serial>,
     /// The tick at or after which the next swing may land.
-    pub next_swing: u64,
+    pub next_swing: WorldTick,
 }
 
 /// A hidden wrestler's next strike is an ambush rather than an ordinary swing.
@@ -1942,7 +1977,7 @@ pub struct WrestlingOpener {
     /// The mobile the concealed fighter committed to.
     pub target: Serial,
     /// The last tick at which the opening remains armed.
-    pub expires_at: u64,
+    pub expires_at: WorldTick,
 }
 
 /// The recovery that stops repeatedly hiding from producing an unlimited stream
@@ -1950,7 +1985,7 @@ pub struct WrestlingOpener {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct WrestlingAmbushCooldown {
     /// The tick at which another ambush may be armed.
-    pub until: u64,
+    pub until: WorldTick,
 }
 
 /// Consecutive unarmed hits against one mobile.
@@ -1964,7 +1999,7 @@ pub struct WrestlingCombo {
     /// Successful hits already landed in this sequence (one or two).
     pub hits: u8,
     /// The last tick on which the next hit still continues the sequence.
-    pub expires_at: u64,
+    pub expires_at: WorldTick,
 }
 
 /// Recent footwork available to an unarmed fighter.
@@ -1976,14 +2011,14 @@ pub struct WrestlingStride {
     /// Steps made inside the current short window.
     pub steps: u8,
     /// The tick at which the stored steps expire.
-    pub expires_at: u64,
+    pub expires_at: WorldTick,
 }
 
 /// The recovery after using recent footwork to intercept a new target.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct WrestlingInterceptCooldown {
     /// The tick at which another intercept can be armed.
-    pub until: u64,
+    pub until: WorldTick,
 }
 
 /// How hard a mobile hits in melee — the base a swing deals before the target's
@@ -2044,7 +2079,7 @@ pub struct SwingSpeed {
 
 /// A mobile's armour: how much of each kind of blow it shrugs off, as a
 /// percentage. Zero everywhere is no protection.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Resistance {
     /// Percent of physical damage absorbed, 0–100.
     pub physical: u8,
@@ -2059,6 +2094,18 @@ pub struct Resistance {
 }
 
 impl Resistance {
+    /// No protection against any kind of damage.
+    #[must_use]
+    pub const fn none() -> Self {
+        Self {
+            physical: 0,
+            fire: 0,
+            cold: 0,
+            poison: 0,
+            energy: 0,
+        }
+    }
+
     /// The percentage that resists `kind` of damage, capped at 100.
     pub fn against(&self, kind: DamageType) -> u8 {
         let value = match kind {
@@ -2155,7 +2202,7 @@ pub struct InRegion {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Guard {
     /// The tick it despawns, its work done.
-    pub until: u64,
+    pub until: WorldTick,
 }
 
 /// A player's house: one entity that draws as a hundred statics.
@@ -2176,7 +2223,7 @@ pub struct Guard {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Boat {
     /// Which multi it is, `0x4000` below the graphic on the wire.
-    pub multi: u16,
+    pub multi: openshard_protocol::wire::MultiId,
     /// Who owns it.
     pub owner: openshard_protocol::serial::Serial,
 }
@@ -2200,7 +2247,7 @@ pub struct Sailing {
     pub direction: openshard_protocol::direction::Direction,
     /// The tick this ship may next take a step on — the cadence gate, in the
     /// same units as [`WorldState::ticks`](crate::WorldState::ticks).
-    pub next: u64,
+    pub next: WorldTick,
     /// How many ticks apart its steps are. Stored rather than recomputed,
     /// because `next` has already passed by the time a step is taken and the
     /// interval cannot be read back out of it.
@@ -2220,7 +2267,7 @@ pub struct Sailing {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct House {
     /// Which multi it is, `0x4000` below the graphic on the wire.
-    pub multi: u16,
+    pub multi: openshard_protocol::wire::MultiId,
     /// Who owns it. A house always has an owner; demolition is what happens when
     /// it would not.
     pub owner: openshard_protocol::serial::Serial,
@@ -2487,6 +2534,12 @@ pub struct HouseDeed {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zero_is_not_a_key_value() {
+        assert!(KeyValue::new(0).is_none());
+        assert_eq!(KeyValue::new(0xBEEF).unwrap().raw(), 0xBEEF);
+    }
 
     #[test]
     fn the_body_table_is_sorted_so_the_search_finds_things() {

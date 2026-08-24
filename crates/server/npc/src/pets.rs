@@ -68,7 +68,7 @@ pub fn tame(
             sight: openshard_protocol::world::Sight(0),
             wander: false,
             next_think: state.ticks,
-            guard_until: 0,
+            guard_until: openshard_state::WorldTick::ZERO,
             opens_doors: false,
             aggression: openshard_protocol::world::Aggression::Defensive,
             beat_ticks: 0,

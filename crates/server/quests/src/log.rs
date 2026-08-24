@@ -5,7 +5,7 @@ use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_protocol::serial::Serial;
 use openshard_state::components::{Client, Escortable, QuestGiver};
-use openshard_state::{QuestGumpContext, QuestSection, WorldState};
+use openshard_state::{QuestGumpContext, QuestKey, QuestSection, WorldState};
 
 use crate::gump;
 use crate::offer;
@@ -36,7 +36,7 @@ pub fn open_log_for(state: &mut WorldState, player: EntityId) {
         state,
         player,
         QuestGumpContext {
-            quest: String::new(),
+            quest: None,
             section: QuestSection::Main,
             offer: false,
             completed: false,
@@ -93,7 +93,7 @@ pub fn speech_offer(state: &mut WorldState, speaker: Serial, text: &str) {
 
 /// Mark an NPC as offering a set of quests. From the pack, and **saved with the
 /// mobile** — that is the whole point.
-pub fn bind_giver(state: &mut WorldState, mobile: Serial, keys: Vec<String>) {
+pub fn bind_giver(state: &mut WorldState, mobile: Serial, keys: Vec<QuestKey>) {
     let Some(entity) = state.registry.entity_of(mobile) else {
         return;
     };
@@ -148,7 +148,7 @@ pub fn make_escortable(state: &mut WorldState, mobile: Serial, destination: Stri
 /// be escorted anywhere, and offering the quest would be offering a walk that can
 /// never be completed.
 #[must_use]
-pub fn offerable(state: &WorldState, key: &str, giver: Option<Serial>) -> bool {
+pub fn offerable(state: &WorldState, key: &QuestKey, giver: Option<Serial>) -> bool {
     let Some(quest) = state.quests.get(key) else {
         return false;
     };

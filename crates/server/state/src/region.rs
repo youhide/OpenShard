@@ -92,9 +92,9 @@ impl RegionRect {
 /// What holds inside a region — the rules an area changes, as opposed to the
 /// scenery it names.
 ///
-/// Every one of these is off by default, so an area that declares nothing behaves
-/// exactly as the world did before regions existed.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+/// [`none`](Self::none) leaves every rule off, so an area that declares nothing
+/// behaves exactly as the world did before regions existed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct RegionFlags {
     /// Guards answer a call here, and hunt a murderer who walks in — ServUO's
     /// `GuardedRegion`.
@@ -110,6 +110,20 @@ pub struct RegionFlags {
     pub no_housing: bool,
     /// A safe zone — no player may harm another. Waiting for its consumer too.
     pub safe: bool,
+}
+
+impl RegionFlags {
+    /// A region that changes no rule from the shard-wide baseline.
+    #[must_use]
+    pub const fn none() -> Self {
+        Self {
+            guarded: false,
+            no_teleport: false,
+            no_recall: false,
+            no_housing: false,
+            safe: false,
+        }
+    }
 }
 
 /// A named area of one facet.
@@ -327,7 +341,7 @@ mod tests {
             name: name.to_owned(),
             priority,
             rects,
-            flags: RegionFlags::default(),
+            flags: RegionFlags::none(),
             music: None,
             light: None,
         }

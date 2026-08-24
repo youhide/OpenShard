@@ -26,6 +26,7 @@
 //! a checklist.
 
 use openshard_entities::EntityId;
+use openshard_protocol::wire::{Graphic, MultiId};
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::WorldState;
 use openshard_state::components::{House, HouseDesign, HouseSign, Position, Standing};
@@ -81,9 +82,8 @@ mod floor {
 /// a foundation whose own platform cannot be read is one there is nothing to
 /// build a design out of.
 #[must_use]
-pub fn initial_foundation(state: &WorldState, multi: u16) -> Option<Vec<Component>> {
-    let multi = multi & !crate::MULTI_FLAG;
-    let platform = state.multis.components(multi);
+pub fn initial_foundation(state: &WorldState, multi: MultiId) -> Option<Vec<Component>> {
+    let platform = state.multis.components(multi.0);
     if platform.is_empty() {
         return None;
     }
@@ -98,7 +98,7 @@ pub fn initial_foundation(state: &WorldState, multi: u16) -> Option<Vec<Componen
     let mut out: Vec<Component> = platform.to_vec();
     let mut put = |graphic: u16, dx: i16, dy: i16| {
         out.push(Component {
-            graphic,
+            graphic: Graphic(graphic),
             dx,
             dy,
             dz: 0,
@@ -258,7 +258,7 @@ pub fn redesign(
 /// costs a serial less; it is spawned fresh because
 /// [`hang_sign`](crate::hang_sign) is the one place that knows where a sign goes
 /// and what it is made of, and two places that know would drift.
-fn rehang_sign(state: &mut WorldState, house: EntityId, facet: Facet, at: Point, multi: u16) {
+fn rehang_sign(state: &mut WorldState, house: EntityId, facet: Facet, at: Point, multi: MultiId) {
     let Some(serial) = state.registry.serial_of(house) else {
         return;
     };

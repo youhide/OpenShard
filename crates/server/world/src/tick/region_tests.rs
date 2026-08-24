@@ -62,7 +62,7 @@ fn walking_into_a_town_is_one_crossing_and_standing_still_is_none() {
             name: "Britain".to_owned(),
             priority: 50,
             rects: vec![RegionRect::new(inside.x, inside.y, 4, 4)],
-            flags: RegionFlags::default(),
+            flags: RegionFlags::none(),
             music: None,
             light: None,
         }],
@@ -98,7 +98,7 @@ fn leaving_a_town_reports_the_region_it_left() {
     let mut world = world();
     let now = Instant::now();
     let player = enter(&mut world, now);
-    register(&mut world, vec![town("Britain", RegionFlags::default())], now);
+    register(&mut world, vec![town("Britain", RegionFlags::none())], now);
     world.tick(now);
     let mut crossings = world.state.bus.cursor::<crate::events::RegionChanged>();
 
@@ -120,7 +120,7 @@ fn a_region_plays_its_music_once() {
     let _ = packets_for(&mut world, player);
     // Registering ticks, and that tick is the crossing: everyone already standing
     // inside the new region has just arrived in it.
-    register(&mut world, vec![town("Britain", RegionFlags::default())], now);
+    register(&mut world, vec![town("Britain", RegionFlags::none())], now);
 
     let music = packets_of(&mut world, player, 0x6D);
     assert_eq!(music.len(), 1, "the town's track starts on the crossing");
@@ -171,7 +171,7 @@ fn a_dungeon_is_dark_at_noon_and_night_sight_beats_both() {
             name: "Covetous".to_owned(),
             priority: 50,
             rects: vec![RegionRect::new(START.0 - 20, START.1 - 20, 40, 40)],
-            flags: RegionFlags::default(),
+            flags: RegionFlags::none(),
             music: None,
             light: Some(DUNGEON_LIGHT),
         }],
@@ -233,7 +233,10 @@ fn calling_the_guards_kills_a_criminal_in_a_guarded_town() {
             "Britain",
             RegionFlags {
                 guarded: true,
-                ..RegionFlags::default()
+                no_teleport: false,
+                no_recall: false,
+                no_housing: false,
+                safe: false,
             },
         )],
         now,
@@ -282,7 +285,10 @@ fn the_guards_do_not_touch_the_innocent() {
             "Britain",
             RegionFlags {
                 guarded: true,
-                ..RegionFlags::default()
+                no_teleport: false,
+                no_recall: false,
+                no_housing: false,
+                safe: false,
             },
         )],
         now,
@@ -314,7 +320,7 @@ fn the_guards_are_not_called_outside_a_guarded_region() {
     let player = enter(&mut world, now);
     let thief = enter_as(&mut world, ConnectionId::from_raw(9), now);
     // A region with no guards flag — the wilds, or a town that disabled them.
-    register(&mut world, vec![town("Wilds", RegionFlags::default())], now);
+    register(&mut world, vec![town("Wilds", RegionFlags::none())], now);
     let thief_entity = world.state.players[&thief];
     world.state.registry.insert(
         thief_entity,
@@ -351,7 +357,10 @@ fn staff_are_never_guard_candidates() {
             "Britain",
             RegionFlags {
                 guarded: true,
-                ..RegionFlags::default()
+                no_teleport: false,
+                no_recall: false,
+                no_housing: false,
+                safe: false,
             },
         )],
         now,
@@ -390,7 +399,10 @@ fn a_murderer_walking_into_town_is_hunted_without_a_call() {
             "Britain",
             RegionFlags {
                 guarded: true,
-                ..RegionFlags::default()
+                no_teleport: false,
+                no_recall: false,
+                no_housing: false,
+                safe: false,
             },
         )],
         now,
@@ -429,7 +441,10 @@ fn a_guard_earns_no_murder_count_and_leaves_when_it_is_done() {
             "Britain",
             RegionFlags {
                 guarded: true,
-                ..RegionFlags::default()
+                no_teleport: false,
+                no_recall: false,
+                no_housing: false,
+                safe: false,
             },
         )],
         now,
@@ -492,7 +507,10 @@ fn a_no_teleport_region_refuses_both_ways() {
             rects: vec![RegionRect::new(barred.x - 2, barred.y - 2, 8, 8)],
             flags: RegionFlags {
                 no_teleport: true,
-                ..RegionFlags::default()
+                guarded: false,
+                no_recall: false,
+                no_housing: false,
+                safe: false,
             },
             music: None,
             light: None,
@@ -530,7 +548,10 @@ fn staff_teleport_where_players_may_not() {
             rects: vec![RegionRect::new(barred.x - 2, barred.y - 2, 8, 8)],
             flags: RegionFlags {
                 no_teleport: true,
-                ..RegionFlags::default()
+                guarded: false,
+                no_recall: false,
+                no_housing: false,
+                safe: false,
             },
             music: None,
             light: None,
@@ -560,7 +581,10 @@ fn regions_and_the_clock_survive_a_restart() {
                 "Britain",
                 RegionFlags {
                     guarded: true,
-                    ..RegionFlags::default()
+                    no_teleport: false,
+                    no_recall: false,
+                    no_housing: false,
+                    safe: false,
                 },
             ),
             Region {
@@ -570,7 +594,10 @@ fn regions_and_the_clock_survive_a_restart() {
                 rects: vec![RegionRect::new(100, 100, 20, 20).with_z(-128, -20)],
                 flags: RegionFlags {
                     no_teleport: true,
-                    ..RegionFlags::default()
+                    guarded: false,
+                    no_recall: false,
+                    no_housing: false,
+                    safe: false,
                 },
                 music: None,
                 light: Some(DUNGEON_LIGHT),
@@ -621,8 +648,8 @@ fn registering_again_replaces_the_set() {
     let mut world = world();
     let now = Instant::now();
     let _ = enter(&mut world, now);
-    register(&mut world, vec![town("Britain", RegionFlags::default())], now);
-    register(&mut world, vec![town("Trinsic", RegionFlags::default())], now);
+    register(&mut world, vec![town("Britain", RegionFlags::none())], now);
+    register(&mut world, vec![town("Trinsic", RegionFlags::none())], now);
 
     let here = world
         .state

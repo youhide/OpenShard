@@ -17,7 +17,7 @@ use openshard_map::grid::Tile;
 use openshard_map::overlay::{Body, Doors};
 use openshard_movement::scene::Scene;
 use openshard_protocol::serial::{Serial, SerialKind};
-use openshard_protocol::wire::Graphic;
+use openshard_protocol::wire::{Graphic, MultiId};
 use openshard_protocol::world::{Facet, Point};
 use openshard_tiles::{TileData, TileFlags};
 use openshard_uofiles::multi::{Component, Multi, Multis};
@@ -41,6 +41,25 @@ const COTTAGE: u16 = 0x64;
 /// A customisable foundation the fixture terrain knows the platform of. Any id
 /// inside [`FOUNDATION_IDS`] would do; this is its first.
 const FOUNDATION: u16 = 0x13EC;
+
+/// Fixture/content ids arrive bare; the housing API deliberately does not.
+fn place(
+    state: &mut WorldState,
+    actor: EntityId,
+    at: Point,
+    facet: Facet,
+    multi: u16,
+    owner: Serial,
+) -> Result<EntityId, Refusal> {
+    super::place(
+        state,
+        actor,
+        at,
+        facet,
+        MultiId::from_graphic(Graphic(multi)),
+        owner,
+    )
+}
 
 /// A wall: impassable, twenty tall — the classic UO wall the door height was
 /// taken from.
@@ -99,7 +118,7 @@ fn multis(components: Vec<Component>) -> Multis {
 
 fn component(graphic: u16, dx: i16, dy: i16, dz: i16, drawn: bool) -> Component {
     Component {
-        graphic,
+        graphic: Graphic(graphic),
         dx,
         dy,
         dz,
@@ -220,14 +239,14 @@ fn a_house_is_an_item_whose_graphic_is_the_multi() {
 
     assert_eq!(
         state.registry.get::<Drawn>(house).map(|drawn| drawn.id),
-        Some(Graphic(MULTI_FLAG | COTTAGE)),
+        Some(MultiId(COTTAGE).graphic()),
         "the wire carries a house as 0x4000 above its id"
     );
     assert_eq!(state.registry.get::<Position>(house).map(|p| p.0), Some(at));
     assert_eq!(
         state.registry.get::<House>(house),
         Some(&House {
-            multi: COTTAGE,
+            multi: MultiId(COTTAGE),
             owner,
             co_owners: Default::default(),
             friends: Default::default(),
@@ -445,7 +464,7 @@ fn a_graphic_and_an_id_place_the_same_house() {
         actor,
         Point::new(20, 20, 0),
         Facet(0),
-        MULTI_FLAG | COTTAGE,
+        MultiId(COTTAGE).graphic().0,
         owner,
     )
     .expect("by graphic");
@@ -476,7 +495,7 @@ fn unblocking_gives_the_ground_back() {
     let (actor, owner) = an_actor(&mut state);
     let at = Point::new(10, 10, 0);
     let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
-    let footprint = footprint_of(&state, at, COTTAGE, None).expect("the same footprint");
+    let footprint = footprint_of(&state, at, MultiId(COTTAGE), None).expect("the same footprint");
 
     unblock(&mut state, house, Facet(0), &footprint);
     assert!(
@@ -619,7 +638,7 @@ fn a_world_with_no_multi_table_has_no_houses() {
 /// A fresh house with one owner and nobody else in it.
 fn a_house(owner: Serial) -> House {
     House {
-        multi: COTTAGE,
+        multi: MultiId(COTTAGE),
         owner,
         co_owners: Default::default(),
         friends: Default::default(),
@@ -841,8 +860,9 @@ fn door_at(state: &mut WorldState, at: Point) -> EntityId {
             open: Graphic(0x06A6),
             offset_x: 1,
             offset_y: 0,
+            link: None,
             is_open: false,
-            close_at: 0,
+            close_at: openshard_state::WorldTick::ZERO,
         },
     );
     entity
@@ -897,7 +917,10 @@ fn a_ban_puts_out_whoever_is_already_inside() {
     assert_eq!(where_of(friend), at, "a friend was put out");
     assert_ne!(where_of(unwelcome), at, "the banned player stayed inside");
     // Just outside the box's west edge, which is where the doorstep is.
-    assert_eq!(where_of(unwelcome), doorstep(&state, Facet(0), at, COTTAGE));
+    assert_eq!(
+        where_of(unwelcome),
+        doorstep(&state, Facet(0), at, MultiId(COTTAGE))
+    );
 }
 
 /// The sign hangs on the box's west-south corner, seven above the house's z.
@@ -915,7 +938,10 @@ fn a_house_hangs_its_sign_on_the_corner_of_its_box() {
     let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
     let serial = state.registry.serial_of(house).expect("the house's serial");
 
-    assert_eq!(sign_spot(&state, at, COTTAGE, None), Some(Point::new(9, 11, 7)));
+    assert_eq!(
+        sign_spot(&state, at, MultiId(COTTAGE), None),
+        Some(Point::new(9, 11, 7))
+    );
     let signs: Vec<_> = state
         .registry
         .query::<openshard_state::components::HouseSign>()
@@ -952,7 +978,7 @@ fn a_house_with_no_multi_table_hangs_no_sign() {
     let mut state = world_with(cottage());
     let owner = an_owner(&mut state);
     assert_eq!(
-        sign_spot(&state, Point::new(10, 10, 0), COTTAGE + 1, None),
+        sign_spot(&state, Point::new(10, 10, 0), MultiId(COTTAGE + 1), None),
         None,
         "an id the table does not hold got a spot anyway"
     );
@@ -1048,7 +1074,7 @@ fn a_house_gets_its_allowance_from_its_own_footprint() {
     let at = Point::new(10, 10, 0);
     let house = place(&mut state, actor, at, Facet(0), COTTAGE, owner).expect("a legal spot");
 
-    let tiles = tiles_of(&state, at, COTTAGE, None).len();
+    let tiles = tiles_of(&state, at, MultiId(COTTAGE), None).len();
     assert_eq!(tiles, 5, "the cottage draws five tiles");
     assert_eq!(
         state.registry.get::<House>(house).map(|entry| entry.lockdowns),
@@ -1445,7 +1471,10 @@ fn forbid_housing(state: &mut WorldState, rect: openshard_state::RegionRect) {
             rects: vec![rect],
             flags: openshard_state::RegionFlags {
                 no_housing: true,
-                ..Default::default()
+                guarded: false,
+                no_teleport: false,
+                no_recall: false,
+                safe: false,
             },
             music: None,
             light: None,
@@ -1596,7 +1625,10 @@ fn an_ordinary_region_takes_a_house() {
             rects: vec![openshard_state::RegionRect::new(5, 5, 12, 12)],
             flags: openshard_state::RegionFlags {
                 guarded: true,
-                ..Default::default()
+                no_teleport: false,
+                no_recall: false,
+                no_housing: false,
+                safe: false,
             },
             music: None,
             light: None,
@@ -1876,8 +1908,9 @@ fn a_redesign_adopts_a_door_its_new_walls_now_stand_around() {
             open: Graphic(0x0676),
             offset_x: 0,
             offset_y: 0,
+            link: None,
             is_open: false,
-            close_at: 0,
+            close_at: openshard_state::WorldTick::ZERO,
         },
     );
     assert!(
@@ -1913,7 +1946,7 @@ fn a_foundation_is_placed_with_a_design_that_has_stairs() {
 
     let shape = design::shape_of_house(&state, house).expect("a foundation is placed designed");
     assert!(
-        shape.iter().any(|component| component.graphic == 0x0751),
+        shape.iter().any(|component| component.graphic == Graphic(0x0751)),
         "the design has no stairs, which is the whole reason the refusal existed"
     );
     // One row further south than the platform reaches. The cottage's own box
@@ -1921,7 +1954,7 @@ fn a_foundation_is_placed_with_a_design_that_has_stairs() {
     assert!(
         shape
             .iter()
-            .filter(|component| component.graphic == 0x0751)
+            .filter(|component| component.graphic == Graphic(0x0751))
             .all(|component| component.dy == 2),
         "the stairs are not on the row the box was grown by"
     );

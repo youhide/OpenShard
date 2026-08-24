@@ -238,7 +238,7 @@ pub fn advance_harvests(state: &mut WorldState) -> Vec<ToolWorn> {
             state.registry.insert(
                 harvester,
                 Harvesting {
-                    next_sound: u64::MAX,
+                    next_sound: openshard_state::WorldTick::MAX,
                     ..work
                 },
             );

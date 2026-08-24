@@ -13,7 +13,7 @@ use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::serial::RawSerial;
 use openshard_quests::{QUEST_GUMP, QUEST_RESIGN_GUMP};
 use openshard_state::components::{Amount, Contained, Drawn, QuestGiver, QuestLog, Stackable};
-use openshard_state::quest::{ObjectiveDef, ObjectiveKind, QuestDef, RewardDef, RewardKind};
+use openshard_state::quest::{ObjectiveDef, ObjectiveKind, QuestDef, QuestKey, RewardDef, RewardKind};
 
 /// The body a rat is drawn as — the slay quests' target.
 const RAT: u16 = 0x00EE;
@@ -23,7 +23,7 @@ const SILK: u16 = 0x0F8D;
 /// A quest asking for five rats, paying 250 gold.
 fn rat_cull() -> QuestDef {
     QuestDef {
-        key: "rat_cull".to_owned(),
+        key: QuestKey::from("rat_cull"),
         title: "A Plague of Rats".to_owned(),
         description: "Slay five rats.".to_owned(),
         complete: "Well done.".to_owned(),
@@ -46,7 +46,7 @@ fn rat_cull() -> QuestDef {
 /// A quest asking for five skeins of silk.
 fn silk_gather() -> QuestDef {
     QuestDef {
-        key: "silk_gather".to_owned(),
+        key: QuestKey::from("silk_gather"),
         title: "Silk for the Spellwright".to_owned(),
         objectives: vec![ObjectiveDef {
             kind: ObjectiveKind::Obtain {
@@ -72,7 +72,7 @@ fn place_giver(world: &mut World, keys: &[&str], now: Instant) -> Serial {
     world.state.registry.insert(
         entity,
         QuestGiver {
-            keys: keys.iter().map(|&k| k.to_owned()).collect(),
+            keys: keys.iter().copied().map(QuestKey::from).collect(),
         },
     );
     serial
@@ -197,7 +197,7 @@ fn accepting_puts_the_quest_in_the_log() {
 
     let log = log_of(&world, connection);
     assert_eq!(log.active.len(), 1);
-    assert_eq!(log.active[0].key, "rat_cull");
+    assert_eq!(log.active[0].key, QuestKey::from("rat_cull"));
     assert_eq!(log.active[0].progress, vec![0]);
 }
 
@@ -400,7 +400,7 @@ fn a_player_one_item_short_loses_nothing_and_is_paid_nothing() {
     let mut world = world();
     let connection = enter(&mut world, now);
     let two_part = QuestDef {
-        key: "two_part".to_owned(),
+        key: QuestKey::from("two_part"),
         title: "Two Things".to_owned(),
         objectives: vec![
             ObjectiveDef {
@@ -588,7 +588,7 @@ fn a_completed_quest_reaches_the_pack() {
 
     let events: Vec<_> = world.bus().read(&mut done).cloned().collect();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].key, "rat_cull");
+    assert_eq!(events[0].key, QuestKey::from("rat_cull"));
 }
 
 /// Put a stack of silk in a container.
@@ -716,7 +716,7 @@ fn a_restore_announces_the_post_an_npc_belongs_to_not_where_it_wandered() {
     world.state.registry.insert(
         entity,
         QuestGiver {
-            keys: vec!["rat_cull".to_owned()],
+            keys: vec![QuestKey::from("rat_cull")],
         },
     );
     let giver = world.registry().serial_of(entity).unwrap();
@@ -886,7 +886,7 @@ fn resigning_an_escort_stops_it_following() {
 /// destination is whatever the giver asked for.
 fn escort_quest() -> QuestDef {
     QuestDef {
-        key: "escort".to_owned(),
+        key: QuestKey::from("escort"),
         title: "An Escort Request".to_owned(),
         objectives: vec![ObjectiveDef {
             kind: ObjectiveKind::Escort {
@@ -909,7 +909,7 @@ fn make_escortable(world: &mut World, serial: Serial) {
         openshard_state::components::Escortable {
             destination: "Britain".to_owned(),
             escorter: None,
-            last_seen: 0,
+            last_seen: openshard_state::WorldTick::ZERO,
         },
     );
 }
@@ -1080,7 +1080,7 @@ fn register_towns(world: &mut World, now: Instant) {
         name: "Britain".to_owned(),
         priority: 50,
         rects: vec![RegionRect::new(START.0 - 20, START.1 - 20, 40, 40)],
-        flags: RegionFlags::default(),
+        flags: RegionFlags::none(),
         music: None,
         light: None,
     };
@@ -1089,7 +1089,7 @@ fn register_towns(world: &mut World, now: Instant) {
         name: "Minoc".to_owned(),
         priority: 50,
         rects: vec![RegionRect::new(START.0 + 200, START.1 + 200, 40, 40)],
-        flags: RegionFlags::default(),
+        flags: RegionFlags::none(),
         music: None,
         light: None,
     };
@@ -1192,7 +1192,7 @@ fn a_delivery_completes_on_talking_to_its_destination() {
 /// A quest asking for two skeins of silk taken to Mirabel.
 fn deliver_quest() -> QuestDef {
     QuestDef {
-        key: "deliver_silk".to_owned(),
+        key: QuestKey::from("deliver_silk"),
         title: "A Parcel for Mirabel".to_owned(),
         objectives: vec![ObjectiveDef {
             kind: ObjectiveKind::Deliver {
@@ -1320,7 +1320,7 @@ fn an_any_of_these_quest_completes_on_one_objective() {
     let mut world = super::tests::world();
     let connection = enter(&mut world, now);
     let either = QuestDef {
-        key: "either".to_owned(),
+        key: QuestKey::from("either"),
         title: "One or the Other".to_owned(),
         all_objectives: false,
         objectives: vec![

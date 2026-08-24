@@ -56,9 +56,9 @@ pub struct StockLine {
     /// Their hue.
     pub hue: Hue,
     /// How many the vendor holds.
-    pub amount: u16,
+    pub amount: Amount,
     /// What one unit costs.
-    pub price: u32,
+    pub price: Price,
     /// The label the client shows.
     pub name: String,
 }
@@ -153,8 +153,8 @@ fn place_stock_line(state: &mut WorldState, stock_serial: Serial, line: &StockLi
             grid: GridSlot(0),
         },
     );
-    state.registry.insert(entity, Amount(line.amount));
-    state.registry.insert(entity, Price(line.price));
+    state.registry.insert(entity, line.amount);
+    state.registry.insert(entity, line.price);
     state.registry.insert(entity, Name(line.name.clone()));
     // And whatever the graphic implies: a lute's tunes, a bottle's poison. After
     // the name, because which poison a bottle holds is read off its label — all
@@ -192,9 +192,9 @@ fn restock_if_due(state: &mut WorldState, vendor: EntityId, stock_serial: Serial
             .next();
         match existing {
             Some(item) => {
-                let have = state.registry.get::<Amount>(item).map_or(0, |a| a.0);
-                if have < line.amount {
-                    state.registry.insert(item, Amount(line.amount));
+                let have = state.registry.get::<Amount>(item).copied().unwrap_or(Amount(0));
+                if have.0 < line.amount.0 {
+                    state.registry.insert(item, line.amount);
                 }
             }
             None => place_stock_line(

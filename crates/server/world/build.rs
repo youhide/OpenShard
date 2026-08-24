@@ -420,9 +420,8 @@ fn spawns(text: &str) -> String {
             })
             .collect();
 
-        out.push_str("            crate::spawner::Spawner::new(\n");
-        // The placeholder id, overwritten by `register_spawner`.
-        out.push_str("                0,\n");
+        out.push_str("            crate::spawner::Spawner::new(openshard_state::SpawnerId::PLACEHOLDER,\n");
+        // The placeholder id is overwritten by `register_spawner`.
         writeln!(
             out,
             "                crate::spawner::SpawnArea {{ x: {}, y: {}, width: {}, height: {}, \
@@ -705,7 +704,7 @@ fn deco(text: &str, addons_text: &str) -> String {
         });
         writeln!(
             out,
-            "    crate::DecorDoor {{ key_value: 0, \
+            "    crate::DecorDoor {{ lock: None, \
              closed: openshard_protocol::wire::Graphic({closed}), \
              open: openshard_protocol::wire::Graphic({}), \
              offset_x: {offset_x}, offset_y: {offset_y}, \
@@ -719,14 +718,22 @@ fn deco(text: &str, addons_text: &str) -> String {
     out.push_str("/// The containers.\n");
     out.push_str("const CONTAINERS: &[crate::DecorContainer] = &[\n");
     for c in &file.containers {
+        let lock = if c.key_value == 0 {
+            "None".to_owned()
+        } else {
+            format!(
+                "Some(openshard_state::LockKind::Key(openshard_state::KeyValue::new({}).expect(\"non-zero decoration key\")))",
+                c.key_value
+            )
+        };
         writeln!(
             out,
-            "    crate::DecorContainer {{ key_value: {}, \
+            "    crate::DecorContainer {{ lock: {lock}, \
              graphic: openshard_protocol::wire::Graphic({}), \
              gump: openshard_protocol::wire::Graphic({}), \
              hue: openshard_protocol::wire::Hue({}), \
              position: openshard_protocol::world::Point::new({}, {}, {}) }},",
-            c.key_value, c.graphic, c.gump, c.hue, c.x, c.y, c.z
+            c.graphic, c.gump, c.hue, c.x, c.y, c.z
         )
         .unwrap();
     }
@@ -949,7 +956,8 @@ fn townsfolk(text: &str) -> String {
             writeln!(
                 out,
                 "            openshard_npc::StockLine {{ graphic: openshard_protocol::wire::Graphic({}), \
-                 hue: openshard_protocol::wire::Hue({}), amount: {}, price: {}, name: {:?}.to_owned() }},",
+                 hue: openshard_protocol::wire::Hue({}), amount: openshard_state::components::Amount({}), \
+                 price: openshard_state::components::Price({}), name: {:?}.to_owned() }},",
                 line.graphic, line.hue, line.amount, line.price, line.name
             )
             .unwrap();
@@ -1086,7 +1094,7 @@ fn townsfolk(text: &str) -> String {
                     person.x,
                     person.y
                 );
-                format!("{key:?}.to_owned()")
+                format!("openshard_state::QuestKey::from({key:?})")
             })
             .collect();
         match offers.is_empty() {

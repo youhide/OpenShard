@@ -161,7 +161,7 @@ pub struct MemoryStore {
     /// (`owner` is `None`).
     items: Mutex<HashMap<Serial, ItemRecord>>,
     /// Spawn regions keyed by id.
-    spawners: Mutex<HashMap<u32, SpawnerRecord>>,
+    spawners: Mutex<HashMap<openshard_state::SpawnerId, SpawnerRecord>>,
     /// NPC mobiles keyed by serial.
     mobiles: Mutex<HashMap<Serial, MobileRecord>>,
     /// Placed decorations keyed by serial.
@@ -774,7 +774,7 @@ mod tests {
             pet: None,
             restock: None,
             npc_wander: 0,
-            spawned_by: Some(1),
+            spawned_by: Some(openshard_state::SpawnerId(1)),
             effects: Vec::new(),
             skills: Vec::new(),
             quest_giver: Vec::new(),

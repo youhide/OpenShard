@@ -34,7 +34,7 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{Heading, Npc, Position};
 use openshard_state::sectors::in_range;
-use openshard_state::{Rng, WorldState};
+use openshard_state::{Rng, WorldState, WorldTick};
 
 use crate::speech::{bark_line, greeting_for};
 
@@ -87,7 +87,7 @@ const BARK_CHANCE: u32 = 6;
 /// replays; jitter is randomness *inside* the tick, which is exactly what
 /// `WorldState::rng` is for.
 #[must_use]
-pub fn next_beat(rng: &mut Rng, now: u64, interval: u64) -> u64 {
+pub fn next_beat(rng: &mut Rng, now: WorldTick, interval: u64) -> WorldTick {
     now + interval + u64::from(rng.below(beat_jitter(interval)))
 }
 
@@ -111,7 +111,7 @@ pub fn beat_jitter(interval: u64) -> u32 {
 /// staggered, and a mobile made to wait a full beat before its first is a mobile
 /// that visibly starts up around the player.
 #[must_use]
-pub fn first_beat(rng: &mut Rng, now: u64, interval: u64) -> u64 {
+pub fn first_beat(rng: &mut Rng, now: WorldTick, interval: u64) -> WorldTick {
     now + u64::from(rng.below(u32::try_from(interval).unwrap_or(u32::MAX)))
 }
 
@@ -181,7 +181,14 @@ pub fn live(state: &mut WorldState) -> Vec<(Serial, Direction)> {
 /// Attend to a visitor: turn to face them (ServUO's `VendorAI.DoActionInteract`)
 /// and greet them if the cooldown has passed. Every trade greets, not only the
 /// bankers — the greeting line itself comes from the trade's speech table.
-fn attend(state: &mut WorldState, npc: EntityId, at: Point, visitor: EntityId, visitor_at: Point, now: u64) {
+fn attend(
+    state: &mut WorldState,
+    npc: EntityId,
+    at: Point,
+    visitor: EntityId,
+    visitor_at: Point,
+    now: WorldTick,
+) {
     // Turn to face them, and let watchers see the turn.
     if let Some(dir) = openshard_movement::direction_toward(at, visitor_at) {
         let facing = Facing::walking(dir);
@@ -215,7 +222,7 @@ fn attend(state: &mut WorldState, npc: EntityId, at: Point, visitor: EntityId, v
 
 /// An idle remark, when nobody is within greeting range. Silent unless the trade's
 /// table supplies a line, so a bare shard's townsfolk do not chatter nonsense.
-fn bark(state: &mut WorldState, npc: EntityId, now: u64) {
+fn bark(state: &mut WorldState, npc: EntityId, now: WorldTick) {
     let Some(npc_state) = state.registry.get::<Npc>(npc).copied() else {
         return;
     };

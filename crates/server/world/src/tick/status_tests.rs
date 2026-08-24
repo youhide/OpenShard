@@ -376,7 +376,7 @@ fn a_wound_closes_on_its_own_and_poison_stops_it() {
         player,
         openshard_state::components::Poisoned {
             level: openshard_protocol::world::PoisonLevel::new(1),
-            next_pulse: u64::MAX,
+            next_pulse: openshard_state::WorldTick::MAX,
             pulses_left: 10,
         },
     );

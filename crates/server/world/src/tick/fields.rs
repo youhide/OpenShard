@@ -127,7 +127,7 @@ impl World {
             let paralyze_until = if matches!(kind, FieldKind::Paralyze) {
                 self.paralyze_until(self.state.registry.entity_of(caster))
             } else {
-                0
+                openshard_state::WorldTick::ZERO
             };
             for victim in victims {
                 match kind {

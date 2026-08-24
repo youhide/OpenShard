@@ -24,7 +24,7 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::wire::ClilocId;
 use openshard_state::components::{Client, QuestLog};
-use openshard_state::quest::{ObjectiveKind, QuestDef};
+use openshard_state::quest::{ObjectiveKind, QuestDef, QuestKey};
 use openshard_state::{QuestGumpContext, QuestSection, WorldState};
 
 /// The gump id the quest window answers under. Distinctive, so a reply is never
@@ -166,9 +166,9 @@ fn build(state: &WorldState, player: EntityId, context: &QuestGumpContext) -> Gu
     layout.no_close();
     layout.no_resize();
     layout.page(0);
-    frame(&mut layout, context.quest.is_empty());
+    frame(&mut layout, context.quest.is_none());
 
-    let quest = state.quests.get(&context.quest);
+    let quest = context.quest.as_ref().and_then(|key| state.quests.get(key));
     match context.section {
         QuestSection::Main => section_main(&mut layout, state, player),
         QuestSection::Description => {
@@ -597,7 +597,7 @@ fn accept_or_resign(layout: &mut GumpLayout, offer: bool) {
 }
 
 /// Whether a player's copy of a quest has failed.
-fn failed(state: &WorldState, player: EntityId, key: &str) -> bool {
+fn failed(state: &WorldState, player: EntityId, key: &QuestKey) -> bool {
     state
         .registry
         .get::<QuestLog>(player)
@@ -624,7 +624,7 @@ fn format_seconds(seconds: u32) -> String {
 ///
 /// A radio pair and one OK button: the choice rides in the switch, not the
 /// button, which is why the reply has to carry its switches at all.
-pub(crate) fn show_resign(state: &mut WorldState, player: EntityId, key: &str) {
+pub(crate) fn show_resign(state: &mut WorldState, player: EntityId, key: &QuestKey) {
     let Some(&Client { connection, .. }) = state.registry.get::<Client>(player) else {
         return;
     };
@@ -634,7 +634,7 @@ pub(crate) fn show_resign(state: &mut WorldState, player: EntityId, key: &str) {
     let title = state
         .quests
         .get(key)
-        .map_or(key, |quest| quest.title.as_str())
+        .map_or_else(|| key.as_str(), |quest| quest.title.as_str())
         .to_owned();
 
     let mut layout = GumpLayout::new();
@@ -681,9 +681,9 @@ pub(crate) fn play(state: &mut WorldState, player: EntityId, sound: openshard_pr
 }
 
 /// The context for a page of a quest a player already has.
-pub(crate) fn log_context(key: &str, section: QuestSection, giver: Option<Serial>) -> QuestGumpContext {
+pub(crate) fn log_context(key: &QuestKey, section: QuestSection, giver: Option<Serial>) -> QuestGumpContext {
     QuestGumpContext {
-        quest: key.to_owned(),
+        quest: Some(key.clone()),
         section,
         offer: false,
         completed: false,

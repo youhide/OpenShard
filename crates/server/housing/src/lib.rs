@@ -43,17 +43,11 @@ use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
 use openshard_map::overlay::Cover;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{Graphic, Hue, MultiId};
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{Drawn, House, Position};
 use openshard_state::{FacetState, WorldState};
 use openshard_uofiles::multi::Component;
-
-/// The bit that turns a multi id into the graphic the wire carries.
-///
-/// A mask rather than an addition on the way back: a caller may hold either
-/// spelling, and `graphic & !MULTI_FLAG` is the id whichever it had.
-pub const MULTI_FLAG: u16 = 0x4000;
 
 /// The first customisable-house foundation id, and the last.
 ///
@@ -147,8 +141,8 @@ fn drawn_tiles(components: &[Component], at: Point) -> Vec<Tile> {
 /// means *absent* and not *unknown* is what makes that right: a classic house
 /// genuinely has no design. A foundation with no design is a different thing, and
 /// C3 makes it unrepresentable rather than letting it hide in here.
-fn shape_of<'a>(design: Option<&'a [Component]>, state: &'a WorldState, multi: u16) -> &'a [Component] {
-    design.unwrap_or_else(|| state.multis.components(multi))
+fn shape_of<'a>(design: Option<&'a [Component]>, state: &'a WorldState, multi: MultiId) -> &'a [Component] {
+    design.unwrap_or_else(|| state.multis.components(multi.0))
 }
 
 /// One entry a house lays on one tile, already in world coordinates.
@@ -211,20 +205,19 @@ pub fn place(
     actor: EntityId,
     at: Point,
     facet: Facet,
-    multi: u16,
+    multi: MultiId,
     owner: Serial,
 ) -> Result<EntityId, Refusal> {
     // Once, at the top, and threaded — this crate's own idiom, the way `trust`,
     // `distrust`, `ban`, `unban` and `standing_of` all take it rather than each
     // asking again.
     let staff = state.is_staff(actor);
-    let multi = multi & !MULTI_FLAG;
     // A foundation is placed **with a design**, and that is the whole of what
     // `NeedsCustomisation` was waiting for: its own component list has no
     // stairs, so one placed bare is a house nobody can get into. The refusal
     // stands only where the design cannot be built — a shard with no client
     // files has no platform to build one out of either.
-    let design = if FOUNDATION_IDS.contains(&multi) {
+    let design = if FOUNDATION_IDS.contains(&multi.0) {
         match design::initial_foundation(state, multi) {
             Some(design) => Some(design),
             None => return Err(Refusal::NeedsCustomisation),
@@ -267,7 +260,7 @@ pub fn place(
     state.registry.insert(
         entity,
         Drawn {
-            id: Graphic(MULTI_FLAG | multi),
+            id: multi.graphic(),
             hue: Hue(0),
         },
     );
@@ -335,8 +328,12 @@ const SIGN_Z: i16 = 7;
 /// a bracket and does nothing, and one more entity per house is one more to
 /// save, restore and take down.
 #[must_use]
-pub fn sign_spot(state: &WorldState, at: Point, multi: u16, design: Option<&[Component]>) -> Option<Point> {
-    let multi = multi & !MULTI_FLAG;
+pub fn sign_spot(
+    state: &WorldState,
+    at: Point,
+    multi: MultiId,
+    design: Option<&[Component]>,
+) -> Option<Point> {
     let box_ = openshard_uofiles::multi::bounds(shape_of(design, state, multi))?;
     let x = u16::try_from(i32::from(at.x) + i32::from(box_.min_x)).ok()?;
     let y = u16::try_from(i32::from(at.y) + i32::from(box_.max_y)).ok()?;
@@ -355,7 +352,7 @@ pub fn hang_sign(
     house: EntityId,
     facet: Facet,
     at: Point,
-    multi: u16,
+    multi: MultiId,
 ) -> Option<EntityId> {
     let serial = state.registry.serial_of(house)?;
     // The house's own design if it has one: the sign hangs off the box's corner
@@ -399,7 +396,7 @@ pub fn hang_sign(
 ///
 /// Called at placement, and again whenever a door is put down — a house cannot
 /// adopt a door that does not exist yet.
-pub fn adopt_doors(state: &mut WorldState, house: EntityId, facet: Facet, at: Point, multi: u16) {
+pub fn adopt_doors(state: &mut WorldState, house: EntityId, facet: Facet, at: Point, multi: MultiId) {
     let Some(serial) = state.registry.serial_of(house) else {
         return;
     };
@@ -448,7 +445,7 @@ pub fn adopt_doors(state: &mut WorldState, house: EntityId, facet: Facet, at: Po
 /// module is about a multi's *shape*, which is the same on every facet, and this
 /// one is about the ground.
 #[must_use]
-pub fn doorstep(state: &WorldState, facet: Facet, at: Point, multi: u16) -> Point {
+pub fn doorstep(state: &WorldState, facet: Facet, at: Point, multi: MultiId) -> Point {
     let tiles = tiles_of(state, at, multi, None);
     let west = tiles.iter().map(|tile| tile.x).min().unwrap_or(at.x);
     let outside = Tile::new(west.saturating_sub(1), at.y);
@@ -509,8 +506,7 @@ pub fn evict_the_banned(state: &mut WorldState, house: EntityId) -> Vec<EntityId
 /// tile" and "does this house block this tile" are two questions with two
 /// answers.
 #[must_use]
-pub fn tiles_of(state: &WorldState, at: Point, multi: u16, design: Option<&[Component]>) -> Vec<Tile> {
-    let multi = multi & !MULTI_FLAG;
+pub fn tiles_of(state: &WorldState, at: Point, multi: MultiId, design: Option<&[Component]>) -> Vec<Tile> {
     // A designed house has a shape whether or not the shard has a multi table;
     // one built from a classic multi has none without it. `shape_of` is what says
     // which, so the two cases need no branch here.
@@ -569,10 +565,9 @@ pub fn unblock(state: &mut WorldState, entity: EntityId, facet: Facet, footprint
 pub fn footprint_of(
     state: &WorldState,
     at: Point,
-    multi: u16,
+    multi: MultiId,
     design: Option<&[Component]>,
 ) -> Result<Vec<Footprint>, Refusal> {
-    let multi = multi & !MULTI_FLAG;
     let components = shape_of(design, state, multi);
     if components.is_empty() {
         // No multi table and no design: a shard with no client files knows about
@@ -585,7 +580,7 @@ pub fn footprint_of(
     let tiledata = state.tiles();
     let mut out = Vec::new();
     for component in components.iter().filter(|c| c.drawn()) {
-        let graphic = Graphic(component.graphic);
+        let graphic = component.graphic;
         // The one expansion. A footprint *refuses* what falls off the edge of
         // the world rather than skipping it, because a house with a wall
         // missing is a house somebody walks out of.

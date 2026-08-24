@@ -66,7 +66,7 @@ fn quest_reply(state: &mut WorldState, player: EntityId, context: &QuestGumpCont
                 state,
                 player,
                 QuestGumpContext {
-                    quest: String::new(),
+                    quest: None,
                     section: QuestSection::Main,
                     offer: false,
                     completed: false,
@@ -75,13 +75,19 @@ fn quest_reply(state: &mut WorldState, player: EntityId, context: &QuestGumpCont
             );
         }
         button::ACCEPT_QUEST if context.offer => {
-            offer::accept(state, player, &context.quest, context.giver);
+            if let Some(key) = &context.quest {
+                offer::accept(state, player, key, context.giver);
+            }
         }
         button::REFUSE_QUEST if context.offer => {
-            offer::refuse(state, player, &context.quest);
+            if let Some(key) = &context.quest {
+                offer::refuse(state, player, key);
+            }
         }
         button::RESIGN_QUEST if !context.offer => {
-            gump::show_resign(state, player, &context.quest);
+            if let Some(key) = &context.quest {
+                gump::show_resign(state, player, key);
+            }
             // Remembered so the confirmation's reply knows which quest it is
             // about: the resign dialog carries no quest of its own.
             if let Some(row) = state.row_of_mut(player) {
@@ -92,7 +98,9 @@ fn quest_reply(state: &mut WorldState, player: EntityId, context: &QuestGumpCont
             hand_in(state, player, context);
         }
         button::ACCEPT_REWARD if context.completed => {
-            turnin::complete(state, player, &context.quest);
+            if let Some(key) = &context.quest {
+                turnin::complete(state, player, key);
+            }
         }
         button::PREVIOUS_PAGE | button::NEXT_PAGE => {
             let section = page(context.section, pressed == button::NEXT_PAGE);
@@ -113,13 +121,16 @@ fn quest_reply(state: &mut WorldState, player: EntityId, context: &QuestGumpCont
 /// and pays on its own button; with none, it is paid outright — ServUO's
 /// `Buttons.Complete`.
 fn hand_in(state: &mut WorldState, player: EntityId, context: &QuestGumpContext) {
-    if !turnin::is_complete(state, player, &context.quest) {
+    let Some(key) = &context.quest else {
+        return;
+    };
+    if !turnin::is_complete(state, player, key) {
         state.system_message(player, "You do not have everything you need!");
         return;
     }
     let has_rewards = state
         .quests
-        .get(&context.quest)
+        .get(key)
         .is_some_and(|quest| !quest.rewards.is_empty());
     if has_rewards {
         gump::show(
@@ -132,7 +143,7 @@ fn hand_in(state: &mut WorldState, player: EntityId, context: &QuestGumpContext)
             },
         );
     } else {
-        turnin::complete(state, player, &context.quest);
+        turnin::complete(state, player, key);
     }
 }
 
@@ -184,7 +195,9 @@ fn resign_reply(state: &mut WorldState, player: EntityId, response: &GumpRespons
         .filter_map(|switch| switch.validate(RESIGN_SWITCHES).ok())
         .any(|switch| switch == RESIGN_SWITCH_YES);
     if yes {
-        offer::resign(state, player, &context.quest);
+        if let Some(key) = &context.quest {
+            offer::resign(state, player, key);
+        }
     } else {
         // Kept: back to the quest's page, where it was.
         gump::show(state, player, context);

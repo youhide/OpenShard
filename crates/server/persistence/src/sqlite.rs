@@ -651,7 +651,7 @@ impl SqliteStore {
                               respawn_secs, remaining_secs, creatures) \
                              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
                             params![
-                                spawner.id,
+                                spawner.id.0,
                                 spawner.facet,
                                 spawner.x,
                                 spawner.y,
@@ -1050,7 +1050,7 @@ impl SqliteStore {
                     let creatures: String = row.get(9)?;
                     Ok((
                         SpawnerRecord {
-                            id: row.get(0)?,
+                            id: openshard_state::SpawnerId(row.get(0)?),
                             facet: row.get(1)?,
                             x: row.get(2)?,
                             y: row.get(3)?,
@@ -1993,6 +1993,7 @@ mod tests {
         }
         let decoration = DecorationRecord {
             key_value: 0,
+            locked: false,
             serial: Serial::new(0x4000_0100).unwrap(),
             graphic: 0x0675,
             hue: 0,
@@ -2005,6 +2006,7 @@ mod tests {
                 open_graphic: 0x0676,
                 offset_x: -1,
                 offset_y: 1,
+                link: Some(Serial::new(0x4000_0101).unwrap()),
                 is_open: true,
             }),
             container_gump: None,

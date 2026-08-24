@@ -798,7 +798,7 @@ fn a_house_survives_a_restart_with_its_walls() {
         [(WALL, -1), (WALL, 1), (FLOOR, 0)]
             .into_iter()
             .map(|(graphic, dx)| Component {
-                graphic,
+                graphic: openshard_protocol::wire::Graphic(graphic),
                 dx,
                 dy: 0,
                 dz: 0,
@@ -818,8 +818,15 @@ fn a_house_survives_a_restart_with_its_walls() {
     let owner = world.state.registry.serial_of(player).expect("a serial");
 
     let at = Point::new(START.0 + 5, START.1 + 5, 0);
-    let house = openshard_housing::place(&mut world.state, player, at, Facet(0), COTTAGE, owner)
-        .expect("a legal spot");
+    let house = openshard_housing::place(
+        &mut world.state,
+        player,
+        at,
+        Facet(0),
+        openshard_protocol::wire::MultiId(COTTAGE),
+        owner,
+    )
+    .expect("a legal spot");
     let serial = world.state.registry.serial_of(house).expect("a house serial");
 
     world.take_snapshot();
@@ -850,7 +857,7 @@ fn a_house_survives_a_restart_with_its_walls() {
             .registry
             .get::<openshard_state::components::House>(back)
             .map(|h| h.multi),
-        Some(COTTAGE)
+        Some(openshard_protocol::wire::MultiId(COTTAGE))
     );
     let obstructions = &restored.state.facet_state(Facet(0)).obstructions();
     assert!(
@@ -1104,7 +1111,7 @@ fn a_designed_house_restores_its_own_walls_with_no_client_files() {
         .expect("its design came back");
     assert_eq!(design.revision, 7, "the cache key did not survive the restart");
     assert_eq!(design.components.len(), 1);
-    assert_eq!(design.components[0].graphic, 0x0006);
+    assert_eq!(design.components[0].graphic, Graphic(0x0006));
     assert_eq!(design.components[0].dx, 1);
 }
 
@@ -1177,7 +1184,7 @@ fn a_boat_survives_a_restart_with_its_deck() {
         [(HULL, -1), (DECK, 0)]
             .into_iter()
             .map(|(graphic, dx)| Component {
-                graphic,
+                graphic: openshard_protocol::wire::Graphic(graphic),
                 dx,
                 dy: 0,
                 dz: 0,
@@ -1219,8 +1226,15 @@ fn a_boat_survives_a_restart_with_its_deck() {
     let owner = world.state.registry.serial_of(player).expect("a serial");
 
     let at = Point::new(START.0 + 5, START.1 + 5, 0);
-    let boat =
-        openshard_boats::place(&mut world.state, player, at, Facet(0), SLOOP, owner).expect("open water");
+    let boat = openshard_boats::place(
+        &mut world.state,
+        player,
+        at,
+        Facet(0),
+        openshard_protocol::wire::MultiId(SLOOP),
+        owner,
+    )
+    .expect("open water");
     let serial = world.state.registry.serial_of(boat).expect("a boat serial");
 
     world.take_snapshot();
@@ -1263,7 +1277,10 @@ fn a_boat_survives_a_restart_with_its_deck() {
             .state
             .registry
             .get::<openshard_state::components::Boat>(back),
-        Some(&openshard_state::components::Boat { multi: SLOOP, owner }),
+        Some(&openshard_state::components::Boat {
+            multi: openshard_protocol::wire::MultiId(SLOOP),
+            owner,
+        }),
     );
 
     // And the berth is back, which is the half a `Boat` component cannot prove.

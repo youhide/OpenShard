@@ -22,7 +22,7 @@ use openshard_config::CombatEra;
 use openshard_entities::EntityId;
 use openshard_state::components::{LastStatGain, StatLock, StatLocks, Stats};
 use openshard_state::skill::Skill;
-use openshard_state::{StatCode, WorldState};
+use openshard_state::{StatCode, WorldState, WorldTick};
 
 use crate::apply_stats;
 
@@ -163,13 +163,13 @@ fn claim_stat_timer(state: &mut WorldState, entity: EntityId, stat: StatCode) ->
     // `previous` is zero for a mobile that has never gained, which is "long ago"
     // on a fresh world and stays true after a restore: the stamp is a tick count
     // and the counter only ever climbs.
-    if previous != 0 && now < previous.saturating_add(delay) {
+    if previous != WorldTick::ZERO && now < previous.saturating_add(delay) {
         return false;
     }
     match stat {
-        StatCode::Str => last.strength = now.max(1),
-        StatCode::Dex => last.dexterity = now.max(1),
-        StatCode::Int => last.intelligence = now.max(1),
+        StatCode::Str => last.strength = now.max(WorldTick::from_raw(1)),
+        StatCode::Dex => last.dexterity = now.max(WorldTick::from_raw(1)),
+        StatCode::Int => last.intelligence = now.max(WorldTick::from_raw(1)),
     }
     state.registry.insert(entity, last);
     true

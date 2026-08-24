@@ -26,6 +26,49 @@
 use openshard_protocol::wire::{Graphic, Hue};
 use std::collections::HashMap;
 
+/// The stable identifier of a quest definition.
+///
+/// Quest keys cross content and persistence boundaries as strings, but inside
+/// the world they must not be confused with an NPC name, region name, or other
+/// arbitrary text.
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default)]
+pub struct QuestKey(String);
+
+impl QuestKey {
+    #[must_use]
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl From<String> for QuestKey {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for QuestKey {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+impl AsRef<str> for QuestKey {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 /// What an objective asks for.
 ///
 /// ServUO's objective classes, as one enum: the concrete list is small, closed,
@@ -122,7 +165,7 @@ pub struct RewardDef {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct QuestDef {
     /// Its id, and the key a player's progress is saved under.
-    pub key: String,
+    pub key: QuestKey,
     /// The quest's name, in the log and the offer.
     pub title: String,
     /// What it asks, in prose.
@@ -152,7 +195,7 @@ pub struct QuestDef {
 impl Default for QuestDef {
     fn default() -> Self {
         Self {
-            key: String::new(),
+            key: QuestKey::default(),
             title: String::new(),
             description: String::new(),
             refuse: String::new(),
@@ -178,7 +221,7 @@ impl Default for QuestDef {
 #[derive(Clone, Default, Debug)]
 pub struct QuestDefs {
     defs: Vec<QuestDef>,
-    by_key: HashMap<String, usize>,
+    by_key: HashMap<QuestKey, usize>,
 }
 
 impl QuestDefs {
@@ -202,7 +245,7 @@ impl QuestDefs {
     /// has since been removed reads as `None`, and every caller treats that as
     /// "this quest no longer exists" rather than failing.
     #[must_use]
-    pub fn get(&self, key: &str) -> Option<&QuestDef> {
+    pub fn get(&self, key: &QuestKey) -> Option<&QuestDef> {
         self.by_key.get(key).and_then(|&index| self.defs.get(index))
     }
 
@@ -227,7 +270,7 @@ mod tests {
 
     fn quest(key: &str, title: &str) -> QuestDef {
         QuestDef {
-            key: key.to_owned(),
+            key: QuestKey::from(key),
             title: title.to_owned(),
             ..QuestDef::default()
         }
@@ -239,7 +282,7 @@ mod tests {
         defs.set(vec![quest("rat_cull", "A Plague of Rats")]);
         defs.set(vec![quest("silk_gather", "Silk for the Spellwright")]);
         assert!(
-            defs.get("rat_cull").is_none(),
+            defs.get(&QuestKey::from("rat_cull")).is_none(),
             "a quest no longer defined must stop being offered"
         );
         assert_eq!(defs.len(), 1);
@@ -249,13 +292,13 @@ mod tests {
     fn a_repeated_key_keeps_the_last_definition() {
         let mut defs = QuestDefs::default();
         defs.set(vec![quest("rat_cull", "Old"), quest("rat_cull", "New")]);
-        assert_eq!(defs.get("rat_cull").unwrap().title, "New");
+        assert_eq!(defs.get(&QuestKey::from("rat_cull")).unwrap().title, "New");
     }
 
     #[test]
     fn an_unknown_key_is_an_answer_not_a_fault() {
         let defs = QuestDefs::default();
-        assert!(defs.get("no_such_quest").is_none());
+        assert!(defs.get(&QuestKey::from("no_such_quest")).is_none());
     }
 
     #[test]
@@ -263,7 +306,7 @@ mod tests {
         let shipped = shipped();
         assert!(!shipped.is_empty(), "the shard ships no quests at all");
 
-        let keys: Vec<String> = shipped.iter().map(|quest| quest.key.clone()).collect();
+        let keys: Vec<QuestKey> = shipped.iter().map(|quest| quest.key.clone()).collect();
         let mut defs = QuestDefs::default();
         defs.set(shipped);
 
@@ -286,7 +329,9 @@ mod tests {
         // escortable traveller precisely because it does *not* name a
         // destination — the engine picks one when the quest is accepted. Filling
         // this in would send all sixty-odd of them to the same town.
-        let escort = shipped().into_iter().find(|quest| quest.key == "escort");
+        let escort = shipped()
+            .into_iter()
+            .find(|quest| quest.key == QuestKey::from("escort"));
         let escort = escort.expect("the shard ships the escort quest");
         assert_eq!(
             escort.objectives[0].kind,

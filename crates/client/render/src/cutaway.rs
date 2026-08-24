@@ -89,7 +89,7 @@ pub const FOLIAGE_ALPHA_U8: u8 = (FOLIAGE_ALPHA * 255.0 + 0.5) as u8;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct FadeKey {
     at: (u16, u16, i8),
-    graphic: u16,
+    graphic: Graphic,
     item: bool,
     foliage: bool,
 }
@@ -98,7 +98,7 @@ impl FadeKey {
     pub const fn static_(at: Point, graphic: Graphic) -> Self {
         Self {
             at: (at.x, at.y, at.z),
-            graphic: graphic.0,
+            graphic,
             item: false,
             foliage: false,
         }
@@ -107,7 +107,7 @@ impl FadeKey {
     pub const fn item(at: Point, graphic: Graphic) -> Self {
         Self {
             at: (at.x, at.y, at.z),
-            graphic: graphic.0,
+            graphic,
             item: true,
             foliage: false,
         }
@@ -117,7 +117,7 @@ impl FadeKey {
     pub const fn foliage(at: Point) -> Self {
         Self {
             at: (at.x, at.y, at.z),
-            graphic: 0,
+            graphic: Graphic(0),
             item: false,
             foliage: true,
         }
@@ -839,6 +839,16 @@ mod tests {
             fades.advance(key, u8::MAX);
         }
         assert_eq!(fades.advance(key, u8::MAX), u8::MAX);
+    }
+
+    #[test]
+    fn fade_keys_keep_their_graphic_typed() {
+        let at = Point::new(12, 34, 5);
+        let graphic = Graphic(0x1234);
+
+        assert_eq!(FadeKey::static_(at, graphic).graphic, graphic);
+        assert_eq!(FadeKey::item(at, graphic).graphic, graphic);
+        assert_eq!(FadeKey::foliage(at).graphic, Graphic(0));
     }
 
     #[test]

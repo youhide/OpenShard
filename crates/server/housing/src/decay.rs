@@ -241,7 +241,10 @@ pub fn demolish(state: &mut WorldState, house: EntityId) -> Option<EntityId> {
     // The walls come out before the entity does: the footprint is derived from
     // where it stood. A house restored with no client files has none to remove,
     // and `unblock` over an empty list is the right no-op for it.
-    let multi = state.registry.get::<House>(house).map_or(0, |entry| entry.multi);
+    let multi = state
+        .registry
+        .get::<House>(house)
+        .map_or(openshard_protocol::wire::MultiId(0), |entry| entry.multi);
     // The shape it actually has: a designed house's walls are on the entity, and
     // unblocking the foundation's instead would leave every tile the two do not
     // share blocked by something that is no longer there.

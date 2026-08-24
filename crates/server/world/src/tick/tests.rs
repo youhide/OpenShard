@@ -5521,7 +5521,10 @@ fn resistance_is_by_damage_type() {
         mob_entity,
         Resistance {
             fire: 50,
-            ..Default::default()
+            physical: 0,
+            cold: 0,
+            poison: 0,
+            energy: 0,
         },
     );
     let _ = packets_for(&mut world, player);
@@ -9483,7 +9486,7 @@ fn decorating_twice_does_not_lay_a_second_britain() {
             ),
         ],
         doors: vec![DecorDoor {
-            key_value: 0,
+            lock: None,
             closed: openshard_protocol::wire::Graphic(0x06A5),
             open: openshard_protocol::wire::Graphic(0x06A6),
             offset_x: -1,
@@ -9491,7 +9494,7 @@ fn decorating_twice_does_not_lay_a_second_britain() {
             position: Point::new(START.0 + 3, START.1, 0),
         }],
         containers: vec![DecorContainer {
-            key_value: 0,
+            lock: None,
             graphic: openshard_protocol::wire::Graphic(0x0E77),
             gump: openshard_protocol::wire::Graphic(0x003E),
             hue: openshard_protocol::wire::Hue(0),
@@ -9555,8 +9558,8 @@ fn placing_the_townsfolk_twice_does_not_double_the_town() {
         stock: vec![openshard_npc::StockLine {
             graphic: openshard_protocol::wire::Graphic(0x1BEF),
             hue: openshard_protocol::wire::Hue(0),
-            amount: 16,
-            price: 5,
+            amount: openshard_state::components::Amount(16),
+            price: openshard_state::components::Price(5),
             name: "iron ingot".to_owned(),
         }],
         escort_to: None,
@@ -9724,7 +9727,7 @@ fn a_door_opens_and_closes_on_double_click() {
         facet: Facet(0),
         statics: Vec::new(),
         doors: vec![DecorDoor {
-            key_value: 0,
+            lock: None,
             closed: openshard_protocol::wire::Graphic(0x0675),
             open: openshard_protocol::wire::Graphic(0x0676),
             offset_x: -1,
@@ -9786,7 +9789,7 @@ fn an_open_door_swings_shut_on_its_own() {
         facet: Facet(0),
         statics: Vec::new(),
         doors: vec![DecorDoor {
-            key_value: 0,
+            lock: None,
             closed: openshard_protocol::wire::Graphic(0x0675),
             open: openshard_protocol::wire::Graphic(0x0676),
             offset_x: -1,
@@ -9818,6 +9821,107 @@ fn an_open_door_swings_shut_on_its_own() {
     assert_eq!(world.registry().get::<Position>(door).unwrap().0, at);
 }
 
+#[test]
+fn linked_leaves_toggle_and_auto_close_as_one_doorway() {
+    let now = Instant::now();
+    let mut world = world();
+    let gm = enter_gm(&mut world, now);
+    let player = world.state.players[&gm];
+    let first_at = Point::new(START.0 + 1, START.1, 0);
+    let second_at = Point::new(START.0 + 2, START.1, 0);
+    world.queue(Command::Decorate {
+        facet: Facet(0),
+        statics: Vec::new(),
+        doors: vec![
+            DecorDoor {
+                lock: None,
+                closed: openshard_protocol::wire::Graphic(0x06A5),
+                open: openshard_protocol::wire::Graphic(0x06A6),
+                offset_x: -1,
+                offset_y: 1,
+                position: first_at,
+            },
+            DecorDoor {
+                lock: None,
+                closed: openshard_protocol::wire::Graphic(0x06A7),
+                open: openshard_protocol::wire::Graphic(0x06A8),
+                offset_x: 1,
+                offset_y: 1,
+                position: second_at,
+            },
+        ],
+        containers: Vec::new(),
+    });
+    world.tick(now);
+
+    let first = world
+        .registry()
+        .query::<Door>()
+        .find(|(entity, _)| {
+            world
+                .registry()
+                .get::<Position>(*entity)
+                .is_some_and(|p| p.0 == first_at)
+        })
+        .unwrap()
+        .0;
+    let second = world
+        .registry()
+        .query::<Door>()
+        .find(|(entity, _)| {
+            world
+                .registry()
+                .get::<Position>(*entity)
+                .is_some_and(|p| p.0 == second_at)
+        })
+        .unwrap()
+        .0;
+    let first_serial = world.registry().serial_of(first).unwrap();
+    let second_serial = world.registry().serial_of(second).unwrap();
+    let mut first_door = *world.registry().get::<Door>(first).unwrap();
+    first_door.link = Some(second_serial);
+    world.state.registry.insert(first, first_door);
+    let mut second_door = *world.registry().get::<Door>(second).unwrap();
+    second_door.link = Some(first_serial);
+    world.state.registry.insert(second, second_door);
+
+    openshard_items::toggle_door(&mut world.state, player, first, first_serial);
+    assert!(world.registry().get::<Door>(first).unwrap().is_open);
+    assert!(world.registry().get::<Door>(second).unwrap().is_open);
+    assert!(
+        world
+            .state
+            .facet_state(Facet(0))
+            .obstructions()
+            .blocker_at(first_at.x, first_at.y)
+            .is_none()
+    );
+    assert!(
+        world
+            .state
+            .facet_state(Facet(0))
+            .obstructions()
+            .blocker_at(second_at.x, second_at.y)
+            .is_none()
+    );
+
+    // One body anywhere under the two closed positions defers the whole pair.
+    teleport(&mut world, gm, second_at);
+    let close_at = world.registry().get::<Door>(first).unwrap().close_at;
+    let mut later = now;
+    while world.state.ticks < close_at {
+        later += TICK_INTERVAL;
+        world.tick(later);
+    }
+    assert!(world.registry().get::<Door>(first).unwrap().is_open);
+    assert!(world.registry().get::<Door>(second).unwrap().is_open);
+
+    teleport(&mut world, gm, Point::new(START.0, START.1, 0));
+    world.tick(later + TICK_INTERVAL);
+    assert!(!world.registry().get::<Door>(first).unwrap().is_open);
+    assert!(!world.registry().get::<Door>(second).unwrap().is_open);
+}
+
 /// One west door frame at (100, 100) and one east frame at (102, 100) — a
 /// single-door gap for the generator to fill. `walled` bricks the gap up.
 ///
@@ -9837,6 +9941,17 @@ fn door_frames(walled: bool) -> Scene {
     if walled {
         scene.wall(101, 100, 0, 20);
     }
+    scene
+}
+
+/// The same frame pair three tiles apart: two gap tiles, hence two linked
+/// leaves rather than a single door.
+fn double_door_frames() -> Scene {
+    const FRAME: u16 = 0x0007;
+    let mut scene = Scene::flat_holding(103, 100, 0);
+    scene.art(FRAME, WALL_FLAGS, 20);
+    scene.put(100, 100, 0, FRAME);
+    scene.put(103, 100, 0, FRAME);
     scene
 }
 
@@ -9895,6 +10010,52 @@ fn doors_are_generated_between_static_frames() {
 }
 
 #[test]
+fn generated_double_door_leaves_link_each_other() {
+    let now = Instant::now();
+    let mut world = world();
+    stand_on(&mut world, double_door_frames());
+    world.queue(Command::GenerateDoors {
+        facet: Facet(0),
+        x: 100,
+        y: 100,
+        width: 4,
+        height: 1,
+    });
+    world.tick(now);
+
+    let mut leaves: Vec<_> = world
+        .registry()
+        .query::<Door>()
+        .map(|(entity, door)| {
+            (
+                world.registry().get::<Position>(entity).unwrap().0.x,
+                world.registry().serial_of(entity).unwrap(),
+                door.link,
+            )
+        })
+        .collect();
+    leaves.sort_unstable_by_key(|leaf| leaf.0);
+    assert_eq!(leaves.len(), 2);
+    assert_eq!(leaves[0].2, Some(leaves[1].1));
+    assert_eq!(leaves[1].2, Some(leaves[0].1));
+
+    let records = world.decoration_records();
+    let mut restored = World::new(START);
+    restored.restore_decorations(records);
+    for &(_, serial, link) in &leaves {
+        let entity = restored
+            .registry()
+            .entity_of(serial)
+            .expect("the linked leaf came back");
+        assert_eq!(restored.registry().get::<Door>(entity).unwrap().link, link);
+        assert!(
+            link.and_then(|other| restored.registry().entity_of(other))
+                .is_some()
+        );
+    }
+}
+
+#[test]
 fn no_door_is_generated_into_a_wall() {
     let now = Instant::now();
     let mut world = world();
@@ -9919,7 +10080,7 @@ fn a_decoration_container_opens_on_double_click() {
         statics: Vec::new(),
         doors: Vec::new(),
         containers: vec![DecorContainer {
-            key_value: 0,
+            lock: None,
             graphic: openshard_protocol::wire::Graphic(0x0E42),
             gump: openshard_protocol::wire::Graphic(0x49),
             hue: openshard_protocol::wire::Hue(0),
@@ -10094,7 +10255,13 @@ fn a_spawner_fills_to_its_ceiling_and_clear_empties_it() {
         facet: Facet(0),
     };
     world.queue(Command::RegisterSpawner {
-        spawner: Spawner::new(0, area, vec![creature], 3, 0),
+        spawner: Spawner::new(
+            openshard_state::SpawnerId::PLACEHOLDER,
+            area,
+            vec![creature],
+            3,
+            0,
+        ),
     });
 
     // One creature per region per pass, so a few ticks fill it to the ceiling
@@ -10173,8 +10340,8 @@ fn clear_also_removes_placed_npcs_and_their_gear_but_not_players() {
         stock: vec![npc::StockLine {
             graphic: openshard_protocol::wire::Graphic(0x0F7A),
             hue: openshard_protocol::wire::Hue(0),
-            amount: 50,
-            price: 4,
+            amount: openshard_state::components::Amount(50),
+            price: openshard_state::components::Price(4),
             name: "black pearl".to_owned(),
         }],
     });
@@ -10653,9 +10820,15 @@ fn a_spawner_respawn_timer_survives_a_restart() {
         facet: Facet(0),
     };
     // A 100-second respawn region.
-    home.register_spawner(Spawner::new(0, area, vec![], 1, 100 * TICKS_PER_SECOND));
+    home.register_spawner(Spawner::new(
+        openshard_state::SpawnerId::PLACEHOLDER,
+        area,
+        vec![],
+        1,
+        100 * TICKS_PER_SECOND,
+    ));
     // Pretend it spawned a while ago and has 60 seconds left to wait.
-    home.state.ticks = 5_000;
+    home.state.ticks = openshard_state::WorldTick::from_raw(5_000);
     home.spawners[0].next_spawn = home.state.ticks + 60 * TICKS_PER_SECOND;
 
     // What the save carries.
@@ -10664,7 +10837,8 @@ fn a_spawner_respawn_timer_survives_a_restart() {
     assert_eq!(records[0].remaining_secs, 60, "sixty seconds still to wait");
     assert_eq!(records[0].respawn_secs, 100);
     assert_eq!(
-        records[0].id, 0,
+        records[0].id,
+        openshard_state::SpawnerId::PLACEHOLDER,
         "the first region's id is its slot, which is where its creatures point"
     );
 
@@ -10674,7 +10848,7 @@ fn a_spawner_respawn_timer_survives_a_restart() {
     assert_eq!(shard.spawners.len(), 1);
     assert_eq!(
         shard.spawners[0].next_spawn,
-        60 * TICKS_PER_SECOND,
+        openshard_state::WorldTick::from_raw(60 * TICKS_PER_SECOND),
         "the sixty seconds are still ahead of it, not reset to zero"
     );
     assert_eq!(shard.spawners[0].respawn_delay, 100 * TICKS_PER_SECOND);
@@ -10692,20 +10866,33 @@ fn re_registering_a_region_keeps_the_first_and_its_timer() {
         height: 5,
         facet: Facet(0),
     };
-    world.register_spawner(Spawner::new(0, area, vec![], 3, 40));
+    world.register_spawner(Spawner::new(
+        openshard_state::SpawnerId::PLACEHOLDER,
+        area,
+        vec![],
+        3,
+        40,
+    ));
     // Give the standing region a timer with time still to wait, as a restore from
     // the database would.
-    world.spawners[0].next_spawn = 5_000;
+    world.spawners[0].next_spawn = openshard_state::WorldTick::from_raw(5_000);
     // A second registration over the same box — a boot re-populate, or a second
     // staff click — must not stack a spawner nor reset the waiting one.
-    world.register_spawner(Spawner::new(0, area, vec![], 3, 40));
+    world.register_spawner(Spawner::new(
+        openshard_state::SpawnerId::PLACEHOLDER,
+        area,
+        vec![],
+        3,
+        40,
+    ));
     assert_eq!(
         world.spawners.len(),
         1,
         "the same region registered twice is one spawner, not two"
     );
     assert_eq!(
-        world.spawners[0].next_spawn, 5_000,
+        world.spawners[0].next_spawn,
+        openshard_state::WorldTick::from_raw(5_000),
         "and the restored timer is left alone, not reset by the re-populate"
     );
 }
@@ -10748,8 +10935,20 @@ fn two_different_regions_over_one_box_are_both_laid() {
         skills: Vec::new(),
     };
     // An orc camp, and the undead patch that overlaps it.
-    let orcs = Spawner::new(0, area, vec![creature(0x0011)], 5, 40);
-    let undead = Spawner::new(0, area, vec![creature(0x0032)], 7, 40);
+    let orcs = Spawner::new(
+        openshard_state::SpawnerId::PLACEHOLDER,
+        area,
+        vec![creature(0x0011)],
+        5,
+        40,
+    );
+    let undead = Spawner::new(
+        openshard_state::SpawnerId::PLACEHOLDER,
+        area,
+        vec![creature(0x0032)],
+        7,
+        40,
+    );
     world.register_spawner(orcs.clone());
     world.register_spawner(undead.clone());
     assert_eq!(
@@ -10788,13 +10987,19 @@ fn a_regions_id_is_its_slot_however_the_list_was_built() {
     };
     let slots_hold = |world: &World, what: &str| {
         for (slot, spawner) in world.spawners.iter().enumerate() {
-            assert_eq!(spawner.id as usize, slot, "{what}: a region's id left its slot");
+            assert_eq!(spawner.id.index(), slot, "{what}: a region's id left its slot");
         }
     };
 
     let mut laid = world();
     for x in 0..5u16 {
-        laid.register_spawner(Spawner::new(0, area(x * 10), vec![], 3, 40));
+        laid.register_spawner(Spawner::new(
+            openshard_state::SpawnerId::PLACEHOLDER,
+            area(x * 10),
+            vec![],
+            3,
+            40,
+        ));
     }
     slots_hold(&laid, "freshly registered");
 
@@ -10806,7 +11011,13 @@ fn a_regions_id_is_its_slot_however_the_list_was_built() {
     slots_hold(&restarted, "restored from the save");
     // And a boot re-populate over the restored list neither stacks nor renumbers.
     for x in 0..5u16 {
-        restarted.register_spawner(Spawner::new(0, area(x * 10), vec![], 3, 40));
+        restarted.register_spawner(Spawner::new(
+            openshard_state::SpawnerId::PLACEHOLDER,
+            area(x * 10),
+            vec![],
+            3,
+            40,
+        ));
     }
     assert_eq!(restarted.spawners.len(), 5, "the re-populate stacked a region");
     slots_hold(&restarted, "after a boot re-populate");
@@ -10816,11 +11027,18 @@ fn a_regions_id_is_its_slot_however_the_list_was_built() {
     restarted.clear_spawners();
     assert!(restarted.spawners.is_empty());
     for x in 0..3u16 {
-        restarted.register_spawner(Spawner::new(0, area(x * 10), vec![], 3, 40));
+        restarted.register_spawner(Spawner::new(
+            openshard_state::SpawnerId::PLACEHOLDER,
+            area(x * 10),
+            vec![],
+            3,
+            40,
+        ));
     }
     slots_hold(&restarted, "after Clear and Populate");
     assert_eq!(
-        restarted.spawners[0].id, 0,
+        restarted.spawners[0].id,
+        openshard_state::SpawnerId::PLACEHOLDER,
         "the ids start again at zero rather than carrying a counter past the clear"
     );
 }
@@ -10913,8 +11131,8 @@ fn a_vendor_and_its_priced_stock_survive_a_restart() {
         stock: vec![npc::StockLine {
             graphic: openshard_protocol::wire::Graphic(0x0F7A),
             hue: openshard_protocol::wire::Hue(0),
-            amount: 50,
-            price: 4,
+            amount: openshard_state::components::Amount(50),
+            price: openshard_state::components::Price(4),
             name: "black pearl".to_owned(),
         }],
     });
@@ -11024,10 +11242,16 @@ fn a_wounded_spawner_creature_survives_a_restart_and_is_counted() {
         facet: Facet(0),
     };
     home.queue(Command::RegisterSpawner {
-        spawner: Spawner::new(0, area, vec![creature], 1, 1000),
+        spawner: Spawner::new(
+            openshard_state::SpawnerId::PLACEHOLDER,
+            area,
+            vec![creature],
+            1,
+            1000,
+        ),
     });
     home.tick(now); // applies the register (its first spawn is jittered out)
-    home.spawners[0].next_spawn = 0; // this test wants the creature now, not the jitter
+    home.spawners[0].next_spawn = openshard_state::WorldTick::ZERO; // this test wants the creature now, not the jitter
     for _ in 0..3 {
         home.tick(now);
     }
@@ -11101,7 +11325,7 @@ fn decoration_and_door_state_survive_a_restart() {
         )],
         doors: vec![
             DecorDoor {
-                key_value: 0,
+                lock: None,
                 closed: openshard_protocol::wire::Graphic(0x0675),
                 open: openshard_protocol::wire::Graphic(0x0676),
                 offset_x: -1,
@@ -11109,7 +11333,7 @@ fn decoration_and_door_state_survive_a_restart() {
                 position: shut_at,
             },
             DecorDoor {
-                key_value: 0,
+                lock: None,
                 closed: openshard_protocol::wire::Graphic(0x0675),
                 open: openshard_protocol::wire::Graphic(0x0676),
                 offset_x: -1,
@@ -11449,13 +11673,18 @@ fn a_townsperson_is_dressed_and_named_by_the_core() {
     );
 }
 
-/// Place a door at `at`, locked to `key_value` (0 for unlocked), and return it.
-fn place_lockable_door(world: &mut World, at: Point, key_value: u32, now: Instant) -> EntityId {
+/// Place a door at `at`, locked to `key`, and return it.
+fn place_lockable_door(
+    world: &mut World,
+    at: Point,
+    key: openshard_state::KeyValue,
+    now: Instant,
+) -> EntityId {
     world.queue(Command::Decorate {
         facet: Facet(0),
         statics: Vec::new(),
         doors: vec![DecorDoor {
-            key_value,
+            lock: Some(openshard_state::LockKind::Key(key)),
             closed: openshard_protocol::wire::Graphic(0x0675),
             open: openshard_protocol::wire::Graphic(0x0676),
             offset_x: 0,
@@ -11657,7 +11886,7 @@ fn a_locked_door_refuses_a_player_and_an_npc_alike() {
     let door = place_lockable_door(
         &mut world,
         Point::new(player_at.x + 1, player_at.y, player_at.z),
-        0xBEEF,
+        openshard_state::KeyValue::new(0xBEEF).expect("non-zero test key"),
         now,
     );
     let door_serial = world.registry().serial_of(door).unwrap();
@@ -11708,7 +11937,7 @@ fn a_key_turns_only_the_lock_it_fits() {
     let door = place_lockable_door(
         &mut world,
         Point::new(player_at.x + 1, player_at.y, player_at.z),
-        0xBEEF,
+        openshard_state::KeyValue::new(0xBEEF).expect("non-zero test key"),
         now,
     );
 
@@ -11723,10 +11952,10 @@ fn a_key_turns_only_the_lock_it_fits() {
         Facet(0),
     )
     .expect("a key");
-    world
-        .state
-        .registry
-        .insert(wrong, openshard_state::components::KeyValue(0x1234));
+    world.state.registry.insert(
+        wrong,
+        openshard_state::components::KeyValue::new(0x1234).expect("non-zero test key"),
+    );
     assert!(!openshard_items::turn_key(&mut world.state, player, wrong, door));
     assert!(
         world.registry().has::<openshard_state::components::Lock>(door),
@@ -11744,10 +11973,10 @@ fn a_key_turns_only_the_lock_it_fits() {
         Facet(0),
     )
     .expect("a key");
-    world
-        .state
-        .registry
-        .insert(right, openshard_state::components::KeyValue(0xBEEF));
+    world.state.registry.insert(
+        right,
+        openshard_state::components::KeyValue::new(0xBEEF).expect("non-zero test key"),
+    );
     assert!(openshard_items::turn_key(&mut world.state, player, right, door));
     assert!(!world.registry().has::<openshard_state::components::Lock>(door));
     assert!(openshard_items::turn_key(&mut world.state, player, right, door));
@@ -11774,7 +12003,12 @@ fn a_locked_door_comes_back_locked() {
     let now = Instant::now();
     let mut world = world();
     let _ = enter(&mut world, now);
-    let door = place_lockable_door(&mut world, Point::new(START.0 + 5, START.1, 0), 0xBEEF, now);
+    let door = place_lockable_door(
+        &mut world,
+        Point::new(START.0 + 5, START.1, 0),
+        openshard_state::KeyValue::new(0xBEEF).expect("non-zero test key"),
+        now,
+    );
     assert!(world.registry().has::<openshard_state::components::Lock>(door));
 
     let records = world.decoration_records();
@@ -11788,8 +12022,49 @@ fn a_locked_door_comes_back_locked() {
         booted
             .registry()
             .query::<openshard_state::components::Lock>()
-            .any(|(_, lock)| lock.key_value == 0xBEEF),
+            .any(|(_, lock)| lock.kind
+                == openshard_state::LockKind::Key(
+                    openshard_state::KeyValue::new(0xBEEF).expect("non-zero test key"),
+                )),
         "and comes back"
+    );
+}
+
+#[test]
+fn a_keyless_lock_is_not_an_unlocked_zero_after_a_restart() {
+    let now = Instant::now();
+    let mut world = world();
+    let _ = enter(&mut world, now);
+    let at = Point::new(START.0 + 6, START.1, 0);
+    world.queue(Command::Decorate {
+        facet: Facet(0),
+        statics: Vec::new(),
+        doors: vec![DecorDoor {
+            lock: Some(openshard_state::LockKind::Unopenable),
+            closed: openshard_protocol::wire::Graphic(0x0675),
+            open: openshard_protocol::wire::Graphic(0x0676),
+            offset_x: 0,
+            offset_y: 0,
+            position: at,
+        }],
+        containers: Vec::new(),
+    });
+    world.tick(now);
+
+    let records = world.decoration_records();
+    assert!(
+        records
+            .iter()
+            .any(|record| record.locked && record.key_value == 0),
+        "the save distinguishes a keyless lock from an unlocked decoration"
+    );
+    let mut booted = World::new(START);
+    booted.restore_decorations(records);
+    assert!(
+        booted
+            .registry()
+            .query::<openshard_state::Lock>()
+            .any(|(_, lock)| { lock.kind == openshard_state::LockKind::Unopenable })
     );
 }
 
@@ -12084,8 +12359,8 @@ fn a_shop_says_nothing_the_client_cannot_read() {
         stock: vec![npc::StockLine {
             graphic: Graphic(0x0F7B),
             hue: Hue(0),
-            amount: 5,
-            price: 3,
+            amount: openshard_state::components::Amount(5),
+            price: openshard_state::components::Price(3),
             name: "black pearl".to_owned(),
         }],
     });
@@ -12374,7 +12649,7 @@ fn a_traveller_asks_for_an_escort_out_loud() {
         openshard_state::components::Escortable {
             destination: "Britain".to_owned(),
             escorter: None,
-            last_seen: 0,
+            last_seen: openshard_state::WorldTick::ZERO,
         },
     );
     let traveller_serial = world.registry().serial_of(traveller).unwrap();
@@ -12397,7 +12672,7 @@ fn a_traveller_asks_for_an_escort_out_loud() {
         openshard_state::components::Escortable {
             destination: "Britain".to_owned(),
             escorter: world.registry().serial_of(player),
-            last_seen: 0,
+            last_seen: openshard_state::WorldTick::ZERO,
         },
     );
     world.drain_outbound().count();
@@ -12433,7 +12708,7 @@ fn a_crowd_of_townsfolk_does_not_beat_in_lockstep() {
     let beats: std::collections::HashSet<u64> = world
         .registry()
         .query::<openshard_state::components::Npc>()
-        .map(|(_, npc)| npc.next_beat)
+        .map(|(_, npc)| npc.next_beat.raw())
         .collect();
     assert!(
         beats.len() > 10,
@@ -12592,7 +12867,7 @@ fn restored_townsfolk_do_not_all_beat_on_the_same_tick() {
     let beats: std::collections::BTreeSet<u64> = booted
         .registry()
         .query::<openshard_state::components::Npc>()
-        .map(|(_, npc)| npc.next_beat)
+        .map(|(_, npc)| npc.next_beat.raw())
         .collect();
     assert!(
         beats.len() > 1,
@@ -12609,7 +12884,7 @@ fn restored_townsfolk_do_not_all_beat_on_the_same_tick() {
     let beats: Vec<u64> = booted
         .registry()
         .query::<openshard_state::components::Npc>()
-        .map(|(_, npc)| npc.next_beat)
+        .map(|(_, npc)| npc.next_beat.raw())
         .collect();
     let unique: std::collections::BTreeSet<u64> = beats.iter().copied().collect();
     assert!(
@@ -13058,8 +13333,8 @@ pub(super) fn spawn_stocked_vendor(world: &mut World, point: Point, now: Instant
         stock: vec![npc::StockLine {
             graphic: openshard_protocol::wire::Graphic(0x0F7A),
             hue: openshard_protocol::wire::Hue(0),
-            amount: 50,
-            price: 4,
+            amount: openshard_state::components::Amount(50),
+            price: openshard_state::components::Price(4),
             name: "black pearl".to_owned(),
         }],
     });
@@ -13812,7 +14087,7 @@ fn an_empty_tick_is_cheap_and_harmless() {
     for _ in 0..1000 {
         world.tick(now);
     }
-    assert_eq!(world.ticks(), 1000);
+    assert_eq!(world.ticks(), openshard_state::WorldTick::from_raw(1000));
     assert!(world.registry().is_empty());
 }
 
@@ -13877,7 +14152,7 @@ fn place_door(world: &mut World, at: Point, now: Instant) -> (EntityId, Serial) 
         facet: Facet(0),
         statics: Vec::new(),
         doors: vec![DecorDoor {
-            key_value: 0,
+            lock: None,
             closed: openshard_protocol::wire::Graphic(0x0675),
             open: openshard_protocol::wire::Graphic(0x0676),
             offset_x: -1,
@@ -16220,8 +16495,8 @@ fn a_shop_sells_goods_and_buys_them_back() {
         stock: vec![npc::StockLine {
             graphic: openshard_protocol::wire::Graphic(0x0F7A),
             hue: openshard_protocol::wire::Hue(0),
-            amount: 50,
-            price: 4,
+            amount: openshard_state::components::Amount(50),
+            price: openshard_state::components::Price(4),
             name: "black pearl".to_owned(),
         }],
     });
@@ -16539,8 +16814,8 @@ fn a_bought_out_shelf_refills_when_its_hour_is_up() {
         stock: vec![npc::StockLine {
             graphic: openshard_protocol::wire::Graphic(0x0F7A),
             hue: openshard_protocol::wire::Hue(0),
-            amount: 20,
-            price: 4,
+            amount: openshard_state::components::Amount(20),
+            price: openshard_state::components::Price(4),
             name: "black pearl".to_owned(),
         }],
     });
@@ -16895,7 +17170,7 @@ fn lod_an_engaged_creature_keeps_simulating() {
         Combat {
             warmode: true,
             target: Some(target),
-            next_swing: 0,
+            next_swing: openshard_state::WorldTick::ZERO,
         },
     );
     world
@@ -16903,7 +17178,7 @@ fn lod_an_engaged_creature_keeps_simulating() {
         .registry
         .get_mut::<Brain>(creature)
         .unwrap()
-        .next_think = 0;
+        .next_think = openshard_state::WorldTick::ZERO;
     world.tick(now);
     let base = world.state.gameplay.creature_step_ticks.max(1);
     let factor = world.state.gameplay.lod_idle_factor;
@@ -16986,10 +17261,16 @@ fn lod_a_spawner_with_no_player_near_stays_dormant_then_wakes() {
         facet: Facet(0),
     };
     world.queue(Command::RegisterSpawner {
-        spawner: Spawner::new(0, area, vec![creature], 3, 40),
+        spawner: Spawner::new(
+            openshard_state::SpawnerId::PLACEHOLDER,
+            area,
+            vec![creature],
+            3,
+            40,
+        ),
     });
     world.tick(now);
-    world.spawners[0].next_spawn = 0; // isolate the proximity gate from the jitter
+    world.spawners[0].next_spawn = openshard_state::WorldTick::ZERO; // isolate the proximity gate from the jitter
 
     for _ in 0..12 {
         world.tick(now);
@@ -17372,7 +17653,7 @@ fn a_deed_raises_the_house_cursor_and_answering_it_builds() {
     /// One wall, one tile east — the cottage the tables below describe.
     fn cottage() -> Vec<Component> {
         vec![Component {
-            graphic: WALL,
+            graphic: Graphic(WALL),
             dx: 1,
             dy: 0,
             dz: 0,
@@ -17478,7 +17759,7 @@ fn a_designed_house_announces_its_revision_and_answers_the_ask() {
     /// One wall, one tile east — the cottage the tables below describe.
     fn cottage() -> Vec<Component> {
         vec![Component {
-            graphic: WALL,
+            graphic: Graphic(WALL),
             dx: 1,
             dy: 0,
             dz: 0,
@@ -17533,7 +17814,7 @@ fn a_designed_house_announces_its_revision_and_answers_the_ask() {
         player,
         house,
         vec![openshard_uofiles::multi::Component {
-            graphic: VILLA_WALL,
+            graphic: Graphic(VILLA_WALL),
             dx: 2,
             dy: 0,
             dz: 0,
@@ -17620,7 +17901,7 @@ fn a_deed_for_a_foundation_builds_a_house_with_a_design() {
     fn platform() -> Vec<Component> {
         (-1..=1)
             .map(|dx| Component {
-                graphic: WALL,
+                graphic: Graphic(WALL),
                 dx,
                 dy: 0,
                 dz: 0,
@@ -17695,7 +17976,7 @@ fn a_deed_for_a_foundation_builds_a_house_with_a_design() {
     let shape = openshard_housing::design::shape_of_house(&world.state, house)
         .expect("a foundation placed from a deed has no design");
     assert!(
-        shape.iter().any(|component| component.graphic == 0x0751),
+        shape.iter().any(|component| component.graphic == Graphic(0x0751)),
         "the house a deed built has no stairs"
     );
     assert!(

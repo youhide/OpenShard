@@ -40,8 +40,9 @@ use std::fmt;
 /// but this type does not fold case itself. Every layer that keys a map by
 /// account name calls [`AccountName::normalized`] explicitly at the point it
 /// builds the key, the same way `Serial`/`EntityId` never hide validation
-/// inside a trait impl.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
+/// inside a trait impl. There is deliberately no `Default`: config validation
+/// rejects the empty string, and there is no context-free account to invent.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct AccountName(pub String);
 
 impl AccountName {

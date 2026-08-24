@@ -8,8 +8,8 @@
 use openshard_entities::EntityId;
 use openshard_protocol::serial::Serial;
 use openshard_state::components::{DoneQuest, QuestGiver, QuestLog, QuestState};
-use openshard_state::quest::ObjectiveKind;
-use openshard_state::{QuestGumpContext, QuestSection, TICKS_PER_SECOND, WorldState};
+use openshard_state::quest::{ObjectiveKind, QuestKey};
+use openshard_state::{QuestGumpContext, QuestSection, TICKS_PER_SECOND, WorldState, WorldTick};
 
 use crate::events::{QuestAccepted, QuestRefused, QuestResigned};
 use crate::gump::{self, sound};
@@ -74,12 +74,12 @@ pub fn talk_to(state: &mut WorldState, player: EntityId, giver: EntityId) -> boo
         state.system_message(player, "You may not take on any more quests.");
         return true;
     }
-    offer(state, player, &key.clone(), giver_serial);
+    offer(state, player, key, giver_serial);
     true
 }
 
 /// Put a quest in front of a player.
-pub fn offer(state: &mut WorldState, player: EntityId, key: &str, giver: Option<Serial>) {
+pub fn offer(state: &mut WorldState, player: EntityId, key: &QuestKey, giver: Option<Serial>) {
     if state.quests.get(key).is_none() {
         return;
     }
@@ -87,7 +87,7 @@ pub fn offer(state: &mut WorldState, player: EntityId, key: &str, giver: Option<
         state,
         player,
         QuestGumpContext {
-            quest: key.to_owned(),
+            quest: Some(key.clone()),
             section: QuestSection::Description,
             offer: true,
             completed: false,
@@ -102,7 +102,7 @@ pub fn offer(state: &mut WorldState, player: EntityId, key: &str, giver: Option<
 /// ServUO's `QuestHelper.CanOffer`, minus the chain rules (quest chains are
 /// deferred) and the objective-collision check.
 #[must_use]
-pub fn can_offer(state: &WorldState, player: EntityId, key: &str) -> bool {
+pub fn can_offer(state: &WorldState, player: EntityId, key: &QuestKey) -> bool {
     if state.quests.get(key).is_none() {
         return false;
     }
@@ -114,12 +114,12 @@ pub fn can_offer(state: &WorldState, player: EntityId, key: &str) -> bool {
     }
     log.done
         .iter()
-        .find(|done| done.key == key)
+        .find(|done| &done.key == key)
         .is_none_or(|done| state.ticks >= done.restart_at)
 }
 
 /// Take the quest: it goes in the log with every objective at zero.
-pub fn accept(state: &mut WorldState, player: EntityId, key: &str, giver: Option<Serial>) {
+pub fn accept(state: &mut WorldState, player: EntityId, key: &QuestKey, giver: Option<Serial>) {
     let Some(quest) = state.quests.get(key) else {
         return;
     };
@@ -141,7 +141,7 @@ pub fn accept(state: &mut WorldState, player: EntityId, key: &str, giver: Option
         return; // already taken; a double-click on Accept is not two quests
     }
     log.active.push(QuestState {
-        key: key.to_owned(),
+        key: key.clone(),
         progress,
         seconds_left,
         failed: false,
@@ -170,7 +170,7 @@ pub fn accept(state: &mut WorldState, player: EntityId, key: &str, giver: Option
     if let Some(serial) = state.registry.serial_of(player) {
         state.bus.send(QuestAccepted {
             player: serial,
-            key: key.to_owned(),
+            key: key.clone(),
         });
     }
     gump::play(state, player, sound::ACCEPT);
@@ -178,18 +178,18 @@ pub fn accept(state: &mut WorldState, player: EntityId, key: &str, giver: Option
 }
 
 /// Turn the offer down. Nothing is started, and the giver says its piece.
-pub fn refuse(state: &mut WorldState, player: EntityId, key: &str) {
+pub fn refuse(state: &mut WorldState, player: EntityId, key: &QuestKey) {
     if let Some(serial) = state.registry.serial_of(player) {
         state.bus.send(QuestRefused {
             player: serial,
-            key: key.to_owned(),
+            key: key.clone(),
         });
     }
     gump::show(
         state,
         player,
         QuestGumpContext {
-            quest: key.to_owned(),
+            quest: Some(key.clone()),
             section: QuestSection::Refuse,
             offer: true,
             completed: false,
@@ -200,11 +200,11 @@ pub fn refuse(state: &mut WorldState, player: EntityId, key: &str) {
 
 /// Give up a quest already taken. Its cooldown starts as if it had been finished,
 /// so resigning is not a way to re-roll a once-only quest.
-pub fn resign(state: &mut WorldState, player: EntityId, key: &str) {
+pub fn resign(state: &mut WorldState, player: EntityId, key: &QuestKey) {
     let Some(mut log) = state.registry.get::<QuestLog>(player).cloned() else {
         return;
     };
-    let Some(index) = log.active.iter().position(|quest| quest.key == key) else {
+    let Some(index) = log.active.iter().position(|quest| &quest.key == key) else {
         return;
     };
     let giver = log.active[index].giver;
@@ -220,7 +220,7 @@ pub fn resign(state: &mut WorldState, player: EntityId, key: &str) {
     if let Some(serial) = state.registry.serial_of(player) {
         state.bus.send(QuestResigned {
             player: serial,
-            key: key.to_owned(),
+            key: key.clone(),
         });
     }
     gump::play(state, player, sound::RESIGN);
@@ -229,20 +229,24 @@ pub fn resign(state: &mut WorldState, player: EntityId, key: &str) {
 
 /// Record that a quest is finished with (turned in or given up), with the wait
 /// before it may be taken again.
-pub(crate) fn remember_done(state: &WorldState, log: &mut openshard_state::components::QuestLog, key: &str) {
+pub(crate) fn remember_done(
+    state: &WorldState,
+    log: &mut openshard_state::components::QuestLog,
+    key: &QuestKey,
+) {
     let Some(quest) = state.quests.get(key) else {
         return;
     };
     let restart_at = if quest.done_once {
-        u64::MAX
+        WorldTick::MAX
     } else {
         state.ticks + u64::from(quest.restart_delay_secs) * TICKS_PER_SECOND
     };
-    if let Some(done) = log.done.iter_mut().find(|done| done.key == key) {
+    if let Some(done) = log.done.iter_mut().find(|done| &done.key == key) {
         done.restart_at = restart_at;
     } else {
         log.done.push(DoneQuest {
-            key: key.to_owned(),
+            key: key.clone(),
             restart_at,
         });
     }
@@ -250,7 +254,7 @@ pub(crate) fn remember_done(state: &WorldState, log: &mut openshard_state::compo
 
 /// Whether a player's copy of a quest has failed its timer.
 #[must_use]
-pub fn failed(state: &WorldState, player: EntityId, key: &str) -> bool {
+pub fn failed(state: &WorldState, player: EntityId, key: &QuestKey) -> bool {
     state
         .registry
         .get::<QuestLog>(player)

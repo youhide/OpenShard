@@ -1,4 +1,5 @@
 use openshard_protocol::serial::Serial;
+use openshard_state::QuestKey;
 
 /// Which objective a quest definition's `objectives` names — the same index a
 /// `QuestState::progress` slot is at. Crosses the event bus into scripting
@@ -54,7 +55,7 @@ pub struct QuestAccepted {
     /// Who took it.
     pub player: Serial,
     /// Which quest, by its key.
-    pub key: String,
+    pub key: QuestKey,
 }
 
 /// A player turned an offered quest down. Nothing was started.
@@ -63,7 +64,7 @@ pub struct QuestRefused {
     /// Who refused.
     pub player: Serial,
     /// Which quest, by its key.
-    pub key: String,
+    pub key: QuestKey,
 }
 
 /// A player gave up on a quest they had taken.
@@ -72,7 +73,7 @@ pub struct QuestResigned {
     /// Who resigned.
     pub player: Serial,
     /// Which quest, by its key.
-    pub key: String,
+    pub key: QuestKey,
 }
 
 /// An objective moved — a kill counted, an item found, a leg of a journey walked.
@@ -81,7 +82,7 @@ pub struct QuestObjectiveUpdated {
     /// Whose quest.
     pub player: Serial,
     /// Which quest, by its key.
-    pub key: String,
+    pub key: QuestKey,
     /// Which objective, by its index in the definition.
     pub objective: ObjectiveIndex,
     /// Its current and required amounts.
@@ -94,7 +95,7 @@ pub struct QuestFailed {
     /// Whose quest.
     pub player: Serial,
     /// Which quest, by its key.
-    pub key: String,
+    pub key: QuestKey,
 }
 
 /// A quest was turned in and paid.
@@ -108,7 +109,7 @@ pub struct QuestCompleted {
     /// Who finished it.
     pub player: Serial,
     /// Which quest, by its key.
-    pub key: String,
+    pub key: QuestKey,
     /// Who it was turned in to, if the giver is still around.
     pub giver: Option<Serial>,
 }

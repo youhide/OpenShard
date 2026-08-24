@@ -385,9 +385,10 @@ fn make_key(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         notify(state, actor, "No room for a key.");
         return;
     };
-    state
-        .registry
-        .insert(key, openshard_state::components::KeyValue(value));
+    state.registry.insert(
+        key,
+        openshard_state::components::KeyValue::new(value).expect("non-zero staff key"),
+    );
     state
         .registry
         .insert(key, openshard_state::components::Name(format!("a key ({value})")));
@@ -796,7 +797,7 @@ fn set_skill(state: &mut WorldState, actor: EntityId, args: &[&str]) {
 /// At the operator's feet rather than at a clicked tile, `.add`'s convention,
 /// which also means the placement is somewhere they are standing and can see.
 fn place_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
-    let Some(multi) = args.first().and_then(parse_u16) else {
+    let Some(raw_multi) = args.first().and_then(parse_u16) else {
         notify(state, actor, "Usage: .house <multi id>, e.g. .house 0x64");
         return;
     };
@@ -807,11 +808,12 @@ fn place_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     let Some(owner) = state.registry.serial_of(actor) else {
         return;
     };
+    let multi = openshard_protocol::wire::MultiId::from_graphic(Graphic(raw_multi));
     match openshard_housing::place(state, actor, at, facet, multi, owner) {
         Ok(_) => notify(
             state,
             actor,
-            &format!("A house ({multi:#06x}) stands at your feet."),
+            &format!("A house ({:#06x}) stands at your feet.", multi.0),
         ),
         Err(refusal) => notify(state, actor, refusal.message()),
     }
@@ -825,7 +827,7 @@ fn place_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
 /// the pointer. Until a vendor sells one this is the only way to hold a deed, and
 /// without it the whole H2 path is unreachable on a running shard.
 fn make_deed(state: &mut WorldState, actor: EntityId, args: &[&str]) {
-    let Some(multi) = args.first().and_then(parse_u16) else {
+    let Some(raw_multi) = args.first().and_then(parse_u16) else {
         notify(state, actor, "Usage: .deed <multi id>, e.g. .deed 0x64");
         return;
     };
@@ -838,7 +840,7 @@ fn make_deed(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         notify(state, actor, "No room for a deed.");
         return;
     };
-    let multi = openshard_protocol::wire::MultiId(multi & !openshard_protocol::wire::MultiId::FLAG);
+    let multi = openshard_protocol::wire::MultiId::from_graphic(Graphic(raw_multi));
     state
         .registry
         .insert(deed, openshard_state::components::HouseDeed { multi });
@@ -882,7 +884,7 @@ fn demolish_house(state: &mut WorldState, actor: EntityId) {
 /// on the arithmetic, so a hull that would land off the edge of the world is
 /// still refused. `docs/boats.md`'s B1.
 fn launch_boat(state: &mut WorldState, actor: EntityId, args: &[&str]) {
-    let Some(multi) = args.first().and_then(parse_u16) else {
+    let Some(raw_multi) = args.first().and_then(parse_u16) else {
         notify(state, actor, "Usage: .boat <multi id>, e.g. .boat 0x0C");
         return;
     };
@@ -895,11 +897,12 @@ fn launch_boat(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     let Some(owner) = state.registry.serial_of(actor) else {
         return;
     };
+    let multi = openshard_protocol::wire::MultiId::from_graphic(Graphic(raw_multi));
     match openshard_boats::place(state, actor, at, facet, multi, owner) {
         Ok(_) => notify(
             state,
             actor,
-            &format!("A ship ({multi:#06x}) is moored at your feet."),
+            &format!("A ship ({:#06x}) is moored at your feet.", multi.0),
         ),
         Err(refusal) => notify(state, actor, refusal.message()),
     }
@@ -971,7 +974,7 @@ fn compass(word: &str) -> Option<Direction> {
 /// It is also the only way a shard ships its own architecture today: a pack can
 /// give a house a shape no `multi.mul` entry has, without editing a client file.
 fn design_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
-    let Some(multi) = args.first().and_then(parse_u16) else {
+    let Some(raw_multi) = args.first().and_then(parse_u16) else {
         notify(state, actor, "Usage: .hdesign <multi id>, e.g. .hdesign 0x65");
         return;
     };
@@ -985,10 +988,10 @@ fn design_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         notify(state, actor, "You are not standing in a house.");
         return;
     };
-    let multi = multi & !openshard_protocol::wire::MultiId::FLAG;
+    let multi = openshard_protocol::wire::MultiId::from_graphic(Graphic(raw_multi));
     // Straight out of the client files, which is the point: a design this shard
     // *invented* is C3's editor, and this one is a shape already known to draw.
-    let components = state.multis.components(multi).to_vec();
+    let components = state.multis.components(multi.0).to_vec();
     if components.is_empty() {
         notify(state, actor, "No multi by that id.");
         return;
@@ -997,7 +1000,7 @@ fn design_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
         Ok(revision) => notify(
             state,
             actor,
-            &format!("The house is rebuilt to {multi:#06x} (revision {revision})."),
+            &format!("The house is rebuilt to {:#06x} (revision {revision}).", multi.0),
         ),
         Err(refusal) => notify(state, actor, refusal.message()),
     }

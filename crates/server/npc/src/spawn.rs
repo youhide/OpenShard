@@ -237,7 +237,10 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
         entity,
         Resistance {
             physical: resistance.get(),
-            ..Default::default()
+            fire: 0,
+            cold: 0,
+            poison: 0,
+            energy: 0,
         },
     );
     // Zero means "derive from dexterity", so a script that does not care about
@@ -279,7 +282,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
                 sight,
                 wander,
                 next_think: first,
-                guard_until: 0,
+                guard_until: openshard_state::WorldTick::ZERO,
                 opens_doors: body_opens_doors(body),
                 aggression,
                 beat_ticks: beat,
@@ -340,7 +343,7 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
                 home: position,
                 wander: TOWNSFOLK_WANDER,
                 next_beat: first,
-                next_greet: 0,
+                next_greet: openshard_state::WorldTick::ZERO,
             },
         );
         if let Some(at) = night_home {

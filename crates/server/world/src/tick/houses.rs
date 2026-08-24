@@ -21,8 +21,7 @@ use openshard_persistence::record::HouseRecord;
 use openshard_protocol::serial::{RawSerial, Serial};
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::target::{MultiTargetRequest, TargetKind};
-use openshard_protocol::wire::CursorId;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{CursorId, Graphic, Hue};
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::TargetPurpose;
 use openshard_state::components::{
@@ -43,7 +42,7 @@ impl World {
                 let &Position(at) = self.state.registry.get::<Position>(entity)?;
                 Some(HouseRecord {
                     serial,
-                    multi: house.multi,
+                    multi: house.multi.0,
                     x: at.x,
                     y: at.y,
                     z: at.z,
@@ -99,7 +98,7 @@ impl World {
                 let &Position(at) = self.state.registry.get::<Position>(entity)?;
                 Some(openshard_persistence::record::BoatRecord {
                     serial,
-                    multi: boat.multi,
+                    multi: boat.multi.0,
                     x: at.x,
                     y: at.y,
                     z: at.z,
@@ -132,7 +131,7 @@ impl World {
             self.state.registry.insert(
                 entity,
                 Drawn {
-                    id: Graphic(openshard_boats::MULTI_FLAG | record.multi),
+                    id: openshard_protocol::wire::MultiId(record.multi).graphic(),
                     hue: Hue(0),
                 },
             );
@@ -140,7 +139,7 @@ impl World {
             self.state.registry.insert(
                 entity,
                 openshard_state::components::Boat {
-                    multi: record.multi,
+                    multi: openshard_protocol::wire::MultiId(record.multi),
                     owner: record.owner,
                 },
             );
@@ -149,7 +148,12 @@ impl World {
             // The hull-and-deck split, recomputed. A shard with no client files
             // gets a ship that draws on every client and carries nobody — the
             // same bargain a house's walls make, and for the same reason.
-            match openshard_boats::planks_of(&self.state, entity, at, record.multi) {
+            match openshard_boats::planks_of(
+                &self.state,
+                entity,
+                at,
+                openshard_protocol::wire::MultiId(record.multi),
+            ) {
                 Ok(berth) => self.state.facet_state_mut(facet).moor(entity, berth),
                 Err(_) => shapeless += 1,
             }
@@ -179,7 +183,7 @@ impl World {
                     openshard_persistence::record::HouseDesignRecord {
                         house,
                         revision: design.revision,
-                        graphic: component.graphic,
+                        graphic: component.graphic.0,
                         dx: component.dx,
                         dy: component.dy,
                         dz: component.dz,
@@ -212,7 +216,7 @@ impl World {
             let entry = by_house.entry(row.house).or_insert((row.revision, Vec::new()));
             entry.0 = row.revision;
             entry.1.push(openshard_uofiles::multi::Component {
-                graphic: row.graphic,
+                graphic: Graphic(row.graphic),
                 dx: row.dx,
                 dy: row.dy,
                 dz: row.dz,
@@ -233,7 +237,7 @@ impl World {
             self.state.registry.insert(
                 entity,
                 Drawn {
-                    id: Graphic(openshard_housing::MULTI_FLAG | record.multi),
+                    id: openshard_protocol::wire::MultiId(record.multi).graphic(),
                     hue: Hue(0),
                 },
             );
@@ -241,7 +245,7 @@ impl World {
             self.state.registry.insert(
                 entity,
                 House {
-                    multi: record.multi,
+                    multi: openshard_protocol::wire::MultiId(record.multi),
                     owner: record.owner,
                     // A saved serial that will not parse is dropped rather than
                     // refused: a name this engine cannot read is a name it cannot
@@ -266,7 +270,12 @@ impl World {
             }
             let shape = design.as_ref().map(|(_, components)| components.as_slice());
 
-            match openshard_housing::footprint_of(&self.state, at, record.multi, shape) {
+            match openshard_housing::footprint_of(
+                &self.state,
+                at,
+                openshard_protocol::wire::MultiId(record.multi),
+                shape,
+            ) {
                 Ok(footprint) => {
                     openshard_housing::block(&mut self.state, entity, facet, &footprint);
                 }
@@ -281,7 +290,13 @@ impl World {
             // of it would go stale the day the operator updates their install.
             // A shard with no client files gets no sign, the same bargain the
             // walls make.
-            openshard_housing::hang_sign(&mut self.state, entity, facet, at, record.multi);
+            openshard_housing::hang_sign(
+                &mut self.state,
+                entity,
+                facet,
+                at,
+                openshard_protocol::wire::MultiId(record.multi),
+            );
             restored += 1;
         }
         if restored > 0 {
@@ -325,7 +340,7 @@ impl World {
         let Some(owner) = self.state.registry.serial_of(actor) else {
             return;
         };
-        match openshard_housing::place(&mut self.state, actor, at, facet, multi.0, owner) {
+        match openshard_housing::place(&mut self.state, actor, at, facet, multi, owner) {
             Ok(_) => {
                 if let Some(serial) = self.state.registry.serial_of(deed) {
                     items::consume(&mut self.state, serial, 1);

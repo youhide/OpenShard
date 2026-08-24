@@ -13,6 +13,7 @@ use openshard_state::components::{
     QuestState, RangedAttack, Restock, RuneMark, Runebook, RunebookEntry, Skills, Spellbook, StatMod,
     StatMods, StockRecord, SwingSpeed, Title, TradeWindow, Trap, TrapKind, Vendor, body_opens_doors, effect,
 };
+use openshard_state::{KeyValue, LockKind, QuestKey, WorldTick};
 
 /// The serials [`World::restore_characters`] reserved, and the proof it ran.
 ///
@@ -152,8 +153,8 @@ impl World {
         // because every online character is saved in full below regardless — an
         // item picked up without a step never marks the character dirty, so the
         // dirty set is not a safe basis for saving what a character holds.
-        let mut snapshot = self.journal.drain(ticks, |_| None).unwrap_or(Snapshot {
-            tick: ticks,
+        let mut snapshot = self.journal.drain(ticks.raw(), |_| None).unwrap_or(Snapshot {
+            tick: ticks.raw(),
             schema: SCHEMA_VERSION,
             characters: Vec::new(),
             removed: Vec::new(),
@@ -252,7 +253,7 @@ impl World {
         {
             return;
         }
-        debug!(tick = ticks, rows = snapshot.len(), "snapshot taken");
+        debug!(tick = ticks.raw(), rows = snapshot.len(), "snapshot taken");
         self.saves.push(snapshot);
     }
 
@@ -555,7 +556,7 @@ impl World {
                     default_entry: book.default_entry,
                     // Not saved: a couple of seconds' cooldown that a restart
                     // re-arms at zero, which errs the player's way.
-                    next_use: 0,
+                    next_use: WorldTick::ZERO,
                 },
             );
         }
@@ -663,21 +664,19 @@ impl World {
                     lines: shelf
                         .lines
                         .iter()
-                        .map(|l| (l.graphic.0, l.hue.0, l.amount, l.price, l.name.clone()))
+                        .map(|l| (l.graphic.0, l.hue.0, l.amount.0, l.price.0, l.name.clone()))
                         .collect(),
                 }),
-                // `SpawnedBy` is a plain index into the spawner list (0, 1, 2, ...), not
-                // a wire serial — a namespace of its own that starts at 0, which
-                // `Serial::new` would reject outright. It is not part of the Serial
-                // sweep and stays a bare `u32`.
+                // `SpawnedBy` is an index into the spawner list (0, 1, 2, ...),
+                // not a wire serial — its own namespace starts at zero.
                 spawned_by: registry.get::<SpawnedBy>(entity).map(|s| s.0),
                 effects: Self::effects_of(registry, entity, self.state.ticks),
                 skills: registry.get::<Skills>(entity).map_or_else(Vec::new, |s| {
                     s.entries().map(|(skill, value, _)| (skill.id(), value)).collect()
                 }),
-                quest_giver: registry
-                    .get::<QuestGiver>(entity)
-                    .map_or_else(Vec::new, |giver| giver.keys.clone()),
+                quest_giver: registry.get::<QuestGiver>(entity).map_or_else(Vec::new, |giver| {
+                    giver.keys.iter().map(|key| key.as_str().to_owned()).collect()
+                }),
                 escort_destination: registry
                     .get::<Escortable>(entity)
                     .map(|escort| escort.destination.clone()),
@@ -705,8 +704,15 @@ impl World {
                 open_graphic: door.open.0,
                 offset_x: door.offset_x,
                 offset_y: door.offset_y,
+                link: door.link,
                 is_open: door.is_open,
             });
+            let lock = registry.get::<openshard_state::components::Lock>(entity);
+            let (locked, key_value) = match lock.map(|lock| lock.kind) {
+                None => (false, 0),
+                Some(LockKind::Key(key)) => (true, key.raw()),
+                Some(LockKind::Unopenable) => (true, 0),
+            };
             records.push(DecorationRecord {
                 serial,
                 graphic: id.0,
@@ -717,9 +723,8 @@ impl World {
                 z: at.z,
                 door,
                 container_gump: registry.get::<Container>(entity).map(|c| c.gump.0),
-                key_value: registry
-                    .get::<openshard_state::components::Lock>(entity)
-                    .map_or(0, |lock| lock.key_value),
+                key_value,
+                locked,
             });
         }
         records
@@ -735,7 +740,7 @@ impl World {
     /// a relog carries a debuff instead of washing it off. For poison the
     /// `remaining` is the pulse count; for a timed buff it is the ticks left until
     /// it lifts, measured from `now`. A buff's `amount` is its signed stat offset.
-    pub(super) fn effects_of(registry: &Registry, entity: EntityId, now: u64) -> Vec<EffectRecord> {
+    pub(super) fn effects_of(registry: &Registry, entity: EntityId, now: WorldTick) -> Vec<EffectRecord> {
         let mut effects = Vec::new();
         if let Some(poison) = registry.get::<Poisoned>(entity) {
             effects.push(EffectRecord {
@@ -788,7 +793,7 @@ impl World {
         registry: &mut Registry,
         entity: EntityId,
         effects: &[EffectRecord],
-        now: u64,
+        now: WorldTick,
     ) {
         let mut mods = StatMods::default();
         let mut buffs = BehaviourBuffs::default();
@@ -836,7 +841,11 @@ impl World {
         }
     }
 
-    pub(super) fn record_of(registry: &Registry, entity: EntityId, now: u64) -> Option<CharacterRecord> {
+    pub(super) fn record_of(
+        registry: &Registry,
+        entity: EntityId,
+        now: WorldTick,
+    ) -> Option<CharacterRecord> {
         let serial = registry.serial_of(entity)?;
         let position = registry.get::<Position>(entity)?.0;
         let heading = registry.get::<Heading>(entity)?.0;
@@ -880,7 +889,7 @@ impl World {
             .get::<openshard_state::components::LastStatGain>(entity)
             .copied()
             .unwrap_or_default();
-        let age = |then: u64| now.saturating_sub(then);
+        let age = |then: WorldTick| now.saturating_sub(then);
         let stat_locks = openshard_persistence::StatLockRecord {
             strength: locks.strength.to_bits(),
             dexterity: locks.dexterity.to_bits(),
@@ -951,7 +960,7 @@ impl World {
         log.active
             .iter()
             .map(|quest| QuestRecord {
-                key: quest.key.clone(),
+                key: quest.key.as_str().to_owned(),
                 progress: quest.progress.clone(),
                 seconds: quest.seconds_left.clone(),
                 failed: quest.failed,
@@ -962,15 +971,19 @@ impl World {
 
     /// The quests a character has finished, with the wait before each may be
     /// taken again — again a remaining span rather than a deadline.
-    pub(super) fn done_quests_of(registry: &Registry, entity: EntityId, now: u64) -> Vec<DoneQuestRecord> {
+    pub(super) fn done_quests_of(
+        registry: &Registry,
+        entity: EntityId,
+        now: WorldTick,
+    ) -> Vec<DoneQuestRecord> {
         let Some(log) = registry.get::<QuestLog>(entity) else {
             return Vec::new();
         };
         log.done
             .iter()
             .map(|done| DoneQuestRecord {
-                key: done.key.clone(),
-                restart_in_secs: if done.restart_at == u64::MAX {
+                key: done.key.as_str().to_owned(),
+                restart_in_secs: if done.restart_at == WorldTick::MAX {
                     u32::MAX // never again
                 } else {
                     let ticks = done.restart_at.saturating_sub(now);
@@ -987,7 +1000,7 @@ impl World {
         entity: EntityId,
         quests: &[QuestRecord],
         done: &[DoneQuestRecord],
-        now: u64,
+        now: WorldTick,
     ) {
         if quests.is_empty() && done.is_empty() {
             return;
@@ -996,7 +1009,7 @@ impl World {
             active: quests
                 .iter()
                 .map(|record| QuestState {
-                    key: record.key.clone(),
+                    key: QuestKey::from(record.key.clone()),
                     progress: record.progress.clone(),
                     seconds_left: record.seconds.clone(),
                     failed: record.failed,
@@ -1006,9 +1019,9 @@ impl World {
             done: done
                 .iter()
                 .map(|record| DoneQuest {
-                    key: record.key.clone(),
+                    key: QuestKey::from(record.key.clone()),
                     restart_at: if record.restart_in_secs == u32::MAX {
-                        u64::MAX
+                        WorldTick::MAX
                     } else {
                         now + u64::from(record.restart_in_secs) * TICKS_PER_SECOND
                     },
@@ -1419,7 +1432,10 @@ impl World {
                 entity,
                 Resistance {
                     physical: record.resistance.get(),
-                    ..Default::default()
+                    fire: 0,
+                    cold: 0,
+                    poison: 0,
+                    energy: 0,
                 },
             );
             if record.swing != 0 {
@@ -1444,7 +1460,7 @@ impl World {
                         sight: record.sight,
                         wander: record.wander,
                         next_think: first_think,
-                        guard_until: 0,
+                        guard_until: WorldTick::ZERO,
                         opens_doors: body_opens_doors(Graphic(record.body)),
                         aggression,
                         beat_ticks: record.beat,
@@ -1493,8 +1509,8 @@ impl World {
                             .map(|(graphic, hue, amount, price, name)| StockRecord {
                                 graphic: Graphic(graphic),
                                 hue: Hue(hue),
-                                amount,
-                                price,
+                                amount: Amount(amount),
+                                price: Price(price),
                                 name,
                             })
                             .collect(),
@@ -1511,7 +1527,7 @@ impl World {
                         // Eligible to greet at once, which is not the same as
                         // greeting at once: `attend` rolls for it, and the beats
                         // above no longer arrive together anyway.
-                        next_greet: 0,
+                        next_greet: WorldTick::ZERO,
                     },
                 );
             }
@@ -1544,7 +1560,7 @@ impl World {
                 self.state.registry.insert(
                     entity,
                     QuestGiver {
-                        keys: record.quest_giver.clone(),
+                        keys: record.quest_giver.iter().cloned().map(QuestKey::from).collect(),
                     },
                 );
             }
@@ -1557,7 +1573,7 @@ impl World {
                         // with the session it was walked in, the way a cast in
                         // flight or a swing timer does.
                         escorter: None,
-                        last_seen: 0,
+                        last_seen: WorldTick::ZERO,
                     },
                 );
             }
@@ -1618,12 +1634,15 @@ impl World {
             self.state.registry.insert(entity, Decoration);
             // The lock, on either kind: a door that was locked at the save comes back
             // locked, or a shard's set-piece unbars itself at every reboot.
-            if record.key_value != 0 {
+            if record.locked || record.key_value != 0 {
                 self.state.registry.insert(
                     entity,
                     openshard_state::components::Lock {
-                        key_value: record.key_value,
-                        ..Default::default()
+                        kind: KeyValue::new(record.key_value)
+                            .map(LockKind::Key)
+                            .unwrap_or(LockKind::Unopenable),
+                        required_skill: 0,
+                        max_skill: 0,
                     },
                 );
             }
@@ -1641,8 +1660,9 @@ impl World {
                             open: Graphic(door.open_graphic),
                             offset_x: door.offset_x,
                             offset_y: door.offset_y,
+                            link: door.link,
                             is_open: door.is_open,
-                            close_at: 0,
+                            close_at: WorldTick::ZERO,
                         },
                     );
                     // A shut door seals its doorway again; an open one blocks

@@ -235,7 +235,7 @@ fn a_pickaxe_swung_at_a_mountain_yields_ore_and_empties_the_vein() {
         START.0 + 1,
         START.1,
         Facet(0),
-        0,
+        openshard_state::WorldTick::ZERO,
         &mut Rng::new(1),
     );
     assert_eq!(
@@ -294,9 +294,16 @@ fn a_vein_runs_dry_and_says_so() {
         let def = definition(HarvestKind::Ore, true);
         let mut rng = Rng::new(1);
         let banks = &mut world.state.facet_state_mut(Facet(0)).banks;
-        let bank = banks.get(def, START.0 + 1, START.1, Facet(0), 0, &mut rng);
+        let bank = banks.get(
+            def,
+            START.0 + 1,
+            START.1,
+            Facet(0),
+            openshard_state::WorldTick::ZERO,
+            &mut rng,
+        );
         let all = bank.maximum;
-        bank.consume(def, all, 0, &mut rng);
+        bank.consume(def, all, openshard_state::WorldTick::ZERO, &mut rng);
     }
     let _ = packets_for(&mut world, player);
 
@@ -589,7 +596,7 @@ fn a_full_pack_loses_the_ore_and_tells_the_miner() {
         START.0 + 1,
         START.1,
         Facet(0),
-        0,
+        openshard_state::WorldTick::ZERO,
         &mut Rng::new(1),
     );
     assert_eq!(

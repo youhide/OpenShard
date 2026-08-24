@@ -35,19 +35,11 @@
 use openshard_entities::EntityId;
 use openshard_map::grid::Tile;
 use openshard_protocol::serial::Serial;
-use openshard_protocol::wire::{Graphic, Hue};
+use openshard_protocol::wire::{Hue, MultiId};
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::WorldState;
 use openshard_state::boat::Plank;
 use openshard_state::components::{Boat, Drawn, Movement, Position, Sailing};
-
-/// The bit a multi's graphic carries on the wire.
-///
-/// The protocol's own, not a copy of housing's: a boat is a multi for the same
-/// reason a house is, and both are reading the same wire fact. This crate does
-/// **not** depend on `openshard-housing` — they are siblings, and the one thing
-/// they share is a constant that belongs to neither.
-pub const MULTI_FLAG: u16 = openshard_protocol::wire::MultiId::FLAG;
 
 /// Why a boat could not be launched.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -102,19 +94,23 @@ type Berth = ((u16, u16), Plank);
 ///
 /// Undrawn components are skipped, the way a house's footprint skips them: the
 /// signature tile every multi opens with is not part of the ship.
-pub fn planks_of(state: &WorldState, boat: EntityId, at: Point, multi: u16) -> Result<Vec<Berth>, Refusal> {
-    let multi = multi & !MULTI_FLAG;
+pub fn planks_of(
+    state: &WorldState,
+    boat: EntityId,
+    at: Point,
+    multi: MultiId,
+) -> Result<Vec<Berth>, Refusal> {
     // The shard's tables, not the facet's ground: what a ship is made of and how
     // tall each piece of it is are facts about the install. Where it may float is
     // the facet's business, and that is `check_berth`'s question.
-    let components = state.multis.components(multi);
+    let components = state.multis.components(multi.0);
     if components.is_empty() {
         return Err(Refusal::NoSuchMulti);
     }
     let tiledata = state.tiles();
     let mut out = Vec::new();
     for component in components.iter().filter(|c| c.drawn()) {
-        let graphic = Graphic(component.graphic);
+        let graphic = component.graphic;
         let (Ok(x), Ok(y)) = (
             u16::try_from(i32::from(at.x) + i32::from(component.dx)),
             u16::try_from(i32::from(at.y) + i32::from(component.dy)),
@@ -144,11 +140,10 @@ pub fn place(
     actor: EntityId,
     at: Point,
     facet: Facet,
-    multi: u16,
+    multi: MultiId,
     owner: Serial,
 ) -> Result<EntityId, Refusal> {
     let staff = state.is_staff(actor);
-    let multi = multi & !MULTI_FLAG;
 
     let Ok((entity, _)) = state
         .registry
@@ -177,7 +172,7 @@ pub fn place(
     state.registry.insert(
         entity,
         Drawn {
-            id: Graphic(MULTI_FLAG | multi),
+            id: multi.graphic(),
             hue: Hue(0),
         },
     );

@@ -25,6 +25,7 @@ use openshard_protocol::world::PoisonLevel;
 use openshard_protocol::world::{
     Aggression, DamageType, FollowerSlots, PhysicalResistance, RangedRange, Sight,
 };
+use openshard_state::SpawnerId;
 use serde::{Deserialize, Serialize};
 
 /// The persisted state of a container trap.
@@ -357,7 +358,10 @@ mod optional_serial {
 ///   none in it, and every ship on the shard is gone on the next boot along with
 ///   whatever was standing on the deck's tiles. A house at least stays where it
 ///   was; a fleet does not come back.
-pub const SCHEMA_VERSION: u32 = 32;
+/// - v33: a generated double door's two leaves name each other. The optional
+///   serial lives inside `DoorState`, so both SQLite and Postgres keep the pair
+///   together through their existing decoration JSON.
+pub const SCHEMA_VERSION: u32 = 33;
 
 /// One component of a house whose shape nobody shipped.
 ///
@@ -1134,7 +1138,7 @@ pub struct CreatureData {
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct SpawnerRecord {
     /// Its stable id, the key it is replaced by.
-    pub id: u32,
+    pub id: SpawnerId,
     /// Which facet.
     pub facet: u8,
     /// The region's north-west corner and size.
@@ -1256,11 +1260,8 @@ pub struct MobileRecord {
     /// counts it and does not spawn over it.
     ///
     /// Not a [`Serial`]: it is `SpawnedBy`'s index into the world's spawner
-    /// list (`SpawnerRecord::id`), a namespace of its own that starts at `0` —
-    /// a value `Serial::new` would reject outright. Converting this field
-    /// alongside the others in the sweep was the wrong call; it stays a bare
-    /// `u32`.
-    pub spawned_by: Option<u32>,
+    /// list (`SpawnerRecord::id`), a namespace of its own that starts at `0`.
+    pub spawned_by: Option<SpawnerId>,
     /// Every timed effect working through it — poison and the rest.
     #[serde(default)]
     pub effects: Vec<EffectRecord>,
@@ -1304,6 +1305,9 @@ pub struct DoorState {
     pub offset_x: i16,
     /// How far the leaf swings north-south when opened.
     pub offset_y: i16,
+    /// The other leaf of a generated double door. Older saves had no link.
+    #[serde(default, with = "optional_serial")]
+    pub link: Option<Serial>,
     /// Whether it stood open at the save — a door left open stays open.
     pub is_open: bool,
 }
@@ -1332,11 +1336,15 @@ pub struct DecorationRecord {
     pub door: Option<DoorState>,
     /// The container gump if this decoration opens as one, else `None`.
     pub container_gump: Option<u16>,
-    /// Which key opens it; `0` is unlocked. On the record rather than inside
+    /// Which key opens it; `0` is the unlocked/no-key boundary representation. On the record rather than inside
     /// [`DoorState`] because a container locks too, and a lock is the same thing on
     /// either — ServUO's `ILockable`. Defaulted, so an older save reads as unlocked.
     #[serde(default)]
     pub key_value: u32,
+    /// Whether a lock is present. Separates an unlocked legacy `key_value: 0`
+    /// from a deliberately unopenable lock.
+    #[serde(default)]
+    pub locked: bool,
 }
 
 /// One named area of a facet, as saved.

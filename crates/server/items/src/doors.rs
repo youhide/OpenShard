@@ -1,7 +1,7 @@
 use super::*;
 use openshard_protocol::wire::Hue;
-use openshard_state::Standing;
 use openshard_state::components::{House, HouseDoor};
+use openshard_state::{KeyValue, Lock, LockKind, Standing, WorldTick};
 
 /// How long a door stays open before it swings shut on its own, in ticks —
 /// roughly the classic client's self-closing delay.
@@ -53,7 +53,7 @@ pub fn toggle_door(state: &mut WorldState, player: EntityId, door: EntityId, ser
         state.system_message(player, LOCKED_MESSAGE);
         return;
     }
-    set_door(state, door, serial, !is_open);
+    set_door_pair(state, door, serial, !is_open);
 }
 
 /// What a house door says to somebody it does not know. ServUO's own line for a
@@ -135,7 +135,7 @@ pub fn is_locked(state: &WorldState, entity: EntityId) -> bool {
 /// works and a key to another door does not. A fitting key toggles the lock, which is
 /// how ServUO's keys both lock and unlock.
 pub fn turn_key(state: &mut WorldState, player: EntityId, key: EntityId, target: EntityId) -> bool {
-    let Some(&KeyValue(value)) = state.registry.get::<KeyValue>(key) else {
+    let Some(&value) = state.registry.get::<KeyValue>(key) else {
         return false;
     };
     // A door or a container is lockable; nothing else is.
@@ -144,7 +144,10 @@ pub fn turn_key(state: &mut WorldState, player: EntityId, key: EntityId, target:
     }
     match state.registry.get::<Lock>(target).copied() {
         // Locked, and this key fits: unlock it.
-        Some(Lock { key_value, .. }) if key_value == value && value != 0 => {
+        Some(Lock {
+            kind: LockKind::Key(key_value),
+            ..
+        }) if key_value == value => {
             state.registry.remove::<Lock>(target);
             state.system_message(player, "You unlock it.");
             true
@@ -155,18 +158,18 @@ pub fn turn_key(state: &mut WorldState, player: EntityId, key: EntityId, target:
             false
         }
         // Unlocked: the same key locks it again.
-        None if value != 0 => {
+        None => {
             state.registry.insert(
                 target,
                 Lock {
-                    key_value: value,
-                    ..Default::default()
+                    kind: LockKind::Key(value),
+                    required_skill: 0,
+                    max_skill: 0,
                 },
             );
             state.system_message(player, "You lock it.");
             true
         }
-        None => false,
     }
 }
 
@@ -186,6 +189,7 @@ pub(crate) fn set_door(state: &mut WorldState, door: EntityId, serial: Serial, o
         open: open_id,
         offset_x,
         offset_y,
+        link,
         is_open,
         ..
     }) = state.registry.get::<Door>(door)
@@ -206,7 +210,7 @@ pub(crate) fn set_door(state: &mut WorldState, door: EntityId, serial: Serial, o
             state.ticks + DOOR_OPEN_TICKS,
         )
     } else {
-        (closed, shift(at, -offset_x, -offset_y), 0)
+        (closed, shift(at, -offset_x, -offset_y), WorldTick::ZERO)
     };
 
     for watcher in state.watchers_of(door) {
@@ -228,6 +232,7 @@ pub(crate) fn set_door(state: &mut WorldState, door: EntityId, serial: Serial, o
             open: open_id,
             offset_x,
             offset_y,
+            link,
             is_open: open,
             close_at,
         },
@@ -251,6 +256,43 @@ pub(crate) fn set_door(state: &mut WorldState, door: EntityId, serial: Serial, o
     state.reveal(door);
 }
 
+/// Put one leaf and its linked twin into the same state. The link is a stable
+/// serial because generated decoration survives a restart; a missing or stale
+/// target degrades to an ordinary single door.
+fn set_door_pair(state: &mut WorldState, door: EntityId, serial: Serial, open: bool) {
+    let linked = linked_door(state, door);
+    set_door(state, door, serial, open);
+    if let Some((other, other_serial)) = linked {
+        set_door(state, other, other_serial, open);
+    }
+}
+
+/// Resolve the other leaf without following the reciprocal link. A corrupt
+/// self-link is ignored, and a serial whose entity is gone is simply stale.
+fn linked_door(state: &WorldState, door: EntityId) -> Option<(EntityId, Serial)> {
+    let serial = state.registry.get::<Door>(door)?.link?;
+    let other = state.registry.entity_of(serial)?;
+    (other != door && state.registry.has::<Door>(other)).then_some((other, serial))
+}
+
+/// Whether an open leaf can return to its frame without closing over a body.
+/// The same predicate is applied to both halves before either half of a pair is
+/// moved, which makes auto-close all-or-nothing.
+fn free_to_close(state: &WorldState, door: EntityId) -> bool {
+    let Some(&Position(at)) = state.registry.get::<Position>(door) else {
+        return false;
+    };
+    let Some(component) = state.registry.get::<Door>(door) else {
+        return false;
+    };
+    let closed_at = if component.is_open {
+        shift(at, -component.offset_x, -component.offset_y)
+    } else {
+        at
+    };
+    state.body_standing_at(state.facet_of(door), closed_at).is_none()
+}
+
 /// Open a shut door by decree — what an NPC that knows door handles does when
 /// one stands in its way. No reach check: the caller is the AI, standing at the
 /// threshold, not a client to be doubted. Opening arms the same auto-close as a
@@ -264,7 +306,7 @@ pub fn open_door(state: &mut WorldState, door: EntityId) {
     if is_locked(state, door) {
         return;
     }
-    set_door(state, door, serial, true);
+    set_door_pair(state, door, serial, true);
 }
 
 /// Swing shut every door whose auto-close tick has arrived. Driven by the tick
@@ -275,11 +317,26 @@ pub fn close_doors(state: &mut WorldState) {
     let due: Vec<(EntityId, Serial)> = state
         .registry
         .query::<Door>()
-        .filter(|(_, door)| door.is_open && door.close_at != 0 && door.close_at <= now)
+        .filter(|(_, door)| door.is_open && door.close_at != WorldTick::ZERO && door.close_at <= now)
         .filter_map(|(entity, _)| state.registry.serial_of(entity).map(|s| (entity, s)))
         .collect();
     for (door, serial) in due {
-        set_door(state, door, serial, false);
+        // The pair may already have been closed when its other due row was
+        // visited. Conversely, if either frame is occupied, neither leaf moves:
+        // there is never half a doorway shut around the player in it.
+        if !state.registry.get::<Door>(door).is_some_and(|door| door.is_open) {
+            continue;
+        }
+        let linked = linked_door(state, door);
+        if !free_to_close(state, door)
+            || linked.is_some_and(|(other, _)| {
+                state.registry.get::<Door>(other).is_some_and(|door| door.is_open)
+                    && !free_to_close(state, other)
+            })
+        {
+            continue;
+        }
+        set_door_pair(state, door, serial, false);
     }
 }
 

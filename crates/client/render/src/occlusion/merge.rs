@@ -1,5 +1,6 @@
 //! Contiguous pieces of one surface become one primitive —
 //! `docs/occluders.md`'s D2b, and the last step of that plan.
+
 //!
 //! # What it is for, and what it is not
 //!
@@ -108,6 +109,7 @@
 //! exempt from itself **only where nothing was going to be lit anyway**.
 
 use crate::occlusion::{Edges, Solid, SolidId};
+use openshard_protocol::wire::Graphic;
 
 /// A primitive's place in the frame's own list — what `parent` and `space`
 /// are keyed by below, and equally what a union-find group's name is: a
@@ -221,7 +223,7 @@ struct Surface {
     roof: bool,
     /// The owner, spelled out: a `(z, graphic)` pair — see the header.
     z: i8,
-    graphic: u16,
+    graphic: Graphic,
     part: u8,
     across: [u64; 4],
 }
@@ -236,7 +238,7 @@ fn surface(axis: Axis, solid: &Solid, space: &crate::solid::Solid) -> Surface {
         edges: solid.edges,
         roof: solid.roof,
         z: solid.owner.z,
-        graphic: solid.owner.graphic.0,
+        graphic: solid.owner.graphic,
         part: solid.part.ordinal(),
         across: across.map(f64::to_bits),
     }
@@ -390,6 +392,13 @@ mod tests {
             (run[0].space.min.y, run[0].space.max.y)
         );
         assert_eq!((space.min.z, space.max.z), (0.0, 20.0));
+    }
+
+    #[test]
+    fn a_surface_key_keeps_its_owners_graphic_typed() {
+        let solid = stands_at(100, 100, 20, Edges::SOUTH, 7);
+
+        assert_eq!(surface(Axis::X, &solid, &solid.space).graphic, Graphic(7));
     }
 
     /// A floor is one slab, which takes **both** axes.

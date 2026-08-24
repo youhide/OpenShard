@@ -3,7 +3,7 @@
 use openshard_entities::EntityId;
 use openshard_state::WorldState;
 use openshard_state::components::QuestLog;
-use openshard_state::quest::{ObjectiveKind, RewardKind};
+use openshard_state::quest::{ObjectiveKind, QuestKey, RewardKind};
 
 use crate::events::QuestCompleted;
 use crate::gump::{self, sound};
@@ -15,7 +15,7 @@ use openshard_protocol::wire::{Graphic, Hue};
 /// `all_objectives` decides whether that means all of them or any one of them —
 /// ServUO's `BaseQuest.Completed`.
 #[must_use]
-pub fn is_complete(state: &WorldState, player: EntityId, key: &str) -> bool {
+pub fn is_complete(state: &WorldState, player: EntityId, key: &QuestKey) -> bool {
     let Some(quest) = state.quests.get(key) else {
         return false;
     };
@@ -49,7 +49,7 @@ pub fn is_complete(state: &WorldState, player: EntityId, key: &str) -> bool {
 /// objective does not lose what they brought for the first. That is the bug the
 /// pack's version had — it took each objective independently — and it is worth
 /// the extra pass, because the failure is invisible to the player.
-pub fn complete(state: &mut WorldState, player: EntityId, key: &str) -> bool {
+pub fn complete(state: &mut WorldState, player: EntityId, key: &QuestKey) -> bool {
     if !is_complete(state, player, key) {
         state.system_message(player, "You do not have everything you need!");
         return false;
@@ -127,7 +127,7 @@ pub fn complete(state: &mut WorldState, player: EntityId, key: &str) -> bool {
         .and_then(|log| log.active_quest(key))
         .and_then(|entry| entry.giver);
     if let Some(mut log) = state.registry.get::<QuestLog>(player).cloned() {
-        log.active.retain(|quest| quest.key != key);
+        log.active.retain(|quest| &quest.key != key);
         offer::remember_done(state, &mut log, key);
         state.registry.insert(player, log);
     }
@@ -136,7 +136,7 @@ pub fn complete(state: &mut WorldState, player: EntityId, key: &str) -> bool {
     state.system_message(player, "You have completed a quest!");
     state.bus.send(QuestCompleted {
         player: player_serial,
-        key: key.to_owned(),
+        key: key.clone(),
         giver,
     });
     true

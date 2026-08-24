@@ -41,7 +41,8 @@ impl World {
     #[must_use]
     pub fn clock_minutes(&self) -> u64 {
         let per_minute = self.state.gameplay.uo_minute_ticks.max(1);
-        self.clock_base.saturating_add(self.state.ticks / per_minute)
+        self.clock_base
+            .saturating_add(self.state.ticks.raw() / per_minute)
     }
 
     /// Publish the world's hour on [`WorldState`] for the systems that read it.

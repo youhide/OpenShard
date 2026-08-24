@@ -21,12 +21,12 @@ use openshard_movement::{
 use openshard_protocol::direction::Direction;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::world::{Facet, Point, Sight};
-use openshard_state::WorldState;
 use openshard_state::components::{
     Aggression, Brain, Client, Combat, Heading, Hitpoints, Pet, PetOrder, Position, RangedAttack, Route,
     RouteRefused,
 };
 use openshard_state::sectors::{distance, in_range};
+use openshard_state::{WorldState, WorldTick};
 
 /// The chance in eight, per beat, that an idle wanderer takes a step. Low enough
 /// that a field of creatures drifts rather than marches.
@@ -986,7 +986,7 @@ pub fn retaliate(state: &mut WorldState, blows: &[MobileDamaged]) {
         };
         // Being struck ends any standing watch on the spot.
         if let Some(b) = state.registry.get_mut::<Brain>(victim) {
-            b.guard_until = 0;
+            b.guard_until = WorldTick::ZERO;
         }
         let engaged = state
             .registry

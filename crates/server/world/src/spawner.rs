@@ -14,7 +14,7 @@
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::{Aggression, DamageType, Facet, PhysicalResistance, RangedRange, Sight};
-use openshard_state::Skill;
+use openshard_state::{Skill, SpawnerId, WorldTick};
 
 /// One creature a spawn region may put down. The fields a spawn needs beyond the
 /// where — mirrors [`crate::tick::Command::SpawnMobile`] minus the position, which
@@ -84,7 +84,7 @@ pub struct Spawner {
     /// [`Spawner::new`] is a placeholder the world overwrites.
     ///
     /// [`SpawnedBy`]: openshard_state::components::SpawnedBy
-    pub id: u32,
+    pub id: SpawnerId,
     /// Where it spawns.
     pub area: SpawnArea,
     /// The creatures it may put down; each spawn picks one at random.
@@ -97,7 +97,7 @@ pub struct Spawner {
     /// region refills at its own pace, not all at once. Persisted as the *seconds*
     /// still to wait, so a rare spawn's timer survives a restart (see the tick's
     /// `spawner_records`).
-    pub next_spawn: u64,
+    pub next_spawn: WorldTick,
 }
 
 impl Spawner {
@@ -119,7 +119,7 @@ impl Spawner {
 
     /// A region that starts able to spawn immediately.
     pub fn new(
-        id: u32,
+        id: SpawnerId,
         area: SpawnArea,
         creatures: Vec<CreatureTemplate>,
         max_count: u16,
@@ -131,7 +131,7 @@ impl Spawner {
             creatures,
             max_count,
             respawn_delay,
-            next_spawn: 0,
+            next_spawn: WorldTick::ZERO,
         }
     }
 }
@@ -164,8 +164,8 @@ mod tests {
             height: 3,
             facet: Facet(0),
         };
-        let spawner = Spawner::new(1, area, Vec::new(), 5, 40);
-        assert_eq!(spawner.next_spawn, 0, "ready from tick zero");
+        let spawner = Spawner::new(SpawnerId(1), area, Vec::new(), 5, 40);
+        assert_eq!(spawner.next_spawn, WorldTick::ZERO, "ready from tick zero");
         assert_eq!(spawner.max_count, 5);
     }
 }

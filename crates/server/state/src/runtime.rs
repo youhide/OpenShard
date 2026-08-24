@@ -53,7 +53,7 @@ use crate::dialogue::Dialogue;
 use crate::facet_rules::FacetRules;
 use crate::harvest::Banks;
 use crate::obstruct::Obstructions;
-use crate::quest::QuestDefs;
+use crate::quest::{QuestDefs, QuestKey};
 use crate::region::{Region, Regions};
 use crate::rng::Rng;
 use crate::sectors::{Occupant, Sectors, VIEW_RANGE};
@@ -1023,7 +1023,7 @@ pub struct WorldState {
     /// of the state so replay is exact; advanced only inside the tick.
     pub rng: Rng,
     /// How many ticks have run.
-    pub ticks: u64,
+    pub ticks: crate::WorldTick,
     /// Who is wearing what, rebuilt from the `Equipped` column when it changes.
     /// A cache with no contents of its own — read it through
     /// [`equipment_of`](WorldState::equipment_of), never directly.
@@ -1111,7 +1111,7 @@ pub enum QuestSection {
 pub struct QuestGumpContext {
     /// Which quest, by the pack's key. Empty on the log page, which is about no
     /// single quest.
-    pub quest: String,
+    pub quest: Option<QuestKey>,
     /// Which page.
     pub section: QuestSection,
     /// Whether this is an *offer* (Accept/Refuse) rather than the log's view of a
@@ -1401,7 +1401,7 @@ impl WorldState {
             seen: HashMap::new(),
             start,
             rng: Rng::new(seed),
-            ticks: 0,
+            ticks: crate::WorldTick::ZERO,
             worn: WornIndex {
                 version: 0,
                 by_mobile: HashMap::new(),
@@ -2919,7 +2919,7 @@ impl WorldState {
             .filter(|component| component.drawn())
             .filter_map(|component| {
                 Some(DesignTile {
-                    graphic: openshard_protocol::wire::Graphic(component.graphic),
+                    graphic: component.graphic,
                     dx: i8::try_from(component.dx).ok()?,
                     dy: i8::try_from(component.dy).ok()?,
                     dz: i8::try_from(component.dz).ok()?,

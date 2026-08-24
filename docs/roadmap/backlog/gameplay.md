@@ -95,6 +95,56 @@ Found while doing it, none started:
   either is the easier warm-up. Deliberately left out of
   [`unenforced.md`](../../unenforced.md) — see that file's last section for why a
   13,000-line mechanical move wants a session that owns the tree outright.
+
+## ~~A double door is two leaves, and nothing links them~~ — linked
+
+**Fixed: the reported diagonal through a double doorway no longer opens only one
+leaf.** One leaf used to swing open while the other stayed shut, and the shut
+one was what the step was actually refused by — but it was refused as a *flank*,
+so nothing about the picture said which door was in the way.
+
+The chain, end to end:
+
+- `world/src/tick/decor.rs`'s `generate_doors` places **two** leaves in a
+  two-tile gap (`GenFacing::WestCw` at `vx + 1` and `EastCcw` at `vx + 2`, and
+  the north/south pair likewise). That much is ServUO's `DoorGenerator`.
+- What was missing was the next two lines of it:
+  `Scripts/Commands/DoorGenerator.cs:512` sets `first.Link = second; second.Link
+  = first`, and `BaseDoor.Use` (`BaseDoor.cs:313`) opens the link along with the
+  door. Our [`Door`](../../../crates/server/state/src/components.rs) component
+  had no link field at all, and `items::doors::toggle_door` toggled exactly one
+  entity.
+- The client plans on `Doors::AllOpen` whenever auto-open is on (the default),
+  and that reading is applied to the **flanks** of a diagonal as well as its
+  landing — `steps_out_of` resolves all eight neighbours through one footing.
+- `App::open_door_ahead` sends a use for the shut door on the tile the step
+  *lands* on, and only that one. The other leaf is a flank, never the landing,
+  so it is never used.
+- The shard reads the flanks `AsTheyStand` (`WorldState::walking_doors` for a
+  living mover), so `Walker::request` refuses the diagonal at the corner rule —
+  a `0x21`, a rollback, and a walk-sequence reset, repeated at walking pace for
+  as long as the order stands.
+
+Every diagonal through a double doorway has the *other* leaf as one of its two
+flanks, which is why it is every diagonal and not some of them. The cardinal
+step through the same doorway works, because there the shut leaf is the landing
+and auto-open reaches it.
+
+The missing port is now in the engine, not patched into the client: generation
+links both leaves by stable serial, `toggle_door` and the AI opener move the pair,
+`DoorState` saves the link, and auto-close first takes and checks the whole pair.
+With both leaves swinging together, the picture, obstruction index and timer
+stay consistent; if a player stands under either closed position, neither leaf
+closes until the doorway is clear.
+
+**The narrower defect underneath it survives that fix**, and is worth a line of
+its own: the client reads a shut door as passable in a flank it will never open.
+Any shut leaf beside a diagonal — a second doorway, a door the shard refuses to
+open, a locked one — is the same rubber-band. Either the client opens every shut
+leaf a step needs (landing *and* both flanks of a diagonal), or the flanks are
+read `AsTheyStand` whatever the mover's own door policy is. The second is the
+conservative one and costs a diagonal the shard would have allowed.
+
 ## Deferred / not yet ported (the Felucca converter)
 
 The one-shot converter (`OpenShard-Community-Pack/tools/convert-servuo.cjs`) lays

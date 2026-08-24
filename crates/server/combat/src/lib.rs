@@ -31,7 +31,7 @@ use openshard_state::components::{
 };
 use openshard_state::sectors::in_range;
 use openshard_state::weapon::{LAYER_ONE_HANDED, LAYER_TWO_HANDED};
-use openshard_state::{Action, Skill, TICKS_PER_SECOND, WorldState};
+use openshard_state::{Action, Skill, TICKS_PER_SECOND, WorldState, WorldTick};
 
 pub mod armor;
 mod vitals;
@@ -805,7 +805,7 @@ fn is_murderer(state: &WorldState, entity: EntityId) -> bool {
 }
 
 /// Push a combatant's next swing out to `tick`.
-pub fn set_next_swing(state: &mut WorldState, attacker: EntityId, tick: u64) {
+pub fn set_next_swing(state: &mut WorldState, attacker: EntityId, tick: WorldTick) {
     if let Some(combat) = state.registry.get_mut::<Combat>(attacker) {
         combat.next_swing = tick;
     }
@@ -872,7 +872,7 @@ pub const fn poison_damage(level: PoisonLevel) -> u16 {
 ///
 /// Nothing here decides *whether* the blow landed: it is called from the one place
 /// that knows, after the damage has gone through the one damage door.
-fn deliver_weapon_poison(state: &mut WorldState, attacker: EntityId, target: Serial, now: u64) {
+fn deliver_weapon_poison(state: &mut WorldState, attacker: EntityId, target: Serial, now: WorldTick) {
     let Some(serial) = state.registry.serial_of(attacker) else {
         return;
     };
@@ -905,7 +905,7 @@ fn deliver_weapon_poison(state: &mut WorldState, attacker: EntityId, target: Ser
 }
 
 /// stronger one already working — ServUO's rule.
-pub fn apply_poison(state: &mut WorldState, serial: Serial, level: PoisonLevel, now: u64) {
+pub fn apply_poison(state: &mut WorldState, serial: Serial, level: PoisonLevel, now: WorldTick) {
     let Some(entity) = state.registry.entity_of(serial) else {
         return;
     };

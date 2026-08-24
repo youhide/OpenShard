@@ -1230,7 +1230,9 @@ fn a_lockpick_opens_a_lock_it_is_good_enough_for() {
     world.state.registry.insert(
         chest,
         openshard_state::components::Lock {
-            key_value: 42,
+            kind: openshard_state::LockKind::Key(
+                openshard_state::KeyValue::new(42).expect("non-zero test key"),
+            ),
             required_skill: 0,
             max_skill: 500,
         },

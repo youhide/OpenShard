@@ -66,6 +66,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 
 /// How many multi ids a client's index can name.
@@ -141,7 +142,7 @@ impl MultiFormat {
 pub struct Component {
     /// The static's art id — what [`tiledata`](crate::tiledata) is asked about
     /// for its height and whether it blocks.
-    pub graphic: u16,
+    pub graphic: Graphic,
     /// East, from the multi's origin.
     pub dx: i16,
     /// South, from the multi's origin.
@@ -499,7 +500,7 @@ fn read_component(bytes: &[u8], format: MultiFormat) -> Component {
         ]),
     };
     Component {
-        graphic: word(0),
+        graphic: Graphic(word(0)),
         dx: word(2) as i16,
         dy: word(4) as i16,
         dz: word(6) as i16,
@@ -534,7 +535,7 @@ fn read_uop_multi(bytes: &[u8]) -> Option<Vec<Component>> {
             _ => TILE_GENERIC,
         };
         components.push(Component {
-            graphic: word(0),
+            graphic: Graphic(word(0)),
             dx: word(2) as i16,
             dy: word(4) as i16,
             dz: word(6) as i16,
@@ -636,7 +637,7 @@ mod tests {
 
     fn component(graphic: u16, dx: i16, dy: i16, flags: u64) -> Component {
         Component {
-            graphic,
+            graphic: Graphic(graphic),
             dx,
             dy,
             dz: 0,
@@ -708,7 +709,7 @@ mod tests {
         }
         let components = read_uop_multi(&bytes).expect("a whole entry");
         assert_eq!(components.len(), 2);
-        assert_eq!(components[0].graphic, 0x04B0);
+        assert_eq!(components[0].graphic, Graphic(0x04B0));
         assert_eq!(components[0].dz, 7);
         assert!(components[0].drawn());
         assert!(
@@ -716,7 +717,8 @@ mod tests {
             "the UOP's one is the mul's zero, and it is the skip"
         );
         assert_eq!(
-            components[1].graphic, 0x06A5,
+            components[1].graphic,
+            Graphic(0x06A5),
             "the cliloc block after the first entry was not skipped"
         );
     }
@@ -731,7 +733,7 @@ mod tests {
     #[test]
     fn a_component_off_the_map_is_refused_rather_than_wrapped() {
         let west = Component {
-            graphic: 0x0006,
+            graphic: Graphic(0x0006),
             dx: -3,
             dy: 0,
             dz: 0,
@@ -741,7 +743,7 @@ mod tests {
         assert_eq!(west.placed_at(Point::new(1, 10, 0)), None, "it wrapped east");
 
         let high = Component {
-            graphic: 0x0006,
+            graphic: Graphic(0x0006),
             dx: 0,
             dy: 0,
             dz: 100,

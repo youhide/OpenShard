@@ -64,6 +64,7 @@ use openshard_map::overlay::{Cover, Doors, Overlay};
 use openshard_movement::spans::SpanIndex;
 use openshard_movement::{Footing, MAX_STEP_UP, MapTerrain, step_allowed};
 use openshard_protocol::direction::Direction;
+use openshard_protocol::wire::Graphic;
 use openshard_protocol::world::Point;
 use openshard_state::boat::Plank;
 use openshard_tiles::TileData;
@@ -169,7 +170,7 @@ fn the_reading_that_was(art: &openshard_tiles::StaticTile, z: i8) -> Cover {
 /// One piece of art the ship turns into a floor and nothing else does.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct Invented {
-    graphic: u16,
+    graphic: Graphic,
     /// Its own z within the ship, and how tall the table says it is.
     z: i8,
     height: u8,
@@ -219,7 +220,7 @@ fn read(install: &Install, id: u16, boat: EntityId) -> Option<Ship> {
 
     for component in multi.drawn() {
         ship.drawn += 1;
-        let art = install.tiles.static_tile(component.graphic);
+        let art = install.tiles.static_tile(component.graphic.0);
         // The ship floats at zero here, so a component's own `dz` is its z. A
         // real placement adds the ship's, and both readings take that addition
         // identically.
@@ -389,7 +390,7 @@ fn boat_art_survey() {
         for (piece, count) in &ship.invented_art {
             println!(
                 "    a floor invented from 0x{:04X} at z {} ({} tall), on {count} tile(s)",
-                piece.graphic, piece.z, piece.height
+                piece.graphic.0, piece.z, piece.height
             );
         }
         for (kind, count) in ship
@@ -431,7 +432,7 @@ fn boat_art_survey() {
     for (piece, count) in &art {
         println!(
             "    0x{:04X} at z {}, {} tall — {count} placements",
-            piece.graphic, piece.z, piece.height
+            piece.graphic.0, piece.z, piece.height
         );
     }
     if totals.is_empty() {
@@ -566,7 +567,7 @@ fn moor_both(
         let Ok(at) = i8::try_from(i32::from(z) + i32::from(component.dz)) else {
             continue;
         };
-        let art = harbour.tiles.static_tile(component.graphic);
+        let art = harbour.tiles.static_tile(component.graphic.0);
         now_at
             .entry((x, y))
             .or_default()

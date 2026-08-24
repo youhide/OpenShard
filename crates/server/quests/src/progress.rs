@@ -26,7 +26,7 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::speech::{Font, TalkMode};
 use openshard_protocol::wire::Hue;
 use openshard_state::components::{Escortable, QuestLog};
-use openshard_state::quest::ObjectiveKind;
+use openshard_state::quest::{ObjectiveKind, QuestKey};
 use openshard_state::{QuestSection, TICKS_PER_SECOND, WorldState};
 
 use crate::events::{ObjectiveIndex, ObjectiveProgress, QuestFailed, QuestObjectiveUpdated};
@@ -85,7 +85,7 @@ pub fn refresh_obtain(state: &mut WorldState, contents: &Contents) {
             continue;
         };
         let mut changed = false;
-        let mut updates: Vec<(String, ObjectiveIndex, ObjectiveProgress)> = Vec::new();
+        let mut updates: Vec<(QuestKey, ObjectiveIndex, ObjectiveProgress)> = Vec::new();
         let mut log = log;
         for quest in &mut log.active {
             let Some(def) = state.quests.get(&quest.key) else {
@@ -243,7 +243,7 @@ pub fn tick_timers(state: &mut WorldState) {
         let Some(mut log) = state.registry.get::<QuestLog>(player).cloned() else {
             continue;
         };
-        let mut newly_failed: Vec<String> = Vec::new();
+        let mut newly_failed: Vec<QuestKey> = Vec::new();
         let mut changed = false;
         for quest in &mut log.active {
             if quest.failed {
@@ -288,7 +288,7 @@ pub(crate) fn advance(state: &mut WorldState, player: EntityId, matches: impl Fn
     let Some(serial) = state.registry.serial_of(player) else {
         return;
     };
-    let mut updates: Vec<(String, ObjectiveIndex, ObjectiveProgress)> = Vec::new();
+    let mut updates: Vec<(QuestKey, ObjectiveIndex, ObjectiveProgress)> = Vec::new();
     for quest in &mut log.active {
         if quest.failed {
             continue;
@@ -328,13 +328,13 @@ fn announce(
     state: &mut WorldState,
     player: EntityId,
     serial: Serial,
-    key: &str,
+    key: &QuestKey,
     objective: ObjectiveIndex,
     progress: ObjectiveProgress,
 ) {
     state.bus.send(QuestObjectiveUpdated {
         player: serial,
-        key: key.to_owned(),
+        key: key.clone(),
         objective,
         progress,
     });
@@ -434,7 +434,7 @@ pub fn deliver_to(state: &mut WorldState, player: EntityId, destination: EntityI
     let Some(serial) = state.registry.serial_of(player) else {
         return false;
     };
-    let mut updates: Vec<(String, ObjectiveIndex, ObjectiveProgress)> = Vec::new();
+    let mut updates: Vec<(QuestKey, ObjectiveIndex, ObjectiveProgress)> = Vec::new();
     for quest in &mut log.active {
         if quest.failed {
             continue;

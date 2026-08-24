@@ -7,7 +7,7 @@ use openshard_protocol::wire::{Graphic, Hue, RawCharacterSlot};
 use openshard_protocol::world::{
     Aggression, DamageType, PhysicalResistance, PoisonLevel, RangedRange, Sight,
 };
-use openshard_state::Skill;
+use openshard_state::{LockKind, Skill};
 
 /// How a character looks: its body graphic and hue. Chosen on the creation
 /// screen, or restored from the save.
@@ -319,8 +319,8 @@ pub struct Entering {
 /// door-family arithmetic); the world only stores and toggles.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DecorDoor {
-    /// Which key opens it; `0` is unlocked.
-    pub key_value: u32,
+    /// Its lock, if it starts locked.
+    pub lock: Option<LockKind>,
     /// The shut graphic.
     pub closed: Graphic,
     /// The open graphic.
@@ -337,8 +337,8 @@ pub struct DecorDoor {
 /// opens onto a gump.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DecorContainer {
-    /// Which key opens it; `0` is unlocked.
-    pub key_value: u32,
+    /// Its lock, if it starts locked.
+    pub lock: Option<LockKind>,
     /// The item graphic.
     pub graphic: Graphic,
     /// The gump the client opens for it.
@@ -669,7 +669,7 @@ pub enum Command {
         /// An escortable traveller gets `escort` added to whatever is here,
         /// because an escort *is* a quest — the offer, the log entry and the
         /// reward all come from one.
-        quests: Vec<String>,
+        quests: Vec<openshard_state::QuestKey>,
     },
     /// Deal damage to a mobile — a script or another mobile's blow.
     Damage {
@@ -1085,7 +1085,7 @@ pub enum Command {
         /// Which NPC.
         serial: Serial,
         /// Which quests, by key. Empty un-binds it.
-        keys: Vec<String>,
+        keys: Vec<openshard_state::QuestKey>,
     },
     /// Mark an NPC as escortable, and save that with it.
     MakeEscortable {

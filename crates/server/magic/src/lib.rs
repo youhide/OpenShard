@@ -344,7 +344,7 @@ pub fn apply_stat_buff(
     serial: Serial,
     kind: StatEffectKind,
     offset: i16,
-    expires_at: u64,
+    expires_at: openshard_state::WorldTick,
 ) {
     let Some(entity) = state.registry.entity_of(serial) else {
         return;
@@ -373,7 +373,7 @@ pub fn apply_stat_buff(
 /// mobile it worked through. Returns whom it touched, so the caller can redraw a
 /// player's status bar. Runs on the tick counter, so it replays.
 #[must_use]
-pub fn expire_buffs(state: &mut WorldState, now: u64) -> Vec<EntityId> {
+pub fn expire_buffs(state: &mut WorldState, now: openshard_state::WorldTick) -> Vec<EntityId> {
     let ready: Vec<EntityId> = state
         .registry
         .query::<StatMods>()
@@ -408,7 +408,7 @@ pub fn apply_behaviour_buff(
     serial: Serial,
     kind: BehaviourBuffKind,
     amount: i16,
-    expires_at: u64,
+    expires_at: openshard_state::WorldTick,
 ) {
     let Some(entity) = state.registry.entity_of(serial) else {
         return;
@@ -431,7 +431,10 @@ pub fn apply_behaviour_buff(
 /// each so the caller can react — Night Sight, say, must re-send the ambient light
 /// when it lifts. Runs on the tick counter, so it replays.
 #[must_use]
-pub fn expire_behaviour_buffs(state: &mut WorldState, now: u64) -> Vec<(EntityId, BehaviourBuffKind)> {
+pub fn expire_behaviour_buffs(
+    state: &mut WorldState,
+    now: openshard_state::WorldTick,
+) -> Vec<(EntityId, BehaviourBuffKind)> {
     let ready: Vec<EntityId> = state
         .registry
         .query::<BehaviourBuffs>()
@@ -493,7 +496,7 @@ pub fn behaviour_buff(state: &WorldState, entity: EntityId, kind: BehaviourBuffK
 /// alike. A no-op if it is already frozen, matching ServUO's `Paralyze()`: a fresh
 /// cast (or a field pulse over someone already caught) does not extend the hold, so
 /// a field cannot pin a target forever.
-pub fn apply_paralyze(state: &mut WorldState, serial: Serial, until: u64) {
+pub fn apply_paralyze(state: &mut WorldState, serial: Serial, until: openshard_state::WorldTick) {
     let Some(entity) = state.registry.entity_of(serial) else {
         return;
     };
@@ -507,7 +510,7 @@ pub fn apply_paralyze(state: &mut WorldState, serial: Serial, until: u64) {
 /// thawed so the caller can tell a player it can move again. Runs on the tick
 /// counter, so it replays.
 #[must_use]
-pub fn expire_frozen(state: &mut WorldState, now: u64) -> Vec<EntityId> {
+pub fn expire_frozen(state: &mut WorldState, now: openshard_state::WorldTick) -> Vec<EntityId> {
     let thawed: Vec<EntityId> = state
         .registry
         .query::<Frozen>()

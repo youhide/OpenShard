@@ -14,7 +14,8 @@ use openshard_movement::scene::Scene;
 use openshard_map::overlay::Doors;
 use openshard_movement::Walker;
 use openshard_protocol::direction::{Direction, Facing};
-use openshard_protocol::serial::SerialKind;
+use openshard_protocol::serial::{Serial, SerialKind};
+use openshard_protocol::wire::{Graphic, MultiId};
 use openshard_state::FacetState;
 use openshard_tiles::TileFlags;
 use openshard_uofiles::multi::{Component, Multi, Multis};
@@ -40,6 +41,25 @@ const GALLEY: u16 = 0x0D;
 /// id nobody knows" a statement about the *neighbourhood* of a known one, and
 /// the second ship added to the table landed on it.
 const UNKNOWN_MULTI: u16 = 0x0E;
+
+/// Fixture/content ids arrive bare; the boat API deliberately does not.
+fn place(
+    state: &mut WorldState,
+    actor: EntityId,
+    at: Point,
+    facet: Facet,
+    multi: u16,
+    owner: Serial,
+) -> Result<EntityId, Refusal> {
+    super::place(
+        state,
+        actor,
+        at,
+        facet,
+        MultiId::from_graphic(Graphic(multi)),
+        owner,
+    )
+}
 
 /// The land id this sea is made of. Water is not a kind of tile the map knows —
 /// it is a flag on the tiledata row the tile points at, which is why the id and
@@ -95,7 +115,7 @@ fn multis() -> Multis {
 
 fn component(graphic: u16, dx: i16, dy: i16, dz: i16, drawn: bool) -> Component {
     Component {
-        graphic,
+        graphic: Graphic(graphic),
         dx,
         dy,
         dz,
@@ -187,13 +207,16 @@ fn a_boat_is_an_item_whose_graphic_is_the_multi() {
 
     assert_eq!(
         state.registry.get::<Drawn>(boat).map(|drawn| drawn.id),
-        Some(Graphic(MULTI_FLAG | SLOOP)),
+        Some(MultiId(SLOOP).graphic()),
         "the wire carries a ship as 0x4000 above its id",
     );
     assert_eq!(state.registry.get::<Position>(boat).map(|p| p.0), Some(at));
     assert_eq!(
         state.registry.get::<Boat>(boat),
-        Some(&Boat { multi: SLOOP, owner }),
+        Some(&Boat {
+            multi: MultiId(SLOOP),
+            owner,
+        }),
     );
     assert_eq!(boat_at(&state, at, Facet(0)), Some(boat));
 }

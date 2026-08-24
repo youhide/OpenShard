@@ -159,6 +159,7 @@ pub fn verb(action: &str) -> Vec<Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openshard_state::WorldTick;
 
     /// What CI gets, since the equivalence test below skips without the pack:
     /// the shard's content reaches the world as one registration carrying every
@@ -218,7 +219,9 @@ mod tests {
         // the live spawner, and `register_spawner` sets them. A number written into
         // the data would be a second source for either.
         assert!(
-            spawners.iter().all(|s| s.id == 0 && s.next_spawn == 0),
+            spawners.iter().all(|s| {
+                s.id == openshard_state::SpawnerId::PLACEHOLDER && s.next_spawn == WorldTick::ZERO
+            }),
             "a shipped spawn region arrived with an id or a timer already set"
         );
         assert!(

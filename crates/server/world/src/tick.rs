@@ -68,9 +68,7 @@ use openshard_state::components::{
 use openshard_state::facet_rules::FacetRules;
 use openshard_state::rng::Rng;
 use openshard_state::sectors::Sectors;
-use openshard_state::{
-    FacetState, Gameplay, Outbound, TICKS_PER_SECOND, TooltipMode, WorldHome, WorldState,
-};
+use openshard_state::{FacetState, Gameplay, Outbound, TICKS_PER_SECOND, TooltipMode, WorldHome, WorldState};
 
 use openshard_ai as ai;
 use openshard_chat as chat;
@@ -474,7 +472,7 @@ impl World {
     }
 
     /// How many ticks have run.
-    pub const fn ticks(&self) -> u64 {
+    pub const fn ticks(&self) -> openshard_state::WorldTick {
         self.state.ticks
     }
 
@@ -1005,7 +1003,7 @@ impl World {
                             // the reward all come from one. Without this it would
                             // follow whoever double-clicked it, with nothing to
                             // accept or refuse.
-                            offers.push("escort".to_owned());
+                            offers.push(openshard_state::QuestKey::from("escort"));
                         }
                         if !offers.is_empty() {
                             quests::bind_giver(&mut self.state, serial, offers);

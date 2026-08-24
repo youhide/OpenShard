@@ -351,7 +351,15 @@ impl World {
             // stat that has never risen would read as having just risen, and a
             // brand-new character would carry a full cooldown into its first
             // login. Zero must restore to zero, not to now.
-            let restore_gain = |age: u64| if age == 0 { 0 } else { now.saturating_sub(age) };
+            let restore_gain = |age: u64| {
+                if age == 0 {
+                    openshard_state::WorldTick::ZERO
+                } else {
+                    openshard_state::WorldTick::from_raw(
+                        now.saturating_sub(openshard_state::WorldTick::from_raw(age)),
+                    )
+                }
+            };
             self.state.registry.insert(
                 entity,
                 openshard_state::components::LastStatGain {
@@ -373,7 +381,7 @@ impl World {
         }
         self.state.registry.insert(entity, Combat::default());
         self.state.registry.insert(entity, Notoriety::Innocent);
-        self.state.registry.insert(entity, Resistance::default());
+        self.state.registry.insert(entity, Resistance::none());
         // No explicit `MeleeDamage` or `SwingSpeed`: a player's blow and pace come
         // from the weapon they wield (or the bare-hands default), derived fresh in
         // `melee_blow`/`swing_speed`. Those components stay a creature's/script's

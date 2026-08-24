@@ -28,7 +28,7 @@ use openshard_protocol::wire::{ClilocId, CursorId, Graphic, Hue, Layer, RawLayer
 use openshard_protocol::world::{Facet, Point};
 use openshard_state::components::{
     Amount, Body, Client, Combat, Contained, Container, Corpse, Decays, Decoration, Door, Drawn, Equipped,
-    Ghost, KeyValue, Lock, Name, PoisonCharges, Position, RUNEBOOK_ENTRIES, RUNEBOOK_GRAPHIC, Ridden, Riding,
+    Ghost, KeyValue, Name, PoisonCharges, Position, RUNEBOOK_ENTRIES, RUNEBOOK_GRAPHIC, Ridden, Riding,
     RuneMark, Runebook, RunebookEntry, SPELLBOOK_GRAPHIC, Seated, Spellbook, Stackable, Weapon,
     mount_item_for, scroll_spell,
 };

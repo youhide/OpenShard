@@ -21,7 +21,7 @@ impl World {
         // full facet, the freeze a staff Populate caused — into O(regions +
         // creatures). The key is the id stored in `SpawnedBy`, which is the
         // region's index here — see `register_spawner`.
-        let mut live_counts: HashMap<u32, u16> = HashMap::new();
+        let mut live_counts: HashMap<openshard_state::SpawnerId, u16> = HashMap::new();
         for (_, owner) in self.state.registry.query::<SpawnedBy>() {
             *live_counts.entry(owner.0).or_default() += 1;
         }
@@ -34,7 +34,8 @@ impl World {
             let spawner = &self.spawners[index];
             let id = spawner.id;
             debug_assert_eq!(
-                id as usize, index,
+                id.index(),
+                index,
                 "a region's id is its slot; a creature's SpawnedBy points at the wrong region"
             );
             let live = live_counts.get(&id).copied().unwrap_or(0);
@@ -153,7 +154,9 @@ impl World {
         // was laid in a different order, and the drift was silent: creatures
         // counted against a neighbouring region, one of them permanently at its
         // ceiling and never spawning again.
-        spawner.id = u32::try_from(self.spawners.len()).expect("a facet has far fewer than 4bn regions");
+        spawner.id = openshard_state::SpawnerId(
+            u32::try_from(self.spawners.len()).expect("a facet has far fewer than 4bn regions"),
+        );
         // Stagger the first spawn across the respawn window. Populating a whole
         // facet registers hundreds of regions in one tick; without this they are
         // all due at once and fire together, a thundering herd that spikes the
@@ -266,7 +269,9 @@ impl World {
             // The records arrive in id order (both stores `ORDER BY id`), which is
             // the order they were saved in, which is the order of the list they
             // came from.
-            let id = u32::try_from(self.spawners.len()).expect("a facet has far fewer than 4bn regions");
+            let id = openshard_state::SpawnerId(
+                u32::try_from(self.spawners.len()).expect("a facet has far fewer than 4bn regions"),
+            );
             let mut spawner = crate::spawner::Spawner::new(
                 id,
                 area,

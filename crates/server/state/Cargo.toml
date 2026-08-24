@@ -32,9 +32,13 @@ openshard-protocol.workspace = true
 # to be shaped like one. See `docs/customisation.md`'s C1.
 openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
+serde.workspace = true
 
 # `build.rs` only: the body-type, mount and skill tables are `data/*.json` and
 # become `const`s before the crate compiles. Nothing here is linked into the shard.
 [build-dependencies]
 serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
 serde_json.workspace = true

@@ -502,7 +502,7 @@ impl PgStore {
                           respawn_secs, remaining_secs, creatures) \
                          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
                         &[
-                            &i64::from(spawner.id),
+                            &i64::from(spawner.id.0),
                             &i32::from(spawner.facet),
                             &i32::from(spawner.x),
                             &i32::from(spawner.y),
@@ -1316,7 +1316,7 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
 fn spawner_from_row(row: &Row) -> Result<SpawnerRecord, StoreError> {
     let creatures: String = row.get(9);
     Ok(SpawnerRecord {
-        id: u32::try_from(row.get::<_, i64>(0)).map_err(|_| corrupt("id"))?,
+        id: openshard_state::SpawnerId(u32::try_from(row.get::<_, i64>(0)).map_err(|_| corrupt("id"))?),
         facet: u8::try_from(row.get::<_, i32>(1)).map_err(|_| corrupt("facet"))?,
         x: u16::try_from(row.get::<_, i32>(2)).map_err(|_| corrupt("x"))?,
         y: u16::try_from(row.get::<_, i32>(3)).map_err(|_| corrupt("y"))?,

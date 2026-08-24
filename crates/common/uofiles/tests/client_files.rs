@@ -1095,9 +1095,9 @@ fn the_two_multi_readers_agree_with_each_other() {
             continue;
         };
         compared += 1;
-        let uop_drawn: Vec<(u16, i16, i16, i16)> =
+        let uop_drawn: Vec<(Graphic, i16, i16, i16)> =
             from_uop.drawn().map(|c| (c.graphic, c.dx, c.dy, c.dz)).collect();
-        let mul_drawn: Vec<(u16, i16, i16, i16)> =
+        let mul_drawn: Vec<(Graphic, i16, i16, i16)> =
             from_mul.drawn().map(|c| (c.graphic, c.dx, c.dy, c.dz)).collect();
         assert!(
             !uop_drawn.is_empty() || mul_drawn.is_empty(),

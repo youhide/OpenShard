@@ -63,16 +63,18 @@ impl World {
                     open: door.open,
                     offset_x: door.offset_x,
                     offset_y: door.offset_y,
+                    link: None,
                     is_open: false,
-                    close_at: 0,
+                    close_at: openshard_state::WorldTick::ZERO,
                 },
             );
-            if door.key_value != 0 {
+            if let Some(kind) = door.lock {
                 self.state.registry.insert(
                     entity,
                     openshard_state::components::Lock {
-                        key_value: door.key_value,
-                        ..Default::default()
+                        kind,
+                        required_skill: 0,
+                        max_skill: 0,
                     },
                 );
             }
@@ -95,12 +97,13 @@ impl World {
             self.state
                 .registry
                 .insert(entity, Container { gump: container.gump });
-            if container.key_value != 0 {
+            if let Some(kind) = container.lock {
                 self.state.registry.insert(
                     entity,
                     openshard_state::components::Lock {
-                        key_value: container.key_value,
-                        ..Default::default()
+                        kind,
+                        required_skill: 0,
+                        max_skill: 0,
                     },
                 );
             }
@@ -206,8 +209,10 @@ impl World {
             }
         }
 
-        // (closed, open, offset_x, offset_y, where-it-sits-closed).
-        let mut placements: Vec<(Graphic, Graphic, i16, i16, Point)> = Vec::new();
+        // (closed, open, offset_x, offset_y, where-it-sits-closed, linked row).
+        // The row index exists only until entities and their stable serials have
+        // been allocated below.
+        let mut placements: Vec<(Graphic, Graphic, i16, i16, Point, Option<usize>)> = Vec::new();
         {
             let Some(terrain) = self.state.map_terrain(facet) else {
                 warn!(facet = %facet, "no map on this facet; no doors to generate");
@@ -223,15 +228,20 @@ impl World {
             // open doorway with a floor, not a solid wall or thin air — and it is
             // not already doored. `can_fit` is ServUO's `CanFit` guard (16 tall);
             // the `occupied` set is our own de-dup.
-            let mut try_place = |gap: Point, door: (Graphic, Graphic, i16, i16)| {
+            let mut try_place = |gap: Point, door: (Graphic, Graphic, i16, i16), link_to: Option<usize>| {
                 let key = (gap.x, gap.y);
                 if occupied.contains(&key) || !terrain.can_fit(Tile::new(gap.x, gap.y), i32::from(gap.z), 16)
                 {
-                    return;
+                    return None;
                 }
                 occupied.insert(key);
                 let (c, o, ox, oy) = door;
-                placements.push((c, o, ox, oy, gap));
+                let row = placements.len();
+                placements.push((c, o, ox, oy, gap, link_to));
+                if let Some(other) = link_to {
+                    placements[other].5 = Some(row);
+                }
+                Some(row)
             };
             let east = |vx: u16| vx.checked_add(2);
             let mut here = Vec::new();
@@ -246,27 +256,51 @@ impl World {
                         if doorgen::is_west_frame(id) {
                             // A single door: one gap tile to an east frame two away.
                             if east(vx).is_some_and(|e| frame_at(e, vy, z, doorgen::is_east_frame)) {
-                                try_place(Point::new(vx + 1, vy, z), doorgen::GenFacing::WestCw.door());
+                                let _ = try_place(
+                                    Point::new(vx + 1, vy, z),
+                                    doorgen::GenFacing::WestCw.door(),
+                                    None,
+                                );
                             } else if vx
                                 .checked_add(3)
                                 .is_some_and(|e| frame_at(e, vy, z, doorgen::is_east_frame))
                             {
                                 // A double door fills the two-tile gap.
-                                try_place(Point::new(vx + 1, vy, z), doorgen::GenFacing::WestCw.door());
-                                try_place(Point::new(vx + 2, vy, z), doorgen::GenFacing::EastCcw.door());
+                                let first = try_place(
+                                    Point::new(vx + 1, vy, z),
+                                    doorgen::GenFacing::WestCw.door(),
+                                    None,
+                                );
+                                let _ = try_place(
+                                    Point::new(vx + 2, vy, z),
+                                    doorgen::GenFacing::EastCcw.door(),
+                                    first,
+                                );
                             }
                         } else if doorgen::is_north_frame(id) {
                             if vy
                                 .checked_add(2)
                                 .is_some_and(|s| frame_at(vx, s, z, doorgen::is_south_frame))
                             {
-                                try_place(Point::new(vx, vy + 1, z), doorgen::GenFacing::SouthCw.door());
+                                let _ = try_place(
+                                    Point::new(vx, vy + 1, z),
+                                    doorgen::GenFacing::SouthCw.door(),
+                                    None,
+                                );
                             } else if vy
                                 .checked_add(3)
                                 .is_some_and(|s| frame_at(vx, s, z, doorgen::is_south_frame))
                             {
-                                try_place(Point::new(vx, vy + 1, z), doorgen::GenFacing::NorthCcw.door());
-                                try_place(Point::new(vx, vy + 2, z), doorgen::GenFacing::SouthCw.door());
+                                let first = try_place(
+                                    Point::new(vx, vy + 1, z),
+                                    doorgen::GenFacing::NorthCcw.door(),
+                                    None,
+                                );
+                                let _ = try_place(
+                                    Point::new(vx, vy + 2, z),
+                                    doorgen::GenFacing::SouthCw.door(),
+                                    first,
+                                );
                             }
                         }
                     }
@@ -275,8 +309,10 @@ impl World {
         }
 
         let count = placements.len();
-        for (closed, open, offset_x, offset_y, position) in placements {
+        let mut placed = vec![None; placements.len()];
+        for (row, &(closed, open, offset_x, offset_y, position, _)) in placements.iter().enumerate() {
             if let Some(entity) = self.place_decoration(facet, closed, Hue(0), position) {
+                placed[row] = Some(entity);
                 self.state.registry.insert(
                     entity,
                     Door {
@@ -284,8 +320,9 @@ impl World {
                         open,
                         offset_x,
                         offset_y,
+                        link: None,
                         is_open: false,
-                        close_at: 0,
+                        close_at: openshard_state::WorldTick::ZERO,
                     },
                 );
                 self.state.facet_state_mut(facet).block(
@@ -295,6 +332,22 @@ impl World {
                     openshard_map::overlay::Cover::door(position.z, openshard_state::DOOR_HEIGHT),
                 );
             }
+        }
+        // Both entities now have stable serials, so turn the temporary row links
+        // into the bidirectional relationship ServUO's generator writes.
+        for (row, &(_, _, _, _, _, link)) in placements.iter().enumerate() {
+            let (Some(entity), Some(other_row)) = (placed[row], link) else {
+                continue;
+            };
+            let Some(other_serial) = placed[other_row].and_then(|other| self.state.registry.serial_of(other))
+            else {
+                continue;
+            };
+            let Some(mut door) = self.state.registry.get::<Door>(entity).copied() else {
+                continue;
+            };
+            door.link = Some(other_serial);
+            self.state.registry.insert(entity, door);
         }
         debug!(facet = %facet, count, "generated doors from static frames");
     }
