@@ -1,12 +1,14 @@
 # 2026-08-24 — the search gets in a hurry
 
-Two commits and a survey. The previous handoff closed the *cheap node* question
+Three commits and a survey. The previous handoff closed the *cheap node* question
 and said the lever left is **fewer nodes**; this session took the cheapest way
-there, took what was still loose inside `explore`, and — because the question
-that opened it was "what does the industry actually do" — priced the rest of the
-field against this codebase rather than in the abstract.
+there, took what was still loose inside `explore`, priced the rest of the field
+against this codebase rather than in the abstract — and then, asked what is left
+in the 76% that is terrain, found that the four refusals guarding it were all
+about *baking more data* and none of them about the land grid's own arithmetic.
 
-**A body's route now reaches a quarter further inside the same node budget.**
+**A body's route reaches a quarter further inside the same node budget, and the
+node it spends is 2.3% cheaper on top of the 2–6% the packing gave.**
 
 ## The measurement this starts from
 
@@ -16,7 +18,23 @@ the `profiling` profile. Nothing here is inherited: the numbers are today's.
 | | |
 |---|---|
 | `explore` — A\*'s own heap, hash, packing and loop | **18.6%** |
-| `land_corners`, `landing`, `Spans::{ground, check}`, `SpanIndex::stored`, `steps_out_of`, `climbed`, `statics_at`, `blocker_at`, `start_surface` | **~76%** |
+| the terrain half, below | **~76%** |
+
+| | |
+|---|---|
+| `WorldMap::land_corners` | 17.7% |
+| `walk::landing` | 13.1% |
+| `Spans::ground` | 10.4% |
+| `SpanIndex::stored` | 9.1% |
+| `Spans::check` | 7.5% |
+| `walk::climbed` | 4.4% |
+| `walk::steps_out_of` | 4.2% |
+| `Overlay::blocker_at` | 3.8% |
+| `WorldMap::statics_at` | 3.1% |
+| `MapTerrain::start_surface` | 2.6% |
+
+`land_corners` at the top of that list is the thread the last section of this
+handoff pulls on.
 
 And inside `explore`, nothing dominates: hashbrown is ~2.8% of the whole
 program, `BinaryHeap` ~3.3%, and the rest is straight-line loop. **That is a
@@ -83,6 +101,55 @@ Anything that has to *compare* two answers is `Weight::EXACT`: the graph's baked
 edge costs, the probe, and every test that means "the shortest". A baked cost is
 a statement about the facet, and a corridor picks between hops by comparing them,
 so it may not be the length of a route that merely happened to be short enough.
+
+### And the terrain half turned out to have arithmetic left in it ✅
+
+**The four refusals were all about baking more data.** The full adjacency
+record, the rejection mask, the dense `average_land_z`, the locality hoist
+across the span seam — every one of them proposed *storing* something, and every
+one was priced and declined. None of them was about what the land grid already
+does, and `land_corners` is the hottest symbol in the whole profile at **17.7%**.
+
+It read four cells with four full derivations. A cell index is a bounds check,
+two remainders, a multiply by the block column's height and two shifts — and a
+block is row-major inside, so the four cells a tile's corners are made of sit at
+`+0`, `+1`, `+8`, `+9` of one another whenever the tile is not on its block's
+eastern or southern edge. **That is 76.6% of a facet**, `(7/8)²`.
+
+**No edge of the facet reaches the fast path, and that is a consequence rather
+than a check**: a facet is a whole number of blocks, so its last row and column
+are exactly the ones the guard refuses. Which is why `corner_quad` returns four
+cells rather than four options — every one of them is on the facet.
+
+The other half is a read that was simply made twice. `Spans::ground` — the tier
+that answers 92% of columns — asked `land(x, y)` for the graphic and then
+`land_corners(x, y)`, which reads `(x, y)` again for its own `own`.
+`land_and_corners` hands back both from one walk. The bake's column builder was
+doing it twice over: four reads where one does.
+
+`step_cost`, `--repeat 25`, least of three runs, open country:
+
+| | before | after | |
+|---|---|---|---|
+| `surface_at`, one column | 12.5 ns | **10.5** | −16% |
+| landings off the bake | 157.8 ns | **145.4** | −7.9% |
+| all eight on one column | 139.2 ns | **127.0** | −8.8% |
+| expansion from a stored column | 178.2 ns | **166.2** | −6.7% |
+| **`steps_out_of`, a whole node** | **201.1 ns** | **196.4** | **−2.3%** |
+| `map.land`, one read | 1.2 ns | 1.2 | — |
+| landings over the map | 373.1 ns | 374.9 | — |
+
+**The last two rows are the control**, and they are what makes the rest a reading
+rather than drift: one read cannot get cheaper, and *landings over the map* does
+not go through `Spans` at all. Both stayed put while everything through the
+changed path fell. Answers dumped and compared byte for byte: identical.
+
+**And the same run explains a refusal that had never been explained.** A dense
+`average_land_z` table was measured and declined, and it could not have helped
+whatever it cost: `ground` needs the corners' **minimum** as well as their
+average — `reach_z` is what a step has to climb to — and an average table does
+not carry it. To replace `land_corners` a table would have to hold both, which
+is 2 bytes over 29.4M columns, **58.8 MB**.
 
 ## What the industry does, and what each is worth here
 
@@ -219,11 +286,18 @@ true lower bound before it may be used as one.
 Bitset grids (one bit a tile, 64 tiles a word — the trick that makes JPS's
 scanning fast), packed node records, arrays instead of hash maps, bucket or
 radix queues for small integer costs, SIMD over the eight neighbours.
-**Measured out here, twice**: the terrain half by
-[`navigation_spans.md`](navigation_spans.md)'s four refusals, and A\*'s own half
-by this session's profile — the heap and the hash are 6% of a run between them,
-and our passability cannot be a bitset because it is a property of a step rather
-than of a tile.
+
+**A\*'s own half is measured out** by this session's profile: the heap and the
+hash are 6% of a run between them, and our passability cannot be a bitset
+because it is a property of a step rather than of a tile.
+
+**The terrain half is not quite as closed as it read.**
+[`navigation_spans.md`](navigation_spans.md)'s four refusals are sound and stand,
+but every one of them asked *should we store more* — and this session found 2.3%
+of a node expansion in what the land grid already computes, by deriving one block
+address instead of four. The distinction is worth carrying forward: **"is there a
+cheaper table" is answered, "is this arithmetic doing work twice" was never
+asked.** What is left of it is in the table below.
 
 ## What is next
 
@@ -235,20 +309,30 @@ than of a tile.
 | ~~**Compressed path databases**~~ | **Refused on arithmetic, §1 above.** `N` is 7,986,741 measured, so the table is `N²` = 6.4 × 10¹³: ~10 GB after run-length compression and ~10⁵ CPU-hours to build, against published databases of tens of MB on maps two to three orders smaller. Alive only per cluster, which `local_costs` already is |
 | **Flow fields for the many-chase-one case** | §4 above. Wants a count first: how many creatures share a goal in a live shard |
 | **The node budgets, 400 and 600** | Now partly argued — 5/4 at 400 beats exact at 600 — but the argument was made about *arrivals*, not about what a tick can afford. That second half still wants the shard's own numbers |
+| **One corner block for a whole expansion** | The corners of a node's nine tiles are **16 distinct cells** and about forty are read. `corner_quad` took the redundancy *inside* one tile; this would take it across the eight. Derived at 10–14% of an expansion and **not measured**, and the ceiling is known: *all eight on one column* against *landings off the bake* is 127.0 against 145.4, so everything locality can ever give is ~13% of the landing half. It also threads an array through `landing` → `Spans::check` → `ground`, which is the seam N3 and the terrain work spent two sessions narrowing — so it wants a measurement before it wants a patch |
 
 ## What is clean
 
-`cargo test -p openshard-movement -p openshard-ai -p openshard-client-app`: 154 +
-7 + 5 + 393 + 1 passed, 0 failed. `cargo clippy` on all three silent — including
-the `too_many_arguments` an eighth parameter earned, which is why `Rigour`
-bundles the budget and the weight where they travel together. `rustfmt` on every
-touched file.
+`cargo test -p openshard-map -p openshard-movement -p openshard-ai -p
+openshard-client-app`: 82 + 154 + 7 + 5 + 393 + 1 passed, 0 failed. `cargo
+clippy` on all of them silent — including the `too_many_arguments` an eighth
+parameter earned, which is why `Rigour` bundles the budget and the weight where
+they travel together. `rustfmt` on every touched file.
+
+**The oracle across all four commits is the probe's own dump**, byte for byte:
+37,248 destinations at both budgets, `arrived=4010` and `arrived=4405`
+throughout. Three of the four commits had to leave it untouched and did; the
+fourth is the one that moves routes on purpose, and what it moves is measured in
+the table above rather than asserted.
 
 **Not ours and still there:** `crates/server/boats` and `crates/server/state` do
 not compile in the working tree — a parallel session's `boat::Plank` is
-mid-change — so `cargo check --workspace` cannot be run to silence today.
+mid-change — and `client/render`'s `frame` test wants a `DirtyRows::start` that
+is mid-change too. So `cargo check --workspace` cannot be run to silence today;
+every crate this session touched was checked on its own, `client/render`'s
+library included.
 
 One thing to own: the second commit swept up a **pure rename** in
 `crates/server/boats/tests/` that a parallel session had left staged in the
 index. No content moved with it. `git commit -- <paths>` rather than a bare
-`git commit` is the guard, and it was not used.
+`git commit` is the guard, and it was not used; the two commits after it use it.
