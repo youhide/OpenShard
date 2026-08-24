@@ -478,15 +478,72 @@ should exempt climbable statics from the guard on the strength of a fall that
 does not happen. What *is* still owed is the report's real cause, and these two
 surveys say where not to look. The suspects left, in order:
 
-- **A boat moored at a pier.** `walk.rs`'s `aboard` takes the *nearest* live
-  surface at any distance and has no reach filter — its own backlog entry, under
-  R3 below. A pier with a ship beside it is exactly the shape that puts a live
-  surface near a body standing on map terrain, and neither survey here can see
-  it: both walk the bare map with no overlay at all.
+- ~~**A boat moored at a pier.**~~ **Walked 2026-08-24 — real, and two units
+  deep.** See the subsection below; the suspect held a defect, the defect is
+  fixed, and it is still not this report.
 - **A multi-step walk**, where a single step is right each time and the sequence
   drifts. Both surveys measure one step from a known surface.
 - **Arriving rather than walking** — a login, a spawn, a gate or a teleport onto
   a deck, which reach `spawn_z` and not `check`.
+
+#### 🚩 The first suspect was walked, 2026-08-24, and it does not reach
+
+`openshard-boats`'s [`moored_boat`](../crates/server/boats/tests/moored_boat.rs)
+is the shard-side sweep with a live overlay this entry asked for. Over facet 0:
+**400** pier and bridge decks with sea beside them, **260** with room for a
+small boat within four tiles. **One ship per pier, each in an overlay of its
+own** — a harbour-wide pass would have to arbitrate between piers competing for
+the same water, and whichever pier lost would go unmeasured, which is a cap on
+coverage disguised as a fixture. Every step off the pier through `step_allowed`,
+asked twice: of the reading the shard has and of the one it retired the same
+day.
+
+| | the ship makes legal | onto its deck | **under its deck** |
+|---|---|---|---|
+| the reading now | 352 | 300 | **0** |
+| the reading retired | 403 | 298 | **3** (worst 2) |
+
+**A moored ship did put a walker under a deck**, and the mechanism was not
+`aboard`'s reach — that was fixed on 2026-08-23 — but a *second reading of the
+ship's own art*: `Plank` split a component on `is_blocking()` alone, so every
+rope and rudder in the multi table became a floor, some of it two under the deck
+beside it. Eighty such floors across the shipped fleet. That is now
+`Cover::of_static` like every other placement, which is ServUO's own test
+(`Movement.cs:211`, `(flags & ImpassableSurface) == TileFlag.Surface`). See
+[`boats.md`](boats.md)'s correction to B3.
+
+**Three times over a facet, two units deep, is a defect worth the fix and is not
+this report.** A player who falls underground on a pier is not two units low.
+The two remaining suspects are unchanged, and the cause is still unknown.
+
+Two things fell out of the same walk:
+
+- **What a real sloop's deck stands at over real water**, which `boats.md`'s own
+  fixture calls an open question: a pier stands **−7..7 above the deck a body
+  boards onto, median 7**.
+- **`boats.md`'s other open question, answered** — see its B4. With
+  `MapTerrain::swimming` on, a swimmer alongside a hull was predicted to end up
+  in the sea under its own deck. It was right: **890 of 8,450** steps, against
+  **0** now, because a deck's blocking half starts at the waterline.
+
+##### Found while walking it
+
+- **`Boats::deck_at` is a third spelling of `Overlay::surface_at`'s rule** —
+  nearest surface to the body — without its reach filter or its
+  tie-goes-to-the-lower, and `Boats::carries` is a fourth. Both are answered by
+  the overlay in production now; `deck_at` and `blocks_at` have no caller left
+  outside tests. Either they read the overlay or they go.
+- **This client has no notion of a boat at all.** `clutter` expands no multis —
+  only a designed house's `HouseShape` — so a ship is invisible to the client's
+  own step rule *and* to `predict_step`, which is what draws the body the
+  instant a key goes down. Every boarding is therefore a disagreement at this
+  end: the shard puts the body on a deck a median seven below the pier and this
+  client draws it at pier height, with a `0x22` that carries no position to
+  correct it. Nothing in [`client.md`](client.md) mentions boats.
+- **A ship can be moored through a dock.** `check_berth` asks only that every
+  berth tile is *water*, which a tile carrying a pier plank can be. **52 of the
+  352** boardings in the survey land on the plank rather than on the deck under
+  it. Harmless as a landing and wrong as a placement.
 
 ### ~~Backlog: a mobile is not an obstacle~~ — closed, and it was two entries
 

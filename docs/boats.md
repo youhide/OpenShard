@@ -246,6 +246,33 @@ one, and the second bullet's repro is spent: it was run, and it refuted the thin
 it was built to confirm. See `roadmap.md`'s pier-and-bridge entry for the full
 numbers and for the suspects the player report has left.
 
+#### 🚩 And the open question was measured, 2026-08-24 — it was right, and it is closed
+
+The overlay this survey did not have is `openshard-boats`'s `moored_boat`, which
+moors a real small boat at a real berth beside every pier on facet 0 and then
+**walks the swimmer in from the water rather than off the pier**. That
+distinction is the whole of it: a body stepping off a pier reaches from the top
+of the pier's own art and clears a deck easily, while the body this prediction is
+about is floating alongside the hull, whose reach is the waterline plus two.
+
+**3,866** tiles of water alongside a hull, **8,450** steps toward a ship:
+
+| | refused | arrive on the deck | **arrive under it** |
+|---|---|---|---|
+| the reading now | 8,450 | 0 | **0** |
+| the reading retired | 7,467 | 93 | **890** (worst 3) |
+
+**The prediction was correct** — 890 bodies in the sea with their own ship
+overhead — and what closes it is not the flag but the deck's **blocking half**,
+which the same day's fix restored: a plank three units thick is three units of
+solid wood starting at the waterline, so there is no longer a gap under it to
+float in. A swimmer can also no longer clamber aboard over the gunwale (93 before
+and none now), which is UO's own answer rather than a loss: you board over the
+plank, and this shard has not built one.
+
+**The flag still stays off**, because nothing else about a swimmer has been
+measured and B4 has not moved. What is gone is the one measured objection to it.
+
 ### B6 — control is speech, and the tiller is a double-click.
 
 The reference's tillerman answers speech keywords — forward, back, left, unfurl
@@ -319,9 +346,34 @@ asks through the live one.
 
 **A `Plank` is the derived answer, not the component.** B3 said "entity → origin
 plus multi id", which would have meant walking the multi per step. The index
-holds the *split* instead — hull or deck, at what height — made once at the
-mooring. That is what makes the hot path a hash probe rather than a component
-walk, and it is why `Boats::moor` takes tiles rather than an id.
+holds what the art *lays* instead — a floor, a solid body, or both, at what
+height — derived once at the mooring. That is what makes the hot path a hash
+probe rather than a component walk, and it is why `Boats::moor` takes tiles
+rather than an id.
+
+> **Corrected 2026-08-24, and the correction is *which* derivation.** This
+> paragraph said "the *split* — hull or deck", and that is exactly what the code
+> did: `is_blocking()` decided, and everything that did not block became a
+> **floor**. Every other placement on this shard — housing, decoration, the
+> persistence reload, the client — reads its art through `Cover::of_static`,
+> which splits on `is_platform()`. That is ServUO's own test as well:
+> `(flags & ImpassableSurface) == TileFlag.Surface`,
+> `Scripts/Services/Pathing/Movement.cs:211`, where a candidate to stand on must
+> carry `Surface` and not merely fail to carry `Impassable`.
+>
+> Over the shipped multi table the two disagree about **eighty** components of
+> the twenty-four ships, every one of them rope, rudder or tiller art — and
+> `walk::aboard` takes the *nearest* live surface with only the climb bounded,
+> so an invented floor at the ship's own z is a floor two under the deck beside
+> it. Each ship also had two or three tiles a body could walk on that no other
+> reader believes in, and every deck was missing the solid half that keeps a
+> body out of the planking.
+>
+> `Plank` now holds a `Covers`, filled only by `Plank::of_art`, with the field
+> private so there is nowhere left to write a second reading; `hull_blocks`
+> became `blocks_at` because a ship's own deck answers it now. The measurement
+> is `openshard-boats`'s `moored_boat`, which keeps the retired rule written out
+> so the number stays reproducible.
 
 **The measurement, which B3 asked for instead of an assurance.** Release, 100,000
 steps: **1.5ms with no boats, 5.5ms with one moored** — 15ns against 55ns. The
@@ -504,3 +556,26 @@ a ship that sails.
   reuses `disrupt` → `move_to` → `refresh_around` → `broadcast_move` by copying
   the sequence, which is the third caller of that sequence after `npc::live` and
   `quests::advance_escorts`. A fourth would be the point at which it wants a name.
+
+## Backlog, found while walking a moored pier (2026-08-24)
+
+- **A ship can be moored through a dock.** `check_berth` asks only that every
+  berth tile is *water*, and a water tile can carry a pier plank. **52 of the
+  352** boardings the survey measured land on the plank rather than on the deck
+  under it. Harmless as a landing and wrong as a placement: nothing should be
+  able to moor a hull inside a dock. The fix is a second clause — no static
+  platform over the berth — and it belongs beside the "all sea" one rather than
+  in the step rule.
+- **`Boats::deck_at` and `Boats::carries` are a third and fourth spelling of
+  `Overlay::surface_at`'s rule**, the nearest surface to a body, each missing a
+  different part of it: `deck_at` has no reach filter and no
+  tie-goes-to-the-lower, `carries` asks for equality instead. Both were the
+  production path before the projection existed; they and `blocks_at` now have
+  no caller outside tests. Either they read the overlay or they go.
+- **This client has no notion of a boat at all.** `clutter` expands no multis —
+  only a designed house's `HouseShape` — so a ship is invisible to the client's
+  own step rule *and* to `predict_step`, which draws the body the instant a key
+  goes down. The survey's median pier stands **seven** above the deck it boards
+  onto, so every boarding is seven units of disagreement that a `0x22` carries
+  no position to correct. B2 is about what the *shard* sends; this is the other
+  end of it, and `docs/client.md` does not mention boats anywhere.
