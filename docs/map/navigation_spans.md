@@ -1414,16 +1414,23 @@ graph over spans names neither.
   which is what says the refusal was the rule and not a loop that had stopped
   finding anywhere.
 - **`a_creature_routes_past_its_exact_budget_over_the_coarse_graph` is
-  load-sensitive by construction.** `walk_toward` re-plans from scratch on every
-  beat, and every plan reads `MAX_LONG_PATH_TIME` — 50 ms of *wall clock*. A
-  debug build on a busy machine can miss it, and one miss anywhere along the
-  walk drops the creature onto the straight-line fall-back and ends it far from
-  the goal. It went red once during the corner-rule work — `left: Point { x: 37,
-  y: 31, z: 0 }` against `right: Point { x: 2, y: 48, z: 0 }` — and did not
-  reproduce afterwards, including ten runs in isolation; that run overlapped a
-  parallel session's in-flight edit to `spans.rs`, so the cause is **not**
-  settled. What is settled is that a wall clock decides this assertion, and a
-  deadline the caller names is what would take it out of the assertion.
+  load-sensitive by construction. ✅ Fixed — the clock is gone from both
+  searches.** `walk_toward` re-plans from scratch on every beat, and every plan
+  read `MAX_LONG_PATH_TIME` — 50 ms of *wall clock*. A debug build on a busy
+  machine could miss it, and one miss anywhere along the walk dropped the
+  creature onto the straight-line fall-back and ended it far from the goal. It
+  went red once during the corner-rule work — `left: Point { x: 37, y: 31, z: 0 }`
+  against `right: Point { x: 2, y: 48, z: 0 }` — and did not reproduce
+  afterwards, including ten runs in isolation.
+
+  **Both timers are counted now.** An exact search is bounded by its node budget
+  and nothing else; a long query is bounded by `LONG_PATH_EFFORT`, one wallet of
+  node expansions that its two floods and every refinement pass draw from, set at
+  100,000 against a worst measured query of 4,377. So this assertion no longer
+  has a clock in it, and neither does the tick `architecture.md` calls
+  deterministic. The unsettled part stays unsettled — that one red run overlapped
+  a parallel session's in-flight edit to `spans.rs` — but the mechanism it was
+  attributed to cannot fire any more.
 - **A second `Ground` now exists in `client/app`, and it is the misnamed one.
   ✅ Fixed.** [`steer::Readings`](../../crates/client/app/src/steer.rs) is a
   pair of `Footing`s — the same map read twice, once with the doors shut and
@@ -1565,6 +1572,45 @@ but **fewer nodes**, and that is the coarse graph, which is built and which the
 shard reads. What the entry leaves standing is the packed static record, under
 [direction B](new_map_representation/plan.md#b--our-own-chunk-format-and-a-uo-importer)'s
 own gate and not this plan's.
+
+**🚩 The other half was never measured, and a quarter of a search was in it.**
+Everything above is about the terrain half, and the sentence it closes with —
+*~225 ns of A\*'s own heap and hash* — was an arithmetic remainder rather than a
+reading: nothing had ever profiled the search itself. A `perf` profile of
+`map_path_probe` over 37,248 destinations from the castle says three of the
+eight hottest symbols were not A\* at all:
+
+| | what it was |
+|---|---|
+| `__vdso_clock_gettime` + `Timespec::now`, **6.5%** | `MAX_SEARCH_TIME`, read once per pop. The only syscall in the loop, and the wall clock this plan's own backlog wanted gone |
+| three `reserve_rehash`, **5.8%** | `cost`, `came_from` and `closed` growing from empty on every search, with the node budget known on the way in |
+| `BinaryHeap::push`, **3.8%** | a six-field `OpenEntry` whose derived `Ord` is a chain of up to six compares, run ~log₂(600) times a push |
+
+All three are closed, and none of them touched the terrain: **the clock is gone
+entirely** (a search is bounded by its node budget, a long query by
+`LONG_PATH_EFFORT`), **the three tables are one `Visit` record reserved at twice
+the budget** — a neighbour cost four hash lookups of one key and now costs one
+`entry` — and **the open list's ordering is one `u128`** laid out
+most-significant-field-first, which is the same order by construction.
+
+Measured the way this plan measures — `map_path_probe --radius 96 --repeat 3`
+from the castle, release, least of three runs, 37,248 destinations at each
+budget:
+
+| | before | after |
+|---|---|---|
+| budget 400, p50 | 0.109 ms | **0.080 ms** |
+| budget 400, whole sweep | 3,825 ms | **2,830 ms** (−26%) |
+| budget 600, p50 | 0.168 ms | **0.122 ms** |
+| budget 600, whole sweep | 5,856 ms | **4,221 ms** (−28%) |
+| per node, budget 600 | ~262 ns | **~189 ns** |
+
+**The answers did not move**: 4,010 and 4,405 arrivals, 26 and 31 columns
+reached at another height, and the places written down are identical to the
+entry — the packing preserves the tie-break, so the search settles on the same
+route among equally short ones. What is left in the profile is 76% terrain and
+22% A\*, which is where the entry above takes over: the lever is still **fewer
+nodes**, not a cheaper one.
 
 **Rebake before running anything.** `ROUTING_VERSION` is 4, so every artifact
 baked before N4 is refused — and refused *loudly*: the shard does not boot.

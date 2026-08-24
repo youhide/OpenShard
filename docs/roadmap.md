@@ -870,9 +870,9 @@ charges nobody anything, and the decreed step obeys the same rule. Five tests in
 
 #### Found while closing it
 
-- 🚩 **The unnamed full-suite flake has a name, and it is wider than a test.**
-  The previous entry recorded "one full-suite run reported a single failure with
-  no name captured". It is
+- 🚩 **The unnamed full-suite flake has a name, and it is wider than a test.
+  ✅ Fixed.** The previous entry recorded "one full-suite run reported a single
+  failure with no name captured". It is
   `a_creature_routes_past_its_exact_budget_over_the_coarse_graph`, and three
   `movement::navigation` tests join it — all four green in isolation, all four
   red under a loaded full-suite run:
@@ -882,16 +882,27 @@ charges nobody anything, and the decreed step obeys the same rule. Five tests in
   right: Point { x: 2, y: 48, z: 0 }
   ```
 
-  The cause is `MAX_SEARCH_TIME: Duration::from_millis(50)`
-  (`movement/src/path.rs:43`): the path search is bounded by **wall-clock**, so a
-  loaded machine gives up sooner and the creature turns somewhere else. The flake
-  is the small half. The large half is that this timer sits inside the tick, and
-  `docs/architecture.md` says the tick is deterministic and a world replays roll
-  for roll — a search that answers differently by how busy the box is breaks
-  that, silently, in production and not only in a test. What would close it is a
-  budget the search counts rather than measures; `ai::PATH_BUDGET` is already
-  that shape, so the timer may simply be a second limiter that no longer has a
-  job.
+  The cause was `MAX_SEARCH_TIME: Duration::from_millis(50)`: the path search was
+  bounded by **wall-clock**, so a loaded machine gave up sooner and the creature
+  turned somewhere else. The flake was the small half. The large half is that the
+  timer sat inside the tick, and `docs/architecture.md` says the tick is
+  deterministic and a world replays roll for roll — a search that answers
+  differently by how busy the box is breaks that, silently, in production and not
+  only in a test.
+
+  **Both constants are gone.** An exact search is bounded by its node budget and
+  by nothing else — 400 or 600 nodes is 0.1–0.25 ms, so the 50 ms it was also
+  measured against was never reachable and only cost the clock read. A *long*
+  query is many searches, and what bounds the sum of them is now
+  `LONG_PATH_EFFORT`, one counted wallet the floods and the refinement passes
+  draw from. It is set from measurement rather than converted: 87 long queries
+  over two origins on facet 0 spend a median of ~1,900 node expansions and a
+  worst of 4,377, and the ceiling is 100,000. `SearchExit::Deadline` and
+  `LongExit::Deadline` are `Spent`, which is a fact about the ground rather than
+  about the machine.
+
+  **It paid for itself twice**: `clock_gettime` was the only syscall in the hot
+  loop and 6.5% of a profile of the search.
 - **`occupy_chair` never reserved the seat**, though its doc said it did — "this
   tiny server-side marker reserves that occupied seat". Nothing checked whether
   another mobile was already `Seated` on that chair. It was unreachable rather

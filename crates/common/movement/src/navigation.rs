@@ -24,8 +24,7 @@
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, VecDeque};
-use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
@@ -34,9 +33,38 @@ use crate::footing::Footing;
 use openshard_map::grid::Tile;
 
 use crate::walk::steps_out_of;
-use crate::{find_path_toward_until, find_path_until, step_allowed};
+use crate::{Effort, debug_enabled, find_path_toward_within, find_path_within, step_allowed};
 
-const MAX_LONG_PATH_TIME: Duration = Duration::from_millis(50);
+/// The whole work one long query may do, in node expansions.
+///
+/// **The ceiling that used to be a clock.** A long query is two region floods
+/// and up to nine refinement passes over a corridor, and what kept the sum of
+/// them off the tick was 50 ms of wall clock read inside each — see
+/// [`Effort`] for why that was the wrong instrument in three separate ways.
+/// This is the same ceiling in the unit the searches under it are already
+/// written in, so what a query may cost stops depending on how busy the
+/// machine is.
+///
+/// **The number is measured, not converted.** Converting the old one would give
+/// ~200,000 — 50 ms at the ~250 ns an expansion costs — and nothing comes near
+/// even a fraction of that. Over `coarse_bench`'s six distance bands from two
+/// origins on facet 0, 87 long queries out to a quarter of the facet:
+///
+/// | | castle (1363, 1600) | open country (1500, 1900) |
+/// |---|---|---|
+/// | cheapest query | 330 | 1,258 |
+/// | median | 1,746 | 2,111 |
+/// | p95 | 3,450 | 4,022 |
+/// | dearest | 4,118 | 4,377 |
+///
+/// A ceiling is not a budget, so it is set well above the sample rather than at
+/// it: **23× the dearest query measured**, which leaves room for ground denser
+/// than any in it — a query is bounded by its corridor and its retries long
+/// before this is reached, and reaching it at all means something is wrong. What
+/// keeps it honest as a *ceiling* is the other end: at ~250 ns a node it is
+/// ~25 ms, half of what the clock it replaces allowed, so the worst case it
+/// permits is a tick a shard can still absorb.
+const LONG_PATH_EFFORT: usize = 100_000;
 
 const WIDE_PORTAL: usize = 6;
 /// A region stays well inside the normal 600-cell refinement budget, while the
@@ -797,7 +825,10 @@ impl NavigationGraph {
                 })
                 .collect();
             for &from in &nodes {
-                let costs = region_costs(footing, &local, self.nodes[from.0].point, &slots);
+                // The bake pays for nothing: what a flood cost is a *query's*
+                // question, and this one runs once at build time with a whole
+                // facet's worth of time to do it in.
+                let (costs, _) = region_costs(footing, &local, self.nodes[from.0].point, &slots);
                 for (index, &to) in nodes.iter().enumerate() {
                     if from == to {
                         continue;
@@ -946,19 +977,20 @@ impl NavigationGraph {
     /// one with the other would propose corridors nothing can walk. [`Join`]
     /// says which was asked.
     ///
-    /// **No deadline is read inside it**, unlike the fan-out it replaces. A
-    /// flood over one region is bounded work — one expansion per place of a
-    /// 32×32 rectangle, which the census puts at about a thousand and caps at
-    /// twelve thousand for a base set nobody has counted — where a fan-out
-    /// carried a whole node budget *per node* and could spend the query's 50 ms
-    /// by itself. The deadline is read where it already was, once the join is
-    /// paid.
+    /// **Nothing stops it part-way**, unlike the fan-out it replaces. A flood
+    /// over one region is bounded work — one expansion per place of a 32×32
+    /// rectangle, which the census puts at about a thousand and caps at twelve
+    /// thousand for a base set nobody has counted — where a fan-out carried a
+    /// whole node budget *per node* and could spend a whole query by itself. So
+    /// the flood is not interrupted; it **pays** for what it expanded, and the
+    /// query's wallet is read where it already was, once the join is done.
     fn local_costs(
         &self,
         footing: &Footing<'_>,
         region_id: RegionId,
         endpoint: Point,
         join: Join,
+        effort: &mut Effort,
     ) -> Vec<(NodeId, u32)> {
         let local = RegionPlaces::sampled(footing, self.regions[region_id.0]);
         // A region whose walkable bit is set holds a place, and the endpoint's
@@ -975,10 +1007,11 @@ impl NavigationGraph {
             .filter_map(|node| local.slot(self.nodes[node.0].point).map(|slot| (node, slot)))
             .collect();
         let wanted: Vec<usize> = joined.iter().map(|&(_, slot)| slot).collect();
-        let costs = match join {
+        let (costs, expanded) = match join {
             Join::OutOf => region_costs(footing, &local, at, &wanted),
             Join::Into => region_costs_into(footing, &local, at, &wanted),
         };
+        effort.spend(expanded);
         joined
             .into_iter()
             .filter_map(|(node, slot)| costs[slot].map(|cost| (node, cost)))
@@ -992,7 +1025,7 @@ impl NavigationGraph {
         to: Point,
         nodes: &[NodeId],
         budget: usize,
-        deadline: Instant,
+        effort: &mut Effort,
     ) -> Result<Vec<Direction>, NodeId> {
         let mut route = Vec::new();
         let mut at = from;
@@ -1000,13 +1033,13 @@ impl NavigationGraph {
             .region_at(from)
             .expect("the query was checked before refinement");
         for &node in nodes {
-            if Instant::now() >= deadline {
+            if effort.spent_out() {
                 return Err(node);
             }
             let next = self.nodes[node.0];
             let next_region = self.node_region(node);
             let segment = match next_region == region {
-                true => region_route(footing, self.regions[region.0], at, next.point, budget, deadline),
+                true => region_route(footing, self.regions[region.0], at, next.point, budget, effort),
                 false => cross_portal(footing, at, next.point),
             };
             let Some(segment) = segment else {
@@ -1021,10 +1054,10 @@ impl NavigationGraph {
         let last = *nodes
             .last()
             .expect("an abstract route always names at least one node");
-        if Instant::now() >= deadline {
+        if effort.spent_out() {
             return Err(last);
         }
-        let Some(segment) = region_route(footing, self.regions[region.0], at, to, budget, deadline) else {
+        let Some(segment) = region_route(footing, self.regions[region.0], at, to, budget, effort) else {
             return Err(last);
         };
         append(footing, at, &segment, &mut route).ok_or(last)?;
@@ -1110,18 +1143,22 @@ fn region_costs(
     local: &RegionPlaces,
     from: Point,
     wanted: &[usize],
-) -> Vec<Option<u32>> {
+) -> (Vec<Option<u32>>, usize) {
     let mut costs = vec![None; local.len()];
     let mut sought = Sought::of(wanted, local.len());
     let mut open = VecDeque::new();
+    // What the flood cost the query, in the same unit a search charges: one per
+    // place whose neighbours were asked for. See `Effort`.
+    let mut expanded = 0;
     let start = local.slot(from).expect("a node is a place of its own region");
     costs[start] = Some(0);
     if sought.done(start) {
-        return costs;
+        return (costs, expanded);
     }
     open.push_back((from, start));
     while let Some((point, slot)) = open.pop_front() {
         let cost = costs[slot].expect("queued places have a cost");
+        expanded += 1;
         for next in steps_out_of(footing, point).into_iter().flatten() {
             let Some(at) = local.slot(next) else {
                 continue;
@@ -1129,13 +1166,13 @@ fn region_costs(
             if costs[at].is_none() {
                 costs[at] = Some(cost + 1);
                 if sought.done(at) {
-                    return costs;
+                    return (costs, expanded);
                 }
                 open.push_back((next, at));
             }
         }
     }
-    costs
+    (costs, expanded)
 }
 
 /// The same traversal read backwards: what it costs to reach `to` from every
@@ -1158,7 +1195,7 @@ fn region_costs_into(
     local: &RegionPlaces,
     to: Point,
     wanted: &[usize],
-) -> Vec<Option<u32>> {
+) -> (Vec<Option<u32>>, usize) {
     let mut costs = vec![None; local.len()];
     // Each place's landings by the region's own numbering, resolved the first
     // time the traversal asks a place where it goes. `NO_NEIGHBOR` is a landing
@@ -1168,10 +1205,13 @@ fn region_costs_into(
     let mut asked = vec![false; local.len()];
     let mut sought = Sought::of(wanted, local.len());
     let mut open = VecDeque::new();
+    // One per place this asks where it goes, which is what an expansion is here:
+    // the traversal pops a place many times over and resolves each one once.
+    let mut expanded = 0;
     let start = local.slot(to).expect("the endpoint is a place of its own region");
     costs[start] = Some(0);
     if sought.done(start) {
-        return costs;
+        return (costs, expanded);
     }
     open.push_back(start);
     while let Some(slot) = open.pop_front() {
@@ -1195,18 +1235,19 @@ fn region_costs_into(
                             .map_or(NO_NEIGHBOR, |at| at as u32);
                     }
                     asked[candidate] = true;
+                    expanded += 1;
                 }
                 if steps[candidate].contains(&(slot as u32)) {
                     costs[candidate] = Some(cost + 1);
                     if sought.done(candidate) {
-                        return costs;
+                        return (costs, expanded);
                     }
                     open.push_back(candidate);
                 }
             }
         }
     }
-    costs
+    (costs, expanded)
 }
 
 fn distance(from: Point, to: Point) -> u32 {
@@ -1235,8 +1276,11 @@ enum LongExit {
     /// A corridor existed and live refinement failed every hop it was given,
     /// until [`LIVE_REROUTES`] retries ran out.
     PortalsExhausted,
-    /// [`MAX_LONG_PATH_TIME`] passed.
-    Deadline,
+    /// [`LONG_PATH_EFFORT`] was spent before the query finished. Its predecessor
+    /// was `Deadline`, and the difference is the whole point: this one is a fact
+    /// about the ground the query was asked over, and the same query over the
+    /// same ground spends it again.
+    Spent,
 }
 
 /// How many corridors refinement may reject before the query gives up.
@@ -1273,17 +1317,23 @@ pub fn find_long_path(
     to: Point,
     budget: usize,
 ) -> Option<Vec<Direction>> {
-    let started = Instant::now();
-    let (mut result, mut exit) = find_long_path_inner(guide, footing, graph, from, to, budget);
-    let elapsed = started.elapsed();
-    // The inner loops observe the same deadline, but an individual live A*
-    // call can finish just after it.  Do not hand an interactive caller a
-    // late route; the next terrain/frame snapshot may try again.
-    if elapsed >= MAX_LONG_PATH_TIME {
-        result = None;
-        exit = LongExit::Deadline;
-    }
-    debug_long_path(from, to, budget, elapsed, result.as_ref().map(Vec::len), exit);
+    let started = debug_enabled().then(Instant::now);
+    // One wallet for the whole query, and the only ceiling over it. What used to
+    // be here as well — a second, later reading of the clock, which threw away a
+    // route that arrived just after the deadline — has nothing to do: a counted
+    // ceiling cannot be passed *between* two reads of it, so a route that comes
+    // back is a route that was paid for.
+    let mut effort = Effort::of(LONG_PATH_EFFORT);
+    let (result, exit) = find_long_path_inner(guide, footing, graph, from, to, budget, &mut effort);
+    debug_long_path(
+        from,
+        to,
+        budget,
+        started,
+        effort.spent(),
+        result.as_ref().map(Vec::len),
+        exit,
+    );
     result
 }
 
@@ -1294,8 +1344,8 @@ fn find_long_path_inner(
     from: Point,
     to: Point,
     budget: usize,
+    effort: &mut Effort,
 ) -> (Option<Vec<Direction>>, LongExit) {
-    let deadline = Instant::now() + MAX_LONG_PATH_TIME;
     let (Some(from_region), Some(to_region)) = (graph.region_at(from), graph.region_at(to)) else {
         return (None, LongExit::OffGraph);
     };
@@ -1307,7 +1357,7 @@ fn find_long_path_inner(
     // standing as the verdict. What that costs is `local_costs` over one region
     // twice, which is the price of an answer where there used to be none.
     let local = match from_region == to_region {
-        true => region_route(footing, graph.regions[from_region.0], from, to, budget, deadline),
+        true => region_route(footing, graph.regions[from_region.0], from, to, budget, effort),
         false => None,
     };
     if let Some(route) = local {
@@ -1318,22 +1368,22 @@ fn find_long_path_inner(
     // the endpoint's own flood does not change between those retries — a portal
     // the corridor may not use is one `abstract_path` skips, not one the ground
     // stopped reaching. Joined once, read every retry.
-    let source = graph.local_costs(guide, from_region, from, Join::OutOf);
-    let target = graph.local_costs(guide, to_region, to, Join::Into);
-    if Instant::now() >= deadline {
-        return (None, LongExit::Deadline);
+    let source = graph.local_costs(guide, from_region, from, Join::OutOf, effort);
+    let target = graph.local_costs(guide, to_region, to, Join::Into, effort);
+    if effort.spent_out() {
+        return (None, LongExit::Spent);
     }
     if source.is_empty() || target.is_empty() {
         return (None, LongExit::NoJoin);
     }
     for _ in 0..=LIVE_REROUTES {
-        if Instant::now() >= deadline {
-            return (None, LongExit::Deadline);
+        if effort.spent_out() {
+            return (None, LongExit::Spent);
         }
         let Some(path) = graph.abstract_path(from, to, &forbidden, &source, &target) else {
             return (None, LongExit::NoCorridor);
         };
-        match graph.refine(footing, from, to, &path, budget, deadline) {
+        match graph.refine(footing, from, to, &path, budget, effort) {
             Ok(route) => return (Some(route), LongExit::Route),
             Err(node) if !forbidden[node.0] => graph.forbid_portal(node, &mut forbidden),
             Err(_) => return (None, LongExit::PortalsExhausted),
@@ -1342,18 +1392,22 @@ fn find_long_path_inner(
     (None, LongExit::PortalsExhausted)
 }
 
+/// `started` is `None` unless diagnostics were asked for, and `spent` is what
+/// the query's wallet paid out — the reading [`LONG_PATH_EFFORT`] is argued
+/// from, and the one number here that is the same on every machine.
 fn debug_long_path(
     from: Point,
     to: Point,
     budget: usize,
-    elapsed: std::time::Duration,
+    started: Option<Instant>,
+    spent: usize,
     route_len: Option<usize>,
     exit: LongExit,
 ) {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    if !*ENABLED.get_or_init(|| std::env::var_os("OPENSHARD_PATH_DEBUG").is_some()) {
+    let Some(started) = started else {
         return;
-    }
+    };
+    let elapsed = started.elapsed();
     let threshold = std::env::var("OPENSHARD_PATH_DEBUG_MS")
         .ok()
         .and_then(|value| value.parse::<u128>().ok())
@@ -1362,7 +1416,7 @@ fn debug_long_path(
         return;
     }
     eprintln!(
-        "path-debug kind=find_long_path from=({}, {}, {}) to=({}, {}, {}) budget={budget} elapsed_ms={:.3} exit={exit:?} route_steps={route_len:?}",
+        "path-debug kind=find_long_path from=({}, {}, {}) to=({}, {}, {}) budget={budget} elapsed_ms={:.3} nodes={spent} exit={exit:?} route_steps={route_len:?}",
         from.x,
         from.y,
         from.z,
@@ -1392,22 +1446,22 @@ fn region_route(
     from: Point,
     to: Point,
     budget: usize,
-    deadline: Instant,
+    effort: &mut Effort,
 ) -> Option<Vec<Direction>> {
     let hop = u16::try_from((budget / 2).max(1)).unwrap_or(u16::MAX);
     let mut route = Vec::new();
     let mut at = from;
     while distance(at, to) > u32::from(hop) {
-        if Instant::now() >= deadline {
+        if effort.spent_out() {
             return None;
         }
         // Aim at the real destination and keep the closest result when the
         // bounded search runs out. A synthetic point exactly `hop` tiles away
         // can itself be a tree, which must not make a whole forest unroutable.
-        let segment = find_path_toward_until(footing, at, to, budget, deadline, Some(region))?;
+        let segment = find_path_toward_within(footing, at, to, budget, effort, Some(region))?;
         at = append(footing, at, &segment, &mut route)?;
     }
-    let segment = find_path_until(footing, at, to, budget, deadline, Some(region))?;
+    let segment = find_path_within(footing, at, to, budget, effort, Some(region))?;
     append(footing, at, &segment, &mut route)?;
     Some(route)
 }
@@ -1723,14 +1777,17 @@ mod tests {
             "and cannot climb back onto it"
         );
 
-        let out_of = graph.local_costs(&footing, region, high, Join::OutOf);
+        let mut effort = Effort::of(LONG_PATH_EFFORT);
+        let out_of = graph.local_costs(&footing, region, high, Join::OutOf, &mut effort);
         assert_eq!(
             out_of.len(),
             graph.nodes_in_region(region).count(),
             "a body that drops off the walkway reaches every portal of its region"
         );
         assert!(
-            graph.local_costs(&footing, region, high, Join::Into).is_empty(),
+            graph
+                .local_costs(&footing, region, high, Join::Into, &mut effort)
+                .is_empty(),
             "and no portal of it reaches the walkway"
         );
 

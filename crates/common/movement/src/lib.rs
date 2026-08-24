@@ -76,11 +76,11 @@ pub use navigation::{COARSE_MIN_DISTANCE, NavigationGraph, find_long_path};
 pub use pace::{
     Pace, RUN_HOLD, RUN_INTERVAL, WALK_BUFFER, WALK_HOLD, WALK_INTERVAL, WalkPace, step_hold, step_progress,
 };
-pub use path::{MAX_SEARCH_TIME, PathSearch, SearchExit, find_path, find_path_toward, search_path};
-pub(crate) use path::{find_path_toward_until, find_path_until};
+pub use path::{PathSearch, SearchExit, find_path, find_path_toward, search_path};
+pub(crate) use path::{Effort, debug_enabled, find_path_toward_within, find_path_within};
 pub use sequence::{OutOfSequence, StepCounter, WalkSequence};
 pub use terrain::{MAX_STEP_UP, MapTerrain, PLAYER_HEIGHT};
 pub use walk::{
-    Heading, Intent, Lean, Refusal, Walk, Walker, can_fit, can_step, direction_toward, heading_toward,
-    intend, line_tiles, sight_clear, step_allowed, step_from, steps_out_of,
+    Heading, Intent, Lean, Refusal, Walk, Walker, can_fit, can_stand, can_step, direction_toward,
+    heading_toward, intend, line_tiles, sight_clear, step_allowed, step_from, steps_out_of,
 };

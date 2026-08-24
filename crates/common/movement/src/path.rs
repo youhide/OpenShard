@@ -22,12 +22,13 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use openshard_map::overlay::Cover;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::world::Point;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
+use std::collections::hash_map::Entry;
 
 use crate::footing::Footing;
 use crate::navigation::Region;
@@ -35,32 +36,133 @@ use openshard_map::grid::Tile;
 
 use crate::walk::steps_out_of;
 
-/// How long one search may run before it gives up, whatever its budget says.
+/// The work one query may do, counted rather than clocked.
 ///
-/// A bound on the *tick*, not on the answer: pathfinding runs on the client's
-/// render thread as well as inside the shard's beat, and neither can afford a
-/// search that walks a whole facet.
-pub const MAX_SEARCH_TIME: Duration = Duration::from_millis(50);
+/// **A search is bounded by its node budget and by nothing else.** What this
+/// exists for is a query that is *many* searches — [`find_long_path`] runs two
+/// region floods and up to nine refinement passes over a corridor, each with the
+/// same per-search budget — where the thing that used to stop the whole from
+/// running away was a 50 ms wall clock, read once per node expansion inside
+/// every one of them.
+///
+/// A clock in there was wrong three times over. It made the answer depend on
+/// what else the machine was doing, in a tick
+/// [`architecture.md`](../../../docs/architecture.md) calls deterministic and
+/// replayable — the same shard, the same inputs, a different route under load.
+/// It made four tests green alone and red together. And it cost 6.5% of a
+/// search: `clock_gettime` was the only syscall in the hot loop and one of the
+/// eight hottest symbols in a profile of it.
+///
+/// The ceiling it replaces is the same ceiling, in the unit the budgets beside
+/// it are already written in: node expansions.
+///
+/// [`find_long_path`]: crate::find_long_path
+pub(crate) struct Effort {
+    left: usize,
+    spent: usize,
+}
+
+impl Effort {
+    /// A query allowed `nodes` expansions across every search it makes.
+    pub(crate) fn of(nodes: usize) -> Self {
+        Self {
+            left: nodes,
+            spent: 0,
+        }
+    }
+
+    /// What the query has expanded so far, over every search and flood in it.
+    ///
+    /// Diagnostic, and the reading the ceiling above it is set from: a number of
+    /// nodes is a thing a bench can quote and a machine cannot move.
+    pub(crate) fn spent(&self) -> usize {
+        self.spent
+    }
+
+    /// What one search inside this query may finalise: its own budget, or
+    /// whatever the query has left, whichever is less.
+    pub(crate) fn allowance(&self, budget: usize) -> usize {
+        budget.min(self.left)
+    }
+
+    /// Whether the query has spent everything it was given. A caller that has
+    /// work left to hand out stops here.
+    pub(crate) fn spent_out(&self) -> bool {
+        self.left == 0
+    }
+
+    /// Charge the query for work already done.
+    ///
+    /// A search charges what it finalised; a region flood charges the places it
+    /// expanded. Both are the same unit, which is what makes one wallet able to
+    /// hold a query made of both.
+    pub(crate) fn spend(&mut self, nodes: usize) {
+        self.left = self.left.saturating_sub(nodes);
+        self.spent += nodes;
+    }
+}
 
 /// One entry on the open list, ordered so [`BinaryHeap`] with [`Reverse`] pops
 /// the cheapest-and-straightest first. See the note where this is pushed for
-/// why [`Self::manhattan`] is there at all.
+/// why the Manhattan distance is in the ordering at all.
 ///
-/// Field order is intentional: the derived ordering ranks `f`, then `h`, then
-/// the Manhattan distance, followed by the node's own coordinates only to make
-/// equal candidates deterministic.
+/// **One integer, not six fields**, and the field order is the reason it can be:
+/// the ranking is `f`, then `h`, then the Manhattan distance, then the node's
+/// own coordinates to make equal candidates deterministic — which is exactly
+/// what comparing one number whose fields are laid out most-significant-first
+/// does. The six-field version derived the same order as a chain of up to six
+/// compares and branches, and a heap runs that chain ~log₂(600) ≈ 9 times per
+/// push: `BinaryHeap::push` was 12.9% of a profile of the search.
+///
+/// The widths are what each field can actually reach: `f` is a cost bounded by
+/// the budget plus a heuristic bounded by the facet, the Manhattan distance is
+/// twice that, and 24 bits holds either with room to spare.
+///
+/// ```text
+/// 111        87        63        39      23      7   0
+///  | f (24) | h (24) | man (24) | x (16) | y (16) | z (8) |
+/// ```
 ///
 /// **The height is one of those coordinates and not a payload.** A candidate is
 /// a place to stand, so the same tile reached at two heights is two entries —
-/// see [`PathNodeKey`].
+/// see [`PathNodeKey`]. It is stored with its sign bit flipped, which is what
+/// makes an unsigned compare of the whole word rank it the way `i8` does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct OpenEntry {
-    f: u32,
-    h: u32,
-    manhattan: u32,
-    x: u16,
-    y: u16,
-    z: i8,
+struct OpenEntry(u128);
+
+/// The width of each of the three cost fields, as a mask.
+const FIELD: u32 = (1 << 24) - 1;
+
+impl OpenEntry {
+    /// A candidate at `at`, ranked by `f`, then `h`, then `manhattan`.
+    ///
+    /// The three costs are clamped rather than masked: a value past 24 bits
+    /// would otherwise wrap into the field above it and rank a candidate as the
+    /// *cheapest* thing on the list. Nothing on a UO facet comes near — the
+    /// widest heuristic a 65,536-tile map can produce is 16 bits — so this is a
+    /// guard rather than a case, and the failure it guards against is a search
+    /// that visibly wanders rather than one that crashes.
+    fn new(f: u32, h: u32, manhattan: u32, at: Point) -> Self {
+        let f = u128::from(f.min(FIELD));
+        let h = u128::from(h.min(FIELD));
+        let manhattan = u128::from(manhattan.min(FIELD));
+        let x = u128::from(at.x);
+        let y = u128::from(at.y);
+        // The bias: `i8::MIN` becomes 0 and `i8::MAX` becomes 255, so unsigned
+        // order over the byte is signed order over the height.
+        let z = u128::from((at.z as u8) ^ 0x80);
+        Self((f << 88) | (h << 64) | (manhattan << 40) | (x << 24) | (y << 8) | z)
+    }
+
+    /// The place this candidate stands on, and its distance to the goal — the
+    /// two things a pop reads back out.
+    fn place(self) -> (Point, u32) {
+        let x = ((self.0 >> 24) & 0xffff) as u16;
+        let y = ((self.0 >> 8) & 0xffff) as u16;
+        let z = (((self.0 & 0xff) as u8) ^ 0x80) as i8;
+        let h = ((self.0 >> 64) & u128::from(FIELD)) as u32;
+        (Point::new(x, y, z), h)
+    }
 }
 
 /// Plan a walk from `from` to the place `to` names, at most `budget` nodes
@@ -88,9 +190,9 @@ struct OpenEntry {
 /// question instead.
 #[must_use]
 pub fn find_path(footing: &Footing<'_>, from: Point, to: Point, budget: usize) -> Option<Vec<Direction>> {
-    let started = Instant::now();
-    let search = search(footing, from, to, budget, started + MAX_SEARCH_TIME, None);
-    debug_slow("find_path", from, to, budget, started.elapsed(), &search);
+    let started = debug_enabled().then(Instant::now);
+    let search = explore(footing, from, to, budget, None);
+    debug_slow("find_path", from, to, budget, started, &search);
     search.arrived.then_some(search.route)
 }
 
@@ -122,9 +224,9 @@ pub fn find_path_toward(
     to: Point,
     budget: usize,
 ) -> Option<Vec<Direction>> {
-    let started = Instant::now();
-    let search = search(footing, from, to, budget, started + MAX_SEARCH_TIME, None);
-    debug_slow("find_path_toward", from, to, budget, started.elapsed(), &search);
+    let started = debug_enabled().then(Instant::now);
+    let search = explore(footing, from, to, budget, None);
+    debug_slow("find_path_toward", from, to, budget, started, &search);
     (search.arrived || !search.route.is_empty()).then_some(search.route)
 }
 
@@ -138,7 +240,7 @@ pub fn find_path_toward(
 /// again. It exists for the measurement the node budgets are argued from.
 #[must_use]
 pub fn search_path(footing: &Footing<'_>, from: Point, to: Point, budget: usize) -> PathSearch {
-    search(footing, from, to, budget, Instant::now() + MAX_SEARCH_TIME, None)
+    explore(footing, from, to, budget, None)
 }
 
 /// What one search found, before either entry point above reads it — and what
@@ -165,6 +267,14 @@ pub struct PathSearch {
     /// Britannia that is 0.6% of columns, so the count is what it always was
     /// everywhere else.
     pub explored: usize,
+    /// Standing places the search wrote down: every one it finalised, plus the
+    /// frontier it reached and never popped.
+    ///
+    /// [`Self::explored`] is what the budget counts; this is what the table
+    /// holds, and the two differ by the frontier. It is here because the table
+    /// is now reserved up front — see `visit_capacity` — and a reservation
+    /// argued from a guess is a rehash nobody sees.
+    pub written: usize,
     /// Why the search stopped.  This is diagnostic only; the two entry points
     /// above keep the established `Option<Vec<Direction>>` contract.
     pub exit: SearchExit,
@@ -172,10 +282,13 @@ pub struct PathSearch {
 
 /// Why a search stopped looking.
 ///
-/// The three that are not [`Self::Goal`] are three different failures wearing
-/// one `None`: a walled-in start, a budget that ran out mid-route, and a search
-/// that outlived [`MAX_SEARCH_TIME`]. Which one it was is what decides whether
-/// a bigger budget would have helped.
+/// The two that are not [`Self::Goal`] are two different failures wearing one
+/// `None`: a walled-in start, and a budget that ran out mid-route. Which one it
+/// was is what decides whether a bigger budget would have helped.
+///
+/// **There is no third failure any more.** A search used to be able to outlive
+/// a wall clock, which is a failure that says nothing about the map and
+/// everything about the machine; the ceiling is counted now — see [`Effort`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SearchExit {
     /// The goal tile was popped: the route arrives.
@@ -184,9 +297,12 @@ pub enum SearchExit {
     /// would have changed the answer.
     Exhausted,
     /// `budget` standing places were finalised and the goal was not among them.
+    ///
+    /// Inside a long query the budget that ran out may be the *query's* rather
+    /// than this search's — one wallet is shared by every search a corridor
+    /// takes — and from in here the two are the same fact: there was no more
+    /// work to spend.
     Budget,
-    /// [`MAX_SEARCH_TIME`] passed inside the search.
-    Deadline,
 }
 
 /// A* over the terrain, once, with both answers kept: the goal's own route, and
@@ -197,36 +313,54 @@ pub enum SearchExit {
 /// keeping the best one seen is a comparison per pop. What it buys is that
 /// "there is no way" and "here is how far the way goes" come out of *one*
 /// search over one terrain, and cannot disagree about which tiles were reachable.
-pub(crate) fn find_path_until(
+pub(crate) fn find_path_within(
     footing: &Footing<'_>,
     from: Point,
     to: Point,
     budget: usize,
-    deadline: Instant,
+    effort: &mut Effort,
     within: Option<Region>,
 ) -> Option<Vec<Direction>> {
-    let search = search(footing, from, to, budget, deadline, within);
+    let search = search(footing, from, to, budget, effort, within);
     search.arrived.then_some(search.route)
 }
 
-pub(crate) fn find_path_toward_until(
+pub(crate) fn find_path_toward_within(
     footing: &Footing<'_>,
     from: Point,
     to: Point,
     budget: usize,
-    deadline: Instant,
+    effort: &mut Effort,
     within: Option<Region>,
 ) -> Option<Vec<Direction>> {
-    let search = search(footing, from, to, budget, deadline, within);
+    let search = search(footing, from, to, budget, effort, within);
     (search.arrived || !search.route.is_empty()).then_some(search.route)
 }
 
+/// One search inside a query that is paying for several: bounded by whichever
+/// of the two budgets is smaller, and charged for what it actually finalised.
+///
+/// The wallet is read *here* and not in the loop below, which is the point of
+/// counting rather than clocking: a limit that cannot change while a search runs
+/// is a limit the hot path never has to look at.
 fn search(
     footing: &Footing<'_>,
     from: Point,
     to: Point,
     budget: usize,
-    deadline: Instant,
+    effort: &mut Effort,
+    within: Option<Region>,
+) -> PathSearch {
+    let search = explore(footing, from, to, effort.allowance(budget), within);
+    effort.spend(search.explored);
+    search
+}
+
+fn explore(
+    footing: &Footing<'_>,
+    from: Point,
+    to: Point,
+    budget: usize,
     within: Option<Region>,
 ) -> PathSearch {
     // The destination as a *place*, which is what the search compares against:
@@ -238,6 +372,7 @@ fn search(
             arrived: true,
             route: Vec::new(),
             explored: 0,
+            written: 0,
             exit: SearchExit::Goal,
         };
     }
@@ -245,9 +380,20 @@ fn search(
     // Pack the standing place into one integer. Besides making the key cheaper
     // to hash, this lets FxHash use its integer fast path. The key carries the
     // whole landing point, so nothing has to remember where a node was.
-    let mut cost: FxHashMap<PathNodeKey, u32> = FxHashMap::default();
-    let mut came_from: FxHashMap<PathNodeKey, (PathNodeKey, Direction)> = FxHashMap::default();
-    let mut closed: FxHashSet<PathNodeKey> = FxHashSet::default();
+    //
+    // **One table, and not three.** What A* knows about a place is its cost, the
+    // step it was reached by and whether it has been finalised, and keying three
+    // containers by the same key asked FxHash the same question three times: a
+    // neighbour cost four hash lookups (`closed`, `cost` read, `cost` write,
+    // `came_from` write) where one `entry` answers all of them, and a pop cost
+    // two where `get_mut` answers both. See `Visit`.
+    //
+    // **Sized up front**, because the node budget is the bound on how much of it
+    // can ever be finalised: growing from empty put three `reserve_rehash`es
+    // among the hottest symbols of a profile — 5.8% of a search spent copying
+    // tables that could have been born big enough.
+    let mut visited: FxHashMap<PathNodeKey, Visit> =
+        FxHashMap::with_capacity_and_hasher(visit_capacity(budget), rustc_hash::FxBuildHasher);
     // The tuple's third field is a tie-breaker, not a second admissible heuristic:
     // Chebyshev alone cannot tell a straight cardinal line from a route that
     // drifts off it and back — both cost the same eight-way step count. Manhattan
@@ -257,18 +403,18 @@ fn search(
     // a shortest path is found (see the cost check below), only which one among
     // several equally short routes A* settles on — the one the client's own map
     // asked for a straight walk on stays a straight walk.
-    let mut open: BinaryHeap<Reverse<OpenEntry>> = BinaryHeap::new();
+    let mut open: BinaryHeap<Reverse<OpenEntry>> = BinaryHeap::with_capacity(open_capacity(budget));
 
-    cost.insert(node_key(start), 0);
+    visited.insert(
+        node_key(start),
+        Visit {
+            cost: 0,
+            from: None,
+            closed: false,
+        },
+    );
     let h0 = heuristic(from, to);
-    open.push(Reverse(OpenEntry {
-        f: h0,
-        h: h0,
-        manhattan: manhattan(from, to),
-        x: start.x,
-        y: start.y,
-        z: start.z,
-    }));
+    open.push(Reverse(OpenEntry::new(h0, h0, manhattan(from, to), start)));
     // How close a finalised node has come to the goal, and what it cost to get
     // there. Seeded with the start, so a node takes the place only by being
     // *strictly* closer: walking to somewhere no nearer than here is not getting
@@ -281,41 +427,42 @@ fn search(
     // goes) and it is why `arrived` is a separate field rather than `h == 0`.
     let mut closest = (h0, 0, start);
     let mut exit = SearchExit::Exhausted;
-    while let Some(Reverse(OpenEntry {
-        h,
-        x: cx,
-        y: cy,
-        z: cz,
-        ..
-    })) = open.pop()
-    {
-        if Instant::now() >= deadline {
-            exit = SearchExit::Deadline;
-            break;
-        }
+    // Finalised places, which is what the budget counts and what `PathSearch`
+    // reports. Kept rather than read off a `closed` set's length, because the
+    // one table now holds the frontier as well.
+    let mut explored = 0;
+    while let Some(Reverse(entry)) = open.pop() {
         // The key *is* the place, so the popped entry is the whole node and
         // nothing has to be looked up to find out where it was.
-        let current = Point::new(cx, cy, cz);
-        // Skip a node already finalised by a cheaper pop.
-        if !closed.insert(node_key(current)) {
+        let (current, h) = entry.place();
+        let key = node_key(current);
+        // One lookup answers both halves of a pop: whether a cheaper pop already
+        // finalised this place, and — where it did not — what the route to it
+        // cost. Two tables asked that as two hashes of the same key.
+        let seen = visited
+            .get_mut(&key)
+            .expect("a candidate is written to the table before it is pushed");
+        if seen.closed {
             continue;
         }
-        let explored = closed.len();
+        seen.closed = true;
+        let here_cost = seen.cost;
+        explored += 1;
         if current == goal {
             return PathSearch {
                 arrived: true,
-                route: reconstruct(&came_from, start, goal),
+                route: reconstruct(&visited, start, goal),
                 explored,
+                written: visited.len(),
                 exit: SearchExit::Goal,
             };
         }
-        let here_cost = cost[&node_key(current)];
         // The first pop of a node is its cheapest, so this is its final cost —
-        // see `closed`.
+        // see `Visit::closed`.
         if (h, here_cost) < (closest.0, closest.1) {
             closest = (h, here_cost, current);
         }
-        if closed.len() > budget {
+        if explored > budget {
             exit = SearchExit::Budget;
             break;
         }
@@ -341,25 +488,35 @@ fn search(
             if within.is_some_and(|region| !region.contains(landing)) {
                 continue;
             }
-            let next = node_key(landing);
-            if closed.contains(&next) {
-                continue;
-            }
             let next_cost = here_cost + 1;
-            if next_cost >= cost.get(&next).copied().unwrap_or(u32::MAX) {
-                continue;
+            // One `entry` for what used to be four separate lookups of one key:
+            // is the place closed, what did it cost before, and the two writes
+            // that answer "cheaper this way". A neighbour is eight per node, so
+            // this is where the three tables cost the most.
+            match visited.entry(node_key(landing)) {
+                Entry::Occupied(mut seen) => {
+                    let seen = seen.get_mut();
+                    if seen.closed || next_cost >= seen.cost {
+                        continue;
+                    }
+                    seen.cost = next_cost;
+                    seen.from = Some((key, dir));
+                }
+                Entry::Vacant(slot) => {
+                    slot.insert(Visit {
+                        cost: next_cost,
+                        from: Some((key, dir)),
+                        closed: false,
+                    });
+                }
             }
-            cost.insert(next, next_cost);
-            came_from.insert(next, (node_key(current), dir));
             let h = heuristic(landing, to);
-            open.push(Reverse(OpenEntry {
-                f: next_cost + h,
+            open.push(Reverse(OpenEntry::new(
+                next_cost + h,
                 h,
-                manhattan: manhattan(landing, to),
-                x: landing.x,
-                y: landing.y,
-                z: landing.z,
-            }));
+                manhattan(landing, to),
+                landing,
+            )));
         }
     }
     // The goal was never popped: what there is to say is how far the way got.
@@ -367,28 +524,42 @@ fn search(
         arrived: false,
         route: match closest.2 == start {
             true => Vec::new(),
-            false => reconstruct(&came_from, start, closest.2),
+            false => reconstruct(&visited, start, closest.2),
         },
-        explored: closed.len(),
+        explored,
+        written: visited.len(),
         exit,
     }
+}
+
+/// Whether slow-query diagnostics were asked for, read from the environment
+/// once.
+///
+/// It gates the clock as well as the printing: timing a search that will not be
+/// reported is two `clock_gettime` calls a query for nothing, and this crate has
+/// just finished taking the last clock out of the loop inside it.
+pub(crate) fn debug_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("OPENSHARD_PATH_DEBUG").is_some())
 }
 
 /// Optional slow-query diagnostics.  Pathfinding is used from the render
 /// thread, so diagnostics are opt-in and only print after the query is over;
 /// they never add per-node logging to a search.
+///
+/// `started` is `None` when nothing asked for them — see [`debug_enabled`].
 fn debug_slow(
     kind: &str,
     from: Point,
     to: Point,
     budget: usize,
-    elapsed: std::time::Duration,
+    started: Option<Instant>,
     search: &PathSearch,
 ) {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    if !*ENABLED.get_or_init(|| std::env::var_os("OPENSHARD_PATH_DEBUG").is_some()) {
+    let Some(started) = started else {
         return;
-    }
+    };
+    let elapsed = started.elapsed();
     let threshold = std::env::var("OPENSHARD_PATH_DEBUG_MS")
         .ok()
         .and_then(|value| value.parse::<u128>().ok())
@@ -419,21 +590,77 @@ fn debug_slow(
 /// comes back to it higher up is a chain that visits `(x, y)` twice and
 /// terminates all the same — see [`PathNodeKey`]. Keyed by tile it would either
 /// stop short at the first visit or never have been found at all.
-fn reconstruct(
-    came_from: &FxHashMap<PathNodeKey, (PathNodeKey, Direction)>,
-    start: Point,
-    goal: Point,
-) -> Vec<Direction> {
+fn reconstruct(visited: &FxHashMap<PathNodeKey, Visit>, start: Point, goal: Point) -> Vec<Direction> {
     let mut steps = Vec::new();
     let start = node_key(start);
     let mut at = node_key(goal);
     while at != start {
-        let (parent, dir) = came_from[&at];
+        let (parent, dir) = visited[&at]
+            .from
+            .expect("only the start is reached by no step, and the walk stops there");
         steps.push(dir);
         at = parent;
     }
     steps.reverse();
     steps
+}
+
+/// What the search knows about one standing place.
+///
+/// The three tables A* wants keyed by the same place — the cost to reach it, the
+/// step it was reached by, and whether it has been finalised — held as one
+/// record, so a lookup answers all three. See where `visited` is declared for
+/// what asking them separately cost.
+struct Visit {
+    /// The cheapest route to this place found so far. Final once
+    /// [`Self::closed`], since the first pop of a place is its cheapest.
+    cost: u32,
+    /// The place stepped from, and the step that landed here.
+    ///
+    /// **`None` is the start**, which no step reached — the one place in the
+    /// table whose absence of a parent is a fact about the search rather than a
+    /// value nobody filled in, and what terminates [`reconstruct`].
+    from: Option<(PathNodeKey, Direction)>,
+    /// Whether the place has been finalised: popped off the open list with its
+    /// cost settled, counted against the budget, and expanded.
+    closed: bool,
+}
+
+/// How many places a search of `budget` finalised nodes writes down.
+///
+/// Every finalised place is one, and so is every place the frontier reached and
+/// never popped — which is what makes the table bigger than the budget it is
+/// reserved from.
+///
+/// **Twice the budget, and the sample says why.** `map_path_probe` prints the
+/// ratio; over 37,248 destinations from each of two origins on facet 0, at both
+/// shipped budgets:
+///
+/// | | castle (1363, 1600) | open country (1500, 1900) |
+/// |---|---|---|
+/// | budget 400, median | 485 | 506 |
+/// | budget 400, peak | 653 (×1.63) | 736 (×1.84) |
+/// | budget 600, median | 687 | 710 |
+/// | budget 600, peak | 862 (×1.43) | 1,041 (×1.73) |
+///
+/// Nothing in 149,000 searches passes ×1.84. Over-reserving costs 24 bytes a
+/// slot on a table that lives for one search; under-reserving costs a rehash
+/// that copies every slot already in it, which is what the three tables this
+/// replaced were doing on every search — 5.8% of a profile.
+fn visit_capacity(budget: usize) -> usize {
+    budget.saturating_mul(2)
+}
+
+/// How many candidates the open list is born able to hold.
+///
+/// The heap holds the frontier *plus* its own stale entries: a place is pushed
+/// again every time a cheaper route to it is found, and the older entry is left
+/// to be popped and skipped. The frontier alone — the same sample's places
+/// written down, less the ones finalised — peaks at 0.84 of the budget, so the
+/// whole budget is the round number above it that also covers a share of the
+/// duplicates. At 16 bytes an entry that is 9.6 KiB at the client's 600.
+fn open_capacity(budget: usize) -> usize {
+    budget
 }
 
 /// One standing place, packed for A*'s hash tables: a tile **and** the height
@@ -538,6 +765,60 @@ fn manhattan(from: Point, to: Point) -> u32 {
 mod tests {
     use super::*;
     use openshard_map::overlay::{Cover, Doors, Overlay};
+
+    /// The packed open-list entry ranks candidates exactly the way the six
+    /// fields it replaced did.
+    ///
+    /// The order **is** the search's answer among equally short routes, so a
+    /// packing that ranks differently does not fail — it silently returns a
+    /// different route than the one the client's own map was drawn for. The
+    /// oracle is the tuple the struct used to be, compared over every pair of a
+    /// sample that puts each field either side of a boundary in turn, negative
+    /// heights included.
+    #[test]
+    fn a_packed_entry_ranks_the_way_its_fields_do() {
+        let sample = [
+            (0, 0, 0, Point::new(0, 0, 0)),
+            (0, 0, 0, Point::new(0, 0, -128)),
+            (0, 0, 0, Point::new(0, 0, 127)),
+            (0, 0, 0, Point::new(0, 1, -1)),
+            (0, 0, 0, Point::new(1, 0, 0)),
+            (0, 0, 1, Point::new(0, 0, 0)),
+            (0, 1, 0, Point::new(0, 0, 0)),
+            (1, 0, 0, Point::new(0, 0, 0)),
+            (7, 3, 9, Point::new(1363, 1600, 30)),
+            (7, 3, 9, Point::new(1363, 1600, -30)),
+            (8, 3, 9, Point::new(1363, 1600, 30)),
+            (FIELD, FIELD, FIELD, Point::new(u16::MAX, u16::MAX, 127)),
+        ];
+        for &(f, h, manhattan, at) in &sample {
+            for &(other_f, other_h, other_manhattan, other_at) in &sample {
+                let fields = (f, h, manhattan, at.x, at.y, at.z);
+                let other_fields = (
+                    other_f,
+                    other_h,
+                    other_manhattan,
+                    other_at.x,
+                    other_at.y,
+                    other_at.z,
+                );
+                assert_eq!(
+                    OpenEntry::new(f, h, manhattan, at).cmp(&OpenEntry::new(
+                        other_f,
+                        other_h,
+                        other_manhattan,
+                        other_at
+                    )),
+                    fields.cmp(&other_fields),
+                    "{fields:?} against {other_fields:?}"
+                );
+            }
+            // And a pop reads back what was pushed: the place is an identity the
+            // search looks the node up by, so a bit lost here is a lookup that
+            // misses.
+            assert_eq!(OpenEntry::new(f, h, manhattan, at).place(), (at, h));
+        }
+    }
 
     /// Ground with nothing on it: no map, so no floor and no walls, and the
     /// overlay is the only thing that can refuse a step.

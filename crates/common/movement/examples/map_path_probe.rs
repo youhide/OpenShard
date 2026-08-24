@@ -75,6 +75,14 @@ struct Reading {
     /// Chebyshev tiles from the origin — the measure the search steers by.
     distance: u32,
     explored: usize,
+    /// Standing places the search's one table held — the finalised nodes and the
+    /// frontier over them.
+    ///
+    /// The reading `visit_capacity` is argued from: the table is reserved from
+    /// the node budget now, and what makes that reservation a fact rather than a
+    /// guess is the ratio between this and [`Self::explored`] over a facet's
+    /// worth of destinations.
+    written: usize,
     route_steps: usize,
     arrived: bool,
     /// Whether the same search has an *approach* to offer where it has no
@@ -132,6 +140,7 @@ impl Reading {
             y,
             distance,
             explored: search.explored,
+            written: search.written,
             route_steps: search.route.len(),
             arrived: search.arrived,
             approaches: search.arrived || !search.route.is_empty(),
@@ -162,13 +171,15 @@ impl Reading {
             (SearchExit::Budget, "near") => "budget/near",
             (SearchExit::Budget, "region") => "budget/region",
             (SearchExit::Budget, _) => "budget/far",
-            (SearchExit::Deadline, _) => "deadline",
         }
     }
 }
 
 /// Every class the table can print, in the order it prints them.
-const CLASSES: [&str; 10] = [
+///
+/// There were ten: a search could also outlive a wall clock, and that class is
+/// gone with the clock — see `SearchExit`.
+const CLASSES: [&str; 9] = [
     "goal/near",
     "goal/region",
     "goal/far",
@@ -178,7 +189,6 @@ const CLASSES: [&str; 10] = [
     "budget/near",
     "budget/region",
     "budget/far",
-    "deadline",
 ];
 
 /// Percentile by nearest-rank, which is what a probe wants: every reported
@@ -249,6 +259,23 @@ fn report(title: &str, readings: &[Reading]) {
     println!(
         "  routes that come back to a column higher up: {}",
         readings.iter().filter(|reading| reading.revisits).count(),
+    );
+    // What the search's one table actually held, against the budget it is
+    // reserved from. A ratio over 2.0 anywhere in a sweep is `visit_capacity`
+    // under-reserving, which is a rehash mid-search and nothing else to see.
+    let mut written = readings.iter().map(|reading| reading.written).collect::<Vec<_>>();
+    written.sort_unstable();
+    let peak = *written.last().expect("the sweep is non-empty");
+    let budget = readings
+        .iter()
+        .map(|reading| reading.explored)
+        .max()
+        .expect("the sweep is non-empty");
+    println!(
+        "  places written down: p50={} p95={} peak={peak} (x{:.2} of the {budget} finalised)",
+        percentile(&written, 50),
+        percentile(&written, 95),
+        peak as f64 / budget as f64,
     );
     for class in CLASSES {
         let of_class = readings

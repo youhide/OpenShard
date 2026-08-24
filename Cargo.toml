@@ -182,3 +182,20 @@ codegen-units = 1
 
 [profile.bench]
 lto = "thin"
+
+# `release`, plus the line tables a sampling profiler needs to name a frame.
+#
+# A profile of `release` itself reports addresses inside one inlined blob, and a
+# profile of `dev` measures a different program. This is the release build with
+# `debug = 1` — no variables, just the file-and-line map — so what a profiler
+# shows is the code that ships, attributed to the lines it was written on:
+#
+# ```sh
+# cargo build --profile profiling -p openshard-movement --examples
+# samply record --save-only -o /tmp/path.json.gz -- \
+#   ./target/profiling/examples/map_path_probe --client "$OPENSHARD_CLIENT"
+# ```
+[profile.profiling]
+inherits = "release"
+debug = 1
+strip = "none"

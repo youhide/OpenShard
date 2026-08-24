@@ -200,6 +200,34 @@ export CARGO_PROFILE_DEV_DEBUG=0      # no symbols at all, if backtraces are not
 du -sh "$CARGO_TARGET_DIR"            # check it before it checks you
 ```
 
+## Profiling: build `profiling`, and set two sysctls first
+
+`release` has no debug info, so a profile of it reports addresses inside one
+inlined blob; `dev` is a different program. `[profile.profiling]` in the
+workspace manifest is the third option — `release` plus `debug = 1`, the
+file-and-line map and nothing else — so a sampling profiler names frames in the
+code that actually ships.
+
+```sh
+cargo build --profile profiling -p openshard-movement --examples
+perf record -F 999 -o perf.data -- ./target/profiling/examples/map_path_probe --client "$OPENSHARD_CLIENT"
+perf report -i perf.data --stdio --no-children --percent-limit 0.4
+```
+
+`samply record --save-only -o profile.json.gz -- <cmd>` records the same run for
+the Firefox Profiler UI (`samply load profile.json.gz`), which is the one to
+reach for when the call tree matters more than the flat list.
+
+**Both want two kernel settings, and neither survives a reboot:**
+
+```sh
+sudo sysctl -w kernel.perf_event_paranoid=1    # 2 is the usual default; perf and samply both refuse it
+sudo sysctl -w kernel.perf_event_mlock_kb=4096 # 516 is the usual default; samply fails with a bare `mmap failed`
+```
+
+The second one is worth knowing about because its symptom names nothing: samply
+prints `Failed to start profiling: mmap failed` and stops.
+
 ## `Cargo.lock` is committed and that is load-bearing
 
 `rust-version` only holds because the lock pins dependency versions that respect

@@ -1468,7 +1468,10 @@ Small things this document is the only current record of:
   gated on the facet-0 numbers the oracle produces.
 - **`MAX_SEARCH_TIME` and the node budgets** — 50 ms inside one search, 400 for
   server AI, 600 for a client plan. The oracle's data is what those can finally
-  be asked against; changing them before it exists is guessing.
+  be asked against; changing them before it exists is guessing. **The 50 ms is
+  gone**: a search is bounded by its node budget alone, and the ceiling over a
+  *long* query is `LONG_PATH_EFFORT`, counted in the same unit. The two node
+  budgets are unchanged and still want the argument this entry asks for.
 - **`net_command`'s multi expansion.** The third way entities are laid over the
   map, and the picture's rather than movement's. `Overlay` may end up being
   what merges it, which is
