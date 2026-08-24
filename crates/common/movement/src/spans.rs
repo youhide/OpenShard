@@ -562,8 +562,10 @@ impl<'a> Spans<'a> {
     /// all — and the reason the middle tier exists: about twelve nanoseconds,
     /// against the `statics_at` it replaces.
     fn ground(&self, x: u16, y: u16) -> Option<Span> {
-        let cell = self.map.land(x, y)?;
-        let corners = self.map.land_corners(x, y).expect("land was just present");
+        // Both halves off one walk: the graphic says whether the land is a
+        // surface at all and the corners say where its middle is, and asking
+        // for them separately read `(x, y)` twice — see `land_and_corners`.
+        let (cell, corners) = self.map.land_and_corners(x, y)?;
         Some(Span {
             stand_z: openshard_map::map::average_corner_z(corners),
             // What a step has to reach is the tile's lowest corner, not the
@@ -745,18 +747,15 @@ fn surfaces_of(
     if !map.contains(x, y) {
         return;
     }
-    // The land, read once. Its *centre* is wanted even where it is no surface at
-    // all — a mountainside still decides `landCheck` for the statics standing on
-    // it — so this is the height and not the span.
-    let land_center = map.land(x, y).map(|_| {
-        let corners = map.land_corners(x, y).expect("land was just present");
-        i32::from(openshard_map::map::average_corner_z(corners))
-    });
-    if let Some(flags) = map
-        .land(x, y)
-        .and_then(|cell| kind_flags(land[usize::from(cell.tile.0)]))
+    // The land, read once — and *once* is now literal. Its *centre* is wanted
+    // even where it is no surface at all — a mountainside still decides
+    // `landCheck` for the statics standing on it — so the height is taken
+    // whether or not the graphic turns out to be a surface.
+    let ground = map.land_and_corners(x, y);
+    let land_center = ground.map(|(_, corners)| i32::from(openshard_map::map::average_corner_z(corners)));
+    if let Some((corners, flags)) = ground
+        .and_then(|(cell, corners)| kind_flags(land[usize::from(cell.tile.0)]).map(|flags| (corners, flags)))
     {
-        let corners = map.land_corners(x, y).expect("land was just present");
         out.push(span_over(
             tiles,
             items,

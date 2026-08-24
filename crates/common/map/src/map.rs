@@ -547,13 +547,37 @@ impl WorldMap {
     /// stands in, which flattens the border rather than dropping it off a cliff
     /// into `z = 0`.
     pub fn land_corners(&self, x: u16, y: u16) -> Option<[i8; 4]> {
-        let own = self.land(x, y)?.z;
+        self.land_and_corners(x, y).map(|(_, corners)| corners)
+    }
+
+    /// The tile's own cell **and** its four corner heights, from one walk.
+    ///
+    /// The pair, because the two callers that matter want both and asking
+    /// separately reads `(x, y)` twice: `Spans::ground` needs the graphic to
+    /// know whether the land is a surface at all and the corners to know where
+    /// its middle is, and the bake's column builder needs the same. A land read
+    /// is ~1.2 ns and a node expansion makes about forty of them, so the
+    /// duplicate is a twentieth of the expansion for nothing.
+    ///
+    /// Inside a block this is [`LandGrid::corner_quad`] — one address
+    /// derivation for four cells, which is 76.6% of the facet. On a block's far
+    /// edge it is the walk it always was, and there the off-facet fallback
+    /// matters: a corner past the edge is the tile's *own* height, so the world
+    /// does not fall away at its border.
+    pub fn land_and_corners(&self, x: u16, y: u16) -> Option<(LandCell, [i8; 4])> {
+        if let Some(quad) = self.land.corner_quad(x, y) {
+            return Some((quad[0], quad.map(|cell| cell.z)));
+        }
+        let own = self.land(x, y)?;
         let at = |x: Option<u16>, y: Option<u16>| match (x, y) {
-            (Some(x), Some(y)) => self.land(x, y).map_or(own, |cell| cell.z),
-            _ => own,
+            (Some(x), Some(y)) => self.land(x, y).map_or(own.z, |cell| cell.z),
+            _ => own.z,
         };
         let (east, south) = (x.checked_add(1), y.checked_add(1));
-        Some([own, at(east, Some(y)), at(Some(x), south), at(east, south)])
+        Some((
+            own,
+            [own.z, at(east, Some(y)), at(Some(x), south), at(east, south)],
+        ))
     }
 
     /// The height a body stands at on the land tile at `(x, y)` — the *average*
@@ -678,6 +702,58 @@ mod tests {
         // all four corners are its own height.
         assert_eq!(map.land_corners(7, 7), Some([14; 4]));
         assert_eq!(map.land_corners(8, 0), None, "off the map is not a tile");
+    }
+
+    /// The one-block-derivation path answers exactly what four separate reads
+    /// do, over every tile of a facet several blocks across.
+    ///
+    /// **The oracle is the walk it replaces**, written out here rather than
+    /// called, because the point is that the fast path and the slow one are two
+    /// pieces of arithmetic that must agree — and the fast one is only taken on
+    /// 76.6% of tiles, so a run that never leaves a block's interior would prove
+    /// nothing about the seam.
+    ///
+    /// A ramp whose height is a function of *both* coordinates is what makes it
+    /// a test: on flat ground, or on ground sloping one way, three of the four
+    /// corners coincide and a transposed pair would pass.
+    #[test]
+    fn a_tiles_corner_quad_is_the_four_reads_it_replaces() {
+        let map = WorldMap::from_blocks(BlockExtent { wide: 3, down: 2 }, |x, y| LandCell {
+            tile: LandTileId(3),
+            z: ((x * 5) as i8).wrapping_sub((y * 3) as i8),
+        });
+        let slowly = |x: u16, y: u16| {
+            let own = map.land(x, y)?.z;
+            let at = |x: Option<u16>, y: Option<u16>| match (x, y) {
+                (Some(x), Some(y)) => map.land(x, y).map_or(own, |cell| cell.z),
+                _ => own,
+            };
+            let (east, south) = (x.checked_add(1), y.checked_add(1));
+            Some([own, at(east, Some(y)), at(Some(x), south), at(east, south)])
+        };
+        let mut fast = 0;
+        for y in 0..map.height() as u16 {
+            for x in 0..map.width() as u16 {
+                assert_eq!(map.land_corners(x, y), slowly(x, y), "({x}, {y})");
+                // And the pair reads back the same cell the tile has, which is
+                // the half `Spans::ground` stopped reading twice for.
+                assert_eq!(
+                    map.land_and_corners(x, y).map(|(cell, _)| cell.z),
+                    map.land(x, y).map(|cell| cell.z),
+                    "({x}, {y})",
+                );
+                fast += usize::from(map.land.corner_quad(x, y).is_some());
+            }
+        }
+        // Seven eighths each way — the tiles on a block's eastern or southern
+        // edge are the ones that fall back, and there must be some of both.
+        assert_eq!(
+            fast,
+            7 * 7 * 3 * 2,
+            "the interior of every block and nothing else"
+        );
+        assert!(map.land.corner_quad(7, 0).is_none(), "a block's eastern edge");
+        assert!(map.land.corner_quad(0, 7).is_none(), "a block's southern edge");
     }
 
     /// The height a body stands at, and the two halves of it that are easy to

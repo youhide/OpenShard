@@ -505,6 +505,42 @@ impl LandGrid {
         self.cells.read(at)
     }
 
+    /// The four cells a tile's corners are made of — itself, east, south and
+    /// south-east — for the tiles where all four share one block.
+    ///
+    /// **One address derivation instead of four.** A block is row-major inside,
+    /// so a tile that is not on its block's eastern or southern edge has its
+    /// three neighbours at `+1`, `+`[`BLOCK_SIZE`] and `+BLOCK_SIZE + 1` from
+    /// its own index — and [`Self::cell_index`] is a bounds check, two
+    /// remainders, a multiply by the block column's height and two shifts, which
+    /// is the whole of what a corner read costs once the cell is in cache.
+    ///
+    /// **That is 76.6% of a facet**: a tile misses only by sitting on one of the
+    /// two far edges of its block, which is `1 - (7/8)²`. The rest fall back to
+    /// four separate reads, which is what every tile used to cost.
+    ///
+    /// **No edge of the facet reaches this**, and that falls out rather than
+    /// being checked: a facet is a whole number of blocks, so its last column
+    /// and last row are the ones with `x % BLOCK_SIZE == BLOCK_SIZE - 1`, and
+    /// those are exactly the ones refused above. Which is why this returns four
+    /// cells and not four options — every one of them is on the facet.
+    ///
+    /// The order is [`WorldMap::land_corners`](crate::map::WorldMap::land_corners)'s:
+    /// top, right, left, bottom.
+    pub fn corner_quad(&self, x: u16, y: u16) -> Option<[LandCell; 4]> {
+        let (x, y) = (u32::from(x), u32::from(y));
+        if x % BLOCK_SIZE == BLOCK_SIZE - 1 || y % BLOCK_SIZE == BLOCK_SIZE - 1 {
+            return None;
+        }
+        let at = self.cell_index(x as u16, y as u16)?;
+        Some([
+            self.cells.read(at),
+            self.cells.read(CellIndex(at.0 + 1)),
+            self.cells.read(CellIndex(at.0 + BLOCK_SIZE)),
+            self.cells.read(CellIndex(at.0 + BLOCK_SIZE + 1)),
+        ])
+    }
+
     /// The cell one tile east, or `None` at the facet's eastern edge.
     ///
     /// A step, not a fresh derivation. Inside a block east is the next cell;
