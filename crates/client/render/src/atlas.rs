@@ -183,6 +183,28 @@ struct Dirty {
     band: Option<(u32, u32)>,
 }
 
+/// A non-empty half-open band of atlas pixel rows that changed.
+///
+/// Atlas allocators are the only producers.  Keeping their `[top, bottom)`
+/// invariant in this type means upload accounting asks for a row count rather
+/// than re-deriving it from two coordinates at every consumer.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct DirtyRows(std::ops::Range<u32>);
+
+impl DirtyRows {
+    /// How many pixel rows the changed band covers.
+    #[must_use]
+    pub fn count(&self) -> u32 {
+        self.0.end - self.0.start
+    }
+
+    /// The coordinates for APIs that have not yet adopted [`DirtyRows`].
+    #[must_use]
+    pub fn into_range(self) -> std::ops::Range<u32> {
+        self.0
+    }
+}
+
 impl Dirty {
     /// Record that `height` rows starting at `top` were written.
     fn mark(&mut self, top: u32, height: u32) {
@@ -199,8 +221,8 @@ impl Dirty {
     }
 
     /// The band, cleared. `None` when nothing has changed.
-    fn take(&mut self) -> Option<std::ops::Range<u32>> {
-        self.band.take().map(|(top, bottom)| top..bottom)
+    fn take(&mut self) -> Option<DirtyRows> {
+        self.band.take().map(|(top, bottom)| DirtyRows(top..bottom))
     }
 }
 
@@ -342,7 +364,7 @@ impl LandAtlas {
     /// [`GroundRenderer::upload_changes`](crate::renderer::GroundRenderer::upload_changes),
     /// and a freshly built atlas reports nothing because whoever binds one
     /// uploads it whole.
-    pub fn take_dirty(&mut self) -> Option<std::ops::Range<u32>> {
+    pub fn take_dirty(&mut self) -> Option<DirtyRows> {
         self.dirty.take()
     }
 
@@ -622,7 +644,7 @@ impl TexmapAtlas {
 
     /// The rows written since this was last asked, cleared. See
     /// [`LandAtlas::take_dirty`].
-    pub fn take_dirty(&mut self) -> Option<std::ops::Range<u32>> {
+    pub fn take_dirty(&mut self) -> Option<DirtyRows> {
         self.dirty.take()
     }
 
@@ -1101,7 +1123,7 @@ impl StaticAtlas {
 
     /// The rows written since this was last asked, cleared. See
     /// [`LandAtlas::take_dirty`].
-    pub fn take_dirty(&mut self) -> Option<std::ops::Range<u32>> {
+    pub fn take_dirty(&mut self) -> Option<DirtyRows> {
         self.dirty.take()
     }
 
@@ -1464,7 +1486,7 @@ pub struct DirtyStaticAtlasPage {
     /// Texture page whose rows changed.
     pub page: StaticAtlasPage,
     /// Pixel rows in that page, half-open.
-    pub rows: std::ops::Range<u32>,
+    pub rows: DirtyRows,
 }
 
 /// Static art spread over a bounded sequence of immutable texture pages.
@@ -1936,7 +1958,7 @@ impl AnimAtlas {
 
     /// The rows written since this was last asked, cleared. See
     /// [`LandAtlas::take_dirty`].
-    pub fn take_dirty(&mut self) -> Option<std::ops::Range<u32>> {
+    pub fn take_dirty(&mut self) -> Option<DirtyRows> {
         self.dirty.take()
     }
 
@@ -2459,7 +2481,7 @@ impl TtfAtlas {
 
     /// The rows written since this was last asked, cleared. See
     /// [`LandAtlas::take_dirty`].
-    pub fn take_dirty(&mut self) -> Option<std::ops::Range<u32>> {
+    pub fn take_dirty(&mut self) -> Option<DirtyRows> {
         self.dirty.take()
     }
 
@@ -3486,7 +3508,9 @@ mod growth_tests {
             .pack_more([(Graphic(1000), land(9))])
             .expect("one more tile fits");
         let tile = LAND_TILE_SIZE as u32;
-        assert_eq!(atlas.take_dirty(), Some(tile..tile * 2));
+        let rows = atlas.take_dirty().expect("the second atlas row changed");
+        assert_eq!(rows.count(), tile, "the band has one land-tile height");
+        assert_eq!(rows.into_range(), tile..tile * 2);
         assert_eq!(atlas.take_dirty(), None, "taking it twice uploads it twice");
     }
 
@@ -3587,7 +3611,7 @@ mod growth_tests {
             atlas.take_dirty(),
             vec![DirtyStaticAtlasPage {
                 page: StaticAtlasPage(1),
-                rows: 1025..1035,
+                rows: DirtyRows(1025..1035),
             }],
             "only the new page's changed rows are uploaded"
         );

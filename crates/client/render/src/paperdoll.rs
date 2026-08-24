@@ -57,7 +57,6 @@
 use std::collections::BTreeMap;
 
 use openshard_protocol::direction::Direction;
-use openshard_protocol::speech::Font;
 use openshard_protocol::wire::{Graphic, Hue, Layer};
 use openshard_tiles::AnimId;
 use openshard_uofiles::equipconv::EquipConv;
@@ -66,8 +65,12 @@ use openshard_uofiles::gumpart::Gumps;
 use crate::gump::{GumpArt, GumpPixel, Picture, PictureIndex};
 use crate::items::HIGHLIGHT_HUE;
 use crate::mobiles::EquipmentLayer;
-use crate::text::GumpLabel;
 
+mod frame;
+use frame::furniture;
+pub use frame::{DollButton, NAME_AT, NAME_FONT, NAME_HUE, Whose, frame, title};
+
+/*
 /// Whose paperdoll a window is, which the frame is chosen by.
 ///
 /// The wire never says it: a `0x88` carries a serial, and whether that serial is
@@ -251,6 +254,7 @@ pub fn title(text: &str, at: GumpPixel) -> GumpLabel<'_> {
         font: NAME_FONT,
     }
 }
+*/
 
 /// A paperdoll, laid out: what to draw and which of it answers the mouse.
 ///
@@ -891,67 +895,6 @@ pub fn window(
         doll.hits.insert(PictureIndex::new(index), DollButton::Backpack);
     }
     doll
-}
-
-/// The frame's own furniture: the buttons down its side, the scrolls along its
-/// bottom and the virtue menu at its top.
-///
-/// Drawn between the frame and the doll, which is `BuildGump`'s own order —
-/// every button is added before the `PaperDollInteractable` is. It shows: a hat
-/// or a weapon drawn past the edge of the opening goes *over* the column, the
-/// way the reference draws it, rather than the column standing on top of the
-/// doll.
-///
-/// A stranger's frame has no column — there is no room for one, which is the
-/// whole difference between the two pictures — so it gets the status button, the
-/// profile scroll and the virtue menu, and nothing else. `PaperDollGump` adds
-/// exactly those three outside its `LocalSerial == World.Player` branch.
-fn furniture(doll: &mut Doll, whose: Whose, held: Option<DollButton>, at: GumpPixel) {
-    let button = |doll: &mut Doll, which: DollButton, faces: (u16, u16), row: i32| {
-        let face = match held == Some(which) {
-            true => faces.1,
-            false => faces.0,
-        };
-        doll.pictures.push(Picture::plain(
-            GumpArt::Gump(Graphic(face)),
-            at.offset(GumpPixel::new(BUTTON_X, BUTTON_TOP + BUTTON_STEP * row)),
-        ));
-        doll.hits
-            .insert(PictureIndex::new(doll.pictures.len() - 1), which);
-    };
-
-    if let Whose::Own { war } = whose {
-        for (row, (which, up, down)) in OWN_BUTTONS.iter().enumerate() {
-            button(doll, *which, (*up, *down), row as i32);
-        }
-        let toggle = match war {
-            true => WAR_TOGGLE,
-            false => PEACE_TOGGLE,
-        };
-        button(doll, DollButton::WarMode, toggle, WAR_ROW);
-    }
-    button(doll, DollButton::Status, STATUS_BUTTON, STATUS_ROW);
-
-    // The scrolls, which are pictures rather than buttons and have no pressed
-    // face at all — the reference draws one `GumpPic` and listens for a double
-    // click on it.
-    let scroll = |doll: &mut Doll, which: DollButton, x: i32| {
-        doll.pictures.push(Picture::plain(
-            GumpArt::Gump(SCROLL),
-            at.offset(GumpPixel::new(x, SCROLL_AT.y)),
-        ));
-        doll.hits
-            .insert(PictureIndex::new(doll.pictures.len() - 1), which);
-    };
-    scroll(doll, DollButton::Profile, SCROLL_AT.x);
-    if matches!(whose, Whose::Own { .. }) {
-        scroll(doll, DollButton::Party, SCROLL_AT.x + SCROLL_STEP);
-    }
-
-    doll.pictures
-        .push(Picture::plain(GumpArt::Gump(VIRTUE), at.offset(VIRTUE_AT)));
-    doll.hits
-        .insert(PictureIndex::new(doll.pictures.len() - 1), DollButton::Virtue);
 }
 
 /// Everything a paperdoll needs packed before it is drawn.

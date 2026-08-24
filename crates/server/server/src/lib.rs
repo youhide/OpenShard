@@ -57,19 +57,16 @@ use openshard_persistence::{AccountRecord, PgStore, Snapshot, SqliteStore, Store
 use openshard_protocol::client_packet::ClientPacket;
 use openshard_protocol::encoded::EncodedSubcommand;
 use openshard_protocol::extended::ExtendedRequest;
-use openshard_protocol::login::{
-    CharacterListFlags, ClientLoginDecodeError, LoginStagePacket, StartLocation, SupportedFeatures,
-};
+use openshard_protocol::login::{ClientLoginDecodeError, LoginStagePacket, StartLocation};
 use openshard_protocol::mobile::StatusQueryKind;
 use openshard_protocol::trade::SecureTradeAction;
 use openshard_protocol::wire::ClilocId;
 use openshard_protocol::world::{Facet, Point};
 use openshard_protocol::{access::AccessLevel, huffman};
 use openshard_state::facet_rules::FacetRules;
-use openshard_world::tick::screen::CharacterScreen;
 use openshard_world::{
-    AdminMenuAction, Command, Gameplay, PlayerEntered, PlayerLeaving, PlayerLeft, PlayerRefused,
-    RestoredCharacters, RestoredItems, StatLock, TICK_INTERVAL, World,
+    AdminMenuAction, Command, PlayerEntered, PlayerLeaving, PlayerLeft, PlayerRefused, RestoredCharacters,
+    RestoredItems, StatLock, TICK_INTERVAL, World,
 };
 use tokio::sync::{Semaphore, mpsc};
 use tracing::{debug, error, info, warn};
@@ -86,7 +83,7 @@ mod testing;
 mod verify;
 
 use boot::{load_config, load_world, open_store};
-use dispatch::{dispatch_world_packet, start_cities};
+use dispatch::dispatch_world_packet;
 use session::{PhaseSync, Session, Sessions};
 use shard::{Reins, run_shard};
 use verify::{Verdict, Verifier};

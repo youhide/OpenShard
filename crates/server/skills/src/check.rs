@@ -156,9 +156,21 @@ pub fn roll_skill_band(state: &mut WorldState, entity: EntityId, skill: Skill, b
     if value >= band.max {
         return true; // no challenge
     }
-    // The band is non-empty here: `band.min < value < band.max`.
-    let chance = (value - band.min) * 1000 / (band.max - band.min);
-    check(state, entity, skill, chance.clamp(0, 1000) as u32)
+    // Reaching here proves `band.min <= value < band.max`, hence the divisor is
+    // positive even if a caller supplied a degenerate band. Do the subtraction
+    // wide: `SkillBand` accepts signed `i32` edges, whose full span exceeds an
+    // `i32` even though any canonical skill band is much narrower.
+    check(state, entity, skill, chance_in_band(value, band))
+}
+
+/// Return the per-mille chance for a value strictly inside a difficulty band.
+///
+/// The caller establishes `band.min <= value < band.max`, so the denominator is
+/// strictly positive.
+fn chance_in_band(value: i32, band: SkillBand) -> u32 {
+    let chance =
+        (i64::from(value) - i64::from(band.min)) * 1000 / (i64::from(band.max) - i64::from(band.min));
+    chance.clamp(0, 1000) as u32
 }
 
 /// Roll a skill against a chance already worked out (per-mille), and teach from
@@ -321,4 +333,14 @@ fn reduce_a_down_skill(
     let lowered = skills.get(victim) - to_gain;
     skills.set(victim, lowered);
     Some((victim, lowered))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SkillBand, chance_in_band};
+
+    #[test]
+    fn chance_in_band_accepts_the_full_i32_span() {
+        assert_eq!(chance_in_band(0, SkillBand::new(i32::MIN, i32::MAX)), 500);
+    }
 }

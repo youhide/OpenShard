@@ -772,11 +772,35 @@ pub(crate) fn notify(state: &mut WorldState, actor: EntityId, text: &str) {
     state.system_message(actor, text);
 }
 
-/// The ground height at `(x, y)` on `facet`, if the facet has a map loaded.
+/// The height a body put at `(x, y)` on `facet` stands at, if the facet is
+/// loaded and something there can hold one.
+///
+/// **The world's answer and not the land's.** This used to be
+/// `MapTerrain::ground_z`, which is the land tile's own average and reads no
+/// static and no live cover at all — so `.go` onto a pier, a bridge, a dock or a
+/// house's floor put the game master *under* it, which over facet 0 is 25,816 of
+/// the 27,052 pier and bridge decks (a median ten units down; see `movement`'s
+/// `arrival_survey`). The ground is still what the question is asked near, so a
+/// `.go` into a building lands on its ground floor rather than climbing it.
 fn ground_z(state: &WorldState, facet: Facet, x: u16, y: u16) -> Option<i8> {
-    state
+    let tile = Tile::new(x, y);
+    let near = state
         .map_terrain(facet)
-        .and_then(|terrain| terrain.ground_z(Tile::new(x, y)))
+        .and_then(|terrain| terrain.ground_z(tile))?;
+    // Nothing there a body can stand on — a mountain, the open sea — still puts
+    // the game master at the tile's own ground rather than refusing the command:
+    // `.go` is how staff get somewhere unreachable, and `.go x y z` is how they
+    // say where exactly.
+    Some(
+        openshard_movement::arrival_z(
+            &state.footing(facet, openshard_map::overlay::Doors::AsTheyStand),
+            tile,
+            i32::from(near),
+            openshard_movement::PLAYER_HEIGHT,
+        )
+        .and_then(|z| i8::try_from(z).ok())
+        .unwrap_or(near),
+    )
 }
 
 /// Parse a `u16` written in hex (`0x1bf2`) or decimal — item ids are quoted both.

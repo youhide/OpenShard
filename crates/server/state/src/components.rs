@@ -1644,20 +1644,42 @@ pub struct Riding {
     pub item: EntityId,
 }
 
-/// The cached route of a chase, followed a step per beat.
+/// The route a body is walking, followed a step per beat.
 ///
 /// Replanning A* from scratch every beat is what the old brain did, and it is
 /// both wasteful and the direct cause of wall-hugging: a plan that fails one
-/// beat was retried identically the next. A route is planned once, followed
-/// until it goes stale — the quarry moved, the route ran out, or two seconds
-/// passed (the references' repath cadence) — and replanned then.
+/// beat was retried identically the next. A route is planned once and followed
+/// until it goes stale — the body is no longer standing on it, the goal strayed,
+/// the steps ran out, or two seconds passed (the references' repath cadence).
+///
+/// **One component for every body that walks somewhere**, and not one per reason
+/// for walking. A chase, a pet closing on its owner, a townsperson heading back
+/// to its post and an escortable trailing its master are all asking the same
+/// question — *what am I walking, and is it still worth walking* — and the answer
+/// is keyed by [`Self::goal`] and [`Self::at`], so a route about another journey
+/// or from another place is stale by construction. Two callers therefore cannot
+/// hand each other a route that means something else: the worst they can do to
+/// one another is force a re-plan, which is what every one of them did on every
+/// beat before this was written down.
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct ChasePath {
-    /// The remaining route.
+pub struct Route {
+    /// The steps, from where it was planned.
     pub steps: Vec<Direction>,
     /// The next step to take.
     pub next: usize,
-    /// Where the route was aimed; a quarry that strays invalidates it.
+    /// Where the body has to be standing for [`Self::next`] to mean anything.
+    ///
+    /// **A route is a sequence of steps and not a set of places**, so it says
+    /// nothing at all from anywhere except where the step before it landed. A
+    /// body that was refused, shoved, frozen or teleported between two beats is
+    /// somewhere else, and walking on from there is walking a route nobody
+    /// planned — the steps stay legal one at a time, so what it costs is not a
+    /// wall walked through but a body wandering off a plan it still believes in.
+    ///
+    /// The whole place and not the tile: a landing is a tile *and* a height, and
+    /// that is the identity the search itself is over.
+    pub at: Point,
+    /// Where the route was aimed; a goal that strays invalidates it.
     pub goal: Point,
     /// When it was planned, for the repath clock.
     pub planned_at: u64,
@@ -1673,8 +1695,9 @@ pub struct ChasePath {
 /// the world and had nowhere to write that down; a chase has one, in
 /// `give_up`'s ten-second guard.
 ///
-/// **Only the coarse half waits.** The exact search still runs every beat, so a
-/// way that opens within its budget is taken at once. What waits is the
+/// **Only the coarse half waits.** A body whose refusal stands still asks the
+/// exact search whenever it has no [`Route`] left to walk, so a way that opens
+/// within that budget is taken as soon as the body next plans. What waits is the
 /// facet-wide answer.
 ///
 /// A tick count, like every other expiry — see [`Pacified`].

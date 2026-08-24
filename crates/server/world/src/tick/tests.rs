@@ -20,7 +20,7 @@ use openshard_skills::SkillUsed;
 use openshard_state::components::Riding;
 use openshard_state::components::{
     Amount, Contained, Container, CorpseBody, CriminalUntil, Decays, Drawn, Equipped, MurderDecay, Murders,
-    RouteRefused, Skills, Stackable,
+    Route, RouteRefused, Skills, Stackable,
 };
 use openshard_state::components::{Banker, SwingSpeed, WrestlingCombo, WrestlingOpener, WrestlingStride};
 use openshard_state::sectors::distance;

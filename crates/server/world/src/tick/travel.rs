@@ -215,23 +215,32 @@ impl World {
     /// Whether a mobile could stand on this tile — the arrival test.
     fn can_stand_at(&self, facet: Facet, at: Point) -> bool {
         // A facet with no map is development mode, where every tile is allowed;
-        // the same convention the step check uses. Asked of the map itself now:
+        // the same convention the step check uses. Asked of the map itself:
         // what this wanted to know was never whether some abstraction was
         // present, only whether there is ground to have an opinion about.
         if self.state.map_terrain(facet).is_none() {
             return true;
         }
-        // The live floor, so a wall the world put there since the rune was
-        // marked counts as much as one the map has always had.
-        // Reached from its own height, which is what asking "is this tile
-        // standable" means when nobody is walking onto it from anywhere. The
-        // *map* and not the live ground: whether a facet has a floor here is
-        // the facet's answer, and a crate standing on it is a separate question
-        // this caller does not ask.
-        self.state
-            .map_terrain(facet)
-            .and_then(|map| map.stand_z(Tile::new(at.x, at.y), i32::from(at.z)))
-            .is_some()
+        // ServUO's `Map.CanSpawnMobile`, which is `CanFit(x, y, z, 16)`: a body
+        // fits at the height the traveller is *arriving at* — a surface under
+        // its feet and nothing solid in it — rather than a surface being findable
+        // somewhere near. A recall lands you at the rune's own z, so that is the
+        // height the question has to be about.
+        //
+        // **And over the live world, which this claimed to do and did not.** It
+        // read `MapTerrain::stand_z`, the bare map, so a wall the world put up
+        // since the rune was marked did not count, a door shut across the spot
+        // did not count, and a deck moored over open water did not count either —
+        // a rune marked on a ship's deck was refused as "blocking" because the
+        // map underneath it is sea.
+        openshard_movement::can_fit(
+            &self
+                .state
+                .footing(facet, openshard_map::overlay::Doors::AsTheyStand),
+            Tile::new(at.x, at.y),
+            i32::from(at.z),
+            openshard_movement::PLAYER_HEIGHT,
+        )
     }
 
     /// Whether `item` is inside the mobile's own backpack, at any depth.

@@ -1,5 +1,9 @@
 use super::*;
 
+mod gameplay;
+#[allow(unused_imports)] // Kept as boot's crate-visible configuration API.
+pub(crate) use gameplay::{character_list_flags_of, character_screen_of, gameplay_of, supported_features_of};
+
 /// Load the config, writing the shipped default if there is none.
 ///
 /// A fresh checkout should run. Writing the default rather than baking one in
@@ -60,132 +64,6 @@ pub async fn open_store(config: &Config) -> Result<Arc<Store>, Box<dyn std::erro
 pub(crate) fn is_postgres_url(target: &str) -> bool {
     let lower = target.to_ascii_lowercase();
     lower.starts_with("postgres://") || lower.starts_with("postgresql://")
-}
-
-/// Turn the validated `[gameplay]` config into the world's runtime rules,
-/// converting the operator's seconds into the tick counts the systems run on.
-///
-/// Every field is named, and none is left to `Default`: a new `[gameplay]` knob
-/// should fail to compile here until it is wired, rather than quietly run on its
-/// default because nobody remembered this function.
-pub(crate) fn gameplay_of(config: &Config) -> Gameplay {
-    let g = &config.gameplay;
-    Gameplay {
-        combat_era: g.combat_era,
-        speed_scale_factor: g.speed_scale_factor,
-        critical_chance: g.critical_chance,
-        critical_damage_percent: g.critical_damage_percent,
-        skill_cap: g.skill_cap,
-        total_skill_cap: g.total_skill_cap,
-        stat_cap: g.stat_cap,
-        stat_cap_individual: g.stat_cap_individual,
-        stat_gain_ticks: Gameplay::ticks_from_ms(g.stat_gain_ms),
-        stat_gain_chance: g.stat_gain_chance,
-        decay_ticks: Gameplay::ticks(g.decay_seconds),
-        house_decay_ticks: Gameplay::ticks(g.house_decay_seconds),
-        criminal_ticks: Gameplay::ticks(g.criminal_seconds),
-        distance_talk: g.distance_talk,
-        distance_whisper: g.distance_whisper,
-        distance_yell: g.distance_yell,
-        creature_step_ticks: Gameplay::ticks_from_ms(g.creature_step_ms),
-        cast_style: openshard_world::CastStyle::parse(&g.cast_style),
-        spell_disturb: g.spell_disturb,
-        tooltip_mode: openshard_world::TooltipMode::parse(&g.tooltips),
-        context_menus: g.context_menus,
-        reagents: g.reagents,
-        mana_loss_on_fail: g.mana_loss_on_fail,
-        reagent_loss_on_fail: g.reagent_loss_on_fail,
-        bank_gold_in_status: g.bank_gold_in_status,
-        vendor_bank_payment: g.vendor_bank_payment,
-        cross_facet_travel: g.cross_facet_travel,
-        lod: g.lod,
-        lod_radius: g.lod_radius,
-        lod_idle_factor: g.lod_idle_factor,
-        uo_minute_ticks: Gameplay::ticks(g.uo_minute_seconds).max(1),
-        season: g.season,
-        guards: g.guards,
-        npc_schedule: g.npc_schedule,
-        npc_work_hour: g.npc_work_hour,
-        npc_home_hour: g.npc_home_hour,
-        // The same setting the `0xB9` mask is built from, as an ordinal: the
-        // paperdoll the client draws and the content the shard runs read one
-        // value, so they cannot disagree about which expansion this is.
-        expansion: expansion_index(&g.expansion),
-    }
-}
-
-/// The `0xB9` SupportedFeatures mask this shard advertises, from the tooltip and
-/// context-menu config.
-///
-/// Zero when both are off — no `0xB9` is sent, and a modern client stays on the
-/// classic single-click name label. Otherwise the AoS expansion set (ServUO's
-/// `FeatureFlags` `T2A|UOR|UOTD|LBR|AOS` = `0x1F`), whose AOS bit is what turns on
-/// object tooltips and context menus. The lower expansion bits ride along as
-/// ServUO's core-expansion default; a 2D client ignores the ones it does not use.
-/// The expansion name as the ordinal `Gameplay` compares against.
-///
-/// The same three names `supported_features_of` maps to `0xB9` masks, read once
-/// more: one setting, two consumers, and `config` has already refused anything
-/// else, so an unknown name is the ML default rather than an error here.
-fn expansion_index(name: &str) -> u8 {
-    match name.trim().to_ascii_lowercase().as_str() {
-        "aos" => Gameplay::AOS,
-        "se" => Gameplay::SE,
-        _ => Gameplay::ML,
-    }
-}
-
-pub(crate) fn supported_features_of(config: &Config) -> SupportedFeatures {
-    let g = &config.gameplay;
-    // The expansion the operator asked for. This is what the client builds its
-    // paperdoll from: under AoS there is no Quest button to press, so the whole
-    // `0xD7`/`0x32` path is unreachable however correctly it is implemented.
-    let expansion = match g.expansion.trim().to_ascii_lowercase().as_str() {
-        "aos" => SupportedFeatures::AOS,
-        "se" => SupportedFeatures::SE,
-        // `config` has already refused anything else; ML is the default.
-        _ => SupportedFeatures::ML,
-    };
-    // With tooltips and context menus both off the shard advertises nothing at
-    // all and a modern client falls back to the classic single-click name — the
-    // pre-AoS feel, which is a choice an operator can still make.
-    let aos = openshard_world::TooltipMode::parse(&g.tooltips) != openshard_world::TooltipMode::Off
-        || g.context_menus;
-    if aos { expansion } else { SupportedFeatures::NONE }
-}
-
-/// The `0xA9` character-list flags this shard advertises, from the tooltip and
-/// context-menu config.
-///
-/// This is the packet ClassicUO actually reads to enable AoS object tooltips
-/// (bit `0x20`) and context menus (bit `0x08`) — its `ClientFeatures.SetFlags`
-/// keys on the character-list flags, not the `0xB9` SupportedFeatures. Without
-/// the right bits here a modern client never sends a tooltip (`0xD6`) or
-/// context-menu (`0xBF`) request, whatever its version.
-pub(crate) fn character_list_flags_of(config: &Config) -> CharacterListFlags {
-    let g = &config.gameplay;
-    let mut flags = CharacterListFlags::NONE;
-    if openshard_world::TooltipMode::parse(&g.tooltips) != openshard_world::TooltipMode::Off {
-        flags = flags.with(CharacterListFlags::TOOLTIPS);
-    }
-    if g.context_menus {
-        flags = flags.with(CharacterListFlags::CONTEXT_MENU);
-    }
-    flags
-}
-
-/// What the character screen offers, from the config.
-///
-/// The cities are filtered to the facets this shard loaded, so every one offered
-/// is a place a player can actually be put. The two masks are the same tooltip
-/// and context-menu settings read once more — one setting, three consumers, and
-/// they must agree or a modern client is told to expect tooltips it never gets.
-pub(crate) fn character_screen_of(config: &Config) -> CharacterScreen {
-    CharacterScreen {
-        starts: crate::start_cities(&config.world.facets, (config.world.start.x, config.world.start.y)),
-        flags: character_list_flags_of(config),
-        features: supported_features_of(config),
-    }
 }
 
 /// The world the config asks for, before a map or a save is laid over it.

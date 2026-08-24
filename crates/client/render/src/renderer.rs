@@ -5,7 +5,7 @@
 //! It never asks for an adapter and never presents: a surface belongs to the
 //! application, and a test has no surface at all.
 
-use crate::atlas::{LandAtlas, StaticAtlas, StaticAtlasPage, StaticAtlasPages, TexmapAtlas};
+use crate::atlas::{DirtyRows, LandAtlas, StaticAtlas, StaticAtlasPage, StaticAtlasPages, TexmapAtlas};
 
 use crate::camera::{Projection, TILE_HEIGHT, TILE_WIDTH, Z_STEP};
 use crate::ground::GroundQuad;
@@ -565,12 +565,12 @@ impl GroundRenderer {
     ) -> u64 {
         let mut uploaded = 0;
         if let Some(rows) = land.take_dirty() {
-            uploaded += u64::from(rows.end - rows.start) * u64::from(LandAtlas::side()) * 4;
-            write_rows(queue, &self.land_texture, land.pixels(), rows);
+            uploaded += u64::from(rows.count()) * u64::from(LandAtlas::side()) * 4;
+            write_rows(queue, &self.land_texture, land.pixels(), rows.into_range());
         }
         if let Some(rows) = texmaps.take_dirty() {
-            uploaded += u64::from(rows.end - rows.start) * u64::from(TexmapAtlas::side()) * 4;
-            write_rows(queue, &self.texmap_texture, texmaps.pixels(), rows);
+            uploaded += u64::from(rows.count()) * u64::from(TexmapAtlas::side()) * 4;
+            write_rows(queue, &self.texmap_texture, texmaps.pixels(), rows.into_range());
         }
         uploaded
     }
@@ -1612,12 +1612,11 @@ impl SpriteRenderer {
     ///
     /// `pixels` is the whole atlas and `rows` is what
     /// [`StaticAtlas::take_dirty`](crate::atlas::StaticAtlas::take_dirty) — or
-    /// the animation atlas's — just handed back. Untyped for the same reason
-    /// [`SpriteRenderer::new`] is: this pass draws rectangles of somebody else's
-    /// picture and does not care which atlas they came from. The pairing is the
-    /// caller's, and taking the band is what makes it hard to get wrong — a
-    /// range only exists because something was written.
-    pub fn upload_rows(&self, queue: &wgpu::Queue, pixels: &[u8], rows: std::ops::Range<u32>) {
+    /// the animation atlas's — just handed back. This pass draws rectangles of
+    /// somebody else's picture and does not care which atlas they came from;
+    /// [`DirtyRows`] preserves the one part of the pairing it does need: the
+    /// band came from a write and has a well-defined row count.
+    pub fn upload_rows(&self, queue: &wgpu::Queue, pixels: &[u8], rows: DirtyRows) {
         self.upload_page_rows(queue, StaticAtlasPage(0), pixels, rows);
     }
 
@@ -1627,13 +1626,13 @@ impl SpriteRenderer {
         queue: &wgpu::Queue,
         page: StaticAtlasPage,
         pixels: &[u8],
-        rows: std::ops::Range<u32>,
+        rows: DirtyRows,
     ) {
         let page = self
             .pages
             .get(usize::from(page.0))
             .expect("static atlas page was uploaded without a renderer page");
-        write_rows(queue, &page.texture, pixels, rows);
+        write_rows(queue, &page.texture, pixels, rows.into_range());
     }
 
     /// The actual GPU atlas page, exposed solely to an opt-in diagnostic that

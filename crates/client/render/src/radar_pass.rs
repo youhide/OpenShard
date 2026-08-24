@@ -553,11 +553,7 @@ fn cap_draws_by_distance<'a>(
         let dy = draw.placement.origin.1 + draw.placement.extent.1 / 2.0 - center.1;
         dx * dx + dy * dy
     };
-    draws.sort_by(|a, b| {
-        distance_sq(a)
-            .partial_cmp(&distance_sq(b))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    draws.sort_by(|a, b| distance_sq(a).total_cmp(&distance_sq(b)));
     draws.truncate(capacity);
     draws.sort_by_key(paint_order);
     draws

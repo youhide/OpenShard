@@ -492,7 +492,7 @@ impl GumpAtlas {
     /// The rows written since this was last asked, cleared. Handed straight to
     /// [`GumpRenderer::upload_rows`].
     pub fn take_dirty(&mut self) -> Option<std::ops::Range<u32>> {
-        self.packed.take_dirty()
+        self.packed.take_dirty().map(crate::atlas::DirtyRows::into_range)
     }
 
     /// Its pixels, RGBA8 and row-major, ready for `write_texture`.

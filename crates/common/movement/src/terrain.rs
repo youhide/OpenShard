@@ -1917,4 +1917,172 @@ mod tests {
             println!("  ({x},{y}) deck {deck} -> ({nx},{ny}): shard {truth}, client {client}");
         }
     }
+
+    /// What one placement rule did with one pier deck.
+    ///
+    /// A struct rather than four running counters per rule, because the three
+    /// rules below are asked the same four questions and a set of counters per
+    /// rule is where a survey starts printing one rule's number under another
+    /// rule's heading.
+    struct Arrivals {
+        /// How it is spelled at the call site, so a reader can go and look.
+        who: &'static str,
+        /// Deck tiles it was asked about.
+        asked: u64,
+        /// Where it answered with the deck itself — the body arrives on the pier.
+        on_deck: u64,
+        /// **Where it answered with something below the deck.** The report's
+        /// symptom: a body standing under the planking it was put on.
+        under: u64,
+        /// Every drop, so the shape of them can be printed rather than just the
+        /// worst — a facet where the median is one and the worst is thirty is a
+        /// different world from one where they are both thirty.
+        drops: Vec<i32>,
+        /// Where it refused to place a body at all.
+        refused: u64,
+        /// A few, spelled out: tile, the deck, and what the rule answered.
+        examples: Vec<(u16, u16, i32, Option<i32>)>,
+    }
+
+    impl Arrivals {
+        fn new(who: &'static str) -> Self {
+            Self {
+                who,
+                asked: 0,
+                on_deck: 0,
+                under: 0,
+                drops: Vec::new(),
+                refused: 0,
+                examples: Vec::new(),
+            }
+        }
+
+        /// Judge one answer against the deck the tile actually carries.
+        fn saw(&mut self, x: u16, y: u16, deck: i32, answer: Option<i32>) {
+            self.asked += 1;
+            match answer {
+                Some(z) if z == deck => self.on_deck += 1,
+                Some(z) if z < deck => {
+                    self.under += 1;
+                    self.drops.push(deck - z);
+                    if self.examples.len() < 8 {
+                        self.examples.push((x, y, deck, answer));
+                    }
+                }
+                Some(_) => {}
+                None => self.refused += 1,
+            }
+        }
+
+        fn report(&mut self) {
+            self.drops.sort_unstable();
+            println!(
+                "\n  {}:\n    \
+                 asked about a pier deck:      {}\n    \
+                 put the body on it:           {}\n    \
+                 ⚠ put the body UNDER it:      {}\n    \
+                 refused to place at all:      {}",
+                self.who, self.asked, self.on_deck, self.under, self.refused
+            );
+            if let (Some(&least), Some(&most)) = (self.drops.first(), self.drops.last()) {
+                println!(
+                    "    ⚠ the drop is {least}..{most} under the deck (median {})",
+                    self.drops[self.drops.len() / 2]
+                );
+            }
+            for (x, y, deck, answer) in &self.examples {
+                println!("    ({x},{y}) deck {deck} -> {answer:?}");
+            }
+        }
+    }
+
+    /// **Where a body that *arrives* is put, over every bridge and pier on the
+    /// facet.** A survey, not an assertion.
+    ///
+    /// `roadmap.md`'s third and last suspect for the 2026-08-02 report, after
+    /// the `landCheck` mechanism was refuted and a moored ship was walked: **a
+    /// login, a spawn, a gate or a teleport**, none of which is a step. A step
+    /// goes through [`check`](MapTerrain::check), reaching from the top of the
+    /// art underfoot; an arrival has nothing to reach *from*, so the shard has
+    /// three other spellings of "put a body on the ground here" and this asks
+    /// each of them about the one shape the report names.
+    ///
+    /// | the rule | who arrives through it |
+    /// |---|---|
+    /// | [`ground_z`](MapTerrain::ground_z) | `WorldState::start_position` (a fresh character's first tile), the `.go` command, and the seed the region spawner hands `npc::spawn` |
+    /// | [`spawn_z`](MapTerrain::spawn_z) | `npc::spawn` itself, seeded as above |
+    /// | [`stand_z`](MapTerrain::stand_z) | the arrival test a recall, a gate travel and a sacred journey are approved by — `world::tick::travel`'s `can_stand_at` |
+    ///
+    /// The three are asked the way their callers ask them: `ground_z` and
+    /// `spawn_z` from the ground, because the pack and the spawner give x and y
+    /// and a rough height rather than a deck; `stand_z` from the deck, because a
+    /// rune is marked where its owner was standing.
+    ///
+    /// **A pier deck is the reference for all three**, which is the same choice
+    /// `moored_boat`'s walk makes: what counts as under a deck cannot be defined
+    /// by the rule under test.
+    ///
+    /// ```sh
+    /// cargo test --release -p openshard-movement arrival_survey -- --nocapture --ignored
+    /// ```
+    #[test]
+    #[ignore = "a survey of a whole facet, not an assertion — see the doc comment"]
+    fn arrival_survey() {
+        let Some(install) = real_install() else {
+            eprintln!("OPENSHARD_CLIENT is unset — nothing to survey");
+            return;
+        };
+        let t = install.terrain();
+        let (width, height) = (t.map().width(), t.map().height());
+
+        let mut ground = Arrivals::new("ground_z — a fresh login, `.go`, the spawner's seed");
+        let mut spawn = Arrivals::new("spawn_z — npc::spawn, seeded from the ground");
+        let mut stand = Arrivals::new("stand_z — the arrival test a recall or a gate is approved by");
+        // Deck tiles where the land underneath is *not* water: a bridge over a
+        // ravine rather than a pier over the sea. Counted apart because the two
+        // shapes fail differently — over water there is nothing at all to fall
+        // to, and over land there is.
+        let mut over_ground = 0_u64;
+
+        for y in 0..height as u16 {
+            for x in 0..width as u16 {
+                if t.map().land(x, y).is_none() {
+                    continue;
+                }
+                // A pier and a bridge are climbable platforms — the same art
+                // `predicted_step_survey` walks, and what the report names.
+                let mut decks: Vec<i32> = Vec::new();
+                for item in t.map().statics_at(x, y) {
+                    let tile = t.tiles().static_tile(item.tile.0);
+                    if tile.flags.is_platform() && tile.flags.is_climbable() {
+                        decks.push(platform_surface(i32::from(item.z), i32::from(tile.height), true).1);
+                    }
+                }
+                if decks.is_empty() {
+                    continue;
+                }
+                over_ground += u64::from(t.land_is_ground(x, y));
+                let tile = Tile::new(x, y);
+                // Only the highest deck on the tile: a pier lays one plank, and
+                // where art is stacked the top of it is the floor a body walking
+                // there is on. Asking about each surface separately would count
+                // the same tile twice and call the lower one a fall.
+                let deck = decks.into_iter().max().expect("decks is not empty");
+                let land = t.ground_z(tile).map(i32::from);
+                ground.saw(x, y, deck, land);
+                // The spawner's own composition, verbatim: the ground is the
+                // *seed*, and `spawn_z` is what chooses from it.
+                spawn.saw(x, y, deck, t.spawn_z(tile, land.unwrap_or(0)));
+                // And a traveller arriving at the height a rune was marked at.
+                stand.saw(x, y, deck, t.stand_z(tile, deck));
+            }
+        }
+
+        println!("arrival survey over facet 0, {width}x{height}");
+        println!("  pier and bridge decks: {}", ground.asked);
+        println!("  of those, over walkable land rather than water: {over_ground}");
+        ground.report();
+        spawn.report();
+        stand.report();
+    }
 }

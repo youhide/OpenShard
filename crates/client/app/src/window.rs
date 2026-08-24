@@ -231,7 +231,7 @@ impl Atlases {
         statics.sync_static_pages(device, queue, &self.statics);
         items.sync_static_pages(device, queue, &self.statics);
         for dirty in self.statics.take_dirty() {
-            uploaded += u64::from(dirty.rows.end - dirty.rows.start) * u64::from(StaticAtlas::side()) * 4;
+            uploaded += u64::from(dirty.rows.count()) * u64::from(StaticAtlas::side()) * 4;
             let page = self
                 .statics
                 .page(dirty.page)
@@ -240,7 +240,7 @@ impl Atlases {
             items.upload_page_rows(queue, dirty.page, page.pixels(), dirty.rows);
         }
         if let Some(rows) = self.mobiles.take_dirty() {
-            uploaded += u64::from(rows.end - rows.start) * u64::from(AnimAtlas::side()) * 4;
+            uploaded += u64::from(rows.count()) * u64::from(AnimAtlas::side()) * 4;
             mobiles.upload_rows(queue, self.mobiles.pixels(), rows);
         }
         uploaded
@@ -825,7 +825,7 @@ impl Screen {
             return;
         };
         if let Some(pass) = &self.ttf_gump_pass {
-            pass.upload_rows(&self.queue, atlas.pixels(), rows);
+            pass.upload_rows(&self.queue, atlas.pixels(), rows.into_range());
         }
     }
 

@@ -675,6 +675,76 @@ pub fn can_stand(footing: &Footing<'_>, tile: Tile, z: i32, height: i32) -> bool
     footing.map.is_none_or(|map| map.can_fit(tile, z, height))
 }
 
+/// Where a body **put** at `tile` ends up, coming from `near_z` — or `None`
+/// where nothing there can hold one.
+///
+/// **An arrival is not a step, and the difference is what this exists for.** A
+/// step is [`step_allowed`]: it reaches from the top of the art underfoot, it
+/// climbs at most [`MAX_STEP_UP`], and where it cannot it refuses — which is
+/// the right answer for a body that is *walking*, because it simply stays where
+/// it was. A body that **arrives** was nowhere a moment ago: a fresh character
+/// on its first tile, a creature the spawner drops, a townsperson the pack
+/// places, a traveller a gate lets out. There is no height to reach from, and a
+/// refusal leaves it nowhere at all — so the two questions are different and
+/// have always had different rules.
+///
+/// What they may not be is different *worlds*. Every arrival on this shard read
+/// the bare map and none of them read the [`Overlay`](crate::Overlay): a deck
+/// over open water, a house's first floor, a stair the shard placed this
+/// morning are all things the map does not have and a step already knows about.
+/// Put a body on a moored ship through the map alone and there is nothing there
+/// to stand on — it lands in the sea, by construction. That is this function's
+/// whole reason to exist, and `roadmap.md`'s third suspect for the 2026-08-02
+/// pier report.
+///
+/// # The two arms, and why the first one is a step
+///
+/// [`MapTerrain::spawn_z`](crate::MapTerrain::spawn_z)'s shape, with the live
+/// world folded into both halves:
+///
+/// - **The ordinary landing, taken in place.** From a ground-level placement it
+///   finds the ground floor and — crucially — *cannot reach the storey above*,
+///   so a banker put at z = 0 stays on the bank's ground floor rather than
+///   climbing to the second. [`can_step`] with one tile for both ends rather
+///   than a second copy of the rule: "put here" is a step that goes nowhere, and
+///   everything a step knows about decks, stairs, ceilings and shut doors comes
+///   along with it.
+/// - **Otherwise, every surface either layer has here**, whether or not a step
+///   could reach it — a shop's raised floor is where the tailor goes even though
+///   nothing can climb to it, and a deck two storeys over the water is where
+///   somebody who logged out on it comes back. Kept to the ones a body actually
+///   fits on ([`can_fit`]), so the ground *under* a covering floor drops out and
+///   the floor itself is chosen.
+///
+/// Among what survives, the one nearest `near_z`, and **a tie goes to the
+/// lower**. That is a rule and not an accident:
+/// [`Overlay::surface_at`](crate::Overlay::surface_at) and `path::goal_node`
+/// break the same tie the same way, for the reason they give — a landing may not
+/// depend on which layer of the world was read first. `spawn_z` left the tie to
+/// the map file's own static order, which is the same defect one layer down.
+#[must_use]
+pub fn arrival_z(footing: &Footing<'_>, tile: Tile, near_z: i32, height: i32) -> Option<i32> {
+    // A z outside `i8` is not a height this world has — the wire cannot carry
+    // one — so the step arm is simply skipped rather than clamped to a height
+    // nobody asked about. The candidate arm below has no such trouble: it
+    // measures distances and never has to name a point.
+    if let Ok(z) = i8::try_from(near_z) {
+        let here = Point { x: tile.x, y: tile.y, z };
+        if let Some(landed) = can_step(footing, here, here) {
+            return Some(i32::from(landed.z));
+        }
+    }
+    let mut candidates: Vec<i32> = footing
+        .map
+        .map(|map| map.surfaces(tile.x, tile.y))
+        .unwrap_or_default();
+    candidates.extend(footing.overlay.surfaces_at(tile).map(Cover::surface));
+    candidates
+        .into_iter()
+        .filter(|&z| can_fit(footing, tile, z, height))
+        .min_by_key(|&z| ((z - near_z).abs(), z))
+}
+
 /// Whether a straight sight line from `from` to `to` is clear.
 ///
 /// The map's walls, and then the live world's doors. A shut door is opaque; a
@@ -1160,6 +1230,113 @@ mod tests {
             Some(Point::new(10, 11, 0)),
             "over ground the same storey is out of reach and the body stays on the ground",
         );
+    }
+
+    /// **A body put on a moored ship's deck, and the map alone cannot say there
+    /// is one.**
+    ///
+    /// `roadmap.md`'s third suspect for the 2026-08-02 pier report, pinned: an
+    /// arrival — a login, a spawn, a gate, a teleport — is not a step, and every
+    /// rule the shard had for one read the bare map. Over open water the map
+    /// answers "nothing to stand on", correctly, right up until a ship is moored
+    /// there; the first assertion below is that refusal, and it is the whole of
+    /// what "lands in the sea by construction" means.
+    ///
+    /// Both arms of [`arrival_z`] are exercised, because a deck can be either
+    /// side of a step's reach and an arrival is bounded by neither: a sloop's
+    /// deck a step above the waterline goes through the landing arm, and a
+    /// carrack's upper deck twenty above it goes through the candidate arm.
+    #[test]
+    fn an_arrival_stands_on_a_deck_the_map_knows_nothing_about() {
+        const SEA: u16 = 0x00A8;
+        let mut scene = crate::scene::Scene::flat_holding(20, 20, 0);
+        scene.land_art(SEA, openshard_tiles::TileFlags::WATER);
+        scene.land(10, 9, SEA);
+        let berth = Tile::new(10, 9);
+
+        assert_eq!(
+            scene.terrain().spawn_z(berth, 0),
+            None,
+            "the map has open water here, and every arrival rule the shard had read only the map",
+        );
+
+        // A deck within a step of the waterline: the landing arm answers.
+        let mut moored = Overlay::default();
+        moored.set(berth, vec![Cover::standing(2, 0)]);
+        let afloat = Footing::new(Some(scene.terrain()), &moored, Doors::AsTheyStand);
+        assert_eq!(
+            arrival_z(&afloat, berth, 0, PLAYER_HEIGHT),
+            Some(2),
+            "a body gated onto a moored ship should stand on its deck, not swim under it",
+        );
+
+        // And one far out of a step's reach: no reach bounds a placement, so the
+        // candidate arm answers with the same deck.
+        let mut tall = Overlay::default();
+        tall.set(berth, vec![Cover::standing(20, 0)]);
+        let castle = Footing::new(Some(scene.terrain()), &tall, Doors::AsTheyStand);
+        assert_eq!(
+            arrival_z(&castle, berth, 0, PLAYER_HEIGHT),
+            Some(20),
+            "an arrival is not bounded by MAX_STEP_UP — nothing walked it here",
+        );
+    }
+
+    /// **An arrival takes the floor it was put on and not the storey above it.**
+    ///
+    /// The property `MapTerrain::spawn_z`'s first arm exists for — a banker
+    /// placed at z = 0 stays on the bank's ground floor — asserted over the
+    /// *live* layer, where a house built this morning is the only thing that has
+    /// storeys at all. Without the landing arm the candidate arm would pick the
+    /// nearest surface, which is the same answer here and a different one the
+    /// moment a mezzanine is closer than the floor.
+    #[test]
+    fn an_arrival_takes_the_floor_it_was_put_on() {
+        let scene = crate::scene::Scene::flat_holding(20, 20, 0);
+        let inside = Tile::new(10, 10);
+        let mut house = Overlay::default();
+        // A ground floor laid on the ground it duplicates, and a first storey.
+        house.set(inside, vec![Cover::standing(0, 0), Cover::standing(20, 0)]);
+        let footing = Footing::new(Some(scene.terrain()), &house, Doors::AsTheyStand);
+
+        assert_eq!(arrival_z(&footing, inside, 0, PLAYER_HEIGHT), Some(0));
+        assert_eq!(
+            arrival_z(&footing, inside, 20, PLAYER_HEIGHT),
+            Some(20),
+            "and somebody who logged out upstairs comes back upstairs",
+        );
+    }
+
+    /// Two live floors the same distance from where a body is being put, and the
+    /// answer may not be the order the house's components were registered in.
+    ///
+    /// [`Overlay::surface_at`](crate::Overlay::surface_at) breaks this tie for a
+    /// *step* and gives its reason; an arrival goes through the candidate arm
+    /// instead, which is a second place the same tie is broken and therefore a
+    /// second place it could have been left to chance.
+    #[test]
+    fn an_arrival_between_two_floors_takes_the_lower() {
+        const SEA: u16 = 0x00A8;
+        let mut scene = crate::scene::Scene::flat_holding(20, 20, 0);
+        scene.land_art(SEA, openshard_tiles::TileFlags::WATER);
+        scene.land(10, 9, SEA);
+        let berth = Tile::new(10, 9);
+
+        // Ten either side of the height asked about, and out of a step's reach
+        // of it so the candidate arm is what answers.
+        for order in [[0, 20], [20, 0]] {
+            let mut decks = Overlay::default();
+            decks.set(
+                berth,
+                order.map(|z| Cover::standing(z, 0)).to_vec(),
+            );
+            let footing = Footing::new(Some(scene.terrain()), &decks, Doors::AsTheyStand);
+            assert_eq!(
+                arrival_z(&footing, berth, 10, PLAYER_HEIGHT),
+                Some(0),
+                "the answer followed the order the decks were registered in",
+            );
+        }
     }
 
     /// **A body is in the way, and the flanks of a diagonal are bodies' too.**

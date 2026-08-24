@@ -1009,11 +1009,8 @@ impl DecodePacket for ClientVersionReport {
     /// leniency `raw` documents for junk content.
     fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
         let body = reader.rest();
-        let end = body
-            .iter()
-            .position(|byte| *byte == 0)
-            .unwrap_or(body.len())
-            .min(Self::MAX_LENGTH);
+        let body = &body[..body.len().min(Self::MAX_LENGTH)];
+        let end = body.iter().position(|byte| *byte == 0).unwrap_or(body.len());
         Ok(Self {
             raw: body[..end].iter().map(|byte| *byte as char).collect(),
         })
@@ -1848,5 +1845,14 @@ mod tests {
             ClientVersionReport::MAX_LENGTH,
             "Sphere clamps to 20 before reading"
         );
+    }
+
+    #[test]
+    fn client_version_report_does_not_scan_past_its_clamp() {
+        let report = ClientVersionReport {
+            raw: format!("{}\0ignored", "9".repeat(ClientVersionReport::MAX_LENGTH)),
+        };
+        let decoded: ClientVersionReport = decode_packet(&report.encode(), version()).unwrap();
+        assert_eq!(decoded.raw, "9".repeat(ClientVersionReport::MAX_LENGTH));
     }
 }

@@ -27,12 +27,15 @@ use crate::animate::StaticAnimations;
 #[cfg(test)]
 use crate::atlas::StaticAtlas;
 use crate::atlas::{Sprite, StaticArt, StaticAtlasPage};
-use crate::camera::{self, Camera, RealPixel, TILE_HEIGHT, TileBounds, ViewPoint, WorldPixel};
+use crate::camera::{Camera, TILE_HEIGHT, TileBounds, ViewPoint};
 use crate::cutaway::{self, Cutaway};
 use crate::depth;
 use crate::geometry::Rect;
 use crate::mesh_face::{MeshFaceRow, MeshFaceVertex};
 use crate::sprite::SpriteQuad;
+
+mod picking;
+pub use picking::{PickedStatic, pick, pick_with_interior, selected};
 
 /// Where a sprite standing on a tile lands, as a [`ViewPoint`] — the drawn
 /// image's own grid, before any zoom. The doc here said "viewport pixels" for
@@ -105,27 +108,6 @@ pub fn graphics_in(
     for_each_static_in(map, bounds, |item| {
         out.extend(animations.cycle(item.tile));
     });
-}
-
-/// One static of the map, named by where it stands and what it is.
-///
-/// What [`pick`] answers with, and the only thing this crate can say about a
-/// static: the map's furniture has no serial — a serial is an entity's, and
-/// these are not entities — so a *reference* to one is its tile, its height and
-/// its graphic. That is enough to place its picture again, which is all a
-/// selection needs; it is deliberately not enough to ask a shard about, because
-/// there is nothing there to ask about.
-///
-/// Two identical graphics on one tile at one height are one value here and draw
-/// one picture, so nothing downstream can tell them apart and nothing needs to.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct PickedStatic {
-    /// Where it stands.
-    pub at: Point,
-    /// Its graphic — the *placed* one, which for an animated static is the
-    /// cycle's start rather than the frame on screen. The same value
-    /// [`collect`] sorts and looks up tiledata by.
-    pub graphic: Graphic,
 }
 
 /// The quads for every visible static.
@@ -992,189 +974,6 @@ pub(crate) fn quad_of(
     .with_static_atlas_page(placed.page)
 }
 
-/// Which static of the map the cursor is over, or `None` for none.
-///
-/// [`crate::items::pick`]'s two rules, over the map's furniture rather than over
-/// the server's list, and for the same reasons — stated there once:
-///
-/// - **A hit is an opaque texel**, not a bounding box.
-/// - **The topmost drawn wins**, which is the largest [`depth::Order`]; a tie
-///   goes to the one the map file has last, which is the one drawn last and so
-///   the one on top.
-///
-/// The cells walked are the conservative subset of [`Camera::visible_tiles`]
-/// whose largest possible sprite could cover the cursor. A wall on a storey this
-/// frame is not showing is not something the player can have pointed at, and a
-/// tall sprite at either extreme of the map's `i8` height range remains in the
-/// subset.
-///
-/// `cursor` is a viewport pixel, the pair `winit` reports and [`Camera::pick`]
-/// takes; the zoom is undone here, once.
-#[must_use]
-pub fn pick<'a>(
-    map: &WorldMap,
-    camera: &Camera,
-    tiledata: &TileData,
-    animations: &StaticAnimations,
-    atlas: impl Into<StaticArt<'a>>,
-    cutaway: &Cutaway,
-    cursor: RealPixel,
-) -> Option<PickedStatic> {
-    pick_with_interior(map, camera, tiledata, animations, atlas, cutaway, cursor, None)
-}
-
-/// [`pick`] with the same building-cell gate as the static collector.
-#[must_use]
-#[allow(clippy::too_many_arguments)] // Rendering inputs intentionally mirror `pick` plus interior visibility.
-pub fn pick_with_interior<'a>(
-    map: &WorldMap,
-    camera: &Camera,
-    tiledata: &TileData,
-    animations: &StaticAnimations,
-    atlas: impl Into<StaticArt<'a>>,
-    cutaway: &Cutaway,
-    cursor: RealPixel,
-    interior: Option<&crate::interiors::InteriorFrame>,
-) -> Option<PickedStatic> {
-    let atlas = atlas.into();
-    let in_view = camera.to_view(camera.pick(cursor));
-    let mut hit: Option<(depth::Order, PickedStatic)> = None;
-    for_each_static_in(map, pick_bounds(camera, atlas, cursor), |item| {
-        let at = Point::new(item.x, item.y, item.z);
-        let tile = tiledata.static_tile(item.tile.0);
-        if !interior.is_none_or(|frame| frame.shows_static_at(at, tile)) {
-            return;
-        }
-        let graphic = item.tile;
-        // Never hides a foliage tile from a click: it is still there to point
-        // at, matching what the reference does with a faded rather than
-        // vanished tile.
-        let Some(placed) = place(at, graphic, camera, tiledata, animations, atlas, cutaway, None) else {
-            return;
-        };
-        // Into the sprite's own pixels. Negative is above or left of it, and
-        // `try_from` failing is the whole of that test.
-        let (Ok(x), Ok(y)) = (
-            u16::try_from(in_view.x - placed.at.x as i32),
-            u16::try_from(in_view.y - placed.at.y as i32),
-        ) else {
-            return;
-        };
-        if !atlas.opaque_at(placed.showing, x, y) {
-            return;
-        }
-        // `>=`, so a later static at the same order takes it: the tie-break is
-        // the file's order, which is the order the picture was drawn in.
-        if hit.is_none_or(|(order, _)| placed.order >= order) {
-            hit = Some((placed.order, PickedStatic { at, graphic }));
-        }
-    });
-    hit.map(|(_, picked)| picked)
-}
-
-/// A conservative tile rectangle for map statics whose sprite can cover a
-/// cursor position.
-///
-/// A static is anchored at the centre/bottom of its tile. Its width can extend
-/// to either side of that centre, and its height only above it; the tile's `z`
-/// shifts that anchor vertically. Convert the resulting world-pixel rectangle
-/// through both ends of the signed height range. The small extra tile is for
-/// rounding in [`camera::unproject`], so this may inspect a few more statics but
-/// can never reject one whose pixels contain the cursor.
-fn pick_bounds<'a>(camera: &Camera, atlas: impl Into<StaticArt<'a>>, cursor: RealPixel) -> TileBounds {
-    let atlas = atlas.into();
-    let cursor = camera.pick(cursor);
-    let (width, height) = atlas.max_sprite_size();
-    let half_width = (i32::from(width) + 1) / 2;
-    let height = i32::from(height);
-    // `stand_on` places the sprite's bottom at the tile diamond's bottom:
-    // `TILE_HEIGHT / 2` below the projected centre.
-    let points = [
-        WorldPixel {
-            x: cursor.x - half_width,
-            y: cursor.y - height - TILE_HEIGHT / 2,
-        },
-        WorldPixel {
-            x: cursor.x + half_width,
-            y: cursor.y + TILE_HEIGHT / 2,
-        },
-    ];
-    let mut min_x = i32::MAX;
-    let mut max_x = i32::MIN;
-    let mut min_y = i32::MAX;
-    let mut max_y = i32::MIN;
-    for point in points {
-        for z in [i8::MIN, i8::MAX] {
-            let (x, y) = camera::unproject(point, z);
-            min_x = min_x.min(x);
-            max_x = max_x.max(x);
-            min_y = min_y.min(y);
-            max_y = max_y.max(y);
-        }
-    }
-    TileBounds {
-        min_x: min_x - 1,
-        max_x: max_x + 1,
-        min_y: min_y - 1,
-        max_y: max_y + 1,
-    }
-}
-
-/// The quads to draw a mask from, for a static that is selected.
-///
-/// The *same* quads [`collect`] draws — same placement, same region, same depth,
-/// through the same [`quad_of`] — because a mask drawn from anything else would
-/// shade pixels the picture is not at. See [`crate::items::outlined`], which is
-/// this for the server's list and exists for the same reason.
-///
-/// A list rather than an `Option` because the pass that consumes it takes one,
-/// and because the day a second static is selected this is where it is appended.
-/// `None` comes back empty rather than being a case the caller has to handle.
-///
-/// The hue is nought: a mask is a shape, and the shape is the alpha.
-pub fn selected<'a>(
-    camera: &Camera,
-    tiledata: &TileData,
-    animations: &StaticAnimations,
-    atlas: impl Into<StaticArt<'a>>,
-    cutaway: &Cutaway,
-    selection: Option<PickedStatic>,
-) -> Vec<SpriteQuad> {
-    let atlas = atlas.into();
-    let (eye_x, eye_y) = camera.eye_tile();
-    let base = depth::base_for(eye_x, eye_y);
-    selection
-        .and_then(|picked| {
-            // Never hides a foliage tile that is already the selection: the
-            // player asked for this one specifically.
-            let placed = place(
-                picked.at,
-                picked.graphic,
-                camera,
-                tiledata,
-                animations,
-                atlas,
-                cutaway,
-                None,
-            )?;
-            match on_screen(camera, placed.at, &placed.sprite) {
-                true => Some(quad_of(
-                    picked.at,
-                    &placed,
-                    base,
-                    0,
-                    crate::occlusion::OwnerId::NONE,
-                    // A silhouette's pixels are a mask — nothing lights them,
-                    // so nothing has to say where in the world they are.
-                    crate::impostor::Range::default(),
-                )),
-                false => None,
-            }
-        })
-        .into_iter()
-        .collect()
-}
-
 /// Walk every static on the visible cells, calling back for each.
 ///
 /// The cells are the ones the ground walks — the same clamped rectangle — and
@@ -1213,6 +1012,7 @@ pub fn for_each_static_in(
 #[cfg(test)]
 mod tests {
     use crate::atlas::StaticAtlasPages;
+    use crate::camera::RealPixel;
 
     use openshard_map::grid::BlockExtent;
     use openshard_map::map::{LandCell, StaticItem};

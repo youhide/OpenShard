@@ -431,7 +431,12 @@ impl App {
                     // down) drew the refusal a tile and a half away from the
                     // barrel that caused it. `ground_z` is only the fallback for
                     // a tile with no surface at all.
-                    let surface = terrain.map.and_then(|map| map.spawn_z(tile, near));
+                    //
+                    // `arrival_z` and not `MapTerrain::spawn_z`, which read the
+                    // bare map: a house's floor and a ship's deck are the live
+                    // world's, and washing them at the land underneath is the
+                    // same defect as drawing the barrel's refusal at the water.
+                    let surface = openshard_movement::arrival_z(&terrain, tile, near, PLAYER_HEIGHT);
                     // `clamp` rather than `unwrap`: a `z` outside `i8` is a
                     // corrupt block and not an invariant of ours, and a diamond
                     // drawn at the wrong height is a better answer than a panic

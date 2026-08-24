@@ -20,10 +20,7 @@
 
 use std::collections::BTreeSet;
 
-use openshard_protocol::items::ItemAmount;
-use openshard_protocol::speech::Font;
 use openshard_protocol::wire::{Graphic, Hue};
-use openshard_protocol::world::Point;
 use openshard_tiles::TileData;
 
 use crate::animate::StaticAnimations;
@@ -36,141 +33,8 @@ use crate::depth;
 use crate::sprite::SpriteQuad;
 use crate::statics::{Placed, on_screen, place_cutaway, placed_rect, quad_of};
 
-/// One thing lying on the ground, as the client has been told about it.
-///
-/// A plain value and not a handle into a `WorldView`, for the reason
-/// [`Mobile`](crate::mobiles::Mobile) is one: this crate renders what it is
-/// given and owns no model of the world.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct GroundItem {
-    /// Where it lies.
-    pub at: Point,
-    /// Its graphic, which is a static's graphic: the two share an art file and
-    /// therefore an atlas.
-    ///
-    /// **The one the shard sent**, not the one on screen. A pile of coins is
-    /// drawn from a different graphic once there are two of it and again once
-    /// there are six — see [`displayed_graphic`] — and [`GroundItem::displayed`]
-    /// is where that choice is made, every time this list is drawn, picked or
-    /// packed. Storing the chosen one here instead was a real defect: the
-    /// client asks `tiledata` about a graphic to decide whether a pile is
-    /// counted, and copper's pile art (`0x0EEB`) does not carry the stacking
-    /// flag its single coin (`0x0EEA`) does — so the same handful of coppers
-    /// was counted in a bag, where the base graphic survives, and silent on
-    /// the floor, where it did not.
-    pub graphic: Graphic,
-    /// Its hue, or [`Hue::NONE`] for none.
-    pub hue: Hue,
-    /// How many of it there are.
-    ///
-    /// This used to be deliberately absent, on the grounds that a pile of 500
-    /// gold is one sprite and picking that sprite is the caller's question. It
-    /// still is — [`displayed_graphic`] runs before a [`GroundItem`] is ever
-    /// built. What changed is that a pile is now drawn with its count written
-    /// over it, and a number the picture carries is part of the picture: see
-    /// [`stack_label`], and [`labels`] for the anchor it hangs from. It also
-    /// picks the art, through [`Self::displayed`]. One for everything that is
-    /// not a pile at all, which is what the wire's own default is.
-    pub amount: ItemAmount,
-}
-
-impl GroundItem {
-    /// The graphic actually on screen: [`displayed_graphic`] of what the shard
-    /// sent and how many there are.
-    ///
-    /// Everything in this module that draws, places, packs or picks this item
-    /// goes through here, so there is one answer to "which picture is this" —
-    /// the atlas is grown for it, the sprite is placed from it, and a click is
-    /// tested against it. What is deliberately **not** asked through it is
-    /// whether the pile is counted at all: that reads the shard's own graphic,
-    /// for the reason [`Self::graphic`] states.
-    #[must_use]
-    pub const fn displayed(&self) -> Graphic {
-        displayed_graphic(self.graphic, self.amount)
-    }
-}
-
-/// The art used for a counted coin stack.
-///
-/// The wire keeps the currency's base graphic (`0x0EED` for gold) and its
-/// amount separate. Like the classic client, choose the two-coin art for a
-/// small stack and the pile art once it holds more than five. This belongs at
-/// the client boundary: the server retains the base graphic, so identical
-/// coins stack regardless of how they are drawn.
-#[must_use]
-pub const fn displayed_graphic(graphic: Graphic, amount: ItemAmount) -> Graphic {
-    match graphic.0 {
-        0x0EEA | 0x0EED | 0x0EF0 if amount.0 > 5 => Graphic(graphic.0 + 2),
-        0x0EEA | 0x0EED | 0x0EF0 if amount.0 > 1 => Graphic(graphic.0 + 1),
-        _ => graphic,
-    }
-}
-
-/// The face a stack's count is written in.
-///
-/// `fonts.mul`'s narrow sans-serif face. It stays legible in an icon corner
-/// without the serifs that make the ordinary caption face blur into the art.
-/// One constant for all three places a count is drawn, for [`stack_label`]'s
-/// reason: a pile counted in one face in a bag and another on the floor is
-/// the same pile drawn twice.
-pub const STACK_COUNT_FONT: Font = Font(9);
-
-/// The digits written on a pile, or `None` for a thing that is drawn without a
-/// count.
-///
-/// **The one rule, for all three places a count is drawn**: an icon in a bag,
-/// a pile on the ground, and the pack on the cursor between the two. Which of
-/// them draws a number is not three decisions — a pile that is counted in a bag
-/// and silent on the floor would be the same pile telling two stories.
-///
-/// Two conditions, both from the client's own files rather than from a guess at
-/// what looks like a heap:
-///
-/// - **The graphic stacks at all** — `tiledata`'s
-///   [`STACKABLE`](openshard_tiles::TileFlags::STACKABLE). A sword
-///   the shard sent with an amount is one sword, and writing `2` on it would be
-///   inventing a pile out of a field the wire happens to carry.
-/// - **There is more than one of it.** A single reagent is a reagent, not a
-///   stack of one — which is the same threshold ClassicUO's own stack drawing
-///   uses for its offset second sprite (`ItemGump.Draw`).
-///
-/// **This is not the reference client's picture.** No 2D client writes a count
-/// on a pile at all: the classic one puts the number in the name over the item
-/// (`NameOverheadGump`, "500 Gold Coins") and nowhere else, and ClassicUO draws
-/// the same art a second time five pixels up and left instead. The digits are
-/// this client's own addition, which is why the whole rule is stated here
-/// rather than cited to a reference that does not have one.
-///
-/// The number is abbreviated — see [`abbreviated`] — because the widest place
-/// it is drawn in is the corner of a 30-pixel icon.
-#[must_use]
-pub fn stack_label(graphic: Graphic, amount: ItemAmount, tiledata: &TileData) -> Option<String> {
-    let stacks = tiledata.static_tile(graphic.0).flags.is_stackable();
-    (stacks && amount.0 > 1).then(|| abbreviated(amount))
-}
-
-/// A stack's size, short enough to sit in the corner of an icon.
-///
-/// Three bands, and the number is **truncated** rather than rounded in all of
-/// them, so what is written is never more than what is there — a pack reading
-/// `1.0k` holds at least a thousand, and one reading `999` is not a thousand
-/// rounded down to look like less.
-///
-/// - Under a thousand: the figure itself. `500`.
-/// - Under ten thousand: one decimal. `1234` reads `1.2k`.
-/// - Above that: whole thousands. `60000` reads `60k`.
-///
-/// There is no `m` band and there never can be: an [`ItemAmount`] is a `u16`,
-/// so the largest pile the wire can describe is `65535`, which reads `65k`.
-#[must_use]
-pub fn abbreviated(amount: ItemAmount) -> String {
-    let count = u32::from(amount.0);
-    match count {
-        0..1_000 => count.to_string(),
-        1_000..10_000 => format!("{}.{}k", count / 1_000, (count % 1_000) / 100),
-        _ => format!("{}k", count / 1_000),
-    }
-}
+mod stacks;
+pub use stacks::{GroundItem, STACK_COUNT_FONT, abbreviated, displayed_graphic, stack_label};
 
 /// A position in the frame's ground-item list.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -652,6 +516,8 @@ pub fn pick_with_interior<'a>(
 
 #[cfg(test)]
 mod tests {
+    use openshard_protocol::items::ItemAmount;
+    use openshard_protocol::world::Point;
     use openshard_uofiles::color::Color16;
     use openshard_uofiles::image::Image;
 

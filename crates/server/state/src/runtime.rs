@@ -1613,20 +1613,45 @@ impl WorldState {
         self.region_at(self.facet_of(entity), position.0)
     }
 
-    /// Where a character appears on `facet`: the configured x and y, at that
-    /// facet's height.
+    /// Where a character appears on `facet`: the configured x and y, at the
+    /// height a body put there actually stands at.
     ///
-    /// The `z` is read from the map rather than configured. A second source of
+    /// The `z` is read from the world rather than configured. A second source of
     /// truth that disagrees by three units leaves a character unable to take a
     /// single step — every one is more than a two-unit climb — with nothing in
     /// the log to explain it.
+    ///
+    /// **From the world and not from the land**, which it used to be:
+    /// `MapTerrain::ground_z` is the land's own average and reads no static and
+    /// no live cover at all, so a shard whose start sits on a pier, a bridge, a
+    /// dock or a house's floor seated every fresh character *under* it. Over
+    /// facet 0 that is 25,816 of the 27,052 pier and bridge decks, a median ten
+    /// units down — see `movement`'s `arrival_survey`. The ground is still what
+    /// the question is asked *near*, because the start is a tile and not a
+    /// storey, and it is still the answer of last resort: a start tile nothing
+    /// can stand on is a misconfigured shard, and seating the character on its
+    /// ground says so more usefully than seating it at zero.
     #[must_use]
     pub fn start_position(&self, facet: Facet) -> Point {
         let (x, y) = self.start;
-        let z = self
+        let tile = Tile::new(x, y);
+        let ground = self
             .map_terrain(facet)
-            .and_then(|terrain| terrain.ground_z(Tile::new(x, y)))
+            .and_then(|terrain| terrain.ground_z(tile))
             .unwrap_or(Z_WITHOUT_A_MAP);
+        // A facet the shard did not load has no ground to ask about — and
+        // `footing` would panic rather than say so.
+        if !self.facets.contains_key(&facet) {
+            return Point::new(x, y, ground);
+        }
+        let z = openshard_movement::arrival_z(
+            &self.footing(facet, Doors::AsTheyStand),
+            tile,
+            i32::from(ground),
+            openshard_movement::PLAYER_HEIGHT,
+        )
+        .and_then(|z| i8::try_from(z).ok())
+        .unwrap_or(ground);
         Point::new(x, y, z)
     }
 

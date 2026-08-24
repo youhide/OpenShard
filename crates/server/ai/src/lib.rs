@@ -23,7 +23,7 @@ use openshard_protocol::serial::Serial;
 use openshard_protocol::world::{Facet, Point, Sight};
 use openshard_state::WorldState;
 use openshard_state::components::{
-    Aggression, Brain, ChasePath, Client, Combat, Heading, Hitpoints, Pet, PetOrder, Position, RangedAttack,
+    Aggression, Brain, Client, Combat, Heading, Hitpoints, Pet, PetOrder, Position, RangedAttack, Route,
     RouteRefused,
 };
 use openshard_state::sectors::{distance, in_range};
@@ -92,7 +92,8 @@ const CHASE_RANGE_MIN: u32 = 12;
 /// The same cadence a planned route is trusted for, and for the same reason: it
 /// is how long an answer about the shape of the world stays worth believing. A
 /// body is not held still by it the way [`GUARD_TICKS`] holds a chaser — only
-/// the facet-wide search waits, while the exact one runs every beat.
+/// the facet-wide search waits, while the exact one is asked again as soon as
+/// there is no [`Route`] left to walk.
 ///
 /// Public for the same reason [`PATH_BUDGET`] is: the test that pins the memory
 /// has to wait exactly this long for it to lapse, and a copy of the number in
@@ -148,10 +149,12 @@ pub fn step_toward(
     to: Point,
     doors: Doors,
 ) -> Option<Direction> {
-    plan_step(state, mover, facet, from, to, doors, Fallback::Ask).direction
+    plan_step(state, mover, facet, from, to, doors, Fallback::Ask)
+        .planned
+        .direction()
 }
 
-/// The same step, decided for a body that can remember a refusal.
+/// The same step, decided for a body that can remember what it planned.
 ///
 /// **N7's finding, and the guard `step_toward` had nowhere to put.** A pet
 /// following an owner behind a locked door, a townsperson whose post is walled
@@ -161,11 +164,17 @@ pub fn step_toward(
 /// goes through [`give_up`] and stands watch.
 ///
 /// So the refusal is written on the body as a [`RouteRefused`], and while it
-/// stands the graph is not asked again about that goal. The body still walks —
-/// the exact search runs every beat as it always did, and the straight-line
-/// fall-back is unchanged — so what waits is the facet-wide answer and nothing
-/// else. A goal that moves further than [`GOAL_DRIFT`] is a different question
-/// and clears it, exactly as it invalidates a [`ChasePath`].
+/// stands the graph is not asked again about that goal. A goal that moves
+/// further than [`GOAL_DRIFT`] is a different question and clears it, exactly as
+/// it invalidates a [`Route`].
+///
+/// **And the answer is written down as well as the refusal.** A search that
+/// arrives returns the whole way there and this used to keep its first step and
+/// drop the rest, so a body walking twenty tiles planned twenty routes to walk
+/// one of each — the exact half of the same waste the refusal memory took out of
+/// the coarse half. The route is a [`Route`] now, followed a step per beat and
+/// re-planned when it goes stale, which is the same cadence [`chase_step`] has
+/// always walked its own by and the references' own pattern.
 ///
 /// `facet` and `from` are the body's own, and are arguments rather than reads
 /// because every caller has just read them.
@@ -178,6 +187,14 @@ pub fn step_body_toward(
     to: Point,
     doors: Doors,
 ) -> Option<Direction> {
+    // A route already planned and still worth walking is one step and no search
+    // at all. This is the whole of what a body has that `step_toward` has not:
+    // somewhere to keep an answer.
+    match cached_step(state, mover, facet, from, to, doors) {
+        Cached::Step(direction) => return Some(direction),
+        Cached::Opening => return None,
+        Cached::Stale => {}
+    }
     let fallback = match state.registry.get::<RouteRefused>(mover).copied() {
         Some(refusal) if state.ticks < refusal.until && distance(refusal.goal, to) <= GOAL_DRIFT => {
             Fallback::Withheld
@@ -203,7 +220,23 @@ pub fn step_body_toward(
         }
         Coarse::NotAsked => {}
     }
-    plan.direction
+    match plan.planned {
+        Planned::Route(steps) => {
+            // An empty route is a body already standing on its goal: nothing to
+            // walk and nothing to write down.
+            let &first = steps.first()?;
+            // The plan is over the planner's reading of the ground and this is
+            // over the live one — a route planned through shut doors
+            // ([`Doors::AllOpen`]) has a first step the world may still refuse.
+            // The landing is what the route is written down against, so it has
+            // to come from the rule the world will actually apply.
+            let (landing, _) = probe(state, mover, facet, from, first);
+            let taken = landing.filter(|_| will_move(state, mover, first));
+            remember(state, mover, steps, from, taken, to);
+            Some(first)
+        }
+        Planned::Straight(direction) => direction,
+    }
 }
 
 /// Whether a refused exact search may fall through to the coarse graph.
@@ -234,11 +267,40 @@ enum Coarse {
 ///
 /// The split [`search_path`](openshard_movement::search_path) is to
 /// `find_path`: one decision, both readings. The direction alone cannot say why
-/// it is what it is, and *why* is the only thing a caller with a memory acts on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// it is what it is nor how far ahead it was decided, and both are things only a
+/// caller with somewhere to keep them can act on.
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct StepPlan {
-    direction: Option<Direction>,
+    planned: Planned,
     coarse: Coarse,
+}
+
+/// What a decision has behind it: a way, or a guess.
+///
+/// The distinction is the whole of what makes a route worth keeping. A search
+/// that arrives has said something about every tile between here and the goal,
+/// and a body may walk all of it; the straight line has said nothing about any
+/// tile at all, including the one it points at, and the beat after it is a
+/// question that has to be asked again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Planned {
+    /// A search found a way, and these are the steps of it. Empty means the body
+    /// is already standing on the goal.
+    Route(Vec<Direction>),
+    /// Nothing found a way, so the gap is closed roughly and asked again next
+    /// beat — better than freezing, and not a plan. `None` where even the
+    /// straight line has nowhere to point, which is a body on its own goal.
+    Straight(Option<Direction>),
+}
+
+impl Planned {
+    /// The step to take this beat, however it was arrived at.
+    fn direction(&self) -> Option<Direction> {
+        match self {
+            Self::Route(steps) => steps.first().copied(),
+            Self::Straight(direction) => *direction,
+        }
+    }
 }
 
 /// The bodies a route from `from` to `to` is planned around.
@@ -285,7 +347,7 @@ fn plan_step(
         .among(openshard_movement::Bodies::standing(&crowd));
     if let Some(path) = find_path(&planner, from, to, PATH_BUDGET, Weight::PLANNING) {
         return StepPlan {
-            direction: path.first().copied(),
+            planned: Planned::Route(path),
             coarse: Coarse::NotAsked,
         };
     }
@@ -295,21 +357,128 @@ fn plan_step(
     let graph = ask.then(|| state.facet_state(facet).coarse_router()).flatten();
     let Some(graph) = graph else {
         return StepPlan {
-            direction: direction_toward(from, to),
+            planned: Planned::Straight(direction_toward(from, to)),
             coarse: Coarse::NotAsked,
         };
     };
     let guide = state.guide(facet);
     match find_long_path(&guide, &planner, graph, from, to, PATH_BUDGET, Weight::PLANNING) {
         Some(path) => StepPlan {
-            direction: path.first().copied(),
+            planned: Planned::Route(path),
             coarse: Coarse::Routed,
         },
         None => StepPlan {
-            direction: direction_toward(from, to),
+            planned: Planned::Straight(direction_toward(from, to)),
             coarse: Coarse::Refused,
         },
     }
+}
+
+/// One step of a body's cached route, or what stopped it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cached {
+    /// The route's next step, and the route advanced past it.
+    Step(Direction),
+    /// The beat is spent opening a door the route runs through; stepping past it
+    /// is the next beat's, and the route is kept for it.
+    Opening,
+    /// Nothing to walk: no route, or one the world has moved out from under. The
+    /// component is gone and the caller plans afresh.
+    Stale,
+}
+
+/// The step a body's own [`Route`] offers this beat, if it still offers one.
+///
+/// **Four ways a route stops being one**, and they are the references' own list:
+/// the body is no longer standing where the next step starts, the goal has moved
+/// past [`GOAL_DRIFT`], the steps have run out, or [`REPATH_TICKS`] have passed
+/// since it was planned. A route that survives all four is still only a *plan* —
+/// the step it offers is put to the live ground through [`probe`] before it is
+/// taken, so a crate dropped on the way, a door swung shut or a body standing in
+/// it costs a re-plan and never a step the shard would refuse.
+///
+/// **The doors are read from `doors` and not from the body**, because that is
+/// the argument the caller has already decided the question with:
+/// [`Doors::AllOpen`] is the reading of a body that intends to open its way
+/// along the route (see that type), so a door refusing a step of a route planned
+/// on it is a door this body meant to open rather than the world changing.
+/// [`Doors::AsTheyStand`] plans round shut doors in the first place, so one in
+/// the way is news, and the route is dropped.
+fn cached_step(
+    state: &mut WorldState,
+    body: EntityId,
+    facet: Facet,
+    from: Point,
+    to: Point,
+    doors: Doors,
+) -> Cached {
+    let Some(route) = state.registry.get::<Route>(body).cloned() else {
+        return Cached::Stale;
+    };
+    let stale = route.at != from
+        || distance(route.goal, to) > GOAL_DRIFT
+        || route.next >= route.steps.len()
+        || state.ticks.saturating_sub(route.planned_at) >= REPATH_TICKS;
+    if stale {
+        state.registry.remove::<Route>(body);
+        return Cached::Stale;
+    }
+    let direction = route.steps[route.next];
+    let (landing, door) = probe(state, body, facet, from, direction);
+    if let Some(landing) = landing {
+        // Turn-as-step: a body not yet facing this way spends the beat turning
+        // and stands where it was, so the same step is due again.
+        if will_move(state, body, direction) {
+            let mut advanced = route;
+            advanced.next += 1;
+            advanced.at = landing;
+            state.registry.insert(body, advanced);
+        }
+        return Cached::Step(direction);
+    }
+    if let (Some(door), Doors::AllOpen) = (door, doors) {
+        items::open_door(state, door);
+        return Cached::Opening;
+    }
+    // The world changed under the route; the caller plans again.
+    state.registry.remove::<Route>(body);
+    Cached::Stale
+}
+
+/// Write down a route a body has just planned, so the beats after this one walk
+/// it instead of planning it again.
+///
+/// `taken` is where the route's first step lands, when the body is taking it
+/// this beat. `None` covers the two ways it is not: a step that only *turns* a
+/// body not yet facing that way, and a first step the body is spending the beat
+/// opening a door in front of. Either way the body has not moved and the route's
+/// first step is still due — which is the whole of why [`Route::next`] and
+/// [`Route::at`] are decided here rather than by each caller: they are one fact
+/// between them, and a caller that got them apart would have a body walking from
+/// a place it is not standing in.
+fn remember(
+    state: &mut WorldState,
+    body: EntityId,
+    steps: Vec<Direction>,
+    from: Point,
+    taken: Option<Point>,
+    goal: Point,
+) {
+    let (next, at) = match taken {
+        Some(landing) => (1, landing),
+        None => (0, from),
+    };
+    let planned_at = state.ticks;
+    state.registry.insert(
+        body,
+        Route {
+            steps,
+            next,
+            at,
+            goal,
+            planned_at,
+        },
+    );
 }
 
 /// One creature's beat: chase and fight what it has, pick a fight if it sees one,
@@ -346,7 +515,7 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction
     if let Some(target_serial) = state.registry.get::<Combat>(creature).and_then(|c| c.target) {
         if let Some(target_pos) = foe_in_sight(state, target_serial, pos, facet, chase_limit(sight)) {
             if should_flee(state, creature, brain) {
-                state.registry.remove::<ChasePath>(creature);
+                state.registry.remove::<Route>(creature);
                 return flee_step(state, creature, facet, pos, target_pos);
             }
             // A ranged fighter kites: back off from a foe at its heels, stand
@@ -355,7 +524,7 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction
             if let Some(&RangedAttack { range, .. }) = state.registry.get::<RangedAttack>(creature) {
                 let gap = distance(pos, target_pos);
                 if gap <= KITE_GAP {
-                    state.registry.remove::<ChasePath>(creature);
+                    state.registry.remove::<Route>(creature);
                     return kite_step(state, creature, facet, pos, target_pos);
                 }
                 let clear = openshard_movement::sight_clear(
@@ -369,13 +538,13 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction
             }
             if in_range(pos, target_pos, combat::MELEE_RANGE) {
                 // Arrived; the route served.
-                state.registry.remove::<ChasePath>(creature);
+                state.registry.remove::<Route>(creature);
                 return None;
             }
             return chase_step(state, creature, facet, pos, target_pos, brain);
         }
         combat::clear_target(state, creature);
-        state.registry.remove::<ChasePath>(creature);
+        state.registry.remove::<Route>(creature);
     }
 
     // Nothing to fight: look for prey — only a creature that starts fights
@@ -449,8 +618,13 @@ fn will_move(state: &WorldState, creature: EntityId, dir: Direction) -> bool {
         .is_some_and(|h| h.0.direction == dir)
 }
 
-/// Whether a step from `from` in `dir` is open on the live terrain; when it is
-/// not, the door standing there, if that is what blocks.
+/// Where a step from `from` in `dir` lands on the live terrain, or — when it is
+/// refused — the door standing there, if that is what blocks.
+///
+/// **The landing and not a yes**, because a route has to be written down against
+/// the place its next step leaves the body standing in: see [`Route::at`]. It is
+/// the live rule's own answer, which is what makes it the same place the tick
+/// will put the body.
 ///
 /// `step_allowed` and not `can_step`: a diagonal may not clip the corner where
 /// two blockers meet, and the flanks are not a question one landing can answer.
@@ -464,7 +638,7 @@ fn will_move(state: &WorldState, creature: EntityId, dir: Direction) -> bool {
 /// caller falls through to.
 ///
 /// A body in the way has nothing to name either, and is refused with the same
-/// `(false, None)` a wall gets. That is the right answer for what the caller
+/// `(None, None)` a wall gets. That is the right answer for what the caller
 /// does with it: there is nothing to open, and going round is exactly the
 /// fall-through. What it is *not* is a reason for the creature to stand still —
 /// `plan_step` plans over the same crowd, so the route it comes back with is one
@@ -475,9 +649,9 @@ fn probe(
     facet: Facet,
     from: Point,
     dir: Direction,
-) -> (bool, Option<EntityId>) {
+) -> (Option<Point>, Option<EntityId>) {
     let Some(target) = step_from(from, dir) else {
-        return (false, None);
+        return (None, None);
     };
     // One tile of reach, which is every tile `steps_out_of` will look at — the
     // eight neighbours, the diagonal's two flanks among them.
@@ -485,8 +659,8 @@ fn probe(
     let live = state
         .footing(facet, Doors::AsTheyStand)
         .among(openshard_movement::Bodies::standing(&crowd));
-    if openshard_movement::step_allowed(&live, from, dir).is_some() {
-        return (true, None);
+    if let Some(landing) = openshard_movement::step_allowed(&live, from, dir) {
+        return (Some(landing), None);
     }
     // Which door, and not just that one is there: the overlay says a door is in
     // the way, and only the obstruction index says which entity to open. That
@@ -497,7 +671,7 @@ fn probe(
         .blocker_at(target.x, target.y)
         .filter(|o| o.door())
         .map(|o| o.entity);
-    (false, door)
+    (None, door)
 }
 
 /// One step of a chase: follow the cached route, walk straight when nothing is
@@ -512,41 +686,18 @@ fn chase_step(
     brain: Brain,
 ) -> Option<Direction> {
     // A cached route first: planned once, followed a step per beat.
-    if let Some(path) = state.registry.get::<ChasePath>(creature).cloned() {
-        let stale = state.ticks.saturating_sub(path.planned_at) >= REPATH_TICKS
-            || distance(path.goal, to) > GOAL_DRIFT
-            || path.next >= path.steps.len();
-        if stale {
-            state.registry.remove::<ChasePath>(creature);
-        } else {
-            let dir = path.steps[path.next];
-            let (open, door) = probe(state, creature, facet, from, dir);
-            if open {
-                if will_move(state, creature, dir) {
-                    let mut advanced = path;
-                    advanced.next += 1;
-                    state.registry.insert(creature, advanced);
-                }
-                return Some(dir);
-            }
-            if let Some(door) = door {
-                if brain.opens_doors {
-                    // The route runs through this door on purpose: open it and
-                    // step through next beat.
-                    items::open_door(state, door);
-                    return None;
-                }
-            }
-            // The world changed under the route; plan again below.
-            state.registry.remove::<ChasePath>(creature);
-        }
+    let doors = Doors::for_opener(brain.opens_doors);
+    match cached_step(state, creature, facet, from, to, doors) {
+        Cached::Step(direction) => return Some(direction),
+        Cached::Opening => return None,
+        Cached::Stale => {}
     }
 
     // Nothing cached: walk straight at the quarry until something is in the
     // way — the naive-step-first shape both references use.
     let dir = direction_toward(from, to)?;
     let (open, door) = probe(state, creature, facet, from, dir);
-    if open {
+    if open.is_some() {
         return Some(dir);
     }
     if let Some(door) = door {
@@ -563,44 +714,28 @@ fn chase_step(
     let planned = {
         let crowd = crowd_for_route(state, creature, facet, from, to);
         let planner = state
-            .footing(facet, Doors::for_opener(brain.opens_doors))
+            .footing(facet, doors)
             .among(openshard_movement::Bodies::standing(&crowd));
         find_path(&planner, from, to, PATH_BUDGET, Weight::PLANNING)
     };
     match planned {
         Some(steps) if !steps.is_empty() => {
             let first = steps[0];
-            let (open, door) = probe(state, creature, facet, from, first);
-            if !open {
+            let (landing, door) = probe(state, creature, facet, from, first);
+            let Some(landing) = landing else {
                 if let Some(door) = door {
                     if brain.opens_doors {
                         items::open_door(state, door);
-                        state.registry.insert(
-                            creature,
-                            ChasePath {
-                                steps,
-                                next: 0,
-                                goal: to,
-                                planned_at: state.ticks,
-                            },
-                        );
+                        remember(state, creature, steps, from, None, to);
                         return None;
                     }
                 }
                 // Planned into something that is neither open nor a door it can
                 // work: give up rather than lunge.
                 return give_up(state, creature);
-            }
-            let next = usize::from(will_move(state, creature, first));
-            state.registry.insert(
-                creature,
-                ChasePath {
-                    steps,
-                    next,
-                    goal: to,
-                    planned_at: state.ticks,
-                },
-            );
+            };
+            let taken = will_move(state, creature, first).then_some(landing);
+            remember(state, creature, steps, from, taken, to);
             Some(first)
         }
         _ => give_up(state, creature),
@@ -612,7 +747,7 @@ fn chase_step(
 /// to end.
 fn give_up(state: &mut WorldState, creature: EntityId) -> Option<Direction> {
     combat::clear_target(state, creature);
-    state.registry.remove::<ChasePath>(creature);
+    state.registry.remove::<Route>(creature);
     let until = state.ticks + GUARD_TICKS;
     if let Some(brain) = state.registry.get_mut::<Brain>(creature) {
         brain.guard_until = until;
@@ -686,8 +821,8 @@ fn flee_step(
     let away = direction_toward(threat, from).unwrap_or(Direction::South);
     for turn in [0u8, 1, 7, 2, 6, 3, 5] {
         let dir = Direction::from_bits((away.to_bits() + turn) & 7);
-        let (open, _) = probe(state, creature, facet, from, dir);
-        if open {
+        let (landing, _) = probe(state, creature, facet, from, dir);
+        if landing.is_some() {
             return Some(dir);
         }
     }
@@ -706,8 +841,8 @@ fn kite_step(
     let away = direction_toward(threat, from).unwrap_or(Direction::South);
     for turn in [0u8, 1, 7, 2, 6] {
         let dir = Direction::from_bits((away.to_bits() + turn) & 7);
-        let (open, _) = probe(state, creature, facet, from, dir);
-        if open {
+        let (landing, _) = probe(state, creature, facet, from, dir);
+        if landing.is_some() {
             return Some(dir);
         }
     }

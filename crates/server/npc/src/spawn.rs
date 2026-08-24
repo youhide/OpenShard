@@ -152,14 +152,22 @@ pub fn spawn(state: &mut WorldState, spec: SpawnSpec) -> Option<EntityId> {
         state.default_facet
     };
     // Drop the mobile onto the ground, the way a client's spawner does: the
-    // pack gives x/y and a rough height, and the floor it stands on — the top
-    // of the static surface there, a building's raised floor and all — is the
-    // map's to say. Without this a banker sinks to the given z and reads as
+    // pack gives x/y and a rough height, and the floor it stands on — the top of
+    // the static surface there, a building's raised floor and all — is the
+    // world's to say. Without this a banker sinks to the given z and reads as
     // "inside a wall".
-    let position = match state
-        .map_terrain(facet)
-        .and_then(|t| t.spawn_z(Tile::new(position.x, position.y), i32::from(position.z)))
-        .and_then(|z| i8::try_from(z).ok())
+    //
+    // **The world's and not the map's**, which is `arrival_z`'s whole point: a
+    // creature put on a moored ship's deck or on the first floor of a house
+    // somebody built this morning is standing on something the map has never
+    // heard of, and the rule that used to answer here read the map alone.
+    let position = match openshard_movement::arrival_z(
+        &state.footing(facet, openshard_map::overlay::Doors::AsTheyStand),
+        Tile::new(position.x, position.y),
+        i32::from(position.z),
+        openshard_movement::PLAYER_HEIGHT,
+    )
+    .and_then(|z| i8::try_from(z).ok())
     {
         Some(z) => Point::new(position.x, position.y, z),
         None => position,
