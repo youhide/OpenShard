@@ -148,16 +148,6 @@ fn every_chunk(blocks: u32) -> Vec<ChunkAt> {
     .collect()
 }
 
-/// A temp directory of this test's own, removed when it passes.
-///
-/// Named for the test as well as the process: two of these run in one binary and
-/// in parallel, and a shared directory would be one bake racing another.
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openshard-{name}-e2e-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("a writable temp directory");
-    dir
-}
-
 /// Run a fetch to completion against a live shard, and say how many chunks it
 /// asked for.
 ///
@@ -229,36 +219,6 @@ fn assert_same_world(here: &WorldMap, there: &WorldMap) {
     }
 }
 
-/// Say one thing and collect what the shard says back, until it goes quiet.
-///
-/// `map_edit`'s helper, and the quiet is a timeout rather than a marker for its
-/// reason: a command's reply is several lines and nothing on the wire says which
-/// is the last one.
-async fn say_and_hear(
-    socket: &mut Socket<TcpStream>,
-    view: &mut openshard_client_net::view::WorldView,
-    words: &str,
-) -> Vec<String> {
-    let before = view.journal.len();
-    socket
-        .send(&talk::say(words, TalkMode::Regular))
-        .await
-        .expect("the shard is listening");
-    let _ = tokio::time::timeout(Duration::from_millis(1500), async {
-        while let Some(event) = socket.next_event().await.expect("the socket stayed up") {
-            if let Event::Packet(packet) = event {
-                view.apply(&packet);
-            }
-        }
-    })
-    .await;
-    view.journal
-        .iter()
-        .skip(before)
-        .map(|line| line.text.clone())
-        .collect()
-}
-
 #[tokio::test]
 #[ignore = "reads the install's tiledata and bakes a graph; run it deliberately"]
 async fn a_client_asks_for_the_ground_and_gets_the_shards_own_bytes() {
@@ -267,7 +227,7 @@ async fn a_client_asks_for_the_ground_and_gets_the_shards_own_bytes() {
         return;
     };
     let dir = scratch("chunks");
-    let base_set = world_of_ours(&dir, &client, BLOCKS);
+    let base_set = world_of_ours(&dir, &client, BLOCKS, &statics(BLOCKS));
 
     // Held for the length of the test: dropping the handle stops the shard.
     let (address, shard) = spawn(config_over(base_set.clone(), client));
@@ -432,7 +392,7 @@ async fn a_client_that_kept_the_ground_asks_only_for_what_moved() {
     // would otherwise be one cache.
     let kept = dir.join("kept");
     std::fs::create_dir_all(&kept).expect("a writable temp directory");
-    let base_set = world_of_ours(&dir, &client, BLOCKS);
+    let base_set = world_of_ours(&dir, &client, BLOCKS, &statics(BLOCKS));
 
     let (address, shard) = spawn(config_over(base_set.clone(), client));
 
@@ -457,8 +417,15 @@ async fn a_client_that_kept_the_ground_asks_only_for_what_moved() {
     let asked = drive(&mut socket, &mut fetch).await;
     assert_eq!(asked.chunks, 16, "the whole facet, which is sixteen chunks");
     let arrived = fetch.finish().expect("a complete set of chunks").world();
-    let path = openshard_client_net::cache::write(&kept, notice, &arrived).expect("a writable temp dir");
-    assert_eq!(path, openshard_client_net::cache::path_of(&kept, world, FACET));
+    let written = openshard_client_net::cache::write(&kept, notice, &arrived).expect("a writable temp dir");
+    assert_eq!(
+        written.path,
+        openshard_client_net::cache::path_of(&kept, world, FACET)
+    );
+    assert!(
+        written.swept.is_empty(),
+        "the first world this client kept let go of nothing"
+    );
     drop(socket);
 
     // The second: the world is kept and the shard has not moved, so the decision
@@ -604,7 +571,7 @@ async fn a_client_with_no_map_files_ends_up_holding_the_shards_world() {
         return;
     };
     let dir = scratch("world-from-the-wire");
-    let base_set = world_of_ours(&dir, &client, WIDE_BLOCKS);
+    let base_set = world_of_ours(&dir, &client, WIDE_BLOCKS, &statics(WIDE_BLOCKS));
 
     let (address, shard) = spawn(config_over(base_set.clone(), client));
     let (mut socket, view) =
@@ -668,7 +635,7 @@ async fn a_publish_reaches_a_client_that_is_already_standing_on_the_ground() {
         return;
     };
     let dir = scratch("published");
-    let base_set = world_of_ours(&dir, &client, BLOCKS);
+    let base_set = world_of_ours(&dir, &client, BLOCKS, &statics(BLOCKS));
 
     let (address, shard) = spawn(config_over(base_set.clone(), client));
     let (mut socket, mut view) =

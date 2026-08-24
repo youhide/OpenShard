@@ -260,9 +260,8 @@ pub fn sweep(dir: &Path, keeping: &Path) -> Vec<PathBuf> {
     }
 
     let mut swept = Vec::new();
-    for worlds in by_facet.into_values() {
-        let mut worlds = worlds;
-        worlds.sort_unstable_by(|left, right| right.0.cmp(&left.0));
+    for mut worlds in by_facet.into_values() {
+        worlds.sort_unstable_by_key(|(used, _)| std::cmp::Reverse(*used));
         let mut places = KEPT_PER_FACET;
         for (_, world) in worlds {
             // `keeping` takes a place whatever its time says. It was written a
@@ -481,12 +480,8 @@ mod tests {
             .write(true)
             .open(path)
             .expect("a world this test just wrote");
-        file.set_times(
-            std::fs::FileTimes::new()
-                .set_accessed(when)
-                .set_modified(when),
-        )
-        .expect("a writable temp dir");
+        file.set_times(std::fs::FileTimes::new().set_accessed(when).set_modified(when))
+            .expect("a writable temp dir");
     }
 
     fn a_world(revision: MapRevision) -> MapSnapshot {
@@ -639,8 +634,12 @@ mod tests {
         // The older world is the one this client actually plays on.
         read(&dir, world_notice(older, FACET)).expect("the file just written");
 
-        let written = write(&dir, world_notice(arriving, FACET), &a_world(MapRevision::INITIAL))
-            .expect("a writable temp dir");
+        let written = write(
+            &dir,
+            world_notice(arriving, FACET),
+            &a_world(MapRevision::INITIAL),
+        )
+        .expect("a writable temp dir");
         assert_eq!(
             written.swept,
             vec![path_of(&dir, newer, FACET)],
@@ -663,8 +662,12 @@ mod tests {
         let dir = dir("belongings");
         let (going, staying) = (WorldId(1), WorldId(2));
         for world in [going, staying] {
-            write(&dir, world_notice(world, Facet(1)), &a_world(MapRevision::INITIAL))
-                .expect("a writable temp dir");
+            write(
+                &dir,
+                world_notice(world, Facet(1)),
+                &a_world(MapRevision::INITIAL),
+            )
+            .expect("a writable temp dir");
         }
         used_at(&path_of(&dir, going, Facet(1)), 300);
         used_at(&path_of(&dir, staying, Facet(1)), 200);

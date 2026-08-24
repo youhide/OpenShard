@@ -510,9 +510,10 @@ Found while writing this, and each is somebody's.
   not exist**~~ — carried over from the last handoff and **fixed**: it says
   `expect("an entity's facet is always loaded")` now, which is what every other
   reader of a missing facet in that file says.
-- **`World` derives `Default`** ([`world.rs`](../../../crates/common/map/src/world.rs#L45)),
+- ~~**`World` derives `Default`**~~ ([`world.rs`](../../../crates/common/map/src/world.rs)),
   which `docs/style.md` bans, and `World::new(None)` is the named constructor it
-  already has.
+  already has. **Gone**, taken off by another session — the type carries `Debug`
+  and nothing else now.
 
 Found while building E1:
 
@@ -576,12 +577,14 @@ Found while building E2:
   module goes public for a test, or `e2e/playground` grows a `tests/` that drives
   `connect` — the second is the smaller change and the playground already links
   both.
-- **`world_of_ours` is written twice, in `map_edit.rs` and in `chunks.rs`.** The
-  same twenty-five lines — write a base set, bake a graph beside it, hand back
-  the path — differing only in whether statics are placed. E2 generalised
+- ~~**`world_of_ours` is written twice, in `map_edit.rs` and in `chunks.rs`.**~~
+  The same twenty-five lines — write a base set, bake a graph beside it, hand
+  back the path — differing only in whether statics are placed. E2 generalised
   `chunks.rs`'s copy by a `blocks` argument rather than adding a third; the lift
   is a `tests/common/mod.rs` those two share, which is dev-only and costs the
-  `openshard-e2e-shard` library nothing.
+  `openshard-e2e-shard` library nothing. **Lifted**, along with `config_over`,
+  `install`, `scratch` and `say_and_hear` and the three constants under them —
+  see the E3 entry below, which is the same finding one caller worse.
 - ~~**A fetch that straddles a publish fails the whole facet.**~~ `assemble`
   refuses `MixedRevisions`, which is right — half a world before an edit and half
   after is a world that never existed — but the client's answer to it was to end
@@ -614,17 +617,47 @@ Found while building E3:
   nothing to apply, so nothing re-stamps it. It wants the same door with no
   chunks in it, and `apply`'s "applying no chunks is not a change" is the
   sentence to reconsider when it is written.
-- **Nothing sweeps an orphaned world.** A shard that re-imports its facet leaves
-  the client's old copy behind under the old identity, and 102 MiB is not
+  **What the other half costs, before anybody writes it: the graph.** A bake
+  carries the revision it was built from and `bake::load` refuses one whose stamp
+  names another number — `incompatible_stale_and_corrupt_files_are_distinct`
+  moves nothing but the number and reads the refusal back. So the
+  re-stamp only *pays* if the file is re-stamped too, and a file at revision *n*
+  + 1 with a graph beside it stamped *n* is a graph this client drops: eleven
+  seconds of flood, or a session with no long routes, traded against a 22-byte
+  request and its reply once per connection. The behaviour that is here is the
+  better one until the stamp can say "the same world, renumbered" — and
+  `Patch::new` already says how rare the case is: *"an empty `ops` … does
+  invalidate every bake over the facet, so an editor should not publish one"*.
+- ~~**Nothing sweeps an orphaned world.**~~ A shard that re-imports its facet
+  leaves the client's old copy behind under the old identity, and 102 MiB is not
   nothing. The names of every world a client has kept are in one directory, so
   what is missing is a rule about how many to keep rather than a mechanism.
+  **The rule is `cache::KEPT_PER_FACET`, and it is two.** On every write each
+  facet's worlds are ranked and the tail goes, taking everything named after it —
+  the navigation graph, which `bake::artifact_path` names after the world's file
+  stem, and any `.osbase.writing` a torn write left. Ranked by when each was last
+  *used* rather than last written, because `cache::read` now stamps the file it
+  read: a world that is already at the shard's revision is never rewritten, so the
+  other clock would have let go of the one cache that pays for itself on every
+  connection. Two and not one because a person who plays two shards should not
+  re-fetch a facet on every start; per *facet* and not per directory because a
+  shard has six of them and walking between them must not evict that shard's own
+  ground.
 - **The cache directory is the working directory and nothing can move it.** No
   flag and no environment variable, because `client_ui.toml` sets that precedent
   and nobody has asked. A read-only checkout is the case that changes it, and
   `bake::artifact_path`'s `OPENSHARD_NAVIGATION` is the shape it would take.
-- **`world_of_ours` is now written twice and a half**, since `e2e/shard`'s
+- ~~**`world_of_ours` is now written twice and a half**~~, since `e2e/shard`'s
   `chunks.rs` grew a copy of `map_edit.rs`'s `say_and_hear` as well. Same lift,
-  one caller worse.
+  one caller worse. **Lifted** into
+  [`e2e/shard/tests/common/mod.rs`](../../../crates/e2e/shard/tests/common/mod.rs):
+  `world_of_ours` with the `blocks` argument E2 gave one copy and the statics the
+  other placed, plus `config_over`, `install`, `scratch`, `say_and_hear` and the
+  three constants under them. A third test that boots a shard on a world of ours
+  is now `mod common;` and nothing else. A `tests/` module and not the
+  `openshard-e2e-shard` library, which is the half worth recording: everything in
+  it reads an install, bakes a graph or drives a socket on a timeout, and none of
+  that belongs in a crate a non-test caller can link.
 
 Found while accepting E3 — by running the playground, which is what E2 and E3
 both left owed:
@@ -713,14 +746,20 @@ Found while building E4:
   before any algorithm is blamed — and **an argument for a cost is not a
   measurement of it**, which is how a 4× saving sat behind a sentence that was
   true.
-- **A quarantined composite block is never un-quarantined.** `CompositeCache`
+- ~~**A quarantined composite block is never un-quarantined.**~~ `CompositeCache`
   permanently marks a block that `FlatGroundBlock::inspect` refused, on the
   stated grounds that "map terrain is immutable for the lifetime of this cache" —
   which is exactly what E4 stops being true. A publish that flattens a block
   leaves it on the direct path for the rest of the session, which is slower and
   not wrong; the reverse is handled, since the invalidation drops the composite
   and the next preparation rejects it again. What is missing is one line of API,
-  `rejected.retain(…)` under the same block invalidation.
+  `rejected.retain(…)` under the same block invalidation. **Done**, at all three
+  doors — `invalidate_block`, `invalidate_blocks` and `clear`, which is the arm a
+  replaced facet takes. The one thing it needed that the entry did not name is an
+  *order*: `quarantine` invalidates the block on its way in, so recording the
+  verdict now happens after that call rather than before it, or quarantining
+  would undo itself. A test asserts that first, since it is the way this fix
+  fails silently.
 - **The client never takes up an interiors bake for a world off the wire**, so
   E4's invalidation has nothing to say about one. `Update::Ground` takes up the
   navigation graph and not the interiors flood — the artifact is looked for only

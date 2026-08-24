@@ -4430,11 +4430,7 @@ mod tests {
             None,
             CompositeQuarantineReason::OracleMissingGroundCoverage,
         );
-        assert_eq!(
-            cache.quarantined_len(),
-            2,
-            "quarantining does not undo itself"
-        );
+        assert_eq!(cache.quarantined_len(), 2, "quarantining does not undo itself");
 
         // One rectangle, as a publish names one per chunk it moved.
         cache.invalidate_blocks(blocks(2, 4, 6, 8));
