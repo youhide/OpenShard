@@ -167,6 +167,14 @@ pub struct OccluderSurface {
 pub struct Route {
     pub open: Vec<openshard_protocol::world::Point>,
     pub barred: Vec<openshard_protocol::world::Point>,
+    /// Why this route does not end on the destination, when it does not.
+    ///
+    /// A walk *toward* an unreachable place and a walk *to* a reachable one are
+    /// the same list of steps, and drawing them the same way is what makes a
+    /// body walking into a wall look like a client that has lost its mind. See
+    /// [`crate::steer::Refusal`], and `draw_route`, which dashes the line and
+    /// marks where it gives up.
+    pub refusal: Option<crate::steer::Refusal>,
 }
 
 /// One overhead health line, anchored in world-viewport pixels.
@@ -227,6 +235,38 @@ pub struct Pick {
     pub item: Option<openshard_client_render::items::ItemIndex>,
 }
 
+/// What this client has by way of a coarse navigation graph, and what it is
+/// doing about it.
+///
+/// Three states and no fourth: a client either has one, is building one, or has
+/// none. It is a diagnostic type because the *only* thing that reads it is the
+/// HUD — a route asks `Resources::coarse` and gets a graph or `None`, which is
+/// all a search can do anything with — but it is not a diagnostic *detail*: with
+/// no graph, a click that has to leave a building is refused, and a person is
+/// owed the difference between "there is no way there" and "this client cannot
+/// see that far yet".
+#[derive(Clone, Debug)]
+pub enum Navigation {
+    /// Nothing baked beside this world, and nothing building one.
+    ///
+    /// The ordinary state of a client on an install with no artifact beside it,
+    /// and of one whose bake failed — the terminal says which.
+    Absent,
+    /// A worker is building one, since this instant.
+    ///
+    /// Held as the start rather than as an elapsed time because the HUD is what
+    /// counts it up, one frame at a time, and a duration written here would be
+    /// as old as the last update that carried it.
+    Baking { since: std::time::Instant },
+    /// One is loaded: its size, and the file it came out of or was kept in.
+    Ready {
+        regions: usize,
+        nodes: usize,
+        edges: usize,
+        path: std::path::PathBuf,
+    },
+}
+
 /// A read-only frame snapshot for the development HUD or another inspector.
 ///
 /// This deliberately sits outside the egui adapter: its facts can equally be
@@ -271,6 +311,15 @@ pub struct Hud {
     /// sliders, `ChatScale`'s or `TtfScale`'s, is the one actually drawing
     /// anything this run. See `desk::TtfScale`'s own doc.
     pub ttf_active: bool,
+    /// The coarse graph: one of it, building, or none — see [`Navigation`].
+    pub navigation: Navigation,
+    /// Why the standing move order is not reaching its destination, if it is
+    /// not — see [`crate::steer::Refusal`].
+    ///
+    /// The journal has the player's copy of this and is said once; this is the
+    /// one that stands, for somebody reading the strip while the body walks at
+    /// a wall.
+    pub refusal: Option<crate::steer::Refusal>,
 }
 
 /// What one frame's radar demand and production resolved to.

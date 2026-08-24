@@ -881,6 +881,13 @@ pub fn run<D: Dial + Send + 'static>(
             // it. With no snapshot there is only the constant.
             world.snapshot.facet()
         });
+    // The two things about this world that outlive reading it: which file it is
+    // (a rebake is stamped against that file, and can be asked for at any time)
+    // and where a graph over it belongs. Both taken before the world moves into
+    // the match below, and both `None` under `WorldSource::Shard` — where there
+    // is no world yet and `Update::Ground` fills them in.
+    let world_file = world.as_ref().and_then(|world| world.base_set.clone());
+    let navigation_path = world.as_ref().map(|world| world.navigation_path(dir));
     let (ground, coarse, interiors) = match world {
         None => {
             eprintln!(
@@ -995,6 +1002,23 @@ pub fn run<D: Dial + Send + 'static>(
     };
     checkpoint("interior graph loaded");
 
+    // What the strip says about the graph before anything has happened: the one
+    // that was just loaded, or nothing. "Building" is never a startup state —
+    // the only bake that runs on this side is the one a world arriving asks for,
+    // and that is a whole login away.
+    let navigation = match (&coarse, navigation_path) {
+        (Some(graph), Some(path)) => {
+            let (regions, nodes, edges) = graph.counts();
+            diagnostics::Navigation::Ready {
+                regions,
+                nodes,
+                edges,
+                path,
+            }
+        }
+        _ => diagnostics::Navigation::Absent,
+    };
+
     // The sound mixer opens before a window exists, but its values belong to
     // the HUD's persisted settings just like light tuning does.
     let mut desk = match desk::Desk::load(std::path::Path::new(desk::PATH)) {
@@ -1069,8 +1093,10 @@ pub fn run<D: Dial + Send + 'static>(
         updates,
         stall_on_update,
         post,
+        navigation,
         resources: resources::Resources {
             dir: dir.to_owned(),
+            world_file,
             ground,
             coarse,
             interiors,

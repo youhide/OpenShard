@@ -532,6 +532,12 @@ impl App {
                 ground,
             )
         };
+        // And why, when the answer is "not all the way there". A click that
+        // cannot be routed still walks the body at whatever is nearest — the
+        // reference client's own behaviour — and that walk is indistinguishable
+        // from a successful one until somebody says so. Said once per
+        // destination; see `Steering::unsaid_refusal`.
+        self.say_refusal();
         match facing {
             Some(facing) => {
                 // The marker under the destination has moved even when the step
@@ -541,6 +547,22 @@ impl App {
                 true
             }
             None => true,
+        }
+    }
+
+    /// Tell the player why the route they asked for is not the route they are
+    /// getting, if there is something to tell and it has not been told.
+    ///
+    /// In the journal, where everything else a player is told goes — a second
+    /// place for one kind of sentence is a place nobody looks. The strip in the
+    /// dev HUD reads `Steering::refusal` instead, which stands for as long as
+    /// the order does rather than being consumed here.
+    pub(crate) fn say_refusal(&mut self) {
+        let Some(refusal) = self.steer.unsaid_refusal() else {
+            return;
+        };
+        if let Some(view) = self.world.authoritative.view.as_mut() {
+            view.client_message(refusal.text().to_owned());
         }
     }
 

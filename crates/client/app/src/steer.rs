@@ -183,9 +183,12 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use openshard_map::overlay::Doors;
+#[cfg(test)]
+use openshard_movement::find_path;
 use openshard_movement::{
-    Around, COARSE_MIN_DISTANCE, Detour, Footing, Heading, Lean, Leeway, NavigationGraph, RUN_HOLD, Step,
-    WALK_HOLD, Weight, destination_place, find_long_path, find_path, find_path_toward, step_allowed,
+    Around, COARSE_MIN_DISTANCE, Detour, Footing, Heading, Lean, Leeway, LongExit, NavigationGraph, RUN_HOLD,
+    SearchExit, Step, WALK_HOLD, Weight, destination_place, find_path_toward, search_long_path, search_path,
+    step_allowed,
 };
 use openshard_protocol::direction::{Direction, Facing};
 use openshard_protocol::world::Point;
@@ -337,35 +340,109 @@ pub struct Readings<'a> {
     pub coarse: Option<&'a NavigationGraph>,
 }
 
+/// Why a route was not planned, in the words a person can be told.
+///
+/// **Four answers and not one**, because they send a player to four different
+/// places: round the wall, closer before clicking again, to the door, or to
+/// wait a few seconds. A client that answers every refusal by walking at the
+/// nearest reachable tile — which is what it does, and what the stock client
+/// does — is not *wrong*, but it looks identical in all four cases, and a body
+/// walking into a wall is the most confusing of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// The search settled everything it could stand on and the goal was not
+    /// among it. There is no way there for a body that walks.
+    Nowhere,
+    /// The search ran out of its node budget, or the corridor query ran out of
+    /// effort. A way may well exist; this client did not get to it from here.
+    TooFar,
+    /// The only way through is a door that is shut, and this client is not
+    /// opening it — see [`Plan::barred`], which is the rest of that route.
+    Barred,
+    /// The destination is further than a bounded search reaches and there is no
+    /// coarse graph to divide it up — the client is still building one, or has
+    /// none. This one goes away by itself.
+    NoGraph,
+}
+
+impl Refusal {
+    /// The sentence a player is shown. Present tense, no jargon, and no
+    /// mention of nodes or budgets: what a person can do about it is the whole
+    /// content.
+    pub const fn text(self) -> &'static str {
+        match self {
+            Self::Nowhere => "There is no way to walk there.",
+            Self::TooFar => "That is too far away to plot a route to from here.",
+            Self::Barred => "The way there is through a door that is shut.",
+            Self::NoGraph => "The map for long routes is still being built.",
+        }
+    }
+}
+
 impl Readings<'_> {
     /// Try the ordinary bounded A* first, then use the static coarse graph to
     /// divide a long answer into the same exact, live-aware hops. `terrain` is
     /// chosen by the caller: real ground for a player's open half, or the
     /// existing doors-open reading for the route that is later cut at a leaf.
-    fn path(&self, footing: &Footing<'_>, from: Point, to: Point) -> Option<Vec<Direction>> {
-        let local = find_path(footing, from, to, PLAN_BUDGET, Weight::PLANNING);
-        if local.is_some() {
-            return local;
+    ///
+    /// A refusal comes back with its reason, which is what the two searches
+    /// already know and used to drop: `SearchExit` tells a goal nothing reaches
+    /// from a budget that ran out, and `LongExit` tells a facet with no corridor
+    /// from a query that ran out of effort.
+    fn path(&self, footing: &Footing<'_>, from: Point, to: Point) -> Result<Vec<Direction>, Refusal> {
+        let local = search_path(footing, from, to, PLAN_BUDGET, Weight::PLANNING);
+        if local.arrived {
+            return Ok(local.route);
         }
         let distance = i32::from(from.x)
             .abs_diff(i32::from(to.x))
             .max(i32::from(from.y).abs_diff(i32::from(to.y)));
+        // Near enough that the graph is not worth asking — see
+        // `COARSE_MIN_DISTANCE`, which is where that threshold is argued. The
+        // bounded search is then the whole answer, and its own exit is the
+        // reason: `Exhausted` really did look everywhere a body could stand.
         if distance <= COARSE_MIN_DISTANCE {
-            return None;
+            return Err(match local.exit {
+                SearchExit::Exhausted => Refusal::Nowhere,
+                SearchExit::Budget | SearchExit::Goal => Refusal::TooFar,
+            });
         }
-        self.coarse.and_then(|coarse| {
-            // Graph and endpoint joins are both the bare map. Live terrain
-            // only approves or rejects the resulting exact steps.
-            find_long_path(
-                &self.guide,
-                footing,
-                coarse,
-                from,
-                to,
-                PLAN_BUDGET,
-                Weight::PLANNING,
-            )
-        })
+        let Some(coarse) = self.coarse else {
+            // Far, and nothing to divide it with. Deliberately not `Nowhere`
+            // however the local search ended: with no corridor to fall back on,
+            // an exhausted 600-node search around a house says nothing at all
+            // about whether the far side of the town is reachable.
+            return Err(Refusal::NoGraph);
+        };
+        // Graph and endpoint joins are both the bare map. Live terrain
+        // only approves or rejects the resulting exact steps.
+        let (route, exit) = search_long_path(
+            &self.guide,
+            footing,
+            coarse,
+            from,
+            to,
+            PLAN_BUDGET,
+            Weight::PLANNING,
+        );
+        match route {
+            Some(route) => Ok(route),
+            // `NoCorridor` is the graph's own "there is no way": both endpoints
+            // joined it and no chain of portals connects them, which on a facet
+            // of islands is the honest answer. Everything else is this query
+            // giving up — an endpoint the graph has no region for, a join that
+            // found no portal, refinement that could not walk any corridor it
+            // was offered, effort spent — and none of those is a claim about
+            // the world.
+            None => Err(match exit {
+                LongExit::NoCorridor => Refusal::Nowhere,
+                LongExit::Route
+                | LongExit::OffGraph
+                | LongExit::NoJoin
+                | LongExit::PortalsExhausted
+                | LongExit::Spent => Refusal::TooFar,
+            }),
+        }
     }
 }
 
@@ -402,6 +479,15 @@ pub struct Plan {
     pub barred: Vec<Direction>,
     pub(crate) open_points: Vec<Point>,
     pub(crate) barred_points: Vec<Point>,
+    /// Why the destination itself is not on the end of this route, when it is
+    /// not — see [`Refusal`].
+    ///
+    /// `None` is the ordinary plan: the way was found and [`Plan::open`] ends on
+    /// the goal. Anything else is a walk *toward* something, and the difference
+    /// between the two is invisible in the steps themselves — both are a list of
+    /// directions ending somewhere. Carrying it here is what lets the line be
+    /// drawn as what it is and the player be told why.
+    pub refusal: Option<Refusal>,
 }
 
 #[derive(Clone, Debug)]
@@ -491,6 +577,21 @@ pub struct Steering {
     /// Both consumers ask the same question for the same world snapshot; do
     /// not make the expensive real/doors-open searches twice.
     cached_plan: Option<CachedPlan>,
+    /// Why the last plan did not reach the place it was asked for, and which
+    /// place that was — see [`Refusal`].
+    ///
+    /// Kept beside the plan rather than inside it because it outlives one: a
+    /// route is replanned every few steps and dropped whenever the ground
+    /// changes, and the answer to "why is my body walking at that wall" has to
+    /// stay on screen for as long as the order does.
+    refused: Option<(Point, Refusal)>,
+    /// Whether [`Steering::refused`] has been said to the player yet.
+    ///
+    /// **A refusal is announced once per destination**, and this is the whole
+    /// of that rule. A plan is remade on a cadence — every few steps, and again
+    /// whenever the live layer moves — so a client that spoke on every plan
+    /// would fill the journal with one sentence while the body stood still.
+    said: bool,
     /// The earliest the next step may leave: the deadline of the step in flight.
     ///
     /// The rate floor, and the queue rule's whole mechanism. Armed by every step
@@ -664,6 +765,51 @@ impl Steering {
         self.cached_plan = None;
     }
 
+    /// Remember why a plan stopped short of what was asked for.
+    ///
+    /// The pair is `(destination, reason)` and both halves matter: the same
+    /// reason about a *new* destination is a new thing to say, and the same
+    /// reason about the same destination is the same sentence a player has
+    /// already read.
+    fn remember_refusal(&mut self, goal: Point, plan: Option<&Plan>) {
+        match plan.and_then(|plan| plan.refusal) {
+            Some(refusal) => {
+                if self.refused != Some((goal, refusal)) {
+                    self.refused = Some((goal, refusal));
+                    self.said = false;
+                }
+            }
+            // A plan that reaches its destination, and a destination with
+            // nothing to walk toward at all — the body is already as close as
+            // the ground gets. Neither is a refusal with a reason in it.
+            None => {
+                self.refused = None;
+                self.said = true;
+            }
+        }
+    }
+
+    /// The reason to tell the player, if there is one they have not been told.
+    ///
+    /// Takes it: the caller says it, and asking twice answers `None` — see
+    /// [`Steering::said`].
+    pub(crate) fn unsaid_refusal(&mut self) -> Option<Refusal> {
+        if self.said {
+            return None;
+        }
+        self.said = true;
+        self.refused.map(|(_, refusal)| refusal)
+    }
+
+    /// The reason the current order is not reaching its destination, for as
+    /// long as it stands. Read every frame by the HUD, and never taken.
+    pub(crate) const fn refusal(&self) -> Option<Refusal> {
+        match self.refused {
+            Some((_, refusal)) => Some(refusal),
+            None => None,
+        }
+    }
+
     /// Discard a route made before dynamic courtesy obstacles changed. The
     /// destination remains, so the next due step plans from the current tile.
     pub(crate) fn clear_route(&mut self) {
@@ -695,6 +841,7 @@ impl Steering {
             }
         }
         let planned = self.planned(ground, from, goal);
+        self.remember_refusal(goal, planned.as_ref());
         self.cached_plan = Some(CachedPlan {
             from,
             goal,
@@ -964,6 +1111,7 @@ impl Steering {
                     }
                     None => {
                         let planned = self.planned(ground, from, at);
+                        self.remember_refusal(at, planned.as_ref());
                         self.cached_plan = Some(CachedPlan {
                             from,
                             goal: at,
@@ -1349,21 +1497,32 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
     // the way go if the door were opened" means.
     let real = ground.live;
     let doors_open = ground.live.reading(Doors::AllOpen);
-    if let Some(open) = ground.path(&real, from, goal) {
-        let result = Some(Plan {
-            open_points: replay(&real, from, &open),
-            open,
-            barred: Vec::new(),
-            barred_points: Vec::new(),
-        });
-        debug_plan(from, goal, started.elapsed(), result.as_ref());
-        return result;
-    }
-    let Some(through) = ground.path(&doors_open, from, goal) else {
+    let refused = match ground.path(&real, from, goal) {
+        Ok(open) => {
+            let result = Some(Plan {
+                open_points: replay(&real, from, &open),
+                open,
+                barred: Vec::new(),
+                barred_points: Vec::new(),
+                refusal: None,
+            });
+            debug_plan(from, goal, started.elapsed(), result.as_ref());
+            return result;
+        }
+        Err(refused) => refused,
+    };
+    let Ok(through) = ground.path(&doors_open, from, goal) else {
         // Not even with the doors open, so there is nothing to say about the
-        // far side of anything: no route through this destination's own tile is
-        // known, and drawing one would be inventing it. What is left is how
-        // close the world as it stands can get, which is a walk and not a guess.
+        // far side of anything: no route through this destination's own tile
+        // is known, and drawing one would be inventing it. What is left is
+        // how close the world as it stands can get, which is a walk and not
+        // a guess — and it is carried with the reason it is not the route
+        // that was asked for.
+        //
+        // The reason is the *real* reading's, not this one's: what the
+        // player wants to know is why the world they are standing in has no
+        // way there, and "with every door in Britannia open it would still
+        // be too far" is the same answer said less usefully.
         let Some(open) = find_path_toward(&real, from, goal, PLAN_BUDGET, Weight::PLANNING) else {
             debug_plan(from, goal, started.elapsed(), None);
             return None;
@@ -1373,6 +1532,7 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
             open,
             barred: Vec::new(),
             barred_points: Vec::new(),
+            refusal: Some(refused),
         });
         debug_plan(from, goal, started.elapsed(), result.as_ref());
         return result;
@@ -1408,6 +1568,11 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
         barred_points.push(next);
     }
     let result = Some(Plan {
+        // A way exists with the doors open and not without them, which is one
+        // refusal and not the general one: whatever the real reading's search
+        // said, what is actually in the way is a leaf, and `barred` is the rest
+        // of the route past it.
+        refusal: (!barred.is_empty()).then_some(Refusal::Barred),
         open,
         barred,
         open_points,
@@ -2311,6 +2476,78 @@ mod tests {
             plan.barred,
             vec![Direction::East; 3],
             "and the rest of the way is what the shut leaf is in the way of"
+        );
+        assert_eq!(
+            plan.refusal,
+            Some(Refusal::Barred),
+            "a way that exists with the door open is a door in the way, not a wall",
+        );
+    }
+
+    /// A destination nothing can walk to is a *reason*, and the reason is not
+    /// the same as the one a budget gives.
+    ///
+    /// The route is still planned — the body walks at the nearest reachable
+    /// place, which is the reference client's behaviour and this client's — so
+    /// what tells the two apart is nothing in the steps. It is
+    /// [`Plan::refusal`], and a picture or a sentence that reads it is the only
+    /// way a player learns the difference between "there is no way" and "click
+    /// again from closer".
+    #[test]
+    fn a_destination_nothing_reaches_is_refused_with_a_reason() {
+        // Walled in on every side, two tiles out: everything the search can
+        // stand on is inside the box, so it exhausts rather than running out of
+        // budget.
+        let mut walls = Overlay::default();
+        for x in 98..=102u16 {
+            for y in 98..=102u16 {
+                if x == 98 || x == 102 || y == 98 || y == 102 {
+                    walls.set(Tile::new(x, y), vec![Cover::blocking(0, 20)]);
+                }
+            }
+        }
+        let plan = plan(
+            Readings {
+                live: over(&walls),
+                guide: over(&walls),
+                coarse: None,
+            },
+            here(),
+            Point::new(105, 100, 0),
+        )
+        .expect("the body can still walk about inside its box");
+        assert_eq!(
+            plan.refusal,
+            Some(Refusal::Nowhere),
+            "the search settled every place there is and the goal was not one of them",
+        );
+        assert!(
+            !plan.open.is_empty(),
+            "the body still walks as close as the box allows — the reason is what is new",
+        );
+    }
+
+    /// And a destination too far for one bounded search, with no graph to
+    /// divide it, is the *other* answer.
+    ///
+    /// This is the state a client is in for the first few seconds against a
+    /// shard whose world it fetched: the coarse graph is still being built, and
+    /// a click across town has to say so rather than claiming there is no way
+    /// there. Open ground is the cheapest possible search — the frontier never
+    /// spreads — so the distance here is well past what 600 nodes buy on any
+    /// real terrain.
+    #[test]
+    fn a_destination_past_the_budget_with_no_graph_says_so() {
+        let plan = plan(
+            Readings::plain(open_ground()),
+            here(),
+            Point::new(here().x + 2_000, here().y, 0),
+        )
+        .expect("open ground is walkable toward");
+        assert_eq!(
+            plan.refusal,
+            Some(Refusal::NoGraph),
+            "a bounded search that ran out on open ground says nothing about the far side of town",
         );
     }
 

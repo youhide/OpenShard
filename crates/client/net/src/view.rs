@@ -874,6 +874,29 @@ impl WorldView {
         self.journal.push_back(line);
     }
 
+    /// Record a line this client said to its own player.
+    ///
+    /// **The one thing in the journal the shard did not say**, and it is here
+    /// rather than in a second log for the reason a player would give: they read
+    /// one journal. A client that cannot plan a route knows why — the shard was
+    /// never asked — and the place to tell somebody is the same place everything
+    /// else is told them.
+    ///
+    /// Drawn like a system line, because that is what it is: no speaker, no
+    /// body, and [`Hue::SYSTEM`] — the hue the shard's own system lines use, so
+    /// the two do not read as different kinds of statement.
+    pub fn client_message(&mut self, text: String) {
+        self.heard(Heard {
+            serial: None,
+            graphic: None,
+            mode: TalkMode::Regular,
+            hue: Hue::SYSTEM,
+            font: Font::DEFAULT,
+            name: String::new(),
+            text,
+        });
+    }
+
     /// Record a localized system line after the application has resolved its
     /// cliloc number through the client's language table.
     ///

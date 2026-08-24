@@ -55,7 +55,9 @@ use openshard_protocol::wire::{Graphic, Hue};
 use winit::window::Window;
 
 use crate::desk::{Desk, Tab};
-use crate::diagnostics::{HealthBar, Height, Hud, PickedTile, PriorityZ, Route, Selection, TerrainOverlay};
+use crate::diagnostics::{
+    HealthBar, Height, Hud, Navigation, PickedTile, PriorityZ, Route, Selection, TerrainOverlay,
+};
 use crate::graphics::{HighlightStyle, HighlightTarget};
 use crate::world::{Shard, WorldState};
 
@@ -154,6 +156,13 @@ pub struct Request {
     pub always_run: Option<bool>,
     /// Use a shut door when a movement step reaches it.
     pub auto_open_doors: Option<bool>,
+    /// Build the coarse navigation graph again, on the frame the button was
+    /// pressed.
+    ///
+    /// Edge-triggered like [`Self::frame_dump`], and for the same reason: it
+    /// starts work rather than setting a state, so a `bool` that stayed true
+    /// would start it again on every frame after.
+    pub rebake_navigation: bool,
 }
 
 /// What the script picker asked for.
@@ -698,6 +707,49 @@ fn layout(root: &mut egui::Ui, hud: &Hud, camera: Camera, world: &WorldState, de
                     .last()
                     .map_or(0.0, |frame| frame.build().as_secs_f64() * 1_000.0)
             ));
+            ui.separator();
+            // The coarse graph, which is the difference between a click that
+            // routes out of a building and one that is refused — see
+            // [`Navigation`]. On the always-there strip rather than in a tab
+            // because the state a person needs to see is the *transient* one: a
+            // graph that is still being built explains a refusal that will stop
+            // happening on its own in a few seconds, and a tab nobody has open
+            // cannot say so.
+            match &hud.navigation {
+                Navigation::Absent => {
+                    ui.label(egui::RichText::new("nav: none").color(ui.visuals().warn_fg_color))
+                }
+                Navigation::Baking { since } => ui.label(
+                    egui::RichText::new(format!("nav: building {:.0}s…", since.elapsed().as_secs_f64()))
+                        .color(ui.visuals().warn_fg_color),
+                ),
+                Navigation::Ready { nodes, .. } => ui.label(format!("nav: {nodes} nodes")),
+            }
+            .on_hover_text(match &hud.navigation {
+                Navigation::Absent => "No coarse graph: a route further than a few tiles is the \
+                                       bounded search alone, so a click that has to leave a \
+                                       building can be refused. The World tab bakes one."
+                    .to_owned(),
+                Navigation::Baking { .. } => "Building the coarse graph. Long routes are the \
+                                              bounded search alone until it lands."
+                    .to_owned(),
+                Navigation::Ready {
+                    regions,
+                    nodes,
+                    edges,
+                    path,
+                } => format!(
+                    "{regions} regions, {nodes} nodes, {edges} edges\n{}",
+                    path.display()
+                ),
+            });
+            // And the standing order's own refusal, while there is one. Beside
+            // the graph on purpose: "nav: none" and "too far to plot a route"
+            // are two halves of one story more often than not.
+            if let Some(refusal) = hud.refusal {
+                ui.separator();
+                ui.label(egui::RichText::new(refusal.text()).color(ui.visuals().warn_fg_color));
+            }
             // The dev window's own switch, on the one strip that is always
             // there. A window with a close button and no way back is a window
             // you close once and then relaunch the client to get back — which is
@@ -1223,7 +1275,65 @@ fn camera_panel(
 /// rather than through a `Hud` snapshot: unlike the camera and the picks, there
 /// is no per-frame reading this panel must agree with, so a live borrow costs
 /// nothing a clone would have bought.
+/// The coarse navigation graph: what this client has, and the one control there
+/// is for it.
+///
+/// **The graph is not a picture**, which is why it sits at the top of the panel
+/// about the world rather than among the drawing switches under it: nothing here
+/// changes a pixel. What it changes is whether a click further than eight tiles
+/// can be answered at all — see `steer.rs`'s `Readings::path`, where a bounded
+/// search that failed falls through to the corridor this graph is.
+///
+/// **Rebuilding is a button and not a setting.** It is the one case a stamp
+/// cannot decide: the artifact validates, and a person has a reason to disbelieve
+/// it anyway — a bake from a build whose routing rules have since changed under
+/// the same `ROUTING_VERSION`, a file that was copied rather than built. Eleven
+/// seconds on a facet, on a thread of its own, and the strip counts it up.
+fn navigation_panel(ui: &mut egui::Ui, hud: &Hud, request: &mut Request) {
+    ui.label("Navigation graph");
+    match &hud.navigation {
+        Navigation::Absent => {
+            ui.label(
+                egui::RichText::new(
+                    "None. A route past a few tiles is the bounded search alone, so a click \
+                     that has to leave a building may be refused.",
+                )
+                .small()
+                .weak(),
+            );
+        }
+        Navigation::Baking { since } => {
+            ui.label(format!("building… {:.1}s", since.elapsed().as_secs_f64()));
+        }
+        Navigation::Ready {
+            regions,
+            nodes,
+            edges,
+            path,
+        } => {
+            ui.label(format!("{regions} regions · {nodes} nodes · {edges} edges"));
+            ui.label(egui::RichText::new(path.display().to_string()).small().weak());
+        }
+    }
+    // Nothing to press while one is being built: the worker is already running,
+    // and a second one would read the same world into a second hundred megabytes
+    // to answer the same question.
+    let building = matches!(hud.navigation, Navigation::Baking { .. });
+    if ui
+        .add_enabled(!building, egui::Button::new("rebake"))
+        .on_hover_text(
+            "Build the graph again from the world in hand and keep it beside that world. \
+             About eleven seconds on a facet; the client keeps playing while it runs.",
+        )
+        .clicked()
+    {
+        request.rebake_navigation = true;
+    }
+}
+
 fn world_panel(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut Request) {
+    navigation_panel(ui, hud, request);
+    ui.separator();
     let view = world.authoritative.view.as_ref();
     // **What the frame draws**, which is the only way to look at a surface
     // something else is standing in front of: the G-buffer holds one answer per
@@ -1473,6 +1583,7 @@ fn tile_tab(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut Requ
                 barred => format!("route {walked} steps, then {barred} barred"),
             };
             ui.label(label);
+            ui.label("route height: low green → high blue");
         }
         None => {
             ui.label("no route");
@@ -2874,6 +2985,8 @@ fn tile_centre(
 
 /// A walkable level, drawn green.
 const STANDABLE: egui::Color32 = egui::Color32::from_rgb(60, 255, 90);
+/// The high end of a walkable route's height gradient.
+const ROUTE_HIGH_Z: egui::Color32 = egui::Color32::from_rgb(60, 135, 255);
 /// A level a body does not fit on, drawn red — the same pair the terrain
 /// overlay washes tiles with, so one vocabulary answers "can I stand there"
 /// wherever the question is asked.
@@ -3132,12 +3245,14 @@ fn draw_interiors(
 /// The way the body is going: a line through the tile centres, with a dot on
 /// each step so a diagonal can be told from a pair of orthogonals.
 ///
-/// **Green as far as the ground allows, red the rest of the way.** The two
-/// halves are [`Route`]'s and the split is the walk's own — where the red starts
-/// is where the body will stop, standing at whatever is in the way. The same
-/// green and red the walkability wash uses ([`STANDABLE`], [`BLOCKED`]), because
-/// it is the same question: this line is that wash asked along one route rather
-/// than over every tile on screen.
+/// **Green at the route's lowest level, blue at its highest, red only past an
+/// obstacle.** The open half's gradient is scaled from its own minimum and
+/// maximum `z`, so a stair or a change between storeys is readable even when its
+/// absolute elevation differs from the next route. The two halves are
+/// [`Route`]'s and the split is the walk's own — where the red starts is where
+/// the body will stop, standing at whatever is in the way. Keeping red for that
+/// only preserves the walkability wash's vocabulary ([`BLOCKED`]) instead of
+/// making a higher floor look impassable.
 ///
 /// Full strength, unlike the wash. A route is what the player just asked for and
 /// is looking at; a tile wash is a diagnostic read against the art beneath it.
@@ -3150,10 +3265,45 @@ fn draw_route(painter: &egui::Painter, camera: &Camera, route: &Route, viewport_
     };
     let open = centres(&route.open);
     let barred = centres(&route.barred);
-    for (line, colour) in [(&open, STANDABLE), (&barred, BLOCKED)] {
-        if line.len() > 1 {
-            painter.add(egui::Shape::line(line.clone(), egui::Stroke::new(2.0, colour)));
+    let (min_z, max_z) = route_height_range(&route.open);
+    // A route that does not reach what was clicked is **dashed**, and the reason
+    // is the picture's whole job here: a walk toward an unreachable place is the
+    // same list of steps as a walk to a reachable one, so a solid line ending at
+    // a wall is a client claiming it planned a way through it. A shut door is
+    // not one of these — that route *does* have a far side, and it is the red
+    // half below.
+    let unreachable = route
+        .refusal
+        .is_some_and(|refusal| refusal != crate::steer::Refusal::Barred);
+    // `egui::Shape::line` takes one colour, while a route's useful fact is the
+    // height of every step. Draw its segments separately and colour each by the
+    // tile it enters, matching the dot that marks that same step.
+    for (segment, point) in open.windows(2).zip(route.open.iter().skip(1)) {
+        let stroke = egui::Stroke::new(2.0, route_height_colour(point.z, min_z, max_z));
+        if unreachable {
+            painter.add(egui::Shape::dashed_line(
+                &[segment[0], segment[1]],
+                stroke,
+                5.0,
+                4.0,
+            ));
+        } else {
+            painter.line_segment([segment[0], segment[1]], stroke);
         }
+    }
+    // And where it gives up: a cross on the last tile the body can reach, in the
+    // colour the wash uses for ground nobody can stand on. Without it a dashed
+    // line that happens to end on open ground says only "somewhere about here".
+    if unreachable {
+        if let Some(&end) = open.last() {
+            let arm = 4.0;
+            let stroke = egui::Stroke::new(2.0, BLOCKED);
+            painter.line_segment([end + egui::vec2(-arm, -arm), end + egui::vec2(arm, arm)], stroke);
+            painter.line_segment([end + egui::vec2(-arm, arm), end + egui::vec2(arm, -arm)], stroke);
+        }
+    }
+    if barred.len() > 1 {
+        painter.add(egui::Shape::line(barred.clone(), egui::Stroke::new(2.0, BLOCKED)));
     }
     // A dot per tile *stepped onto*, which is why both halves drop their first
     // point: the open half begins on the tile the body is already standing on,
@@ -3161,11 +3311,46 @@ fn draw_route(painter: &egui::Painter, camera: &Camera, route: &Route, viewport_
     // stand on and wait. A dot on either would read as a step still to take, and
     // the red one would paint the tile the body *can* stand on in the colour of
     // the ones it cannot.
-    for (line, colour) in [(&open, STANDABLE), (&barred, BLOCKED)] {
-        for centre in line.iter().skip(1) {
-            painter.circle_filled(*centre, 2.5, colour);
-        }
+    for (centre, point) in open.iter().skip(1).zip(route.open.iter().skip(1)) {
+        painter.circle_filled(*centre, 2.5, route_height_colour(point.z, min_z, max_z));
     }
+    for centre in barred.iter().skip(1) {
+        painter.circle_filled(*centre, 2.5, BLOCKED);
+    }
+}
+
+/// The lowest and highest floors a route can actually walk.
+///
+/// `open` is always seeded with the route origin, but keeping this total makes
+/// the painter safe for a diagnostic route assembled by a future caller.
+fn route_height_range(route: &[openshard_protocol::world::Point]) -> (i8, i8) {
+    route.iter().fold((i8::MAX, i8::MIN), |(min_z, max_z), point| {
+        (min_z.min(point.z), max_z.max(point.z))
+    })
+}
+
+/// A route floor's colour, from green at its minimum `z` to blue at its maximum.
+///
+/// A level route deliberately remains green: without a height range there is no
+/// floor distinction to encode, and green continues to say that its steps are
+/// walkable. The blue endpoint stays far from [`BLOCKED`]'s red, leaving that
+/// colour unambiguous for route points the body cannot reach.
+fn route_height_colour(z: i8, min_z: i8, max_z: i8) -> egui::Color32 {
+    if min_z >= max_z {
+        return STANDABLE;
+    }
+    let position = i16::from(z) - i16::from(min_z);
+    let range = i16::from(max_z) - i16::from(min_z);
+    let mix = |low: u8, high: u8| {
+        let low = i16::from(low);
+        let high = i16::from(high);
+        (low + (high - low) * position / range) as u8
+    };
+    egui::Color32::from_rgb(
+        mix(STANDABLE.r(), ROUTE_HIGH_Z.r()),
+        mix(STANDABLE.g(), ROUTE_HIGH_Z.g()),
+        mix(STANDABLE.b(), ROUTE_HIGH_Z.b()),
+    )
 }
 
 /// Every surface in the grid, with the tile it stands on.
@@ -3442,5 +3627,29 @@ mod tests {
         ] {
             assert_eq!(health_colour(notoriety), colour, "{notoriety:?}");
         }
+    }
+
+    #[test]
+    fn route_height_gradient_uses_the_open_route_minimum_and_maximum_z() {
+        let route = [
+            openshard_protocol::world::Point::new(10, 10, -15),
+            openshard_protocol::world::Point::new(11, 10, 0),
+            openshard_protocol::world::Point::new(12, 10, 45),
+        ];
+        let (min_z, max_z) = route_height_range(&route);
+
+        assert_eq!((min_z, max_z), (-15, 45));
+        assert_eq!(route_height_colour(min_z, min_z, max_z), STANDABLE);
+        assert_eq!(route_height_colour(max_z, min_z, max_z), ROUTE_HIGH_Z);
+        assert_eq!(
+            route_height_colour(0, min_z, max_z),
+            egui::Color32::from_rgb(60, 225, 131),
+            "an intermediate floor stays between green and blue",
+        );
+    }
+
+    #[test]
+    fn a_level_route_remains_walkable_green() {
+        assert_eq!(route_height_colour(20, 20, 20), STANDABLE);
     }
 }

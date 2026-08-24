@@ -630,6 +630,7 @@ impl App {
                         let route = Route {
                             open: route.open[index..].to_vec(),
                             barred: route.barred.clone(),
+                            refusal: route.refusal,
                         };
                         let route = Arc::new(route);
                         self.route_cache = Some(crate::app::RouteCache {
@@ -677,7 +678,11 @@ impl App {
             if !barred.is_empty() {
                 barred.insert(0, from);
             }
-            Arc::new(Route { open, barred })
+            Arc::new(Route {
+                open,
+                barred,
+                refusal: plan.refusal,
+            })
         });
         self.route_cache = Some(crate::app::RouteCache {
             from,
@@ -767,6 +772,15 @@ impl App {
         // the shell no longer draws it.
         if request.frame_dump {
             self.request_frame_dump();
+        }
+        // The rebake button. A client with no facet open has nothing to bake a
+        // graph *of*, and that is the state the button is disabled in anyway —
+        // this is the second net, because a facet is the worker's own argument.
+        if request.rebake_navigation {
+            match self.facet() {
+                Some(facet) => self.bake_navigation(facet, true),
+                None => eprintln!("no navigation graph: this client has no facet open"),
+            }
         }
         if request.relock {
             self.relock();
@@ -1069,6 +1083,8 @@ impl App {
             health_bars: self.health_bars(camera, drawn_mobiles),
             goal: self.steer.goal().map(|at| self.tile_info(Tile::new(at.x, at.y))),
             ttf_active: self.resources.ttf_font.is_some(),
+            navigation: self.navigation.clone(),
+            refusal: self.steer.refusal(),
             composites: self
                 .window
                 .as_ref()

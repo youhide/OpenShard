@@ -125,6 +125,16 @@ pub struct Resources {
     /// to be able to ask both. Before that world existed, every reader had `dir`
     /// on the stack in `run` and none of them needed it again.
     pub dir: PathBuf,
+    /// The file this facet's ground came out of — a base set of ours, or the
+    /// one a client keeps of the world a shard handed it — and `None` for a
+    /// facet read out of the install's own `map*` files.
+    ///
+    /// What it is for is baking: an artifact is stamped against the world it was
+    /// built from, and that world has to be a file for the stamp to name. It
+    /// outlives startup because a rebake can be asked for at any time, and
+    /// because under `WorldSource::Shard` there is no world at startup to have
+    /// remembered one from.
+    pub world_file: Option<PathBuf>,
     /// The facet: the ground read off the install, what the shard has laid over
     /// it, and where a body may stand on the two. Its base is shared with the
     /// shard thread — see [`crate::link::connect`].

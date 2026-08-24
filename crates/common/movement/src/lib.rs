@@ -72,7 +72,7 @@ mod walk;
 
 pub use detour::{Around, Detour, Leeway, Step};
 pub use footing::{Bodies, Footing};
-pub use navigation::{COARSE_MIN_DISTANCE, NavigationGraph, find_long_path};
+pub use navigation::{COARSE_MIN_DISTANCE, LongExit, NavigationGraph, find_long_path, search_long_path};
 pub use pace::{
     Pace, RUN_HOLD, RUN_INTERVAL, WALK_BUFFER, WALK_HOLD, WALK_INTERVAL, WalkPace, step_hold, step_progress,
 };

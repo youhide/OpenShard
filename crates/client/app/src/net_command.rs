@@ -39,54 +39,59 @@ use crate::{clutter, crowd, link};
 /// [`bake::build`](openshard_movement::bake::build) — the same construction the
 /// bake binary and the shard's own boot use, so a graph this client builds is
 /// the graph they would have built.
+/// `world_file` is the base set the facet lives in — a shard's, or the one a
+/// client kept of the world it was handed — or `None` for a facet read out of
+/// the install. `force` skips the artifact and builds, which is the rebake
+/// button: a person pressing it has a reason the stamp cannot see.
 fn navigation_bake(
     dir: &std::path::Path,
-    world_file: &std::path::Path,
+    world_file: Option<&std::path::Path>,
     facet: openshard_protocol::world::Facet,
     tiles: &openshard_tiles::TileData,
+    force: bool,
     post: &crate::app::Post,
 ) {
     use openshard_movement::bake;
 
     let started = Instant::now();
-    let world = match bake::FacetWorld::read(dir, bake::WorldSource::BaseSet(world_file), facet) {
+    let source = match world_file {
+        Some(file) => bake::WorldSource::BaseSet(file),
+        None => bake::WorldSource::Install,
+    };
+    let world = match bake::FacetWorld::read(dir, source, facet) {
         Ok(world) => world,
-        Err(error) => {
-            eprintln!("no navigation graph: {error}");
-            return;
-        }
+        Err(error) => return lost(post, &error.to_string()),
     };
     let stamp = match world.stamp(dir, facet) {
         Ok(stamp) => stamp,
-        Err(error) => {
-            eprintln!("no navigation graph: {error}");
-            return;
-        }
+        Err(error) => return lost(post, &error.to_string()),
     };
     let path = world.navigation_path(dir);
     // The artifact first: a client that has played this world before pays a
     // read rather than a bake, which is the whole reason the graph is written
     // out at all.
-    match bake::load(&path, &stamp) {
-        Ok(graph) => {
-            eprintln!(
-                "the navigation graph beside this world is current: {}",
-                path.display()
-            );
-            post.publish(link::Update::Navigation {
-                graph: Box::new(graph),
-            });
-            return;
+    if !force {
+        match bake::load(&path, &stamp) {
+            Ok(graph) => {
+                eprintln!(
+                    "the navigation graph beside this world is current: {}",
+                    path.display()
+                );
+                post.publish(link::Update::Navigation {
+                    graph: Box::new(graph),
+                    path,
+                });
+                return;
+            }
+            Err(error) => eprintln!("{error}; baking one over the world in hand"),
         }
-        Err(error) => eprintln!("{error}; baking one over the world the shard sent"),
     }
     let Some(graph) = bake::build(&world.snapshot, tiles) else {
-        eprintln!("no navigation graph: this facet's dimensions cannot be represented");
-        return;
+        return lost(post, "this facet's dimensions cannot be represented");
     };
     // Kept before it is handed over, so the next connection to this world pays
     // the read above instead. A graph that cannot be written is still a graph
-    // this run can route with, so the failure is a line and not a return.
+    // this run can route with, so the failure is a line and not a refusal.
     match bake::save(&path, &graph, &stamp) {
         Ok(bytes) => eprintln!(
             "the navigation graph took {:.1}s and {bytes} bytes; kept at {}",
@@ -97,7 +102,18 @@ fn navigation_bake(
     }
     post.publish(link::Update::Navigation {
         graph: Box::new(graph),
+        path,
     });
+}
+
+/// Say why there is no graph, on the terminal and in the window both.
+///
+/// Both, because they are read by different people at different times: the line
+/// is what a developer greps for afterwards, and the state is what tells a
+/// player *now* that the strip is not going to say "building" for ever.
+fn lost(post: &crate::app::Post, why: &str) {
+    eprintln!("no navigation graph: {why}");
+    post.publish(link::Update::NavigationLost { why: why.to_owned() });
 }
 
 /// Fold one locally predicted step into the presentation that ages it.
@@ -161,20 +177,173 @@ impl App {
             return;
         }
         let Some(world_file) = kept else {
+            self.navigation = crate::diagnostics::Navigation::Absent;
             eprintln!(
                 "no navigation graph: the ground this shard sent was not kept on disk, and a graph \
                  is stamped against the world it was built from"
             );
             return;
         };
+        // The world's file is kept, because the rebake button asks for the same
+        // work later and a person pressing it is not going to be told "only
+        // right after login".
+        self.resources.world_file = Some(world_file);
+        self.bake_navigation(facet, false);
+    }
+
+    /// Start the navigation worker, whether that is the arrival of a world or a
+    /// person pressing rebake.
+    ///
+    /// `force` is the button: skip the artifact and build. The state goes to
+    /// [`Navigation::Baking`](crate::diagnostics::Navigation::Baking) here and
+    /// not in the worker, so the strip says so on the very next frame rather
+    /// than after a hundred megabytes have been read.
+    pub(crate) fn bake_navigation(&mut self, facet: openshard_protocol::world::Facet, force: bool) {
+        if matches!(self.navigation, crate::diagnostics::Navigation::Baking { .. }) {
+            return;
+        }
         let dir = self.resources.dir.clone();
+        let world_file = self.resources.world_file.clone();
         let tiles = std::sync::Arc::clone(&self.resources.tiledata);
         let post = self.post.clone();
+        self.navigation = crate::diagnostics::Navigation::Baking {
+            since: Instant::now(),
+        };
         if let Err(error) = std::thread::Builder::new()
             .name("navigation".to_owned())
-            .spawn(move || navigation_bake(&dir, &world_file, facet, &tiles, &post))
+            .spawn(move || navigation_bake(&dir, world_file.as_deref(), facet, &tiles, force, &post))
         {
             eprintln!("no navigation graph: {error}");
+            self.navigation = crate::diagnostics::Navigation::Absent;
+        }
+    }
+
+    /// Which facet this client is standing on, for the worker to name.
+    ///
+    /// The world's own answer where there is a world, since a client that took
+    /// its ground off the wire has no constant to fall back on.
+    pub(crate) fn facet(&self) -> Option<openshard_protocol::world::Facet> {
+        self.resources.ground.snapshot().map(|world| world.facet())
+    }
+
+    /// Put the squares a publish moved into the world this client is drawing,
+    /// and throw away everything that was a picture of the ground they replaced.
+    ///
+    /// `to_the_client.md`'s E4 at this end, and the whole of what makes it
+    /// different from [`Update::Ground`](crate::link::Update::Ground): that
+    /// arrives before the first frame, when every cache the facet feeds is still
+    /// empty. This one arrives with the window drawing, and each of the four
+    /// things below is a store of *pixels or decisions taken over the ground as
+    /// it was*.
+    ///
+    /// **Nothing here is by revision except the radar**, and that asymmetry is
+    /// the caches' own: the composites and this end's route pictures are keyed by
+    /// where they are, so what is dropped is named by block; the radar's products
+    /// carry the source revision in their key, so naming the new one is what
+    /// makes every one of them unreachable at once. `RadarCache` was built with
+    /// that field and no writer for it — *"this path has no production writer
+    /// today, the client's `WorldMap` cannot change at runtime"* — and this is
+    /// the writer it was waiting for.
+    ///
+    /// The coarse navigation graph is **dropped and not rebuilt**. It is eleven
+    /// seconds of flood over the facet; the shard makes the same trade for the
+    /// same reason and tells its operator to rebake offline. Long routes fall
+    /// back on the bounded search until this client reconnects, which is when the
+    /// kept world is caught up and a graph is looked for beside it again.
+    ///
+    /// Nothing here is fatal. Chunks that do not fit the world in hand are a line
+    /// on the terminal and a facet left exactly as it was — the connection has
+    /// already checked that they are the chunks it asked for, at the revision the
+    /// publish named, so what is left for `take_chunks` to refuse is a
+    /// disagreement about the *facet*, and drawing on is better than going dark.
+    fn ground_moved(&mut self, chunks: &[openshard_map::chunk::Chunk]) {
+        use openshard_client_render::composite::MapBlockBounds;
+
+        let Some(first) = chunks.first() else {
+            // `Fetch::moved` refuses an empty list and the shard does not send
+            // one, so this is the belt rather than the braces.
+            return;
+        };
+        let facet = first.key().facet;
+        // The world and the bake over it, in one statement — `Ground::take_chunks`
+        // is that pairing, exactly as `set_base` is for a whole facet.
+        let revision = match self
+            .resources
+            .ground
+            .take_chunks(chunks, &self.resources.tiledata)
+        {
+            Ok(revision) => revision,
+            Err(error) => {
+                eprintln!("the ground the shard published was not applied: {error}");
+                return;
+            }
+        };
+        eprintln!(
+            "the ground moved: {} chunk(s) at revision {}",
+            chunks.len(),
+            revision.get()
+        );
+        // The blocks those chunks cover, which is what the composited pictures
+        // of the ground are addressed by. One rectangle per chunk rather than
+        // one over all of them: two edits at opposite ends of a facet would
+        // otherwise drop every composite between them.
+        for chunk in chunks {
+            let origin = chunk.key().at.block_origin();
+            let extent = chunk.extent();
+            let blocks = MapBlockBounds {
+                min_x: origin.x,
+                max_x: origin.x + extent.wide - 1,
+                min_y: origin.y,
+                max_y: origin.y + extent.down - 1,
+            };
+            if let Some(window) = self.window.as_mut() {
+                window.composites.invalidate_blocks(blocks);
+            }
+            self.composite_work.invalidate_blocks(blocks);
+        }
+        self.derived_over_the_ground_dropped(facet, revision);
+    }
+
+    /// Everything this end had worked out over the ground, let go of because the
+    /// ground is not that ground any more.
+    ///
+    /// The half [`ground_moved`](Self::ground_moved) and a replaced facet share.
+    /// What is *not* here is the composited pictures, and that is the one thing
+    /// the two callers differ about: chunks name the blocks they cover and a
+    /// replacement names none, so each does its own before calling this.
+    fn derived_over_the_ground_dropped(
+        &mut self,
+        facet: openshard_protocol::world::Facet,
+        revision: openshard_map::snapshot::MapRevision,
+    ) {
+        // Every radar product of this facet at once, by naming the revision they
+        // were not built at. The stale pictures stay reachable through
+        // `select_ready`'s stale-exact path while the new ones rasterise, which
+        // is what keeps a minimap from blinking empty over an edit.
+        self.radar_cache.set_revision(
+            facet,
+            openshard_client_render::radar::RadarRevision(revision.get()),
+        );
+        // And this end's own answers over the ground: what is in the way, what
+        // the terrain looks like from here, and the route it had planned across
+        // ground that has just changed height.
+        self.terrain_cache = None;
+        self.occluder_cache = None;
+        self.route_cache = None;
+        self.steer.clear_plan_cache();
+        self.steer.clear_route();
+        // The coarse graph goes with it. Nothing rebuilds one over a world that
+        // moved under a running client: it is eleven seconds of flood, which is
+        // the same trade the shard makes when it publishes, and the same answer
+        // it gives its operator. Long routes are the bounded search until this
+        // client reconnects, which is when a graph is looked for beside the kept
+        // world again.
+        if self.resources.coarse.take().is_some() {
+            self.navigation = crate::diagnostics::Navigation::Absent;
+            eprintln!(
+                "the coarse navigation graph was a graph of the world before this edit and has \
+                 been dropped: long routes are the bounded search until this client reconnects"
+            );
         }
     }
 
@@ -249,13 +418,26 @@ impl App {
                     snapshot.map().height(),
                 ),
             ),
-            link::Update::Navigation { graph } => {
+            link::Update::GroundMoved { chunks } => (
+                "ground moved",
+                format!(
+                    "chunks={} revision={}",
+                    chunks.len(),
+                    chunks
+                        .first()
+                        .expect("a publish that moved no chunk is not fetched")
+                        .revision()
+                        .get(),
+                ),
+            ),
+            link::Update::Navigation { graph, .. } => {
                 let (regions, nodes, edges) = graph.counts();
                 (
                     "navigation",
                     format!("regions={regions} nodes={nodes} edges={edges}"),
                 )
             }
+            link::Update::NavigationLost { why } => ("navigation lost", why.clone()),
             link::Update::Lost(_) => ("lost", String::new()),
         };
         match update {
@@ -296,21 +478,26 @@ impl App {
             // client's own files are: a `0xD8` carries no width or height, and
             // the box comes out of the foundation's own multi.
             link::Update::Design(bytes) => self.fold_design(&bytes),
-            // The facet, off the wire. It arrives once, a whole fetch *after*
-            // the first `Update::World`, and the gap between the two is what
-            // `App::grounded` gates the frame and the window's events on — see
-            // `Resources::map`, where the invariant is written down.
+            // The facet, off the wire. In the ordinary run it arrives once, a
+            // whole fetch *after* the first `Update::World`, and the gap between
+            // the two is what `App::grounded` gates the frame and the window's
+            // events on — see `Resources::map`, where the invariant is written
+            // down.
             //
-            // Nothing derived is thrown away here, and nothing needs to be: no
-            // frame has been drawn yet, because drawing is one of the two things
-            // that gate was put in front of, so every cache the ground feeds is
-            // still empty. The one thing the ground feeds that is built *before*
-            // it arrives is the atlases, and `App::create_window` packs them
-            // empty and leaves `graphics.covered` unset for exactly this moment:
-            // the first frame after this line grows them over the whole lit
-            // rectangle. A *second* one of these is E4's — a publish reaching
-            // a connected client — and that is where the invalidation has a way
-            // to be tested.
+            // On that first one nothing derived is thrown away, and nothing needs
+            // to be: no frame has been drawn yet, because drawing is one of the
+            // two things that gate was put in front of, so every cache the ground
+            // feeds is still empty. The one thing the ground feeds that is built
+            // *before* it arrives is the atlases, and `App::create_window` packs
+            // them empty and leaves `graphics.covered` unset for exactly this
+            // moment: the first frame after this line grows them over the whole
+            // lit rectangle.
+            //
+            // A *second* one is E4's other shape — a publish the shard could not
+            // name chunk by chunk, answered by taking the facet again — and then
+            // every one of those caches is full and is a picture of the world
+            // before the edit. There is no rectangle to name for it: the whole
+            // facet was replaced, so the whole of each of them goes.
             link::Update::Ground { snapshot, kept } => {
                 eprintln!(
                     "{} arrived from the shard: {}x{} tiles at revision {}",
@@ -320,6 +507,8 @@ impl App {
                     snapshot.revision().get(),
                 );
                 let facet = snapshot.facet();
+                let revision = snapshot.revision();
+                let replaced = self.resources.grounded();
                 // Both in one statement, because a `Ground` is the facet *and*
                 // the bake over it — see `Ground::set_base`, which is the seam
                 // arrival goes through precisely so that there is no moment in
@@ -327,22 +516,53 @@ impl App {
                 self.resources
                     .ground
                     .set_base(Some(*snapshot), &self.resources.tiledata);
+                if replaced {
+                    if let Some(window) = self.window.as_mut() {
+                        window.composites.clear();
+                    }
+                    self.composite_work.clear();
+                    self.derived_over_the_ground_dropped(facet, revision);
+                }
                 // And the coarse graph over it, which the span bake above is
                 // not: one is 0.16 s and the other is eleven seconds of flood,
                 // so it is looked for on disk and built off this thread when it
                 // is not there. See `App::take_up_navigation`.
+                //
+                // It is looked for again on a replacement as well, and that is
+                // right rather than wasteful: the world was written to the kept
+                // file a moment ago, on the shard thread, so the stamp beside it
+                // is a stamp of *this* world and a graph found there is one of
+                // it. What is not right is the graph that was in hand, and
+                // `derived_over_the_ground_dropped` has just let go of it.
                 self.take_up_navigation(kept, facet);
             }
+            // The squares an operator's edit moved, for the world this end is
+            // drawing from. E4, and the other half of the arm above: that one
+            // arrives before the first frame and throws nothing away, this one
+            // arrives in the middle of play and throws away everything derived
+            // over the ground it changed. See `App::ground_moved`.
+            link::Update::GroundMoved { chunks } => self.ground_moved(&chunks),
             // A graph the bake worker finished, or one it found already written.
-            link::Update::Navigation { graph } => {
+            link::Update::Navigation { graph, path } => {
                 let (regions, nodes, edges) = graph.counts();
                 eprintln!("the navigation graph is ready: {regions} regions, {nodes} nodes, {edges} edges");
+                self.navigation = crate::diagnostics::Navigation::Ready {
+                    regions,
+                    nodes,
+                    edges,
+                    path,
+                };
                 self.resources.coarse = Some(*graph);
                 // A route refused for want of a corridor is worth asking again
                 // now that there is one. A remembered refusal is kept across
                 // frames on purpose — see `Steering::begin_frame` — so nothing
                 // else would drop it until the player clicked somewhere new.
                 self.steer.clear_plan_cache();
+            }
+            // And the other end of the same question: there will be no graph,
+            // and the strip stops saying "building".
+            link::Update::NavigationLost { why: _ } => {
+                self.navigation = crate::diagnostics::Navigation::Absent;
             }
             link::Update::Lost(reason) => {
                 eprintln!("disconnected: {reason}");
@@ -1131,7 +1351,7 @@ impl App {
                     .tiles
                     .into_iter()
                     .map(|tile| openshard_uofiles::multi::Component {
-                        graphic: tile.graphic.0,
+                        graphic: tile.graphic,
                         dx: i16::from(tile.dx),
                         dy: i16::from(tile.dy),
                         dz: i16::from(tile.dz),
@@ -1280,7 +1500,7 @@ fn laid_out(components: &[openshard_uofiles::multi::Component], at: Point, hue: 
         .filter_map(|component| {
             Some(GroundItem {
                 at: component.placed_at(at)?,
-                graphic: Graphic(component.graphic),
+                graphic: component.graphic,
                 hue,
                 // A house's wall is a wall, not a pile of walls: a multi's
                 // parts are pictures laid out from a component list and have no
@@ -1536,21 +1756,21 @@ mod tests {
             vec![
                 // The signature tile every multi starts with, undrawn.
                 Component {
-                    graphic: 1,
+                    graphic: Graphic(1),
                     dx: 0,
                     dy: 0,
                     dz: 0,
                     flags: 0,
                 },
                 Component {
-                    graphic: 0x0006,
+                    graphic: Graphic(0x0006),
                     dx: -1,
                     dy: 2,
                     dz: 0,
                     flags: 1,
                 },
                 Component {
-                    graphic: 0x0007,
+                    graphic: Graphic(0x0007),
                     dx: 1,
                     dy: 0,
                     dz: 20,
@@ -1620,7 +1840,7 @@ mod tests {
         let known = Multi::new(
             0x64,
             vec![Component {
-                graphic: 0x0006,
+                graphic: Graphic(0x0006),
                 dx: 0,
                 dy: 0,
                 dz: 0,
@@ -1649,7 +1869,7 @@ mod tests {
         let foundation = Multi::new(
             0x64,
             vec![Component {
-                graphic: 0x0006,
+                graphic: Graphic(0x0006),
                 dx: 0,
                 dy: 0,
                 dz: 0,
@@ -1658,7 +1878,7 @@ mod tests {
         );
         let multis = Multis::of([foundation]);
         let design = [Component {
-            graphic: 0x1234,
+            graphic: Graphic(0x1234),
             dx: 2,
             dy: 3,
             dz: 4,
@@ -1691,7 +1911,7 @@ mod tests {
         use openshard_uofiles::multi::Component;
 
         let design = [Component {
-            graphic: 0x1234,
+            graphic: Graphic(0x1234),
             dx: 0,
             dy: 0,
             dz: 0,

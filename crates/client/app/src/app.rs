@@ -129,6 +129,13 @@ pub(crate) struct App {
     /// How this side's own workers report back — see [`Post`]. The shard thread
     /// has its own copy of the same pair, made in `run`.
     pub(crate) post: Post,
+    /// What this client has by way of a coarse graph, for the HUD to say.
+    ///
+    /// Beside `Resources::coarse` and not inside it, because they answer
+    /// different questions: the graph is what a route reads, and this is what a
+    /// *person* is told — including "there is one being built", which is not a
+    /// state a search has any use for.
+    pub(crate) navigation: crate::diagnostics::Navigation,
     /// The optional output mixer. It hears packet feedback but never owns game
     /// state, which stays in `world`.
     pub(crate) audio: crate::audio::Audio,
@@ -650,14 +657,22 @@ impl App {
                 true
             }
             // And not the ground, nor the graph baked over it: neither is the
-            // shard talking. The ground arrives once, long before the zoom this
-            // soak counts traffic after, and the graph comes from a thread of
-            // this client's own — counting either as a server update would also
-            // let `freeze_server` swallow updates the client cannot work
-            // without.
+            // shard talking in the sense this counts. The ground arrives before
+            // the zoom this soak counts traffic after, and the graph comes from a
+            // thread of this client's own — counting either as a server update
+            // would also let `freeze_server` swallow updates the client cannot
+            // work without.
+            //
+            // The squares a publish moved are the same kind of thing and are here
+            // for the second half of that reason rather than the first: they do
+            // arrive mid-soak, and there is no resend. A soak that swallowed one
+            // would go on drawing ground the shard has stopped believing in, for
+            // as long as it ran.
             crate::link::Update::Design(_)
             | crate::link::Update::Ground { .. }
+            | crate::link::Update::GroundMoved { .. }
             | crate::link::Update::Navigation { .. }
+            | crate::link::Update::NavigationLost { .. }
             | crate::link::Update::Lost(_) => false,
         };
         let freeze = sweep.freeze_server && is_server_update;

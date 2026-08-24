@@ -21,13 +21,15 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 
 use openshard_client_net::action::Outgoing;
-use openshard_client_net::chunks::{Fetch, FetchError};
+use openshard_client_net::chunks::{Fetch, FetchError, Fetched};
 use openshard_client_net::connection::Event;
 use openshard_client_net::session::Plan;
 use openshard_client_net::transport::{Dial, Socket, enter_world_with};
 use openshard_client_net::view::WorldView;
 use openshard_client_net::walk::{Moved, Walk};
-use openshard_protocol::chunks::{Changes, ChangesReply, ChangesRequest, WorldNotice, WorldRevision};
+use openshard_protocol::chunks::{
+    Changes, ChangesReply, ChangesRequest, PublishNotice, WorldNotice, WorldRevision,
+};
 use openshard_protocol::feedback::{Animation, NewAnimation};
 use openshard_protocol::gump::GumpId;
 use openshard_protocol::gump::GumpPoint;
@@ -192,9 +194,17 @@ pub enum Update {
     Design(Vec<u8>),
     /// The facet, assembled out of every chunk of it the shard sent.
     ///
-    /// Sent once, for a connection whose [`GroundSource`] is
+    /// Sent for a connection whose [`GroundSource`] is
     /// [`Fetched`](GroundSource::Fetched), and **after** [`Update::World`] — by
     /// however long a facet takes to arrive.
+    ///
+    /// Once per connection in the ordinary run, and it is no longer *only* once:
+    /// a publish the shard cannot name chunk by chunk — `Changes::Everything`,
+    /// which is a patch that touched more squares than a packet can list — is
+    /// answered by taking the facet again, and that arrives here. Whoever folds
+    /// this in has to be able to fold in a second one over a window that is
+    /// already drawing; see [`Update::GroundMoved`], which is the ordinary shape
+    /// of the same event and where the invalidation is argued.
     ///
     /// That gap is the whole cost of E2 and it is deliberate. The other order
     /// was available: hold the world back until the ground is here, and the
@@ -223,6 +233,35 @@ pub enum Update {
         /// without.
         kept: Option<std::path::PathBuf>,
     },
+    /// The squares of ground a publish moved, for the world the window is
+    /// holding.
+    ///
+    /// `to_the_client.md`'s E4, and the reason it is chunks rather than a facet
+    /// is ownership: the shard thread gave the world away with [`Ground`] and a
+    /// [`MapSnapshot`](openshard_map::snapshot::MapSnapshot) has one owner per
+    /// process, so the only copy there is to apply them over is the window's.
+    /// `openshard_movement::ground::Ground::take_chunks` is the seam at the far
+    /// end, and it rebakes the spans in the same statement for the reason that
+    /// type exists.
+    ///
+    /// **This is the one update that invalidates what has already been drawn.**
+    /// [`Ground`](Update::Ground) arrives before the first frame and can throw
+    /// nothing away because nothing has been built yet; this one arrives in the
+    /// middle of play, and every cache over the facet — the composited blocks,
+    /// the radar's products, the route this end had planned — is a picture of the
+    /// world as it was.
+    ///
+    /// The coarse navigation graph is *dropped* rather than rebuilt, which is the
+    /// same bargain the shard takes for the same reason: a graph is eleven
+    /// seconds of flood and a router planning through a wall somebody just built
+    /// is worse than no router at all. Long routes go back to the bounded search
+    /// until the client reconnects.
+    ///
+    /// [`Ground`]: Update::Ground
+    GroundMoved {
+        /// Every chunk that moved, each at the revision the publish named.
+        chunks: Vec<openshard_map::chunk::Chunk>,
+    },
     /// The coarse navigation graph, once something on this side has one.
     ///
     /// Loaded beside the world or baked from it, and either way off the frame
@@ -236,7 +275,17 @@ pub enum Update {
     /// it.
     Navigation {
         graph: Box<openshard_movement::NavigationGraph>,
+        /// The artifact it was read from, or written to. What the HUD names, so
+        /// that "which graph is this client running" is answerable without
+        /// reading the terminal back.
+        path: std::path::PathBuf,
     },
+    /// The graph could not be had, and why.
+    ///
+    /// A refusal is an answer here: a client that asked for one and never heard
+    /// back would sit at "building…" for the rest of the run, which reads as a
+    /// hang and is not one.
+    NavigationLost { why: String },
     /// The connection ended, and why. Nothing further will arrive.
     ///
     /// The window stays open on one of these: a client that vanished when a
@@ -839,6 +888,57 @@ enum WhatMoved {
     These(Fetch),
 }
 
+/// What to do about a publish, told to a client that is already drawing.
+///
+/// [`what_moved`] one phase later and with one thing different: there is no
+/// world in hand here to fill in. The facet went to the window with
+/// [`Update::Ground`] a whole fetch ago, so what comes back is chunks — unless
+/// the shard could not name them, in which case the answer is the same one E2
+/// starts with, and the facet arrives whole a second time.
+///
+/// `None` is a notice with nothing in it, which no shard of ours sends: an
+/// [`Option`] and not a two-armed enum beside [`WhatMoved`] because both of that
+/// one's arms carry a value and only one of these does.
+fn published(notice: WorldNotice, published: &PublishNotice) -> Result<Option<Fetch>, FetchError> {
+    match &published.changes {
+        // A shard of ours does not send one: an empty patch moves no square, so
+        // there is nothing to announce and `mapedit::commit` says nothing. A
+        // client that is told anyway has nothing to fetch and nothing to redraw.
+        Changes::These(chunks) if chunks.is_empty() => {
+            eprintln!(
+                "the ground is at revision {} and no chunk of it changed",
+                published.revision.0
+            );
+            Ok(None)
+        }
+        Changes::Everything => {
+            // One patch that moved more squares than a packet can list. Rare
+            // enough that no shipped command can make one — an operator's edit
+            // is one op and one chunk — and the honest answer is the one the
+            // client already knows how to carry out.
+            eprintln!(
+                "the ground moved to revision {} in more chunks than can be named: taking the \
+                 facet again",
+                published.revision.0
+            );
+            Fetch::of(notice).map(Some)
+        }
+        Changes::These(chunks) => {
+            eprintln!(
+                "the ground moved to revision {}: fetching {} chunk(s)",
+                published.revision.0,
+                chunks.len()
+            );
+            Fetch::moved(
+                notice,
+                chunks.clone(),
+                openshard_map::snapshot::MapRevision::decoded(published.revision.0),
+            )
+            .map(Some)
+        }
+    }
+}
+
 /// Everything after the runtime exists, up to the reason it ended.
 async fn play<D: Dial, F: Fn(Update) + Send>(
     dial: D,
@@ -997,6 +1097,65 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                         continue;
                     }
                 }
+                // The shard moved its own ground. It arrives unasked, at any
+                // point after world entry, and what it costs to act on is a
+                // handful of chunks — see `published`, which is the decision,
+                // and `Update::GroundMoved`, which is what the window is given.
+                if let openshard_protocol::server_packet::ServerPacket::PublishNotice(publish) = &packet {
+                    let GroundSource::Fetched { .. } = &ground else {
+                        // A client drawing a facet off its own disk. The shard's
+                        // ground is not the ground on this screen, and chunks of
+                        // it would not belong to the world in hand.
+                        eprintln!(
+                            "the shard's facet {} is at revision {} now; this client is drawing its \
+                             own ground and does not follow it",
+                            publish.facet.0, publish.revision.0
+                        );
+                        continue;
+                    };
+                    let Some(notice) = world_notice else {
+                        return "the shard published a world it never described".to_owned();
+                    };
+                    if publish.facet != notice.facet {
+                        // Nothing here holds another facet's ground: this client
+                        // fetched the one it entered on, and a `0x76` is not a
+                        // thing it has ever been sent.
+                        eprintln!(
+                            "facet {} moved to revision {}, and we are standing on facet {}",
+                            publish.facet.0, publish.revision.0, notice.facet.0
+                        );
+                        continue;
+                    }
+                    // Ground is already on the way — the facet, or the difference
+                    // a kept world was behind by — and the answers to it are on
+                    // the wire at the revision this publish has just moved past.
+                    // Those answers cannot be told apart from the ones a second
+                    // fetch would ask for, so the connection ends here rather
+                    // than a few seconds later inside `assemble`, with the reason
+                    // being the publish rather than a mixed set of chunks. See
+                    // `to_the_client.md`'s backlog: draining the abandoned fetch
+                    // is what would make this a recovery.
+                    if pending.is_some() {
+                        return format!(
+                            "the ground moved to revision {} while it was still arriving: \
+                             reconnect to take it at the revision it is at now",
+                            publish.revision.0
+                        );
+                    }
+                    match published(notice, publish) {
+                        Ok(None) => {}
+                        Ok(Some(mut fetch)) => {
+                            if let Err(reason) = ask::<D>(&mut socket, &mut fetch).await {
+                                return reason;
+                            }
+                            pending = Some(Pending::Fetching(fetch));
+                        }
+                        Err(error) => {
+                            return format!("the ground the shard published cannot be fetched: {error}");
+                        }
+                    }
+                    continue;
+                }
                 // The ground, while it is still arriving. A chunk packet is
                 // consumed here and never reported: what the window is given is
                 // the facet, once, and not the seven thousand fragments it
@@ -1040,7 +1199,7 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                             done.wanted()
                         );
                         match done.finish() {
-                            Ok(snapshot) => {
+                            Ok(Fetched::World(snapshot)) => {
                                 // Kept before it is handed over, and on this
                                 // thread: the window has no ground yet either
                                 // way, and the write is a tenth of a second
@@ -1069,6 +1228,19 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                                     kept,
                                 });
                             }
+                            // E4's arm: the world these belong to is the
+                            // window's, so they cross the seam as chunks.
+                            //
+                            // **The kept file is left at the revision it was
+                            // written at**, and that is a decision rather than an
+                            // omission: rewriting it would mean the world coming
+                            // back across this seam to be written from, and what
+                            // it saves is one small fetch on the next connection
+                            // — which is exactly the mechanism E3 built and this
+                            // client will run anyway. The next start asks what
+                            // moved, is told these same chunks, and writes the
+                            // file then.
+                            Ok(Fetched::Chunks(chunks)) => report(Update::GroundMoved { chunks }),
                             Err(error) => {
                                 return format!("the ground the shard sent is not a facet: {error}");
                             }

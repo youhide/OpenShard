@@ -1256,14 +1256,21 @@ fn distance(from: Point, to: Point) -> u32 {
         .max(i32::from(from.y).abs_diff(i32::from(to.y)))
 }
 
-/// Why a long-path query ended, for diagnostics only.
+/// Why a long-path query ended.
 ///
 /// The four refusals used to be one string — `unreachable_or_live_refinement`
 /// — which is four different repairs wearing one word. Telling them apart is
 /// what the facet-0 oracle needed to say *why* the router refuses a route past
 /// one region, rather than only that it does. See `docs/map/terrain_seam.md`.
+///
+/// **It was diagnostics-only until a player asked.** A client that cannot plan
+/// a route owes the person who clicked a reason, and the reasons here are the
+/// only honest ones there are: a goal nothing reaches is not the same answer as
+/// a query that ran out of effort, and telling a player the wrong one of those
+/// sends them looking for a way round a wall that has none — or standing still
+/// where one more click would have worked. See [`search_long_path`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LongExit {
+pub enum LongExit {
     /// A route came back.
     Route,
     /// One or both endpoints are on a tile the static graph has no region for.
@@ -1313,8 +1320,17 @@ pub const COARSE_MIN_DISTANCE: u32 = 8;
 /// query makes — a corridor hop is a body's own walking, so it is planned the
 /// way a body's walking is. It does **not** reach the graph: an edge cost is
 /// baked, and what it says about the facet is what the corridor picks by.
+/// The same query as [`find_long_path`], reported rather than answered.
+///
+/// [`search_path`](crate::search_path) is to [`find_path`](crate::find_path)
+/// what this is to `find_long_path`, and it exists for the same kind of caller:
+/// one that has to say *why*. A client whose click cannot be routed tells the
+/// person what stopped it, and the difference between [`LongExit::NoCorridor`]
+/// — the facet has no way there — and [`LongExit::Spent`] — this query ran out
+/// of effort — is the difference between "you cannot get there" and "ask again
+/// from closer".
 #[must_use]
-pub fn find_long_path(
+pub fn search_long_path(
     guide: &Footing<'_>,
     footing: &Footing<'_>,
     graph: &NavigationGraph,
@@ -1322,7 +1338,7 @@ pub fn find_long_path(
     to: Point,
     budget: usize,
     weight: Weight,
-) -> Option<Vec<Direction>> {
+) -> (Option<Vec<Direction>>, LongExit) {
     let started = debug_enabled().then(Instant::now);
     // One wallet for the whole query, and the only ceiling over it. What used to
     // be here as well — a second, later reading of the clock, which threw away a
@@ -1341,7 +1357,20 @@ pub fn find_long_path(
         result.as_ref().map(Vec::len),
         exit,
     );
-    result
+    (result, exit)
+}
+
+#[must_use]
+pub fn find_long_path(
+    guide: &Footing<'_>,
+    footing: &Footing<'_>,
+    graph: &NavigationGraph,
+    from: Point,
+    to: Point,
+    budget: usize,
+    weight: Weight,
+) -> Option<Vec<Direction>> {
+    search_long_path(guide, footing, graph, from, to, budget, weight).0
 }
 
 fn find_long_path_inner(
