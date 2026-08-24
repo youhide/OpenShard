@@ -187,7 +187,10 @@ pub fn covers_at(obstructions: &Obstructions, boats: &Boats, x: u16, y: u16) -> 
         .at(x, y)
         .iter()
         .map(|obstacle| obstacle.cover)
-        .chain(boats.at(x, y).iter().map(|plank| plank.cover()))
+        // `flat_map` and not `map`: a piece of a ship lays what its art lays,
+        // which for a deck plank is two covers — the floor and the planking
+        // under it — and for a rope is none at all.
+        .chain(boats.at(x, y).iter().flat_map(|plank| plank.covers()))
         .collect()
 }
 
@@ -260,6 +263,11 @@ mod tests {
 
     /// The land id of the strip a body can actually stand on.
     const SHORE: u16 = 0x0003;
+
+    /// A deck plank: a platform two tall, so a body stands on it at z 2.
+    const DECK: u16 = 0x3E4A;
+    /// A hull plank: impassable and ten tall.
+    const HULL: u16 = 0x3E4E;
 
     /// A harbour with no ships in it. Most of these tests predate boats and want
     /// exactly that; the ones that do not build their own.
@@ -466,53 +474,39 @@ mod tests {
         for x in 0..scene.width() {
             scene.land(x, 0, SHORE);
         }
+        // What a ship is made of is a fact about the install, so it lives in the
+        // tile table beside the water rather than in the plank fixture.
+        scene.art(DECK, TileFlags::PLATFORM, 2);
+        scene.art(HULL, TileFlags::WALL | TileFlags::BLOCK, 10);
         scene
     }
 
-    fn a_ship_at(boat: EntityId, x: u16, y: u16) -> Boats {
+    /// Two deck tiles whose surface is z 2, and a hull tile beside them.
+    ///
+    /// **The art is the scene's**, and read through [`Plank::of_art`] — the one
+    /// reading. A fixture that assembled a plank out of a height and a flag
+    /// would be asserting against a rule the shard no longer has: a component
+    /// is a floor because its tiledata row says `PLATFORM`, not because it
+    /// fails to say `BLOCK`.
+    ///
+    /// **The deck stands two above the shore, and that is the most it may be.**
+    /// A walk climbs at most `MAX_STEP_UP`, and these tests assert a body
+    /// *walking* aboard from the shore at z 0. The fixture used to put the
+    /// surface at 5 and pass, because `walk::aboard` applied no climb limit at
+    /// all; it applies the same one `climbed` does now. See `walk.rs`'s
+    /// `boarding_from_open_water_obeys_the_climb_limit`, and `docs/boats.md`
+    /// for how a UO player really boards — over the plank, which teleports
+    /// rather than steps.
+    fn a_ship_at(scene: &Scene, boat: EntityId, x: u16, y: u16) -> Boats {
+        let deck = scene.tiles().static_tile(DECK);
+        let hull = scene.tiles().static_tile(HULL);
         let mut boats = Boats::default();
         boats.moor(
             boat,
             [
-                // Two deck tiles whose surface is z 2, and a hull tile beside
-                // them.
-                //
-                // **The deck stands two above the shore, and that is the most it
-                // may be.** A walk climbs at most `MAX_STEP_UP`, and these tests
-                // assert a body *walking* aboard from the shore at z 0. The
-                // fixture used to put the surface at 5 and pass, because
-                // `walk::aboard` applied no climb limit at all; it applies the
-                // same one `climbed` does now. See `walk.rs`'s
-                // `boarding_from_open_water_obeys_the_climb_limit`, and
-                // `docs/boats.md` for how a UO player really boards — over the
-                // plank, which teleports rather than steps.
-                (
-                    (x, y),
-                    Plank {
-                        boat,
-                        z: 0,
-                        height: 2,
-                        blocks: false,
-                    },
-                ),
-                (
-                    (x, y + 1),
-                    Plank {
-                        boat,
-                        z: 0,
-                        height: 2,
-                        blocks: false,
-                    },
-                ),
-                (
-                    (x + 1, y),
-                    Plank {
-                        boat,
-                        z: 2,
-                        height: 10,
-                        blocks: true,
-                    },
-                ),
+                ((x, y), Plank::of_art(boat, deck, 0)),
+                ((x, y + 1), Plank::of_art(boat, deck, 0)),
+                ((x + 1, y), Plank::of_art(boat, hull, 2)),
             ],
         );
         boats
@@ -526,8 +520,8 @@ mod tests {
     #[test]
     fn a_deck_makes_a_step_onto_open_water_legal() {
         let obstructions = Obstructions::default();
-        let boats = a_ship_at(an_entity(), 10, 1);
         let sea = sea();
+        let boats = a_ship_at(&sea, an_entity(), 10, 1);
         let live_overlay = project(&obstructions, &boats);
         let live = Footing::new(Some(sea.terrain()), &live_overlay, Doors::AsTheyStand);
 
@@ -553,8 +547,8 @@ mod tests {
     #[test]
     fn a_hull_refuses_the_step_a_deck_would_have_allowed() {
         let obstructions = Obstructions::default();
-        let boats = a_ship_at(an_entity(), 10, 1);
         let sea = sea();
+        let boats = a_ship_at(&sea, an_entity(), 10, 1);
         let live_overlay = project(&obstructions, &boats);
         let live = Footing::new(Some(sea.terrain()), &live_overlay, Doors::AsTheyStand);
 
@@ -634,8 +628,8 @@ mod tests {
     fn boat_step_cost() {
         const STEPS: u32 = 100_000;
         let obstructions = Obstructions::default();
-        let busy = a_ship_at(an_entity(), 500, 1);
         let sea = sea();
+        let busy = a_ship_at(&sea, an_entity(), 500, 1);
 
         let walk = |boats: &Boats| {
             let live_overlay = project(&obstructions, boats);

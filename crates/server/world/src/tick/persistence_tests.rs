@@ -1274,7 +1274,7 @@ fn a_boat_survives_a_restart_with_its_deck() {
         "the ship came back with nothing to stand on",
     );
     assert!(
-        index.hull_blocks(at.x - 1, at.y, 0),
+        index.blocks_at(at.x - 1, at.y, 0),
         "the ship came back with no hull",
     );
     assert_eq!(index.boat_at(at.x, at.y), Some(back));

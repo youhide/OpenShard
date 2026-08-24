@@ -36,7 +36,8 @@
 use std::collections::HashMap;
 
 use openshard_entities::EntityId;
-use openshard_map::overlay::Cover;
+use openshard_map::overlay::{Body, Cover, Covers};
+use openshard_tiles::StaticTile;
 
 /// One tile of one boat, as the step check needs it.
 ///
@@ -47,35 +48,62 @@ use openshard_map::overlay::Cover;
 pub struct Plank {
     /// Which boat this tile belongs to.
     pub boat: EntityId,
-    /// The z the component sits at — the ship's own z plus the component's `dz`.
-    pub z: i8,
-    /// What it stands on top of: `z + height` is where a body's feet go.
-    pub height: u8,
-    /// Whether it stops a body rather than carrying one. A hull blocks; a deck
-    /// plank is a floor.
-    pub blocks: bool,
+    /// What this piece of the ship lays over its tile, based at the height the
+    /// component sits at.
+    ///
+    /// **[`Covers`] and not a `(z, height, blocks)` triple.** The triple was a
+    /// *second reading of the same tiledata row*: it split a component on
+    /// `is_blocking()` alone — hull if it stops a body, deck if it does not —
+    /// where [`Cover::of_static`] splits on `is_platform()`, which is ServUO's
+    /// `(flags & ImpassableSurface) == TileFlag.Surface`
+    /// (`Scripts/Services/Pathing/Movement.cs:211`) and what housing,
+    /// decoration, the persistence reload and the client all read. On the
+    /// shipped fleet the two disagree about **eighty** components, every one of
+    /// them art that is neither a platform nor a blocker — a rope, a rudder,
+    /// the tiller — which the ship's own reading turned into a floor two under
+    /// its own deck. See `openshard-boats`'s `boat_art_survey`.
+    ///
+    /// A piece of art laying *both* halves is not a contradiction and is why
+    /// this is a [`Covers`] rather than one [`Cover`]: a deck plank is a floor
+    /// at its top **and** three units of solid wood under it, and it was the
+    /// missing second half that let a body stand inside the planking.
+    ///
+    /// Private, and [`of_art`](Self::of_art) is the only way to fill it: the
+    /// whole of this change is that there is one reading of a ship's art, and a
+    /// public field is somewhere to put a second.
+    covers: Covers,
 }
 
 impl Plank {
-    /// Where a body standing on this tile has its feet.
+    /// One piece of a ship, read off the tile table.
+    ///
+    /// `z` is the ship's own z plus the component's `dz` — the placement's half
+    /// of the answer, which the table cannot know.
     #[must_use]
-    pub const fn surface(self) -> i32 {
-        self.z as i32 + self.height as i32
+    pub fn of_art(boat: EntityId, art: &StaticTile, z: i8) -> Self {
+        Self {
+            boat,
+            covers: Cover::of_static(art).based_at(z),
+        }
     }
 
-    /// This plank as the overlay states it.
+    /// What this piece of the ship lays over its tile.
     ///
-    /// The projection [`FacetState`](crate::FacetState) maintains. `blocks` is
-    /// what picks the arm, and it partitions: a hull stops a body, a deck
-    /// carries one, and no plank has ever been both — which is the whole
-    /// argument for the overlay's `CoverKind` being an enum rather than a pair
-    /// of flags.
+    /// Read outwards for the projection into the overlay — see
+    /// [`covers_at`](crate::obstruct::covers_at) — and by the survey that
+    /// prices this reading against the one it replaced.
     #[must_use]
-    pub const fn cover(self) -> Cover {
-        match self.blocks {
-            true => Cover::blocking(self.z, self.height),
-            false => Cover::standing(self.z, self.height),
-        }
+    pub const fn covers(self) -> Covers {
+        self.covers
+    }
+
+    /// Where a body standing here has its feet, if this piece of the ship is
+    /// somewhere to stand at all.
+    ///
+    /// `None` for a hull, for a mast, and for the ropes that used to answer.
+    #[must_use]
+    pub fn surface(self) -> Option<i32> {
+        self.covers.stands().map(Cover::surface)
     }
 }
 
@@ -168,16 +196,24 @@ impl Boats {
         self.at(x, y).first().map(|plank| plank.boat)
     }
 
-    /// Whether a hull closes `(x, y)` for a body standing at `z`.
+    /// Whether anything of a ship closes `(x, y)` for a body standing at `z`.
     ///
     /// The same vertical-span rule the obstruction index uses: a gunwale at deck
-    /// height does not seal the water beneath it.
+    /// height does not seal the water beneath it. [`Cover::meets`] is that rule,
+    /// borrowed rather than written out a second time — the arithmetic used to
+    /// live here as well, and a `height` of zero had to be special-cased at both
+    /// ends.
+    ///
+    /// **A ship's own deck answers here now**, which the name no longer
+    /// pretends otherwise about: a plank three units thick is three units of
+    /// solid wood with a floor on top, so a body in the water under it is
+    /// stopped by the same span that carries the body above it.
     #[must_use]
-    pub fn hull_blocks(&self, x: u16, y: u16, z: i32) -> bool {
+    pub fn blocks_at(&self, x: u16, y: u16, z: i32) -> bool {
         self.at(x, y)
             .iter()
-            .filter(|plank| plank.blocks)
-            .any(|plank| z >= plank.z as i32 && z < plank.surface().max(plank.z as i32 + 1))
+            .filter_map(|plank| plank.covers.blocks())
+            .any(|cover| cover.meets(Body::new(z, 1)))
     }
 
     /// The deck a body would stand on at `(x, y)`, coming from `near_z`.
@@ -191,8 +227,7 @@ impl Boats {
     pub fn deck_at(&self, x: u16, y: u16, near_z: i32) -> Option<i32> {
         self.at(x, y)
             .iter()
-            .filter(|plank| !plank.blocks)
-            .map(|plank| plank.surface())
+            .filter_map(|plank| plank.surface())
             .min_by_key(|surface| (surface - near_z).abs())
     }
 
@@ -214,8 +249,8 @@ impl Boats {
     pub fn carries(&self, boat: EntityId, x: u16, y: u16, z: i32) -> bool {
         self.at(x, y)
             .iter()
-            .filter(|plank| plank.boat == boat && !plank.blocks)
-            .any(|plank| plank.surface() == z)
+            .filter(|plank| plank.boat == boat)
+            .any(|plank| plank.surface() == Some(z))
     }
 }
 
@@ -223,6 +258,7 @@ impl Boats {
 mod tests {
     use super::*;
     use openshard_entities::Registry;
+    use openshard_tiles::{AnimId, StaticTile, TileFlags};
 
     fn an_entity() -> EntityId {
         Registry::default().spawn()
@@ -236,22 +272,33 @@ mod tests {
         (registry.spawn(), registry.spawn())
     }
 
-    fn deck(boat: EntityId, z: i8) -> Plank {
-        Plank {
-            boat,
-            z,
-            height: 3,
-            blocks: false,
+    /// One row of the tile table, named field by field.
+    ///
+    /// The fixture builds a `StaticTile` and reads it rather than asserting a
+    /// cover directly, because what these tests are about is the *reading*: a
+    /// plank is whatever [`Cover::of_static`] makes of the art, and a fixture
+    /// that skipped it would be the second reading this type was just relieved
+    /// of.
+    fn art(flags: u64, height: u8) -> StaticTile {
+        StaticTile {
+            flags: TileFlags::new(flags),
+            height,
+            weight: 255,
+            layer: 0,
+            anim_id: AnimId(0),
+            name: String::from("a fixture"),
         }
     }
 
+    /// A deck plank: a platform three tall, so a body stands at `z + 3` and the
+    /// three units of planking under it are solid.
+    fn deck(boat: EntityId, z: i8) -> Plank {
+        Plank::of_art(boat, &art(TileFlags::PLATFORM, 3), z)
+    }
+
+    /// A hull plank: impassable and ten tall, with no floor anywhere on it.
     fn hull(boat: EntityId, z: i8) -> Plank {
-        Plank {
-            boat,
-            z,
-            height: 10,
-            blocks: true,
-        }
+        Plank::of_art(boat, &art(TileFlags::WALL | TileFlags::BLOCK, 10), z)
     }
 
     #[test]
@@ -260,7 +307,7 @@ mod tests {
         assert!(boats.is_empty());
         assert_eq!(boats.len(), 0);
         assert!(boats.at(10, 10).is_empty());
-        assert!(!boats.hull_blocks(10, 10, 0));
+        assert!(!boats.blocks_at(10, 10, 0));
         assert_eq!(boats.deck_at(10, 10, 0), None);
     }
 
@@ -273,8 +320,15 @@ mod tests {
         boats.moor(ship, [((10, 10), deck(ship, 2)), ((11, 10), hull(ship, 2))]);
 
         assert_eq!(boats.deck_at(10, 10, 0), Some(5), "the deck plank's top");
-        assert!(!boats.hull_blocks(10, 10, 5), "a deck does not block");
-        assert!(boats.hull_blocks(11, 10, 5), "the hull does");
+        assert!(
+            !boats.blocks_at(10, 10, 5),
+            "a body standing on the deck is in its own way"
+        );
+        assert!(
+            boats.blocks_at(10, 10, 3),
+            "and the planking it stands on is solid, so nothing stands inside it"
+        );
+        assert!(boats.blocks_at(11, 10, 5), "the hull does");
         assert_eq!(boats.deck_at(11, 10, 0), None, "and a hull is not a floor");
     }
 
@@ -286,8 +340,8 @@ mod tests {
         let mut boats = Boats::default();
         boats.moor(ship, [((11, 10), hull(ship, 20))]);
 
-        assert!(boats.hull_blocks(11, 10, 25));
-        assert!(!boats.hull_blocks(11, 10, 0), "the sea beneath is still the sea");
+        assert!(boats.blocks_at(11, 10, 25));
+        assert!(!boats.blocks_at(11, 10, 0), "the sea beneath is still the sea");
     }
 
     /// Mooring again replaces: a move is one call, and half a hull left at the

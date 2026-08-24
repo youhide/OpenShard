@@ -91,9 +91,14 @@ type Berth = ((u16, u16), Plank);
 /// refusals — a ship that was afloat when it was launched stays afloat, the way
 /// a house that was legal when it was built stays built.
 ///
-/// A component that blocks by its tiledata is hull; everything else is deck. The
-/// split is the whole of what [`Boats`](openshard_state::Boats) needs, and it is
-/// made once here rather than per step.
+/// **What each component lays is [`Cover::of_static`]'s answer**, taken once
+/// here rather than per step. It used to be this function's own: a component
+/// that blocked by its tiledata was hull and *everything else was deck*, which
+/// made a floor out of every rope, rudder and tiller in the table — eighty of
+/// them across the shipped fleet, some two units under the deck they hang
+/// beside. ServUO asks for the `Surface` flag and not merely for the absence of
+/// `Impassable` (`Scripts/Services/Pathing/Movement.cs:211`), and so does every
+/// other placement here. See `tests/boat_art_survey.rs`.
 ///
 /// Undrawn components are skipped, the way a house's footprint skips them: the
 /// signature tile every multi opens with is not part of the ship.
@@ -119,15 +124,7 @@ pub fn planks_of(state: &WorldState, boat: EntityId, at: Point, multi: u16) -> R
         let Ok(z) = i8::try_from(i32::from(at.z) + i32::from(component.dz)) else {
             return Err(Refusal::OffTheMap);
         };
-        out.push((
-            (x, y),
-            Plank {
-                boat,
-                z,
-                height: tiledata.static_tile(graphic.0).height,
-                blocks: tiledata.static_tile(graphic.0).flags.is_blocking(),
-            },
-        ));
+        out.push(((x, y), Plank::of_art(boat, tiledata.static_tile(graphic.0), z)));
     }
     if out.is_empty() {
         return Err(Refusal::NoSuchMulti);

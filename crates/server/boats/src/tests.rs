@@ -209,8 +209,8 @@ fn the_hull_blocks_and_the_deck_carries() {
     let boats = &state.facet_state(Facet(0)).boats();
     assert_eq!(boats.deck_at(20, 20, 0), Some(2), "the deck plank's own top");
     assert_eq!(boats.deck_at(20, 21, 0), Some(2), "and the tile behind it");
-    assert!(boats.hull_blocks(19, 20, 0), "the port hull");
-    assert!(boats.hull_blocks(21, 20, 0), "the starboard hull");
+    assert!(boats.blocks_at(19, 20, 0), "the port hull");
+    assert!(boats.blocks_at(21, 20, 0), "the starboard hull");
     assert_eq!(boats.deck_at(19, 20, 0), None, "a hull is not a floor");
 }
 
@@ -414,7 +414,7 @@ fn a_ship_sails_a_tile() {
     );
     let boats = &state.facet_state(Facet(0)).boats();
     assert_eq!(boats.deck_at(20, 21, 0), Some(2), "the deck came with it");
-    assert!(boats.hull_blocks(19, 21, 0), "and so did the port hull");
+    assert!(boats.blocks_at(19, 21, 0), "and so did the port hull");
     assert!(
         boats.at(20, 20).is_empty() && boats.at(19, 20).is_empty(),
         "the ship left planks behind in the tiles it sailed out of",
