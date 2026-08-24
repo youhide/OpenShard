@@ -481,10 +481,16 @@ surveys say where not to look. The suspects left, in order:
 - ~~**A boat moored at a pier.**~~ **Walked 2026-08-24 — real, and two units
   deep.** See the subsection below; the suspect held a defect, the defect is
   fixed, and it is still not this report.
+- ~~**Arriving rather than walking** — a login, a spawn, a gate or a teleport
+  onto a deck, which reach `spawn_z` and not `check`.~~ **Surveyed 2026-08-24 —
+  real, and by far the largest of the three.** See the second subsection below:
+  a body arriving on a pier or a bridge was put a median ten units under it on
+  **25,816 of the facet's 27,052 decks**. Fixed, and it is *still* not this
+  report — nothing a player does reaches the rule that did it.
 - **A multi-step walk**, where a single step is right each time and the sequence
-  drifts. Both surveys measure one step from a known surface.
-- **Arriving rather than walking** — a login, a spawn, a gate or a teleport onto
-  a deck, which reach `spawn_z` and not `check`.
+  drifts. Both surveys measure one step from a known surface. **The only suspect
+  left on the shard's side** — and see the last subsection for a fourth that is
+  not on the shard's side at all.
 
 #### 🚩 The first suspect was walked, 2026-08-24, and it does not reach
 
@@ -544,6 +550,77 @@ Two things fell out of the same walk:
   berth tile is *water*, which a tile carrying a pier plank can be. **52 of the
   352** boardings in the survey land on the plank rather than on the deck under
   it. Harmless as a landing and wrong as a placement.
+
+#### 🚩 The third suspect was surveyed, 2026-08-24: an arrival is not a step
+
+`movement`'s
+[`arrival_survey`](../crates/common/movement/src/terrain.rs) asks the shard's
+*placement* rules the one question this entry is about: over facet 0, for each
+of the 27,052 pier and bridge decks, where does a body that **arrives** there
+end up? A step goes through `check`, reaching from the top of the art underfoot.
+An arrival has nothing to reach from, so the shard had **four other spellings of
+it**, and none of them was the same rule.
+
+| the rule | who arrived through it | on the deck | **under it** | refused |
+|---|---|---|---|---|
+| `MapTerrain::ground_z` | a fresh character's first tile (`start_position`), the `.go` command, the region spawner's seed | 808 | **25,816** (median 10, worst 67; 6,266 of them over open water) | 0 |
+| `MapTerrain::spawn_z` | `npc::spawn`, seeded from the ground | 18,862 | 3,139 (median 23) | 3,450 |
+| `MapTerrain::stand_z` | the arrival test a recall, a gate travel and a sacred journey are approved by | 21,255 | 0 | 4,593 |
+| `housing::doorstep` | a banned player put out of a house | — it named `at.z`, the house's own floor, and asked nothing | | |
+| **`movement::arrival_z`** | **all four now** | 18,868 | **3,132** (only **7** of them over water) | 3,450 |
+
+**`ground_z` is the land tile's own average and reads no static at all**, which
+is the whole of the first row: on a pier it answers the sea, on a bridge it
+answers the ravine. And **none of the four read the
+[`Overlay`](../crates/common/map/src/overlay.rs)**, which is the same shape the
+moored-ship subsection above found one layer down — a body put on a deck or on a
+house's first floor lands in the sea or in the ground *by construction*, because
+the only layer that knows those exist was not asked.
+
+`arrival_z` is the one rule they go through now: `spawn_z`'s two arms with the
+live layer folded into both — the ordinary landing taken **in place** (so a
+placement finds the ground floor and cannot climb to the storey above), then
+every surface either layer has, filtered by `can_fit`, nearest to the height
+asked about with a tie to the lower. `can_step` for the first arm rather than a
+second copy of it: *put here* is a step that goes nowhere.
+
+**The 3,132 that remain are the seed's answer and not the rule's.** All but
+seven are bridges over walkable land, where the ground under the bridge is what
+the caller asked to be placed *near* — a spawner names a rectangle and no storey,
+so the ground is the honest seed and a rat belongs under the walkway. The seven
+over water are worth a look and are not a fall a player can take.
+
+**And it is still not this report.** Every caller of `ground_z` is staff or
+server-side: the configured start tile, `.go`, and where the spawner looks. A
+player walking around Britannia reaches none of them. What the survey *is* worth
+is the 25,816: a `.go` onto any dock put a game master in the water, and that is
+now a rule rather than four.
+
+##### Found while surveying it
+
+- **A moongate crossing is not checked and a recall is.** `travel_through`
+  (`world::tick::gates`) calls `move_to` with the destination verbatim; recall,
+  sacred journey and gate travel all pass `can_stand_at` first. ServUO's
+  `Moongate.UseGate` is verbatim too, so this is parity rather than a defect —
+  but the two paths arriving under different rules is worth writing down before
+  somebody assumes otherwise.
+- **`.tele` honours the z the client picked.** Deliberate for staff, and the one
+  arrival that *should* name a height: a game master clicking a spot means that
+  spot. Left alone.
+- **[`client.md`](client.md) has already attributed this report, twice, and the
+  roadmap's suspect list never mentioned it.** Its "found while drawing the
+  ground" and "found while joining the window to the wire" entries call the
+  2026-08-02 report one bug with two client-side causes: `GroundQuad` builds its
+  four heights from the **land layer only**, so a pier's deck has no ground plane
+  of its own, and `Walk::step`'s predicted z came from the same place. The second
+  half is fixed — `ui_command.rs` predicts with `MapTerrain::predict_step` on
+  both the online and the offline arm — and the first is **still true today**
+  (`ground.rs`'s `corners` is `WorldMap::land_corners`). Whether that draws as
+  *sinking* is not obvious and wants a look rather than an argument: the body is
+  drawn above the plane, not below it, so the visible failure would have to come
+  from the depth sort putting the plank in front of the body. Two documents have
+  been holding two different theories of one report; whoever takes the last
+  suspect should read both first.
 
 ### ~~Backlog: a mobile is not an obstacle~~ — closed, and it was two entries
 
