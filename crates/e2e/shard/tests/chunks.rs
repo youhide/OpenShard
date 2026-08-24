@@ -542,7 +542,7 @@ async fn a_client_that_kept_the_ground_asks_only_for_what_moved() {
     let mut fetch = Fetch::of(notice).expect("a facet the wire can name");
     let asked = drive(&mut socket, &mut fetch).await;
     assert_eq!(asked.chunks, 16, "the whole facet, which is sixteen chunks");
-    let arrived = fetch.finish().expect("a complete set of chunks");
+    let arrived = fetch.finish().expect("a complete set of chunks").world();
     let path = openshard_client_net::cache::write(&kept, notice, &arrived).expect("a writable temp dir");
     assert_eq!(path, openshard_client_net::cache::path_of(&kept, world, FACET));
     drop(socket);
@@ -646,7 +646,7 @@ async fn a_client_that_kept_the_ground_asks_only_for_what_moved() {
     .expect("the world kept is the world described");
     let asked = drive(&mut socket, &mut fetch).await;
     assert_eq!(asked.chunks, 1, "exactly the chunks that moved");
-    let caught_up = fetch.finish().expect("the chunk that moved");
+    let caught_up = fetch.finish().expect("the chunk that moved").world();
     assert_eq!(caught_up.revision().get(), notice.revision.0);
 
     // And it is the shard's world: the tile the operator moved is where the
@@ -715,7 +715,7 @@ async fn a_client_with_no_map_files_ends_up_holding_the_shards_world() {
         asked.requests
     );
 
-    let arrived = fetch.finish().expect("a complete set of chunks");
+    let arrived = fetch.finish().expect("a complete set of chunks").world();
 
     // The oracle: the file the shard booted from, read back through the reader a
     // shard boots with. Not the bytes this time — the world.

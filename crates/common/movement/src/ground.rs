@@ -41,10 +41,11 @@
 //! to every function that writes it, and a table that arrives after the ground
 //! did needs [`Ground::rebake`].
 
+use openshard_map::chunk::Chunk;
 use openshard_map::overlay::Overlay;
 use openshard_map::patch::{Patch, PatchError, Undo};
-use openshard_map::snapshot::MapSnapshot;
-use openshard_map::world::World;
+use openshard_map::snapshot::{MapRevision, MapSnapshot};
+use openshard_map::world::{ChunksError, World};
 use openshard_tiles::TileData;
 
 use crate::spans::SpanIndex;
@@ -58,7 +59,7 @@ use crate::terrain::MapTerrain;
 /// [`set_base`](Self::set_base), [`rebake`](Self::rebake),
 /// [`publish`](Self::publish) and [`undo`](Self::undo) — writes both, so there
 /// is no sequence of calls that separates them.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Ground {
     /// The two lower layers and what the live world has laid over them.
     ///
@@ -153,6 +154,29 @@ impl Ground {
     pub fn undo(&mut self, undo: &Undo, tiles: &TileData) {
         self.world.undo(undo);
         self.rebake(tiles);
+    }
+
+    /// Take squares of ground the other end of the wire has published, and
+    /// rebake over them in the same statement.
+    ///
+    /// [`publish`](Self::publish) is how the *shard* moves its ground and this is
+    /// how a client's moves: it holds no patch and no history, only the chunks a
+    /// publish notice named and it went and fetched. See
+    /// [`World::take_chunks`], which is the half without the bake, and
+    /// `docs/map/new_map_representation/to_the_client.md`'s E4.
+    ///
+    /// **The rebake is this method's reason for existing**, exactly as it is
+    /// `publish`'s: the span layer is a projection of the base, and this is the
+    /// second thing that moves the base while something is running.
+    ///
+    /// # Errors
+    ///
+    /// [`ChunksError`], from [`World::take_chunks`] — and on either of them
+    /// nothing has moved, so the bake is still the bake of the world in hand.
+    pub fn take_chunks(&mut self, chunks: &[Chunk], tiles: &TileData) -> Result<MapRevision, ChunksError> {
+        let revision = self.world.take_chunks(chunks)?;
+        self.rebake(tiles);
+        Ok(revision)
     }
 
     /// The ground, the statics and the revision they are at — and no way from
