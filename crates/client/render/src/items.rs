@@ -441,6 +441,10 @@ pub fn labels<'a>(
 
 /// Which item the cursor is over: an index into `items`, or `None` for none.
 ///
+/// Answered as a [`depth::Hit`], because the item list is not the only list the
+/// cursor is tested against and the caller has to know which of two answers the
+/// frame drew in front — see that type.
+///
 /// **The picture is what is hit, not the tile.** A door's leaf is drawn on its
 /// own tile and stands two tiles up the screen from it, so a click on the leaf
 /// unprojects to the tile *behind* the door — pick by tile and a player can
@@ -467,7 +471,7 @@ pub fn pick<'a>(
     atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     cursor: RealPixel,
-) -> Option<ItemIndex> {
+) -> Option<depth::Hit<ItemIndex>> {
     pick_with_interior(items, camera, tiledata, animations, atlas, cutaway, cursor, None)
 }
 
@@ -483,10 +487,10 @@ pub fn pick_with_interior<'a>(
     cutaway: &Cutaway,
     cursor: RealPixel,
     interior: Option<&crate::interiors::InteriorFrame>,
-) -> Option<ItemIndex> {
+) -> Option<depth::Hit<ItemIndex>> {
     let atlas = atlas.into();
     let in_view = camera.to_view(camera.pick(cursor));
-    let mut hit: Option<(depth::Order, ItemIndex)> = None;
+    let mut hit: Option<depth::Hit<ItemIndex>> = None;
     for (index, item) in items.iter().enumerate() {
         if !interior.is_none_or(|frame| frame.shows_at(item.at)) {
             continue;
@@ -507,11 +511,14 @@ pub fn pick_with_interior<'a>(
         }
         // `>=`, so a later item at the same order takes it: the tie-break is the
         // caller's order, and the one drawn last is the one on top.
-        if hit.is_none_or(|(order, _)| placed.order >= order) {
-            hit = Some((placed.order, ItemIndex::new(index)));
+        if hit.is_none_or(|best| placed.order >= best.order) {
+            hit = Some(depth::Hit {
+                order: placed.order,
+                what: ItemIndex::new(index),
+            });
         }
     }
-    hit.map(|(_, index)| index)
+    hit
 }
 
 #[cfg(test)]
@@ -943,7 +950,7 @@ mod tests {
             )
         };
         assert_eq!(
-            pick_at(30.0, 30.0),
+            pick_at(30.0, 30.0).map(|hit| hit.what),
             Some(ItemIndex::new(0)),
             "the drawn half was not hit"
         );
@@ -988,7 +995,7 @@ mod tests {
             cursor_over(&camera, near, 22.0, 10.0),
         );
         assert_eq!(
-            found,
+            found.map(|hit| hit.what),
             Some(ItemIndex::new(1)),
             "the door behind was picked through the one in front"
         );

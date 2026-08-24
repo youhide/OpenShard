@@ -172,7 +172,7 @@ impl App {
     /// A plain click remains available to the normal selection/double-click
     /// use path in the event loop.
     pub(crate) fn press_world_item(&mut self) -> bool {
-        let Some(serial) = self.picking.hover.item else {
+        let Some(serial) = self.picking.hover.item.map(|item| item.serial) else {
             return false;
         };
         let Some(item) = self

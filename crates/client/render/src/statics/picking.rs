@@ -32,6 +32,10 @@ pub struct PickedStatic {
 /// Which static of the map the cursor is over, or `None` for none.
 ///
 /// A hit is an opaque texel; when pictures overlap, the topmost drawn one wins.
+///
+/// Answered as a [`depth::Hit`], because the map's furniture is not the only
+/// list the cursor is tested against and the caller has to know which of two
+/// answers the frame drew in front — see that type.
 #[must_use]
 pub fn pick<'a>(
     map: &WorldMap,
@@ -41,7 +45,7 @@ pub fn pick<'a>(
     atlas: impl Into<StaticArt<'a>>,
     cutaway: &Cutaway,
     cursor: RealPixel,
-) -> Option<PickedStatic> {
+) -> Option<depth::Hit<PickedStatic>> {
     pick_with_interior(map, camera, tiledata, animations, atlas, cutaway, cursor, None)
 }
 
@@ -57,10 +61,10 @@ pub fn pick_with_interior<'a>(
     cutaway: &Cutaway,
     cursor: RealPixel,
     interior: Option<&crate::interiors::InteriorFrame>,
-) -> Option<PickedStatic> {
+) -> Option<depth::Hit<PickedStatic>> {
     let atlas = atlas.into();
     let in_view = camera.to_view(camera.pick(cursor));
-    let mut hit: Option<(depth::Order, PickedStatic)> = None;
+    let mut hit: Option<depth::Hit<PickedStatic>> = None;
     for_each_static_in(map, pick_bounds(camera, atlas, cursor), |item| {
         let at = Point::new(item.x, item.y, item.z);
         let tile = tiledata.static_tile(item.tile.0);
@@ -82,11 +86,14 @@ pub fn pick_with_interior<'a>(
             return;
         }
         // A later equal-order item is drawn last and therefore wins.
-        if hit.is_none_or(|(order, _)| placed.order >= order) {
-            hit = Some((placed.order, PickedStatic { at, graphic }));
+        if hit.is_none_or(|best| placed.order >= best.order) {
+            hit = Some(depth::Hit {
+                order: placed.order,
+                what: PickedStatic { at, graphic },
+            });
         }
     });
-    hit.map(|(_, picked)| picked)
+    hit
 }
 
 /// A conservative tile rectangle for statics whose sprite can cover `cursor`.

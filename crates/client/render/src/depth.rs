@@ -59,6 +59,28 @@ pub struct Order {
     pub priority_z: i32,
 }
 
+/// What a hit test found, and where the frame sorted the picture it found.
+///
+/// The cursor is answered by searching three lists separately — the crowd, the
+/// shard's items, the map's own furniture — so "what is under the cursor" comes
+/// back up to three times, once per list. Which of those answers the player is
+/// actually pointing at is not something the order the lists are asked in can
+/// decide: it is whichever the frame drew in front, and that is [`Order`], which
+/// each search already computes in order to break ties *inside* its own list.
+///
+/// So it is carried out with the hit instead of being dropped there, and the
+/// comparison between two lists becomes the same comparison as the one within
+/// one. See `crate::renderer::depth_state` for what the pass does with equal
+/// depths, which is what makes `>=` the right test in both places.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Hit<T> {
+    /// Where the picture that was hit sorts against everything else this frame
+    /// draws. Larger is nearer.
+    pub order: Order,
+    /// What was hit — a list's own way of naming one of its entries.
+    pub what: T,
+}
+
 impl Order {
     /// The depth value a quad writes, in the range clip space wants.
     ///

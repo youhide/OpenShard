@@ -1635,10 +1635,12 @@ impl App {
         // Creatures are asked first and they win: a mobile stands *on* the
         // clutter of its tile — it is sorted above whatever is lying there, and
         // it is what a player pointing at a shopkeeper standing on a rug means.
-        // Then the server's items, then the map's own furniture. One chain, and
-        // every later question is asked only where the earlier ones found
-        // nothing — so "what is under the cursor" has exactly one answer and the
-        // ring, the wash, the tile marker and the click cannot disagree about it.
+        // The server's items and the map's own furniture are then asked *both*,
+        // and [`picking::in_front`] settles them against each other — see there
+        // for why that pair cannot be an order of asking the way the crowd can.
+        // Either way "what is under the cursor" ends up with exactly one answer,
+        // so the ring, the wash, the tile marker and the click cannot disagree
+        // about it.
         // Kept whole, and not just picked from: the click reads a mobile back by
         // [`Who`] rather than by this index, which is only ever good for this
         // one frame's own `Vec` — see `FrameFacts::on_mobile`.
@@ -1673,19 +1675,27 @@ impl App {
             }),
             false => None,
         };
-        // And the map's own furniture last, which is the one a wall is: it has no
-        // serial and cannot be used, so it loses to anything that can. Asked
-        // every frame rather than at the click, because it is what the *tile
-        // marker* has to know — a wall under the cursor takes the highlight, and
-        // the diamond drawn on the ground behind it was the client answering the
-        // same question twice with two different tiles.
+        // And the map's own furniture, asked beside the items rather than only
+        // where they found nothing. Asked every frame rather than at the click,
+        // because it is what the *tile marker* has to know — a wall under the
+        // cursor takes the highlight, and the diamond drawn on the ground behind
+        // it was the client answering the same question twice with two different
+        // tiles.
+        //
+        // **Both, and then compared.** This used to be asked only where the item
+        // pick came back empty, which made "the item wins" a rule nobody had
+        // stated and nobody could see — and the day a house's floor became a
+        // live item, that unstated rule was deciding which storey a click walked
+        // to. The cost of asking both is one extra map walk in the frames where
+        // the cursor is on an item, which is exactly the frames where the
+        // question exists at all.
         //
         // This is the one pick that walks the map: `statics::pick` covers the
         // cells `statics::collect` is about to draw. It is a second walk of them
         // per frame with the pointer over the world, and the placement it does
         // per static is the collector's own — see the Frames tab if it ever
         // shows.
-        let on_static = match owns_pointer && on_mobile.is_none() && on_item.is_none() {
+        let on_static = match owns_pointer && on_mobile.is_none() {
             true => self.window.as_ref().and_then(|window| {
                 statics::pick_with_interior(
                     self.resources.map(),
@@ -1700,6 +1710,8 @@ impl App {
             }),
             false => None,
         };
+        // Which of the two the frame drew in front, and the other one put out.
+        let (on_item, on_static) = crate::picking::in_front(on_item, on_static);
         // What the mode allows to light up. `Tiles` lights neither, which is the
         // whole of that setting; the facts above are unchanged by it.
         let lit_mobile = on_mobile.filter(|_| self.graphics.highlight != HighlightTarget::Tiles);
@@ -1804,9 +1816,14 @@ impl App {
                 .and_then(|drawn| drawn.get(index.position()))
                 .map(|(who, _)| *who)
         });
-        self.picking.hover.item = facts
-            .on_item
-            .map(|index| self.world.presentation.item_serials[index.position()]);
+        // The serial *and* the place, read out of the one entry the hit test
+        // hit: `item_serials` runs parallel to `items` and a house repeats its
+        // serial down both, so the serial alone could not be looked back up to
+        // the storey that was clicked. See [`crate::picking::HoveredItem`].
+        self.picking.hover.item = facts.on_item.map(|index| crate::picking::HoveredItem {
+            serial: self.world.presentation.item_serials[index.position()],
+            at: self.world.presentation.items[index.position()].at,
+        });
     }
 
     /// **Steps two and three**: the frame `Self::advance` staged for. Takes

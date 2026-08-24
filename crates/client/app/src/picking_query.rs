@@ -926,7 +926,7 @@ impl App {
         if let Some(who) = self.picking.hover.mobile {
             return Some(who.unwrap_or(view.player.serial));
         }
-        self.picking.hover.item
+        self.picking.hover.item.map(|item| item.serial)
     }
 
     /// The tooltip to draw at the cursor this frame, and the request that fills

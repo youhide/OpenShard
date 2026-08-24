@@ -120,7 +120,7 @@ impl App {
         }
         let object = match (self.picking.hover.mobile, self.picking.hover.item) {
             (Some(Some(mobile)), _) => Some(mobile),
-            (_, Some(item)) => Some(item),
+            (_, Some(item)) => Some(item.serial),
             _ => None,
         };
         if cursor.cursor.kind == TargetKind::Object && object.is_none() {
@@ -132,6 +132,15 @@ impl App {
         // reject an otherwise valid lumberjacking swing.  The static pick also
         // carries its placed z, which is the exact value the shard verifies
         // against the map.
+        //
+        // **A hovered item is deliberately not read here**, unlike in
+        // `App::walk_destination`, and the difference is what the two answers
+        // are *for*: a move order names a place in the world, while this names a
+        // place **on the map** — `skills::resolve_harvest_target` looks the
+        // graphic up in the facet's own statics and refuses one that is not
+        // there, so an item's graphic sent as a location would be a refusal
+        // rather than an improvement.  The item is named by `object` above,
+        // which is the half of the reply the shard reads for it.
         let (location, graphic) = if let Some(picked) = self.picking.hover.static_ {
             (picked.at, Some(picked.graphic))
         } else {
@@ -442,12 +451,22 @@ impl App {
     /// height is the whole of the order: a house's second storey and the street
     /// under it are one tile, and a click that carried only that tile was an
     /// order to whichever of them the body was already level with. So a click
-    /// that landed on a static takes *that* static's place — the same
-    /// static-first precedence [`App::target_under_cursor`] answers a shard's
-    /// location cursor with, and the same one the reference client walks by. It
-    /// is also the only reading that can name an upper floor at all:
-    /// [`App::pick_tile`] unprojects at the body's own height, so a roof under
-    /// the cursor answers with the ground tile behind it.
+    /// that landed on something takes *that thing's* place, which is the reading
+    /// the reference client walks by. It is also the only reading that can name
+    /// an upper floor at all: [`App::pick_tile`] unprojects at the body's own
+    /// height, so a roof under the cursor answers with the ground tile behind
+    /// it.
+    ///
+    /// **A house somebody built is the same case, and it is not a static.** A
+    /// multi is expanded into ground items where the view becomes a draw list
+    /// (`App::apply_items`), so the second storey of a player's house is a
+    /// [`Hover::item`](crate::picking::Hover::item) and never a
+    /// [`Hover::static_`](crate::picking::Hover::static_) — which is why the
+    /// item arm is here and why it can be read plainly. The two are settled
+    /// against each other before they get here, by the depth the *frame* sorted
+    /// them at rather than by the order this match happens to be written in
+    /// (see [`crate::picking::in_front`]), so at most one of them is `Some` and
+    /// the arms below cannot be a silent precedence.
     ///
     /// **The art's own z, not a surface.** What a body may stand on at that
     /// height is the search's to resolve and `steer.rs`'s to compare arrival
@@ -457,9 +476,10 @@ impl App {
     /// wall, a tree) is the refusal it always was — the walk goes as close as the
     /// ground allows and stops there.
     pub(crate) fn walk_destination(&self, tile: &PickedTile) -> Point {
-        match self.picking.hover.static_ {
-            Some(picked) => picked.at,
-            None => Point::new(tile.at.x, tile.at.y, tile.stand_z.0),
+        match (self.picking.hover.static_, self.picking.hover.item) {
+            (Some(picked), _) => picked.at,
+            (None, Some(item)) => item.at,
+            (None, None) => Point::new(tile.at.x, tile.at.y, tile.stand_z.0),
         }
     }
 
@@ -652,7 +672,7 @@ impl App {
         ) else {
             return;
         };
-        let serial = self.world.presentation.item_serials[index.position()];
+        let serial = self.world.presentation.item_serials[index.what.position()];
         match self.world.shard.link() {
             Some(link) => link.use_object(serial),
             None => tracing::info!(serial = serial.raw(), "nothing used: no shard is connected"),

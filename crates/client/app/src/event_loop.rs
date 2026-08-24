@@ -678,12 +678,13 @@ impl ApplicationHandler<()> for App {
                     // one the last frame was drawn with — the picture the player
                     // is clicking on.
                     let camera = *self.control.camera();
-                    // What the last frame found under the cursor — by identity,
-                    // and in the same order the hover pick already answered
-                    // "what is the cursor on" in: a creature first, then an item,
-                    // then the map's own furniture, then bare ground. `None` all
-                    // the way down is how a selection is put out: there is
-                    // nothing to select where nothing is standing.
+                    // What the last frame found under the cursor — by identity.
+                    // At most one of the three is `Some` (see [`Hover`]), so
+                    // this is a match over three exclusive answers rather than a
+                    // shortlist being re-ranked here: the frame already settled
+                    // which of them the cursor is on. `None` all the way down is
+                    // how a selection is put out — there is nothing to select
+                    // where nothing is standing, and bare ground is the tile.
                     //
                     // **The tile a bare click names is the ground under the
                     // cursor; everything else's is its own.** Two different
@@ -701,7 +702,7 @@ impl ApplicationHandler<()> for App {
                         self.picking.hover.static_,
                     ) {
                         (Some(who), _, _) => Some(SelectedIdentity::Mobile(who)),
-                        (None, Some(serial), _) => Some(SelectedIdentity::Item(serial)),
+                        (None, Some(item), _) => Some(SelectedIdentity::Item(item.serial)),
                         (None, None, Some(picked)) => Some(SelectedIdentity::Static(picked)),
                         (None, None, None) => self.pick_tile(camera).map(|tile| SelectedIdentity::Tile {
                             x: tile.at.x,

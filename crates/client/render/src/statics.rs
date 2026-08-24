@@ -1351,7 +1351,7 @@ mod tests {
             )
         };
         assert_eq!(
-            pick_at(30.0, 30.0),
+            pick_at(30.0, 30.0).map(|hit| hit.what),
             Some(PickedStatic {
                 at: Point::new(100, 100, 0),
                 graphic,
@@ -1401,9 +1401,89 @@ mod tests {
             cursor_over(&camera, near, 22.0, 10.0),
         );
         assert_eq!(
-            found.map(|picked| picked.at),
+            found.map(|hit| hit.what.at),
             Some(Point::new(101, 101, 0)),
             "the wall behind was picked through the one in front",
+        );
+    }
+
+    /// **The two lists' answers can be compared, because they are one
+    /// arithmetic.**
+    ///
+    /// The cursor is tested against the map's own furniture and against the
+    /// shard's items by two separate searches over two separate lists, and the
+    /// app decides between their answers by the [`depth::Order`] each carries
+    /// (`picking::in_front`). That decision is only meaningful if the two orders
+    /// mean the same thing — which they do, because [`crate::items::place`] is
+    /// [`place`] and not a second copy of it, and this is the test that says so.
+    /// A wall lying on the floor and a wall built into the map sort alike; put
+    /// the item one tile nearer the eye and it is in front, whatever height the
+    /// static behind it has.
+    #[test]
+    fn a_map_static_and_a_ground_item_are_ordered_by_one_arithmetic() {
+        let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
+        let graphic = Graphic(0x0006);
+        let atlas = atlas(graphic, 44, 88);
+        let tiledata = TileData::empty();
+        let animations = StaticAnimations::default();
+        let at = Point::new(100, 100, 0);
+        let mut map = field();
+        map.place_static(StaticItem {
+            tile: graphic,
+            x: at.x,
+            y: at.y,
+            z: at.z,
+            hue: Hue(0),
+        });
+        let item = |at| crate::items::GroundItem {
+            amount: openshard_protocol::items::ItemAmount::ONE,
+            at,
+            graphic,
+            hue: Hue::NONE,
+        };
+        let sprite = atlas.sprite(graphic).expect("packed");
+        // On the wall's own tile, so both pictures stand in the same place and
+        // one cursor is on either of them — and low enough down the sprite that
+        // the tile one step nearer, which stands a whole tile height further
+        // down the screen, still has this same pixel inside its own picture.
+        let cursor = cursor_over(&camera, stand_on(&camera, at, &sprite), 22.0, 70.0);
+        let pick_static = |cursor| {
+            pick(
+                &map,
+                &camera,
+                &tiledata,
+                &animations,
+                &atlas,
+                &Cutaway::OPEN,
+                cursor,
+            )
+        };
+        let pick_item = |items: &[crate::items::GroundItem], cursor| {
+            crate::items::pick(
+                items,
+                &camera,
+                &tiledata,
+                &animations,
+                &atlas,
+                &Cutaway::OPEN,
+                cursor,
+            )
+        };
+
+        let wall = pick_static(cursor).expect("the cursor is on the map's wall");
+        let lying = pick_item(&[item(at)], cursor).expect("the cursor is on the item too");
+        assert_eq!(
+            lying.order, wall.order,
+            "one graphic in one place sorted two ways depending on which list it came from",
+        );
+
+        // And one tile nearer the eye, which is the case `in_front` exists for:
+        // a house's floor drawn over the street behind it.
+        let nearer = Point::new(at.x + 1, at.y + 1, at.z);
+        let floor = pick_item(&[item(nearer)], cursor).expect("the nearer sprite covers this pixel");
+        assert!(
+            floor.order > wall.order,
+            "the item a tile nearer did not outrank the static behind it",
         );
     }
 
@@ -1497,7 +1577,7 @@ mod tests {
             cursor,
         )
         .expect("the cursor is on the wall's own pixels");
-        assert_eq!(picked.at, stands, "the wall is on the tile it was placed on");
+        assert_eq!(picked.what.at, stands, "the wall is on the tile it was placed on");
 
         // And the other arithmetic: the ground the cursor points at, read at the
         // ground's own height, which is what `App::pick_tile` resolves.
@@ -1622,6 +1702,7 @@ mod tests {
             &Cutaway::OPEN,
             cursor,
         );
+        let picked = picked.map(|hit| hit.what);
         assert_eq!(picked, Some(PickedStatic { at, graphic }));
 
         let mask = selected(&camera, &tiledata, &animations, &atlas, &Cutaway::OPEN, picked);
