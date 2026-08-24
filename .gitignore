@@ -12,6 +12,12 @@ node_modules/
 .next/
 dist/
 .turbo/
+# Byte-code the interpreter writes beside the helper scripts in `tools/`, one
+# file per script per Python version. Nobody edits it and it outlives the
+# script: a `font_multimatte.cpython-314.pyc` was still there after the
+# experiment that made it had been deleted.
+__pycache__/
+*.pyc
 
 # Local data
 *.sqlite
@@ -67,4 +73,8 @@ CLAUDE.local.md
 # ours to distribute.
 *.osbase
 *.ospatch
-openshard-navigation-*.bin
+# The bake names itself after the world file it read — `openshard-navigation-0.bin`
+# only when there is no world file, and `<stem>-navigation-0.bin` otherwise (see
+# `openshard_movement::bake`). A 7 MiB `felucca-navigation-0.bin` sat untracked
+# in the working tree because the narrow first pattern did not cover the stem.
+*-navigation-*.bin
