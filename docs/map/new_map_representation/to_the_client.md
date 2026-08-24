@@ -388,3 +388,21 @@ Found while building E1:
   a map revision is one and splitting it into two dwords at the wire would be a
   second spelling of the same number. Worth noting only because it means no
   reference packet has ever carried a field this wide.
+
+Found while fixing the two above:
+
+- **"Is this facet loaded" has no accessor either, and nine callers ask it by
+  hand.** `state.facets.contains_key(&facet)`, each one followed by the same
+  `if … { facet } else { default_facet }` — `enter.rs`, `travel.rs`, `decor.rs`
+  (twice), `regions.rs` (three times), `gates.rs` (three times), `persist.rs`
+  (three times), `npc/spawn.rs`, `items/spawn.rs`, `gm.rs`. `facet_state_if_loaded`
+  now covers the *reading* half of that question; the falling-back half is one
+  named method — "the facet this number means on this shard" — and it would put
+  the rule in one place rather than in eleven `if`s that have to agree.
+- **`a_property_list_is_framed_even_though_no_variant_carries_it` is now named
+  after something that is no longer true.** A variant does carry `0xD6` —
+  `PropertyListReply`, in the fixture since this fix. What has no variant is the
+  server-side *builder*, `PropertyList`, which is what the test actually frames,
+  and the test is still worth having for exactly that reason: a second writer of
+  the same id is a second chance to disagree with the table. Rename, don't
+  delete.
