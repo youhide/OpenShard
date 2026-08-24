@@ -915,18 +915,29 @@ device.
 **The floor fills in.** Both windows open at their widest zoom, an empty cache,
 two physical pixels to a gump pixel (an ordinary HiDPI screen at no desk scale):
 the facet map picks level 2 and draws 448 chunks, the minimap level 1 and 144.
-The floor is complete in **122 frames and 154 ms of raster**, no frame above
-**1.65 ms**, and no view is missing terrain from frame 111 on. The fallback
-ladder is visible doing its job on the way: `coarser` climbs to 144 as the
-minimap's level-1 chunks are stood in for by their level-2 ancestors, and falls
-back to zero as the exact products land. The CPU cache settles at **5.8 MiB of
-its 32 MiB tail** and evicts nothing; the queue peaks at 588 of 1024.
+The floor is complete in **122 frames and 592 chunks**, and no view is missing
+terrain from frame 111 on. The fallback ladder is visible doing its job on the
+way: `coarser` climbs to 144 as the minimap's level-1 chunks are stood in for by
+their level-2 ancestors, and falls back to zero as the exact products land. The
+CPU cache settles at **5.8 MiB of its 32 MiB tail** and evicts nothing; the
+queue peaks at 588 of 1024.
 
-**Walking costs no raster work — 19 ns a step.** A minimap alone at zoom 0, a
-player stepping one tile a frame for 256 tiles: **4 frames of the 256 did any
-raster work at all**, one per chunk edge crossed, 102 µs each. The other 252
-cost 19 nanoseconds between them, which is the producer being handed nothing.
-The argument this document has carried since R7 is now a number.
+**Walking costs no raster work — twenty nanoseconds a step.** A minimap alone at
+zoom 0, a player stepping one tile a frame for 256 tiles: **4 frames of the 256
+did any raster work at all**, one per chunk edge crossed. The other 252 cost
+about twenty nanoseconds each, which is the producer being handed nothing. The
+argument this document has carried since R7 is now a number.
+
+**What in the above is a wall clock, and what is not.** Every count here — 122
+frames, 592 chunks, 448 and 144 pages, 5.8 MiB, 4 building frames of 256 — is
+exact and reproduces run to run, because they are properties of the map and the
+bounds. The milliseconds are not: the floor's raster total moved between 154 ms
+and 194 ms across two runs on the same machine, and its worst frame between
+1.65 ms and 3.35 ms, with parallel work on the other cores. Read them as *a
+frame is a millisecond or two, not a hundred* — which is the claim R8 made and
+the one worth checking — and take a fresh reading before quoting a number to
+three digits. `coarse_bench`'s discipline of printing how a reading was taken is
+the shape this should grow towards.
 
 **The two bounds a run without a device can read** are both fine at 1×: the
 worst zoom of either window asks for 344 pages of 1024, and the CPU tail never
