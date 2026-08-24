@@ -51,19 +51,23 @@
 //! over: an assertion over a shipped multi table is an assertion about the art.
 //!
 //! ```sh
-//! OPENSHARD_CLIENT=... cargo test -p openshard-boats --test boat_art_survey -- --nocapture --ignored
+//! OPENSHARD_CLIENT=... cargo test -p openshard-boats --test moored_boat boat_art_survey -- --nocapture --ignored
 //! ```
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
 use openshard_entities::{EntityId, Registry};
 use openshard_map::grid::Tile;
-use openshard_map::overlay::{Cover, Overlay};
-use openshard_movement::MAX_STEP_UP;
+use openshard_map::map::WorldMap;
+use openshard_map::overlay::{Cover, Doors, Overlay};
+use openshard_movement::spans::SpanIndex;
+use openshard_movement::{Footing, MAX_STEP_UP, MapTerrain, step_allowed};
+use openshard_protocol::direction::Direction;
+use openshard_protocol::world::Point;
 use openshard_state::boat::Plank;
 use openshard_tiles::TileData;
-use openshard_uofiles::multi::Multis;
+use openshard_uofiles::multi::{Component, Multis};
 
 /// The multi ids a ship can have.
 ///
@@ -432,5 +436,573 @@ fn boat_art_survey() {
     }
     if totals.is_empty() {
         println!("  the two readings agree on every component of every ship");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The walk: a real pier, a real ship beside it, and the shard's own step rule.
+// ---------------------------------------------------------------------------
+
+/// The ship this walk moors.
+///
+/// One hull and not the fleet: [`boat_art_survey`] has already established that
+/// all twenty-four lay the same two readings at the same heights, so a second
+/// ship would measure the same arithmetic against more piers.
+const SMALL_BOAT: u16 = 0x00;
+
+/// How far from a pier a berth is looked for.
+///
+/// A ship is a handful of tiles across, so an origin further out than this puts
+/// even its nearest gunwale beyond a step of the pier and leaves the walk with
+/// nothing to measure.
+const BERTH_RADIUS: i32 = 4;
+
+/// How many piers to walk.
+///
+/// A cap, and the survey says what it dropped: silent truncation reads as "the
+/// whole facet" when it is not. The piers are taken at an even stride so the
+/// sample is not one harbour.
+const PIERS_WALKED: usize = 20_000;
+
+/// One facet, and the three tables a step over it is decided by.
+struct Harbour {
+    map: WorldMap,
+    tiles: TileData,
+    spans: SpanIndex,
+    multis: Multis,
+}
+
+fn real_harbour() -> Option<Harbour> {
+    let dir = client_dir()?;
+    let map = openshard_uofiles::map::read_facet(&dir, 0).expect("the client's map0 should load");
+    let tiles =
+        openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata should load");
+    let multis = Multis::load(&dir).expect("the client's multi table should load");
+    let spans = SpanIndex::build(&map, &tiles);
+    Some(Harbour {
+        map,
+        tiles,
+        spans,
+        multis,
+    })
+}
+
+/// Every tile a ship whose origin is `(x, y)` would put something on.
+fn footprint(components: &[Component], x: u16, y: u16) -> Option<Vec<(u16, u16)>> {
+    components
+        .iter()
+        .filter(|c| c.drawn())
+        .map(|component| {
+            let (Ok(cx), Ok(cy)) = (
+                u16::try_from(i32::from(x) + i32::from(component.dx)),
+                u16::try_from(i32::from(y) + i32::from(component.dy)),
+            ) else {
+                return None;
+            };
+            Some((cx, cy))
+        })
+        .collect()
+}
+
+/// The nearest berth to `(x, y)` a ship could actually be moored at — all sea,
+/// which is `boats::check_berth`'s first judgement.
+///
+/// Its second judgement, *nothing else already there*, is met by construction:
+/// **one ship is moored at a time, in an overlay of its own**. A harbour-wide
+/// pass would have to arbitrate between piers competing for the same water, and
+/// whichever pier lost would go unmeasured — which is a cap on coverage
+/// disguised as a fixture. Every pier gets its ship here.
+///
+/// Nearest rather than first, so the ship ends up alongside the pier rather
+/// than wherever the scan happened to reach it from.
+fn berth_near(terrain: &MapTerrain<'_>, components: &[Component], x: u16, y: u16) -> Option<(u16, u16)> {
+    let mut best: Option<((u16, u16), i32)> = None;
+    for dy in -BERTH_RADIUS..=BERTH_RADIUS {
+        for dx in -BERTH_RADIUS..=BERTH_RADIUS {
+            let (Ok(ox), Ok(oy)) = (u16::try_from(i32::from(x) + dx), u16::try_from(i32::from(y) + dy))
+            else {
+                continue;
+            };
+            let Some(berth) = footprint(components, ox, oy) else {
+                continue;
+            };
+            if !berth
+                .iter()
+                .all(|&(cx, cy)| terrain.land_is_water(Tile::new(cx, cy)))
+            {
+                continue;
+            }
+            let distance = dx * dx + dy * dy;
+            if best.is_none_or(|(_, seen)| distance < seen) {
+                best = Some(((ox, oy), distance));
+            }
+        }
+    }
+    best.map(|(origin, _)| origin)
+}
+
+/// Lay a ship into two overlays at once: the reading the shard has, and the one
+/// it retired.
+///
+/// Both from the same components at the same z, so a difference between the two
+/// walks below is the *rule* and nothing else.
+fn moor_both(
+    harbour: &Harbour,
+    boat: EntityId,
+    origin: (u16, u16),
+    z: i8,
+    now: &mut Overlay,
+    then: &mut Overlay,
+) {
+    let mut now_at: BTreeMap<(u16, u16), Vec<Cover>> = BTreeMap::new();
+    let mut then_at: BTreeMap<(u16, u16), Vec<Cover>> = BTreeMap::new();
+    for component in harbour.multis.components(SMALL_BOAT).iter().filter(|c| c.drawn()) {
+        let (Ok(x), Ok(y)) = (
+            u16::try_from(i32::from(origin.0) + i32::from(component.dx)),
+            u16::try_from(i32::from(origin.1) + i32::from(component.dy)),
+        ) else {
+            continue;
+        };
+        let Ok(at) = i8::try_from(i32::from(z) + i32::from(component.dz)) else {
+            continue;
+        };
+        let art = harbour.tiles.static_tile(component.graphic);
+        now_at
+            .entry((x, y))
+            .or_default()
+            .extend(Plank::of_art(boat, art, at).covers());
+        then_at
+            .entry((x, y))
+            .or_default()
+            .push(the_reading_that_was(art, at));
+    }
+    for ((x, y), covers) in now_at {
+        now.set(Tile::new(x, y), covers);
+    }
+    for ((x, y), covers) in then_at {
+        then.set(Tile::new(x, y), covers);
+    }
+}
+
+/// One step, spelled out, so a count can be checked against a case.
+struct Example {
+    /// The pier it was taken from.
+    pier: (u16, u16),
+    /// The tile it landed on.
+    onto: (u16, u16),
+    /// The height the body arrived at.
+    at: i32,
+    /// Every surface the ship lays on that tile.
+    decks: Vec<i32>,
+}
+
+/// What one reading of one moored ship does to the steps off a pier.
+///
+/// **The reference for every verdict is the deck as the shard reads it now**,
+/// for both walks: "under the deck" has to mean under the floor the engine
+/// agrees is there, and a retired reading asked about its own invented floors
+/// would report itself correct.
+struct Walk {
+    /// Steps the bare map refused and the ship made legal — a boarding.
+    boarded: usize,
+    /// Of those, the ones that put the body exactly on the ship's deck. A
+    /// boarding, however far down it was: a pier stands over the water and a
+    /// hull floats in it, so stepping aboard is a step *down* by construction.
+    onto_deck: usize,
+    /// **The fall.** The body lands below the ship's own deck at that tile —
+    /// inside the hull, with the planking over its head.
+    under_deck: usize,
+    /// The worst of those: the pier it was walked off, and how far under.
+    worst_under: Option<((u16, u16), i32)>,
+    /// Steps the ship made legal **without supplying the landing**: the height
+    /// the body arrived at is the map's own — a piling, a pier plank over
+    /// water, the shore — and what the ship changed was a *diagonal's flank*,
+    /// which `step_allowed` refuses when either cardinal beside it has no
+    /// footing. Not a boarding, and counted apart so it cannot be read as one.
+    not_a_boarding: usize,
+    /// One of those, spelled out. A count alone cannot be told apart from a
+    /// defect in this survey's own arithmetic — which is how the first two
+    /// versions of this classification were caught.
+    an_example: Option<Example>,
+    /// How far a pier deck stands above the deck a body boards onto.
+    ///
+    /// `boats.md`'s open question, which its own fixture names: *what a real
+    /// sloop's deck actually stands at over real water*.
+    drops: Vec<i32>,
+    /// Steps the bare map already allowed whose answer the ship *lowered*.
+    ///
+    /// Should be nothing: where the map answers, only `climbed` speaks, and it
+    /// takes surfaces strictly above the ground. A landing that went down here
+    /// would be a defect in the rule rather than in the art.
+    lowered: usize,
+}
+
+impl Walk {
+    fn nothing_yet() -> Self {
+        Self {
+            boarded: 0,
+            onto_deck: 0,
+            under_deck: 0,
+            worst_under: None,
+            not_a_boarding: 0,
+            an_example: None,
+            drops: Vec::new(),
+            lowered: 0,
+        }
+    }
+}
+
+/// Every step off one pier, with one ship beside it, under one reading.
+fn walk_off(
+    terrain: MapTerrain<'_>,
+    overlay: &Overlay,
+    bare: &Overlay,
+    truth: &Overlay,
+    pier: (u16, u16, i8),
+    out: &mut Walk,
+) {
+    let (x, y, deck) = pier;
+    let footing = Footing::new(Some(terrain), overlay, Doors::AsTheyStand);
+    let bare_footing = Footing::new(Some(terrain), bare, Doors::AsTheyStand);
+    let from = Point::new(x, y, deck);
+    for direction in Direction::ALL {
+        let with = step_allowed(&footing, from, direction);
+        let without = step_allowed(&bare_footing, from, direction);
+        match (with, without) {
+            (Some(landed), None) => {
+                out.boarded += 1;
+                let at = i32::from(landed.z);
+                let tile = Tile::new(landed.x, landed.y);
+                // The verdict rests on what the ship lays *at the destination*,
+                // and the first arm is why: a diagonal is refused when either
+                // flanking cardinal has no footing, so a ship can make a step
+                // legal without the body ever leaving the map's own ground.
+                let decks: Vec<i32> = truth.surfaces_at(tile).map(Cover::surface).collect();
+                let highest = decks.iter().copied().max();
+                // **Did the ship supply the height the body arrived at?** That
+                // is the whole classification, and nothing else is: a hull may
+                // cover the destination and a pier plank may stand on the same
+                // water, so neither "the ship is here" nor "the map refused"
+                // is the question.
+                match highest {
+                    Some(_) if decks.contains(&at) => {
+                        out.onto_deck += 1;
+                        out.drops.push(i32::from(deck) - at);
+                    }
+                    Some(highest) if at < highest => {
+                        out.under_deck += 1;
+                        let under = highest - at;
+                        if out.worst_under.is_none_or(|(_, seen)| under > seen) {
+                            out.worst_under = Some(((x, y), under));
+                        }
+                    }
+                    _ => {
+                        out.not_a_boarding += 1;
+                        if out.an_example.is_none() {
+                            out.an_example = Some(Example {
+                                pier: (x, y),
+                                onto: (landed.x, landed.y),
+                                at,
+                                decks,
+                            });
+                        }
+                    }
+                }
+            }
+            (Some(landed), Some(bare_landed)) if landed.z < bare_landed.z => out.lowered += 1,
+            _ => {}
+        }
+    }
+}
+
+/// The same pier walked by a body water is ground to.
+///
+/// **`boats.md`'s open question, and the overlay it says the earlier survey did
+/// not have.** That document keeps `MapTerrain::swimming` off, and since
+/// 2026-08-23 its recorded reason is an open one: with the flag on, `check`
+/// stops refusing water and answers with the water's own height, so `aboard`
+/// never fires and the deck is left to `climbed` — which bounds the climb by
+/// `MAX_STEP_UP`. A deck more than two above the water would then leave a body
+/// standing on the sea *under its own ship*. It says so, and says it has not
+/// been measured. This measures it.
+///
+/// There is no bare comparison here, because the question is not which steps
+/// the ship makes legal — with swimming on the water is already walkable. It is
+/// where a body ends up on a tile the ship covers.
+///
+/// **And it is walked from the water rather than from the pier**, which is the
+/// whole of what makes it the right question. A body stepping off a pier
+/// reaches from the top of the pier's own art, which clears a deck easily; the
+/// body the prediction is about is *in the sea beside the hull*, whose reach is
+/// the waterline plus two.
+struct Swim {
+    /// Tiles of open water beside a hull where a swimmer can float at all. A
+    /// zero anywhere below means nothing was tried unless this one is large.
+    alongside: usize,
+    /// Steps from one of those toward a tile the ship covers.
+    tried: usize,
+    /// Refused: the tile is a wall to a swimmer, whatever is on it.
+    refused: usize,
+    /// Allowed, and the body arrives on the deck.
+    onto_deck: usize,
+    /// **Allowed, and the body arrives below the deck** — floating in the sea
+    /// with its own ship over its head, which is the prediction.
+    under_deck: usize,
+    /// The worst of those: the water it swam from, and how far under.
+    worst_under: Option<((u16, u16), i32)>,
+}
+
+impl Swim {
+    const fn nothing_yet() -> Self {
+        Self {
+            alongside: 0,
+            tried: 0,
+            refused: 0,
+            onto_deck: 0,
+            under_deck: 0,
+            worst_under: None,
+        }
+    }
+}
+
+fn swim_off(
+    terrain: MapTerrain<'_>,
+    map: &WorldMap,
+    overlay: &Overlay,
+    berth: &[(u16, u16)],
+    out: &mut Swim,
+) {
+    let footing = Footing::new(Some(terrain), overlay, Doors::AsTheyStand);
+    let aboard: HashSet<(u16, u16)> = berth.iter().copied().collect();
+    // The ring of open water round the hull, each tile once however many of the
+    // ship's tiles it touches.
+    let mut alongside: HashSet<(u16, u16)> = HashSet::new();
+    for &(bx, by) in berth {
+        for direction in Direction::ALL {
+            let (dx, dy) = direction.step();
+            let (Ok(wx), Ok(wy)) = (
+                u16::try_from(i32::from(bx) + dx),
+                u16::try_from(i32::from(by) + dy),
+            ) else {
+                continue;
+            };
+            if !aboard.contains(&(wx, wy)) && terrain.land_is_water(Tile::new(wx, wy)) {
+                alongside.insert((wx, wy));
+            }
+        }
+    }
+
+    for (wx, wy) in alongside {
+        let Some(cell) = map.land(wx, wy) else {
+            continue;
+        };
+        let waterline = i32::from(cell.z);
+        // Where a swimmer actually floats there, by the map's own rule rather
+        // than by this survey's guess at it.
+        let Some(stand) = terrain.check(wx, wy, waterline, waterline) else {
+            continue;
+        };
+        let Ok(from_z) = i8::try_from(stand) else {
+            continue;
+        };
+        out.alongside += 1;
+        let from = Point::new(wx, wy, from_z);
+        for direction in Direction::ALL {
+            let (dx, dy) = direction.step();
+            let (Ok(tx), Ok(ty)) = (
+                u16::try_from(i32::from(wx) + dx),
+                u16::try_from(i32::from(wy) + dy),
+            ) else {
+                continue;
+            };
+            if !aboard.contains(&(tx, ty)) {
+                continue;
+            }
+            out.tried += 1;
+            let Some(landed) = step_allowed(&footing, from, direction) else {
+                out.refused += 1;
+                continue;
+            };
+            let decks: Vec<i32> = overlay
+                .surfaces_at(Tile::new(landed.x, landed.y))
+                .map(Cover::surface)
+                .collect();
+            let Some(highest) = decks.iter().copied().max() else {
+                out.refused += 1;
+                continue;
+            };
+            let at = i32::from(landed.z);
+            if decks.contains(&at) {
+                out.onto_deck += 1;
+            } else if at < highest {
+                out.under_deck += 1;
+                let under = highest - at;
+                if out.worst_under.is_none_or(|(_, seen)| under > seen) {
+                    out.worst_under = Some(((wx, wy), under));
+                }
+            }
+        }
+    }
+}
+
+/// **A ship moored at a real pier, and every step off that pier.**
+///
+/// `roadmap.md`'s first remaining suspect for the 2026-08-02 report, measured
+/// rather than reasoned about. The two surveys that refuted the `landCheck`
+/// mechanism both walk the bare map with no overlay at all, and this is the
+/// overlay they could not see: over every pier on facet 0 with sea beside it, a
+/// small boat is moored at the nearest berth it would actually float in, and
+/// every step off the pier is asked of the shard's own `step_allowed`.
+///
+/// Asked twice — of the reading the shard has and of the one it retired — so
+/// the fix is priced on real ground rather than on the multi table alone.
+///
+/// ```sh
+/// OPENSHARD_CLIENT=... cargo test --release -p openshard-boats --test moored_boat moored_pier_survey -- --nocapture --ignored
+/// ```
+#[test]
+#[ignore = "a survey of a whole facet, not an assertion — see the doc comment"]
+fn moored_pier_survey() {
+    let Some(harbour) = real_harbour() else {
+        eprintln!("OPENSHARD_CLIENT is unset — nothing to survey");
+        return;
+    };
+    let terrain = MapTerrain::new(&harbour.map, &harbour.tiles, &harbour.spans);
+    let components = harbour.multis.components(SMALL_BOAT).to_vec();
+    assert!(!components.is_empty(), "this install has no small boat to moor");
+    let mut registry = Registry::new();
+    let boat = registry.spawn();
+
+    // Every pier and bridge deck with open water beside it — the only shape a
+    // ship can be moored against.
+    let (width, height) = (harbour.map.width() as u16, harbour.map.height() as u16);
+    let mut piers: Vec<(u16, u16, i8)> = Vec::new();
+    for y in 1..height - 1 {
+        for x in 1..width - 1 {
+            if harbour.map.land(x, y).is_none() {
+                continue;
+            }
+            let beside_water = Direction::ALL.iter().any(|direction| {
+                let (dx, dy) = direction.step();
+                let (Ok(nx), Ok(ny)) = (u16::try_from(i32::from(x) + dx), u16::try_from(i32::from(y) + dy))
+                else {
+                    return false;
+                };
+                terrain.land_is_water(Tile::new(nx, ny))
+            });
+            if !beside_water {
+                continue;
+            }
+            for item in harbour.map.statics_at(x, y) {
+                let art = harbour.tiles.static_tile(item.tile.0);
+                if !(art.flags.is_platform() && art.flags.is_climbable()) {
+                    continue;
+                }
+                let Some(stands) = Cover::of_static(art).based_at(item.z).stands() else {
+                    continue;
+                };
+                let Ok(deck) = i8::try_from(stands.surface()) else {
+                    continue;
+                };
+                piers.push((x, y, deck));
+            }
+        }
+    }
+
+    let stride = piers.len().div_ceil(PIERS_WALKED).max(1);
+    let walked: Vec<(u16, u16, i8)> = piers.iter().copied().step_by(stride).collect();
+    println!(
+        "moored-pier survey over facet 0, {width}x{height}\n  \
+         pier and bridge decks with sea beside them: {}\n  \
+         walked: {} (every {stride}{})",
+        piers.len(),
+        walked.len(),
+        match stride {
+            1 => String::new(),
+            _ => format!(", so {} were not walked", piers.len() - walked.len()),
+        }
+    );
+
+    // One pier at a time, each with its own ship in its own overlay — see
+    // `berth_near` for why a harbour-wide pass would have been a cap on
+    // coverage rather than a fixture.
+    let bare = Overlay::default();
+    let swimmer = MapTerrain::new(&harbour.map, &harbour.tiles, &harbour.spans).swimming(true);
+    let (mut with_now, mut with_then) = (Walk::nothing_yet(), Walk::nothing_yet());
+    let (mut swim_now, mut swim_then) = (Swim::nothing_yet(), Swim::nothing_yet());
+    let mut moored = 0_usize;
+    for &pier in &walked {
+        let (x, y, _) = pier;
+        let Some(origin) = berth_near(&terrain, &components, x, y) else {
+            continue;
+        };
+        let Some(water) = harbour.map.land(origin.0, origin.1) else {
+            continue;
+        };
+        let Some(berth) = footprint(&components, origin.0, origin.1) else {
+            continue;
+        };
+        moored += 1;
+        let (mut now, mut then) = (Overlay::default(), Overlay::default());
+        moor_both(&harbour, boat, origin, water.z, &mut now, &mut then);
+        // Both walks are judged against the deck as the shard reads it *now*:
+        // what a fall is cannot be defined by the reading under test.
+        walk_off(terrain, &now, &bare, &now, pier, &mut with_now);
+        walk_off(terrain, &then, &bare, &now, pier, &mut with_then);
+        swim_off(swimmer, &harbour.map, &now, &berth, &mut swim_now);
+        swim_off(swimmer, &harbour.map, &then, &berth, &mut swim_then);
+    }
+    println!("  of those, {moored} have room for a small boat within {BERTH_RADIUS} tiles");
+
+    for (who, walk) in [
+        ("the reading now", &with_now),
+        ("the reading retired", &with_then),
+    ] {
+        println!(
+            "\n  {who}:\n    \
+             steps the ship makes legal:        {}\n    \
+             of those, onto the ship's deck:    {}\n    \
+             ⚠ UNDER the ship's own deck:       {}\n    \
+             the ship did not supply the floor: {}\n    \
+             already-legal steps it lowers:     {}",
+            walk.boarded, walk.onto_deck, walk.under_deck, walk.not_a_boarding, walk.lowered
+        );
+        if let Some(((x, y), under)) = walk.worst_under {
+            println!("    ⚠ worst: off the pier at ({x},{y}), {under} under the deck");
+        }
+        if let Some(example) = &walk.an_example {
+            println!(
+                "    one that is not a boarding: off ({},{}) onto ({},{}) at z {}, where the ship lays {:?}",
+                example.pier.0, example.pier.1, example.onto.0, example.onto.1, example.at, example.decks
+            );
+        }
+        let mut drops = walk.drops.clone();
+        drops.sort_unstable();
+        if let (Some(&least), Some(&most)) = (drops.first(), drops.last()) {
+            println!(
+                "    a pier stands {least}..{most} above the deck a body boards onto (median {})",
+                drops[drops.len() / 2]
+            );
+        }
+    }
+
+    // And `boats.md`'s open question, which is about a swimmer rather than a
+    // walker: with `MapTerrain::swimming` on — a flag this shard keeps off —
+    // does a body that cannot climb to the deck end up in the sea under it?
+    println!("\n  with MapTerrain::swimming on, which this shard keeps off:");
+    for (who, swim) in [
+        ("the reading now", &swim_now),
+        ("the reading retired", &swim_then),
+    ] {
+        println!(
+            "    {who}: {} tiles of water alongside a hull, {} steps toward the ship\n      \
+             refused outright:              {}\n      \
+             arrive on the deck:            {}\n      \
+             ⚠ arrive UNDER the deck:       {}",
+            swim.alongside, swim.tried, swim.refused, swim.onto_deck, swim.under_deck
+        );
+        if let Some(((x, y), under)) = swim.worst_under {
+            println!("      ⚠ worst: from the water at ({x},{y}), {under} under the deck");
+        }
     }
 }
