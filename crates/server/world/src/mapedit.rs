@@ -42,18 +42,25 @@
 //! Both are facet-wide for an edit that touches one chunk, and both are direction
 //! D's to make local.
 //!
-//! # What it does not do
+//! # And then everybody standing on it is told
 //!
-//! **Nothing tells a connected client.** Our own client draws the map it loaded
-//! out of the install, and the classic client draws the one on the player's own
-//! disk; neither has a packet that says "this tile is different now". So an edit
-//! changes what the shard *allows* — where a body may stand, what a step is
-//! refused for — while every picture on every screen is the world as it was.
-//! That is direction E, and it is the last piece of C's own "done".
+//! [`PublishNotice`] — `to_the_client.md`'s E4, and the last piece of direction
+//! C's own "done". It goes out **after** the log has the patch, for the reason
+//! the order above exists: a commit whose log refuses puts the world back, and a
+//! client told about a revision that was rolled back holds a world that never
+//! existed and asks for chunks of it.
+//!
+//! What a client does with it is a client's business — see the packet's own doc
+//! for why it is sent to everyone on the facet rather than to a list of
+//! subscribers, and `crates/client/app/src/link.rs` for the one client that acts
+//! on it.
 
 use openshard_basemap::patches;
+use openshard_gateway::ConnectionId;
 use openshard_map::patch::{Patch, PatchError};
 use openshard_map::snapshot::MapRevision;
+use openshard_protocol::chunks::{Changes, ChunkAt, MAX_MOVED, PublishNotice, WorldRevision};
+use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::world::Facet;
 use openshard_state::WorldState;
 
@@ -131,16 +138,72 @@ pub fn commit(state: &mut WorldState, facet: Facet, patch: &Patch) -> Result<Map
     let undo = state.publish(facet, patch).map_err(CommitError::Refused)?;
 
     match patches::append(&log, facet, base, patch) {
-        Ok(()) => Ok(state
-            .facet_state(facet)
-            .ground()
-            .snapshot()
-            .expect("a facet that just published a patch has ground")
-            .revision()),
+        Ok(()) => {
+            let revision = state
+                .facet_state(facet)
+                .ground()
+                .snapshot()
+                .expect("a facet that just published a patch has ground")
+                .revision();
+            announce(state, facet, revision, patch);
+            Ok(revision)
+        }
         Err(source) => {
             state.undo_publish(facet, undo);
             Err(CommitError::NotLogged(source))
         }
+    }
+}
+
+/// Tell everyone standing on `facet` that its ground has moved.
+///
+/// One packet per connection on that facet, naming the revision it moved to and
+/// the chunks the patch touched. Called from [`commit`] alone, and after the log
+/// has the patch — see the module header, which is where that order is argued.
+///
+/// **The audience is the facet and not a list of subscribers**, which is
+/// [`PublishNotice`]'s own decision and is argued there. Here it costs one walk
+/// of the players, which is what every other "everyone who can see this" answer
+/// on this shard costs.
+fn announce(state: &mut WorldState, facet: Facet, revision: MapRevision, patch: &Patch) {
+    let touched = patch.touched_chunks();
+    // An empty patch moves the revision without moving a tile. There is nothing
+    // for a client to fetch and nothing for it to redraw, so there is nothing to
+    // say — and saying `These([])` would be a packet whose only effect is to be
+    // ignored.
+    if touched.is_empty() {
+        return;
+    }
+    // Past the cap the list stops fitting in a packet — see `MAX_MOVED` — and
+    // the honest answer is the one a client can act on: take the facet again.
+    let changes = if touched.len() > usize::from(MAX_MOVED) {
+        Changes::Everything
+    } else {
+        Changes::These(
+            touched
+                .iter()
+                .map(|at| ChunkAt {
+                    x: u16::try_from(at.x).expect("a facet of fewer than 65,536 chunks across"),
+                    y: u16::try_from(at.y).expect("a facet of fewer than 65,536 chunks down"),
+                })
+                .collect(),
+        )
+    };
+    let notice = ServerPacket::PublishNotice(PublishNotice {
+        facet,
+        revision: WorldRevision(revision.get()),
+        changes,
+    });
+    // Collected before anything is sent: naming the audience reads the world and
+    // sending writes to it.
+    let audience: Vec<ConnectionId> = state
+        .players
+        .iter()
+        .filter(|(_, &entity)| state.facet_of(entity) == facet)
+        .map(|(&connection, _)| connection)
+        .collect();
+    for connection in audience {
+        state.send_packet(connection, &notice);
     }
 }
 

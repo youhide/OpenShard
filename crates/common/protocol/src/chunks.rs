@@ -1,6 +1,6 @@
 //! The world itself, over the game connection.
 //!
-//! Six subcommands in the [`OPENSHARD_SUBCOMMANDS`] range, and together they
+//! Seven subcommands in the [`OPENSHARD_SUBCOMMANDS`] range, and together they
 //! are how a client of ours comes to draw the ground *the shard* is standing on
 //! rather than the ground on its own disk. `docs/map/new_map_representation/to_the_client.md`
 //! is the plan; this is its wire.
@@ -16,6 +16,10 @@
 //! 0xE004  WorldNotice    server -> client, on world entry
 //!         facet u8, blocks wide u32, blocks down u32, revision u64,
 //!         world named u8, world id u64
+//!
+//! 0xE005  PublishNotice  server -> client, when the ground moves
+//!         facet u8, revision u64, answer u8,
+//!         then for "these" only: count u16, count x { chunk x u16, chunk y u16 }
 //!
 //! 0xE006  ChunkRefused   server -> client
 //!         facet u8, chunk x u16, chunk y u16, reason u8
@@ -41,8 +45,15 @@
 //! chosen for what happens when we are wrong.
 //!
 //! Beyond that, **only a client that asked is answered**. A stock client never
-//! sends [`ChunkRequest`], so nothing here but [`WorldNotice`] ever reaches one,
-//! and that is seventeen bytes of body it will drop.
+//! sends [`ChunkRequest`], so nothing here but the two notices ever reaches one,
+//! and both are a couple of dozen bytes of body it will drop.
+//!
+//! The two are the exception together and for one reason: a client cannot ask
+//! about a world nobody told it about, and it cannot ask what moved unless
+//! somebody says something did. [`WorldNotice`] is that sentence at world entry
+//! and [`PublishNotice`] is the same sentence afterwards, so there is no
+//! connection state that decides who hears them — see `PublishNotice`'s own doc,
+//! where the alternative is written down and refused.
 //!
 //! # A chunk is deflated, and the packet carries the inflated length
 //!
@@ -685,9 +696,9 @@ impl std::fmt::Display for Refusal {
 /// cannot produce one — which is precisely why it must be visible when it
 /// happens rather than looking like a lost packet.
 ///
-/// `0xE006` and not `0xE005`: the next number is spoken for by the publish
-/// notice this plan's last phase adds, and an id chosen by which was written
-/// first is an id that has to be renumbered later.
+/// `0xE006` and not `0xE005`: that number was left free for the publish notice
+/// this plan's last phase adds — [`PublishNotice`], which now has it — because an
+/// id chosen by which was written first is an id that has to be renumbered later.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ChunkRefused {
     /// Which facet was asked about.
@@ -832,6 +843,11 @@ pub enum Changes {
     /// never published — a log it could not read, or more chunks than
     /// [`MAX_MOVED`]. The client's answer to all four is the same one, which is
     /// why they are one variant and the reason is a log line on the shard.
+    ///
+    /// In a [`PublishNotice`] only the last of the four can be the reason: the
+    /// shard is describing a patch it has just committed, so it knows exactly
+    /// what moved and the only thing it can fail to do is name it all in one
+    /// packet.
     Everything,
 }
 
@@ -892,21 +908,7 @@ impl EncodePacket for ChangesReply {
 
     fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
         out.u16(Self::SUBCOMMAND);
-        out.u8(self.facet.0);
-        out.u64(self.revision.0);
-        out.u8(self.changes.wire());
-        if let Changes::These(chunks) = &self.changes {
-            let count = u16::try_from(chunks.len()).unwrap_or(u16::MAX);
-            assert!(
-                count <= MAX_MOVED,
-                "a changes reply names {count} chunks, and {MAX_MOVED} is the cap"
-            );
-            out.u16(count);
-            for at in chunks {
-                out.u16(at.x);
-                out.u16(at.y);
-            }
-        }
+        write_moved(out, self.facet, self.revision, &self.changes, "a changes reply");
     }
 }
 
@@ -921,41 +923,174 @@ impl DecodePacket for ChangesReply {
                 value: u32::from(subcommand),
             });
         }
-        let facet = Facet(reader.u8()?);
-        let revision = WorldRevision(reader.u64()?);
-        let answer = reader.u8()?;
-        let changes = match answer {
-            0 => {
-                let count = reader.u16()?;
-                if count > MAX_MOVED {
-                    return Err(DecodeError::UnknownValue {
-                        field: "chunks in one changes reply",
-                        value: u32::from(count),
-                    });
-                }
-                let mut chunks = Vec::with_capacity(usize::from(count));
-                for _ in 0..count {
-                    chunks.push(ChunkAt {
-                        x: reader.u16()?,
-                        y: reader.u16()?,
-                    });
-                }
-                Changes::These(chunks)
-            }
-            1 => Changes::Everything,
-            other => {
-                return Err(DecodeError::UnknownValue {
-                    field: "changes reply answer",
-                    value: u32::from(other),
-                });
-            }
-        };
+        let (facet, revision, changes) = read_moved(reader, "changes reply answer")?;
         Ok(Self {
             facet,
             revision,
             changes,
         })
     }
+}
+
+/// `0xBF` subcommand `0xE005` — "the ground under you has moved, and this is
+/// what moved".
+///
+/// The other half of [`ChangesReply`]: that one is an *answer*, sent once to a
+/// client that asked before it had anything to draw; this is an *announcement*,
+/// sent to a client that is already drawing when the shard commits a patch. The
+/// three fields are the same three facts, so they are one body and two
+/// subcommands rather than two encoders that have to agree.
+///
+/// # Who hears it, and why it is nobody's decision
+///
+/// Every connection standing on the facet, whatever client it is running. The
+/// obvious alternative is to send it only to a client that has asked for
+/// chunks — the shard could remember that a connection sent a `0xE002` — and it
+/// is wrong for the reason [`WorldNotice`] is sent unasked in the first place:
+/// **a client cannot ask about something nobody told it happened.** A client of
+/// ours whose kept world was already current asks for nothing at all on the way
+/// in, which is `to_the_client.md`'s E3 working exactly as intended, and a
+/// subscription built out of "who asked" would leave that client — the one whose
+/// cache works best — the one that never hears about an edit.
+///
+/// So it goes to everyone, and what a client does with it is a client's business:
+/// a stock client reads `0xBF`'s length out of the envelope and drops a
+/// subcommand it does not know, and a client of ours that opened a facet on its
+/// own disk ignores it, because the ground it is drawing is not this shard's to
+/// move.
+///
+/// # It is sent after the log has the patch, never before
+///
+/// A commit whose log refuses puts the world back — see `openshard_world`'s
+/// `mapedit::commit` — and a client told about a revision that was rolled back
+/// holds a world that never existed and will ask for chunks of it.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct PublishNotice {
+    /// Which facet moved.
+    pub facet: Facet,
+    /// The revision it moved to.
+    pub revision: WorldRevision,
+    /// What moved to get there.
+    ///
+    /// [`Changes::These`] is the ordinary case and it is the patch's own
+    /// [`touched_chunks`](openshard_map::patch::Patch::touched_chunks) — usually
+    /// one square. [`Changes::Everything`] is a patch that touched more chunks
+    /// than [`MAX_MOVED`], which is the same fact the reply's own `Everything`
+    /// carries for its third reason, and it asks the same thing of the client:
+    /// take the facet again.
+    ///
+    /// An empty list is not sent at all: an empty patch moves the revision
+    /// without moving a tile, and there is nothing for a client to do about it.
+    pub changes: Changes,
+}
+
+impl PublishNotice {
+    /// Which `0xBF` this is.
+    pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 5;
+
+    /// Encode the whole packet.
+    ///
+    /// # Panics
+    ///
+    /// If more than [`MAX_MOVED`] chunks are named — [`ChangesReply::encode`]'s
+    /// panic, for its reason.
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        crate::packet::encode_packet(self, ClientVersion::new(4, 0, 0, 0))
+    }
+}
+
+/// Variable, for [`ChangesReply`]'s reason: the list is as long as what moved.
+impl EncodePacket for PublishNotice {
+    const ID: u8 = 0xBF;
+    const LENGTH: PacketLength = PacketLength::Variable;
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u16(Self::SUBCOMMAND);
+        write_moved(out, self.facet, self.revision, &self.changes, "a publish notice");
+    }
+}
+
+impl DecodePacket for PublishNotice {
+    const ID: u8 = 0xBF;
+
+    fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
+        let subcommand = reader.u16()?;
+        if subcommand != Self::SUBCOMMAND {
+            return Err(DecodeError::UnknownValue {
+                field: "0xBF subcommand for a publish notice",
+                value: u32::from(subcommand),
+            });
+        }
+        let (facet, revision, changes) = read_moved(reader, "publish notice answer")?;
+        Ok(Self {
+            facet,
+            revision,
+            changes,
+        })
+    }
+}
+
+/// A facet, a revision and what moved between it and the last one — the body
+/// [`ChangesReply`] and [`PublishNotice`] share.
+///
+/// `what` names the packet in the panic, because the cap it enforces is the same
+/// cap for both and a caller reading the message wants to know which one it
+/// wrote.
+fn write_moved(out: &mut PacketWriter, facet: Facet, revision: WorldRevision, changes: &Changes, what: &str) {
+    out.u8(facet.0);
+    out.u64(revision.0);
+    out.u8(changes.wire());
+    if let Changes::These(chunks) = changes {
+        let count = u16::try_from(chunks.len()).unwrap_or(u16::MAX);
+        assert!(
+            count <= MAX_MOVED,
+            "{what} names {count} chunks, and {MAX_MOVED} is the cap"
+        );
+        out.u16(count);
+        for at in chunks {
+            out.u16(at.x);
+            out.u16(at.y);
+        }
+    }
+}
+
+/// [`write_moved`] read back. `answer_field` names the packet's own answer byte,
+/// so an unknown one says which packet it was unreadable in.
+fn read_moved(
+    reader: &mut PacketReader<'_>,
+    answer_field: &'static str,
+) -> Result<(Facet, WorldRevision, Changes), DecodeError> {
+    let facet = Facet(reader.u8()?);
+    let revision = WorldRevision(reader.u64()?);
+    let answer = reader.u8()?;
+    let changes = match answer {
+        0 => {
+            let count = reader.u16()?;
+            if count > MAX_MOVED {
+                return Err(DecodeError::UnknownValue {
+                    field: "chunks named in one packet",
+                    value: u32::from(count),
+                });
+            }
+            let mut chunks = Vec::with_capacity(usize::from(count));
+            for _ in 0..count {
+                chunks.push(ChunkAt {
+                    x: reader.u16()?,
+                    y: reader.u16()?,
+                });
+            }
+            Changes::These(chunks)
+        }
+        1 => Changes::Everything,
+        other => {
+            return Err(DecodeError::UnknownValue {
+                field: answer_field,
+                value: u32::from(other),
+            });
+        }
+    };
+    Ok((facet, revision, changes))
 }
 
 #[cfg(test)]
@@ -999,6 +1134,7 @@ mod tests {
             ChunkRequest::SUBCOMMAND,
             ChunkData::SUBCOMMAND,
             WorldNotice::SUBCOMMAND,
+            PublishNotice::SUBCOMMAND,
             ChunkRefused::SUBCOMMAND,
             ChangesRequest::SUBCOMMAND,
             ChangesReply::SUBCOMMAND,
@@ -1014,9 +1150,11 @@ mod tests {
                 "{one:#06X} is used by two of our own packets"
             );
         }
-        // And the one this plan's last phase will take is left free on purpose.
+        // The one this plan's last phase was to take, taken by it: the refusal
+        // is still `0xE006` and the publish notice has the number that was held
+        // for it, so nothing was renumbered on the way.
         assert_eq!(ChunkRefused::SUBCOMMAND, OPENSHARD_SUBCOMMANDS + 6);
-        assert!(!ours.contains(&(OPENSHARD_SUBCOMMANDS + 5)), "0xE005 is reserved");
+        assert_eq!(PublishNotice::SUBCOMMAND, OPENSHARD_SUBCOMMANDS + 5);
     }
 
     #[test]
@@ -1305,6 +1443,77 @@ mod tests {
                 Some(ServerPacket::ChangesReply(sent))
             );
         }
+    }
+
+    /// The announcement, which is the same three facts as the answer above and
+    /// has to read back as a different packet.
+    ///
+    /// Both arms, and the empty list with them: a shard does not *send* an empty
+    /// publish notice — an empty patch moves nothing a client could fetch — but a
+    /// decoder that could not read one would be a decoder with an unreachable
+    /// error in it, and the shared body is what makes that worth checking here.
+    #[test]
+    fn a_publish_notice_survives_the_wire() {
+        for changes in [
+            Changes::These(vec![ChunkAt { x: 2, y: 2 }]),
+            Changes::These(Vec::new()),
+            Changes::Everything,
+        ] {
+            let sent = PublishNotice {
+                facet: Facet(0),
+                revision: WorldRevision(2),
+                changes,
+            };
+            let bytes = sent.encode();
+            assert_eq!(bytes[0], 0xBF);
+            assert_eq!(
+                u16::from_be_bytes([bytes[3], bytes[4]]),
+                PublishNotice::SUBCOMMAND
+            );
+            assert_eq!(
+                ServerPacket::decode(&bytes, version()).expect("our own bytes decode"),
+                Some(ServerPacket::PublishNotice(sent))
+            );
+        }
+    }
+
+    /// The two packets that share a body are still two packets: the same three
+    /// facts under the other subcommand decode as the other variant.
+    ///
+    /// What this is against is the one mistake a shared encoder makes possible —
+    /// writing one subcommand and reading the other — which no round trip of
+    /// either packet alone can see.
+    #[test]
+    fn the_shared_body_is_still_two_packets() {
+        let facet = Facet(1);
+        let revision = WorldRevision(7);
+        let changes = Changes::These(vec![ChunkAt { x: 3, y: 4 }]);
+        let reply = ChangesReply {
+            facet,
+            revision,
+            changes: changes.clone(),
+        }
+        .encode();
+        let notice = PublishNotice {
+            facet,
+            revision,
+            changes,
+        }
+        .encode();
+        assert_eq!(
+            reply[5..],
+            notice[5..],
+            "the bodies are one encoder and have to agree byte for byte"
+        );
+        assert_ne!(reply[3..5], notice[3..5], "and the subcommands are two");
+        assert!(matches!(
+            ServerPacket::decode(&reply, version()).expect("our own bytes decode"),
+            Some(ServerPacket::ChangesReply(_))
+        ));
+        assert!(matches!(
+            ServerPacket::decode(&notice, version()).expect("our own bytes decode"),
+            Some(ServerPacket::PublishNotice(_))
+        ));
     }
 
     /// A reply naming the most chunks it may fits in a packet, and one naming a

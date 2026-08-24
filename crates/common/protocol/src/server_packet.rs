@@ -167,6 +167,9 @@ pub enum ServerPacket {
     /// `0xBF` subcommand `0xE004` — which facet the connection is standing in,
     /// how big it is and which revision of it the shard holds.
     WorldNotice(crate::chunks::WorldNotice),
+    /// `0xBF` subcommand `0xE005` — the ground moved under a connection that is
+    /// already standing on it, and these are the chunks that moved.
+    PublishNotice(crate::chunks::PublishNotice),
     /// `0xBF` subcommand `0xE006` — a chunk that was asked for is not coming.
     ChunkRefused(crate::chunks::ChunkRefused),
     /// `0xBF` subcommand `0xE008` — what moved since the revision a client says
@@ -260,6 +263,7 @@ impl ServerPacket {
             Self::AuthorityNotice(_) => <crate::access::AuthorityNotice as EncodePacket>::ID,
             Self::ChunkData(_) => <crate::chunks::ChunkData as EncodePacket>::ID,
             Self::WorldNotice(_) => <crate::chunks::WorldNotice as EncodePacket>::ID,
+            Self::PublishNotice(_) => <crate::chunks::PublishNotice as EncodePacket>::ID,
             Self::ChunkRefused(_) => <crate::chunks::ChunkRefused as EncodePacket>::ID,
             Self::ChangesReply(_) => <crate::chunks::ChangesReply as EncodePacket>::ID,
             Self::PropertyListReply(_) => <PropertyListReply as EncodePacket>::ID,
@@ -338,6 +342,7 @@ impl ServerPacket {
             Self::AuthorityNotice(_) => <crate::access::AuthorityNotice as EncodePacket>::LENGTH,
             Self::ChunkData(_) => <crate::chunks::ChunkData as EncodePacket>::LENGTH,
             Self::WorldNotice(_) => <crate::chunks::WorldNotice as EncodePacket>::LENGTH,
+            Self::PublishNotice(_) => <crate::chunks::PublishNotice as EncodePacket>::LENGTH,
             Self::ChunkRefused(_) => <crate::chunks::ChunkRefused as EncodePacket>::LENGTH,
             Self::ChangesReply(_) => <crate::chunks::ChangesReply as EncodePacket>::LENGTH,
             Self::PropertyListReply(_) => PropertyListReply::LENGTH,
@@ -418,6 +423,7 @@ impl ServerPacket {
             Self::AuthorityNotice(packet) => packet.encode_body(out, version),
             Self::ChunkData(packet) => packet.encode_body(out, version),
             Self::WorldNotice(packet) => packet.encode_body(out, version),
+            Self::PublishNotice(packet) => packet.encode_body(out, version),
             Self::ChunkRefused(packet) => packet.encode_body(out, version),
             Self::ChangesReply(packet) => packet.encode_body(out, version),
             Self::PropertyListReply(packet) => packet.encode_body(out, version),
@@ -493,6 +499,9 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
         crate::chunks::WorldNotice::SUBCOMMAND => decode_server(packet, version)
             .map(ServerPacket::WorldNotice)
             .map_err(ServerDecodeError::WorldNotice)?,
+        crate::chunks::PublishNotice::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::PublishNotice)
+            .map_err(ServerDecodeError::PublishNotice)?,
         crate::chunks::ChunkRefused::SUBCOMMAND => decode_server(packet, version)
             .map(ServerPacket::ChunkRefused)
             .map_err(ServerDecodeError::ChunkRefused)?,
@@ -831,6 +840,8 @@ pub enum ServerDecodeError {
     ChunkData(DecodeError),
     /// `0xBF 0xE004` did not decode.
     WorldNotice(DecodeError),
+    /// `0xBF 0xE005` did not decode.
+    PublishNotice(DecodeError),
     /// `0xBF 0xE006` did not decode.
     ChunkRefused(DecodeError),
     /// `0xBF 0xE008` did not decode.
@@ -872,6 +883,7 @@ impl fmt::Display for ServerDecodeError {
             Self::AuthorityNotice(error) => ("0xBF 0xE001 authority notice", error),
             Self::ChunkData(error) => ("0xBF 0xE003 chunk data", error),
             Self::WorldNotice(error) => ("0xBF 0xE004 world notice", error),
+            Self::PublishNotice(error) => ("0xBF 0xE005 publish notice", error),
             Self::ChunkRefused(error) => ("0xBF 0xE006 chunk refused", error),
             Self::ChangesReply(error) => ("0xBF 0xE008 changes reply", error),
             Self::PropertyListReply(error) => ("0xD6 property list", error),
@@ -1156,6 +1168,7 @@ mod tests {
         AuthorityNotice,
         ChunkData,
         WorldNotice,
+        PublishNotice,
         ChunkRefused,
         ChangesReply,
         TooltipRevision,
@@ -1541,6 +1554,11 @@ mod tests {
                 blocks: crate::chunks::FacetBlocks { wide: 896, down: 512 },
                 revision: crate::chunks::WorldRevision(1),
                 world: Some(crate::world::WorldId(0x0123_4567_89AB_CDEF)),
+            }),
+            ServerPacket::PublishNotice(crate::chunks::PublishNotice {
+                facet: crate::world::Facet(0),
+                revision: crate::chunks::WorldRevision(2),
+                changes: crate::chunks::Changes::These(vec![crate::chunks::ChunkAt { x: 2, y: 2 }]),
             }),
             ServerPacket::ChunkRefused(crate::chunks::ChunkRefused {
                 facet: crate::world::Facet(0),

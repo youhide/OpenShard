@@ -25,7 +25,7 @@ use openshard_map::map::{LandCell, StaticItem, WorldMap};
 use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
 use openshard_map::snapshot::{MapRevision, MapSnapshot};
 use openshard_protocol::chunks::{
-    Changes, ChangesReply, ChunkAt, ChunkData, Refusal, WorldNotice, WorldRevision, join,
+    Changes, ChangesReply, ChunkAt, ChunkData, PublishNotice, Refusal, WorldNotice, WorldRevision, join,
 };
 use openshard_state::WorldHome;
 use openshard_tiles::LandTileId;
@@ -632,6 +632,111 @@ fn a_revision_this_shard_cannot_place_is_answered_with_the_whole_facet() {
     let _entry = packets_for(&mut world, entered);
     let reply = ask_changes(&mut world, entered, WorldRevision(1));
     assert_eq!(reply.changes, Changes::Everything);
+}
+
+/// E4's "done", on the shard's side: a commit tells everyone standing on the
+/// facet which revision it moved to and which chunk moved.
+///
+/// Two connections, because the audience is the facet and not the operator: the
+/// second character never typed anything and is told the same thing.
+#[test]
+fn a_commit_tells_everyone_on_the_facet_what_moved() {
+    let (mut world, base_set) = world_of_ours("published", MapRevision::INITIAL);
+    let operator = enter_as(&mut world, connection(), Instant::now());
+    let bystander = enter_as(&mut world, connection(), Instant::now());
+    let _entry = packets_for(&mut world, operator);
+    let _entry = packets_for(&mut world, bystander);
+
+    // A tile in chunk (1, 1): the fixture is 72 tiles square and cut into
+    // sixty-four-tile squares, so tile 70 is in the second chunk on both axes.
+    let revision = commit_a_tile(&mut world, (70, 71));
+
+    for connection in [operator, bystander] {
+        let notices = publish_notices(&mut world, connection);
+        assert_eq!(notices.len(), 1, "one commit, one notice");
+        assert_eq!(notices[0].facet, Facet(0));
+        assert_eq!(notices[0].revision.0, revision.get());
+        assert_eq!(
+            notices[0].changes,
+            Changes::These(vec![ChunkAt { x: 1, y: 1 }]),
+            "the chunk the patch touched, and not the facet"
+        );
+    }
+    clean(&base_set);
+}
+
+/// A commit that the log refuses tells nobody anything.
+///
+/// The world moved and was put back, so the revision the notice would have named
+/// is one that never existed — and a client that fetched chunks of it would be
+/// told they are at a revision it has never heard of.
+#[test]
+fn a_commit_the_log_refuses_is_not_announced() {
+    let (mut world, base_set) = world_of_ours("unlogged", MapRevision::INITIAL);
+    let connection = enter_as(&mut world, connection(), Instant::now());
+    let _entry = packets_for(&mut world, connection);
+
+    // A directory where the log file should be: appending to it cannot succeed,
+    // and nothing else about the world is different. `tests/mapedit.rs` breaks
+    // the log the same way and for the same reason.
+    let log = openshard_basemap::patches::log_path(&base_set);
+    std::fs::remove_file(&log).ok();
+    std::fs::create_dir_all(&log).expect("a writable temp dir");
+
+    let parent = world
+        .state
+        .facet_state(Facet(0))
+        .ground()
+        .snapshot()
+        .expect("the fixture has ground")
+        .revision();
+    let map = world
+        .state
+        .facet_state(Facet(0))
+        .ground()
+        .snapshot()
+        .expect("the fixture has ground")
+        .map();
+    let op = PatchOp::set_land(
+        map,
+        3,
+        4,
+        LandCell {
+            tile: LandTileId(0x3FF),
+            z: 7,
+        },
+    )
+    .expect("a tile of this facet");
+    let patch = Patch::new(
+        Facet(0),
+        parent,
+        PatchAuthor("a test".to_owned()),
+        PatchTime(0),
+        vec![op],
+    );
+    assert!(
+        crate::mapedit::commit(&mut world.state, Facet(0), &patch).is_err(),
+        "a log that is a directory takes nothing"
+    );
+    assert!(
+        publish_notices(&mut world, connection).is_empty(),
+        "the world was put back, so there is nothing to announce"
+    );
+
+    std::fs::remove_dir_all(&log).ok();
+    clean(&base_set);
+}
+
+/// Every publish notice a connection has been sent since the last drain.
+fn publish_notices(world: &mut World, connection: ConnectionId) -> Vec<PublishNotice> {
+    packets_for(world, connection)
+        .iter()
+        .filter_map(|bytes| ServerPacket::decode(bytes, ClientVersion::TOL).expect("our own bytes"))
+        .filter_map(|packet| match packet {
+            ServerPacket::PublishNotice(notice) => Some(notice),
+            _ => None,
+        })
+        .collect()
 }
 
 /// A facet with no map sends none: a notice of nought blocks by nought would be
