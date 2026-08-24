@@ -25,5 +25,11 @@ openshard-map.workspace = true
 openshard-protocol.workspace = true
 clap.workspace = true
 
+[dev-dependencies]
+# A world of ours, written into a temp directory: `tests/interior_stamp.rs` pins
+# that a flood over a base set is not stamped against the install's map files,
+# and building one is the only way to have a base-set world to stamp.
+openshard-basemap.workspace = true
+
 [lints]
 workspace = true
