@@ -40,36 +40,31 @@
 //! **one**: the operator edits the ground while standing on it, and the shard
 //! says so on the connection that is already open.
 
-use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use openshard_client_net::chunks::{Fetch, Fetched};
 use openshard_client_net::connection::Event;
 use openshard_client_net::talk;
 use openshard_client_net::transport::{Socket, enter_world};
-use openshard_config::{Config, FacetKey, RawAccessLevel};
 use openshard_map::chunk::{Chunk, ChunkCoord, assemble, chunks_of};
 use openshard_map::codec;
 use openshard_map::grid::BlockExtent;
 use openshard_map::map::{LandCell, StaticItem, WorldMap};
-use openshard_map::overlay::{Doors, Overlay};
-use openshard_map::snapshot::MapSnapshot;
-use openshard_movement::spans::SpanIndex;
-use openshard_movement::{Footing, MapTerrain, NavigationGraph, bake};
 use openshard_protocol::chunks::{
     Changes, ChangesRequest, ChunkAt, ChunkData, ChunkRequest, Refusal, WorldRevision, join,
 };
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::speech::TalkMode;
 use openshard_protocol::wire::{Graphic, Hue};
-use openshard_protocol::world::Facet;
 use openshard_tiles::LandTileId;
 use tokio::net::TcpStream;
 
-use openshard_e2e_shard::{ACCOUNT, plan, spawn, stock_config, version};
+use openshard_e2e_shard::{plan, spawn, version};
 
-const FACET: Facet = Facet(0);
+mod common;
+
+use common::{FACET, START, config_over, install, say_and_hear, scratch, world_of_ours};
+
 /// 32 blocks square — 256×256 tiles, which is sixteen chunks and bakes in well
 /// under a second.
 const BLOCKS: u32 = 32;
@@ -82,24 +77,6 @@ const CHUNKS: u16 = 4;
 /// that has to pace itself; eighty-one are two requests, so the send-then-read
 /// loop is exercised over a socket rather than only against a fixture.
 const WIDE_BLOCKS: u32 = 72;
-const START: (u16, u16) = (128, 128);
-/// The ground the fixture is made of: grass, flat, at zero.
-///
-/// Uniform on purpose. What makes the oracle sharp is not the land but the
-/// comparison — every record is checked byte for byte against what `Chunk::of`
-/// cuts out of the file — and a fixture whose heights wandered would be a
-/// fixture whose navigation bake could refuse to build for reasons that have
-/// nothing to do with this test.
-const GROUND: LandCell = LandCell {
-    tile: LandTileId(3),
-    z: 0,
-};
-
-/// The install, from the environment. `None` skips the test rather than failing
-/// it — `map_edit`'s argument.
-fn install() -> Option<PathBuf> {
-    std::env::var_os("OPENSHARD_CLIENT").map(PathBuf::from)
-}
 
 /// The fixture's statics: one on each side of both chunk seams, one in the far
 /// corner, and two stacked on one tile.
@@ -130,73 +107,6 @@ fn statics(blocks: u32) -> Vec<StaticItem> {
         });
     }
     items
-}
-
-/// Write a small world of ours into `dir`, bake its graph beside it, and hand
-/// back the base set's path.
-///
-/// `openshard-map-import` and `openshard-navigation-bake` in miniature, through
-/// the same functions — `map_edit`'s reasoning, and the same code shape.
-fn world_of_ours(dir: &Path, client: &Path, blocks: u32) -> PathBuf {
-    let base_set = dir.join("fixture.osbase");
-    let mut map = WorldMap::from_blocks(
-        BlockExtent {
-            wide: blocks,
-            down: blocks,
-        },
-        |_, _| GROUND,
-    );
-    for item in statics(blocks) {
-        map.place_static(item);
-    }
-    let snapshot = MapSnapshot::new(FACET, map);
-    openshard_basemap::write(&base_set, &snapshot).expect("a writable temp directory");
-
-    let tiledata = client.join("tiledata.mul");
-    let tiles = openshard_uofiles::tiledata::load(&tiledata)
-        .expect("the install has a tile table")
-        .tiles;
-    let spans = SpanIndex::build(snapshot.map(), &tiles);
-    let nothing_placed = Overlay::default();
-    let footing = Footing::new(
-        Some(MapTerrain::new(snapshot.map(), &tiles, &spans)),
-        &nothing_placed,
-        Doors::AsTheyStand,
-    );
-    let graph = NavigationGraph::build(&footing, snapshot.map().width(), snapshot.map().height())
-        .expect("a facet this size has a graph");
-    let stamp = bake::stamp_of_base_set(&base_set, None, &tiledata, FACET, snapshot.revision())
-        .expect("the two inputs exist");
-    bake::save(
-        &bake::artifact_path(bake::beside(&base_set), Some(&base_set), FACET),
-        &graph,
-        &stamp,
-    )
-    .expect("a writable temp directory");
-
-    base_set
-}
-
-/// The stock config, pointed at a world of ours.
-///
-/// The development account is promoted, so that a `.`-command is a command
-/// rather than speech — `map_edit`'s rule, and the third test below is why this
-/// one wants it too: it moves the ground the way an operator does.
-fn config_over(base_set: PathBuf, client: PathBuf) -> impl FnOnce(SocketAddr) -> Config + Send {
-    move |address| {
-        let mut config = stock_config(address);
-        config.world.client_files = client.display().to_string();
-        config.world.facets = vec![FACET.0];
-        config.world.base_sets.insert(FacetKey(FACET), base_set);
-        config.world.start.x = START.0;
-        config.world.start.y = START.1;
-        for account in &mut config.accounts {
-            if account.name == ACCOUNT {
-                account.access = RawAccessLevel("administrator".to_owned());
-            }
-        }
-        config
-    }
 }
 
 /// Read packets until `done` is satisfied, or give up.

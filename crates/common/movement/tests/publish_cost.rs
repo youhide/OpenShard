@@ -14,8 +14,18 @@
 //!   The whole facet, because the bake has no seam smaller than one.
 //! - **`chunk::apply`** — the window's own, which the shard never pays. A
 //!   block's statics are one run in a facet-wide vector, so a chunk whose item
-//!   count moved moves every static after it: there is no splice that is not a
-//!   copy of the tail.
+//!   count moved moves every static after it: one memmove of the tail, made once
+//!   for the whole set. It used to rebuild the facet instead — 15.3 ms here, and
+//!   a second 150 MiB facet resident while it ran — on the argument that the
+//!   tail copy was unavoidable anyway. It is; what the rebuild *added* to it was
+//!   the 117 MiB of land no splice touches and a re-sort of all 458,752 blocks
+//!   rather than the sixty-four that arrived.
+//!
+//!   The line below is the cheap half of that, and deliberately: a `.setland`
+//!   moves no statics, so the chunk it sends holds exactly as many as the one it
+//!   replaces and the tail does not move at all. A publish that *added* an item
+//!   is 3.9–5.6 ms — see `WorldMap::replace_blocks`, which has both numbers and
+//!   why the second one is mostly neither the span nor the tail.
 //! - **`Chunk::of`** — cutting the square out on the shard, for scale.
 //!
 //! # Why this is a test and not a bench
@@ -48,7 +58,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use openshard_map::chunk::{self, Chunk, ChunkCoord};
+use openshard_map::chunk::{Chunk, ChunkCoord};
 use openshard_map::map::LandCell;
 use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
 use openshard_movement::ground::Ground;
@@ -178,7 +188,10 @@ fn what_one_setland_costs_at_each_end() {
     let cut = best_of(|| Chunk::of(&snapshot, at).expect("the sample chunk is on this facet"));
     let chunks = vec![Chunk::of(&snapshot, at).expect("the sample chunk is on this facet")];
 
-    let rebuild = best_of(|| chunk::apply(snapshot.map(), facet, &chunks).expect("one chunk of this facet"));
+    // Repeatable because the square being written in is the square that is
+    // already there: the chunk was cut out of this very world, so every round
+    // moves the same blocks the same amount and leaves the same facet behind.
+    let written = best_of(|| snapshot.take_chunks(&chunks).expect("one chunk of this facet"));
 
     println!("\nthe wire:");
     println!("  Chunk::of            — one square, cut        {}", ms(cut));
@@ -193,7 +206,7 @@ fn what_one_setland_costs_at_each_end() {
     });
 
     println!("\nthe window, on the frame the publish landed — the event-loop thread:");
-    println!("  chunk::apply         — the facet rebuilt      {}", ms(rebuild));
+    println!("  chunk::apply         — the squares written in {}", ms(written));
     println!("  SpanIndex::build     — the facet rebaked      {}", ms(bake));
     println!("  = Ground::take_chunks                         {}", ms(take));
     println!("\nthe hitch a person sees is the last line.");

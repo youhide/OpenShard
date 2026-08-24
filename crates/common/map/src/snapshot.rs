@@ -11,6 +11,7 @@
 
 use openshard_protocol::world::Facet;
 
+use crate::chunk::{AssemblyError, Chunk};
 use crate::map::WorldMap;
 use crate::patch::{Patch, PatchError, Undo};
 
@@ -182,6 +183,43 @@ impl MapSnapshot {
         let was = self.revision;
         self.revision = patch.revision();
         Ok(Undo::new(ops, was))
+    }
+
+    /// Take squares of ground somebody else cut, and move to the revision they
+    /// were cut at.
+    ///
+    /// **[`MapSnapshot::publish`]'s counterpart on the other end of the wire**,
+    /// and it is `&mut self` for exactly that method's reason: a reader holding a
+    /// `&WorldMap` cannot be alive while this runs, so there is no window in
+    /// which half the chunks are in. A shard moves its ground by applying a patch
+    /// it has the whole history for; a client is handed the chunks that changed
+    /// and has no patch at all — see
+    /// `docs/map/new_map_representation/to_the_client.md`, which argues why whole
+    /// chunks travel rather than operations.
+    ///
+    /// The revision it moves to is the chunks' own, and **it is not checked
+    /// against the one this snapshot is at**: what the chunks are a difference
+    /// *from* is a question the caller asked the shard and this one cannot
+    /// re-ask. [`crate::chunk::apply`] draws the same line one level down.
+    ///
+    /// That is also what makes this the re-stamp `publish` has and a client did
+    /// not: the world and its number move together, in one call, without the
+    /// facet being rebuilt to carry a new one.
+    ///
+    /// # Errors
+    ///
+    /// [`AssemblyError`] — the chunks are not of this facet, do not agree about
+    /// which revision they are, or do not fit where they say they do. On any of
+    /// them the world is exactly as it was.
+    ///
+    /// # Panics
+    ///
+    /// If `chunks` is empty — [`crate::chunk::apply`]'s panic, for its reason: a
+    /// world that did not move is a case answered before this is called.
+    pub fn take_chunks(&mut self, chunks: &[Chunk]) -> Result<MapRevision, AssemblyError> {
+        let revision = crate::chunk::apply(&mut self.map, self.facet, chunks)?;
+        self.revision = revision;
+        Ok(revision)
     }
 
     /// Take back a publish that was never written down.

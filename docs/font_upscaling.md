@@ -638,9 +638,45 @@ cargo test -p openshard-uofiles --lib --bin openshard-font-upscale
 
 ## Next decision
 
-The local word-context hypothesis is closed: it does not provide semantic text
-understanding. The next decision is between (a) an exact-shape local contour
-candidate, where animevideo and UltraSharp remain the least destructive, and
-(b) a generative OpenAI edit that may make a cleaner new master but can redesign
-glyphs. For (b), set an API key and explicitly approve a billed probe; test
-native alpha first, then compare and split one word before any full-font work.
+### 2026-08-25: accepted generative reference and `OpenShard` probe
+
+The user supplied a successful before/after pair for the complete word
+`Electronic`. It establishes a new acceptance criterion: a semantic redraw is
+allowed when it produces a clean, smooth word with the original light fill and
+thick dark outline. Exact preservation of every source pixel corner is no
+longer required. The successful setup also used a readable complete word on an
+opaque parchment background, not isolated transparent glyphs.
+
+The same setup was reproduced for `OpenShard`:
+
+- source glyph assembly:
+  `font-upscale-artifacts/word-context-OpenShard/input-word-clean.png`;
+- readable 5x source on parchment:
+  `font-upscale-artifacts/chatgpt-parchment-OpenShard/input-openshard-parchment.png`;
+- built-in OpenAI image-generation result:
+  `font-upscale-artifacts/chatgpt-parchment-OpenShard/result-parchment-v1.png`;
+- attempted model-side background extraction:
+  `font-upscale-artifacts/chatgpt-parchment-OpenShard/result-checker-v1.png`;
+- locally extracted alpha:
+  `font-upscale-artifacts/chatgpt-parchment-OpenShard/result-transparent-v1.png`;
+- black/magenta alpha inspection sheet:
+  `font-upscale-artifacts/chatgpt-parchment-OpenShard/alpha-contrast-comparison-v1.png`.
+
+The word restoration was prompted with the user's `Electronic` before/after
+pair as the transformation reference and the locally prepared `OpenShard` as
+the edit target. The exact required text was `OpenShard` (`O-p-e-n-S-h-a-r-d`),
+with no added texture, decoration, shadow, or extra outline. The model produced
+a smooth, legible 1774x887 RGB result and retained the two-part fill/outline
+design, while semantically redesigning the glyph contours in the same general
+way as the accepted `Electronic` result.
+
+The separate model-side transparency edit failed technically: it baked a
+checkerboard into a three-channel RGB PNG instead of producing alpha. Real
+transparency was therefore extracted from the parchment result. The matte uses
+the strong separation between the yellow parchment, near-white fill, and dark
+outline, followed by a 0.55 px alpha blur. The trimmed output is 1754x886 RGBA.
+The black/magenta sheet is the review artifact for edge halos and transparent
+counters.
+
+Current gate: wait for the user's visual verdict on the generated letterforms
+and extracted alpha. Do not split or repack this candidate before approval.

@@ -128,7 +128,17 @@ composited blocks by name, the radar's products by naming a revision they were
 not built at, and the coarse graph outright, which is the trade the shard already
 makes when it publishes.
 
-What is left of E is its backlog, and the largest entry is **the fetch that
-straddles a publish**: a client told the ground moved while it is still arriving
-ends the connection and says so, where draining the abandoned answers would let
-it start again at the new revision instead.
+**And the largest entry of E's backlog is closed: a fetch survives the ground
+moving.** A publish that lands while chunks are on the wire used to end the
+connection, because the answers still coming were cut at a revision the shard had
+moved past and nothing tells them apart from the answers a second fetch would ask
+for. Now the fetch is *abandoned* rather than failed — what it is still owed is
+eaten without being decoded, and when the wire is clean it asks again for the
+**union** of what it was asking about and what the publish named. A publish that
+arrives while the client is still *asking* what moved has no list to union, so
+the stale answer is recognised by its revision and the question is asked again.
+
+What is left of E is the rest of that backlog, and none of it is load-bearing:
+the untested joining in `link::play`, a base set that could store its chunks
+deflated, and the small cache manners — a world that moved by an empty patch, and
+nothing sweeping an orphaned one.

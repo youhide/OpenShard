@@ -256,6 +256,22 @@ impl TerrainCells {
         let from = block.0 as usize * CELLS_PER_BLOCK;
         &self.0[from..from + CELLS_PER_BLOCK]
     }
+
+    /// Put a whole block's cells in, over the ones there.
+    ///
+    /// [`TerrainCells::block`]'s write half, and the reason land is the cheap
+    /// half of replacing a block: every block is the same [`CELLS_PER_BLOCK`]
+    /// cells wherever it sits, so a new one goes exactly where the old one was
+    /// and nothing after it moves.
+    ///
+    /// # Panics
+    ///
+    /// If `cells` is not exactly one block's worth, or if `block` came from a
+    /// different, larger grid — [`TerrainCells::block`]'s precondition.
+    fn write_block(&mut self, block: BlockIndex, cells: &[LandCell]) {
+        let from = block.0 as usize * CELLS_PER_BLOCK;
+        self.0[from..from + CELLS_PER_BLOCK].copy_from_slice(cells);
+    }
 }
 
 /// The land of one facet, in the block order the files are in.
@@ -488,6 +504,23 @@ impl LandGrid {
     /// facets rather than a value it could have got wrong.
     pub fn block(&self, block: BlockIndex) -> &[LandCell] {
         self.cells.block(block)
+    }
+
+    /// Put a whole block of ground in, over the one that is there.
+    ///
+    /// [`Self::block`]'s write half, and the tile-at-a-time [`Self::set`]'s
+    /// block-at-a-time one. What wants it is a square of the world that arrived
+    /// whole — see [`WorldMap::replace_blocks`](crate::map::WorldMap::replace_blocks),
+    /// its only caller — where writing sixty-four cells one `set` at a time
+    /// would resolve the same block sixty-four times.
+    ///
+    /// # Panics
+    ///
+    /// If `cells` is not exactly one block's worth, or if `block` came from a
+    /// different, larger grid. Both are [`Self::block`]'s preconditions, and the
+    /// second is the same "a caller mixing up two facets" it names.
+    pub fn set_block(&mut self, block: BlockIndex, cells: &[LandCell]) {
+        self.cells.write_block(block, cells);
     }
 
     /// The cell at a linear index.

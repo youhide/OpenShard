@@ -1106,18 +1106,27 @@ impl CompositeCache {
         removed
     }
 
-    /// Permanently fall back to direct LOD0 rendering for one block after a
-    /// full-frame oracle found a missing map pixel in its cached replacement.
+    /// Fall back to direct LOD0 rendering for one block after a full-frame
+    /// oracle found a missing map pixel in its cached replacement.
     ///
     /// This is deliberately a block-level circuit breaker rather than a retry:
     /// retrying the same deterministic producer would merely reintroduce the
-    /// hole after its queue comes round again. Map terrain is immutable for the
-    /// lifetime of this cache, so the direct path remains the authoritative
-    /// safe representation until the underlying producer is fixed.
+    /// hole after its queue comes round again. The direct path stays the
+    /// authoritative safe representation **for as long as the ground under the
+    /// block is the ground that was refused** — which used to be the lifetime of
+    /// the cache, and is not any more: see [`invalidate_block`], which lifts a
+    /// quarantine because the ground it was a statement about has moved.
+    ///
+    /// The pictures are dropped *before* the record is written, and the order is
+    /// load-bearing: [`invalidate_block`] un-quarantines, so writing the record
+    /// first would have this call undo itself.
+    ///
+    /// [`invalidate_block`]: Self::invalidate_block
     pub fn quarantine(&mut self, quarantine: CompositeQuarantine) -> usize {
+        let dropped = self.invalidate_block(quarantine.block);
         self.latest_quarantine = Some(quarantine);
         self.rejected.insert(quarantine.block, quarantine);
-        self.invalidate_block(quarantine.block)
+        dropped
     }
 
     /// Permanently fall back to LOD0 and retain the source owner that proved
@@ -1153,12 +1162,23 @@ impl CompositeCache {
         self.latest_quarantine
     }
 
-    /// Forget every cached resolution and revision of one changed map block.
+    /// Forget every cached resolution and revision of one changed map block,
+    /// **and any quarantine held over it**.
     ///
     /// A map/static mutation changes the source pixels for both cached LODs;
     /// keeping another revision around would make it too easy for a fallback
     /// lookup to show stale map state.
+    ///
+    /// A quarantine goes with them because it is a statement about the *ground*
+    /// and not about the block number: `NonFlatGround` is a verdict on heights
+    /// this call has just replaced, and `OracleMissingGroundCoverage` is a
+    /// verdict on pixels produced from them. A publish that flattens a block
+    /// would otherwise leave it on the direct path for the rest of the session —
+    /// slower, and never revisited. The reverse costs nothing: a block that is
+    /// still unfit is refused again by the next preparation, which is where both
+    /// verdicts are reached in the first place.
     pub fn invalidate_block(&mut self, block: BlockCoord) -> usize {
+        self.rejected.remove(&block);
         self.invalidate_matching(|key| key.block == block)
     }
 
@@ -1167,8 +1187,14 @@ impl CompositeCache {
         self.invalidate_matching(|key| key.block == block && tiers.contains(&key.tier))
     }
 
-    /// Forget every cached resolution/revision in an affected block rectangle.
+    /// Forget every cached resolution/revision in an affected block rectangle,
+    /// and any quarantine held over one of them.
+    ///
+    /// [`invalidate_block`](Self::invalidate_block)'s rule over a rectangle, and
+    /// this is the one a publish takes: `App::ground_moved` names one rectangle
+    /// per chunk the shard says moved.
     pub fn invalidate_blocks(&mut self, blocks: MapBlockBounds) -> usize {
+        self.rejected.retain(|block, _| !blocks.contains(*block));
         self.invalidate_matching(|key| blocks.contains(key.block))
     }
 
@@ -1178,11 +1204,19 @@ impl CompositeCache {
     }
 
     /// Forget every entry whose immutable input changed globally, such as a
-    /// world-output format change.  Callers should use the block variants for
-    /// ordinary map/static or newly packed-art changes.
+    /// world-output format change or a whole facet replaced under a running
+    /// client.  Callers should use the block variants for ordinary map/static or
+    /// newly packed-art changes.
+    ///
+    /// Quarantines go with them, for
+    /// [`invalidate_block`](Self::invalidate_block)'s reason taken to its
+    /// limit: every verdict this cache holds was reached over inputs that have
+    /// just been replaced, and re-reaching one costs a single inspection.
     pub fn clear(&mut self) -> usize {
         let removed = self.entries.len();
         self.entries.clear();
+        self.rejected.clear();
+        self.latest_quarantine = None;
         self.budget.clear();
         removed
     }
@@ -4367,5 +4401,55 @@ mod tests {
                 reason: CompositeQuarantineReason::NonFlatGround,
             })
         );
+    }
+
+    /// A quarantine is a verdict on the ground under a block, so ground that
+    /// moves is what lifts it.
+    ///
+    /// E4 is what made this reachable. `CompositeCache` was written when *"map
+    /// terrain is immutable for the lifetime of this cache"* was true of every
+    /// client, and a publish reaching one that is already drawing is what
+    /// stopped it being so: a block an operator flattens would otherwise stay on
+    /// the direct path until the client was restarted.
+    ///
+    /// The first assertion is the ordering [`CompositeCache::quarantine`]
+    /// depends on — it invalidates the block on the way in, and lifting is now
+    /// part of that — so a record written before the invalidation would leave
+    /// this cache unable to quarantine anything at all.
+    #[test]
+    fn ground_that_moves_lifts_the_quarantine_over_it() {
+        let mut cache = CompositeCache::default();
+        let key = |x: u32| CompositeKey {
+            block: BlockCoord { x, y: 7 },
+            tier: CompositeTier::Lod1,
+            revision: ImmutableRevision(12),
+        };
+        cache.reject_block(key(3), None, CompositeQuarantineReason::NonFlatGround);
+        cache.reject_block(
+            key(30),
+            None,
+            CompositeQuarantineReason::OracleMissingGroundCoverage,
+        );
+        assert_eq!(
+            cache.quarantined_len(),
+            2,
+            "quarantining does not undo itself"
+        );
+
+        // One rectangle, as a publish names one per chunk it moved.
+        cache.invalidate_blocks(blocks(2, 4, 6, 8));
+        assert!(!cache.is_rejected(key(3).block), "its ground was replaced");
+        assert!(
+            cache.is_rejected(key(30).block),
+            "and a block the edit did not touch is still on the direct path"
+        );
+
+        // The single-block door, and the whole-facet one.
+        cache.invalidate_block(key(30).block);
+        assert_eq!(cache.quarantined_len(), 0);
+        cache.reject_block(key(3), None, CompositeQuarantineReason::NonFlatGround);
+        cache.clear();
+        assert_eq!(cache.quarantined_len(), 0, "a replaced facet is every block");
+        assert_eq!(cache.latest_quarantine(), None);
     }
 }

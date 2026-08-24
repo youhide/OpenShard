@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 
 use openshard_client_net::action::Outgoing;
-use openshard_client_net::chunks::{Fetch, FetchError, Fetched};
+use openshard_client_net::chunks::{Drain, Fetch, FetchError, Fetched, Restart};
 use openshard_client_net::connection::Event;
 use openshard_client_net::session::Plan;
 use openshard_client_net::transport::{Dial, Socket, enter_world_with};
@@ -768,8 +768,9 @@ async fn ask<D: Dial>(socket: &mut Socket<D::Stream>, fetch: &mut Fetch) -> Resu
 ///
 /// `None` of it is a connection with nothing left to do — a client that opened
 /// its own facet, one whose kept world was already current, and one whose fetch
-/// has finished. The two arms are the two waits, and they are both *before* the
-/// window has ground: see [`Update::Ground`].
+/// has finished. The first two arms are the two waits a client starts with, and
+/// both are *before* the window has ground: see [`Update::Ground`]. The third is
+/// the one that can happen at any time, because a publish can.
 enum Pending {
     /// A world was kept and the shard is at a newer revision, so it has been
     /// asked what moved. Nothing else can be decided until the answer lands.
@@ -784,6 +785,22 @@ enum Pending {
     },
     /// Chunks are coming, whether that is the facet or only what moved.
     Fetching(Fetch),
+    /// The ground moved while it was arriving, so the fetch that was running has
+    /// been abandoned and its last answers are being thrown away.
+    ///
+    /// Nothing goes out on the wire while this lasts: the shard answers a chunk
+    /// request exactly once and nothing in an answer says which request it
+    /// belongs to, so asking again now would put two sets of answers on the wire
+    /// with no way to tell them apart. See
+    /// [`Fetch::abandon`](openshard_client_net::chunks::Fetch::abandon), which
+    /// is where that is argued, and [`Restart`], which is what goes out when the
+    /// drain is empty.
+    Draining {
+        /// What the abandoned fetch is still owed.
+        drain: Drain,
+        /// What to ask for once it is owed nothing.
+        restart: Restart,
+    },
 }
 
 /// What a connection does about the ground, once the shard has described it.
@@ -939,6 +956,48 @@ fn published(notice: WorldNotice, published: &PublishNotice) -> Result<Option<Fe
     }
 }
 
+/// Where an abandoned fetch leaves this connection: draining, or already asking
+/// again because there was nothing left to drain.
+///
+/// The second is not a rare case. A fetch asks in whole requests and the window
+/// only empties, so a publish that lands in the gap between the last answer and
+/// the next request finds nothing outstanding at all — and waiting for a packet
+/// that is not coming would leave the ground one revision behind for the rest of
+/// the connection.
+async fn resume<D: Dial>(
+    socket: &mut Socket<D::Stream>,
+    drain: Drain,
+    restart: Restart,
+    notice: WorldNotice,
+) -> Result<Pending, String> {
+    if drain.is_empty() {
+        return begin::<D>(socket, restart, notice).await;
+    }
+    Ok(Pending::Draining { drain, restart })
+}
+
+/// Put a restart's first requests on the wire.
+///
+/// The one place a fetch starts that is not a decision about what the shard
+/// said: [`Restart`] has already decided, and what is left is the socket.
+async fn begin<D: Dial>(
+    socket: &mut Socket<D::Stream>,
+    restart: Restart,
+    notice: WorldNotice,
+) -> Result<Pending, String> {
+    let mut fetch = match restart.begin(notice) {
+        Ok(fetch) => fetch,
+        Err(error) => {
+            return Err(format!(
+                "the ground the shard published cannot be fetched: {error}"
+            ));
+        }
+    };
+    eprintln!("the ground is asked for again: {} chunk(s)", fetch.wanted());
+    ask::<D>(socket, &mut fetch).await?;
+    Ok(Pending::Fetching(fetch))
+}
+
 /// Everything after the runtime exists, up to the reason it ended.
 async fn play<D: Dial, F: Fn(Update) + Send>(
     dial: D,
@@ -1018,6 +1077,15 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
     // kept world is filed under when the fetch lands. `Copy`, so this is the
     // value and not a borrow of the view that is about to move.
     let world_notice = view.world;
+    // The newest revision the shard has said this facet is at — the notice's,
+    // and then every publish's. `None` is a shard that described no world at
+    // all, which is the same absence `world_notice` carries and the case where
+    // nothing below ever reads this.
+    //
+    // What it is for is the answer to `ChangesRequest`: a reply written before a
+    // publish names what moved to a revision the world has already left, and the
+    // pair of numbers is the only thing that tells the two apart.
+    let mut latest = world_notice.map(|notice| notice.revision);
     // Where the server put us. The owner starts its `Walk` from this view, and
     // every `0x02` after it is computed there.
     report(Update::World { view: Box::new(view) });
@@ -1065,6 +1133,37 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                                 "we asked what moved on facet {} and the shard answered about facet {}",
                                 notice.facet.0, reply.facet.0
                             );
+                        }
+                        // A publish landed between the question and this answer.
+                        // What the reply names is the difference to a revision
+                        // the shard has already moved past, and every chunk of
+                        // it would arrive at the new one — `WrongRevision`, one
+                        // fetch later. There is no list here to add the publish
+                        // to the way an abandoned fetch's is, so the honest
+                        // answer is to ask the question again: one round trip,
+                        // one request in flight at a time, and no state.
+                        //
+                        // `!=` rather than "older than", because the two numbers
+                        // have to *agree* and not merely be ordered: a reply
+                        // from ahead of every notice this connection has seen is
+                        // as unusable as one from behind.
+                        let now = latest.expect("the shard described the world this asked about");
+                        if reply.revision != now {
+                            let Some(Pending::Asking { held }) = &pending else {
+                                unreachable!("the arm matched a line ago");
+                            };
+                            eprintln!(
+                                "the shard answered about revision {} and it is at {} now: asking again",
+                                reply.revision.0, now.0,
+                            );
+                            let asking = ChangesRequest {
+                                facet: notice.facet,
+                                revision: WorldRevision(held.revision().get()),
+                            };
+                            if let Err(error) = socket.send(&asking.encode()).await {
+                                return error.to_string();
+                            }
+                            continue;
                         }
                         let Some(Pending::Asking { held }) = pending.take() else {
                             unreachable!("the arm matched a line ago");
@@ -1126,35 +1225,95 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                         );
                         continue;
                     }
-                    // Ground is already on the way — the facet, or the difference
-                    // a kept world was behind by — and the answers to it are on
-                    // the wire at the revision this publish has just moved past.
-                    // Those answers cannot be told apart from the ones a second
-                    // fetch would ask for, so the connection ends here rather
-                    // than a few seconds later inside `assemble`, with the reason
-                    // being the publish rather than a mixed set of chunks. See
-                    // `to_the_client.md`'s backlog: draining the abandoned fetch
-                    // is what would make this a recovery.
-                    if pending.is_some() {
-                        return format!(
-                            "the ground moved to revision {} while it was still arriving: \
-                             reconnect to take it at the revision it is at now",
-                            publish.revision.0
-                        );
-                    }
-                    match published(notice, publish) {
-                        Ok(None) => {}
-                        Ok(Some(mut fetch)) => {
-                            if let Err(reason) = ask::<D>(&mut socket, &mut fetch).await {
-                                return reason;
+                    // Whatever this connection is in the middle of, the shard is
+                    // at this revision now.
+                    latest = Some(publish.revision);
+                    let moved_to = openshard_map::snapshot::MapRevision::decoded(publish.revision.0);
+                    match pending.take() {
+                        // Nothing is on the way, so the publish is answered as it
+                        // stands: fetch what it names, for the world the window
+                        // is holding.
+                        None => match published(notice, publish) {
+                            Ok(None) => {}
+                            Ok(Some(mut fetch)) => {
+                                if let Err(reason) = ask::<D>(&mut socket, &mut fetch).await {
+                                    return reason;
+                                }
+                                pending = Some(Pending::Fetching(fetch));
                             }
-                            pending = Some(Pending::Fetching(fetch));
+                            Err(error) => {
+                                return format!("the ground the shard published cannot be fetched: {error}");
+                            }
+                        },
+                        // The question is out and its answer is not back yet, so
+                        // there is no list here to add this one to. Nothing is
+                        // done about it now: the reply names the revision it was
+                        // written at, and a stale one asks again where it lands.
+                        Some(Pending::Asking { held }) => {
+                            eprintln!(
+                                "the ground moved to revision {} while we were asking what moved",
+                                publish.revision.0
+                            );
+                            pending = Some(Pending::Asking { held });
                         }
-                        Err(error) => {
-                            return format!("the ground the shard published cannot be fetched: {error}");
+                        // Ground is on the wire at a revision the shard has just
+                        // moved past, and the answers still coming cannot be told
+                        // apart from the ones a second fetch would ask for. So
+                        // the fetch stops, what it is owed is eaten rather than
+                        // decoded, and what to ask for again is the union of what
+                        // it was asking about and what this publish named — see
+                        // `Fetch::abandon`, which is where all three are argued.
+                        Some(Pending::Fetching(fetch)) => {
+                            let (drain, restart) = fetch.abandon(&publish.changes, moved_to);
+                            eprintln!(
+                                "the ground moved to revision {} while it was still arriving: \
+                                 {} chunk(s) of the fetch that was abandoned are still owed",
+                                publish.revision.0,
+                                drain.owed()
+                            );
+                            pending = Some(match resume::<D>(&mut socket, drain, restart, notice).await {
+                                Ok(pending) => pending,
+                                Err(reason) => return reason,
+                            });
+                        }
+                        // A second edit while the first one's answers are still
+                        // draining. The list grows and the revision moves; there
+                        // is no second abandonment, because nothing has gone out
+                        // on the wire since the first.
+                        Some(Pending::Draining { drain, mut restart }) => {
+                            restart.and(&publish.changes, moved_to);
+                            eprintln!(
+                                "the ground moved to revision {} while {} chunk(s) were still \
+                                 draining",
+                                publish.revision.0,
+                                drain.owed()
+                            );
+                            pending = Some(Pending::Draining { drain, restart });
                         }
                     }
                     continue;
+                }
+                // The last answers to a fetch the ground moved out from under.
+                // They are counted and thrown away — nothing here is decoded,
+                // and nothing is reported — and when the wire is finally owed
+                // nothing, the restart goes out. Until then this connection asks
+                // for no ground at all, which is the whole reason a drain is a
+                // state and not a filter.
+                if let Some(Pending::Draining { drain, .. }) = pending.as_mut() {
+                    if drain.on_packet(&packet) {
+                        if drain.is_empty() {
+                            let Some(Pending::Draining { restart, .. }) = pending.take() else {
+                                unreachable!("the drain borrowed a line ago");
+                            };
+                            let notice = world_notice
+                                .expect("a fetch is only abandoned for a world the shard described");
+                            pending = Some(match begin::<D>(&mut socket, restart, notice).await {
+                                Ok(pending) => pending,
+                                Err(reason) => return reason,
+                            });
+                        }
+                        continue;
+                    }
                 }
                 // The ground, while it is still arriving. A chunk packet is
                 // consumed here and never reported: what the window is given is
@@ -1212,9 +1371,26 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                                     (&ground, world_notice)
                                 {
                                     match openshard_client_net::cache::write(cache, notice, &snapshot) {
-                                        Ok(path) => {
-                                            eprintln!("the ground is kept at {}", path.display());
-                                            kept = Some(path);
+                                        Ok(written) => {
+                                            eprintln!(
+                                                "the ground is kept at {}",
+                                                written.path.display()
+                                            );
+                                            // A world of this facet that nobody
+                                            // will ask for again — a shard that
+                                            // re-imported, or a third shard on
+                                            // one facet. Worth a line: it is a
+                                            // hundred megabytes leaving the
+                                            // working directory without anyone
+                                            // asking for that either.
+                                            for gone in &written.swept {
+                                                eprintln!(
+                                                    "a world this client had kept was let go of to \
+                                                     make room: {}",
+                                                    gone.display()
+                                                );
+                                            }
+                                            kept = Some(written.path);
                                         }
                                         Err(error) => eprintln!("the ground was not kept: {error}"),
                                     }

@@ -61,6 +61,55 @@ fn describe_size(width: u32, height: u32) -> &'static str {
     }
 }
 
+/// One block of a facet as it is to become: its ground and everything standing
+/// on it, whole.
+///
+/// What [`WorldMap::replace_blocks`] takes, and it borrows rather than owns —
+/// the arrays it points into belong to whatever the block arrived in, which is
+/// a [`Chunk`](crate::chunk::Chunk) at the only caller.
+///
+/// **A block and not a tile**, because that is the unit the two arrays agree in:
+/// a block's cells are a fixed slice of the land and its items are one run with
+/// a count, so replacing *part* of one would leave the count describing
+/// something that is no longer there. A caller with one tile to change wants
+/// [`crate::patch`], which is the other kind of change entirely.
+#[derive(Debug)]
+pub struct BlockPatch<'a> {
+    /// Which block of the facet, in the land's own order.
+    at: BlockIndex,
+    /// Its sixty-four cells, row-major within the block — [`LandGrid::block`]'s
+    /// order, because that is where it will go.
+    land: &'a [LandCell],
+    /// Everything standing in it. Any order: [`WorldMap::replace_blocks`]
+    /// imposes the sort, for the reason [`WorldMap::from_parts`] does.
+    statics: &'a [StaticItem],
+}
+
+impl<'a> BlockPatch<'a> {
+    /// Name a block and what is to be in it.
+    ///
+    /// # Panics
+    ///
+    /// If `land` is not exactly one block's cells. The check is here rather than
+    /// at the write so that a caller assembling a list of these finds out which
+    /// block it got wrong.
+    #[must_use]
+    pub fn new(at: BlockIndex, land: &'a [LandCell], statics: &'a [StaticItem]) -> Self {
+        assert_eq!(
+            land.len(),
+            CELLS_PER_BLOCK,
+            "a block is {CELLS_PER_BLOCK} cells",
+        );
+        Self { at, land, statics }
+    }
+
+    /// Which block of the facet this replaces.
+    #[must_use]
+    pub const fn at(&self) -> BlockIndex {
+        self.at
+    }
+}
+
 /// One facet: the ground and the statics on it.
 ///
 /// The whole thing is in memory. That is the design — the database is never
@@ -397,6 +446,132 @@ impl WorldMap {
             *offset -= 1;
         }
         Some(gone)
+    }
+
+    /// Put whole blocks of the facet back, in one pass.
+    ///
+    /// **What a square of the world that arrived whole goes in through**, and the
+    /// third door into the statics after [`WorldMap::from_parts`] and
+    /// [`WorldMap::place_static`]. The difference from both is the unit: a patch
+    /// names one *tile*, an importer builds a *facet*, and this replaces some
+    /// number of *blocks* — which is what a chunk is made of, and what
+    /// [`crate::chunk::apply`] hands over.
+    ///
+    /// # What it costs, and why it is not a facet rebuilt
+    ///
+    /// Land is free of the question entirely: a block is
+    /// [`CELLS_PER_BLOCK`] cells wherever it sits, so each one is written where
+    /// the old one was and nothing else moves — see [`LandGrid::set_block`].
+    ///
+    /// The statics are the part with a cost, because a block's items are one run
+    /// in a facet-wide vector and a block whose item count changed moves every
+    /// static after it. That is one memmove of the tail, and this makes it
+    /// **once**: the run between the first replaced block and the last is
+    /// rebuilt in a local vector — untouched blocks in that span come along
+    /// because they are *inside* it, not because they moved — and goes back
+    /// through one `splice`. Which is why the blocks arrive as a set rather than
+    /// one call each: sixty-four calls would be sixty-four tails.
+    ///
+    /// So the cost is the span, not the facet. Measured on Felucca — 458,752
+    /// blocks, 2,906,871 statics — against the whole-facet rebuild this
+    /// replaced, which was **15.3 ms** and a second 150 MiB facet resident for
+    /// the length of the call:
+    ///
+    /// - blocks holding as many statics as the ones they replace — which is
+    ///   every edit to the *ground* — cost **0.1 ms**. The span is written where
+    ///   it was, nothing after it moves, and the offsets are not touched at all.
+    /// - blocks that changed the count cost **3.9–5.6 ms**, and most of that is
+    ///   neither the span nor the tail: [`WorldMap::from_parts`] shrinks the
+    ///   statics to fit, so the first item added to a facet reallocates all
+    ///   29 MiB of them wherever it lands.
+    ///
+    /// The case with no saving in it is two blocks at opposite corners, whose
+    /// span is the facet; a caller with scattered blocks and no need of
+    /// atomicity can make several calls.
+    ///
+    /// The sort inside each arriving block is imposed here, for
+    /// [`WorldMap::from_parts`]' reason: the `(y, x)` order is this type's
+    /// invariant and not its callers', and a block handed over unsorted would not
+    /// fail, it would make every later binary search quietly find nothing.
+    ///
+    /// # Panics
+    ///
+    /// If `blocks` is empty, if they are not in strictly ascending
+    /// [`BlockIndex`] order — which is what makes them one span and each block
+    /// at most once — or if any of them is a block this facet has not.
+    pub fn replace_blocks(&mut self, blocks: &[BlockPatch<'_>]) {
+        assert!(!blocks.is_empty(), "replacing no blocks is not a change");
+        assert!(
+            blocks.windows(2).all(|pair| pair[0].at < pair[1].at),
+            "blocks must arrive in the facet's own order, each of them once",
+        );
+        let first = blocks[0].at.get() as usize;
+        let last = blocks[blocks.len() - 1].at.get() as usize;
+        assert!(
+            last < self.offsets.len() - 1,
+            "a block this facet has not: {last} of {}",
+            self.offsets.len() - 1,
+        );
+
+        // The span of the statics run this touches, as it stands now.
+        let from = self.offsets[first] as usize;
+        let to = self.offsets[last + 1] as usize;
+        let mut run: Vec<StaticItem> = Vec::with_capacity(to - from);
+        let mut counts: Vec<u32> = Vec::with_capacity(last + 1 - first);
+
+        let mut next = 0;
+        for block in first..=last {
+            let start = run.len();
+            match blocks.get(next).filter(|patch| patch.at.get() as usize == block) {
+                Some(patch) => {
+                    next += 1;
+                    run.extend_from_slice(patch.statics);
+                    run[start..].sort_by_key(tile_key);
+                    // The fields directly rather than `self.set_land`: the loop
+                    // borrows `self.statics` and `self.offsets` below, and the
+                    // three are disjoint.
+                    self.land.set_block(patch.at, patch.land);
+                }
+                // Not replaced, and it is in the span only because something on
+                // either side of it was. It keeps its items and its order.
+                None => run.extend_from_slice(
+                    &self.statics[self.offsets[block] as usize..self.offsets[block + 1] as usize],
+                ),
+            }
+            counts.push(u32::try_from(run.len() - start).expect("a block of fewer than 4G statics"));
+        }
+
+        // The one memmove. `splice` over an exact-sized replacement shifts the
+        // tail once and leaves the vector's own capacity alone.
+        let (was, now) = (to - from, run.len());
+        self.statics.splice(from..to, run);
+
+        let mut running = self.offsets[first];
+        for (block, count) in counts.iter().enumerate() {
+            running = running
+                .checked_add(*count)
+                .expect("a facet of fewer than 4G statics");
+            self.offsets[first + 1 + block] = running;
+        }
+        // Every block past the span keeps its items and finds them somewhere
+        // else. One arithmetic pass over 1.8 MiB of offsets — 34 µs on Felucca,
+        // and nothing at all when the span's length did not change, which is
+        // every land-only edit.
+        match now.cmp(&was) {
+            std::cmp::Ordering::Greater => {
+                let grew = u32::try_from(now - was).expect("a facet of fewer than 4G statics");
+                for offset in &mut self.offsets[last + 2..] {
+                    *offset += grew;
+                }
+            }
+            std::cmp::Ordering::Less => {
+                let shrank = u32::try_from(was - now).expect("a facet of fewer than 4G statics");
+                for offset in &mut self.offsets[last + 2..] {
+                    *offset -= shrank;
+                }
+            }
+            std::cmp::Ordering::Equal => {}
+        }
     }
 
     /// Every static standing on a point.

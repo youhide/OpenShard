@@ -577,12 +577,11 @@ Found while building E2:
   `chunks.rs`'s copy by a `blocks` argument rather than adding a third; the lift
   is a `tests/common/mod.rs` those two share, which is dev-only and costs the
   `openshard-e2e-shard` library nothing.
-- **A fetch that straddles a publish fails the whole facet.** `assemble` refuses
-  `MixedRevisions`, which is right — half a world before an edit and half after
-  is a world that never existed — but the client's answer to it is to end the
-  connection. The honest recovery is to start the fetch again at the new
-  revision, and it belongs with E4, which is where a client learns that a publish
-  happened at all.
+- ~~**A fetch that straddles a publish fails the whole facet.**~~ `assemble`
+  refuses `MixedRevisions`, which is right — half a world before an edit and half
+  after is a world that never existed — but the client's answer to it was to end
+  the connection. **Fixed** by drain-and-restart; the entry E4 left is where it
+  is written up.
 - **The window is blank for the length of the fetch and only the terminal says
   why.** 21.3 MiB of Felucca is seconds, and what a person sees is an unpainted
   surface while `the ground: 4096 of 7168 chunks` scrolls past in a console they
@@ -642,19 +641,27 @@ both left owed:
 
 Found while building E4:
 
-- **A fetch that straddles a publish is ended and not recovered.** The finding E2
-  left and E3 handed on: a client is now *told* a publish happened, which is what
-  a recovery needs, and it still does not make one. The obstacle is that the
-  abandoned fetch's answers are already on the wire and are indistinguishable
-  from the answers a restarted fetch would ask for. The shape it wants is
-  **drain-and-restart**: keep the abandoned `Fetch` beside the new one, route
-  chunk packets to it while it is still owed any — `outstanding.len()` is exactly
-  how many — and discard what completes, then start again. It needs a
-  `Fetch::discard` that eats a packet without decoding it (a refusal has to come
-  out of `outstanding` too, which `on_packet` does not do), a way to get a held
-  world back out of a `Fetch` for the E3 arm, and a rule for a publish that lands
-  while a client is *asking* what moved — where the reply is already stale and
-  the honest answer is to ask again rather than fetch against it.
+- ~~**A fetch that straddles a publish is ended and not recovered.**~~ The
+  finding E2 left, E3 handed on and E4 could not close — **fixed**, in the shape
+  it asked for. `Fetch::abandon` turns the fetch in flight into two values: a
+  [`Drain`](../../../crates/client/net/src/chunks.rs), which eats the answers the
+  shard still owes without decoding one of them, and a `Restart`, which is what
+  to ask for once it is owed nothing. Nothing goes out on the wire in between,
+  because the shard answers a chunk exactly once and an answer does not say which
+  request it belongs to.
+  **What to ask for again is a union**, and that is the decision the fix turns
+  on: what the fetch was asking about is what moved between the world this end
+  can still show and the revision it was fetching, and what the publish names is
+  what moved from there — so a square in either list has moved as far as this end
+  is concerned, and nothing will ever name it again. The three arms restart as
+  themselves: a whole facet is taken whole (`Changes::Everything` absorbs
+  whatever it is unioned with), a kept world comes back out of the fetch and is
+  filled in, and the window's world still ends in chunks.
+  The fourth case is the one the entry named separately and it needed no drain:
+  **a publish that lands while a client is *asking* what moved** leaves no list
+  to union, so the stale reply — recognised by the revision it carries against
+  the newest the shard has announced — is answered by asking the question again.
+  One request in flight at a time, and no state.
 - **A publish costs the window a whole facet's rebuild** — ~~and nobody has
   measured it~~. **Measured now**, by
   [`publish_cost`](../../../crates/common/movement/tests/publish_cost.rs), and
@@ -697,3 +704,25 @@ Found while building E4:
   *while the connection is doing something else*, and therefore the one whose
   ordering against a fetch in flight is hardest to get right by reading. Same
   fix, one caller worse: a `tests/` in `e2e/playground`, which links both ends.
+
+Found while closing the fetch that straddles a publish
+([handoff](handoffs/2026-08-25-a-fetch-survives-the-ground-moving.md)):
+
+- **A whole-facet fetch restarts from zero on every publish.** A client with no
+  kept world fetches 7,168 chunks over seconds, and a publish at any point in
+  that abandons every one of them — a chunk that already arrived carries the old
+  revision and `assemble` refuses a mixed set, even though a chunk the publish
+  did *not* name has identical content at both. So an operator publishing faster
+  than a facet arrives can keep a first-time client from ever finishing. What
+  would retire it is a way for `assemble` to take a set whose revisions differ
+  but whose content is known not to — the shard already computes which chunks a
+  revision left untouched (`changes_since`), and an arriving chunk's own
+  `revision` field cannot express it.
+- **A fetch applies at its end and never as chunks arrive, and `Fetch::abandon`
+  now depends on it.** `Filling::Held` hands the kept world back untouched, which
+  is only right because `finish` is where `take_chunks` happens. A streaming
+  apply — an obvious optimisation for a client watching a blank window — would
+  make that world half a revision ahead of its own number.
+- **`link::play`'s wiring has a fourth decision now.** The publish arm is a
+  four-way match on what the connection is in the middle of, and two of its arms
+  are new *states* rather than new packets. Same fix, four handoffs old.

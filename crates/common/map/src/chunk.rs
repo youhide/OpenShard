@@ -61,7 +61,7 @@
 use openshard_protocol::world::Facet;
 
 use crate::grid::{BlockCoord, BlockExtent, BlockIndex, LandGrid};
-use crate::map::{BLOCK_SIZE, CELLS_PER_BLOCK, LandCell, StaticItem, WorldMap};
+use crate::map::{BLOCK_SIZE, BlockPatch, CELLS_PER_BLOCK, LandCell, StaticItem, WorldMap};
 use crate::snapshot::{MapRevision, MapSnapshot};
 
 /// Tiles along each side of a chunk.
@@ -579,22 +579,46 @@ pub fn assemble(
     Ok(WorldMap::from_parts(land, items, &counts))
 }
 
+/// One block of an arriving chunk, and which chunk it came out of.
+///
+/// The second half is only ever read to name a chunk in an
+/// [`AssemblyError::Overlap`]: the blocks are sorted into the facet's order
+/// before anything is written, and by then a block no longer remembers where it
+/// came from.
+struct Placed<'a> {
+    /// The block, as [`WorldMap::replace_blocks`] takes it.
+    patch: BlockPatch<'a>,
+    /// The chunk it was cut out of.
+    from: ChunkCoord,
+}
+
 /// Put *some* chunks back into a facet somebody already holds.
 ///
 /// [`assemble`]'s other half. That one builds a world out of a complete set;
 /// this one takes a world and a handful of squares that have moved since, which
 /// is what a client with a cache does when the shard tells it the ground is at a
 /// newer revision — `docs/map/new_map_representation/to_the_client.md`'s E3 —
-/// and what a client told about a publish will do with the chunks it refetches.
+/// and what a client told about a publish does with the chunks it refetches.
 ///
-/// **It rebuilds rather than patching in place, and the reason is the layout.**
-/// A block's statics are one run in a facet-wide vector, so a chunk whose items
-/// changed in number moves every static after it; there is no splice that is not
-/// a copy of the tail. Since the copy is unavoidable, it is made once, through
-/// [`WorldMap::from_parts`] — the same call `assemble` and the `.mul` importer
-/// both end in, so a world grown this way cannot have a different idea of the
-/// per-block order from a world read whole. What it costs is one more facet
-/// resident for the length of the call.
+/// **It writes into the world rather than building a second one.** A block's
+/// statics are one run in a facet-wide vector, so a chunk whose item count
+/// changed moves every static after it — but that is a memmove of the tail, and
+/// the land, which is the larger half of a facet, does not move at all: a block
+/// is a fixed slice wherever it sits. Rebuilding the whole facet to avoid one
+/// tail copy was measured against doing the tail copy, on Felucca:
+/// **15.3 ms and a second 150 MiB facet resident, against 0.1 ms for a set that
+/// did not change any block's item count and 3.9–5.6 ms for one that did.**
+/// [`WorldMap::replace_blocks`] is where the copy is made once for the whole
+/// set, and where those numbers are broken down.
+///
+/// Nothing is written until every chunk has been checked, so a refused set
+/// leaves the world exactly as it was — which is the property the old rebuild
+/// got for free by building somewhere else, kept deliberately here.
+///
+/// What it does *not* do is come back through [`WorldMap::from_parts`], and the
+/// per-block sort that call imposes is imposed by `replace_blocks` instead, on
+/// the blocks that arrived. A world grown a chunk at a time still cannot have a
+/// different idea of the per-block order from one read whole.
 ///
 /// The revision it hands back is the chunks' own, and every chunk has to agree
 /// about it: half a world before an edit and half after is a world that never
@@ -614,26 +638,15 @@ pub fn assemble(
 /// a caller with nothing to apply has nothing to do — a world that has not moved
 /// is a case answered before this is called.
 pub fn apply(
-    world: &WorldMap,
+    world: &mut WorldMap,
     facet: Facet,
     chunks: &[Chunk],
-) -> Result<(WorldMap, MapRevision), AssemblyError> {
+) -> Result<MapRevision, AssemblyError> {
     assert!(!chunks.is_empty(), "applying no chunks is not a change");
     let facet_extent = world.extent();
-    let blocks = facet_extent.count() as usize;
-    // What each block's items are *now*, and the borrow is the point: an
-    // untouched block's run stays where it is until the one pass below copies
-    // it, exactly as `assemble` leaves a chunk's items inside the chunk.
-    let mut statics: Vec<&[StaticItem]> = Vec::with_capacity(blocks);
-    let mut cells: Vec<LandCell> = Vec::with_capacity(blocks * CELLS_PER_BLOCK);
-    for index in facet_extent.blocks() {
-        let block = facet_extent.coord_of(index).expect("a block of this facet");
-        cells.extend_from_slice(world.land_in_block(block));
-        statics.push(world.statics_in_block(block.x, block.y));
-    }
-
-    let mut replaced = vec![false; blocks];
+    let mut placed: Vec<Placed<'_>> = Vec::with_capacity(chunks.len() * BLOCKS_PER_CHUNK as usize);
     let mut revision: Option<MapRevision> = None;
+
     for chunk in chunks {
         if chunk.key.facet != facet {
             return Err(AssemblyError::WrongFacet {
@@ -664,39 +677,31 @@ pub fn apply(
 
         for local in chunk.blocks() {
             let block = world_block(origin, chunk.extent, local);
-            let index = facet_extent
-                .index_of(block)
-                .expect("a block inside the facet")
-                .get() as usize;
-            // Twice in one set is refused rather than last-write-wins: two
-            // chunks of one square are two answers to the same question, and
-            // taking either of them would be a guess.
-            if std::mem::replace(&mut replaced[index], true) {
-                return Err(AssemblyError::Overlap { at });
-            }
-            let from = index * CELLS_PER_BLOCK;
-            cells[from..from + CELLS_PER_BLOCK].copy_from_slice(chunk.land_in_block(local));
-            statics[index] = chunk.statics_in_block(local);
+            let index = facet_extent.index_of(block).expect("a block inside the facet");
+            placed.push(Placed {
+                patch: BlockPatch::new(index, chunk.land_in_block(local), chunk.statics_in_block(local)),
+                from: at,
+            });
         }
     }
 
-    let land = LandGrid::from_file_order(
-        facet_extent.wide * BLOCK_SIZE,
-        facet_extent.down * BLOCK_SIZE,
-        cells.into_iter(),
-    );
-    let counts: Vec<u32> = statics
-        .iter()
-        .map(|block| u32::try_from(block.len()).expect("a block of fewer than 4G statics"))
-        .collect();
-    let mut items = Vec::with_capacity(statics.iter().map(|block| block.len()).sum());
-    for block in statics {
-        items.extend_from_slice(block);
+    // The facet's own order, which is what one span and one memmove need them
+    // in. Unstable is the right sort because no two entries can compare equal
+    // and survive the next check.
+    placed.sort_unstable_by_key(|block| block.patch.at());
+    // Twice in one set is refused rather than last-write-wins: two chunks of one
+    // square are two answers to the same question, and taking either would be a
+    // guess. Chunks tile the facet, so a repeated block is a repeated chunk.
+    if let Some(pair) = placed
+        .windows(2)
+        .find(|pair| pair[0].patch.at() == pair[1].patch.at())
+    {
+        return Err(AssemblyError::Overlap { at: pair[1].from });
     }
-    Ok((
-        WorldMap::from_parts(land, items, &counts),
-        revision.expect("a set that is not empty has a revision"),
-    ))
+
+    let patches: Vec<BlockPatch<'_>> = placed.into_iter().map(|block| block.patch).collect();
+    world.replace_blocks(&patches);
+    Ok(revision.expect("a set that is not empty has a revision"))
 }
 
 #[cfg(test)]
@@ -841,8 +846,9 @@ mod tests {
     /// which is two chunks of the fixture's four and leaves two untouched.
     ///
     /// The static is added rather than only moved on purpose: it changes how
-    /// many items its block holds, which is the case a splice would have to get
-    /// right and the reason [`apply`] rebuilds instead.
+    /// many items its block holds, which is the case [`apply`]'s splice has to
+    /// get right — the block's run grows by one and every static after it on the
+    /// facet moves along.
     fn moved() -> MapSnapshot {
         let mut map = fixture::map();
         map.set_land(
@@ -877,25 +883,81 @@ mod tests {
             .map(|at| Chunk::of(&is, at).expect("a chunk of this facet"))
             .collect();
 
-        let (world, revision) = apply(was.map(), FACET, &touched).expect("two chunks of this facet");
+        let mut world = fixture::map();
+        let revision = apply(&mut world, FACET, &touched).expect("two chunks of this facet");
         assert_eq!(revision, is.revision());
         assert_same_world(is.map(), &world);
-        // And the world it was applied over is untouched, which is what makes
-        // the caller's `MapSnapshot::restored` the only place a revision moves.
-        assert_same_world(snapshot().map(), was.map());
+        // The two untouched chunks came through the splice's span — the blocks
+        // between the first replaced one and the last are rebuilt whether or not
+        // anything moved them — so `assert_same_world` above is what says they
+        // came through it unchanged, ordering and all.
+        assert_eq!(was.map().static_count() + 1, world.static_count());
+    }
+
+    /// A block's items are sorted where they go *in*, not where they came from.
+    ///
+    /// The `(y, x)` order is [`WorldMap`]'s invariant and [`apply`] no longer
+    /// comes back through [`WorldMap::from_parts`], which is where it used to be
+    /// imposed — so this is what holds the new door to it. A decoder handing over
+    /// a block in some other order is not hypothetical: a chunk arrives off a
+    /// wire, and a run in the wrong order does not fail, it makes every later
+    /// binary search over that block quietly find nothing.
+    #[test]
+    fn a_blocks_items_are_sorted_where_they_go_in() {
+        let is = moved();
+        let cut = Chunk::of(&is, ChunkCoord { x: 1, y: 1 }).expect("the south-east chunk");
+
+        // The same chunk with every block's run in `(x, y)` order — the two
+        // coordinates the other way round, which is a plausible decoder bug and
+        // not a scramble. The sort is stable, so two statics on one tile keep
+        // the order they are in here and the world still compares equal.
+        let counts: Vec<u32> = cut.counts().collect();
+        let mut items: Vec<StaticItem> = Vec::with_capacity(cut.static_count());
+        let mut from = 0;
+        for count in &counts {
+            let to = from + *count as usize;
+            let mut block = cut.statics()[from..to].to_vec();
+            block.sort_by_key(|held| (held.x, held.y));
+            items.extend_from_slice(&block);
+            from = to;
+        }
+        let wrong_way_round = Chunk::from_parts(
+            cut.key(),
+            cut.revision(),
+            cut.extent(),
+            cut.land().to_vec(),
+            &counts,
+            items,
+        );
+
+        let mut world = fixture::map();
+        apply(&mut world, FACET, &[wrong_way_round]).expect("one chunk of this facet");
+        for y in u16::try_from(CHUNK_TILES).unwrap()..u16::try_from(fixture::TILES).unwrap() {
+            for x in u16::try_from(CHUNK_TILES).unwrap()..u16::try_from(fixture::TILES).unwrap() {
+                let want: Vec<_> = is.map().statics_at(x, y).collect();
+                let got: Vec<_> = world.statics_at(x, y).collect();
+                assert_eq!(want, got, "the statics at ({x}, {y})");
+            }
+        }
     }
 
     /// Every way a set of chunks does not belong to the world it is applied
     /// over. The same four `assemble` refuses a complete set for — a partial set
     /// is not a licence to skip them.
+    ///
+    /// **And on every one of them the world is exactly as it was.** That used to
+    /// be free, because a refused set was one that never finished building a
+    /// second facet somewhere else; now it is a property of the order `apply`
+    /// does things in, so it is asserted rather than assumed.
     #[test]
     fn chunks_that_are_not_this_worlds_are_refused_by_apply() {
         let was = snapshot();
         let is = moved();
         let chunk = |at| Chunk::of(&is, at).expect("a chunk of this facet");
+        let mut world = fixture::map();
 
         assert!(matches!(
-            apply(was.map(), Facet(3), &[chunk(ChunkCoord { x: 0, y: 0 })]),
+            apply(&mut world, Facet(3), &[chunk(ChunkCoord { x: 0, y: 0 })]),
             Err(AssemblyError::WrongFacet {
                 wanted: Facet(3),
                 found: FACET
@@ -903,7 +965,7 @@ mod tests {
         ));
         assert!(matches!(
             apply(
-                was.map(),
+                &mut world,
                 FACET,
                 &[
                     chunk(ChunkCoord { x: 0, y: 0 }),
@@ -914,7 +976,7 @@ mod tests {
         ));
         assert!(matches!(
             apply(
-                was.map(),
+                &mut world,
                 FACET,
                 &[chunk(ChunkCoord { x: 1, y: 1 }), chunk(ChunkCoord { x: 1, y: 1 })],
             ),
@@ -939,7 +1001,7 @@ mod tests {
         );
         assert!(matches!(
             apply(
-                was.map(),
+                &mut world,
                 FACET,
                 &[Chunk::of(&wider, ChunkCoord { x: 2, y: 0 }).expect("a chunk of the wider facet")],
             ),
@@ -947,6 +1009,8 @@ mod tests {
                 at: ChunkCoord { x: 2, y: 0 }
             })
         ));
+
+        assert_same_world(was.map(), &world);
     }
 
     #[test]

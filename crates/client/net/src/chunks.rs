@@ -52,6 +52,15 @@
 //! [`Fetch::moved`] ends in the chunks themselves rather than in a world. What
 //! they are applied over is the window's, which is the only copy there is.
 //!
+//! # Or it moves while it is still arriving
+//!
+//! The three above are a fetch that runs to its end. This is the one that does
+//! not: a publish lands while chunks are on the wire, and every answer still
+//! coming was cut at a revision the shard has already moved past. See
+//! [`Fetch::abandon`], [`Drain`] and [`Restart`] — the fetch stops, what it is
+//! still owed is eaten rather than decoded, and what to ask for again is the
+//! union of what it was asking about and what the publish named.
+//!
 //! [`WorldMap`]: openshard_map::map::WorldMap
 
 use openshard_map::chunk::{Chunk, ChunkCoord, ChunkKey, assemble, chunks_of};
@@ -59,11 +68,11 @@ use openshard_map::codec;
 use openshard_map::grid::BlockExtent;
 use openshard_map::snapshot::{MapRevision, MapSnapshot};
 use openshard_protocol::chunks::{
-    ChunkAt, ChunkData, ChunkRequest, FacetBlocks, JoinError, MAX_CHUNKS, Refusal, WorldNotice, join,
+    Changes, ChunkAt, ChunkData, ChunkRequest, FacetBlocks, JoinError, MAX_CHUNKS, Refusal, WorldNotice, join,
 };
 use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::world::Facet;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// How many chunks may be outstanding at once.
 ///
@@ -634,21 +643,279 @@ impl Fetch {
             .first()
             .expect("a facet the shard sent a notice for has at least one chunk")
             .revision();
-        let map = match &self.filling {
-            Filling::Nothing => assemble(self.facet, self.extent, &self.held)
-                .map_err(|source| FetchError::Assembly { source })?,
-            Filling::Held { world, .. } => {
-                openshard_map::chunk::apply(world.map(), self.facet, &self.held)
-                    .map_err(|source| FetchError::Assembly { source })?
-                    .0
+        match self.filling {
+            Filling::Nothing => {
+                let map = assemble(self.facet, self.extent, &self.held)
+                    .map_err(|source| FetchError::Assembly { source })?;
+                Ok(Fetched::World(MapSnapshot::restored(self.facet, revision, map)))
+            }
+            // The world that was kept, moved to where it was told the shard is:
+            // `take_chunks` writes the squares in and re-stamps the revision in
+            // one call, so there is no second snapshot to build around a facet
+            // that never left this variant.
+            Filling::Held { mut world, .. } => {
+                world
+                    .take_chunks(&self.held)
+                    .map_err(|source| FetchError::Assembly { source })?;
+                Ok(Fetched::World(world))
             }
             // Every check this would have made on the way to a world has been
             // made already — each chunk is the one that was asked for, and each
             // carries the revision the publish named. What is left is
             // `chunk::apply`, and it belongs to whoever holds the world.
-            Filling::Loose { .. } => return Ok(Fetched::Chunks(self.held)),
+            Filling::Loose { .. } => Ok(Fetched::Chunks(self.held)),
+        }
+    }
+
+    /// Stop, because the world moved: what is still owed, and what to ask for
+    /// again.
+    ///
+    /// The answer to a publish that lands while ground is arriving. Nothing this
+    /// fetch is holding can be used — a chunk that arrived before the publish
+    /// was cut at the revision the publish moved past, and one that arrives
+    /// after it carries the new number, which is
+    /// [`WrongRevision`](FetchError::WrongRevision) for the two narrow arms and
+    /// a set `assemble` refuses for the wide one.
+    ///
+    /// **What cannot simply be dropped is the wire.** The shard answers every
+    /// chunk it was asked for exactly once, so the answers to this fetch's last
+    /// requests are already coming and nothing in them says which request they
+    /// belong to — a restart that asked for the same square would take the
+    /// abandoned answer for its own. That is what the [`Drain`] is: the
+    /// bookkeeping, without the chunks.
+    ///
+    /// `published` and `revision` are the publish that caused this, folded in
+    /// here rather than left to the caller because a [`Restart`] with no
+    /// revision to fetch at is not a thing that should be constructible. Further
+    /// publishes go through [`Restart::and`].
+    pub fn abandon(self, published: &Changes, revision: MapRevision) -> (Drain, Restart) {
+        let drain = Drain {
+            facet: self.facet,
+            owed: self
+                .outstanding
+                .iter()
+                .map(|(&at, pieces)| (at, pieces.len()))
+                .collect(),
         };
-        Ok(Fetched::World(MapSnapshot::restored(self.facet, revision, map)))
+        let (mut moved, whose) = match self.filling {
+            // Nothing of this facet is on this side at all, so there is nothing
+            // narrower than the whole of it to ask for: the chunks that had
+            // already arrived are as abandoned as the ones that had not.
+            Filling::Nothing => (Changes::Everything, Whose::Nobodys),
+            Filling::Held { world, .. } => (Changes::These(self.wanted), Whose::Ours(world)),
+            Filling::Loose { .. } => (Changes::These(self.wanted), Whose::Windows),
+        };
+        merge(&mut moved, published);
+        (
+            drain,
+            Restart {
+                moved,
+                revision,
+                whose,
+            },
+        )
+    }
+}
+
+/// The answers an abandoned [`Fetch`] is still owed.
+///
+/// A chunk request is answered exactly once and the answer says nothing about
+/// which request it belongs to, so a connection that abandoned a fetch and asked
+/// again would have two sets of answers on the wire and no way to tell them
+/// apart — the same square, at two revisions, and the wrong one might land
+/// second. So the abandoned fetch is not dropped, it is turned into this: the
+/// count of what it was owed, and nothing else. When [`is_empty`](Self::is_empty)
+/// says so, the wire carries no answer to a question this connection has
+/// forgotten and the restart can go out.
+///
+/// **It decodes nothing.** A discarded chunk is bytes to count and not a chunk:
+/// the fragments are dropped as they arrive rather than joined, so what a drain
+/// costs is one entry per outstanding chunk however big the facet is.
+#[derive(Debug)]
+pub struct Drain {
+    /// The facet the abandoned fetch was about. Only for the log line: what
+    /// arrives is eaten whatever facet it names — see [`on_packet`](Self::on_packet).
+    facet: Facet,
+    /// One entry per chunk asked for and not yet whole, and how many of its
+    /// fragments have been seen. A chunk leaves when its last fragment arrives
+    /// or when the shard refuses it, which are the only two things the shard
+    /// can answer with.
+    owed: FxHashMap<ChunkAt, usize>,
+}
+
+impl Drain {
+    /// Eat one packet, answering whether it was a chunk packet.
+    ///
+    /// `false` is everything the abandoned fetch would have handed back, and it
+    /// is handed back for the same reason: the ground arrives on the one stream
+    /// every other packet does.
+    ///
+    /// **Every chunk packet is eaten, whatever it names.** Nothing on this
+    /// connection has asked for a chunk since the fetch was abandoned, so a
+    /// chunk packet is an abandoned answer by construction; and one that is not
+    /// — a facet nobody asked about, a square that already completed — is still
+    /// nothing the window can be told about. What the bookkeeping recognises is
+    /// narrower than what it consumes, on purpose: a drain that ended early
+    /// would let the restart's answers race the abandoned ones, which is the
+    /// whole thing this exists to prevent.
+    pub fn on_packet(&mut self, packet: &ServerPacket) -> bool {
+        match packet {
+            ServerPacket::ChunkData(data) => {
+                if data.facet == self.facet {
+                    self.fragment(data);
+                }
+                true
+            }
+            // The other half of "answered exactly once", and the half
+            // [`Fetch::on_packet`] has no reason to handle: there a refusal ends
+            // the fetch, so what it leaves in `outstanding` never matters. Here
+            // it is the answer, and a chunk still owed after it would hold the
+            // drain open for a packet that is never coming.
+            ServerPacket::ChunkRefused(refused) => {
+                if refused.facet == self.facet {
+                    self.owed.remove(&refused.at);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// One fragment of one abandoned chunk, counted and thrown away.
+    fn fragment(&mut self, data: &ChunkData) {
+        let Some(seen) = self.owed.get_mut(&data.at) else {
+            return;
+        };
+        *seen += 1;
+        // `>=` and not `==`: the count is the sender's, and a drain that held
+        // itself open over a shard that sent a fragment twice would stop this
+        // connection from ever asking for ground again. `join`'s check is what
+        // this end has instead, and a discarded chunk is never joined.
+        if *seen >= usize::from(data.fragment.count()) {
+            self.owed.remove(&data.at);
+        }
+    }
+
+    /// Whether every answer has arrived, so the wire is clean.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.owed.is_empty()
+    }
+
+    /// How many chunks are still owed — what a progress line says while a
+    /// restart is waiting.
+    #[must_use]
+    pub fn owed(&self) -> usize {
+        self.owed.len()
+    }
+}
+
+/// Whose world an abandoned fetch was filling in.
+///
+/// [`Filling`] after the fact, and it is a second enum rather than that one
+/// because a restart has no fragments, no cursor and no chunks — what survives
+/// an abandonment is which of the three kinds of fetch to start again.
+#[derive(Debug)]
+enum Whose {
+    /// Nobody's yet: the facet had not arrived, so a restart takes it whole.
+    Nobodys,
+    /// This thread's, out of [`crate::cache`]. It comes back with the restart,
+    /// still at the revision it was kept at — nothing was applied over it,
+    /// because a fetch applies at its end and this one had none.
+    Ours(MapSnapshot),
+    /// The window's: the facet was handed over a whole fetch ago, so a restart
+    /// ends in chunks.
+    Windows,
+}
+
+/// What to ask for once an abandoned fetch's answers have stopped arriving.
+///
+/// **The list is a union, and that is the whole rule.** What a fetch was asking
+/// about is what moved between the world this end can still show and the
+/// revision it was fetching; what a publish names is what moved between that
+/// revision and the new one. A square in either list has moved as far as this
+/// end is concerned, and nothing will ever name it again — the shard's next
+/// notice is about its next patch, not about this one. So the two lists are put
+/// together rather than the second replacing the first, and the result is asked
+/// for at the newest revision.
+///
+/// The union can name more chunks than one [`ChangesReply`] could
+/// — `MAX_MOVED` bounds a *packet*, and this is a list of things to request in
+/// batches of [`MAX_CHUNKS`]. Where it stops being narrower than the facet is
+/// the shard's own answer, [`Changes::Everything`], which absorbs everything it
+/// is unioned with.
+///
+/// [`ChangesReply`]: openshard_protocol::chunks::ChangesReply
+#[derive(Debug)]
+pub struct Restart {
+    /// Every square that moved between the world this end can still show and
+    /// [`revision`](Self::revision).
+    moved: Changes,
+    /// The revision to fetch at: the newest publish's, since each one is the
+    /// world as it now stands.
+    revision: MapRevision,
+    /// Which of the three fetches to start again.
+    whose: Whose,
+}
+
+impl Restart {
+    /// Fold another publish in: what it names moved as well.
+    ///
+    /// A second edit while the first one's answers are still draining, and it
+    /// costs nothing but a longer list — the fetch has not gone out yet, so
+    /// there is no second abandonment and no second drain.
+    pub fn and(&mut self, published: &Changes, revision: MapRevision) {
+        self.revision = revision;
+        merge(&mut self.moved, published);
+    }
+
+    /// The fetch to start, once the [`Drain`] beside it is empty.
+    ///
+    /// # Errors
+    ///
+    /// [`FetchError::TooWide`], and [`FetchError::WrongWorld`] for the arm that
+    /// carries a world — both of them [`Fetch`]'s own, and both about the notice
+    /// rather than about anything a publish said.
+    pub fn begin(self, notice: WorldNotice) -> Result<Fetch, FetchError> {
+        match (self.moved, self.whose) {
+            // The shard could not name what moved, or there was nothing on this
+            // side to name it against. Either way the facet is taken again, and
+            // a world in hand is worth nothing against it: `assemble` builds one
+            // out of the chunks alone.
+            (Changes::Everything, _) => Fetch::of(notice),
+            (Changes::These(moved), Whose::Ours(world)) => Fetch::over(notice, world, moved, self.revision),
+            (Changes::These(moved), Whose::Windows) => Fetch::moved(notice, moved, self.revision),
+            (Changes::These(_), Whose::Nobodys) => {
+                unreachable!("a fetch of the whole facet is abandoned as Everything")
+            }
+        }
+    }
+}
+
+/// Put one list of moved squares into another, keeping each square once.
+///
+/// [`Changes::Everything`] is not a list and absorbs whatever it meets, in both
+/// directions: it is the shard saying nothing narrower than the facet is safe to
+/// take, and a union with a handful of named squares does not make it safer.
+fn merge(into: &mut Changes, other: &Changes) {
+    match (&mut *into, other) {
+        (Changes::Everything, _) => {}
+        (Changes::These(_), Changes::Everything) => *into = Changes::Everything,
+        (Changes::These(have), Changes::These(more)) => {
+            // A set and not `contains` per square: an operator holding a key
+            // down publishes one chunk at a time, and a restart that has been
+            // waiting through a hundred of them would be scanning a list that
+            // long for each one. It also dedupes `more` against itself, which
+            // the wire says is unnecessary and cannot be trusted to be — a
+            // square in the list twice is a square asked for twice, and the
+            // second answer is one nobody asked for.
+            let mut known: FxHashSet<ChunkAt> = have.iter().copied().collect();
+            for &at in more {
+                if known.insert(at) {
+                    have.push(at);
+                }
+            }
+        }
     }
 }
 
@@ -981,10 +1248,13 @@ mod tests {
             assert_eq!(chunk.revision(), revision);
         }
 
-        // The window's half, which is `chunk::apply` and nothing else.
-        let (map, applied) =
-            openshard_map::chunk::apply(held.map(), FACET, &chunks).expect("two chunks of this facet");
+        // The window's half, which is `MapSnapshot::take_chunks` and nothing
+        // else — `chunk::apply` with the world's own facet and revision
+        // bookkeeping around it.
+        let mut held = held;
+        let applied = held.take_chunks(&chunks).expect("two chunks of this facet");
         assert_eq!(applied, revision);
+        let map = held.map();
         assert_eq!(map.static_count(), moved.map().static_count());
         for y in 0..moved.map().height() as u16 {
             for x in 0..moved.map().width() as u16 {
@@ -1045,6 +1315,234 @@ mod tests {
             Err(FetchError::WrongRevision { at, wanted, found })
                 if at == ChunkAt { x: 0, y: 0 } && wanted == asked_about && found == later.revision()
         ));
+    }
+
+    /// A publish under a running fetch: what the fetch was still owed is eaten
+    /// rather than decoded, and the drain is empty when the last of it lands.
+    ///
+    /// The answers deliberately come from the world *after* the edit — which is
+    /// what makes them unusable, and what a drain has no opinion about.
+    #[test]
+    fn an_abandoned_fetch_eats_the_answers_it_was_still_owed() {
+        let snapshot = a_facet();
+        let published_at = a_facet().revision().after();
+        let mut fetch = Fetch::of(notice()).expect("a facet the wire can name");
+        let request = fetch.next_request().expect("a facet has chunks");
+        assert_eq!(request.chunks.len(), 4, "the fixture is four chunks");
+        // One of the four is whole before the publish lands.
+        let first = ChunkRequest {
+            facet: FACET,
+            chunks: vec![request.chunks[0]],
+        };
+        for packet in answers(&snapshot, &first) {
+            assert!(fetch.on_packet(&packet).expect("the shard's own bytes"));
+        }
+
+        let (mut drain, _restart) =
+            fetch.abandon(&Changes::These(vec![ChunkAt { x: 1, y: 1 }]), published_at);
+        assert_eq!(drain.owed(), 3, "the answers still on the wire");
+        assert!(!drain.is_empty());
+
+        let moved = a_facet_that_moved(published_at);
+        let rest = ChunkRequest {
+            facet: FACET,
+            chunks: request.chunks[1..].to_vec(),
+        };
+        for packet in answers(&moved, &rest) {
+            assert!(drain.on_packet(&packet), "an answer the abandoned fetch was owed");
+        }
+        assert!(drain.is_empty(), "the wire is clean and the restart can go out");
+        assert!(
+            !drain.on_packet(&ServerPacket::LoginComplete(
+                openshard_protocol::world::LoginComplete
+            )),
+            "everything but a chunk packet is still the caller's"
+        );
+    }
+
+    /// A refusal is an answer, and it has to come out of the drain: a chunk
+    /// still owed after one would hold the connection shut for a packet that is
+    /// never coming. [`Fetch::on_packet`] has no equivalent — there a refusal
+    /// ends the fetch, so what it leaves outstanding never matters.
+    #[test]
+    fn a_refusal_takes_a_chunk_out_of_a_drain() {
+        let mut fetch = Fetch::of(notice()).expect("a facet the wire can name");
+        let request = fetch.next_request().expect("a facet has chunks");
+        let (mut drain, _restart) = fetch.abandon(&Changes::Everything, a_facet().revision().after());
+        assert_eq!(drain.owed(), request.chunks.len());
+        for &at in &request.chunks {
+            assert!(drain.on_packet(&ServerPacket::ChunkRefused(ChunkRefused {
+                facet: FACET,
+                at,
+                reason: Refusal::NoWorld,
+            })));
+        }
+        assert!(
+            drain.is_empty(),
+            "a drain that ignored a refusal would never empty"
+        );
+    }
+
+    /// The restart asks for both lists: what the shard said had moved, and what
+    /// the publish that interrupted it said moved as well.
+    ///
+    /// A square in the first list and not the second has still moved as far as
+    /// this end can tell, and nothing will ever name it again — so the answer is
+    /// the union, fetched at the revision the publish named. The oracle is the
+    /// world the shard is holding after both.
+    #[test]
+    fn a_restart_asks_for_what_the_answer_and_the_publish_both_named() {
+        let held = a_facet();
+        let asked_about = a_facet().revision().after();
+        let published_at = asked_about.after();
+        let moved = a_facet_that_moved(published_at);
+        let notice = WorldNotice {
+            revision: WorldRevision(published_at.get()),
+            ..notice()
+        };
+
+        // Told one chunk moved, and a publish naming another lands before a
+        // single answer does.
+        let fetch = Fetch::over(notice, held, vec![ChunkAt { x: 0, y: 0 }], asked_about)
+            .expect("a world the size the notice describes");
+        let (drain, restart) = fetch.abandon(&Changes::These(vec![ChunkAt { x: 1, y: 1 }]), published_at);
+        assert!(drain.is_empty(), "nothing had been asked for yet");
+
+        let mut fetch = restart
+            .begin(notice)
+            .expect("a world the size the notice describes");
+        assert!(fetch.is_over_a_world());
+        assert_eq!(
+            fetch.wanted(),
+            2,
+            "the square the answer named and the one the publish did"
+        );
+        while let Some(request) = fetch.next_request() {
+            for packet in answers(&moved, &request) {
+                assert!(fetch.on_packet(&packet).expect("the shard's own bytes"));
+            }
+        }
+        let arrived = fetch.finish().expect("two chunks of this facet").world();
+
+        assert_eq!(arrived.revision(), published_at);
+        assert_eq!(arrived.map().static_count(), moved.map().static_count());
+        for y in 0..moved.map().height() as u16 {
+            for x in 0..moved.map().width() as u16 {
+                assert_eq!(
+                    arrived.map().land(x, y),
+                    moved.map().land(x, y),
+                    "the land at ({x}, {y})"
+                );
+                let there: Vec<StaticItem> = arrived.map().statics_at(x, y).copied().collect();
+                let here: Vec<StaticItem> = moved.map().statics_at(x, y).copied().collect();
+                assert_eq!(there, here, "the statics at ({x}, {y})");
+            }
+        }
+    }
+
+    /// A publish that cannot name what moved takes the facet again, and the
+    /// world that was being filled in goes with it: `assemble` builds one out of
+    /// the chunks alone.
+    #[test]
+    fn a_publish_that_cannot_name_what_moved_takes_the_facet_again() {
+        let asked_about = a_facet().revision().after();
+        let fetch = Fetch::over(notice(), a_facet(), vec![ChunkAt { x: 0, y: 0 }], asked_about)
+            .expect("a world the size the notice describes");
+        let (_drain, restart) = fetch.abandon(&Changes::Everything, asked_about.after());
+        let fetch = restart.begin(notice()).expect("a facet the wire can name");
+        assert!(
+            !fetch.is_over_a_world(),
+            "the facet, and not a world being filled in"
+        );
+        assert_eq!(fetch.wanted(), 4, "every chunk of the fixture");
+    }
+
+    /// A whole-facet fetch is abandoned as the whole facet: nothing of it is on
+    /// this side, so there is nothing narrower to ask for however few squares
+    /// the publish names.
+    #[test]
+    fn an_abandoned_facet_is_taken_whole_and_not_by_the_square() {
+        let fetch = Fetch::of(notice()).expect("a facet the wire can name");
+        let (_drain, restart) = fetch.abandon(
+            &Changes::These(vec![ChunkAt { x: 0, y: 0 }]),
+            a_facet().revision().after(),
+        );
+        let fetch = restart.begin(notice()).expect("a facet the wire can name");
+        assert!(!fetch.is_over_a_world());
+        assert_eq!(fetch.wanted(), 4, "every chunk of the fixture");
+    }
+
+    /// A publish under E4's own fetch: the restart is the same kind of fetch,
+    /// so it still ends in the chunks themselves rather than in a world this
+    /// end does not hold.
+    #[test]
+    fn a_restart_for_the_windows_world_still_ends_in_chunks() {
+        let published_at = a_facet().revision().after();
+        let again = published_at.after();
+        let moved = a_facet_that_moved(again);
+        let notice = WorldNotice {
+            revision: WorldRevision(again.get()),
+            ..notice()
+        };
+
+        let fetch = Fetch::moved(notice, vec![ChunkAt { x: 0, y: 0 }], published_at)
+            .expect("a facet the wire can name");
+        let (drain, restart) = fetch.abandon(&Changes::These(vec![ChunkAt { x: 1, y: 1 }]), again);
+        assert!(drain.is_empty());
+
+        let mut fetch = restart.begin(notice).expect("a facet the wire can name");
+        assert_eq!(fetch.wanted(), 2);
+        while let Some(request) = fetch.next_request() {
+            for packet in answers(&moved, &request) {
+                assert!(fetch.on_packet(&packet).expect("the shard's own bytes"));
+            }
+        }
+        let Fetched::Chunks(chunks) = fetch.finish().expect("two chunks of this facet") else {
+            panic!("a fetch for the window's world ends in the chunks themselves");
+        };
+        assert_eq!(chunks.len(), 2);
+        for chunk in &chunks {
+            assert_eq!(chunk.revision(), again);
+        }
+    }
+
+    /// A second edit while the first one's answers are still draining: the list
+    /// grows, each square is named once however often a publish repeats it, and
+    /// what is fetched is the newest revision.
+    #[test]
+    fn a_second_publish_grows_the_list_and_names_no_square_twice() {
+        let asked_about = a_facet().revision().after();
+        let published_at = asked_about.after();
+        let again = published_at.after();
+        let moved = a_facet_that_moved(again);
+        let notice = WorldNotice {
+            revision: WorldRevision(again.get()),
+            ..notice()
+        };
+
+        let fetch = Fetch::over(notice, a_facet(), vec![ChunkAt { x: 0, y: 0 }], asked_about)
+            .expect("a world the size the notice describes");
+        let (_drain, mut restart) =
+            fetch.abandon(&Changes::These(vec![ChunkAt { x: 1, y: 1 }]), published_at);
+        // The same square again, and one nobody has named yet.
+        restart.and(
+            &Changes::These(vec![ChunkAt { x: 1, y: 1 }, ChunkAt { x: 1, y: 0 }]),
+            again,
+        );
+
+        let mut fetch = restart
+            .begin(notice)
+            .expect("a world the size the notice describes");
+        assert_eq!(fetch.wanted(), 3, "three squares, each named once");
+        // Every chunk arrives at the newest revision, which is the check that
+        // says `and` moved it: at the older one this is `WrongRevision`.
+        while let Some(request) = fetch.next_request() {
+            for packet in answers(&moved, &request) {
+                assert!(fetch.on_packet(&packet).expect("the shard's own bytes"));
+            }
+        }
+        let arrived = fetch.finish().expect("three chunks of this facet").world();
+        assert_eq!(arrived.revision(), again);
     }
 
     /// A world of another size is refused before a chunk is asked for.

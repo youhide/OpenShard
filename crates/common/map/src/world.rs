@@ -160,12 +160,11 @@ impl World {
     /// its reason: a world that did not move is a case answered before this is
     /// called.
     pub fn take_chunks(&mut self, chunks: &[Chunk]) -> Result<MapRevision, ChunksError> {
-        let base = self.base.as_ref().ok_or(ChunksError::NoGround)?;
-        let facet = base.facet();
-        let (map, revision) =
-            crate::chunk::apply(base.map(), facet, chunks).map_err(ChunksError::Applying)?;
-        self.base = Some(MapSnapshot::restored(facet, revision, map));
-        Ok(revision)
+        self.base
+            .as_mut()
+            .ok_or(ChunksError::NoGround)?
+            .take_chunks(chunks)
+            .map_err(ChunksError::Applying)
     }
 }
 

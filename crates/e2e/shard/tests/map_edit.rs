@@ -24,139 +24,21 @@
 //! the operator's own Felucca would move its revision and leave every bake
 //! beside it stale — the test would be a shard's worth of work to undo.
 
-use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use openshard_client_net::connection::Event;
-use openshard_client_net::talk;
 use openshard_client_net::transport::enter_world;
-use openshard_config::{Config, FacetKey, RawAccessLevel};
-use openshard_map::grid::BlockExtent;
-use openshard_map::map::{LandCell, WorldMap};
-use openshard_map::overlay::{Doors, Overlay};
-use openshard_map::snapshot::MapSnapshot;
-use openshard_movement::spans::SpanIndex;
-use openshard_movement::{Footing, MapTerrain, NavigationGraph, bake};
-use openshard_protocol::speech::TalkMode;
-use openshard_protocol::world::Facet;
+use openshard_map::map::LandCell;
 use openshard_tiles::LandTileId;
 
-use openshard_e2e_shard::{ACCOUNT, plan, spawn, stock_config, version};
+use openshard_e2e_shard::{plan, spawn, version};
 
-const FACET: Facet = Facet(0);
+mod common;
+
+use common::{START, config_over, install, say_and_hear, scratch, world_of_ours};
+
 /// 32 blocks square — 256×256 tiles, which bakes in well under a second and is
 /// still big enough for a graph with regions in it.
 const BLOCKS: u32 = 32;
-const START: (u16, u16) = (128, 128);
-/// The ground the fixture is made of: grass, flat, at zero.
-const GROUND: LandCell = LandCell {
-    tile: LandTileId(3),
-    z: 0,
-};
-
-/// The install, from the environment. `None` skips the test rather than failing
-/// it: an ignored test that is run deliberately still deserves to say why it
-/// cannot run.
-fn install() -> Option<PathBuf> {
-    std::env::var_os("OPENSHARD_CLIENT").map(PathBuf::from)
-}
-
-/// Write a small world of ours into `dir`, bake its graph beside it, and hand
-/// back the base set's path.
-///
-/// This is `openshard-map-import` and `openshard-navigation-bake` in miniature,
-/// and deliberately through the same functions: a fixture that wrote the files
-/// its own way would be testing a pipeline the shard does not have.
-fn world_of_ours(dir: &Path, client: &Path) -> PathBuf {
-    let base_set = dir.join("fixture.osbase");
-    let map = WorldMap::from_blocks(
-        BlockExtent {
-            wide: BLOCKS,
-            down: BLOCKS,
-        },
-        |_, _| GROUND,
-    );
-    let snapshot = MapSnapshot::new(FACET, map);
-    openshard_basemap::write(&base_set, &snapshot).expect("a writable temp directory");
-
-    let tiledata = client.join("tiledata.mul");
-    let tiles = openshard_uofiles::tiledata::load(&tiledata)
-        .expect("the install has a tile table")
-        .tiles;
-    let spans = SpanIndex::build(snapshot.map(), &tiles);
-    let nothing_placed = Overlay::default();
-    let footing = Footing::new(
-        Some(MapTerrain::new(snapshot.map(), &tiles, &spans)),
-        &nothing_placed,
-        Doors::AsTheyStand,
-    );
-    let graph = NavigationGraph::build(&footing, snapshot.map().width(), snapshot.map().height())
-        .expect("a facet this size has a graph");
-    // No log yet: the world has never been patched, and the stamp says so. The
-    // first commit in this test is what makes that stamp stale — which is the
-    // cost the shard prints and this test reads back.
-    let stamp = bake::stamp_of_base_set(&base_set, None, &tiledata, FACET, snapshot.revision())
-        .expect("the two inputs exist");
-    bake::save(
-        &bake::artifact_path(bake::beside(&base_set), Some(&base_set), FACET),
-        &graph,
-        &stamp,
-    )
-    .expect("a writable temp directory");
-
-    base_set
-}
-
-/// The stock config, pointed at a world of ours, with the development account
-/// promoted so its `.`-commands are commands rather than speech.
-fn config_over(base_set: PathBuf, client: PathBuf) -> impl FnOnce(SocketAddr) -> Config + Send {
-    move |address| {
-        let mut config = stock_config(address);
-        config.world.client_files = client.display().to_string();
-        config.world.facets = vec![FACET.0];
-        config.world.base_sets.insert(FacetKey(FACET), base_set);
-        config.world.start.x = START.0;
-        config.world.start.y = START.1;
-        for account in &mut config.accounts {
-            if account.name == ACCOUNT {
-                account.access = RawAccessLevel("administrator".to_owned());
-            }
-        }
-        config
-    }
-}
-
-/// Say one thing and collect what the shard says back, until it goes quiet.
-///
-/// The quiet is a timeout rather than a marker, because a command's reply is
-/// several lines and nothing on the wire says which is the last one.
-async fn say_and_hear(
-    socket: &mut openshard_client_net::transport::Socket<tokio::net::TcpStream>,
-    view: &mut openshard_client_net::view::WorldView,
-    words: &str,
-) -> Vec<String> {
-    let before = view.journal.len();
-    socket
-        .send(&talk::say(words, TalkMode::Regular))
-        .await
-        .expect("the shard is listening");
-    let _ = tokio::time::timeout(Duration::from_millis(1500), async {
-        while let Some(event) = socket.next_event().await.expect("the socket stayed up") {
-            if let Event::Packet(packet) = event {
-                view.apply(&packet);
-            }
-        }
-    })
-    .await;
-    // `skip` rather than a range: the journal is a `VecDeque` with a ceiling on
-    // it, so it is a queue and not a slice.
-    view.journal
-        .iter()
-        .skip(before)
-        .map(|line| line.text.clone())
-        .collect()
-}
 
 #[tokio::test]
 #[ignore = "reads the install's tiledata and bakes a graph; run it deliberately"]
@@ -165,9 +47,8 @@ async fn a_game_master_changes_the_ground_and_the_shard_is_a_different_world() {
         eprintln!("OPENSHARD_CLIENT is not set, so there is no tile table to read: skipping");
         return;
     };
-    let dir = std::env::temp_dir().join(format!("openshard-mapedit-e2e-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("a writable temp directory");
-    let base_set = world_of_ours(&dir, &client);
+    let dir = scratch("mapedit");
+    let base_set = world_of_ours(&dir, &client, BLOCKS, &[]);
 
     // Held for the length of the test: dropping the handle stops the shard.
     let (address, shard) = spawn(config_over(base_set.clone(), client));
