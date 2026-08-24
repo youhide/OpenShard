@@ -933,6 +933,16 @@ worst zoom of either window asks for 344 pages of 1024, and the CPU tail never
 comes near its budget at any scale — 18% at the reading above. The third is
 10.5.
 
+**What the harness restates, and the drift that buys.** The scenario is the two
+panes' own numbers — the plate's fallback inset, the minimap's 15% rim, both
+zoom ranges, the 21% margin — copied into the example, because
+`openshard-client-render` cannot depend on `openshard-client-app` and must not:
+the dependency runs the other way. The *mechanism* is shared and the *scenario*
+is not, which is the right side of that trade — but a pane that changes its
+extent or its zoom range leaves this reading describing a client nobody runs,
+silently. Every constant names where it came from, and that is the whole of the
+defence.
+
 ### 10.2 The coarse floor is swept once, and a terrain edit does not re-sweep
 
 `drain_sweep` strikes a key off when the facet's revision moves past it, on the

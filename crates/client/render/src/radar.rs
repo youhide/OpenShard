@@ -407,9 +407,18 @@ impl RadarView {
     /// several *physical* ones — HiDPI, a larger desk scale, or the window's
     /// own zoom — so the fetch asks for that many more tiles rather than
     /// magnifying a cached texture, which would blur or block up what nearest
-    /// sampling is for. `tiles_per_pixel` and `device_scale` are the two
-    /// numbers that say how many; `placement.extent` is already in physical
-    /// pixels.
+    /// sampling is for.
+    ///
+    /// The three spaces, because getting them the wrong way round is a factor
+    /// of `device_scale` in the fetch and nothing that fails to compile.
+    /// `placement.extent` is in the space every window in this client is placed
+    /// in — gump pixels times the desk's own window scale — which is what
+    /// `radar_pass` multiplies by `frame.scale` to reach the surface.
+    /// `device_scale` is that same `frame.scale`, so the product of the two is
+    /// physical pixels. `tiles_per_pixel` is therefore tiles per **physical**
+    /// pixel, and that is the number [`Self::lod`] picks a level from: one texel
+    /// to one device pixel, rather than to one of whatever size a desk happens
+    /// to be set to.
     ///
     /// **No `sqrt(2)` factor for a rotated round window**, though a whole
     /// comment used to argue for one: a placed square whose half-side equals

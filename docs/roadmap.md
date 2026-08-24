@@ -4695,6 +4695,34 @@ work had to touch anyway:
   `span_census` quote a bake time with no repeat at all, and it is a bake time
   the plans keep.
 
+### Found while taking the radar plan's soak
+
+- **An instrument nobody can run at the scale it is about stays unread.** R7's
+  radar panel was complete for weeks and answered nothing, because its two open
+  questions — "walking costs no raster work", "the page cache is reached only by
+  a pathological view" — are questions about a HiDPI, desk-scaled surface, and
+  the machine the HUD is in front of is one surface. What closed it was lifting
+  the frame's own step into `radar::advance` and driving *that* from an example,
+  so the scenario is an argument rather than a machine. **The scene composites
+  are in exactly the state the radar was in**: `CompositeTelemetry` is read by
+  the HUD and by nothing else, `CompositeWorkQueue` and `CompositeCache` have no
+  headless driver, and their budgets (128 MiB, `builds_per_frame`) have the same
+  shape of claim attached to them. The radar's answer transfers whole — one
+  function that is the frame's step, one example that drives it — and it is
+  worth doing before the next composite budget is argued about rather than
+  measured.
+- **`RadarFrame` derives `Default` and `App::new` calls `RadarFrame::default()`**
+  ([`app/src/diagnostics.rs`](../crates/client/app/src/diagnostics.rs),
+  [`lib.rs`](../crates/client/app/src/lib.rs)), which is the construction
+  `docs/style.md` and this repo's house rules refuse: a value from nowhere, with
+  no place where somebody decided what it should be. The `..Default::default()`
+  that fed it in `presentation.rs` is gone — every field of that sample is named
+  now, so a field added later cannot be silently swallowed and read as a frame
+  that measured nothing — but the derive and the one `::default()` call remain,
+  in a file a parallel session had open. A named constructor (`RadarFrame::
+  empty()`, beside the doc that already explains why the sample is reset) is the
+  shape.
+
 ## Later
 
 LLM NPCs, quest generation, GM assistant, Discord integration. All optional, all

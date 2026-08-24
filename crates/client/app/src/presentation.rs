@@ -2072,12 +2072,24 @@ impl App {
         // in this frame's sample needs a colour table, and a run without one
         // draws no radar at all — so the tally, the cost and the built count
         // are reset here rather than left showing whichever frame last had one.
+        //
+        // Every field named, rather than `..Default::default()` over the three
+        // that are zero here: a field added to this sample later would be
+        // swallowed by the spread and read as a frame that measured nothing,
+        // which is the one failure a diagnostic must not have.
         self.radar_frame = crate::diagnostics::RadarFrame {
             levels: radar_views
                 .iter()
                 .map(|(subject, view, lod)| (*subject, *lod, view.tiles_per_pixel))
                 .collect(),
-            ..crate::diagnostics::RadarFrame::default()
+            demand: radar::RadarDemand {
+                exact: 0,
+                coarser: 0,
+                stale: 0,
+                missing: 0,
+            },
+            raster: Duration::ZERO,
+            built: 0,
         };
         let Some(window) = self.window.as_mut() else {
             return;
