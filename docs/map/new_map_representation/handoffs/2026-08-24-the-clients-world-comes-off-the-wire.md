@@ -125,6 +125,16 @@ chunk and the reason, through the `Update::Lost` the window already shows.
 which has one owner per process by construction. Nothing had ever cloned an
 update; this is what stops one from starting.
 
+**`--world-from-shard` wins over `--base-set` rather than conflicting with it.**
+The conflict was written first and is wrong: a base set arrives from
+`OPENSHARD_BASE_SET` as readily as from the command line, and this repo's own
+`.env` is where an install is named once — so `clap`'s `conflicts_with` turned
+the flag into *"the argument '--base-set <FILE>' cannot be used with
+'--world-from-shard'"* for a person who had typed only one of the two. A world
+does come from one place, and the one somebody typed is it. The precedence is
+printed when it applies, which is what keeps it from being a guess made in
+silence.
+
 ## What is clean
 
 `cargo check --workspace --all-targets`: silent. `cargo clippy --all-targets` on

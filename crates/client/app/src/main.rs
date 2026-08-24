@@ -79,15 +79,20 @@ struct Cli {
     /// not exist; `--client` is still required, because the art, the hues, the
     /// multis and `tiledata.mul` are not on the wire and are not going to be.
     ///
-    /// It needs an `--account`: a viewer with no shard has nobody to ask. It is
-    /// exclusive with `--base-set` for the plainer reason — a world comes from
-    /// one place.
+    /// It needs an `--account`: a viewer with no shard has nobody to ask.
     ///
-    /// No environment variable, like `--solids` and unlike `--base-set`: this
-    /// says what a *run* is doing rather than where this machine keeps its
-    /// files, and a `.env` that quietly took the ground off the wire would be a
-    /// client that stopped reading the install without anybody typing anything.
-    #[arg(long, conflicts_with = "base_set")]
+    /// **It wins over `--base-set`**, and says so on the way past. That is not
+    /// clap's `conflicts_with`, which was tried and is wrong here: a base set
+    /// also arrives from `OPENSHARD_BASE_SET`, so a `.env` naming one turned
+    /// this flag into an error about an argument nobody typed. A world does come
+    /// from one place, and the one a person typed on the command line is it.
+    ///
+    /// No environment variable of its own, like `--solids` and unlike
+    /// `--base-set`: this says what a *run* is doing rather than where this
+    /// machine keeps its files, and a `.env` that quietly took the ground off
+    /// the wire would be a client that stopped reading the install without
+    /// anybody typing anything.
+    #[arg(long)]
     world_from_shard: bool,
 
     /// The account to log in as. Without one this is an offline map viewer.
@@ -209,11 +214,22 @@ fn main() -> ExitCode {
     };
     // Where the ground comes out of. `Install` is the arm every run before base
     // sets existed took, and it is a source rather than the absence of one; the
-    // third names no file at all. `--world-from-shard` conflicts with
-    // `--base-set` at the command line, so the pair `(true, Some(_))` is one
-    // clap refuses before this runs.
+    // third names no file at all.
+    //
+    // Both at once is not refused, it is *decided* and then said: a base set
+    // arrives from `OPENSHARD_BASE_SET` as readily as from the command line, so
+    // refusing the pair turns a `.env` into an error message about an argument
+    // nobody typed. The flag wins because somebody typed it, and the line below
+    // is what stops that from being a guess the client made silently.
     let world = match (cli.world_from_shard, cli.base_set.as_deref()) {
-        (true, _) => WorldSource::Shard,
+        (true, Some(base_set)) => {
+            eprintln!(
+                "--world-from-shard: the ground comes from the shard, and not from {}",
+                base_set.display()
+            );
+            WorldSource::Shard
+        }
+        (true, None) => WorldSource::Shard,
         (false, Some(base_set)) => WorldSource::BaseSet(base_set),
         (false, None) => WorldSource::Install,
     };

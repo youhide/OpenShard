@@ -178,8 +178,9 @@ cargo run -p openshard-client-app -- --world-from-shard --account admin
 `map0LegacyMUL.uop`, `staidx0.mul` and `statics0.mul` need not exist for either.
 `--client` still does, for `--base-set`'s reason: the art, the hues, the multis
 and `tiledata.mul` are not on the wire. It needs a shard — a viewer has nobody to
-ask — and it is exclusive with `--base-set`, because a world comes from one
-place.
+ask — and it **wins over `--base-set`**, saying so on the way past: a base set is
+as likely to come from `OPENSHARD_BASE_SET` in a `.env` as from the command line,
+and the source somebody typed is the one that counts.
 
 There is no cache yet, so the whole facet arrives on every run: 21.3 MiB and
 about 7,168 replies for Felucca, with a progress line in the terminal and a blank

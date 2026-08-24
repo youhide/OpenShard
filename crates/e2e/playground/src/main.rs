@@ -220,7 +220,16 @@ fn main() -> ExitCode {
     // beside it. See `docs/map/new_map_representation/to_the_client.md`.
     let base_set = openshard_e2e_shard::window_base_set(operator.as_ref());
     if let Some(base_set) = &base_set {
-        eprintln!("both ends read facet 0 from {}", base_set.display());
+        match cli.world_from_shard {
+            // The shard still reads it — it has to, since what the window
+            // fetches is the shard's own facet. What changed is only which end
+            // opens the file.
+            true => eprintln!(
+                "the shard reads facet 0 from {}, and the window asks the shard for it",
+                base_set.display()
+            ),
+            false => eprintln!("both ends read facet 0 from {}", base_set.display()),
+        }
     }
 
     // The shard reads the same install the window does, and that is not a
@@ -262,6 +271,9 @@ fn main() -> ExitCode {
     // thing it just logged in to play. `--at` is the offline viewer's.
     let code = openshard_client_app::run(
         &dir,
+        // The flag wins over the config's base set, and the line above already
+        // said which file that was — see `openshard-client-app`'s own `main`,
+        // where the precedence is argued.
         match (cli.world_from_shard, base_set.as_deref()) {
             (true, _) => openshard_client_app::WorldSource::Shard,
             (false, Some(base_set)) => openshard_client_app::WorldSource::BaseSet(base_set),
