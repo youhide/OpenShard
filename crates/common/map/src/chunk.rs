@@ -7,6 +7,13 @@
 //! makes a round trip an assertion about *bytes* rather than about two parallel
 //! worlds that agree by inspection.
 //!
+//! [`apply`] is the other way back in — some chunks into a world somebody
+//! already holds — and it does *not* go through `from_parts`, because there is
+//! no facet to build. What it borrows from that call instead is the one thing
+//! that call owns: the per-block sort, imposed on the blocks that arrived. A
+//! world grown a chunk at a time still cannot have a different idea of the
+//! per-block order from a world read whole.
+//!
 //! # Why sixty-four tiles
 //!
 //! Measured on the shipped Felucca — 7168x4096, 2,906,871 statics — for every
