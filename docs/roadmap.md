@@ -2268,7 +2268,10 @@ Roughly in dependency order, each script-first:
       **A pet does not decide anything**: `ai::pet_beat` carries out its last order
       and returns a direction, so a pet moves through the same `step` a wild
       creature and a townsperson use, and an attack order simply points the `Combat`
-      the AI already drives. **Orders come through speech** (`npc::pets`) — "all
+      the AI already drives. What it keeps of the creature it was is its own
+      brain, doors included — a tamed orc opens the shop door in its way and a
+      llama stops at it, which is ServUO's `BaseAI.CanOpenDoors` and the same
+      read a wild brain gets. **Orders come through speech** (`npc::pets`) — "all
       kill", "<name> stay" — matched on the words, because the `0xAD` keyword block
       is skipped by the parser; ServUO's keyword ids are recorded beside the table
       for the day it is decoded. **Follower slots** are a read-site derivation
@@ -2725,11 +2728,21 @@ Roughly in dependency order, each script-first:
     step and A\* plan — a closed door blocks players and NPCs alike. Aggro needs
     **line of sight** (`Terrain::sight_clear`, a Bresenham ray; windows pass,
     walls and NO_SHOOT statics do not, shut doors are opaque). A chase walks
-    naive-step-first, plans once when blocked, follows a **cached `ChasePath`**
-    with a 2s repath, and on an impossible route **gives up** — target dropped,
-    ~10s standing guard, then back to its life; never the fence-shuffle.
-    Humanoids (`body_opens_doors`) open unlocked doors in their way; so do
-    townsfolk heading home. Creatures carry an `Aggression` posture (passive
+    naive-step-first, plans once when blocked, follows a **cached `Route`**, and
+    on an impossible route **gives up** — target dropped, ~10s standing guard,
+    then back to its life; never the fence-shuffle. Every body that walks
+    somewhere keeps its route now, and **how long it is kept is what it is
+    walking toward** (`ai::Goal`): a body — a quarry, an owner, an escorter — is
+    a guess, so the route to one is re-planned on the references' 2s cadence; a
+    *place* does not move, so the route to one is walked to its end and a
+    townsperson's minute-long walk home costs one search rather than one every
+    two seconds. The other three ways a route ends are the world's and apply to
+    both: the body is not standing where the next step starts, the goal drifted,
+    or the live ground refuses the step. Humanoids (`body_opens_doors`) open
+    unlocked doors in their way — townsfolk heading home, a chaser, and a pet
+    whose body has hands, all through the one rule (`ai`'s `way_ahead`), which
+    is applied on whichever step of a route meets the door. Creatures carry an
+    `Aggression` posture (passive
     fauna flee when struck; defensive ones answer the first blow via
     `ai::retaliate`; aggressive ones hunt on sight), break off badly hurt unless
     too big to scare, and step at `gameplay.creature_step_ms` (400 classic — a
