@@ -1471,7 +1471,14 @@ Small things this document is the only current record of:
   be asked against; changing them before it exists is guessing. **The 50 ms is
   gone**: a search is bounded by its node budget alone, and the ceiling over a
   *long* query is `LONG_PATH_EFFORT`, counted in the same unit. The two node
-  budgets are unchanged and still want the argument this entry asks for.
+  budgets are unchanged, and **half the argument now exists**: raising the
+  budget is the *worse* of the two ways to reach further.
+  [`the-search-gets-in-a-hurry`](handoffs/2026-08-24-the-search-gets-in-a-hurry.md)
+  measured 33,280 destinations from two origins — a `Weight::PLANNING` search at
+  400 arrives at more of them than an exact one at 600, at two thirds of the
+  worst-case cost, for routes 0.2% longer in total. What is still open is the
+  other half: what a *tick* can afford, which wants the shard's own numbers
+  rather than the probe's.
 - **`net_command`'s multi expansion.** The third way entities are laid over the
   map, and the picture's rather than movement's. `Overlay` may end up being
   what merges it, which is
