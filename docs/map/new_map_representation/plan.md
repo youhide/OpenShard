@@ -189,6 +189,16 @@ a free optimisation, until `Order` is made total across distinct tiles.
 
 **Goal.** A change with an author, an order and an undo.
 
+> **Built, except for the client.** The patch model, the log, the offline tool
+> and the live publish are all in — see the two handoffs and
+> [`mapedit`](../../../crates/server/world/src/mapedit.rs). What the "done"
+> below still asks for is the last clause: a patch **visible to a connected
+> client**, which is direction E's.
+>
+> One departure worth reading: the log is a file beside the base set rather than
+> a table in `crates/server/persistence`, because the offline bake and the
+> editor both have to resolve a world and neither can see a server crate.
+
 - `Patch { parent, ops, author, touched }` and the smallest useful `PatchOp` —
   set land, add static, remove static. Persisted through
   `crates/server/persistence`.

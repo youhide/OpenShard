@@ -38,16 +38,18 @@ artifact does not boot.
 [`handoffs/`](handoffs/) — where the work stands, one file per session. The
 plans hold intent; a handoff holds state.
 
-## The track — era S, half built
+## The track — era S, and the map moves now
 
 [`new_map_representation/`](new_map_representation/) — **a map we can change.**
 The world was the player's own UO install, nothing in the engine could move a
 coastline, and every bake was keyed to file mtimes. The track replaces that with
 an imported base, committed patches, and one revisioned snapshot every reader
-takes a handle to. **A0, A and B are built and C's first half with them** — the
-shard runs on a base set it owns and a patch survives a restart. What is left —
-the live publish, revisioned bakes, chunks to the client, the editor — resumes
-after eras R and P. Start at its
+takes a handle to. **A0, A, B and C are built** — the shard runs on a base set it
+owns, a patch survives a restart, and a **running** shard edits its own ground
+from four staff verbs, with the log written in the one order that cannot leave a
+revision nobody can reach. What is left — chunks to the client, which is the last
+clause of C's own "done", then revisioned bakes and the editor — resumes after
+eras R and P. Start at its
 [`README.md`](new_map_representation/README.md), and read
 [`client_today.md`](new_map_representation/client_today.md) for the measured
 backlog era R spends.

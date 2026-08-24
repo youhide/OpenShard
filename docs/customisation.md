@@ -38,10 +38,14 @@ reason.
 | the `0xD7` design subcommands | — | — | speaks them |
 | `0xD8` the design itself | **sent**, on request | **drawn** | speaks it |
 | `0xBF 0x1D` the design revision | **sent**, with the draw and on commit | **cached, and asked on a miss** | speaks it |
-| a per-house component list | **nowhere it can live** — D1 | — | n/a |
+| a per-house component list | **built** — `HouseDesign` on the entity, D1 | — | n/a |
 | a foundation on the ground | **placed, with a derived design** | **drawn** | draws multis already |
-| the design saved | — | n/a | n/a |
+| the design saved | **built** — the `house_designs` table, schema v31 | n/a | n/a |
 | the editor | — | — | **has one** |
+
+The first two rows of this table were still saying "nowhere it can live" and "—"
+after C1 and C2 had built both, which is what a table nobody re-reads does. The
+phase sections below are the ones kept in step, and they are where the state is.
 
 `0xD8` is this plan's `0x99`: the one packet that has to be written from nothing
 on both ends. Zlib-compressed, and `Feature::CompressedGumps`

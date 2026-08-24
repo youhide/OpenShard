@@ -135,7 +135,8 @@ Read off the workspace and the plans, so a session does not re-derive it:
 | a column with two floors is two nodes | ✅ [N3b](navigation_spans.md#n3b--the-node-stops-being-a-tile) — the node is a place to stand, and 178 arrivals round Britain were lies |
 | regions over spans | ✅ [N4](navigation_spans.md#n4--regions-over-spans) — the coarse graph refuses nothing the flood says is walkable, from any of five origins |
 | the server reading the graph | ✅ [N7](navigation_spans.md#n7--the-server-reads-the-graph) — a creature walks a route flat A\* at budget 400 refuses, from a raised origin as well as a flat one |
-| live publish, revisioned bakes, chunks to the client, the editor | ⬜ era S |
+| an edit while people are standing on it | ✅ era S's C — [`mapedit`](../../crates/server/world/src/mapedit.rs): four staff verbs, the world before the log, and the way back if the log refuses |
+| revisioned bakes, chunks to the client, the editor | ⬜ era S |
 
 ## Era R — the map you hold
 
@@ -415,7 +416,7 @@ waits is the rest of
 
 | | |
 |---|---|
-| **C, second half** | a live publish: an edit taking effect in a running shard between two ticks, and reaching a connected client. The precondition landed with `terrain_seam.md`'s D — `FacetState.map` is a `MapSnapshot` the shard can take `&mut` of. What is left is **who** calls it and **where in the tick** |
+| ~~**C, second half**~~ | **Built.** A running shard edits its own ground — `.tile`, `.setland`, `.addstatic`, `.rmstatic` — through [`mapedit::commit`](../../crates/server/world/src/mapedit.rs), which is the answer to "who calls it and where in the tick": a staff verb, in the tick that read the command. The world moves before the log because applying a patch is how you find out whether it applies, and a log that refuses puts the world back. The span bake follows; the coarse router is dropped, and that is the cost D retires. **What is left of C is the connected client, which is E** |
 | **D** | derived data keyed by the source revision instead of by file mtimes — the navigation bake and the building flood **already carry a `MapRevision` and refuse themselves on a mismatch**; the occluder measurements and the radar do not, and the radar's revision dimension has no production writer at all |
 | **E** | whole chunks to our client, over a pipe chosen there and not before |
 | **F** | the editor, and committing a house into the base as its one-way operation |
@@ -591,6 +592,9 @@ layer is a real 16.5 MiB structure, and the step rule over it is proved to be
 the step rule over the map. **The only risk in that plan is retired**, and
 **N3 is the next node** — where the search stops asking the map at all.
 
-**Era S is resumed, not restarted.** Its first half is built and running; the
-handoffs in [`handoffs/`](new_map_representation/handoffs/) are where its state
-lives, and the plan holds the intent.
+**Era S is resumed, not restarted.** Directions A0, A, B and C are built and
+running — a world of ours, a history, and an edit that lands between two ticks;
+the handoffs in [`handoffs/`](new_map_representation/handoffs/) are where its
+state lives, and the plan holds the intent. **What C still owes is the picture**:
+an edit changes what the shard allows and reaches no screen at all, because both
+ends draw the facet they loaded off disk. That is E.

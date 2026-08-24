@@ -1548,3 +1548,9 @@ a `MapSnapshot` now and `facet_state_mut` reaches it, so the `&mut` that
 one that makes a publish atomic by construction — is available on the shard.
 That is the precondition, not the feature: **who** calls it, and where in the
 tick, is C2's own.
+
+> **And C2 spent it.** A staff verb, in the tick that read the command:
+> [`mapedit::commit`](../../crates/server/world/src/mapedit.rs) publishes into
+> the facet and writes the patch to the log, in that order, putting the world
+> back if the log refuses. The `&mut` this section made available is exactly what
+> it takes.

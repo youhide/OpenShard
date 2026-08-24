@@ -52,6 +52,16 @@ cannot arrive at different revisions of it. `openshard-map-patch` commits one
 change from a command line, and a committed change survives a restart and
 changes what the server allows.
 
+**And its second: the live publish is built.** A running shard edits its own
+ground — `.tile`, `.setland`, `.addstatic`, `.rmstatic` — and the whole of what
+that adds over the command line is an *order*: the world moves first, because
+applying a patch is the only honest way to ask whether it applies, and the log is
+written second, so a log that refuses puts the world back. The span bake follows
+the ground and the coarse router is dropped, because a graph baked over the world
+before the edit is a graph of somewhere else.
+See [`mapedit`](../../../crates/server/world/src/mapedit.rs) and the
+[handoff](handoffs/2026-08-24-the-ground-moves-while-people-stand-on-it.md).
+
 **This track is era S of [`map_rebuild.md`](../map_rebuild.md)**, which is the
 map area's entry point and the document that ordered the nine plans here. What
 is left below resumes after era R (the runtime map — the tile table out of the
@@ -61,8 +71,9 @@ Nothing here is blocked by them; it is sequenced behind them so that a bake keye
 to a revision, and an editor previewing through the runtime's apply path, are not
 written against a layout that is still moving.
 
-What is left of C is the *live* publish: an edit taking effect in a running
-shard between two ticks, and reaching a connected client. The decisions and the
-leftovers are in the newest
-[handoff](handoffs/2026-08-22-a-world-with-a-history.md); the plan itself
-records intent, not progress.
+What is left of C is the **client**: an edit reaches a running shard's rules and
+no picture at all, because both ends still draw the facet they loaded off disk.
+That is direction E, and it is now the only thing between here and C's own
+"done". The decisions and the leftovers are in the newest
+[handoff](handoffs/2026-08-24-the-ground-moves-while-people-stand-on-it.md); the
+plan itself records intent, not progress.
