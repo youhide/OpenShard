@@ -637,11 +637,7 @@ struct Placed<'a> {
 /// If `chunks` is empty. There is no revision in an empty set to hand back, and
 /// a caller with nothing to apply has nothing to do — a world that has not moved
 /// is a case answered before this is called.
-pub fn apply(
-    world: &mut WorldMap,
-    facet: Facet,
-    chunks: &[Chunk],
-) -> Result<MapRevision, AssemblyError> {
+pub fn apply(world: &mut WorldMap, facet: Facet, chunks: &[Chunk]) -> Result<MapRevision, AssemblyError> {
     assert!(!chunks.is_empty(), "applying no chunks is not a change");
     let facet_extent = world.extent();
     let mut placed: Vec<Placed<'_>> = Vec::with_capacity(chunks.len() * BLOCKS_PER_CHUNK as usize);

@@ -95,11 +95,7 @@ impl<'a> BlockPatch<'a> {
     /// block it got wrong.
     #[must_use]
     pub fn new(at: BlockIndex, land: &'a [LandCell], statics: &'a [StaticItem]) -> Self {
-        assert_eq!(
-            land.len(),
-            CELLS_PER_BLOCK,
-            "a block is {CELLS_PER_BLOCK} cells",
-        );
+        assert_eq!(land.len(), CELLS_PER_BLOCK, "a block is {CELLS_PER_BLOCK} cells");
         Self { at, land, statics }
     }
 
