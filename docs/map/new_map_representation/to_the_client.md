@@ -333,9 +333,57 @@ the facet.
   applies over the base. Rewriting 102 MiB for a one-tile edit is the cost that
   decides it, and it should be measured rather than assumed.
 
+Two more subcommands, and one field on E1's notice:
+
+```text
+0xE004  WorldNotice    server -> client, on world entry
+        ... as E1, and then: world named u8, world id u64
+
+0xE007  ChangesRequest client -> server
+        facet u8, revision u64
+
+0xE008  ChangesReply   server -> client
+        facet u8, revision u64, answer u8,
+        then for "these" only: count u16, count x { chunk x u16, chunk y u16 }
+```
+
 **Done when** a second run over an unchanged world asks for no chunks at all, and
 a second run over a world that moved by one patch asks for exactly the chunks
 that patch touched.
+
+**Taken in E3, and the first of them is the open question above:**
+
+- **It is rewritten whole.** Measured on the shipped Felucca rather than argued:
+  `openshard_basemap::write` is **0.10–0.13 s** for 7,168 chunks and 102.6 MiB,
+  and the flush behind it does not register. A tail would save a tenth of a
+  second per edit and cost a version 2 of the file format, a second read path and
+  a compaction rule. (The read is 0.12–0.19 s, which is the number E3 is *for*:
+  that against seconds of fetch.)
+- **A cache is filed under the world and not under the shard.** The address
+  dialled is the obvious key and it is wrong twice — our own playground dials
+  nothing, and a shard that re-imports its facet serves a different world at the
+  same address whose first revision is 1 again. So the shard names its world in
+  the notice (`WorldId`, a hash of the base set's bytes taken at boot), the name
+  goes in the file name, and a facet the shard *cannot* name is not kept at all.
+- **The cache is read on the shard thread, after the notice.** This document
+  guessed that a cache hit would be `BaseSet` with a path the client chose; it
+  cannot be, because the path is named by an identity that arrives after login.
+  E2's startup order is unchanged — what a cache changes is only how long the
+  window waits for ground.
+- **What moved is the log's answer, computed per request** — `0xE007` and
+  `0xE008`, with `Changes::Everything` as the one answer to four different facts
+  the client acts on identically, and a cap of 4,096 chunks because that is what
+  a packet holds. Nothing is cached on the shard, for the reason its own chunk
+  reader gives.
+- **An empty list is knowledge**: a world that moved by an empty patch has not
+  moved, and saying `Everything` would send a client to fetch what it has.
+- **Every chunk of an incremental fetch is checked against the revision the
+  difference was asked about**, because the list is a statement about two
+  particular revisions and a publish in between makes it a list of the wrong
+  squares.
+- **`chunk::apply` is `assemble`'s other half and it rebuilds rather than
+  splices** — a block's statics are one run in a facet-wide vector, so a chunk
+  whose item count changed moves every static after it. E4 is its other caller.
 
 ### E4 — a publish reaches a connected client
 
@@ -474,3 +522,28 @@ Found while building E2:
   worth a picture; if it is, the state already exists — `Resources::grounded` is
   false and `WorldState::connection` is the strip that says what the connection
   is doing.
+
+Found while building E3:
+
+- **`link::play`'s wiring is now larger and still has no test.** E2's finding,
+  one phase worse: the three-way decision between keeping, asking and fetching is
+  `decide` in `link.rs`, and the packet loop grew a state for waiting on the
+  answer. The e2e test writes the same three branches out by hand, so what is
+  untested is the joining — which is where a state machine goes wrong. The fix is
+  unchanged: a `tests/` in `e2e/playground`, which already links both ends.
+- **A world that moved by an empty patch keeps its old revision in the cache.**
+  The client is told nothing changed, keeps the world it has, and does not
+  re-stamp it — so it asks the same question on the next connection and is told
+  the same thing. One packet, on a world nobody will ever publish; the fix is a
+  `MapSnapshot` that can be re-stamped without being rebuilt.
+- **Nothing sweeps an orphaned world.** A shard that re-imports its facet leaves
+  the client's old copy behind under the old identity, and 102 MiB is not
+  nothing. The names of every world a client has kept are in one directory, so
+  what is missing is a rule about how many to keep rather than a mechanism.
+- **The cache directory is the working directory and nothing can move it.** No
+  flag and no environment variable, because `client_ui.toml` sets that precedent
+  and nobody has asked. A read-only checkout is the case that changes it, and
+  `bake::artifact_path`'s `OPENSHARD_NAVIGATION` is the shape it would take.
+- **`world_of_ours` is now written twice and a half**, since `e2e/shard`'s
+  `chunks.rs` grew a copy of `map_edit.rs`'s `say_and_hear` as well. Same lift,
+  one caller worse.

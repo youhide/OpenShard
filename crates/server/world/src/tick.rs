@@ -1260,6 +1260,11 @@ impl World {
                 facet,
                 chunks,
             } => self.chunk_request(connection, facet, &chunks),
+            Command::RequestChanges {
+                connection,
+                facet,
+                revision,
+            } => self.changes_request(connection, facet, revision),
             Command::ContextMenuSelect {
                 connection,
                 serial,

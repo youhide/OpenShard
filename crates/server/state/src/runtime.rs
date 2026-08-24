@@ -793,6 +793,18 @@ pub struct WorldHome {
     /// The revision the base set *file* is at, which is what a patch log's
     /// header records — not the revision the world reached by replaying it.
     pub base: openshard_map::snapshot::MapRevision,
+    /// Which world this base set *is*, by its own bytes.
+    ///
+    /// `openshard_basemap::identity_of`'s answer, taken once when the facet was
+    /// read and carried here because the one caller that needs it is a
+    /// connection: a client that keeps a copy of this ground files it under this
+    /// number, and a facet number would not do — two shards both serving facet 0
+    /// serve two Feluccas and both call the first revision of it 1.
+    ///
+    /// It is beside the path rather than derived from it for the reason the two
+    /// fields above are: a *name* is not an identity, and a base set that was
+    /// replaced under the same name is exactly what this catches.
+    pub identity: openshard_protocol::world::WorldId,
 }
 
 /// Everything a facet has to put back if a publish is taken back.

@@ -519,10 +519,20 @@ fn facet_source(
         // and a patch committed while the shard runs is appended to that log.
         // `None` for a facet read out of the install, which is a facet nothing
         // can edit while the shard runs.
-        home: base_set.map(|base_set| openshard_state::WorldHome {
-            base_set: base_set.to_owned(),
-            base: world.base.expect("a facet read from a base set has one"),
-        }),
+        home: base_set
+            .map(|base_set| {
+                // The identity is taken from the file rather than from the world
+                // in hand: what a client files its cache under has to be the
+                // same number after a restart, and a hash of the *bytes on disk*
+                // is that whether or not a patch has moved the world since.
+                // See `openshard_basemap::identity_of`.
+                openshard_basemap::identity_of(base_set).map(|identity| openshard_state::WorldHome {
+                    base_set: base_set.to_owned(),
+                    base: world.base.expect("a facet read from a base set has one"),
+                    identity,
+                })
+            })
+            .transpose()?,
         map: world.snapshot,
         rebake,
     })

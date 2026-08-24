@@ -33,12 +33,23 @@
 //! draws. Fetching on approach is direction G's, and [`WorldMap`] is a dense
 //! array that cannot answer half a facet today.
 //!
+//! # Unless it is already here
+//!
+//! E3's half, and it is the same transfer with a different list: a client that
+//! kept the ground it was given comes back holding a world at some revision, is
+//! told the shard is at another, and asks *what moved* — see [`crate::cache`],
+//! which owns the copy on disk, and `openshard_protocol::chunks::ChangesRequest`,
+//! which is the question. What comes back then is a handful of chunks rather
+//! than a facet, and [`Fetch::over`] is the same state machine pointed at them:
+//! the pacing, the checks and the bookkeeping are one implementation, because
+//! the difference between "all of it" and "these four" is a list.
+//!
 //! [`WorldMap`]: openshard_map::map::WorldMap
 
 use openshard_map::chunk::{Chunk, ChunkCoord, ChunkKey, assemble, chunks_of};
 use openshard_map::codec;
 use openshard_map::grid::BlockExtent;
-use openshard_map::snapshot::MapSnapshot;
+use openshard_map::snapshot::{MapRevision, MapSnapshot};
 use openshard_protocol::chunks::{
     ChunkAt, ChunkData, ChunkRequest, FacetBlocks, JoinError, MAX_CHUNKS, Refusal, WorldNotice, join,
 };
@@ -126,6 +137,37 @@ pub enum FetchError {
         /// What the record says it is.
         found: ChunkKey,
     },
+    /// A chunk of the world that was asked about arrived at another revision.
+    ///
+    /// Only a fetch [`over`](Fetch::over) a world already held can fail this
+    /// way, and it is the reason such a fetch names the revision it expects: the
+    /// list of chunks to ask for was the difference between two *particular*
+    /// revisions, so a publish landing between the answer and the fetch makes it
+    /// a list of the wrong chunks. Every other chunk of the facet moved to that
+    /// new revision too, and nothing here was told which.
+    ///
+    /// A whole-facet fetch has no such expectation — `assemble` refuses a set
+    /// that straddles a publish, which is the same fact one level down.
+    WrongRevision {
+        /// Which chunk.
+        at: ChunkAt,
+        /// The revision the difference was computed against.
+        wanted: MapRevision,
+        /// The revision the chunk was cut at.
+        found: MapRevision,
+    },
+    /// The world a fetch was told to fill in is not the world being described.
+    ///
+    /// A cache of the right facet at the right revision whose *extent* is not
+    /// the one the notice named. It cannot come from [`crate::cache`], which
+    /// checks the pair before it hands a world over, so it is here for the
+    /// caller that assembles one itself.
+    WrongWorld {
+        /// What the shard described.
+        blocks: FacetBlocks,
+        /// What the world in hand is.
+        held: BlockExtent,
+    },
     /// The chunks are all here and do not make one facet.
     Assembly {
         /// Why.
@@ -160,6 +202,19 @@ impl std::fmt::Display for FetchError {
                 "chunk ({}, {}) was asked for and chunk ({}, {}) of facet {} arrived",
                 asked.x, asked.y, found.at.x, found.at.y, found.facet.0
             ),
+            Self::WrongRevision { at, wanted, found } => write!(
+                f,
+                "chunk ({}, {}) arrived at revision {} and what moved was asked about revision {}",
+                at.x,
+                at.y,
+                found.get(),
+                wanted.get()
+            ),
+            Self::WrongWorld { blocks, held } => write!(
+                f,
+                "a world of {}x{} blocks was kept and the shard describes one of {}x{}",
+                held.wide, held.down, blocks.wide, blocks.down
+            ),
             Self::Assembly { source } => write!(f, "the chunks do not make one facet: {source}"),
         }
     }
@@ -171,11 +226,39 @@ impl std::error::Error for FetchError {
             Self::Join { source, .. } => Some(source),
             Self::Record { source, .. } => Some(source),
             Self::Assembly { source } => Some(source),
-            Self::TooWide { .. } | Self::Refused { .. } | Self::Unasked { .. } | Self::WrongChunk { .. } => {
-                None
-            }
+            Self::TooWide { .. }
+            | Self::Refused { .. }
+            | Self::Unasked { .. }
+            | Self::WrongChunk { .. }
+            | Self::WrongRevision { .. }
+            | Self::WrongWorld { .. } => None,
         }
     }
+}
+
+/// What a fetch is filling in.
+///
+/// The two arms are the two ways a client comes to hold a facet, and they differ
+/// in one thing each: which chunks are asked for, and what the ones that arrive
+/// are put into. Everything between — the pacing, the fragments, the checks — is
+/// the same, which is why this is a field of [`Fetch`] rather than a second type
+/// beside it.
+#[derive(Debug)]
+enum Filling {
+    /// Nothing was held: every chunk of the facet is coming, and `assemble` is
+    /// what turns the set into a world.
+    Nothing,
+    /// A world already in hand, and only what has moved since is coming.
+    ///
+    /// The revision is the one the difference was computed against — see
+    /// [`FetchError::WrongRevision`], which is what makes it a field rather than
+    /// a thing to check afterwards.
+    Held {
+        /// The world as it was, out of [`crate::cache`].
+        world: MapSnapshot,
+        /// The revision every arriving chunk has to carry.
+        revision: MapRevision,
+    },
 }
 
 /// One facet's ground, arriving.
@@ -184,6 +267,9 @@ impl std::error::Error for FetchError {
 /// one thing a client is told without asking and the one thing it needs before
 /// it can ask: the extent is what `assemble` refuses a short set of chunks
 /// against, and the chunks to ask for are `chunks_of` it.
+///
+/// [`Fetch::over`] is the same machine with a shorter list, for a client that
+/// kept the last world it was given.
 #[derive(Debug)]
 pub struct Fetch {
     /// Which facet is being fetched. Every reply is checked against it.
@@ -208,49 +294,99 @@ pub struct Fetch {
     outstanding: FxHashMap<ChunkAt, Vec<ChunkData>>,
     /// Whole, decoded, and checked against what was asked for.
     held: Vec<Chunk>,
+    /// What the chunks are being put into. See [`Filling`].
+    filling: Filling,
 }
 
 impl Fetch {
-    /// Begin fetching the facet `notice` describes.
+    /// Begin fetching the facet `notice` describes, whole.
     ///
     /// # Errors
     ///
     /// [`FetchError::TooWide`] for an extent whose chunks the wire cannot name.
     pub fn of(notice: WorldNotice) -> Result<Self, FetchError> {
-        let extent = BlockExtent {
-            wide: notice.blocks.wide,
-            down: notice.blocks.down,
-        };
-        // Before `chunks_of` and not after: the extent came off a socket, and a
-        // facet claiming a billion blocks would otherwise be a hundred million
-        // coordinates allocated on the way to refusing them.
-        let chunks_wide = extent.wide.div_ceil(openshard_map::chunk::BLOCKS_PER_CHUNK);
-        let chunks_down = extent.down.div_ceil(openshard_map::chunk::BLOCKS_PER_CHUNK);
-        if u16::try_from(chunks_wide).is_err() || u16::try_from(chunks_down).is_err() {
-            return Err(FetchError::TooWide {
-                blocks: notice.blocks,
-            });
-        }
+        let extent = extent_of(notice)?;
         let wanted: Vec<ChunkAt> = chunks_of(extent)
             .map(|at| ChunkAt {
                 x: at.x as u16,
                 y: at.y as u16,
             })
             .collect();
-        Ok(Self {
-            facet: notice.facet,
+        Ok(Self::new(notice.facet, extent, wanted, Filling::Nothing))
+    }
+
+    /// Begin fetching only `moved`, over the world already in `held`.
+    ///
+    /// E3's arm. `revision` is what the shard said it is at — the revision the
+    /// list of moved chunks was computed against, and the one every chunk that
+    /// arrives has to carry, since a publish in between makes the list name the
+    /// wrong squares.
+    ///
+    /// An empty `moved` is not a fetch: a world that has not moved is answered
+    /// before this is called, by keeping the one already held. It is refused
+    /// with a panic rather than by finishing instantly, because a caller that
+    /// got here with nothing to ask for has skipped that decision.
+    ///
+    /// # Errors
+    ///
+    /// [`FetchError::TooWide`] for an extent whose chunks the wire cannot name,
+    /// and [`FetchError::WrongWorld`] for a world that is not the size the
+    /// notice describes.
+    ///
+    /// # Panics
+    ///
+    /// If `moved` is empty.
+    pub fn over(
+        notice: WorldNotice,
+        held: MapSnapshot,
+        moved: Vec<ChunkAt>,
+        revision: MapRevision,
+    ) -> Result<Self, FetchError> {
+        assert!(!moved.is_empty(), "a fetch of nothing is a world already held");
+        let extent = extent_of(notice)?;
+        if held.map().extent() != extent {
+            return Err(FetchError::WrongWorld {
+                blocks: notice.blocks,
+                held: held.map().extent(),
+            });
+        }
+        Ok(Self::new(
+            notice.facet,
+            extent,
+            moved,
+            Filling::Held {
+                world: held,
+                revision,
+            },
+        ))
+    }
+
+    /// The parts both constructors share.
+    fn new(facet: Facet, extent: BlockExtent, wanted: Vec<ChunkAt>, filling: Filling) -> Self {
+        Self {
+            facet,
             extent,
             outstanding: FxHashMap::default(),
             held: Vec::with_capacity(wanted.len()),
             wanted,
             asked: 0,
-        })
+            filling,
+        }
     }
 
     /// Which facet this is fetching.
     #[must_use]
     pub const fn facet(&self) -> Facet {
         self.facet
+    }
+
+    /// Whether this is filling in a world already held rather than fetching one.
+    ///
+    /// What a progress line says about itself: "the ground" and "what moved" are
+    /// different news, and four chunks arriving is not the same event as 7,168.
+    #[must_use]
+    pub const fn is_over_a_world(&self) -> bool {
+        matches!(self.filling, Filling::Held { .. })
     }
 
     /// How many chunks the facet has.
@@ -371,15 +507,31 @@ impl Fetch {
                 found: chunk.key(),
             });
         }
+        // Only for a fetch over a world already held, and the asymmetry is the
+        // point: there the list of chunks *is* a statement about two revisions,
+        // so a chunk from a third one makes the rest of the list wrong. A whole
+        // facet has nothing to be wrong about until `assemble` compares the set
+        // with itself.
+        if let Filling::Held { revision, .. } = self.filling {
+            if chunk.revision() != revision {
+                return Err(FetchError::WrongRevision {
+                    at: data.at,
+                    wanted: revision,
+                    found: chunk.revision(),
+                });
+            }
+        }
         self.held.push(chunk);
         Ok(())
     }
 
-    /// The facet, out of every chunk of it.
+    /// The facet, out of what arrived and whatever was already held.
     ///
     /// Through the same [`assemble`] a base set is read through, which is the
     /// point: "the client's world" and "the shard's world" are one code path and
-    /// not two that agree.
+    /// not two that agree. A fetch over a world already held ends in
+    /// [`apply`](openshard_map::chunk::apply) instead, which is `assemble`'s
+    /// other half and ends in the same `WorldMap::from_parts`.
     ///
     /// **The revision is the chunks' own and not the notice's.** They are the
     /// same number for a world that held still, and where they differ it is the
@@ -387,13 +539,16 @@ impl Fetch {
     /// the shard's snapshot, and what arrived is what arrived. `assemble` is
     /// what refuses a set that straddles a publish — half a facet before an edit
     /// and half after is a world that never existed — so by the time this reads
-    /// one chunk's field, every chunk carries it.
+    /// one chunk's field, every chunk carries it. Over a world already held the
+    /// same number was checked chunk by chunk on the way in, against the
+    /// revision the difference was asked about.
     ///
     /// # Errors
     ///
-    /// [`FetchError::Assembly`] for a set of chunks that is not one facet. It
-    /// cannot be called before [`is_complete`](Self::is_complete), which is the
-    /// only reason a short set is not one of the ways this fails.
+    /// [`FetchError::Assembly`] for a set of chunks that is not one facet, or
+    /// that does not fit the world it is being applied over. It cannot be called
+    /// before [`is_complete`](Self::is_complete), which is the only reason a
+    /// short set is not one of the ways this fails.
     ///
     /// # Panics
     ///
@@ -406,10 +561,37 @@ impl Fetch {
             .first()
             .expect("a facet the shard sent a notice for has at least one chunk")
             .revision();
-        let map = assemble(self.facet, self.extent, &self.held)
-            .map_err(|source| FetchError::Assembly { source })?;
+        let map = match &self.filling {
+            Filling::Nothing => assemble(self.facet, self.extent, &self.held)
+                .map_err(|source| FetchError::Assembly { source })?,
+            Filling::Held { world, .. } => {
+                openshard_map::chunk::apply(world.map(), self.facet, &self.held)
+                    .map_err(|source| FetchError::Assembly { source })?
+                    .0
+            }
+        };
         Ok(MapSnapshot::restored(self.facet, revision, map))
     }
+}
+
+/// The facet's extent, refused before a list of its chunks is built.
+///
+/// Before `chunks_of` and not after: the extent came off a socket, and a facet
+/// claiming a billion blocks would otherwise be a hundred million coordinates
+/// allocated on the way to refusing them.
+fn extent_of(notice: WorldNotice) -> Result<BlockExtent, FetchError> {
+    let extent = BlockExtent {
+        wide: notice.blocks.wide,
+        down: notice.blocks.down,
+    };
+    let chunks_wide = extent.wide.div_ceil(openshard_map::chunk::BLOCKS_PER_CHUNK);
+    let chunks_down = extent.down.div_ceil(openshard_map::chunk::BLOCKS_PER_CHUNK);
+    if u16::try_from(chunks_wide).is_err() || u16::try_from(chunks_down).is_err() {
+        return Err(FetchError::TooWide {
+            blocks: notice.blocks,
+        });
+    }
+    Ok(extent)
 }
 
 #[cfg(test)]
@@ -418,6 +600,7 @@ mod tests {
     use openshard_map::map::{LandCell, StaticItem, WorldMap};
     use openshard_protocol::chunks::{ChunkRefused, WorldRevision};
     use openshard_protocol::wire::{Graphic, Hue};
+    use openshard_protocol::world::WorldId;
     use openshard_tiles::LandTileId;
 
     use super::*;
@@ -470,13 +653,20 @@ mod tests {
     }
 
     fn notice() -> WorldNotice {
+        notice_of(FacetBlocks {
+            wide: BLOCKS,
+            down: BLOCKS,
+        })
+    }
+
+    /// A notice about a facet of some other size, for the tests that are about
+    /// the pacing rather than about the fixture.
+    fn notice_of(blocks: FacetBlocks) -> WorldNotice {
         WorldNotice {
             facet: FACET,
-            blocks: FacetBlocks {
-                wide: BLOCKS,
-                down: BLOCKS,
-            },
+            blocks,
             revision: WorldRevision(1),
+            world: Some(WorldId(0x0EFA_CE00_0EFA_CE00)),
         }
     }
 
@@ -552,6 +742,135 @@ mod tests {
                 assert_eq!(there, here, "the statics at ({x}, {y})");
             }
         }
+    }
+
+    /// The same facet with one tile of ground moved and one static added, at
+    /// whichever revision the caller says — a publish, as far as this end can
+    /// tell.
+    fn a_facet_that_moved(revision: MapRevision) -> MapSnapshot {
+        let was = a_facet();
+        let mut map = WorldMap::from_blocks(extent(), |x, y| {
+            was.map()
+                .land(x, y)
+                .expect("a tile of the facet it was built from")
+        });
+        for y in 0..u16::try_from(BLOCKS * 8).unwrap() {
+            for x in 0..u16::try_from(BLOCKS * 8).unwrap() {
+                for item in was.map().statics_at(x, y) {
+                    map.place_static(*item);
+                }
+            }
+        }
+        map.set_land(
+            3,
+            4,
+            LandCell {
+                tile: LandTileId(0x3FF),
+                z: 12,
+            },
+        );
+        map.place_static(StaticItem {
+            tile: Graphic(0x4321),
+            x: 70,
+            y: 71,
+            z: 3,
+            hue: Hue(9),
+        });
+        MapSnapshot::restored(FACET, revision, map)
+    }
+
+    /// E3's client side without a socket: a world already held, told which two
+    /// chunks moved, comes out as the world the shard is holding — including the
+    /// two chunks nobody sent.
+    #[test]
+    fn a_world_already_held_takes_the_chunks_that_moved() {
+        let held = a_facet();
+        let moved = a_facet_that_moved(a_facet().revision().after());
+        let revision = moved.revision();
+        let notice = WorldNotice {
+            revision: WorldRevision(revision.get()),
+            ..notice()
+        };
+
+        let mut fetch = Fetch::over(
+            notice,
+            held,
+            vec![ChunkAt { x: 0, y: 0 }, ChunkAt { x: 1, y: 1 }],
+            revision,
+        )
+        .expect("a world the size the notice describes");
+        assert!(fetch.is_over_a_world());
+        assert_eq!(fetch.wanted(), 2, "what moved, and not the facet");
+        while let Some(request) = fetch.next_request() {
+            for packet in answers(&moved, &request) {
+                assert!(fetch.on_packet(&packet).expect("the shard's own bytes"));
+            }
+        }
+        assert!(fetch.is_complete());
+
+        let arrived = fetch.finish().expect("two chunks of this facet");
+        assert_eq!(arrived.revision(), revision);
+        assert_eq!(arrived.map().static_count(), moved.map().static_count());
+        for y in 0..moved.map().height() as u16 {
+            for x in 0..moved.map().width() as u16 {
+                assert_eq!(
+                    arrived.map().land(x, y),
+                    moved.map().land(x, y),
+                    "the land at ({x}, {y})"
+                );
+                let there: Vec<StaticItem> = arrived.map().statics_at(x, y).copied().collect();
+                let here: Vec<StaticItem> = moved.map().statics_at(x, y).copied().collect();
+                assert_eq!(there, here, "the statics at ({x}, {y})");
+            }
+        }
+    }
+
+    /// A publish that lands between the answer and the fetch is caught by the
+    /// revision every chunk carries.
+    ///
+    /// It has to be: the list of chunks was the difference between two
+    /// particular revisions, so a chunk from a third one means other chunks
+    /// moved as well and nothing here was told which. The whole-facet fetch has
+    /// no equivalent check because `assemble` compares the set with itself.
+    #[test]
+    fn a_chunk_from_another_revision_ends_a_fetch_over_a_world() {
+        let held = a_facet();
+        let asked_about = a_facet().revision().after();
+        // And then the world moved again, under the answer.
+        let later = a_facet_that_moved(asked_about.after());
+
+        let mut fetch = Fetch::over(notice(), held, vec![ChunkAt { x: 0, y: 0 }], asked_about)
+            .expect("a world the size the notice describes");
+        let request = fetch.next_request().expect("one chunk to ask for");
+        let sent = answers(&later, &request);
+        let last = sent.len() - 1;
+        for packet in &sent[..last] {
+            fetch.on_packet(packet).expect("a fragment of a chunk asked for");
+        }
+        assert!(matches!(
+            fetch.on_packet(&sent[last]),
+            Err(FetchError::WrongRevision { at, wanted, found })
+                if at == ChunkAt { x: 0, y: 0 } && wanted == asked_about && found == later.revision()
+        ));
+    }
+
+    /// A world of another size is refused before a chunk is asked for.
+    #[test]
+    fn a_world_that_is_not_the_one_described_cannot_be_filled_in() {
+        let held = a_facet();
+        let elsewhere = notice_of(FacetBlocks {
+            wide: BLOCKS + 8,
+            down: BLOCKS,
+        });
+        assert!(matches!(
+            Fetch::over(
+                elsewhere,
+                held,
+                vec![ChunkAt { x: 0, y: 0 }],
+                MapRevision::INITIAL
+            ),
+            Err(FetchError::WrongWorld { .. })
+        ));
     }
 
     /// Every chunk is asked for exactly once, in `chunks_of` order, and never
@@ -675,14 +994,10 @@ mod tests {
     #[test]
     fn no_more_than_the_window_is_ever_in_flight() {
         // 17 x 16 chunks: 272 of them, comfortably past the window.
-        let mut fetch = Fetch::of(WorldNotice {
-            facet: FACET,
-            blocks: FacetBlocks {
-                wide: 17 * openshard_map::chunk::BLOCKS_PER_CHUNK,
-                down: 16 * openshard_map::chunk::BLOCKS_PER_CHUNK,
-            },
-            revision: WorldRevision(1),
-        })
+        let mut fetch = Fetch::of(notice_of(FacetBlocks {
+            wide: 17 * openshard_map::chunk::BLOCKS_PER_CHUNK,
+            down: 16 * openshard_map::chunk::BLOCKS_PER_CHUNK,
+        }))
         .expect("a facet the wire can name");
         assert_eq!(fetch.wanted(), 272);
 
@@ -728,12 +1043,7 @@ mod tests {
                 },
             ),
         );
-        let mut fetch = Fetch::of(WorldNotice {
-            facet: FACET,
-            blocks,
-            revision: WorldRevision(1),
-        })
-        .expect("a facet the wire can name");
+        let mut fetch = Fetch::of(notice_of(blocks)).expect("a facet the wire can name");
 
         let mut window = Vec::new();
         while let Some(request) = fetch.next_request() {
@@ -759,14 +1069,10 @@ mod tests {
     /// them is built.
     #[test]
     fn a_facet_too_wide_to_name_is_refused() {
-        let notice = WorldNotice {
-            facet: FACET,
-            blocks: FacetBlocks {
-                wide: 8 * 70_000,
-                down: 8,
-            },
-            revision: WorldRevision(1),
-        };
+        let notice = notice_of(FacetBlocks {
+            wide: 8 * 70_000,
+            down: 8,
+        });
         assert!(matches!(Fetch::of(notice), Err(FetchError::TooWide { .. })));
     }
 

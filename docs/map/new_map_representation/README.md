@@ -104,6 +104,16 @@ frame and at the window's events rather than by holding the world back. The
 decisions and the leftovers are in the [handoffs](handoffs/); the plan itself
 records intent, not progress.
 
-What is left is **E3**, the cache that makes the 21.3 MiB a once, and **E4**, a
-publish reaching a connected client — which is direction C's own "done", and the
-last clause of it.
+**And E3: the client keeps what it was given.** The 21.3 MiB is paid once — what
+arrives is written as a base set of ours and read back through
+`openshard_basemap::load`, so a cache hit is E0's reader and not a second format.
+It is filed under the *world* rather than under the shard: a shard names its
+world in the notice, by a hash of its base set's own bytes, because our own
+playground dials no address at all and a re-imported facet is a different world
+at the same one. A second start over an unchanged world asks for no chunks; one
+over a world an operator edited asks the shard what moved and fetches exactly
+that. The open question the plan left — rewrite whole or grow a tail — was closed
+by measurement: writing all of Felucca is 0.10–0.13 s, so it is rewritten whole.
+
+What is left is **E4**, a publish reaching a connected client — which is direction
+C's own "done", and the last clause of it.

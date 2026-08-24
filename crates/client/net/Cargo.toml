@@ -13,6 +13,11 @@ workspace = true
 
 [dependencies]
 openshard-client-model.workspace = true
+# The file a client keeps the shard's ground in — see `cache.rs`. It is a base
+# set of ours, read back through the same `load` the shard's own boot uses, which
+# is what makes "the client's world" and "the shard's world" one format rather
+# than two that agree.
+openshard-basemap.workspace = true
 # Where a thing is on a facet: `Tile`, the plane a view and a walk both address.
 openshard-map.workspace = true
 openshard-protocol.workspace = true

@@ -836,9 +836,17 @@ pub fn run<D: Dial + Send + 'static>(
     // `world` above answered: a client holding a facet asks the shard for none
     // of it, and a client holding none asks for all of it. There is no third
     // answer, which is why this is derived here rather than passed in.
+    //
+    // Under the second one the connection is also told where this client keeps
+    // the ground it is given — the working directory, which is where
+    // `client_ui.toml` already lives and for that file's reason: per-checkout,
+    // visible, and deleting it is how a person asks for the whole facet again.
+    // See `openshard_client_net::cache`.
     let ground_source = match world {
         Some(_) => link::GroundSource::OwnDisk,
-        None => link::GroundSource::Fetched,
+        None => link::GroundSource::Fetched {
+            cache: PathBuf::from("."),
+        },
     };
     let shard = shard.map(|(dial, plan)| {
         eprintln!("logging in as {}", plan.account.0);

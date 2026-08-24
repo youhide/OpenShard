@@ -919,6 +919,23 @@ pub enum Command {
         /// decoder — a request over the cap never became a command.
         chunks: Vec<openshard_protocol::chunks::ChunkAt>,
     },
+    /// A client of ours asked what has moved since it last held this facet
+    /// (`0xBF` `0xE007`).
+    ///
+    /// The question a client with a cache asks instead of fetching the world
+    /// again, and it is answered exactly once — with the chunks that moved, or
+    /// with "take the facet again". See [`openshard_protocol::chunks::Changes`].
+    RequestChanges {
+        /// Which connection asked.
+        connection: ConnectionId,
+        /// Which facet's ground, as the client named it. Not checked here, for
+        /// [`RequestChunks`](Self::RequestChunks)'s reason.
+        facet: Facet,
+        /// The revision the client says it already holds. An input and not an
+        /// invariant: a revision this shard never published is one of the things
+        /// the answer accounts for.
+        revision: openshard_protocol::chunks::WorldRevision,
+    },
     /// A client picked a context-menu entry (`0xBF` `0x15`).
     ContextMenuSelect {
         /// Which connection asked.

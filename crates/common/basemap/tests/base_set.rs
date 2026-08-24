@@ -24,6 +24,12 @@ fn path(tag: &str) -> std::path::PathBuf {
 /// Land that names its own tile, so a transposed read comes back holding a cell
 /// that says where it should have been, and statics on the seams.
 fn snapshot() -> MapSnapshot {
+    MapSnapshot::new(FACET, a_map())
+}
+
+/// The fixture's ground on its own, for the one test that wants to move a tile
+/// of it before it is published.
+fn a_map() -> WorldMap {
     let mut map = WorldMap::from_blocks(
         BlockExtent {
             wide: BLOCKS,
@@ -58,7 +64,7 @@ fn snapshot() -> MapSnapshot {
             hue: Hue(n),
         });
     }
-    MapSnapshot::new(FACET, map)
+    map
 }
 
 fn written(tag: &str) -> (std::path::PathBuf, MapSnapshot) {
@@ -107,6 +113,57 @@ fn writing_the_same_facet_twice_writes_the_same_bytes() {
     assert_eq!(std::fs::read(&first).unwrap(), std::fs::read(&third).unwrap());
 
     for path in [first, second, third] {
+        std::fs::remove_file(path).ok();
+    }
+}
+
+/// Two worlds that differ by one tile are two identities, and one world written
+/// twice is one — which is the whole of what a client files its cache under.
+///
+/// The second half is the load-bearing one: a shard that minted a fresh identity
+/// every time it wrote its world would send a client back to fetching the facet
+/// on every restart, and nothing would say why.
+#[test]
+fn a_world_is_named_by_its_own_bytes() {
+    let (first, snapshot) = written("identity-a");
+    let same = path("identity-b");
+    write(&same, &snapshot).expect("a writable temp dir");
+    assert_eq!(
+        openshard_basemap::identity_of(&first).expect("a base set"),
+        openshard_basemap::identity_of(&same).expect("a base set"),
+    );
+
+    let elsewhere = path("identity-c");
+    let mut moved = a_map();
+    moved.set_land(
+        3,
+        4,
+        LandCell {
+            tile: LandTileId(0x3FF),
+            z: 12,
+        },
+    );
+    write(&elsewhere, &MapSnapshot::new(FACET, moved)).expect("a writable temp dir");
+    assert_ne!(
+        openshard_basemap::identity_of(&first).expect("a base set"),
+        openshard_basemap::identity_of(&elsewhere).expect("a base set"),
+        "one tile of difference is a different world"
+    );
+
+    // And a file that is not a base set has no identity to take: naming a world
+    // after somebody else's bytes is worse than not naming it.
+    let foreign = path("identity-foreign");
+    std::fs::write(
+        &foreign,
+        b"not a base set at all, but long enough to have a header",
+    )
+    .unwrap();
+    assert!(matches!(
+        openshard_basemap::identity_of(&foreign),
+        Err(BaseError::NotABaseSet { .. })
+    ));
+
+    for path in [first, same, elsewhere, foreign] {
         std::fs::remove_file(path).ok();
     }
 }

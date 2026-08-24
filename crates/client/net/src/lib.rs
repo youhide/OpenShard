@@ -25,6 +25,7 @@
 //! [`openshard_gateway::Connection`]: https://docs.rs/openshard-gateway
 
 pub mod action;
+pub mod cache;
 pub mod casting;
 pub mod chunks;
 pub mod combat;

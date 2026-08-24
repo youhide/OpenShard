@@ -1251,6 +1251,28 @@ pub struct MapChange {
 #[serde(transparent)]
 pub struct Facet(pub u8);
 
+/// Which *world* a facet's ground is — the base set it was imported from, named
+/// by its own bytes.
+///
+/// Beside [`Facet`] and not inside the chunk wire, for [`Facet`]'s reason: it is
+/// a fact everybody shares rather than a field one packet carries.
+/// `openshard_basemap::identity_of` is what produces one, `WorldHome` is where a
+/// shard keeps it, and [`WorldNotice`](crate::chunks::WorldNotice) is what tells
+/// a client.
+///
+/// **A facet number is not an identity.** Two shards both serving facet 0 serve
+/// two different Feluccas, and both call the first revision of it 1 — so a
+/// client that kept a copy of one and compared revisions with the other would
+/// draw a world nobody built. That is what this number separates, and it is the
+/// whole of why it exists: a cache is filed under it.
+///
+/// It says nothing about how far a world has been *edited* — that is
+/// [`WorldRevision`](crate::chunks::WorldRevision), and the two are asked
+/// together. The base set never changes, so this does not either; the log beside
+/// it is what moves.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+pub struct WorldId(pub u64);
+
 /// How far, in tiles, a creature notices a foe.
 ///
 /// Zero means the creature never initiates a fight. This is game data rather

@@ -42,8 +42,9 @@ use std::time::Duration;
 
 use openshard_client_net::chunks::Fetch;
 use openshard_client_net::connection::Event;
+use openshard_client_net::talk;
 use openshard_client_net::transport::{Socket, enter_world};
-use openshard_config::{Config, FacetKey};
+use openshard_config::{Config, FacetKey, RawAccessLevel};
 use openshard_map::chunk::{Chunk, ChunkCoord, assemble, chunks_of};
 use openshard_map::codec;
 use openshard_map::grid::BlockExtent;
@@ -52,14 +53,17 @@ use openshard_map::overlay::{Doors, Overlay};
 use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::spans::SpanIndex;
 use openshard_movement::{Footing, MapTerrain, NavigationGraph, bake};
-use openshard_protocol::chunks::{ChunkAt, ChunkData, ChunkRequest, Refusal, join};
+use openshard_protocol::chunks::{
+    Changes, ChangesRequest, ChunkAt, ChunkData, ChunkRequest, Refusal, WorldRevision, join,
+};
 use openshard_protocol::server_packet::ServerPacket;
+use openshard_protocol::speech::TalkMode;
 use openshard_protocol::wire::{Graphic, Hue};
 use openshard_protocol::world::Facet;
 use openshard_tiles::LandTileId;
 use tokio::net::TcpStream;
 
-use openshard_e2e_shard::{plan, spawn, stock_config, version};
+use openshard_e2e_shard::{ACCOUNT, plan, spawn, stock_config, version};
 
 const FACET: Facet = Facet(0);
 /// 32 blocks square — 256×256 tiles, which is sixteen chunks and bakes in well
@@ -170,6 +174,10 @@ fn world_of_ours(dir: &Path, client: &Path, blocks: u32) -> PathBuf {
 }
 
 /// The stock config, pointed at a world of ours.
+///
+/// The development account is promoted, so that a `.`-command is a command
+/// rather than speech — `map_edit`'s rule, and the third test below is why this
+/// one wants it too: it moves the ground the way an operator does.
 fn config_over(base_set: PathBuf, client: PathBuf) -> impl FnOnce(SocketAddr) -> Config + Send {
     move |address| {
         let mut config = stock_config(address);
@@ -178,6 +186,11 @@ fn config_over(base_set: PathBuf, client: PathBuf) -> impl FnOnce(SocketAddr) ->
         config.world.base_sets.insert(FacetKey(FACET), base_set);
         config.world.start.x = START.0;
         config.world.start.y = START.1;
+        for account in &mut config.accounts {
+            if account.name == ACCOUNT {
+                account.access = RawAccessLevel("administrator".to_owned());
+            }
+        }
         config
     }
 }
@@ -229,6 +242,107 @@ fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("openshard-{name}-e2e-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("a writable temp directory");
     dir
+}
+
+/// Run a fetch to completion against a live shard, and say how many chunks it
+/// asked for.
+///
+/// The loop `link.rs` runs — ask until the window is full, then read until
+/// something completes — written out rather than called, for the reason the test
+/// below gives: the loop is private to a crate that cannot see a shard. The
+/// count is the assertion E3 is about, so it is the return value rather than a
+/// thing to count afterwards.
+async fn drive(socket: &mut Socket<TcpStream>, fetch: &mut Fetch) -> Asked {
+    let mut asked = Asked {
+        requests: 0,
+        chunks: 0,
+    };
+    let fetching = async {
+        loop {
+            while let Some(request) = fetch.next_request() {
+                asked.requests += 1;
+                asked.chunks += request.chunks.len();
+                socket
+                    .send(&request.encode())
+                    .await
+                    .expect("the shard is listening");
+            }
+            if fetch.is_complete() {
+                return;
+            }
+            let event = socket
+                .next_event()
+                .await
+                .expect("the socket stayed up")
+                .expect("the shard did not hang up mid-fetch");
+            if let Event::Packet(packet) = event {
+                fetch.on_packet(&packet).expect("the shard's own ground");
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(60), fetching)
+        .await
+        .expect("the chunks arrived inside the timeout");
+    asked
+}
+
+/// What a fetch cost on the wire: how many requests it took, and how many chunks
+/// they named between them.
+///
+/// Two numbers because two tests ask different questions of one loop — E2 wants
+/// to know that a facet too big for one request was paced, and E3 that a client
+/// with a cache asked for a *count* nobody had to pace at all.
+struct Asked {
+    requests: usize,
+    chunks: usize,
+}
+
+/// Every tile of one world answers what the other's does.
+///
+/// Tile by tile and not sampled, because the failure this is against is a
+/// *transposed* chunk — one that lands somewhere plausible and is wrong
+/// everywhere.
+fn assert_same_world(here: &WorldMap, there: &WorldMap) {
+    assert_eq!((here.width(), here.height()), (there.width(), there.height()));
+    assert_eq!(here.static_count(), there.static_count());
+    for y in 0..u16::try_from(there.height()).unwrap() {
+        for x in 0..u16::try_from(there.width()).unwrap() {
+            assert_eq!(here.land(x, y), there.land(x, y), "the land at ({x}, {y})");
+            let ours: Vec<StaticItem> = here.statics_at(x, y).copied().collect();
+            let theirs: Vec<StaticItem> = there.statics_at(x, y).copied().collect();
+            assert_eq!(ours, theirs, "the statics at ({x}, {y})");
+        }
+    }
+}
+
+/// Say one thing and collect what the shard says back, until it goes quiet.
+///
+/// `map_edit`'s helper, and the quiet is a timeout rather than a marker for its
+/// reason: a command's reply is several lines and nothing on the wire says which
+/// is the last one.
+async fn say_and_hear(
+    socket: &mut Socket<TcpStream>,
+    view: &mut openshard_client_net::view::WorldView,
+    words: &str,
+) -> Vec<String> {
+    let before = view.journal.len();
+    socket
+        .send(&talk::say(words, TalkMode::Regular))
+        .await
+        .expect("the shard is listening");
+    let _ = tokio::time::timeout(Duration::from_millis(1500), async {
+        while let Some(event) = socket.next_event().await.expect("the socket stayed up") {
+            if let Event::Packet(packet) = event {
+                view.apply(&packet);
+            }
+        }
+    })
+    .await;
+    view.journal
+        .iter()
+        .skip(before)
+        .map(|line| line.text.clone())
+        .collect()
 }
 
 #[tokio::test]
@@ -376,6 +490,184 @@ async fn a_client_asks_for_the_ground_and_gets_the_shards_own_bytes() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// E3's "done", both clauses of it: a second connection over an unchanged world
+/// asks for **no chunks at all**, and one over a world that moved by a single
+/// `.setland` asks for **exactly the chunk that patch touched**.
+///
+/// Three connections to one shard, and each is a client starting up: it is told
+/// what world it is standing in, it looks in the directory where it keeps
+/// worlds, and it decides. The decision itself is `link.rs`'s `decide` — private
+/// to `openshard-client-app`, which cannot see a shard — so it is written out
+/// here in the same three branches, the way the fetch loop above is.
+///
+/// What only this can catch is the join: that the identity the shard puts in its
+/// notice is stable across two connections, that a world written by
+/// `openshard_client_net::cache` reads back as the world that was fetched, and
+/// that the shard's answer about what moved names the chunk an operator's edit
+/// actually landed in.
+#[tokio::test]
+#[ignore = "reads the install's tiledata and bakes a graph; run it deliberately"]
+async fn a_client_that_kept_the_ground_asks_only_for_what_moved() {
+    let Some(client) = install() else {
+        eprintln!("OPENSHARD_CLIENT is not set, so there is no tile table to read: skipping");
+        return;
+    };
+    let dir = scratch("kept-ground");
+    // Where this client keeps worlds. A directory of the test's own rather than
+    // the working directory the real client uses: two of these in one binary
+    // would otherwise be one cache.
+    let kept = dir.join("kept");
+    std::fs::create_dir_all(&kept).expect("a writable temp directory");
+    let base_set = world_of_ours(&dir, &client, BLOCKS);
+
+    let (address, shard) = spawn(config_over(base_set.clone(), client));
+
+    // The first connection: nothing kept, so the whole facet.
+    let (mut socket, view) =
+        tokio::time::timeout(Duration::from_secs(30), enter_world(address, plan(), version()))
+            .await
+            .expect("the login conversation finished inside the timeout")
+            .expect("the client reached the world");
+    let notice = view.world.expect("the shard told us what world we are in");
+    let world = notice
+        .world
+        .expect("a shard running on a base set of ours names its world");
+    assert!(
+        matches!(
+            openshard_client_net::cache::read(&kept, notice),
+            Err(openshard_client_net::cache::CacheError::Missing { .. })
+        ),
+        "nothing has been kept yet"
+    );
+    let mut fetch = Fetch::of(notice).expect("a facet the wire can name");
+    let asked = drive(&mut socket, &mut fetch).await;
+    assert_eq!(asked.chunks, 16, "the whole facet, which is sixteen chunks");
+    let arrived = fetch.finish().expect("a complete set of chunks");
+    let path = openshard_client_net::cache::write(&kept, notice, &arrived).expect("a writable temp dir");
+    assert_eq!(path, openshard_client_net::cache::path_of(&kept, world, FACET));
+    drop(socket);
+
+    // The second: the world is kept and the shard has not moved, so the decision
+    // ends before a single chunk is asked for.
+    let (socket, view) =
+        tokio::time::timeout(Duration::from_secs(30), enter_world(address, plan(), version()))
+            .await
+            .expect("the login conversation finished inside the timeout")
+            .expect("the client reached the world");
+    let notice = view.world.expect("the shard told us what world we are in");
+    assert_eq!(notice.world, Some(world), "the same world, named the same way");
+    let held = openshard_client_net::cache::read(&kept, notice).expect("the world kept a moment ago");
+    assert_eq!(
+        held.revision().get(),
+        notice.revision.0,
+        "nothing moved, so there is nothing to ask for"
+    );
+    let on_disk = openshard_basemap::read(&base_set).expect("the base set reads back");
+    assert_same_world(held.map(), on_disk.map());
+    drop(socket);
+
+    // An operator moves one tile of ground, which is one chunk of the facet.
+    let (mut socket, mut view) =
+        tokio::time::timeout(Duration::from_secs(30), enter_world(address, plan(), version()))
+            .await
+            .expect("the login conversation finished inside the timeout")
+            .expect("the client reached the world");
+    let before = view.world.expect("the shard told us what world we are in");
+    let said = say_and_hear(&mut socket, &mut view, ".setland 3 40").await;
+    assert!(
+        said.iter()
+            .any(|line| line.contains("Committed") && line.contains("revision 2")),
+        "the patch was committed and the facet moved: {said:?}"
+    );
+    drop(socket);
+
+    // The third connection: the kept world is a revision behind, so the shard is
+    // asked what moved and answers with the one chunk the edit landed in.
+    let (mut socket, view) =
+        tokio::time::timeout(Duration::from_secs(30), enter_world(address, plan(), version()))
+            .await
+            .expect("the login conversation finished inside the timeout")
+            .expect("the client reached the world");
+    let notice = view.world.expect("the shard told us what world we are in");
+    assert_eq!(notice.world, Some(world), "one edit is not another world");
+    assert_eq!(notice.revision.0, before.revision.0 + 1, "and it moved by one");
+    let held = openshard_client_net::cache::read(&kept, notice).expect("the world kept above");
+    assert!(
+        held.revision().get() < notice.revision.0,
+        "the kept world is behind"
+    );
+
+    socket
+        .send(
+            &ChangesRequest {
+                facet: FACET,
+                revision: WorldRevision(held.revision().get()),
+            }
+            .encode(),
+        )
+        .await
+        .expect("the shard is listening");
+    let heard = hear(&mut socket, |so_far| {
+        so_far
+            .iter()
+            .any(|packet| matches!(packet, ServerPacket::ChangesReply(_)))
+    })
+    .await;
+    let reply = heard
+        .iter()
+        .find_map(|packet| match packet {
+            ServerPacket::ChangesReply(reply) => Some(reply.clone()),
+            _ => None,
+        })
+        .expect("what moved is answered exactly once");
+    assert_eq!(reply.facet, FACET);
+    assert_eq!(reply.revision.0, notice.revision.0);
+    // The tile the operator moved is at START, which is inside chunk (2, 2) of a
+    // facet cut into sixty-four-tile squares.
+    let touched = ChunkAt {
+        x: START.0 / 64,
+        y: START.1 / 64,
+    };
+    assert_eq!(
+        reply.changes,
+        Changes::These(vec![touched]),
+        "one patch, one chunk, and not the facet"
+    );
+
+    let mut fetch = Fetch::over(
+        notice,
+        held,
+        match &reply.changes {
+            Changes::These(chunks) => chunks.clone(),
+            Changes::Everything => panic!("the shard knows what moved"),
+        },
+        openshard_map::snapshot::MapRevision::decoded(reply.revision.0),
+    )
+    .expect("the world kept is the world described");
+    let asked = drive(&mut socket, &mut fetch).await;
+    assert_eq!(asked.chunks, 1, "exactly the chunks that moved");
+    let caught_up = fetch.finish().expect("the chunk that moved");
+    assert_eq!(caught_up.revision().get(), notice.revision.0);
+
+    // And it is the shard's world: the tile the operator moved is where the
+    // operator put it, and every other tile of the facet is what it was.
+    let moved = openshard_basemap::load(&base_set).expect("the world reads back");
+    assert_eq!(moved.patches, 1, "one commit, one record");
+    assert_same_world(caught_up.map(), moved.snapshot.map());
+    assert_eq!(
+        caught_up.map().land(START.0, START.1),
+        Some(LandCell {
+            tile: LandTileId(3),
+            z: 40
+        }),
+        "the tile the operator moved arrived over the wire"
+    );
+    openshard_client_net::cache::write(&kept, notice, &caught_up).expect("a writable temp dir");
+
+    shard.stop();
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// E2's own seam: the client does not compare bytes, it **holds a world**.
 ///
 /// The test above is E1's — it checks each record against the file the shard cut
@@ -411,39 +703,16 @@ async fn a_client_with_no_map_files_ends_up_holding_the_shards_world() {
     let mut fetch = Fetch::of(notice).expect("a facet the wire can name");
     assert_eq!(fetch.wanted(), 81, "nine chunks square");
 
-    // The loop `link.rs` runs, and deliberately written out here rather than
-    // called: what is under test is that the two halves of it — ask until the
-    // window is full, then read until something completes — make progress
-    // against a real shard.
-    let mut requests = 0;
-    let fetching = async {
-        loop {
-            while let Some(request) = fetch.next_request() {
-                requests += 1;
-                socket
-                    .send(&request.encode())
-                    .await
-                    .expect("the shard is listening");
-            }
-            if fetch.is_complete() {
-                return;
-            }
-            let event = socket
-                .next_event()
-                .await
-                .expect("the socket stayed up")
-                .expect("the shard did not hang up mid-fetch");
-            if let Event::Packet(packet) = event {
-                fetch.on_packet(&packet).expect("the shard's own ground");
-            }
-        }
-    };
-    tokio::time::timeout(Duration::from_secs(60), fetching)
-        .await
-        .expect("the facet arrived inside the timeout");
+    // The loop `link.rs` runs — see [`drive`], which is that loop written out
+    // rather than called: what is under test is that the two halves of it — ask
+    // until the window is full, then read until something completes — make
+    // progress against a real shard.
+    let asked = drive(&mut socket, &mut fetch).await;
+    assert_eq!(asked.chunks, 81);
     assert!(
-        requests > 1,
-        "81 chunks is more than one request may name, and it was asked for in {requests}"
+        asked.requests > 1,
+        "81 chunks is more than one request may name, and it was asked for in {}",
+        asked.requests
     );
 
     let arrived = fetch.finish().expect("a complete set of chunks");
@@ -453,25 +722,10 @@ async fn a_client_with_no_map_files_ends_up_holding_the_shards_world() {
     let on_disk = openshard_basemap::read(&base_set).expect("the base set reads back");
     assert_eq!(arrived.facet(), FACET);
     assert_eq!(arrived.revision(), on_disk.revision(), "a world nobody patched");
-    assert_eq!(arrived.map().width(), on_disk.map().width());
-    assert_eq!(arrived.map().height(), on_disk.map().height());
-    assert_eq!(arrived.map().static_count(), on_disk.map().static_count());
-
     // Every tile, because the failure this is against is a *transposed* chunk —
     // one that lands somewhere plausible and is wrong everywhere. Sampling would
     // find it only by luck.
-    for y in 0..u16::try_from(on_disk.map().height()).unwrap() {
-        for x in 0..u16::try_from(on_disk.map().width()).unwrap() {
-            assert_eq!(
-                arrived.map().land(x, y),
-                on_disk.map().land(x, y),
-                "the land at ({x}, {y})"
-            );
-            let here: Vec<StaticItem> = arrived.map().statics_at(x, y).copied().collect();
-            let there: Vec<StaticItem> = on_disk.map().statics_at(x, y).copied().collect();
-            assert_eq!(here, there, "the statics at ({x}, {y})");
-        }
-    }
+    assert_same_world(arrived.map(), on_disk.map());
 
     shard.stop();
     std::fs::remove_dir_all(&dir).ok();

@@ -11,7 +11,7 @@
 //! whichever body it names.
 
 use crate::casting::CastSpellRequest;
-use crate::chunks::ChunkRequest;
+use crate::chunks::{ChangesRequest, ChunkRequest};
 use crate::context::{ContextMenuRequest, ContextMenuSelect};
 use crate::design::DesignDetailsRequest;
 use crate::error::{DecodeError, expect_id};
@@ -46,6 +46,11 @@ pub enum ExtendedRequest {
     /// a word for it, which is exactly what makes receiving one the whole of
     /// the capability negotiation — see [`ChunkRequest`].
     Chunks(ChunkRequest),
+    /// Subcommand `0xE007` — "what has moved since this revision?". This
+    /// engine's own, like [`Chunks`](Self::Chunks) above, and asked only by a
+    /// client that kept a copy of the ground it was given — see
+    /// [`ChangesRequest`].
+    Changes(ChangesRequest),
     /// Any subcommand this engine does not act on — screen size, close-gump
     /// and the rest of the family `0xBF` carries. Not an error:
     /// the same "logged fact, not a dropped connection" treatment
@@ -78,6 +83,7 @@ impl ExtendedRequest {
             }
             crate::party::SUBCOMMAND => Self::Party(PartyRequest::decode_body(&mut reader)?),
             ChunkRequest::SUBCOMMAND => Self::Chunks(ChunkRequest::decode_body(&mut reader)?),
+            ChangesRequest::SUBCOMMAND => Self::Changes(ChangesRequest::decode_body(&mut reader)?),
             other => Self::Unknown(other),
         })
     }

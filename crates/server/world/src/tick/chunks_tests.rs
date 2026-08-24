@@ -14,14 +14,20 @@
 //! wire that transposed a chunk, or dropped the statics of one block, passes the
 //! first and fails the second.
 
+use std::path::{Path, PathBuf};
+
 use super::tests::{connection, enter_as, packets_for, world};
 use super::*;
 use openshard_map::chunk::{Chunk, ChunkCoord, assemble, chunks_of};
 use openshard_map::codec;
 use openshard_map::grid::BlockExtent;
 use openshard_map::map::{LandCell, StaticItem, WorldMap};
-use openshard_map::snapshot::MapSnapshot;
-use openshard_protocol::chunks::{ChunkAt, ChunkData, Refusal, WorldRevision, join};
+use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
+use openshard_map::snapshot::{MapRevision, MapSnapshot};
+use openshard_protocol::chunks::{
+    Changes, ChangesReply, ChunkAt, ChunkData, Refusal, WorldNotice, WorldRevision, join,
+};
+use openshard_state::WorldHome;
 use openshard_tiles::LandTileId;
 
 /// Nine blocks square — 72 tiles — which is **not** a whole number of chunks on
@@ -83,8 +89,124 @@ fn ground() -> WorldMap {
 }
 
 /// A world with that facet under it, spawning inside it.
+///
+/// **No home**, so it is a facet read out of an install as far as everything
+/// below is concerned: nothing can be committed to it and it has no identity to
+/// send. [`world_of_ours`] is the other one.
 fn world_with_ground() -> World {
     World::new((32, 32)).with_map(MapSnapshot::new(Facet(0), ground()))
+}
+
+/// The same facet, written to a base set in the temp dir and loaded back — a
+/// world of *ours*, which is the only kind that can say what moved.
+///
+/// The tag keeps two tests in one binary off each other's files and the pid
+/// keeps two runs off each other's, which is `tests/mapedit.rs`'s rule and
+/// `openshard-basemap`'s before it. `base` is the revision the file is written
+/// at: a base set at something other than the first revision is what makes
+/// "older than this world" a state a client can be in.
+fn world_of_ours(tag: &str, base: MapRevision) -> (World, PathBuf) {
+    let path = std::env::temp_dir().join(format!("openshard-changes-{tag}-{}.osbase", std::process::id()));
+    std::fs::remove_file(&path).ok();
+    std::fs::remove_file(openshard_basemap::patches::log_path(&path)).ok();
+    let written = MapSnapshot::restored(Facet(0), base, ground());
+    openshard_basemap::write(&path, &written).expect("a writable temp dir");
+
+    let loaded = openshard_basemap::load(&path).expect("the base set just written");
+    let home = WorldHome {
+        base_set: path.clone(),
+        base: loaded.base,
+        identity: openshard_basemap::identity_of(&path).expect("the base set just written"),
+    };
+    let world = World::new((32, 32)).with_facet(
+        Facet(0),
+        loaded.snapshot,
+        None,
+        openshard_state::facet_rules::FacetRules::classic(Facet(0)),
+        Some(home),
+    );
+    (world, path)
+}
+
+/// Everything `world_of_ours` left in the temp dir.
+fn clean(base_set: &Path) {
+    std::fs::remove_file(openshard_basemap::patches::log_path(base_set)).ok();
+    std::fs::remove_file(base_set).ok();
+}
+
+/// Move one tile of ground and write it down, the way an operator's `.setland`
+/// does — through [`mapedit::commit`], so the log on disk is the one a real
+/// shard would have written.
+fn commit_a_tile(world: &mut World, at: (u16, u16)) -> MapRevision {
+    let parent = world
+        .state
+        .facet_state(Facet(0))
+        .ground()
+        .snapshot()
+        .expect("the fixture has ground")
+        .revision();
+    let map = world
+        .state
+        .facet_state(Facet(0))
+        .ground()
+        .snapshot()
+        .expect("the fixture has ground")
+        .map();
+    let op = PatchOp::set_land(
+        map,
+        at.0,
+        at.1,
+        LandCell {
+            tile: LandTileId(0x3FF),
+            z: 7,
+        },
+    )
+    .expect("a tile of this facet");
+    let patch = Patch::new(
+        Facet(0),
+        parent,
+        PatchAuthor("a test".to_owned()),
+        PatchTime(0),
+        vec![op],
+    );
+    crate::mapedit::commit(&mut world.state, Facet(0), &patch).expect("a world of ours takes a patch")
+}
+
+/// The one world notice a connection was sent on the way in, if it was sent one.
+///
+/// It drains the entry packets, so a caller that wants them for something else
+/// has to take them first.
+fn notice_for(world: &mut World, connection: ConnectionId) -> Option<WorldNotice> {
+    let notices: Vec<WorldNotice> = packets_for(world, connection)
+        .iter()
+        .filter_map(|bytes| ServerPacket::decode(bytes, ClientVersion::TOL).expect("our own bytes"))
+        .filter_map(|packet| match packet {
+            ServerPacket::WorldNotice(notice) => Some(notice),
+            _ => None,
+        })
+        .collect();
+    assert!(notices.len() <= 1, "a notice is sent once, on world entry");
+    notices.into_iter().next()
+}
+
+/// Ask what has moved since `held`, through the queue and a tick.
+fn ask_changes(world: &mut World, connection: ConnectionId, held: WorldRevision) -> ChangesReply {
+    world.queue(Command::RequestChanges {
+        connection,
+        facet: Facet(0),
+        revision: held,
+    });
+    world.tick(Instant::now());
+    let replies: Vec<ChangesReply> = packets_for(world, connection)
+        .iter()
+        .filter_map(|bytes| ServerPacket::decode(bytes, ClientVersion::TOL).expect("the shard's own bytes"))
+        .filter_map(|packet| match packet {
+            ServerPacket::ChangesReply(reply) => Some(reply),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(replies.len(), 1, "one question, one answer");
+    replies.into_iter().next().expect("just counted")
 }
 
 /// Every chunk the fixture has, as the wire names them.
@@ -380,23 +502,136 @@ fn a_client_entering_is_told_what_world_it_is_in() {
     let mut world = world_with_ground();
     let connection = enter_as(&mut world, connection(), Instant::now());
 
-    let notices: Vec<_> = packets_for(&mut world, connection)
-        .iter()
-        .filter_map(|bytes| ServerPacket::decode(bytes, ClientVersion::TOL).expect("our own bytes"))
-        .filter_map(|packet| match packet {
-            ServerPacket::WorldNotice(notice) => Some(notice),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(notices.len(), 1, "sent once, on world entry");
-    assert_eq!(notices[0].facet, Facet(0));
-    assert_eq!(notices[0].blocks.wide, BLOCKS);
-    assert_eq!(notices[0].blocks.down, BLOCKS);
-    assert_eq!(notices[0].revision.0, 1, "a facet nobody has patched");
+    let notice = notice_for(&mut world, connection).expect("sent once, on world entry");
+    assert_eq!(notice.facet, Facet(0));
+    assert_eq!(notice.blocks.wide, BLOCKS);
+    assert_eq!(notice.blocks.down, BLOCKS);
+    assert_eq!(notice.revision.0, 1, "a facet nobody has patched");
 
     // And the extent is the one `assemble` wants: the chunks of a facet this
     // size are exactly the chunks the shard will answer for.
     assert_eq!(every_chunk().len(), 4);
+}
+
+/// A world of ours is named on the way in, and one out of an install is not.
+///
+/// The identity is what a client files its cache under, so the `None` half is
+/// the load-bearing one: a facet the shard cannot name is a facet a client must
+/// not keep, because nothing afterwards could tell that copy from another
+/// install's Felucca.
+#[test]
+fn a_world_of_ours_is_named_and_one_out_of_an_install_is_not() {
+    {
+        let (mut world, base_set) = world_of_ours("named", MapRevision::INITIAL);
+        let entered = enter_as(&mut world, connection(), Instant::now());
+        let named = notice_for(&mut world, entered).expect("a facet with ground sends one");
+        assert_eq!(
+            named.world,
+            Some(openshard_basemap::identity_of(&base_set).expect("the base set")),
+            "the notice names the world the shard read"
+        );
+        clean(&base_set);
+    }
+
+    let mut world = world_with_ground();
+    let entered = enter_as(&mut world, connection(), Instant::now());
+    let unnamed = notice_for(&mut world, entered).expect("a facet with ground sends one");
+    assert_eq!(unnamed.world, None, "a facet with no base set has no identity");
+}
+
+/// A client already holding the world is told that nothing moved — which is
+/// knowledge and not a refusal, and is what makes a second run ask for no chunks
+/// at all.
+#[test]
+fn a_client_that_is_up_to_date_is_told_that_nothing_moved() {
+    let (mut world, base_set) = world_of_ours("current", MapRevision::INITIAL);
+    let connection = enter_as(&mut world, connection(), Instant::now());
+    let _entry = packets_for(&mut world, connection);
+
+    let reply = ask_changes(&mut world, connection, WorldRevision(MapRevision::INITIAL.get()));
+    assert_eq!(reply.facet, Facet(0));
+    assert_eq!(reply.revision.0, MapRevision::INITIAL.get());
+    assert_eq!(reply.changes, Changes::These(Vec::new()));
+    clean(&base_set);
+}
+
+/// E3's "done", on the shard's side: what a stale client is told is exactly the
+/// chunks the patches since its revision touched — no more, and never the facet.
+///
+/// Two patches, in two different chunks, and the answer is asked for from three
+/// vantage points: before both, between them, and after both.
+#[test]
+fn what_moved_is_the_chunks_the_patches_touched() {
+    let (mut world, base_set) = world_of_ours("moved", MapRevision::INITIAL);
+    let connection = enter_as(&mut world, connection(), Instant::now());
+    let _entry = packets_for(&mut world, connection);
+
+    let first = WorldRevision(MapRevision::INITIAL.get());
+    // A tile in chunk (0, 0), then one in chunk (1, 1): the fixture is 72 tiles
+    // square, so tile 70 is in the second chunk on both axes.
+    let second = WorldRevision(commit_a_tile(&mut world, (3, 4)).get());
+    let third = WorldRevision(commit_a_tile(&mut world, (70, 71)).get());
+    assert_eq!(second.0, first.0 + 1);
+    assert_eq!(third.0, second.0 + 1);
+
+    let reply = ask_changes(&mut world, connection, first);
+    assert_eq!(reply.revision, third, "the revision it will be at once applied");
+    assert_eq!(
+        reply.changes,
+        Changes::These(vec![ChunkAt { x: 0, y: 0 }, ChunkAt { x: 1, y: 1 }]),
+        "both patches, each chunk named once"
+    );
+
+    let reply = ask_changes(&mut world, connection, second);
+    assert_eq!(
+        reply.changes,
+        Changes::These(vec![ChunkAt { x: 1, y: 1 }]),
+        "only the patch it has not seen"
+    );
+
+    let reply = ask_changes(&mut world, connection, third);
+    assert_eq!(reply.changes, Changes::These(Vec::new()));
+    clean(&base_set);
+}
+
+/// Every revision this shard cannot describe a difference to, and there are
+/// three of them: one it has never published, one from before this base set
+/// existed, and any at all on a facet it does not own.
+///
+/// All three are one answer — take the facet again — because the client does the
+/// same thing with each. What separates them is a line in the shard's log.
+#[test]
+fn a_revision_this_shard_cannot_place_is_answered_with_the_whole_facet() {
+    {
+        let (mut world, base_set) = world_of_ours("ahead", MapRevision::INITIAL);
+        let entered = enter_as(&mut world, connection(), Instant::now());
+        let _entry = packets_for(&mut world, entered);
+        let reply = ask_changes(&mut world, entered, WorldRevision(99));
+        assert_eq!(reply.changes, Changes::Everything, "a client from the future");
+        assert_eq!(reply.revision.0, 1, "and it is told where the world actually is");
+        clean(&base_set);
+    }
+    {
+        // A base set written at a later revision: a client claiming an earlier
+        // one holds a world this log has no record of reaching.
+        let (mut world, base_set) = world_of_ours("older", MapRevision::decoded(5));
+        let entered = enter_as(&mut world, connection(), Instant::now());
+        let _entry = packets_for(&mut world, entered);
+        let reply = ask_changes(&mut world, entered, WorldRevision(3));
+        assert_eq!(reply.changes, Changes::Everything);
+        assert_eq!(reply.revision.0, 5);
+        clean(&base_set);
+    }
+
+    // And a facet with ground but no base set: there is no log to read, so
+    // nothing here knows what moved. Such a facet is sent with no identity, so a
+    // client should never have a copy of it to ask about — which is why this is
+    // an answer rather than a way to be wrong.
+    let mut world = world_with_ground();
+    let entered = enter_as(&mut world, connection(), Instant::now());
+    let _entry = packets_for(&mut world, entered);
+    let reply = ask_changes(&mut world, entered, WorldRevision(1));
+    assert_eq!(reply.changes, Changes::Everything);
 }
 
 /// A facet with no map sends none: a notice of nought blocks by nought would be

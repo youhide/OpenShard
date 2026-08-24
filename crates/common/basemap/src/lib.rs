@@ -59,7 +59,7 @@ use openshard_map::codec::{self, DecodeError};
 use openshard_map::grid::BlockExtent;
 use openshard_map::patch::PatchError;
 use openshard_map::snapshot::{MapRevision, MapSnapshot};
-use openshard_protocol::world::Facet;
+use openshard_protocol::world::{Facet, WorldId};
 
 pub mod patches;
 
@@ -401,6 +401,63 @@ pub fn read(path: impl AsRef<Path>) -> Result<MapSnapshot, BaseError> {
         source,
     })?;
     Ok(MapSnapshot::restored(facet, revision, map))
+}
+
+/// Which world a base set *is*, by its own bytes.
+///
+/// **The question a facet number cannot answer.** Two shards both serving facet
+/// 0 serve two different Feluccas and both call the first revision of it 1, so a
+/// client that kept a copy of one and compared revisions with the other would
+/// draw a world nobody built. A shard tells a client this in its
+/// `WorldNotice`, and the client files what it keeps under it — see
+/// [`WorldId`], and `docs/map/new_map_representation/to_the_client.md`'s E3.
+///
+/// **Of the base set alone, and not of the log beside it.** A base set never
+/// changes, so this never does; where the world has got to since is the
+/// revision, and the two are asked together. The pair separates every world any
+/// shard of ours can serve except two logs forked from one base at the same
+/// revision — which is a log taken apart by hand, and the append-only rule in
+/// [`patches`] is what makes that not a thing that happens.
+///
+/// FNV-1a, 64 bits, over the file exactly as it sits — [`patches`]'s own
+/// checksum one width up, and for the same reason: an identity that has to be
+/// the same on two machines and in every future build of this engine, not a
+/// defence against anybody. A hash from a crate whose value changes with its
+/// version would silently orphan every cache on an upgrade.
+///
+/// # Errors
+///
+/// [`BaseError::Read`] if the file cannot be read, and
+/// [`BaseError::NotABaseSet`] for a file that is not one — the magic is checked
+/// here rather than trusted, because an identity taken over somebody else's file
+/// is a name for a world this shard is not serving.
+pub fn identity_of(base_set: impl AsRef<Path>) -> Result<WorldId, BaseError> {
+    let path = base_set.as_ref();
+    let bytes = std::fs::read(path).map_err(|source| BaseError::Read {
+        path: path.to_owned(),
+        source,
+    })?;
+    if bytes.len() < HEADER_BYTES || bytes[..4] != MAGIC {
+        return Err(BaseError::NotABaseSet {
+            path: path.to_owned(),
+        });
+    }
+    Ok(WorldId(fnv1a64(&bytes)))
+}
+
+/// FNV-1a, 64 bits.
+///
+/// The 32-bit twin in [`patches`] is a torn-write check over one record; this is
+/// an identity over a whole file, and it is written out here for that module's
+/// reason — it is six lines, it has no configuration, and both are pinned to a
+/// spelling that cannot change under us.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 /// A facet as it stands: the base set, and every patch committed over it.

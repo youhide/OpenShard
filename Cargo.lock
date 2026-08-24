@@ -2627,6 +2627,7 @@ dependencies = [
 name = "openshard-client-net"
 version = "0.0.1"
 dependencies = [
+ "openshard-basemap",
  "openshard-client-model",
  "openshard-map",
  "openshard-movement",

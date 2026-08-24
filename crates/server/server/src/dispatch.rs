@@ -224,6 +224,14 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
                 facet: request.facet,
                 chunks: request.chunks,
             }),
+            // And the same for the question a client with a cache asks first:
+            // whether this shard can say what moved since that revision is a
+            // question about a world and a log, and neither is here.
+            ExtendedRequest::Changes(request) => Some(Command::RequestChanges {
+                connection: id,
+                facet: request.facet,
+                revision: request.revision,
+            }),
             ExtendedRequest::Unknown(subcommand) => {
                 debug!(%id, subcommand = format!("0x{subcommand:02X}"), "unhandled 0xBF");
                 None

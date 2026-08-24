@@ -1,6 +1,6 @@
 //! The world itself, over the game connection.
 //!
-//! Four subcommands in the [`OPENSHARD_SUBCOMMANDS`] range, and together they
+//! Six subcommands in the [`OPENSHARD_SUBCOMMANDS`] range, and together they
 //! are how a client of ours comes to draw the ground *the shard* is standing on
 //! rather than the ground on its own disk. `docs/map/new_map_representation/to_the_client.md`
 //! is the plan; this is its wire.
@@ -14,10 +14,18 @@
 //!         fragment u8, fragments u8, inflated u32, blob ..
 //!
 //! 0xE004  WorldNotice    server -> client, on world entry
-//!         facet u8, blocks wide u32, blocks down u32, revision u64
+//!         facet u8, blocks wide u32, blocks down u32, revision u64,
+//!         world named u8, world id u64
 //!
 //! 0xE006  ChunkRefused   server -> client
 //!         facet u8, chunk x u16, chunk y u16, reason u8
+//!
+//! 0xE007  ChangesRequest client -> server
+//!         facet u8, revision u64
+//!
+//! 0xE008  ChangesReply   server -> client
+//!         facet u8, revision u64, answer u8,
+//!         then for "these" only: count u16, count x { chunk x u16, chunk y u16 }
 //! ```
 //!
 //! Big-endian, like the rest of the wire and unlike the chunk record inside the
@@ -65,7 +73,7 @@ use crate::codec::{PacketReader, PacketWriter};
 use crate::error::DecodeError;
 use crate::packet::{DecodePacket, EncodePacket, PacketLength, frame_body};
 use crate::version::ClientVersion;
-use crate::world::Facet;
+use crate::world::{Facet, WorldId};
 
 /// The largest slice of one chunk's deflated blob a single packet carries.
 ///
@@ -531,14 +539,31 @@ pub struct WorldNotice {
     pub blocks: FacetBlocks,
     /// Which published revision of it the shard is holding.
     pub revision: WorldRevision,
+    /// Which world this ground *is*, when the shard can say.
+    ///
+    /// `None` is a facet the shard reads out of a UO install: there is no base
+    /// set to name it by, and a client must not keep a copy of ground the shard
+    /// cannot identify — two installs' Feluccas are two worlds, and nothing here
+    /// could tell them apart afterwards. It is the shard's own `WorldHome` being
+    /// absent, reaching the client.
+    ///
+    /// With one, a client files its cache under it and the revision beside it is
+    /// then a question about *this* world rather than about a number two shards
+    /// both start at 1. See [`WorldId`].
+    pub world: Option<WorldId>,
 }
 
 impl WorldNotice {
     /// Which `0xBF` this is.
     pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 4;
-    /// The whole framed packet: id, length, subcommand, facet, two extents and
-    /// a revision.
-    pub const LENGTH_BYTES: u8 = 22;
+    /// The whole framed packet: id, length, subcommand, facet, two extents, a
+    /// revision, and the world's identity behind a byte saying whether there is
+    /// one.
+    ///
+    /// A presence byte rather than nought standing for "no world": a hash is
+    /// free to come out as any of its 2^64 values, and a reserved one would be a
+    /// world that silently stopped being cacheable on the day it was imported.
+    pub const LENGTH_BYTES: u8 = 31;
 
     /// Encode the whole packet.
     #[must_use]
@@ -561,6 +586,8 @@ impl EncodePacket for WorldNotice {
         out.u32(self.blocks.wide);
         out.u32(self.blocks.down);
         out.u64(self.revision.0);
+        out.u8(u8::from(self.world.is_some()));
+        out.u64(self.world.map_or(0, |world| world.0));
     }
 }
 
@@ -575,13 +602,22 @@ impl DecodePacket for WorldNotice {
                 value: u32::from(subcommand),
             });
         }
+        let facet = Facet(reader.u8()?);
+        let blocks = FacetBlocks {
+            wide: reader.u32()?,
+            down: reader.u32()?,
+        };
+        let revision = WorldRevision(reader.u64()?);
+        // The byte says whether the eight after it mean anything, and it is read
+        // as a *flag*: anything but nought is a shard that named its world, and
+        // the identity itself is opaque here — this end never computes one.
+        let named = reader.u8()? != 0;
+        let world = WorldId(reader.u64()?);
         Ok(Self {
-            facet: Facet(reader.u8()?),
-            blocks: FacetBlocks {
-                wide: reader.u32()?,
-                down: reader.u32()?,
-            },
-            revision: WorldRevision(reader.u64()?),
+            facet,
+            blocks,
+            revision,
+            world: named.then_some(world),
         })
     }
 }
@@ -716,6 +752,212 @@ impl DecodePacket for ChunkRefused {
     }
 }
 
+/// How many chunks one [`ChangesReply`] may name.
+///
+/// The packet is what decides it: a reply is five bytes of framing and twelve of
+/// header, and each chunk named is four more, so 4,096 of them is 16,401 bytes
+/// against an 18,000-byte cap. Past that the answer is
+/// [`Changes::Everything`] — which is not a compromise but the cheaper truth,
+/// since a client that has to be told about 4,097 of Felucca's 7,168 chunks is a
+/// client whose cache has stopped being a saving.
+///
+/// It is deliberately not fragmented the way a chunk record is. A chunk *has* to
+/// arrive; a list of what moved has an alternative that is one packet long.
+pub const MAX_MOVED: u16 = 4_096;
+
+/// `0xBF` subcommand `0xE007` — "what has moved since this revision?".
+///
+/// The question a client with a cache asks, and the only one it asks before it
+/// knows what to fetch: it holds a world of this facet at some revision, the
+/// shard has just said which revision it is at, and the two differ.
+///
+/// The revision is the client's own, not the shard's. What comes back is
+/// [`ChangesReply`], exactly once.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ChangesRequest {
+    /// Which facet's ground the question is about.
+    pub facet: Facet,
+    /// The revision the asker already holds.
+    pub revision: WorldRevision,
+}
+
+impl ChangesRequest {
+    /// Which `0xBF` this is.
+    pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 7;
+
+    /// Read the body, `reader` already past the id, length and subcommand.
+    ///
+    /// Nothing is checked against a world here, for [`ChunkRequest`]'s reason:
+    /// whether the shard can *answer* about that revision is the tick's
+    /// question, and its answer is a [`ChangesReply`] rather than a decoder's
+    /// error.
+    pub(crate) fn decode_body(reader: &mut PacketReader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            facet: Facet(reader.u8()?),
+            revision: WorldRevision(reader.u64()?),
+        })
+    }
+
+    /// Encode the whole packet. Our own client sends this; the shard only ever
+    /// decodes it.
+    #[must_use]
+    pub fn encode(self) -> Vec<u8> {
+        frame_body(0xBF, PacketLength::Variable, |out: &mut PacketWriter| {
+            out.u16(Self::SUBCOMMAND);
+            out.u8(self.facet.0);
+            out.u64(self.revision.0);
+        })
+    }
+}
+
+/// What moved between two revisions of one facet.
+///
+/// Two answers and not a list that is sometimes empty and sometimes everything:
+/// "these chunks and no others" and "I cannot tell you, take the facet again"
+/// are different facts, and a client acts on them differently. Collapsing the
+/// second into a list of all 7,168 would be a shard pretending to know something
+/// it does not.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Changes {
+    /// Exactly these chunks changed, and no others.
+    ///
+    /// At most [`MAX_MOVED`] of them, in no particular order and each named once
+    /// — the union over the patches committed since the revision asked about.
+    /// An empty list is a legal answer and means a world that has not moved.
+    These(Vec<ChunkAt>),
+    /// The shard cannot say what moved, so nothing short of the whole facet is
+    /// safe to take.
+    ///
+    /// A revision it has no history for — older than the base set, or one it
+    /// never published — a log it could not read, or more chunks than
+    /// [`MAX_MOVED`]. The client's answer to all four is the same one, which is
+    /// why they are one variant and the reason is a log line on the shard.
+    Everything,
+}
+
+impl Changes {
+    /// The byte this answer rides as.
+    ///
+    /// Written out rather than derived from the discriminant, for
+    /// [`Refusal::wire`]'s reason: the order of the variants is not a wire
+    /// format.
+    #[must_use]
+    pub const fn wire(&self) -> u8 {
+        match self {
+            Self::These(_) => 0,
+            Self::Everything => 1,
+        }
+    }
+}
+
+/// `0xBF` subcommand `0xE008` — the answer to [`ChangesRequest`], exactly once.
+///
+/// The revision it carries is the shard's own — the one the chunks it names were
+/// cut at, and the one the asker's world is at once it has applied them. A
+/// client that fetched them and found a different revision on the wire has a
+/// world that moved underneath it mid-answer, which is the same fact
+/// `openshard_map::chunk::assemble` refuses a mixed set for.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ChangesReply {
+    /// Which facet this is about.
+    pub facet: Facet,
+    /// The revision the shard is at now.
+    pub revision: WorldRevision,
+    /// What moved to get there from the revision that was asked about.
+    pub changes: Changes,
+}
+
+impl ChangesReply {
+    /// Which `0xBF` this is.
+    pub const SUBCOMMAND: u16 = OPENSHARD_SUBCOMMANDS + 8;
+
+    /// Encode the whole packet.
+    ///
+    /// # Panics
+    ///
+    /// If more than [`MAX_MOVED`] chunks are named. The cap is the protocol's
+    /// and [`Changes::Everything`] is what a shard says instead, so a caller
+    /// that could write one would be building a packet past
+    /// [`MAX_PACKET_SIZE`](crate::packet::MAX_PACKET_SIZE).
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        crate::packet::encode_packet(self, ClientVersion::new(4, 0, 0, 0))
+    }
+}
+
+/// Variable: the list is as long as what moved.
+impl EncodePacket for ChangesReply {
+    const ID: u8 = 0xBF;
+    const LENGTH: PacketLength = PacketLength::Variable;
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u16(Self::SUBCOMMAND);
+        out.u8(self.facet.0);
+        out.u64(self.revision.0);
+        out.u8(self.changes.wire());
+        if let Changes::These(chunks) = &self.changes {
+            let count = u16::try_from(chunks.len()).unwrap_or(u16::MAX);
+            assert!(
+                count <= MAX_MOVED,
+                "a changes reply names {count} chunks, and {MAX_MOVED} is the cap"
+            );
+            out.u16(count);
+            for at in chunks {
+                out.u16(at.x);
+                out.u16(at.y);
+            }
+        }
+    }
+}
+
+impl DecodePacket for ChangesReply {
+    const ID: u8 = 0xBF;
+
+    fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
+        let subcommand = reader.u16()?;
+        if subcommand != Self::SUBCOMMAND {
+            return Err(DecodeError::UnknownValue {
+                field: "0xBF subcommand for a changes reply",
+                value: u32::from(subcommand),
+            });
+        }
+        let facet = Facet(reader.u8()?);
+        let revision = WorldRevision(reader.u64()?);
+        let answer = reader.u8()?;
+        let changes = match answer {
+            0 => {
+                let count = reader.u16()?;
+                if count > MAX_MOVED {
+                    return Err(DecodeError::UnknownValue {
+                        field: "chunks in one changes reply",
+                        value: u32::from(count),
+                    });
+                }
+                let mut chunks = Vec::with_capacity(usize::from(count));
+                for _ in 0..count {
+                    chunks.push(ChunkAt {
+                        x: reader.u16()?,
+                        y: reader.u16()?,
+                    });
+                }
+                Changes::These(chunks)
+            }
+            1 => Changes::Everything,
+            other => {
+                return Err(DecodeError::UnknownValue {
+                    field: "changes reply answer",
+                    value: u32::from(other),
+                });
+            }
+        };
+        Ok(Self {
+            facet,
+            revision,
+            changes,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -758,6 +1000,8 @@ mod tests {
             ChunkData::SUBCOMMAND,
             WorldNotice::SUBCOMMAND,
             ChunkRefused::SUBCOMMAND,
+            ChangesRequest::SUBCOMMAND,
+            ChangesReply::SUBCOMMAND,
         ];
         for one in ours {
             assert!(one > 0x2B, "{one:#06X} is in a real client's range");
@@ -1005,21 +1249,106 @@ mod tests {
         assert!(ServerPacket::decode(&bytes, version()).is_err());
     }
 
+    /// Both notices: one that names its world and one that cannot.
+    ///
+    /// The pair together, because the presence byte is the whole difference and
+    /// a test of either alone would pass with the byte written as a constant.
     #[test]
     fn a_world_notice_survives_the_wire() {
-        let sent = WorldNotice {
-            facet: Facet(0),
-            blocks: FacetBlocks { wide: 896, down: 512 },
-            revision: WorldRevision(7),
+        for world in [Some(WorldId(0xDEAD_BEEF_FEED_FACE)), None] {
+            let sent = WorldNotice {
+                facet: Facet(0),
+                blocks: FacetBlocks { wide: 896, down: 512 },
+                revision: WorldRevision(7),
+                world,
+            };
+            let bytes = sent.encode();
+            assert_eq!(bytes.len(), usize::from(WorldNotice::LENGTH_BYTES));
+            assert_eq!(bytes[0], 0xBF);
+            assert_eq!(u16::from_be_bytes([bytes[3], bytes[4]]), WorldNotice::SUBCOMMAND);
+            assert_eq!(
+                ServerPacket::decode(&bytes, version()).expect("our own bytes decode"),
+                Some(ServerPacket::WorldNotice(sent))
+            );
+        }
+    }
+
+    /// The question a client with a cache asks, and both answers to it.
+    #[test]
+    fn a_changes_conversation_survives_the_wire() {
+        let asked = ChangesRequest {
+            facet: Facet(2),
+            revision: WorldRevision(41),
         };
-        let bytes = sent.encode();
-        assert_eq!(bytes.len(), usize::from(WorldNotice::LENGTH_BYTES));
-        assert_eq!(bytes[0], 0xBF);
-        assert_eq!(u16::from_be_bytes([bytes[3], bytes[4]]), WorldNotice::SUBCOMMAND);
+        let bytes = asked.encode();
+        assert_eq!(
+            ExtendedRequest::decode(&bytes).expect("our own bytes decode"),
+            ExtendedRequest::Changes(asked)
+        );
+
+        for changes in [
+            Changes::These(vec![ChunkAt { x: 21, y: 25 }, ChunkAt { x: 0, y: 0 }]),
+            // A world that has not moved, which is a list and not `Everything`:
+            // "nothing changed" is knowledge, and it is the answer a cache hit
+            // one revision behind an empty patch gets.
+            Changes::These(Vec::new()),
+            Changes::Everything,
+        ] {
+            let sent = ChangesReply {
+                facet: Facet(2),
+                revision: WorldRevision(42),
+                changes,
+            };
+            let bytes = sent.encode();
+            assert_eq!(
+                ServerPacket::decode(&bytes, version()).expect("our own bytes decode"),
+                Some(ServerPacket::ChangesReply(sent))
+            );
+        }
+    }
+
+    /// A reply naming the most chunks it may fits in a packet, and one naming a
+    /// chunk more is refused rather than truncated.
+    ///
+    /// The cap is what makes [`Changes::Everything`] necessary at all, so the
+    /// arithmetic behind it is worth pinning rather than trusting.
+    #[test]
+    fn the_moved_cap_is_what_a_packet_holds() {
+        let full = ChangesReply {
+            facet: Facet(0),
+            revision: WorldRevision(9),
+            changes: Changes::These(
+                (0..MAX_MOVED)
+                    .map(|n| ChunkAt {
+                        x: n % 112,
+                        y: n / 112,
+                    })
+                    .collect(),
+            ),
+        };
+        let bytes = full.encode();
+        assert!(
+            bytes.len() <= MAX_PACKET_SIZE,
+            "a full changes reply is {} bytes",
+            bytes.len()
+        );
         assert_eq!(
             ServerPacket::decode(&bytes, version()).expect("our own bytes decode"),
-            Some(ServerPacket::WorldNotice(sent))
+            Some(ServerPacket::ChangesReply(full))
         );
+
+        // One past the cap, written by hand: no encoder of ours can produce it,
+        // which is exactly why the decoder is what has to refuse it.
+        let mut bytes = ChangesReply {
+            facet: Facet(0),
+            revision: WorldRevision(9),
+            changes: Changes::These(vec![ChunkAt { x: 1, y: 1 }]),
+        }
+        .encode();
+        // The count, after id, length, subcommand, facet, revision and answer.
+        let index = 1 + 2 + 2 + 1 + 8 + 1;
+        bytes[index..index + 2].copy_from_slice(&(MAX_MOVED + 1).to_be_bytes());
+        assert!(ServerPacket::decode(&bytes, version()).is_err());
     }
 
     #[test]

@@ -85,6 +85,7 @@ fn shard(base_set: &Path, home: bool, router: bool) -> WorldState {
     let home = home.then(|| WorldHome {
         base_set: base_set.to_owned(),
         base: loaded.base,
+        identity: openshard_basemap::identity_of(base_set).expect("the base set just written"),
     });
 
     let mut facets = BTreeMap::new();

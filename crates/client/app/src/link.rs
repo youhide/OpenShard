@@ -21,12 +21,13 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 
 use openshard_client_net::action::Outgoing;
-use openshard_client_net::chunks::Fetch;
+use openshard_client_net::chunks::{Fetch, FetchError};
 use openshard_client_net::connection::Event;
 use openshard_client_net::session::Plan;
 use openshard_client_net::transport::{Dial, Socket, enter_world_with};
 use openshard_client_net::view::WorldView;
 use openshard_client_net::walk::{Moved, Walk};
+use openshard_protocol::chunks::{Changes, ChangesReply, ChangesRequest, WorldNotice, WorldRevision};
 use openshard_protocol::feedback::{Animation, NewAnimation};
 use openshard_protocol::gump::GumpId;
 use openshard_protocol::gump::GumpPoint;
@@ -120,7 +121,7 @@ impl Movement {
 /// window decides it — see [`crate::WorldSource`], of which this is the half the
 /// wire cares about — and it decides one thing here: whether the login is
 /// followed by a fetch before anything is reported.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum GroundSource {
     /// The window opened a facet before it dialled, from the install or from a
     /// base set. Nothing is asked of the shard, and a stock shard notices no
@@ -133,7 +134,18 @@ pub enum GroundSource {
     /// is [`Update::Ground`]. A shard that sends no notice has no ground to
     /// give, and this client has none of its own: the connection ends and says
     /// so.
-    Fetched,
+    ///
+    /// `cache` is the directory the last world this shard gave us was kept in —
+    /// E3, and [`openshard_client_net::cache`] is where the file's name and its
+    /// rules live. A world already there at the revision the shard names costs
+    /// no chunks at all; one behind costs the difference.
+    Fetched {
+        /// Where kept worlds live. The client's own working directory, beside
+        /// `client_ui.toml`, and named by the caller rather than assumed here:
+        /// this file knows about a socket, not about where a client keeps
+        /// things.
+        cache: std::path::PathBuf,
+    },
 }
 
 /// What the shard thread tells the window.
@@ -679,6 +691,130 @@ async fn ask<D: Dial>(socket: &mut Socket<D::Stream>, fetch: &mut Fetch) -> Resu
     Ok(())
 }
 
+/// What this connection is still doing about the ground.
+///
+/// `None` of it is a connection with nothing left to do — a client that opened
+/// its own facet, one whose kept world was already current, and one whose fetch
+/// has finished. The two arms are the two waits, and they are both *before* the
+/// window has ground: see [`Update::Ground`].
+enum Pending {
+    /// A world was kept and the shard is at a newer revision, so it has been
+    /// asked what moved. Nothing else can be decided until the answer lands.
+    ///
+    /// The world is held here rather than reported early on purpose: it is a
+    /// revision behind, and handing the window a world the shard has already
+    /// moved past would draw ground that is knowably wrong for as long as the
+    /// difference takes to arrive.
+    Asking {
+        /// The world as it was kept.
+        held: openshard_map::snapshot::MapSnapshot,
+    },
+    /// Chunks are coming, whether that is the facet or only what moved.
+    Fetching(Fetch),
+}
+
+/// What a connection does about the ground, once the shard has described it.
+///
+/// The three answers are E3 in one place: the world is already here, the world
+/// is here but behind, or there is no world to start from. Each is reported as
+/// it is decided, because a person watching a blank window wants to know which
+/// of the three is happening.
+fn decide(cache: &std::path::Path, notice: WorldNotice) -> Result<Decided, FetchError> {
+    let held = match openshard_client_net::cache::read(cache, notice) {
+        Ok(held) => held,
+        Err(reason) => {
+            // Every way a kept world is not usable ends here, and none of them
+            // is fatal: what it costs is the fetch this whole mechanism exists
+            // to avoid, so the reason is worth a line every time.
+            eprintln!("the ground comes from the shard: {reason}");
+            return Fetch::of(notice).map(Decided::Fetching);
+        }
+    };
+    if held.revision().get() == notice.revision.0 {
+        eprintln!(
+            "the ground is the one we kept: facet {}, revision {}, nothing to ask for",
+            notice.facet.0, notice.revision.0
+        );
+        return Ok(Decided::Held(held));
+    }
+    eprintln!(
+        "the ground we kept is revision {} and the shard is at {}: asking what moved",
+        held.revision().get(),
+        notice.revision.0
+    );
+    Ok(Decided::Asking(held))
+}
+
+/// [`decide`]'s three answers, before any of them has touched the socket.
+enum Decided {
+    /// The kept world is the shard's world. Nothing is asked for at all.
+    Held(openshard_map::snapshot::MapSnapshot),
+    /// The kept world is behind: the shard is asked what moved.
+    Asking(openshard_map::snapshot::MapSnapshot),
+    /// There is no world to start from, so the facet is fetched whole.
+    Fetching(Fetch),
+}
+
+/// What to do with the shard's answer about what moved.
+///
+/// Three answers again, and only two outcomes: either the world in hand is the
+/// world after all, or chunks are coming. Which chunks — the difference or the
+/// whole facet — is the shard's to say, and by the time this returns it is the
+/// same `Fetch` either way.
+fn what_moved(
+    notice: WorldNotice,
+    held: openshard_map::snapshot::MapSnapshot,
+    reply: &ChangesReply,
+) -> Result<WhatMoved, FetchError> {
+    match &reply.changes {
+        Changes::Everything => {
+            // A revision the shard cannot place, a log it could not read, or
+            // more chunks than a packet can name. All three are one thing to do.
+            eprintln!(
+                "the shard cannot say what moved since revision {}: taking the facet again",
+                held.revision().get()
+            );
+            Fetch::of(notice).map(WhatMoved::These)
+        }
+        Changes::These(chunks) if chunks.is_empty() => {
+            // A legal answer, and rarer than it looks: an empty patch moves the
+            // revision without moving a tile. The world in hand is the world;
+            // what it keeps is the older number, so the next connection asks
+            // this same question again and is told the same thing.
+            eprintln!(
+                "the world is at revision {} and no chunk of it changed",
+                reply.revision.0
+            );
+            Ok(WhatMoved::Nothing(held))
+        }
+        Changes::These(chunks) => {
+            eprintln!(
+                "{} chunk(s) moved since the world we kept: fetching those",
+                chunks.len()
+            );
+            Fetch::over(
+                notice,
+                held,
+                chunks.clone(),
+                openshard_map::snapshot::MapRevision::decoded(reply.revision.0),
+            )
+            .map(WhatMoved::These)
+        }
+    }
+}
+
+/// [`what_moved`]'s two outcomes.
+///
+/// Named for the question rather than for the answer, because
+/// [`Moved`](openshard_client_net::walk::Moved) is a walk's word in this same
+/// file and the two are nothing to do with each other.
+enum WhatMoved {
+    /// Nothing did: the world already in hand is the shard's.
+    Nothing(openshard_map::snapshot::MapSnapshot),
+    /// These chunks are coming — the difference, or the facet.
+    These(Fetch),
+}
+
 /// Everything after the runtime exists, up to the reason it ended.
 async fn play<D: Dial, F: Fn(Update) + Send>(
     dial: D,
@@ -706,33 +842,55 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
     // no ground for this facet at all — see `World::world_notice` — and this
     // client has none of its own, so the connection ends and says which of the
     // two it was.
-    let mut fetch = match ground {
+    let mut pending = match &ground {
         GroundSource::OwnDisk => None,
-        GroundSource::Fetched => {
+        GroundSource::Fetched { cache } => {
             let Some(notice) = view.world else {
                 return "this shard has no ground for the facet, and this client opened none of its \
                         own: start it with --base-set or with the install's map files"
                     .to_owned();
             };
-            match Fetch::of(notice) {
-                Ok(fetch) => {
+            match decide(cache, notice) {
+                Ok(Decided::Held(held)) => {
+                    // The one path that costs nothing: the world is reported
+                    // before the first packet the window sees, so a cache hit
+                    // looks to everything above like a client that opened a
+                    // facet on its own disk.
+                    report(Update::Ground {
+                        snapshot: Box::new(held),
+                    });
+                    None
+                }
+                Ok(Decided::Asking(held)) => {
+                    let asking = ChangesRequest {
+                        facet: notice.facet,
+                        revision: WorldRevision(held.revision().get()),
+                    };
+                    if let Err(error) = socket.send(&asking.encode()).await {
+                        return error.to_string();
+                    }
+                    Some(Pending::Asking { held })
+                }
+                Ok(Decided::Fetching(mut fetch)) => {
                     eprintln!(
                         "the ground comes from the shard: facet {}, revision {}, {} chunks",
                         notice.facet.0,
                         notice.revision.0,
                         fetch.wanted(),
                     );
-                    Some(fetch)
+                    if let Err(reason) = ask::<D>(&mut socket, &mut fetch).await {
+                        return reason;
+                    }
+                    Some(Pending::Fetching(fetch))
                 }
                 Err(error) => return format!("the world the shard described cannot be fetched: {error}"),
             }
         }
     };
-    if let Some(active) = fetch.as_mut() {
-        if let Err(reason) = ask::<D>(&mut socket, active).await {
-            return reason;
-        }
-    }
+    // The notice, kept for as long as there is ground on the way: it is what a
+    // kept world is filed under when the fetch lands. `Copy`, so this is the
+    // value and not a borrow of the view that is about to move.
+    let world_notice = view.world;
     // Where the server put us. The owner starts its `Walk` from this view, and
     // every `0x02` after it is computed there.
     report(Update::World { view: Box::new(view) });
@@ -767,13 +925,49 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                 if matches!(packet, openshard_protocol::server_packet::ServerPacket::LogoutAck(_)) {
                     return "logged out".to_owned();
                 }
+                // The answer to "what moved since the world we kept". It arrives
+                // once, before any chunk of this connection, and what it decides
+                // is which of the two fetches happens — or neither.
+                if let Some(Pending::Asking { .. }) = &pending {
+                    if let openshard_protocol::server_packet::ServerPacket::ChangesReply(reply) = &packet {
+                        let Some(notice) = world_notice else {
+                            return "the shard answered about a world it never described".to_owned();
+                        };
+                        if reply.facet != notice.facet {
+                            return format!(
+                                "we asked what moved on facet {} and the shard answered about facet {}",
+                                notice.facet.0, reply.facet.0
+                            );
+                        }
+                        let Some(Pending::Asking { held }) = pending.take() else {
+                            unreachable!("the arm matched a line ago");
+                        };
+                        match what_moved(notice, held, reply) {
+                            Ok(WhatMoved::Nothing(held)) => {
+                                report(Update::Ground {
+                                    snapshot: Box::new(held),
+                                });
+                            }
+                            Ok(WhatMoved::These(mut fetch)) => {
+                                if let Err(reason) = ask::<D>(&mut socket, &mut fetch).await {
+                                    return reason;
+                                }
+                                pending = Some(Pending::Fetching(fetch));
+                            }
+                            Err(error) => {
+                                return format!("the world the shard described cannot be fetched: {error}");
+                            }
+                        }
+                        continue;
+                    }
+                }
                 // The ground, while it is still arriving. A chunk packet is
                 // consumed here and never reported: what the window is given is
                 // the facet, once, and not the seven thousand fragments it
                 // came in. Every failure ends the connection, because a client
                 // that was told to take the shard's ground and did not get it
                 // has nothing to draw and no second source to fall back to.
-                if let Some(active) = fetch.as_mut() {
+                if let Some(Pending::Fetching(active)) = pending.as_mut() {
                     let before = active.held();
                     let mine = match active.on_packet(&packet) {
                         Ok(mine) => mine,
@@ -797,12 +991,39 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                         // follows on this connection is ordinary traffic, and a
                         // `Fetch` still sitting here would refuse the next
                         // `ChunkData` E4 sends as one nobody asked for.
-                        let done = fetch.take().expect("the fetch borrowed a line ago");
-                        eprintln!("the ground arrived: {} chunks", done.wanted());
+                        let Some(Pending::Fetching(done)) = pending.take() else {
+                            unreachable!("the fetch borrowed a line ago");
+                        };
+                        eprintln!(
+                            "{}: {} chunks",
+                            if done.is_over_a_world() {
+                                "the ground moved"
+                            } else {
+                                "the ground arrived"
+                            },
+                            done.wanted()
+                        );
                         match done.finish() {
-                            Ok(snapshot) => report(Update::Ground {
-                                snapshot: Box::new(snapshot),
-                            }),
+                            Ok(snapshot) => {
+                                // Kept before it is handed over, and on this
+                                // thread: the window has no ground yet either
+                                // way, and the write is a tenth of a second
+                                // against a fetch that was seconds. A cache that
+                                // will not be written costs the next connection
+                                // the same fetch and nothing else, so it is a
+                                // line rather than a lost connection.
+                                if let (GroundSource::Fetched { cache }, Some(notice)) =
+                                    (&ground, world_notice)
+                                {
+                                    match openshard_client_net::cache::write(cache, notice, &snapshot) {
+                                        Ok(path) => eprintln!("the ground is kept at {}", path.display()),
+                                        Err(error) => eprintln!("the ground was not kept: {error}"),
+                                    }
+                                }
+                                report(Update::Ground {
+                                    snapshot: Box::new(snapshot),
+                                });
+                            }
                             Err(error) => {
                                 return format!("the ground the shard sent is not a facet: {error}");
                             }

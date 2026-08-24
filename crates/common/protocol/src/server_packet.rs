@@ -169,6 +169,9 @@ pub enum ServerPacket {
     WorldNotice(crate::chunks::WorldNotice),
     /// `0xBF` subcommand `0xE006` — a chunk that was asked for is not coming.
     ChunkRefused(crate::chunks::ChunkRefused),
+    /// `0xBF` subcommand `0xE008` — what moved since the revision a client says
+    /// it already holds, so that a cache asks only for the difference.
+    ChangesReply(crate::chunks::ChangesReply),
     /// `0xDC` — the tooltip revision for one object.
     TooltipRevision(TooltipRevision),
     /// `0xD6` — the property list itself, answering a client's batch query.
@@ -258,6 +261,7 @@ impl ServerPacket {
             Self::ChunkData(_) => <crate::chunks::ChunkData as EncodePacket>::ID,
             Self::WorldNotice(_) => <crate::chunks::WorldNotice as EncodePacket>::ID,
             Self::ChunkRefused(_) => <crate::chunks::ChunkRefused as EncodePacket>::ID,
+            Self::ChangesReply(_) => <crate::chunks::ChangesReply as EncodePacket>::ID,
             Self::PropertyListReply(_) => <PropertyListReply as EncodePacket>::ID,
             Self::PartyMemberList(_) => <PartyMemberList as EncodePacket>::ID,
             Self::PartyRemoveMember(_) => <PartyRemoveMember as EncodePacket>::ID,
@@ -335,6 +339,7 @@ impl ServerPacket {
             Self::ChunkData(_) => <crate::chunks::ChunkData as EncodePacket>::LENGTH,
             Self::WorldNotice(_) => <crate::chunks::WorldNotice as EncodePacket>::LENGTH,
             Self::ChunkRefused(_) => <crate::chunks::ChunkRefused as EncodePacket>::LENGTH,
+            Self::ChangesReply(_) => <crate::chunks::ChangesReply as EncodePacket>::LENGTH,
             Self::PropertyListReply(_) => PropertyListReply::LENGTH,
             Self::PartyMemberList(_) => PartyMemberList::LENGTH,
             Self::PartyRemoveMember(_) => PartyRemoveMember::LENGTH,
@@ -414,6 +419,7 @@ impl ServerPacket {
             Self::ChunkData(packet) => packet.encode_body(out, version),
             Self::WorldNotice(packet) => packet.encode_body(out, version),
             Self::ChunkRefused(packet) => packet.encode_body(out, version),
+            Self::ChangesReply(packet) => packet.encode_body(out, version),
             Self::PropertyListReply(packet) => packet.encode_body(out, version),
             Self::PartyMemberList(packet) => packet.encode_body(out, version),
             Self::PartyRemoveMember(packet) => packet.encode_body(out, version),
@@ -490,6 +496,9 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
         crate::chunks::ChunkRefused::SUBCOMMAND => decode_server(packet, version)
             .map(ServerPacket::ChunkRefused)
             .map_err(ServerDecodeError::ChunkRefused)?,
+        crate::chunks::ChangesReply::SUBCOMMAND => decode_server(packet, version)
+            .map(ServerPacket::ChangesReply)
+            .map_err(ServerDecodeError::ChangesReply)?,
         crate::party::SUBCOMMAND => return decode_party(packet, version),
         _ => return Ok(None),
     }))
@@ -824,6 +833,8 @@ pub enum ServerDecodeError {
     WorldNotice(DecodeError),
     /// `0xBF 0xE006` did not decode.
     ChunkRefused(DecodeError),
+    /// `0xBF 0xE008` did not decode.
+    ChangesReply(DecodeError),
     /// `0xD6` did not decode.
     PropertyListReply(DecodeError),
     /// A `0xBF` subcommand `0x06` did not decode. One variant for all four,
@@ -862,6 +873,7 @@ impl fmt::Display for ServerDecodeError {
             Self::ChunkData(error) => ("0xBF 0xE003 chunk data", error),
             Self::WorldNotice(error) => ("0xBF 0xE004 world notice", error),
             Self::ChunkRefused(error) => ("0xBF 0xE006 chunk refused", error),
+            Self::ChangesReply(error) => ("0xBF 0xE008 changes reply", error),
             Self::PropertyListReply(error) => ("0xD6 property list", error),
             Self::Party(error) => ("0xBF 0x06 party", error),
             Self::CloseGump(error) => ("0xBF 0x04 close gump", error),
@@ -1145,6 +1157,7 @@ mod tests {
         ChunkData,
         WorldNotice,
         ChunkRefused,
+        ChangesReply,
         TooltipRevision,
         PropertyListReply,
         PartyMemberList,
@@ -1527,11 +1540,23 @@ mod tests {
                 facet: crate::world::Facet(0),
                 blocks: crate::chunks::FacetBlocks { wide: 896, down: 512 },
                 revision: crate::chunks::WorldRevision(1),
+                world: Some(crate::world::WorldId(0x0123_4567_89AB_CDEF)),
             }),
             ServerPacket::ChunkRefused(crate::chunks::ChunkRefused {
                 facet: crate::world::Facet(0),
                 at: crate::chunks::ChunkAt { x: 900, y: 0 },
                 reason: crate::chunks::Refusal::PastTheEdge,
+            }),
+            // The second variable-length 0xBF of ours, and named chunks rather
+            // than `Everything` for the same reason the fragment above carries a
+            // blob: the arm whose length varies is the one worth framing.
+            ServerPacket::ChangesReply(crate::chunks::ChangesReply {
+                facet: crate::world::Facet(0),
+                revision: crate::chunks::WorldRevision(3),
+                changes: crate::chunks::Changes::These(vec![
+                    crate::chunks::ChunkAt { x: 21, y: 25 },
+                    crate::chunks::ChunkAt { x: 22, y: 25 },
+                ]),
             }),
         ]
     }
