@@ -922,20 +922,30 @@ chunk whose *content* did not change should keep its identity across a facet's
 revision — and not a bigger frame budget. Era S's live publish is where that
 lands.
 
-### 10.3 One page eviction per insert is an invariant nothing states
+### 10.3 One page eviction per insert was an invariant nothing states ✅
 
-`RadarChunkRenderer::resident_layer` inserts one page, evicts to budget, and
-takes `eviction.keys.first()` as the layer to reuse. Every other evicted key
+`RadarChunkRenderer::resident_layer` inserted one page, evicted to budget, and
+took `eviction.keys.first()` as the layer to reuse. Every other evicted key
 would be dropped from `residency` while staying in `self.pages` — a page the
 budget believes is free and the map still hands out, which is the corruption
 `cap_draws_by_distance` exists to prevent, arriving by the other door.
 
-It cannot happen today: one insert of one fixed-size page can put the budget at
-most one page over, so `keys` is never longer than one. That is an arithmetic
+It could not happen: one insert of one fixed-size page puts the budget at most
+one page over, so `keys` was never longer than one. That is an arithmetic
 argument about `RADAR_CHUNK_PAGE_BYTES` being constant, made in a different
-file from the loop that depends on it, and written down nowhere. Found while
+file from the loop that depended on it, and written down nowhere. Found while
 adding the eviction counter, which is what made the plural in `keys.len()`
-visible at all. Either assert the length or drain the whole list.
+visible at all.
+
+**Closed by draining the list**, which needed the other half stating too: a
+fresh layer was `pages.len()`, and that is only the next unused layer while the
+allocated ones are dense — evicting two and reusing one would leak the other and
+then hand it out again. `free_layers` is the missing half — *every layer ever
+allocated is either held by a page or waiting in it* — so `pages.len()` is
+reached only when nothing is free. The test is a picture rather than a counter:
+two pages churned through nine chunks and then asked to hold two at once, where
+one layer holding both draws the same colour twice. Its control is the free list
+removed by hand, and it fails on the west half being green.
 
 ### 10.4 The margin fraction is measured, and its measurement is a person looking
 

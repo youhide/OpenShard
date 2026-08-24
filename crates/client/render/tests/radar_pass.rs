@@ -122,6 +122,120 @@ fn adjacent_chunks_each_draw_their_own_pixels() {
     );
 }
 
+/// **A recycled layer belongs to exactly one chunk.** The array's layers are
+/// handed out once and reused forever: a page evicted gives its layer back, and
+/// the next chunk takes it. Nothing states that as an invariant, and the way it
+/// breaks is not a crash — two resident chunks holding one layer draw the same
+/// picture twice, which reads as terrain that has not arrived yet.
+///
+/// `docs/map/radar.md`'s 10.3. The bookkeeping was safe only by arithmetic —
+/// one insert of one fixed-size page can put the budget at most one page over,
+/// so the eviction list was never longer than one and taking its first element
+/// happened to be taking all of it. That argument lived in a different file from
+/// the loop that depended on it. The free list is what makes it structural, and
+/// this is the picture that says so: two pages churned through nine chunks and
+/// then asked to hold two at once.
+#[test]
+fn pages_recycled_through_eviction_each_belong_to_one_chunk() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU: skipping");
+        return;
+    };
+    let cache = RadarCache::default();
+    let facet = Facet(0);
+    let solid = |x: u32, colour: Color16| {
+        RadarChunk::new(
+            cache.key(facet, 0, RadarChunkCoord::new(x, 0)),
+            vec![colour; usize::from(BASE_CHUNK_TILES) * usize::from(BASE_CHUNK_TILES)],
+        )
+        .expect("a complete chunk")
+    };
+    let (width, height) = (u32::from(BASE_CHUNK_TILES) * 2, u32::from(BASE_CHUNK_TILES));
+    let whole = Placement {
+        origin: (0.0, 0.0),
+        extent: (width as f32, height as f32),
+        circle: false,
+        rotation: 0.0,
+    };
+    // Two layers, which is what makes the pair at the end a fit rather than a
+    // truncation, and every chunk before it an eviction.
+    let mut chunks = RadarChunkRenderer::new(&device, FORMAT, RADAR_CHUNK_PAGE_BYTES * 2);
+    assert_eq!(chunks.counters().capacity, 2);
+
+    // Nine chunks the cache cannot hold, one at a time: seven evictions, and
+    // seven layers handed back and taken again.
+    for x in 2..11 {
+        let chunk = solid(x, Color16(0x001F));
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let (_target, view) = cleared_target(&device, &mut encoder, width, height);
+        chunks.render_region(
+            &device,
+            &queue,
+            &mut encoder,
+            Frame {
+                target: &view,
+                width,
+                height,
+                scale: 1.0,
+            },
+            region(
+                facet,
+                (u32::from(BASE_CHUNK_TILES) * x, 0),
+                (BASE_CHUNK_TILES, BASE_CHUNK_TILES),
+            ),
+            whole,
+            whole,
+            [&chunk],
+        );
+        queue.submit([encoder.finish()]);
+    }
+    let churned = chunks.counters();
+    assert_eq!(churned.resident, 2, "the array holds what it has room for");
+    assert!(
+        churned.evicted >= 7,
+        "and everything before that gave its page back"
+    );
+
+    // Now two at once, into the two layers the churn released and reclaimed.
+    let west = solid(0, Color16(0x7C00));
+    let east = solid(1, Color16(0x03E0));
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let (target, view) = cleared_target(&device, &mut encoder, width, height);
+    chunks.render_region(
+        &device,
+        &queue,
+        &mut encoder,
+        Frame {
+            target: &view,
+            width,
+            height,
+            scale: 1.0,
+        },
+        region(facet, (0, 0), (BASE_CHUNK_TILES * 2, BASE_CHUNK_TILES)),
+        whole,
+        whole,
+        [&west, &east],
+    );
+
+    let pixels = read_back(&device, &queue, encoder, &target, width, height);
+    let at = |x: u32, y: u32| {
+        let i = ((y * width + x) * 4) as usize;
+        (pixels[i], pixels[i + 1], pixels[i + 2])
+    };
+    assert_eq!(
+        chunks.counters().over_capacity_draws,
+        0,
+        "two chunks fit in two pages"
+    );
+    assert_eq!(at(0, 0), (255, 0, 0), "the west chunk has a layer of its own");
+    assert_eq!(
+        at(u32::from(BASE_CHUNK_TILES), 0),
+        (0, 255, 0),
+        "and the east chunk has the other one — one layer holding both is what \
+         draws the same colour twice",
+    );
+}
+
 /// **A second identical draw allocates nothing.** The instance buffer grows on
 /// demand and is reused; that is R0's whole claim, and until now the only thing
 /// that could have noticed it growing every frame was a profiler. The capacity

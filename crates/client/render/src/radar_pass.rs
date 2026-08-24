@@ -577,6 +577,15 @@ pub struct RadarChunkRenderer {
     quad: wgpu::Buffer,
     texture: wgpu::Texture,
     pages: BTreeMap<RadarChunkKey, ResidentPage>,
+    /// Layers an eviction released and no chunk has taken back yet.
+    ///
+    /// The array's layers are handed out once and recycled forever, so this is
+    /// the other half of the count: **every layer ever allocated is either held
+    /// by a page or waiting here**. That is what lets a fresh layer be
+    /// `pages.len()` — it is only ever asked for when this is empty — and it is
+    /// what makes evicting more than one page at a time safe rather than a
+    /// silent layer collision.
+    free_layers: Vec<u32>,
     residency: LruBudget<RadarChunkKey>,
     capacity: u32,
     instances: wgpu::Buffer,
@@ -811,6 +820,7 @@ impl RadarChunkRenderer {
             quad,
             texture,
             pages: BTreeMap::new(),
+            free_layers: Vec::new(),
             residency: LruBudget::new(u64::from(capacity) * RADAR_CHUNK_PAGE_BYTES)
                 .expect("a radar renderer retains at least one page"),
             capacity,
@@ -878,12 +888,22 @@ impl RadarChunkRenderer {
         self.residency.insert(key, RADAR_CHUNK_PAGE_BYTES);
         let eviction = self.residency.evict_to_budget();
         self.evicted = self.evicted.saturating_add(eviction.keys.len() as u64);
-        let layer = eviction.keys.first().map_or(self.pages.len() as u32, |evict| {
-            self.pages
-                .remove(evict)
-                .expect("the residency key belongs to the page cache")
-                .layer
-        });
+        // Every evicted key leaves the page map with it. Taking only the first
+        // and dropping the rest would leave a page the budget believes is free
+        // and this map still hands out — the corruption `cap_draws_by_distance`
+        // exists to prevent, arriving by the other door. One insert of one
+        // fixed-size page can put the budget at most one page over, so this loop
+        // runs at most once today; writing it as a loop is what keeps that an
+        // arithmetic fact rather than a load-bearing one, in a file that cannot
+        // see `RADAR_CHUNK_PAGE_BYTES` being constant.
+        for evicted in &eviction.keys {
+            let page = self
+                .pages
+                .remove(evicted)
+                .expect("the residency key belongs to the page cache");
+            self.free_layers.push(page.layer);
+        }
+        let layer = self.free_layers.pop().unwrap_or(self.pages.len() as u32);
         let mut bytes = Vec::with_capacity(RADAR_CHUNK_PAGE_BYTES as usize);
         for colour in chunk.pixels() {
             let rgb = colour.rgb8();
