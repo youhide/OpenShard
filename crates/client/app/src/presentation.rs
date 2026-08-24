@@ -37,7 +37,7 @@ use openshard_client_render::items::{self};
 use openshard_client_render::lod::BlockLod;
 use openshard_client_render::mobiles::{self, Mobile};
 use openshard_client_render::outline::{self};
-use openshard_client_render::radar::{self, RadarBuildScratch, build_chunk_reusing, build_ready_ancestors};
+use openshard_client_render::radar::{self, RadarBuildScratch};
 use openshard_client_render::radar_pass::Placement;
 use openshard_client_render::renderer::{self, Target};
 use openshard_client_render::sprite::SpriteQuad;
@@ -2147,71 +2147,45 @@ impl App {
                 composite_producer::produce(&self.resources, window, &mut self.composite_work, work);
             }
         }
-        // Radar terrain for every open view. `radar_queue` bounds the pure-CPU
-        // map/colour-table work in base-chunk units; publishing needs no GPU
-        // step, and `Screen::radar_chunks` uploads a product only when a
-        // content pass first draws it.
+        // Radar terrain for every open view, through the one implementation of
+        // that step — ask, sweep, build, resolve, evict — which
+        // `radar::advance` owns and `examples/radar_soak.rs` drives with no
+        // window at all. `radar_queue` bounds the pure-CPU map/colour-table
+        // work in base-chunk units; publishing needs no GPU step, and
+        // `Screen::radar_chunks` uploads a product only when a content pass
+        // first draws it.
         if let Some(colors) = self.resources.radar_colors.as_ref() {
-            let mut protected = radar::request_views(
-                radar_views.iter().map(|(_, view, lod)| (*view, *lod)),
-                &self.radar_cache,
-                &mut self.radar_queue,
-            );
-            let facet = openshard_protocol::world::Facet(crate::FACET);
+            // The facet map is the window that can show the whole facet at
+            // once, so its being open is what owes the coarse floor; a minimap
+            // never wants the whole of one.
             let world_map_open = radar_views
                 .iter()
                 .any(|(subject, _, _)| *subject == crate::windows::WindowSubject::WorldMap);
-            // The coarse floor, offered again every frame until it exists.
-            // Asking once was asking under a bound: `request_sweep` refuses
-            // when the queue is full, and the refused chunk was a hole in the
-            // fallback floor that nothing would ever fill. The cache owes the
-            // keys and strikes them off as they land — see
-            // `RadarCache::drain_sweep`.
-            if world_map_open {
-                self.radar_cache.begin_sweep(facet, radar_facet_extent);
-                let queue = &mut self.radar_queue;
-                self.radar_cache
-                    .drain_sweep(facet, |key| queue.request_sweep(key));
-            }
-            self.radar_queue.reconcile(&self.radar_cache);
-            let producer_centre = player_tile
-                .map(radar::world_tile_to_base_chunk)
-                .map(|(chunk, _)| chunk)
-                .unwrap_or_else(|| radar::RadarChunkCoord::new(0, 0));
+            // The levels came from each window's own selector above; everything
+            // else about a view is the view itself, so the subject is dropped
+            // here and the step is a function of the views alone.
+            let views: Vec<(radar::RadarView, radar::RadarLod)> =
+                radar_views.iter().map(|(_, view, lod)| (*view, *lod)).collect();
             let mut scratch = RadarBuildScratch::default();
-            // The radar's whole synchronous cost, measured where it is spent:
-            // this loop is the map walk and the colour table, and everything
-            // else in this block is bookkeeping over keys. R7 asks for it in
-            // milliseconds because "walking costs no raster work" has always
-            // been an argument rather than a reading.
-            let raster_started = Instant::now();
-            let mut built = 0_usize;
-            for key in self.radar_queue.take_for_producer_near(producer_centre) {
-                let chunk = build_chunk_reusing(self.resources.map(), colors, key, &mut scratch);
-                let Some(chunk) = chunk else {
-                    // The slot goes back rather than being lost — see
-                    // `RadarWorkQueue::abandon`.
-                    self.radar_queue.abandon(key);
-                    continue;
-                };
-                if self.radar_queue.finish(&mut self.radar_cache, chunk) {
-                    built += 1;
-                    build_ready_ancestors(&mut self.radar_cache, key, radar_facet_extent);
-                }
-            }
-            let raster = raster_started.elapsed();
-            // One walk of the demand, answering both questions it can answer:
-            // which chunk each view will actually draw (so eviction cannot take
-            // it), and *how* the cache answered (so the HUD can say whether the
-            // picture is exact, blurry, stale or absent). The second used to be
-            // discarded, which is why a minimap filling in and a minimap
-            // starved looked identical.
-            let resolved = radar::resolve_demand(&self.radar_cache, protected.iter().copied());
-            self.radar_frame.demand = resolved.demand;
-            self.radar_frame.raster = raster;
-            self.radar_frame.built = built;
-            protected.extend(resolved.drawn);
-            self.radar_cache.evict_to_budget(protected);
+            let report = radar::advance(
+                radar::RadarStep {
+                    views: &views,
+                    sweep: world_map_open.then_some(openshard_protocol::world::Facet(crate::FACET)),
+                    facet_extent: radar_facet_extent,
+                    producer_centre: player_tile
+                        .map(radar::world_tile_to_base_chunk)
+                        .map(|(chunk, _)| chunk)
+                        .unwrap_or_else(|| radar::RadarChunkCoord::new(0, 0)),
+                },
+                self.resources.map(),
+                colors,
+                &mut self.radar_cache,
+                &mut self.radar_queue,
+                &mut scratch,
+            );
+            self.radar_frame.demand = report.demand;
+            self.radar_frame.raster = report.raster;
+            self.radar_frame.built = report.built;
         }
         // Three time-varying halves of a mobile, filled in per frame rather
         // than per packet: the crowd is the only thing that knows what a

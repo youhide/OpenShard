@@ -13,15 +13,19 @@ cache is built to, or [`minimap_lod_handoff.md`](minimap_lod_handoff.md),
 which is still the record of what landed. It is the layer those two never
 reached: **nothing chooses an LOD.**
 
-> **Status: R0–R8 are built and their loose ends are closed; the soak R7 asks
-> for has not been run.**
+> **Status: R0–R8 are built, their loose ends are closed, and the soak R7 asks
+> for has been run — by a harness, and it found two things.**
 > A window picks its own level from its own pixels, both windows are one
 > `RadarView` — one construction, handed to the draw — the queue and the byte
 > budget are one implementation under both subsystems, the pyramid is swept
 > until it exists, the CPU cache evicts, the facet map wears a plate with a
 > close button, and every counter the build wrote is now readable in the
 > development HUD. R8 then took the last unbounded thing out of the frame: the
-> map is walked at one level, and every coarser product is reduced from it.
+> map is walked at one level, and every coarser product is reduced from it. The
+> whole per-frame step is now one function — `radar::advance` — because the
+> reading below had to be taken by something that is not a person at a screen,
+> and a harness that spelled that order out for itself would have measured a
+> radar step nothing plays.
 > Sections 1–3 below are therefore **the record of what was
 > wrong**, not a description of the code — read them for the reasoning, not for
 > the current shape. Section 9 is now the record of the eight things the build
@@ -614,7 +618,7 @@ local window under `Windows`, with interaction tests for each; the canvas
 cannot be dragged out of its own frame at any zoom; and `Drawn::WorldMap` no
 longer answers `pictures()` with an empty slice.
 
-### R7 — measure, and then soak — **the instrument is built; the soak is not run**
+### R7 — measure, and then soak ✅ (the soak is 10.1, and it found 10.5)
 
 `RadarCacheCounters` and `RadarWorkCounters` existed and nobody read them; R0
 added a third on the page cache. Putting them in the frame report **was a UI
@@ -647,10 +651,13 @@ sample is **a frame behind on purpose**: the HUD is assembled near the top of
 reporting a frame's worth of nothing. The three counter sets beside it are
 live.
 
-**What is still owed is the reading, not the instrument.** Nobody has yet sat
-in front of a HiDPI, desk-scaled, fully-zoomed-out worst case and written the
-numbers down. "Walking costs no raster work" is still an argument rather than a
-measurement — but `raster` in the panel is now the one number that settles it.
+**What was still owed was the reading, and it is taken.** Not by a person in
+front of the worst case — by `examples/radar_soak.rs`, which drives the frame's
+own step with no device and can therefore be *at* every scale rather than at the
+one the development machine happens to be. "Walking costs no raster work" is
+nineteen nanoseconds a step; 4.6's "reached only by a pathological view" is
+false one scale above this machine's. Both readings, and what they cost, are
+10.1 and 10.5.
 
 ### R8 — the map is walked at one level ✅
 
@@ -884,19 +891,47 @@ reason it is deliberate written beside it.
 
 ## 10. What is open now
 
-### 10.1 The soak R7 asks for, which is now a person and not a build
+### 10.1 The soak R7 asks for — taken, by a harness ✅
 
-The panel is there and every number in it is written. What has not happened is
-somebody opening both windows on a HiDPI, desk-scaled, fully-zoomed-out worst
-case and recording: the chosen level per view, the fallback tally as the floor
-fills in, `raster` while walking, and how close each of the three bounds gets.
+R7 built the instrument and nothing read it, and the reason it stayed unread is
+worth keeping: the HUD shows its numbers on **one** machine at **one** scale,
+and the worst case R7 names — HiDPI, desk-scaled, fully zoomed out — is a scale
+most machines are not. But nothing in that worst case needs a window. The level
+a view picks, the rectangle it fetches, the chunks it draws and what the
+producer spends walking the map are all functions of the map, the colour table
+and four numbers a person could have typed into a settings panel.
 
-Two of those readings would settle a question this document has been carrying
-as an argument. `raster` while walking is "walking costs no raster work".
-`over_capacity_draws` staying at zero through a session is the claim in 4.6
-that the GPU page cache is now "reached only by a pathological view" — and if
-it is ever not zero, the panel says so in yellow, which is the whole reason it
-was worth reading a counter that had been written since R0.
+So the reading is [`examples/radar_soak.rs`](../../crates/client/render/examples/radar_soak.rs),
+against the shipped Felucca install, release. It drives `radar::advance` — the
+same call `App::draw_from` makes, and deliberately the same one: a harness with
+its own copy of *ask, sweep, build, resolve, evict* would be measuring a radar
+step nothing plays, which is 9.1's mistake arriving through the diagnostic
+instead of through the picture. What it cannot answer is GPU residency and
+eviction, which are a real device's; what it measures instead is
+`over_capacity_draws`' own **predicate** — how many chunks a view hands
+`render_region`, against how many pages exist — which is the half that needs no
+device.
+
+**The floor fills in.** Both windows open at their widest zoom, an empty cache,
+two physical pixels to a gump pixel (an ordinary HiDPI screen at no desk scale):
+the facet map picks level 2 and draws 448 chunks, the minimap level 1 and 144.
+The floor is complete in **122 frames and 154 ms of raster**, no frame above
+**1.65 ms**, and no view is missing terrain from frame 111 on. The fallback
+ladder is visible doing its job on the way: `coarser` climbs to 144 as the
+minimap's level-1 chunks are stood in for by their level-2 ancestors, and falls
+back to zero as the exact products land. The CPU cache settles at **5.8 MiB of
+its 32 MiB tail** and evicts nothing; the queue peaks at 588 of 1024.
+
+**Walking costs no raster work — 19 ns a step.** A minimap alone at zoom 0, a
+player stepping one tile a frame for 256 tiles: **4 frames of the 256 did any
+raster work at all**, one per chunk edge crossed, 102 µs each. The other 252
+cost 19 nanoseconds between them, which is the producer being handed nothing.
+The argument this document has carried since R7 is now a number.
+
+**The two bounds a run without a device can read** are both fine at 1×: the
+worst zoom of either window asks for 344 pages of 1024, and the CPU tail never
+comes near its budget at any scale — 18% at the reading above. The third is
+10.5.
 
 ### 10.2 The coarse floor is swept once, and a terrain edit does not re-sweep
 
@@ -954,3 +989,56 @@ seam. The tests pin the *arithmetic* — that it scales with the window and with
 `zoom` and with nothing else — and no test says the seam is gone, because
 nothing here can see. It is a `silhouettes.md`-shaped question: first attribute
 it with a debug view, then decide.
+
+### 10.5 The shared page array is crossed at two physical pixels to a gump pixel
+
+4.6 said the GPU page cache is now "reached only by a pathological view", and
+the soak says that is true of a 1× surface and false of the next one up.
+`radar_soak`'s third reading, in pages of the 1024 the array has:
+
+| physical px per gump px | facet map, worst zoom | minimap, worst zoom | together |
+|---|---|---|---|
+| 1 | 280 (27%) | 64 (6%) | 344 (34%) |
+| 2 | **988 (96%)** | 144 (14%) | **1132 (111%)** |
+| 4 | 3744 (366%) | 400 (39%) | 4144 (405%) |
+
+Two physical pixels to a gump pixel is a HiDPI laptop with the desk scale left
+alone. Four is that laptop at a 2× desk scale — a 2368-pixel-wide facet map,
+which is large but not absurd; eight is a window wider than any screen and is in
+the table only to show the shape.
+
+**The two failures are different and both are 3.5's.** One view above 1024 —
+the facet map's 3744 — trips `over_capacity_draws` and `cap_draws_by_distance`
+drops the surplus, which is terrain that is simply not drawn. Two views summing
+above it — 1132 at the ordinary HiDPI scale — is the other half of the same
+defect: one `RadarChunkRenderer` serves both windows, so each frame the minimap
+evicts 144 of the facet map's pages and the facet map uploads them again, 2.3
+MiB of page copies a frame, for as long as both windows are open.
+
+**The worst zoom is not the widest, which is the part no one had reason to
+expect.** Fitted, the facet map asks for 448 pages; five notches *in*, it asks
+for 988. A zoom step shrinks the region by 1.25 and the level only steps by
+powers of two, so the demand climbs through a level's whole band and then falls
+off a cliff when the level changes — the peak sits just inside each boundary,
+and the global peak is at the finest boundary the region is still large at.
+Everything in section 3 reasons about *zooming out* as the direction that hurts;
+the measurement says the middle of the range is.
+
+### 10.6 The level rule always errs finer, and that is where the factor of four is
+
+4.2 chose `lod = floor(log2(tiles_per_pixel))` and gave no reason for the
+rounding. `floor` never magnifies: a texel is at most one tile per pixel and at
+worst half of one, so the picture is sharp-to-aliased rather than
+sharp-to-blocky. What it costs is exactly the 10.5 table. At two physical pixels
+to a gump pixel and zoom step 5 the view wants 1.98 tiles a pixel: `floor` says
+level 0 and 988 pages, `round` would say level 1 and 247 — the same window, a
+quarter of the array, and one tile drawn across 1.01 pixels instead of 0.5.
+
+This is a decision to take rather than a defect to fix, and it is the cheapest
+of the three ways out of 10.5: `round` costs a fraction of a texel of sharpness,
+a second `RadarChunkRenderer` per window costs 16 MiB and leaves the truncation
+case untouched, and a larger array costs GPU memory the client has other uses
+for. It is left open because it changes what a person sees, and this document
+has spent nine sections learning not to decide those by arithmetic — see
+`lighting_pitfalls.md` on the same discipline. First attribute it with both
+levels drawn side by side, then decide.

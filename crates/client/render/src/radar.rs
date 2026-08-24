@@ -34,6 +34,7 @@
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::{Duration, Instant};
 
 use openshard_map::grid::BlockCoord;
 use openshard_map::map::{BLOCK_SIZE, WorldMap};
@@ -579,6 +580,116 @@ pub fn request_views(
         }
     }
     protected
+}
+
+/// What one frame asks of the radar.
+#[derive(Clone, Copy, Debug)]
+pub struct RadarStep<'a> {
+    /// Every open view, each with the level its own window's selector chose.
+    pub views: &'a [(RadarView, RadarLod)],
+    /// The facet whose coarse floor is owed this frame — `Some` while a window
+    /// that can show the whole facet is open, `None` while none is. The absence
+    /// is the state and not a missing answer: a floor already begun keeps every
+    /// key it still owes, and is simply not offered them on a frame when no such
+    /// window is open.
+    pub sweep: Option<Facet>,
+    /// The facet's own extent: how high the ladder goes, and which absent
+    /// children are ground the facet does not have.
+    pub facet_extent: RadarExtent,
+    /// Which chunk the producer's turn works outward from — the player's own,
+    /// in the client.
+    pub producer_centre: RadarChunkCoord,
+}
+
+/// What one frame's radar step did, in the terms the development HUD reads.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RadarStepReport {
+    /// How every key the open views are about to draw was answered.
+    pub demand: RadarDemand,
+    /// What the producer turn spent walking the map and colouring tiles: the
+    /// whole of the radar's synchronous CPU cost, measured where it is spent.
+    pub raster: Duration,
+    /// Chunks the turn published, its reduced ancestors not counted — a
+    /// reduction is arithmetic over four ready products and walks no map.
+    pub built: usize,
+    /// Products the CPU budget dropped, which is zero on any frame inside the
+    /// tail budget. That is the ordinary frame.
+    pub evicted: usize,
+}
+
+/// One frame's whole radar step: ask, sweep, build, resolve, evict.
+///
+/// [`request_views`] and [`resolve_demand`] were lifted out of `App::draw_from`
+/// so that *which chunks a view needs* and *how the cache answered* could each
+/// be asserted without a device. What stayed behind was the **order** they are
+/// called in — the sweep between them, the producer turn under its cost budget,
+/// the eviction after the draw list is known — and an order is exactly the kind
+/// of thing a second caller reproduces almost right.
+///
+/// `examples/radar_soak.rs` is that second caller. It drives this function frame
+/// after frame against the shipped map with no window at all, which is how the
+/// readings `docs/map/radar.md` §10.1 asks for get taken at every scale a person
+/// might have rather than at whichever one the machine in front of them happens
+/// to be. Were the harness to spell this sequence out for itself, it would be
+/// measuring a radar step nothing plays — `docs/parity.md`'s hazard arriving
+/// through the diagnostic rather than through the picture, which is the mistake
+/// §9.1 records the request and the draw making with one `RadarView`.
+///
+/// The one thing this does not own is the level. Hysteresis is per window and
+/// lives across frames, so [`RadarLodSelector`] stays with whoever owns the
+/// window and hands its answer in.
+pub fn advance(
+    step: RadarStep<'_>,
+    map: &WorldMap,
+    colors: &RadarColors,
+    cache: &mut RadarCache,
+    queue: &mut RadarWorkQueue,
+    scratch: &mut RadarBuildScratch,
+) -> RadarStepReport {
+    let mut protected = request_views(step.views.iter().copied(), cache, queue);
+    // The coarse floor, offered again every frame the facet map is open. Asking
+    // once was asking under a bound: `request_sweep` refuses when the queue is
+    // full, and the refused chunk was a hole in the fallback floor that nothing
+    // would ever fill. The cache owes the keys and strikes them off as they
+    // land — see `RadarCache::drain_sweep`.
+    if let Some(facet) = step.sweep {
+        cache.begin_sweep(facet, step.facet_extent);
+        cache.drain_sweep(facet, |key| queue.request_sweep(key));
+    }
+    queue.reconcile(cache);
+    // This loop is the map walk and the colour table; everything else in this
+    // function is bookkeeping over keys. R7 asks for it in milliseconds because
+    // "walking costs no raster work" has always been an argument rather than a
+    // reading.
+    let raster_started = Instant::now();
+    let mut built = 0_usize;
+    for key in queue.take_for_producer_near(step.producer_centre) {
+        let Some(chunk) = build_chunk_reusing(map, colors, key, scratch) else {
+            // The slot goes back rather than being lost — see
+            // `RadarWorkQueue::abandon`.
+            queue.abandon(key);
+            continue;
+        };
+        if queue.finish(cache, chunk) {
+            built += 1;
+            build_ready_ancestors(cache, key, step.facet_extent);
+        }
+    }
+    let raster = raster_started.elapsed();
+    // One walk of the demand, answering both questions it can answer: which
+    // chunk each view will actually draw (so eviction cannot take it), and
+    // *how* the cache answered (so a reader can tell whether the picture is
+    // exact, blurry, stale or absent). The second used to be discarded, which
+    // is why a minimap filling in and a minimap starved looked identical.
+    let resolved = resolve_demand(cache, protected.iter().copied());
+    protected.extend(resolved.drawn);
+    let evicted = cache.evict_to_budget(protected);
+    RadarStepReport {
+        demand: resolved.demand,
+        raster,
+        built,
+        evicted,
+    }
 }
 
 /// Convert a world tile to the level-zero chunk and local tile that contain it.
@@ -2374,6 +2485,143 @@ mod tests {
             requested_alone.len() + region_chunks(facet_map.region(), SWEEP_LOD).count(),
             "the facet map's addition is its region's floor, and nothing of the minimap's",
         );
+    }
+
+    /// A facet four base chunks square: a three-level ladder whose floor is one
+    /// chunk, so a whole sweep is one map walk and a test can afford it.
+    fn a_four_chunk_facet() -> (WorldMap, RadarExtent) {
+        let side = BASE_CHUNK_TILES * 4;
+        (
+            WorldMap::from_blocks(
+                BlockExtent {
+                    wide: u32::from(side / BLOCK_TILES),
+                    down: u32::from(side / BLOCK_TILES),
+                },
+                |_, _| LandCell {
+                    tile: LandTileId(1),
+                    z: 0,
+                },
+            ),
+            RadarExtent::new(side, side).expect("a four-chunk facet"),
+        )
+    }
+
+    /// What [`advance`] adds over the functions it calls is the **order** they
+    /// are called in, and the one a frame would get wrong invisibly is
+    /// resolving the demand before the producer has run: every number the HUD
+    /// shows would then be the previous frame's, and a radar filling in would
+    /// read as a radar starved for exactly as long as it took to fill.
+    #[test]
+    fn a_frames_report_names_what_that_frame_built() {
+        let (map, extent) = a_four_chunk_facet();
+        let colors = colors();
+        let view = RadarView::new(
+            Facet(0),
+            RadarTile::new(128, 128),
+            extent,
+            1.0,
+            Placement {
+                origin: (0.0, 0.0),
+                extent: (64.0, 64.0),
+                circle: false,
+                rotation: 0.0,
+            },
+            1.0,
+        );
+        let mut cache = RadarCache::default();
+        let mut queue = RadarWorkQueue::default();
+        let mut scratch = RadarBuildScratch::default();
+
+        let report = advance(
+            RadarStep {
+                views: &[(view, view.lod())],
+                sweep: None,
+                facet_extent: extent,
+                producer_centre: RadarChunkCoord::new(2, 2),
+            },
+            &map,
+            &colors,
+            &mut cache,
+            &mut queue,
+            &mut scratch,
+        );
+
+        assert_eq!(view.lod(), RadarLod::BASE);
+        let wanted = region_chunks(view.region(), RadarLod::BASE).count();
+        assert_eq!(report.built, wanted, "one turn's budget covers this region");
+        assert_eq!(report.demand.total(), wanted);
+        assert_eq!(
+            report.demand.exact, wanted,
+            "the tally is this frame's, taken after the producer rather than before it",
+        );
+        assert_eq!(report.evicted, 0, "a frame inside the tail budget evicts nothing");
+    }
+
+    /// The sweep is the facet map's, and `sweep: None` is a frame where no
+    /// window can show the whole facet — not a frame that forgot to ask.
+    #[test]
+    fn only_a_frame_that_asks_for_the_floor_starts_one() {
+        let (map, extent) = a_four_chunk_facet();
+        let colors = colors();
+        let facet = Facet(0);
+        let view = RadarView::new(
+            facet,
+            RadarTile::new(128, 128),
+            extent,
+            1.0,
+            Placement {
+                origin: (0.0, 0.0),
+                extent: (64.0, 64.0),
+                circle: false,
+                rotation: 0.0,
+            },
+            1.0,
+        );
+        let views = [(view, view.lod())];
+        let step = |sweep| RadarStep {
+            views: &views,
+            sweep,
+            facet_extent: extent,
+            producer_centre: RadarChunkCoord::new(2, 2),
+        };
+        let mut cache = RadarCache::default();
+        let mut queue = RadarWorkQueue::default();
+        let mut scratch = RadarBuildScratch::default();
+
+        advance(step(None), &map, &colors, &mut cache, &mut queue, &mut scratch);
+        assert!(
+            !cache.sweep_started(facet),
+            "a minimap alone never owes the facet its floor",
+        );
+
+        let mut frames = 0;
+        loop {
+            let report = advance(
+                step(Some(facet)),
+                &map,
+                &colors,
+                &mut cache,
+                &mut queue,
+                &mut scratch,
+            );
+            frames += 1;
+            assert!(frames < 64, "the floor drains rather than spinning");
+            if report.built == 0 && queue.counters().queued == 0 && cache.sweep_owed_len(facet) == 0 {
+                break;
+            }
+        }
+
+        let whole_facet = RadarRegion::new(facet, RadarTile::new(0, 0), extent);
+        for lod in SWEEP_LOD.value()..=max_lod(extent).value() {
+            let lod = RadarLod::new(lod);
+            for chunk in region_chunks(whole_facet, lod) {
+                assert!(
+                    cache.get(cache.key(facet, lod, chunk)).is_some(),
+                    "level {} chunk {chunk:?} is part of the floor",
+                    lod.value(),
+                );
+            }
+        }
     }
 
     #[test]
