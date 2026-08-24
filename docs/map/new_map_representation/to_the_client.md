@@ -655,16 +655,24 @@ Found while building E4:
   world back out of a `Fetch` for the E3 arm, and a rule for a publish that lands
   while a client is *asking* what moved — where the reply is already stale and
   the honest answer is to ask again rather than fetch against it.
-- **A publish costs the window a whole facet's rebuild, and nobody has measured
-  it.** `chunk::apply` rebuilds rather than splices — a block's statics are one
-  run in a facet-wide vector — and `Ground::take_chunks` rebakes the span index
-  over the result, which is 0.07 s on Felucca by the navigation-spans
-  measurement. Both happen on the *event-loop thread*, on the frame the edit
-  lands, so a one-tile `.setland` is a visible hitch on a facet that size. It is
-  paid once per publish by whoever is watching, which is why this is a note
-  rather than a defect; what would retire it is the same thing direction D wants
-  for the shard — a span layer that can be rebuilt in pieces — plus an `apply`
-  that can splice a chunk whose static count did not change.
+- **A publish costs the window a whole facet's rebuild** — ~~and nobody has
+  measured it~~. **Measured now**, by
+  [`publish_cost`](../../../crates/common/movement/tests/publish_cost.rs), and
+  the measurement found something else first: *the cost nobody could see was the
+  build profile*. `[profile.dev.package."*"]` reaches dependencies and not
+  workspace members, so `openshard-map`, `openshard-movement` and
+  `openshard-tiles` were compiled at `opt-level = 0` in every `cargo run`, and
+  one `.setland` on Felucca was **1.17 s on the shard's tick and 1.29 s on the
+  window's event-loop thread** — two and a half seconds of stall for one tile.
+  The root `Cargo.toml` now names the three, which takes both halves to ~0.13 s.
+  What is left after that is the real entry, and it is small enough to rank
+  honestly: `SpanIndex::build` is 115 ms of the window's 132 and `chunk::apply`
+  is the other 16, both still on the event-loop thread. Retiring them is the same
+  thing direction D wants for the shard — a span layer that rebuilds in pieces —
+  plus an `apply` that can splice a chunk whose static count did not change.
+  The general shape is worth keeping: **"it is slow" is a claim about a binary,
+  and the profile that built it is the first thing to ask about**, before any
+  algorithm is blamed.
 - **A quarantined composite block is never un-quarantined.** `CompositeCache`
   permanently marks a block that `FlatGroundBlock::inspect` refused, on the
   stated grounds that "map terrain is immutable for the lifetime of this cache" —

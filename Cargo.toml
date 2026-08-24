@@ -83,6 +83,42 @@ opt-level = 1
 [profile.dev.package.openshard-protocol]
 opt-level = 1
 
+# The map crates do not survive it either, and what they cost is not a frame —
+# it is a whole facet, walked on demand.
+#
+# The three of them are what a publish is made of, and none of them is reached
+# per frame: `SpanIndex::build` bakes 29,360,128 tiles, `chunk::apply` rebuilds a
+# facet-wide statics run, and `openshard_basemap::read` decodes 7,168 chunks.
+# Measured on Felucca by `openshard-movement`'s `publish_cost` test, which exists
+# to be re-run when these numbers are doubted:
+#
+#                                opt 0     here    release
+#   SpanIndex::build          1166.9ms   115.4ms    55.5ms
+#   chunk::apply               117.9ms    16.3ms    16.7ms
+#   base set read             1343.5ms   123.1ms   150.0ms
+#
+# So one `.setland` was 1.17s on the shard's tick and 1.29s on the window's
+# event-loop thread — two and a half seconds of stall for a one-tile edit, in the
+# build a person actually plays under `cargo run -p openshard-playground`. It is
+# 0.13s and 0.13s here. `[profile.dev.package."*"]` above does not reach any of
+# them: that glob is for *dependencies*, and these are workspace members.
+#
+# `openshard-movement` is held at 1 rather than 2 — 115.4ms against 95.7ms — for
+# the reason stated above: the walk rules and the A* are the code most likely to
+# have a breakpoint in it, and 20ms is not what made this slow. `openshard-map`
+# and `openshard-tiles` are layout and a lookup table, with nothing in them to
+# step through, so they take 2.
+#
+# What actually retires this cost is direction D — a span layer that rebuilds in
+# pieces — plus an `apply` that can splice a chunk whose static count did not
+# change. See `docs/map/new_map_representation/to_the_client.md`'s backlog.
+[profile.dev.package.openshard-map]
+opt-level = 2
+[profile.dev.package.openshard-movement]
+opt-level = 1
+[profile.dev.package.openshard-tiles]
+opt-level = 2
+
 [workspace.dependencies]
 # Fast non-cryptographic hashing for hot integer-keyed maps.
 rustc-hash = "2.1"
