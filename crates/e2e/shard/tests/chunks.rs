@@ -27,20 +27,24 @@
 //! that file, read back through `openshard_basemap::read`, so the test needs a
 //! world it knows every byte of.
 //!
-//! # Two tests, and they are two phases
+//! # Four tests, and they are four phases
 //!
 //! The first is E1's and is about the **wire**: sixteen chunks asked for by
 //! hand, and every record compared byte for byte against what `Chunk::of` cuts
-//! out of the file. The second is E2's and is about the **client**: it drives
+//! out of the file. E2's is about the **client**: it drives
 //! `openshard_client_net::chunks::Fetch` — the thing a window runs — over
 //! eighty-one chunks, which is more than one request may name, and asks whether
-//! the facet it ends up holding is the shard's facet tile for tile.
+//! the facet it ends up holding is the shard's facet tile for tile. E3's is
+//! about **three connections to one shard**, with a `.setland` between the
+//! second and the third, and it asks what each of them costs. E4's is about
+//! **one**: the operator edits the ground while standing on it, and the shard
+//! says so on the connection that is already open.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use openshard_client_net::chunks::Fetch;
+use openshard_client_net::chunks::{Fetch, Fetched};
 use openshard_client_net::connection::Event;
 use openshard_client_net::talk;
 use openshard_client_net::transport::{Socket, enter_world};
@@ -726,6 +730,136 @@ async fn a_client_with_no_map_files_ends_up_holding_the_shards_world() {
     // one that lands somewhere plausible and is wrong everywhere. Sampling would
     // find it only by luck.
     assert_same_world(arrived.map(), on_disk.map());
+
+    shard.stop();
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// E4's "done": the ground moves under a client that is already holding it, and
+/// the client is told **on the connection it is already on**.
+///
+/// One connection, and that is the whole difference from the test above: there
+/// the world moved between two logins and the client asked what had happened on
+/// the way in; here it is standing on the facet when an operator types
+/// `.setland`, and the shard is what starts the conversation.
+///
+/// Two things only this can catch. That a commit reaches the wire at all —
+/// `mapedit::commit` sends the notice out of the tick that ran the command, and
+/// nothing below the socket can tell whether it was queued for this connection.
+/// And that what the notice names is fetchable *as chunks*: the client's world
+/// belongs to its window by then, so `Fetch::moved` ends in the squares
+/// themselves and `chunk::apply` — which is what the window runs — is what puts
+/// them in.
+#[tokio::test]
+#[ignore = "reads the install's tiledata and bakes a graph; run it deliberately"]
+async fn a_publish_reaches_a_client_that_is_already_standing_on_the_ground() {
+    let Some(client) = install() else {
+        eprintln!("OPENSHARD_CLIENT is not set, so there is no tile table to read: skipping");
+        return;
+    };
+    let dir = scratch("published");
+    let base_set = world_of_ours(&dir, &client, BLOCKS);
+
+    let (address, shard) = spawn(config_over(base_set.clone(), client));
+    let (mut socket, mut view) =
+        tokio::time::timeout(Duration::from_secs(30), enter_world(address, plan(), version()))
+            .await
+            .expect("the login conversation finished inside the timeout")
+            .expect("the client reached the world");
+    let notice = view.world.expect("the shard told us what world we are in");
+
+    // The ground, the way E2 takes it: the facet whole, before anything moves.
+    let mut fetch = Fetch::of(notice).expect("a facet the wire can name");
+    drive(&mut socket, &mut fetch).await;
+    let held = fetch.finish().expect("a complete set of chunks").world();
+    assert_eq!(held.revision().get(), notice.revision.0);
+
+    // And now the operator — who is this same character — moves one tile of it.
+    // Said rather than committed, so what is under test includes the command
+    // path: `.setland` is a `0xAD` that becomes a patch inside one tick.
+    socket
+        .send(&talk::say(".setland 3 40", TalkMode::Regular))
+        .await
+        .expect("the shard is listening");
+    let heard = hear(&mut socket, |so_far| {
+        so_far
+            .iter()
+            .any(|packet| matches!(packet, ServerPacket::PublishNotice(_)))
+    })
+    .await;
+    // The journal is read for the same reason `map_edit` reads it: a commit that
+    // was refused says so in words, and a test that only looked for the notice
+    // would report "no packet" for it.
+    for packet in &heard {
+        view.apply(packet);
+    }
+    let published = heard
+        .iter()
+        .find_map(|packet| match packet {
+            ServerPacket::PublishNotice(published) => Some(published.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| {
+            let said: Vec<String> = view.journal.iter().map(|line| line.text.clone()).collect();
+            panic!("no publish notice; the shard said {said:?}")
+        });
+    assert_eq!(published.facet, FACET);
+    assert_eq!(
+        published.revision.0,
+        notice.revision.0 + 1,
+        "one patch, one revision"
+    );
+    // START is inside chunk (2, 2) of a facet cut into sixty-four-tile squares.
+    let touched = ChunkAt {
+        x: START.0 / 64,
+        y: START.1 / 64,
+    };
+    assert_eq!(
+        published.changes,
+        Changes::These(vec![touched]),
+        "the chunk the edit landed in, and not the facet"
+    );
+
+    // What a connected client does with it: fetch those chunks, and put them
+    // into the world it already has. `Fetched::Chunks` rather than a world is the
+    // point — the facet is the window's by now, and this is what crosses the
+    // seam to it.
+    let Changes::These(moved) = published.changes.clone() else {
+        panic!("the shard knows what moved");
+    };
+    let mut fetch = Fetch::moved(
+        notice,
+        moved,
+        openshard_map::snapshot::MapRevision::decoded(published.revision.0),
+    )
+    .expect("a facet the wire can name");
+    let asked = drive(&mut socket, &mut fetch).await;
+    assert_eq!(asked.chunks, 1, "exactly the chunk that moved");
+    let Fetched::Chunks(chunks) = fetch.finish().expect("the chunk that moved") else {
+        panic!("a fetch of what moved ends in the chunks themselves");
+    };
+
+    // The window's half, which is `Ground::take_chunks` and is `chunk::apply`
+    // underneath. Done here through the world type, because that is what holds
+    // the rule this is about: the ground moves and the revision moves with it.
+    let mut world = openshard_map::world::World::new(Some(held));
+    let now = world.take_chunks(&chunks).expect("a chunk of this facet");
+    assert_eq!(now.get(), published.revision.0);
+
+    // And it is the shard's world: the file on disk, which is where the log put
+    // the same patch.
+    let after = openshard_basemap::load(&base_set).expect("the world reads back");
+    assert_eq!(after.patches, 1, "one commit, one record");
+    let caught_up = world.snapshot().expect("it was given ground");
+    assert_same_world(caught_up.map(), after.snapshot.map());
+    assert_eq!(
+        caught_up.map().land(START.0, START.1),
+        Some(LandCell {
+            tile: LandTileId(3),
+            z: 40
+        }),
+        "the tile the operator moved arrived over the same connection"
+    );
 
     shard.stop();
     std::fs::remove_dir_all(&dir).ok();
