@@ -166,6 +166,17 @@ more than once.
 
 ## Found along the way
 
+**A publish costs the window a whole facet's rebuild, and nobody has measured
+it.** `chunk::apply` rebuilds rather than splices — a block's statics are one run
+in a facet-wide vector, so a chunk whose item count changed moves every static
+after it — and `Ground::take_chunks` rebakes the span index over the result,
+which is 0.07 s on Felucca. Both happen on the *event-loop thread*, on the frame
+the edit lands, so a one-tile `.setland` is a visible hitch on a facet that size.
+Paid once per publish by whoever is watching, which is why it is a note rather
+than a defect. What would retire it is what direction D already wants for the
+shard — a span layer that rebuilds in pieces — plus an `apply` that can splice a
+chunk whose static count did not change.
+
 **A quarantined composite block is never un-quarantined.** `CompositeCache`
 permanently marks a block whose ground `FlatGroundBlock::inspect` refused, on the
 stated grounds that "map terrain is immutable for the lifetime of this cache" —

@@ -655,6 +655,16 @@ Found while building E4:
   world back out of a `Fetch` for the E3 arm, and a rule for a publish that lands
   while a client is *asking* what moved — where the reply is already stale and
   the honest answer is to ask again rather than fetch against it.
+- **A publish costs the window a whole facet's rebuild, and nobody has measured
+  it.** `chunk::apply` rebuilds rather than splices — a block's statics are one
+  run in a facet-wide vector — and `Ground::take_chunks` rebakes the span index
+  over the result, which is 0.07 s on Felucca by the navigation-spans
+  measurement. Both happen on the *event-loop thread*, on the frame the edit
+  lands, so a one-tile `.setland` is a visible hitch on a facet that size. It is
+  paid once per publish by whoever is watching, which is why this is a note
+  rather than a defect; what would retire it is the same thing direction D wants
+  for the shard — a span layer that can be rebuilt in pieces — plus an `apply`
+  that can splice a chunk whose static count did not change.
 - **A quarantined composite block is never un-quarantined.** `CompositeCache`
   permanently marks a block that `FlatGroundBlock::inspect` refused, on the
   stated grounds that "map terrain is immutable for the lifetime of this cache" —
