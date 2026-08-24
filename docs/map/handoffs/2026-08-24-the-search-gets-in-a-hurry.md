@@ -89,24 +89,70 @@ so it may not be the length of a route that merely happened to be short enough.
 The question this session was opened with. Ranked by what it would buy *this*
 codebase, with the reason it is or is not applicable.
 
-### 1. Do not search — precompute the answer
+### 1. Do not search — precompute the answer, and why the whole facet cannot
 
-- **Compressed Path Databases** (Botea/Harabor; what wins the Grid-Based Path
-  Planning Competition). For every node, the *first move* toward every other
-  node, run-length compressed. A query is "read a byte, step, repeat" — no open
-  list, no heuristic, microseconds facet-wide. **The endgame, and the one thing
-  here that is genuinely orders of magnitude.** The cost is memory and a bake:
-  our facet has ~5.4M standing places, and the compression ratio on a game map
-  is the whole question. **Nobody has measured it here.**
+**Everything in this family is one idea with one obstacle.** The idea: answer
+the query from a table instead of a search. The obstacle: the table a query
+wants is *the world joined against the world*, and the join does not survive a
+facet.
+
+The number that decides it is measured — `span_census` over facet 0, which is
+7168 × 4096:
+
+| | |
+|---|---|
+| columns | 29,360,128 |
+| **standing places a walker has** | **7,986,741** |
+| of them, the land's own surface | 7,704,411 (96.5%) |
+
+So `N ≈ 8.0 × 10⁶`, and `N²` is **6.4 × 10¹³**.
+
+- **Compressed Path Databases** (Botea; Strasser/Harabor/Botea — what wins the
+  Grid-Based Path Planning Competition). For every source, the *first move*
+  toward every target, run-length compressed. A query is "read a byte, step,
+  repeat" — no open list, no heuristic. **It is the fastest thing in the
+  literature and it does not fit here**, and the arithmetic is the whole
+  argument rather than a caveat:
+
+  - *Storage.* RLE is what makes it tractable at all: for a fixed source the
+    first move is spatially coherent — whole quarters of the map leave by the
+    same door — so a row of 8M entries compresses to a few hundred runs. But it
+    compresses to **O(N × runs)**, not to O(N). At 8.0M sources and a
+    generous 300 runs of 4 bytes, that is **~10 GB**. The published databases
+    are tens to hundreds of MB on GPPC maps that hold 10⁴–10⁵ walkable cells;
+    we are two to three orders of magnitude past them.
+  - *Build.* One single-source search per source: **N searches over an N-node
+    graph**. At this tree's measured ~200 ns a node expansion, 6.4 × 10¹³
+    expansions is on the order of **10⁵ CPU-hours**. There is no compression
+    for that — RLE shrinks the answer, not the work of finding it.
+
+  **Where it is still alive is per cluster**, which is the standard reading: a
+  32×32 region holds ~270 standing places, so all-pairs inside one is ~73,000
+  entries and trivial. That is what `local_costs` already computes, on the fly,
+  per query.
 - **Hierarchical decomposition** (HPA\*, and every RTS since). *We have this* —
-  [`navigation_graph.md`](navigation_graph.md), built in N4, read since N7.
-- **A connectivity oracle.** "Is there any way at all" answered from precomputed
-  components in O(1). We have the components; **the AI does not ask them first**
-  — see the backlog below.
-- **Contraction hierarchies / hub labelling** (OSRM, road networks). Microsecond
-  queries on continental graphs, but they exploit road-network structure —
-  highway hierarchy — that a uniform grid does not have. CPD is the grid's
-  answer to the same ambition.
+  [`navigation_graph.md`](navigation_graph.md), built in N4, read since N7 —
+  **and the obstacle above is precisely why it exists.** Hierarchy is not a
+  cheaper table; it is the trick for never building the big one. Pay all-pairs
+  only among a small distinguished set — portals here, contracted nodes in a
+  contraction hierarchy, access nodes in transit-node routing, landmarks in
+  ALT — where |P| ≪ N, and reach the nearest member with a short local search.
+  `|P|² + N` is a table; `N²` is not.
+- **Contraction hierarchies / hub labelling** (OSRM, road networks). The same
+  escape, tuned to a graph with a highway structure a uniform grid does not
+  have. Worth reading for the escape rather than for the method.
+- **A connectivity oracle.** The cheapest member of the family and the only one
+  that is genuinely O(1) storage per place: "is there any way at all", answered
+  from precomputed components. We have the components; **the AI does not ask
+  them first** — see the backlog below.
+
+**What this leaves is the linear precomputation**, which is why
+[differential heuristics](#3-search-the-same-graph-expand-fewer-nodes) below is
+ranked where it is: `K × N` and not `N²`. Even that wants a granularity
+decision — 8.0M places × 8 landmarks × 2 bytes is 128 MB beside a facet that is
+already ~150 MB resident — so the landmark distances probably want to hang on
+regions rather than on places, and a region-level bound has to be shown to be a
+true lower bound before it may be used as one.
 
 ### 2. Do not search a grid — change what a node is
 
@@ -139,7 +185,10 @@ codebase, with the reason it is or is not applicable.
   Chebyshev *precisely where Chebyshev is worst* — around a wall the frontier is
   currently flooding — and it stays **admissible**, so routes remain shortest.
   **The strongest idea in this document that is both applicable and free of a
-  behaviour change**, and we already bake a graph to hang it on.
+  behaviour change**, and we already bake a graph to hang it on. It is also the
+  only precomputation here that is **linear** — `K × N` where §1's table is
+  `N²` — which is the whole reason it survives a facet and CPD does not. The
+  granularity question §1 ends on is its first decision.
 - **Bidirectional search.** ~2× on average. **Blocked by a real property of this
   world**: our step rule is not symmetric — a body drops off a ledge it cannot
   climb — so the backward search needs its own reverse rule, which is a second
@@ -183,7 +232,7 @@ than of a tile.
 | 🚩 **The exact search runs every beat and its route is thrown away** | `ai::plan_step` calls `find_path` each beat and uses `path.first()`. `REPATH_TICKS` (40) governs the *coarse* half only. A validated cached route — walk it, re-plan on a refused step, on the goal moving past a threshold, or on the timer — is the references' own pattern and would cut exact searches by roughly the length of a route |
 | 🚩 **A far chase pays a full 400-node local search before the graph is asked** | `plan_step` asks `find_path` first and falls through to `find_long_path` only on refusal. For a destination past `COARSE_MIN_DISTANCE` that the local search will refuse, that is the whole budget spent to learn what the region components already know |
 | **Differential heuristics** | §3 above. Bake K landmark distances beside the navigation graph; it is admissible, so the oracle is the existing dump — the routes must not move, only the node counts |
-| **Compressed path databases** | §1 above. The one order-of-magnitude idea in the list. Wants a measurement of the compression ratio on facet 0 before it wants a plan |
+| ~~**Compressed path databases**~~ | **Refused on arithmetic, §1 above.** `N` is 7,986,741 measured, so the table is `N²` = 6.4 × 10¹³: ~10 GB after run-length compression and ~10⁵ CPU-hours to build, against published databases of tens of MB on maps two to three orders smaller. Alive only per cluster, which `local_costs` already is |
 | **Flow fields for the many-chase-one case** | §4 above. Wants a count first: how many creatures share a goal in a live shard |
 | **The node budgets, 400 and 600** | Now partly argued — 5/4 at 400 beats exact at 600 — but the argument was made about *arrivals*, not about what a tick can afford. That second half still wants the shard's own numbers |
 
