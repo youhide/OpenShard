@@ -55,14 +55,12 @@ when exact legacy shapes matter. A direct API test with the explicit
 
 ## Where everything is
 
-Source data on this workstation:
+Source data, wherever the client is installed:
 
-- `.env` sets `OPENSHARD_CLIENT` to
-  `/home/sc/t/uo_files/Electronic Arts/Ultima Online Classic`.
-- Original file:
-  `/home/sc/t/uo_files/Electronic Arts/Ultima Online Classic/fonts.mul`
-  (884,909 bytes; 884,766 bytes belong to the ten decoded faces and 143 bytes
-  trail them).
+- `.env` sets `OPENSHARD_CLIENT` to `/path/to/Ultima Online Classic`, the same
+  variable the playground and every other tool here read.
+- Original file: `$OPENSHARD_CLIENT/fonts.mul` (884,909 bytes; 884,766 bytes
+  belong to the ten decoded faces and 143 bytes trail them).
 
 Implementation:
 

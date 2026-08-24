@@ -194,7 +194,7 @@ map and `MapTerrain` used by the client planner. The reusable probe is
 
 ```text
 cargo run --release -p openshard-movement --example map_path_probe -- \
-  --client "/home/sc/t/uo_files/Electronic Arts/Ultima Online Classic" \
+  --client "/path/to/Ultima Online Classic" \
   --x 1363 --y 1600 --radius 96 --budget 600
 ```
 

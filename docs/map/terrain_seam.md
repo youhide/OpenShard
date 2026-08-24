@@ -507,7 +507,7 @@ villa, keep and two-storey shop, on any real map, everywhere. The fixture
 answered `can_fit` with a boolean the test set to `true`, so the check had never
 once been run against ground. ServUO gates the same question the same way — its
 `hasSurface` is only ever set for a component at `addTile.Z == 0`
-([`HousePlacement.cs:174`](/home/sc/t/ServUO/Scripts/Multis/HousePlacement.cs)) —
+(ServUO's `Scripts/Multis/HousePlacement.cs:174`) —
 and `check_region` four lines above already carried the doctrine in its own
 header: *"the house's `z`, once, and never the component's"*. Fixed, with two
 tests that fail without it.
