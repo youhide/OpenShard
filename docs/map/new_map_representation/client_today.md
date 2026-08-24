@@ -29,7 +29,7 @@ Derived artifacts, as they stand:
 |---|---|---|---|
 | [`NavigationGraph`](../../../crates/common/movement/src/navigation.rs#L28) | walkable bitset 3.7 MiB + nodes/edges | 8.5 MiB | input file name, size, mtime |
 | [`BuildingMap`](../../../crates/client/render/src/interiors.rs#L1025) | `Arc<[u32]>`, one label per tile = **112 MiB** | **112 MiB**, raw `u32`, uncompressed | same |
-| `RadarCache` chunks | 8 KiB per 64×64 chunk, **no eviction** | — | `(facet, lod, chunk, revision)` |
+| `RadarCache` chunks | 8 KiB per 64×64 chunk; a 32 MiB unpinned tail, LRU, with the coarse floor pinned | — | `(facet, lod, chunk, revision)` |
 | Art table (surfaces) | small | 219 KiB | same |
 
 ## Backlog
@@ -46,13 +46,36 @@ Ranked by what a person would notice first.
    parent exists only once all four children do, so it cannot answer "show the
    whole facet cheaply" at all. A coarse producer that samples `WorldMap`
    directly is the missing piece, not a different LOD request.
+
+   > **Spent, with findings 2 and 3, by [`radar.md`](../radar.md)'s R0–R8.** A
+   > window picks its level from its own pixels, both windows are one
+   > `RadarView`, `max_lod` is a property of the facet rather than a constant,
+   > and the coarse floor is swept once per session. The requester walks each
+   > view's own region at its own level — 112 chunks at fit zoom, not 7,168 —
+   > and `RadarCache` carries a 32 MiB tail budget with LRU eviction and a
+   > pinned floor. **The "coarse producer" this entry asked for was built and
+   > then taken back out of the schedule**: sampling `WorldMap` at level seven
+   > is one 8192²-tile walk, measured at 232 ms in a single frame with a 192 MiB
+   > scratch buffer. The map is walked at `SWEEP_LOD` alone (126 ms for the
+   > facet) and every coarser product is *reduced* from it (113 ms), which is
+   > bit-identical over all 151 of them — `examples/radar_floor_cost.rs`.
 2. **An O(facet) scan every frame.** With the world map open,
    [`presentation.rs:2017`](../../../crates/client/app/src/presentation.rs#L2017)
    allocates and sorts a 7,168-element `Vec` of chunk coordinates and probes the
    cache's `BTreeMap` once per element, per frame.
+
+   > **Spent** with finding 1. `radar::request_views` walks each view's region
+   > at its own level; the one walk that is still a facet-sized list is a
+   > fully-zoomed-out facet map asking for its region's *floor* — 448 keys, the
+   > sweep's own list, which R8 states as the price of never walking the map
+   > coarsely.
 3. **`RadarCache` never evicts.** Its own test says so
    (`"eviction is not implemented yet"`). One pass over the world map retains
    about 75 MiB of chunks for the rest of the run.
+
+   > **Spent** with finding 1, by R5: `RADAR_CPU_TAIL_BUDGET` is 32 MiB, the
+   > unpinned tail is evicted LRU with superseded revisions taken first, and
+   > `RadarCacheCounters::evicted` is written and read in the frame report.
 4. **The revision dimension has no production writer.** `set_revision` and
    `invalidate_tile` are called only from tests, because the client's `WorldMap`
    cannot change at runtime. It is the right preparation for direction D and it

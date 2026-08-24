@@ -2196,7 +2196,7 @@ impl App {
                 };
                 if self.radar_queue.finish(&mut self.radar_cache, chunk) {
                     built += 1;
-                    build_ready_ancestors(&mut self.radar_cache, key, radar::max_lod(radar_facet_extent));
+                    build_ready_ancestors(&mut self.radar_cache, key, radar_facet_extent);
                 }
             }
             let raster = raster_started.elapsed();

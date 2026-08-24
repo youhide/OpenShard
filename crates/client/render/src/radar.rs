@@ -311,6 +311,32 @@ pub const BASE_CHUNK_TILES: u16 = BLOCK_TILES * 8;
 
 /// The number of map blocks along a base chunk edge.
 pub const BASE_CHUNK_BLOCKS: u16 = BASE_CHUNK_TILES / BLOCK_TILES;
+/// The one level the map is walked at, and therefore the ceiling on any key a
+/// producer may be handed.
+///
+/// Two roles, and they are the same statement read from either end.
+///
+/// **The floor.** Levels two and coarser are 599 chunks and 4.8 MiB for
+/// Britannia — smaller than the GPU page cache — so this is the level a facet's
+/// whole coarse picture is swept at, and the level at or above which
+/// [`RadarCache::evict_to_budget`] never evicts.
+///
+/// **The ceiling.** [`build_chunk`] can raster any level directly, and that is
+/// what makes it the one product rule; it is *not* a scheduling rule.  A
+/// level-`n` chunk covers `4^n · 4096` tiles, so at the top of Britannia's
+/// ladder one key is one 8192²-tile walk with a 192 MiB scratch buffer behind
+/// it — 232 ms inside a single `App::draw_from`, measured by
+/// `examples/radar_floor_cost.rs`, against a producer turn that means to spend
+/// eight base chunks. The turn cannot refuse it either:
+/// `take_for_producer_by_cost` always takes at least one key, so the budget is
+/// a rate and never a bound on one build.
+///
+/// So nothing above this level is ever built from the map. Everything above it
+/// is *reduced* — [`build_ready_ancestors`] climbs as families complete, which
+/// is 113 ms for the whole of Britannia's ladder against 1.01 s of direct
+/// builds, for a bit-identical product. The three places that could name a
+/// coarser key each clamp to this: [`request_views`], [`RadarCache::begin_sweep`]
+/// and [`RadarCache::invalidate_tile`].
 pub const SWEEP_LOD: RadarLod = RadarLod::new(2);
 pub const RADAR_CPU_TAIL_BUDGET: u64 = 32 * 1024 * 1024;
 const RADAR_CHUNK_CPU_BYTES: u64 = (BASE_CHUNK_TILES as u64) * (BASE_CHUNK_TILES as u64) * 2;
@@ -512,6 +538,24 @@ impl RadarLodSelector {
 /// [`RadarWorkQueue::request`] refuses once its bound is reached, and raster
 /// order would then decide whose far rows are never offered a slot at all —
 /// see [`region_chunks_near`].
+///
+/// # What a view draws and what a view asks to be built are two levels
+///
+/// They are the same level until a view zooms past [`SWEEP_LOD`], and above it
+/// they part: the map is never walked coarser than that ceiling, so a view at
+/// level six asks for **the floor under its own region** and draws the
+/// ancestors [`build_ready_ancestors`] reduces from it. The two lists in this
+/// function are therefore two walks and not one — the drawn keys, at the view's
+/// own level, are what eviction must keep and what
+/// [`resolve_demand`] reports the fallback ladder for; the built keys, at the
+/// ceiling, are what the producer is offered.
+///
+/// The consequence worth stating: a view above the ceiling no longer has a
+/// demand bounded by its own pixel area. Its region's floor is, for a
+/// fully-zoomed-out facet map, that facet's whole floor — 448 chunks of
+/// Britannia, which is [`RadarCache::begin_sweep`]'s own list arriving in the
+/// order this view wants it. That is the same total map work either way; what
+/// changes is that it is spent 282 µs at a time instead of 232 ms.
 #[must_use]
 pub fn request_views(
     views: impl IntoIterator<Item = (RadarView, RadarLod)>,
@@ -522,10 +566,13 @@ pub fn request_views(
     for (view, lod) in views {
         let region = view.region();
         let (base_centre, _) = world_tile_to_base_chunk(view.centre);
-        let centre = base_centre.ancestor_at(lod.value());
-        for coord in region_chunks_near(region, lod, centre) {
-            let key = cache.key(region.facet(), lod, coord);
-            protected.push(key);
+        for coord in region_chunks(region, lod) {
+            protected.push(cache.key(region.facet(), lod, coord));
+        }
+        let build_lod = lod.min(SWEEP_LOD);
+        let centre = base_centre.ancestor_at(build_lod.value());
+        for coord in region_chunks_near(region, build_lod, centre) {
+            let key = cache.key(region.facet(), build_lod, coord);
             if cache.get(key).is_none() {
                 queue.request(key);
             }
@@ -931,9 +978,20 @@ impl RadarCache {
     ///
     /// The mutation creates a new source revision for `facet`, marks the
     /// intersecting level-zero chunk, then marks its parent at every LOD up to
-    /// and including `max_lod`.  Thus a one-tile edit requests exactly one
-    /// base rebuild and one product at each derived level; sibling chunks are
-    /// not raster work merely because they share an ancestor.
+    /// and including `max_lod` — **or [`SWEEP_LOD`], whichever is lower**.  Thus
+    /// a one-tile edit requests exactly one base rebuild and one product at each
+    /// derived level the map is walked for; sibling chunks are not raster work
+    /// merely because they share an ancestor, and no edit can put an
+    /// 8192²-tile walk in a frame (see `SWEEP_LOD`).
+    ///
+    /// What the clamp costs is written down in `docs/map/radar.md`'s section 10:
+    /// a facet-wide revision bump already leaves every coarse product reachable
+    /// only through [`Self::select_ready`]'s stale-exact path, because a parent
+    /// needs four children at the *new* revision and an edit rebuilds one. The
+    /// clamp does not create that; it declines to hide it behind a stall. This
+    /// path has no production writer today — the client's `WorldMap` cannot
+    /// change at runtime — and the shard that gives it one owes the coarse
+    /// ladder a revision model, not a bigger frame budget.
     ///
     /// Returns `None` only if the facet revision has exhausted `u64`.  The map
     /// itself must not be changed in that case, because the cache can no longer
@@ -944,7 +1002,7 @@ impl RadarCache {
         tile: impl Into<RadarTile>,
         max_lod: impl Into<RadarLod>,
     ) -> Option<RadarRevision> {
-        let max_lod = max_lod.into();
+        let max_lod = max_lod.into().min(SWEEP_LOD);
         let revision = RadarRevision(self.revision(facet).0.checked_add(1)?);
         self.revisions.insert(facet, revision);
         self.dirty.retain(|key| key.facet != facet);
@@ -1136,21 +1194,24 @@ impl RadarCache {
 
     /// Owe a facet its whole coarse floor, once per session.
     ///
-    /// Answers `true` on the call that starts one. Every level from
-    /// [`SWEEP_LOD`] up to the facet's own [`max_lod`] is enumerated here, at
-    /// the revision current when the facet map first opened; keys are handed
-    /// out by [`Self::drain_sweep`] and struck off as they land.
+    /// Answers `true` on the call that starts one. The floor is one level —
+    /// [`SWEEP_LOD`], 448 chunks of Britannia — at the revision current when
+    /// the facet map first opened; keys are handed out by [`Self::drain_sweep`]
+    /// and struck off as they land.
+    ///
+    /// **The levels above it are not owed, because they are not built.** Every
+    /// coarser product is reduced from this floor by [`build_ready_ancestors`]
+    /// as each family completes: 113 ms for Britannia's whole ladder against
+    /// the 1.01 s the same ladder cost when every level was walked out of the
+    /// map, and a bit-identical product either way. `SWEEP_LOD`'s own doc
+    /// carries why a coarse key must never reach a producer at all.
     pub fn begin_sweep(&mut self, facet: Facet, extent: RadarExtent) -> bool {
         if self.sweep_owed.contains_key(&facet) {
             return false;
         }
         let whole_facet = RadarRegion::new(facet, RadarTile::new(0, 0), extent);
-        let owed: BTreeSet<_> = (SWEEP_LOD.value()..=max_lod(extent).value())
-            .flat_map(|lod| {
-                let lod = RadarLod::new(lod);
-                region_chunks(whole_facet, lod).map(move |chunk| (lod, chunk))
-            })
-            .map(|(lod, chunk)| self.key(facet, lod, chunk))
+        let owed: BTreeSet<_> = region_chunks(whole_facet, SWEEP_LOD)
+            .map(|chunk| self.key(facet, SWEEP_LOD, chunk))
             .collect();
         self.sweep_owed.insert(facet, owed);
         true
@@ -1283,10 +1344,22 @@ pub struct RadarWorkCounters {
 
 impl Default for RadarWorkQueue {
     fn default() -> Self {
-        // Eight level-zero units preserve the original production rate. A
-        // coarse product spends 4^lod units, so zoom cannot silently multiply
-        // the synchronous map walk by hundreds.
-        Self::new(1024, 8).expect("the shipped radar queue limits are non-zero")
+        // Sixty-four units is four floor chunks a turn, and the ceiling
+        // [`SWEEP_LOD`] states is what makes that a real bound rather than a
+        // rate: no key costs more than sixteen units, so a turn is at most four
+        // builds — 1.1 ms of map walk against a measured 282 µs a chunk.
+        //
+        // It was eight while the coarse levels were built from the map, where
+        // it bounded nothing (one level-seven key spent 16,384 of those units in
+        // one frame, because a turn always takes at least one job). With the
+        // ladder reduced instead, the whole of Britannia's floor is 126 ms of
+        // work, and the only question left is how many frames it is spread
+        // over: at eight units that is 448 frames — seven seconds of a facet
+        // map with nothing in it, since a coarse product now lands *after* its
+        // children rather than before them. At sixty-four it is under two
+        // seconds. The reading that moves this number again is R7's `raster`,
+        // in the frame report.
+        Self::new(1024, 64).expect("the shipped radar queue limits are non-zero")
     }
 }
 
@@ -1573,14 +1646,35 @@ pub fn reduce_lod_pixel(samples: [Color16; 4]) -> Color16 {
     samples[winner]
 }
 
-/// Build one LOD parent from its four complete children.
+/// Build one LOD parent from its four children.
 ///
 /// Children are ordered north-west, north-east, south-west, south-east.  Their
 /// keys must be the direct children of `key`, on the same facet and revision.
 /// Refusing a mismatched family prevents a cache from publishing mixed-source
 /// terrain after an invalidation.
+///
+/// # A child may be absent only where the facet is
+///
+/// A level's chunk count is `ceil(extent / side)`, and an odd count means the
+/// level above it asks for a child one column or row past the facet's edge.
+/// Britannia goes odd at level four — seven chunks across — so a family-complete
+/// climb that refuses every absent child stops there: levels five, six and
+/// seven of the shipped facet are unreachable, which is what
+/// `examples/radar_floor_cost.rs` measured before this rule existed.
+///
+/// So `None` is a *quadrant of unmapped ground* and contributes [`UNKNOWN`],
+/// which is exactly what [`build_chunk`] rasters for the same tiles — the two
+/// paths stay bit-identical, at the edge as in the middle. It is accepted only
+/// where the child's own rectangle begins beyond `extent`: a child inside the
+/// facet that has merely not been built yet is a hole, a reduction over it is a
+/// picture of three quarters of the ground, and this answers `None` for it as
+/// it always did.
 #[must_use]
-pub fn build_lod_parent(key: RadarChunkKey, children: [&RadarChunk; 4]) -> Option<RadarChunk> {
+pub fn build_lod_parent(
+    key: RadarChunkKey,
+    children: [Option<&RadarChunk>; 4],
+    extent: RadarExtent,
+) -> Option<RadarChunk> {
     let child_lod = key.lod.child()?;
     let child_x = key.chunk.x().checked_mul(2)?;
     let child_y = key.chunk.y().checked_mul(2)?;
@@ -1590,14 +1684,29 @@ pub fn build_lod_parent(key: RadarChunkKey, children: [&RadarChunk; 4]) -> Optio
         RadarChunkCoord::new(child_x, child_y.checked_add(1)?),
         RadarChunkCoord::new(child_x.checked_add(1)?, child_y.checked_add(1)?),
     ];
-    if children.iter().zip(expected).any(|(child, chunk)| {
-        let child_key = child.key();
-        child_key.facet != key.facet
-            || child_key.lod != child_lod
-            || child_key.chunk != chunk
-            || child_key.revision != key.revision
-    }) {
-        return None;
+    let child_world = u32::from(BASE_CHUNK_TILES).checked_shl(u32::from(child_lod.value()))?;
+    for (child, chunk) in children.iter().zip(expected) {
+        match child {
+            Some(child) => {
+                let child_key = child.key();
+                if child_key.facet != key.facet
+                    || child_key.lod != child_lod
+                    || child_key.chunk != chunk
+                    || child_key.revision != key.revision
+                {
+                    return None;
+                }
+            }
+            // Off the facet in either axis: the whole quadrant is ground the
+            // map has no cell for, and `UNKNOWN` is what the map answers for it.
+            None => {
+                let origin_x = chunk.x().checked_mul(child_world)?;
+                let origin_y = chunk.y().checked_mul(child_world)?;
+                if origin_x < u32::from(extent.width()) && origin_y < u32::from(extent.height()) {
+                    return None;
+                }
+            }
+        }
     }
 
     let side = usize::from(BASE_CHUNK_TILES);
@@ -1607,7 +1716,7 @@ pub fn build_lod_parent(key: RadarChunkKey, children: [&RadarChunk; 4]) -> Optio
             let index = |x: usize, y: usize| y * side + x;
             let sample = |x: usize, y: usize| {
                 let child = (y / side) * 2 + x / side;
-                children[child].pixels[index(x % side, y % side)]
+                children[child].map_or(UNKNOWN, |child| child.pixels[index(x % side, y % side)])
             };
             let source_x = x * 2;
             let source_y = y * 2;
@@ -1681,19 +1790,21 @@ pub fn lod_cost(lod: RadarLod) -> usize {
 ///
 /// The parent of a chunk is built when — and only when — its fourth child
 /// lands, so this walks up until it meets a level whose family is incomplete.
-/// That is what makes a coarse fallback exist without anybody scheduling one:
-/// no ancestor is ever requested, and none is ever built from terrain that is
-/// partly missing.
+/// Since [`SWEEP_LOD`] this is not merely how a coarse fallback appears without
+/// anybody scheduling one — it is the *only* way anything coarser than that
+/// ceiling is ever built at all.
 ///
-/// Work is bounded by the facet's [`max_lod`] and by the arithmetic: one reduction is four
-/// complete children into one product of the same pixel count, and it happens
-/// on one child in four.
-pub fn build_ready_ancestors(
-    cache: &mut RadarCache,
-    key: RadarChunkKey,
-    max_lod: impl Into<RadarLod>,
-) -> usize {
-    let max_lod = max_lod.into();
+/// The facet's own `extent` is the argument rather than a level because the two
+/// answers this needs both come from it: how high the ladder goes
+/// ([`max_lod`]), and which absent children are ground the facet does not have
+/// (see [`build_lod_parent`]). Handing in a level and an extent separately would
+/// be two spellings of one fact, free to disagree.
+///
+/// Work is bounded by that ladder and by the arithmetic: one reduction is four
+/// children into one product of the same pixel count, and it happens on one
+/// child in four.
+pub fn build_ready_ancestors(cache: &mut RadarCache, key: RadarChunkKey, extent: RadarExtent) -> usize {
+    let max_lod = max_lod(extent);
     let mut built = 0;
     let mut child = key;
     while child.lod < max_lod {
@@ -1706,11 +1817,8 @@ pub fn build_ready_ancestors(
             let Some(family) = child_keys(parent) else {
                 break;
             };
-            let ready: Option<Vec<&RadarChunk>> = family.iter().map(|key| cache.get(*key)).collect();
-            match ready {
-                Some(ready) => build_lod_parent(parent, [ready[0], ready[1], ready[2], ready[3]]),
-                None => None,
-            }
+            let ready = family.map(|key| cache.get(key));
+            build_lod_parent(parent, ready, extent)
         }) else {
             break;
         };
@@ -1983,6 +2091,19 @@ mod tests {
         })
     }
 
+    /// [`a_field`]'s own extent: one map block, so every tile past the eighth is
+    /// ground the fixture does not have.
+    fn a_fields_extent() -> RadarExtent {
+        RadarExtent::new(BLOCK_TILES, BLOCK_TILES).expect("a one-block facet")
+    }
+
+    /// A facet sixteen base chunks across: a four-level ladder, and every family
+    /// a climb test names lies well inside it — so an absent child is a hole
+    /// rather than ground the facet does not have.
+    fn a_four_level_facet() -> RadarExtent {
+        RadarExtent::new(BASE_CHUNK_TILES * 16, BASE_CHUNK_TILES * 16).expect("a sixteen-chunk facet")
+    }
+
     fn put(map: &mut WorldMap, graphic: u16, x: u16, y: u16, z: i8) {
         map.place_static(StaticItem {
             tile: Graphic(graphic),
@@ -2117,8 +2238,17 @@ mod tests {
                         );
                         parents.insert(
                             RadarChunkCoord::new(x, y),
-                            build_lod_parent(key, [child(0, 0), child(1, 0), child(0, 1), child(1, 1)])
-                                .expect("a complete family"),
+                            build_lod_parent(
+                                key,
+                                [
+                                    Some(child(0, 0)),
+                                    Some(child(1, 0)),
+                                    Some(child(0, 1)),
+                                    Some(child(1, 1)),
+                                ],
+                                a_fields_extent(),
+                            )
+                            .expect("a complete family"),
                         );
                     }
                 }
@@ -2200,10 +2330,14 @@ mod tests {
         assert_eq!(facet_map.lod(), RadarLod::new(4));
 
         let cache = RadarCache::default();
-        let mut alone = RadarWorkQueue::default();
+        // Bounds far above either window's demand: the subject is which keys
+        // each view names, and a queue at its bound — or a turn at its cost
+        // budget — would answer with a prefix of them instead.
+        let mut alone = RadarWorkQueue::new(4096, 1 << 20).expect("non-zero limits");
         let by_itself = request_views([(minimap, minimap.lod())], &cache, &mut alone);
+        let requested_alone = alone.take_for_producer();
 
-        let mut together = RadarWorkQueue::default();
+        let mut together = RadarWorkQueue::new(4096, 1 << 20).expect("non-zero limits");
         // The facet map first, which is the order that starves the minimap if
         // anything at all is shared between the two.
         let both = request_views(
@@ -2211,6 +2345,7 @@ mod tests {
             &cache,
             &mut together,
         );
+        let requested_together: BTreeSet<_> = together.take_for_producer().into_iter().collect();
 
         assert!(!by_itself.is_empty());
         for key in &by_itself {
@@ -2223,11 +2358,21 @@ mod tests {
             both.len() > by_itself.len(),
             "the facet map adds a demand of its own"
         );
-        let distinct: BTreeSet<_> = both.iter().collect();
+        // The same question of the producer's side, where the two windows now
+        // name two different *levels*: the minimap's own base chunks are
+        // untouched by a facet map whose region is the whole world, and what
+        // the facet map adds is that world's floor rather than its own level.
+        assert!(!requested_alone.is_empty());
+        for key in &requested_alone {
+            assert!(
+                requested_together.contains(key),
+                "the minimap keeps its own build {key:?}",
+            );
+        }
         assert_eq!(
-            together.pending_len(),
-            distinct.len(),
-            "every key either window named reached the queue",
+            requested_together.len(),
+            requested_alone.len() + region_chunks(facet_map.region(), SWEEP_LOD).count(),
+            "the facet map's addition is its region's floor, and nothing of the minimap's",
         );
     }
 
@@ -2299,16 +2444,17 @@ mod tests {
         assert!(cache.begin_sweep(facet, extent));
         assert!(!cache.begin_sweep(facet, extent));
         assert!(cache.sweep_started(facet));
-        // Levels two through seven of the shipped facet: 448 + 112 + 28 + 8 +
-        // 2 + 1.
-        assert_eq!(cache.sweep_owed_len(facet), 599);
+        // The floor is one level: 28 × 16 chunks of the shipped facet. The 151
+        // products above it — 112 + 28 + 8 + 2 + 1 — are reduced from it and
+        // are never owed, because the map is never walked for them.
+        assert_eq!(cache.sweep_owed_len(facet), 448);
 
         let mut queue = RadarWorkQueue::new(8, 1).unwrap();
         let visible = cache.key(facet, RadarLod::BASE, RadarChunkCoord::new(20, 20));
         assert!(queue.request(visible));
         assert_eq!(
             cache.drain_sweep(facet, |key| queue.request_sweep(key)),
-            599,
+            448,
             "the floor is owed until its products land, not until it was asked for",
         );
         assert_eq!(
@@ -2320,9 +2466,19 @@ mod tests {
 
     /// The defect the flag had: `request_sweep` refuses at the queue's bound,
     /// a refused key was never offered again, and the flag already said the
-    /// sweep had run. Today's arithmetic hides it — 599 keys against a bound
+    /// sweep had run. Today's arithmetic hides it — 448 keys against a bound
     /// of 1024 — so this drives the sweep through a queue far too small for
     /// it and asks for the floor afterwards.
+    ///
+    /// It is also the acceptance test for the ceiling [`SWEEP_LOD`] states.
+    /// The loop below is `App::draw_from`'s producer loop with the window taken
+    /// out: take a bounded turn, publish, climb. Nothing in it ever requests a
+    /// level above the ceiling, and every level up to Britannia's seventh has
+    /// to exist at the end anyway — which is only true if the climb completes
+    /// the families the facet's *odd* levels leave open. It goes odd at level
+    /// four, seven chunks across, and before the off-map rule in
+    /// [`build_lod_parent`] this assertion failed at level five with six of its
+    /// eight chunks built.
     #[test]
     fn a_sweep_through_a_queue_it_does_not_fit_in_still_builds_the_whole_floor() {
         let facet = Facet(0);
@@ -2340,8 +2496,13 @@ mod tests {
             let batch = queue.take_for_producer_near(RadarChunkCoord::new(0, 0));
             assert!(!batch.is_empty(), "a turn always hands out at least one job");
             for key in batch {
+                assert!(
+                    key.lod() <= SWEEP_LOD,
+                    "the map is never walked above the ceiling: {key:?}",
+                );
                 let chunk = RadarChunk::new(key, vec![GREEN; chunk_pixel_count()]).expect("a complete chunk");
                 assert!(queue.finish(&mut cache, chunk));
+                build_ready_ancestors(&mut cache, key, extent);
             }
             turns += 1;
             assert!(turns < 5_000, "the sweep drains rather than spinning");
@@ -2376,8 +2537,17 @@ mod tests {
         let southeast = child(1, 1, BLUE);
         let key = RadarChunkKey::new(Facet(0), 1, RadarChunkCoord::new(0, 0), revision);
 
-        let parent = build_lod_parent(key, [&northwest, &northeast, &southwest, &southeast])
-            .expect("four direct children");
+        let parent = build_lod_parent(
+            key,
+            [
+                Some(&northwest),
+                Some(&northeast),
+                Some(&southwest),
+                Some(&southeast),
+            ],
+            RadarExtent::new(1024, 1024).expect("a facet with room for the family"),
+        )
+        .expect("four direct children");
         let side = usize::from(BASE_CHUNK_TILES);
 
         assert_eq!(parent.pixels()[0], RED, "ties prefer the north-west sample");
@@ -2393,6 +2563,96 @@ mod tests {
             "the south-east child is sampled"
         );
         assert_eq!(reduce_lod_pixel([RED, WHITE, RED, WHITE]), RED);
+    }
+
+    /// The two halves of the off-map rule, on the geometry that made it
+    /// necessary. Britannia's level four is seven chunks across — an odd count
+    /// — so the level-five parent at `x = 3` asks for children at `x = 7`,
+    /// which is ground the facet does not have. Refusing those was refusing
+    /// levels five, six and seven of the shipped world.
+    #[test]
+    fn a_parent_reduces_an_off_facet_child_as_unmapped_and_still_refuses_a_missing_one() {
+        let extent = RadarExtent::new(7168, 4096).expect("Britannia");
+        let revision = RadarRevision(3);
+        let child = |x, y| {
+            RadarChunk::new(
+                RadarChunkKey::new(Facet(0), 4, RadarChunkCoord::new(x, y), revision),
+                vec![RED; chunk_pixel_count()],
+            )
+            .expect("a complete child")
+        };
+        let side = usize::from(BASE_CHUNK_TILES);
+
+        let east_edge = RadarChunkKey::new(Facet(0), 5, RadarChunkCoord::new(3, 0), revision);
+        let (northwest, southwest) = (child(6, 0), child(6, 1));
+        let built = build_lod_parent(
+            east_edge,
+            [Some(&northwest), None, Some(&southwest), None],
+            extent,
+        )
+        .expect("the eastern half of this parent is off the facet");
+        assert_eq!(built.pixels()[0], RED, "the western half is the children's");
+        assert_eq!(
+            built.pixels()[side / 2],
+            UNKNOWN,
+            "the eastern half is ground the facet has no cell for, which is what \
+             `build_chunk` rasters there too",
+        );
+
+        // The same shape one parent to the west, where every child names ground
+        // inside the facet: an absent one is a hole, and a reduction over a hole
+        // is a picture of half the ground.
+        let inside = RadarChunkKey::new(Facet(0), 5, RadarChunkCoord::new(0, 0), revision);
+        let (northwest, southwest) = (child(0, 0), child(0, 1));
+        assert!(build_lod_parent(inside, [Some(&northwest), None, Some(&southwest), None], extent).is_none(),);
+    }
+
+    /// Above [`SWEEP_LOD`] a view draws what it cannot ask for. What it asks
+    /// for is the floor under its own region — in its own nearest-first order,
+    /// which is what makes an open facet map fill from where a person is
+    /// looking — and what it hands back is the keys the draw will name, because
+    /// those are what eviction must keep and what `resolve_demand` reports on.
+    #[test]
+    fn a_view_above_the_ceiling_asks_for_the_floor_under_its_region() {
+        let extent = RadarExtent::new(7168, 4096).expect("Britannia");
+        let view = RadarView::new(
+            Facet(0),
+            RadarTile::new(3584, 2048),
+            extent,
+            64.0,
+            Placement {
+                origin: (0.0, 0.0),
+                extent: (640.0, 458.0),
+                circle: false,
+                rotation: 0.0,
+            },
+            1.0,
+        );
+        assert_eq!(view.lod(), RadarLod::new(6), "the whole facet in one window");
+
+        let cache = RadarCache::default();
+        // Bounds far above what one view asks for: this test is about which
+        // keys are named, and a queue that refused some of them would hide it.
+        let mut queue = RadarWorkQueue::new(4096, 1 << 20).expect("non-zero limits");
+        let protected = request_views([(view, view.lod())], &cache, &mut queue);
+
+        assert_eq!(
+            protected.len(),
+            region_chunks(view.region(), view.lod()).count(),
+            "the drawn keys are the view's own region at its own level",
+        );
+        assert!(protected.iter().all(|key| key.lod() == view.lod()));
+
+        let requested = queue.take_for_producer_near(RadarChunkCoord::new(0, 0));
+        assert_eq!(
+            requested.len(),
+            region_chunks(view.region(), SWEEP_LOD).count(),
+            "the built keys are that same region's floor",
+        );
+        assert!(
+            requested.iter().all(|key| key.lod() == SWEEP_LOD),
+            "no key above the ceiling reaches a producer",
+        );
     }
 
     #[test]
@@ -2415,7 +2675,7 @@ mod tests {
         for (x, y) in [(0, 0), (1, 0), (0, 1)] {
             let key = child(&cache, x, y).key();
             assert!(cache.publish(child(&cache, x, y)));
-            assert_eq!(build_ready_ancestors(&mut cache, key, RadarLod::new(4)), 0);
+            assert_eq!(build_ready_ancestors(&mut cache, key, a_four_level_facet()), 0);
         }
         assert!(cache.get(parent).is_none());
 
@@ -2423,7 +2683,7 @@ mod tests {
         let key = last.key();
         assert!(cache.publish(last));
         assert_eq!(
-            build_ready_ancestors(&mut cache, key, RadarLod::new(4)),
+            build_ready_ancestors(&mut cache, key, a_four_level_facet()),
             1,
             "the fourth child completes exactly one level — the level above it \
              still has three quarters missing"
@@ -2438,7 +2698,7 @@ mod tests {
     }
 
     #[test]
-    fn the_ladder_is_climbed_no_further_than_it_was_asked_for() {
+    fn the_ladder_is_climbed_no_further_than_the_facet_has_levels() {
         let facet = Facet(0);
         let mut cache = RadarCache::default();
         for (x, y) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
@@ -2451,9 +2711,10 @@ mod tests {
         }
         let last = cache.key(facet, 0, RadarChunkCoord::new(1, 1));
         assert_eq!(
-            build_ready_ancestors(&mut cache, last, 0),
+            build_ready_ancestors(&mut cache, last, a_fields_extent()),
             0,
-            "a ladder of no levels builds nothing"
+            "a facet one chunk across has no level above zero, so a complete \
+             family builds nothing"
         );
         assert!(
             cache
@@ -2774,9 +3035,9 @@ mod tests {
                 cache.key(facet, 0, RadarChunkCoord::new(6, 5)),
                 cache.key(facet, 1, RadarChunkCoord::new(3, 2)),
                 cache.key(facet, 2, RadarChunkCoord::new(1, 1)),
-                cache.key(facet, 3, RadarChunkCoord::new(0, 0)),
             ],
-            "one tile has one base product and one ancestor at each LOD"
+            "one tile has one base product and one ancestor at each LOD the map \
+             is walked for — the caller asked for three, and the ceiling is two"
         );
 
         let base = cache.key(facet, 0, RadarChunkCoord::new(6, 5));

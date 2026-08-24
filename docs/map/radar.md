@@ -13,14 +13,16 @@ cache is built to, or [`minimap_lod_handoff.md`](minimap_lod_handoff.md),
 which is still the record of what landed. It is the layer those two never
 reached: **nothing chooses an LOD.**
 
-> **Status: R0–R7 are built and their loose ends are closed; the soak R7 asks
+> **Status: R0–R8 are built and their loose ends are closed; the soak R7 asks
 > for has not been run.**
 > A window picks its own level from its own pixels, both windows are one
 > `RadarView` — one construction, handed to the draw — the queue and the byte
 > budget are one implementation under both subsystems, the pyramid is swept
 > until it exists, the CPU cache evicts, the facet map wears a plate with a
 > close button, and every counter the build wrote is now readable in the
-> development HUD. Sections 1–3 below are therefore **the record of what was
+> development HUD. R8 then took the last unbounded thing out of the frame: the
+> map is walked at one level, and every coarser product is reduced from it.
+> Sections 1–3 below are therefore **the record of what was
 > wrong**, not a description of the code — read them for the reasoning, not for
 > the current shape. Section 9 is now the record of the eight things the build
 > left open and what closed each; **section 10 is what is open now**, and that
@@ -285,6 +287,12 @@ complete. `build_ready_ancestors` stays as the opportunistic climb.
 Cost is `4^lod · 4096` tile colours. A level-2 chunk is 256×256 tiles ≈ 1024
 blocks ≈ a few milliseconds; a level-4 chunk is 16× that again.
 
+> **R8 keeps this as the product rule and refuses it as a scheduling rule.**
+> `build_chunk` still builds any level, and that is what makes the two paths one
+> product. What no longer happens is a producer being *handed* such a key: the
+> "16× again" above is 232 ms and 192 MiB by level seven, in one frame. The
+> climb was never the opportunistic half — it is the only half.
+
 ### 4.4 The producer's budget is time, not a count
 
 `builds_per_turn: 8` is a count, and it was right while every build cost the
@@ -299,6 +307,13 @@ The whole facet at levels 2 and coarser is 599 chunks and 4.8 MiB (section 2).
 Its total build cost is one walk of the facet — 29.4 M tile colours,
 ~1 s of CPU — and under 4.4's budget it is a **few seconds of wall clock,
 spread over frames, once per session**, with no thread and no disk artifact.
+
+> **That cost was an arithmetic claim, and the build made it false.** Asking for
+> every level separately is one walk *per level*: 1.01 s measured, of which
+> 232 ms is a single key. R8 makes the sentence above true by construction — the
+> walk is level two alone, 126 ms, and the 151 products above it are reduced from
+> it for another 113 ms of arithmetic. Its "coarsest level first" micro-decision
+> below is retired with it: a parent cannot precede its children.
 
 So: when a facet map opens (or, cheaper for the player, eagerly at idle), the
 requester enqueues the facet's level-2-and-coarser chunks at low priority.
@@ -637,6 +652,80 @@ in front of a HiDPI, desk-scaled, fully-zoomed-out worst case and written the
 numbers down. "Walking costs no raster work" is still an argument rather than a
 measurement — but `raster` in the panel is now the one number that settles it.
 
+### R8 — the map is walked at one level ✅
+
+R2 gave `build_chunk` the ability to raster **any** level directly out of the
+map, and R4 gave the sweep **every** level from `SWEEP_LOD` to `max_lod` to ask
+for. Each was right on its own. Together they meant the producer walked the
+whole facet once per level, and that the coarsest of those walks was a *single
+key* — which `take_for_producer_by_cost` cannot refuse, because a turn always
+takes at least one job whatever it costs. §4.4's cost budget was a rate, never a
+bound on one build.
+
+`examples/radar_floor_cost.rs`, against the shipped Felucca install
+(`7168×4096`, `samples=3`, release):
+
+| level | chunks | tiles a chunk covers | scratch | one chunk | the level |
+|---|---|---|---|---|---|
+| 2 | 448 | 65,536 | 192 KiB | 282 µs | 126 ms |
+| 3 | 112 | 262,144 | 768 KiB | 1.27 ms | 142 ms |
+| 4 | 28 | 1,048,576 | 3 MiB | 5.03 ms | 141 ms |
+| 5 | 8 | 4,194,304 | 12 MiB | 22.5 ms | 180 ms |
+| 6 | 2 | 16,777,216 | 48 MiB | 94.7 ms | 189 ms |
+| 7 | 1 | 67,108,864 | 192 MiB | **232 ms** | 232 ms |
+| | | | | | **1.01 s** |
+
+So the first open of a facet map put a **232 ms frame** and a 192 MiB transient
+allocation in a player's way — one key, inside `App::draw_from` — and the floor
+§4.5 costed at "one walk of the facet, ~1 s of CPU" was in fact seven and a half
+walks. The same floor **reduced** from level two instead: **113 ms**, no chunk
+above 282 µs, and every one of the 151 coarse products **bit-identical** to the
+direct build it replaces.
+
+1. **`SWEEP_LOD` is the ceiling as well as the floor.** One constant, two roles,
+   because they are one statement: the level the map is walked at. Nothing
+   coarser is ever built from terrain; it is reduced.
+2. **The three doors that could name a coarser key each clamp.**
+   `request_views` builds at `min(lod, SWEEP_LOD)`, `begin_sweep` owes one level
+   (448 chunks, not 599), `invalidate_tile` marks dirty no higher than the
+   ceiling.
+3. **A parent may be reduced with an absent child, but only where the facet
+   ends.** A level's chunk count is `ceil(extent / side)`, and an odd count means
+   the level above asks for a child past the edge. Britannia goes odd at level
+   **four** — seven chunks across — so a family-complete climb stops there:
+   measured 6 of 8 chunks at level five, 1 of 2 at six, 0 of 1 at seven. An
+   absent child off the facet is a quadrant of `UNKNOWN`, which is exactly what
+   `build_chunk` rasters for those tiles; an absent child *inside* the facet is
+   still a hole and still refused.
+4. **`build_ready_ancestors` takes the facet's extent, not a level.** Both
+   answers it needs come from it — how high the ladder goes, and which absent
+   children are ground the facet does not have — and handing in a level beside
+   an extent would be two spellings of one fact, free to disagree.
+5. **The turn budget is sixty-four units, and only now is it a bound.** A
+   coarse product lands *after* its children instead of before them, so §4.5's
+   "coarsest level first, a blocky picture within a fraction of a second" is
+   retired: the floor fills nearest each view's own centre and each completed
+   family lights one tile of the level above. At eight units — one floor chunk
+   a turn — that is 448 frames, seven seconds of a facet map with nothing in
+   it, for 126 ms of actual work. Sixty-four is four floor chunks, 1.1 ms of
+   map walk in the worst turn there is, and under two seconds to fill. It is a
+   bound rather than a rate because no key costs more than sixteen units any
+   more; the reading that moves it again is R7's `raster`.
+
+**What this costs, said plainly.** R3's invariant — *a window's chunk demand is
+a function of its own pixel area* — now holds for the keys a view **draws**. The
+keys it asks to have **built** are its region's floor, which for a fully
+zoomed-out facet map is that facet's whole floor. It is the same total map work
+either way; what changes is that it is spent 282 µs at a time instead of 232 ms,
+and that every level above the ceiling comes free with it.
+
+**Done when** the sweep, driven through a queue eight slots wide, leaves every
+level up to Britannia's seventh complete while no key above the ceiling ever
+reaches a producer — one test, which is also the edge rule's oracle, since it
+fails at level five without it. And `radar_floor_cost` reports every coarse
+chunk of the shipped facet identical between the two paths, which is what makes
+them one product rather than two pictures that resemble each other.
+
 ---
 
 ## 8. What this retires
@@ -818,6 +907,20 @@ chunk an `invalidate_tile` actually named, and it is *not* the same claim as
 coarse products that only `select_ready`'s stale-fallback path can use. Nothing
 in the shard moves a facet revision that way today. Naming it because the next
 map-editing feature is what would.
+
+**R8 sharpened this rather than causing it, and it is the one thing R8 gives up.**
+An edit already left every coarse product stale, because a facet-wide revision
+moves all of them at once and a parent needs four children at the *new* revision
+while an edit rebuilds one. What `invalidate_tile` used to do about that was
+rebuild the edited tile's own ancestors directly from the map — a column of
+current products in an otherwise stale ladder, bought with the frame R8 exists to
+give back (232 ms of it, at the top). It now marks dirty no higher than the
+ceiling. So the honest statement of the gap is: **after a terrain edit the coarse
+ladder is stale until something re-sweeps the floor, and nothing does.** The shard
+that gives this path a production writer owes the ladder a revision model — a
+chunk whose *content* did not change should keep its identity across a facet's
+revision — and not a bigger frame budget. Era S's live publish is where that
+lands.
 
 ### 10.3 One page eviction per insert is an invariant nothing states
 
