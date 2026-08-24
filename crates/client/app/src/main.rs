@@ -20,10 +20,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
+use openshard_client_app::WorldSource;
 use openshard_client_net::session::{Pick, Plan};
 use openshard_client_net::transport::Tcp;
 use openshard_map::grid::Tile;
-use openshard_movement::bake::WorldSource;
 use openshard_protocol::identity::{RawAccountName, RawPlaintextPassword};
 use tracing_subscriber::EnvFilter;
 
@@ -69,6 +69,26 @@ struct Cli {
     /// this world and not from that one.
     #[arg(long, env = "OPENSHARD_BASE_SET", value_name = "FILE")]
     base_set: Option<PathBuf>,
+
+    /// Take the ground from the shard, and not from any file on this machine.
+    ///
+    /// `docs/map/new_map_representation/to_the_client.md`'s E2. The client
+    /// starts with no facet at all, is told on world entry how big the one it is
+    /// standing in is, asks for every chunk of it, and assembles the world out of
+    /// what arrives. `map0LegacyMUL.uop`, `staidx0.mul` and `statics0.mul` need
+    /// not exist; `--client` is still required, because the art, the hues, the
+    /// multis and `tiledata.mul` are not on the wire and are not going to be.
+    ///
+    /// It needs an `--account`: a viewer with no shard has nobody to ask. It is
+    /// exclusive with `--base-set` for the plainer reason — a world comes from
+    /// one place.
+    ///
+    /// No environment variable, like `--solids` and unlike `--base-set`: this
+    /// says what a *run* is doing rather than where this machine keeps its
+    /// files, and a `.env` that quietly took the ground off the wire would be a
+    /// client that stopped reading the install without anybody typing anything.
+    #[arg(long, conflicts_with = "base_set")]
+    world_from_shard: bool,
 
     /// The account to log in as. Without one this is an offline map viewer.
     #[arg(short, long, env = "OPENSHARD_ACCOUNT")]
@@ -187,11 +207,15 @@ fn main() -> ExitCode {
             Scenario::LiveOracle => openshard_client_app::Scenario::LiveOracle,
         }),
     };
-    // Which files the ground comes out of. `Install` is the arm every run before
-    // base sets existed took, and it is a source rather than the absence of one.
-    let world = cli
-        .base_set
-        .as_deref()
-        .map_or(WorldSource::Install, WorldSource::BaseSet);
+    // Where the ground comes out of. `Install` is the arm every run before base
+    // sets existed took, and it is a source rather than the absence of one; the
+    // third names no file at all. `--world-from-shard` conflicts with
+    // `--base-set` at the command line, so the pair `(true, Some(_))` is one
+    // clap refuses before this runs.
+    let world = match (cli.world_from_shard, cli.base_set.as_deref()) {
+        (true, _) => WorldSource::Shard,
+        (false, Some(base_set)) => WorldSource::BaseSet(base_set),
+        (false, None) => WorldSource::Install,
+    };
     openshard_client_app::run(&cli.client, world, shard, cli.ttf_font, opening)
 }

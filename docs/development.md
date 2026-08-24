@@ -164,6 +164,30 @@ Every bake over the facet is stale the moment a patch lands, and the navigation
 graph is the one that stops a shard booting — so rebake it, over the same base
 set, with the command in the section above. The tool prints it.
 
+### A client with no map files at all
+
+Our own client can take the ground off the connection instead of off a disk. It
+is told on world entry how big the facet it is standing in is, asks for every
+chunk of it, and assembles the world out of what arrives:
+
+```sh
+cargo run -p openshard-playground -- --world-from-shard
+cargo run -p openshard-client-app -- --world-from-shard --account admin
+```
+
+`map0LegacyMUL.uop`, `staidx0.mul` and `statics0.mul` need not exist for either.
+`--client` still does, for `--base-set`'s reason: the art, the hues, the multis
+and `tiledata.mul` are not on the wire. It needs a shard — a viewer has nobody to
+ask — and it is exclusive with `--base-set`, because a world comes from one
+place.
+
+There is no cache yet, so the whole facet arrives on every run: 21.3 MiB and
+about 7,168 replies for Felucca, with a progress line in the terminal and a blank
+window until the last of it lands. Nothing baked over the world comes with it —
+no navigation graph, no interiors flood — so long routes and the interior
+diagnostic are off, exactly as they are for an install with nothing baked beside
+it.
+
 ## No Rust toolchain? Install one without root
 
 `rustup` is unreachable from some sandboxes — `static.rust-lang.org` is blocked —

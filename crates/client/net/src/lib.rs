@@ -26,6 +26,7 @@
 
 pub mod action;
 pub mod casting;
+pub mod chunks;
 pub mod combat;
 pub mod connection;
 pub mod doll;

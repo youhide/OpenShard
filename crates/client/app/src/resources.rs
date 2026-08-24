@@ -43,43 +43,68 @@ use openshard_uofiles::ttf_font::TtfFont;
 /// bodies standing on that ground in the same call, because refreshing one
 /// without the other is a step decided against two different moments.
 impl Resources {
+    /// Whether this client has ground under it yet.
+    ///
+    /// **The invariant [`map`](Self::map) and [`terrain`](Self::terrain) are
+    /// stated in terms of**, and it became a real question at
+    /// `to_the_client.md`'s E2: a client whose world comes over the connection
+    /// has a window, a shard and every one of its own files before it has a
+    /// facet. Under the other two [`WorldSource`](crate::WorldSource) arms this
+    /// is true from the first line of `run` and never becomes false again.
+    ///
+    /// It is checked at the two doors a world question can come through —
+    /// [`App::draw`](crate::App::draw) for the frame and
+    /// `App::window_event` for the mouse and the keyboard — and at the
+    /// one place a *packet* asks one, which is `App::cutaway`. Everything
+    /// downstream of those three is inside a frame or inside an event, and can
+    /// read the map without asking again.
+    #[must_use]
+    pub fn grounded(&self) -> bool {
+        self.ground.snapshot().is_some()
+    }
+
     /// The ground this client is drawing.
     ///
-    /// A method rather than a field because of the shape of
-    /// [`Ground`]: its base is optional, for a *shard* that runs with no client
-    /// files at all. A
-    /// client is not one — it opened the install to get this far, and `run`
-    /// fails before building a `Resources` if it could not — so the absence is
-    /// unreachable here, and every one of the forty readers below would
-    /// otherwise carry the same `expect` for it.
+    /// A method rather than a field because of the shape of [`Ground`]: its base
+    /// is optional, for a shard that runs with no client files at all and — since
+    /// E2 — for a client whose facet has not arrived yet. Forty readers below
+    /// would otherwise carry the same `expect`, and each of them would be
+    /// answering a question that has exactly one answer at the door they came
+    /// through.
     ///
     /// # Panics
     ///
-    /// Never: `run` loads the facet before anything can call this, and nothing
-    /// takes a client's ground away again.
+    /// If there is no ground. Reachable now, and held off by
+    /// [`grounded`](Self::grounded) rather than by the shape of `run`: the frame
+    /// and the window's events are gated on it, and the one packet that reads
+    /// the map asks for itself. A caller reached from somewhere that is neither
+    /// is a caller that has to say why it is safe.
     #[must_use]
     pub fn map(&self) -> &WorldMap {
         self.ground
             .snapshot()
-            .expect("a client that got as far as drawing opened a facet")
+            .expect("a client that got as far as drawing has been given a facet")
             .map()
     }
 
     /// The same ground read through the table that says what its graphics are,
     /// and the bake over the pair — which is what the interiors bake takes.
     ///
-    /// The bake is [`Ground`]'s own, taken when the facet was loaded. It used to
-    /// be built twice more inside `interiors.rs`, once per bake, because the
-    /// three tables had no name to travel under; `MapTerrain` is that name.
+    /// The bake is [`Ground`]'s own, taken in the same statement the facet was:
+    /// at startup for a world off the disk, and at
+    /// [`Ground::set_base`](openshard_movement::ground::Ground::set_base) for one
+    /// off the wire. It used to be built twice more inside `interiors.rs`, once
+    /// per bake, because the three tables had no name to travel under;
+    /// `MapTerrain` is that name.
     ///
     /// # Panics
     ///
-    /// Never, and for [`map`](Self::map)'s reason.
+    /// If there is no ground, and for [`map`](Self::map)'s reason.
     #[must_use]
     pub fn terrain(&self) -> openshard_movement::MapTerrain<'_> {
         self.ground
             .terrain(&self.tiledata)
-            .expect("a client that got as far as drawing opened a facet")
+            .expect("a client that got as far as drawing has been given a facet")
     }
 }
 

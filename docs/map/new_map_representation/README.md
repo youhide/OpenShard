@@ -90,6 +90,20 @@ is one function all four now go through.
 deflated chunk in fragments of at most 8,192 bytes, a notice on world entry
 saying which facet at which revision, and a refusal — with the deflating and the
 joining as one pair of functions in `openshard-protocol`, so the two ends of the
-wire are a round trip rather than two implementations. Nothing draws it yet;
-that is E2, and it is where the real cost is. The decisions and the leftovers are
-in the [handoffs](handoffs/); the plan itself records intent, not progress.
+wire are a round trip rather than two implementations.
+
+**And E2: the client's world comes off the wire.** `--world-from-shard` starts a
+client with no facet at all; it is told on world entry how big the one it is
+standing in is, asks for every chunk of it in requests of 64 with 256 in flight,
+and assembles the world through the same `chunk::assemble` a base set is read
+through. What it cost is the startup order — `run` used to read the facet before
+the window existed, and everything after it was built from a map that was already
+there. The client now starts with a `Ground` that has no base and grows one when
+the fetch lands, and the gap between the two is closed by one gate checked at the
+frame and at the window's events rather than by holding the world back. The
+decisions and the leftovers are in the [handoffs](handoffs/); the plan itself
+records intent, not progress.
+
+What is left is **E3**, the cache that makes the 21.3 MiB a once, and **E4**, a
+publish reaching a connected client — which is direction C's own "done", and the
+last clause of it.

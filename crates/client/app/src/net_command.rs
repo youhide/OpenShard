@@ -120,6 +120,16 @@ impl App {
             link::Update::Animation(_) => ("animation", String::new()),
             link::Update::NewAnimation(_) => ("new animation", String::new()),
             link::Update::Design(bytes) => ("design", format!("bytes={}", bytes.len())),
+            link::Update::Ground { snapshot } => (
+                "ground",
+                format!(
+                    "facet={} revision={} {}x{}",
+                    snapshot.facet().0,
+                    snapshot.revision().get(),
+                    snapshot.map().width(),
+                    snapshot.map().height(),
+                ),
+            ),
             link::Update::Lost(_) => ("lost", String::new()),
         };
         match update {
@@ -160,6 +170,33 @@ impl App {
             // client's own files are: a `0xD8` carries no width or height, and
             // the box comes out of the foundation's own multi.
             link::Update::Design(bytes) => self.fold_design(&bytes),
+            // The facet, off the wire. It arrives once, a whole fetch *after*
+            // the first `Update::World`, and the gap between the two is what
+            // `App::grounded` gates the frame and the window's events on — see
+            // `Resources::map`, where the invariant is written down.
+            //
+            // Nothing derived is thrown away here, and nothing needs to be: no
+            // frame has been drawn yet, because drawing is one of the two things
+            // that gate was put in front of, so every cache the ground feeds is
+            // still empty. A *second* one of these is E4's — a publish reaching
+            // a connected client — and that is where the invalidation has a way
+            // to be tested.
+            link::Update::Ground { snapshot } => {
+                eprintln!(
+                    "{} arrived from the shard: {}x{} tiles at revision {}",
+                    snapshot.map().facet_name(),
+                    snapshot.map().width(),
+                    snapshot.map().height(),
+                    snapshot.revision().get(),
+                );
+                // Both in one statement, because a `Ground` is the facet *and*
+                // the bake over it — see `Ground::set_base`, which is the seam
+                // arrival goes through precisely so that there is no moment in
+                // which this end holds one without the other.
+                self.resources
+                    .ground
+                    .set_base(Some(*snapshot), &self.resources.tiledata);
+            }
             link::Update::Lost(reason) => {
                 eprintln!("disconnected: {reason}");
                 if let Some(view) = self.world.authoritative.view.as_mut() {
@@ -529,7 +566,15 @@ impl App {
         // shard serving a different one draws this client the wrong ground with
         // no complaint from either end. Said once, because it is a
         // misconfiguration and not an event.
-        if !self.world.authoritative.facet_checked {
+        //
+        // **And only once there is ground to compare against.** A client fed
+        // from the wire hears the `0x1B` before the facet arrives, so the flag
+        // stays down until there is a map — which makes this the first view
+        // *after* the ground rather than the first view. The check is then
+        // vacuous for that client and it is still worth making: what it compares
+        // is the size the `0x1B` carried against the size the chunks assembled
+        // to, and those are two statements the shard makes in two packets.
+        if !self.world.authoritative.facet_checked && self.resources.grounded() {
             self.world.authoritative.facet_checked = true;
             if u32::from(view.map.width) != self.resources.map().width()
                 || u32::from(view.map.height) != self.resources.map().height()

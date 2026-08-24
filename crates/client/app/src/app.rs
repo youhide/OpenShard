@@ -320,8 +320,21 @@ impl App {
     /// thing hidden by architecture in the picture cannot honestly be under
     /// the cursor. Keep this existing settings switch and map rule together;
     /// the future building renderer has its own policy and frame value.
+    /// Whether there is a world under this client at all.
+    ///
+    /// [`Resources::grounded`](crate::resources::Resources::grounded) is where
+    /// the invariant is written down; this is the name the two doors call it by.
+    pub(crate) fn grounded(&self) -> bool {
+        self.resources.grounded()
+    }
+
     pub(crate) fn cutaway(&self) -> Cutaway {
-        if self.graphics.cutaway_disabled {
+        // Open with no ground, and it is not a special case: a cutaway is the
+        // architecture standing between the eye and the body, and a facet
+        // nobody has handed over has none. This is the one reader of the map
+        // that a *packet* can reach — `App::apply_view` advances the cutaway —
+        // so it answers for itself rather than being gated by a caller.
+        if self.graphics.cutaway_disabled || !self.grounded() {
             Cutaway::OPEN
         } else {
             Cutaway::at(
@@ -598,7 +611,13 @@ impl App {
                 sweep.server_updates.new_animations += 1;
                 true
             }
-            crate::link::Update::Design(_) | crate::link::Update::Lost(_) => false,
+            // And not the ground: it arrives once, before the world does and so
+            // long before the zoom this soak is counting traffic after. Counting
+            // it as a server update would also let `freeze_server` swallow the
+            // one update the client cannot draw without.
+            crate::link::Update::Design(_)
+            | crate::link::Update::Ground { .. }
+            | crate::link::Update::Lost(_) => false,
         };
         let freeze = sweep.freeze_server && is_server_update;
         if freeze {

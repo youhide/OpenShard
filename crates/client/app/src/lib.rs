@@ -217,6 +217,54 @@ pub struct Opening {
     pub scenario: Option<Scenario>,
 }
 
+/// Where this client's ground comes from.
+///
+/// Three arms, and deliberately not
+/// [`openshard_movement::bake::WorldSource`]'s two: the third is a *client's*
+/// answer and can be nobody else's. The shard reads the world it is about to
+/// serve and each of the two bakes reads the world it is about to bake, so none
+/// of them has a shard to ask — and an arm they can never take is an arm every
+/// one of them would have to write a `match` for. What the two types share is
+/// the arms that name a file, and [`WorldSource::on_disk`] is the seam.
+///
+/// The install and a base set are both *sources*, which is why this is not an
+/// `Option<PathBuf>` with a flag beside it: E0 argued that for the first two and
+/// the third does not change it — a world that arrives over the connection is a
+/// third place to read one from, not the absence of the other two.
+#[derive(Clone, Copy, Debug)]
+pub enum WorldSource<'a> {
+    /// The client install's own `map*` and `statics*`, as every run before base
+    /// sets existed.
+    Install,
+    /// A base set of ours, and the append-only patch log beside it.
+    BaseSet(&'a Path),
+    /// The shard's own ground, fetched over the game connection after login.
+    ///
+    /// `docs/map/new_map_representation/to_the_client.md`'s E2. It needs a shard
+    /// — an offline viewer with this arm has nobody to ask — and it is the one
+    /// arm under which the window exists before the facet does. What that costs
+    /// is stated once, on [`crate::resources::Resources::map`].
+    Shard,
+}
+
+impl<'a> WorldSource<'a> {
+    /// The file source this names, or `None` for the world that arrives over the
+    /// connection.
+    ///
+    /// The conversion to the type the shard's boot and the two bakes share. It
+    /// is the whole of what the two enums have to agree about, and a new file
+    /// arm added to either is a compile error here rather than a client that
+    /// quietly reads the install instead.
+    #[must_use]
+    pub const fn on_disk(self) -> Option<openshard_movement::bake::WorldSource<'a>> {
+        match self {
+            Self::Install => Some(openshard_movement::bake::WorldSource::Install),
+            Self::BaseSet(path) => Some(openshard_movement::bake::WorldSource::BaseSet(path)),
+            Self::Shard => None,
+        }
+    }
+}
+
 /// A repeatable presentation path injected into the client at startup.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Scenario {
@@ -405,14 +453,23 @@ pub(crate) fn scaled_gump_quads(labels: &[GumpLabel<'_>], atlas: &FontAtlas, sca
 /// version claimed, where the camera starts — is a constant above, because none
 /// of it is a decision a caller has ever needed to make differently.
 ///
-/// `world` is the second of those and is new: the install used to be the only
-/// possible answer, and now a base set of ours is the other one. It is an enum
-/// with two arms rather than an `Option<PathBuf>` because the install is a
-/// *source* and not the absence of one. What a base set replaces is
-/// `map0LegacyMUL.uop`, `staidx0.mul` and `statics0.mul`; `dir` is still
-/// required either way, because the art, the hues, the multis and — the one
-/// that decides what a tile *means* — `tiledata.mul` are not in a base set and
-/// are not going to be.
+/// `world` is the second of those: the install used to be the only possible
+/// answer, then a base set of ours became the second, and the shard itself is
+/// the third — see [`WorldSource`], which is where the three are argued. What a
+/// base set replaces is `map0LegacyMUL.uop`, `staidx0.mul` and `statics0.mul`;
+/// `dir` is still required under every arm, because the art, the hues, the
+/// multis and — the one that decides what a tile *means* — `tiledata.mul` are
+/// not in a base set, are not on the wire, and are not going to be.
+///
+/// **[`WorldSource::Shard`] is the arm that reorders this function.** Under the
+/// other two the facet is read before the window exists and everything after it
+/// — the span bake, the coarse graph, the interiors flood, the camera's opening
+/// `z` — is built from a map that is already there. A world that arrives after
+/// login cannot keep that order, so under this arm the client starts with a
+/// [`Ground`](openshard_movement::ground::Ground) that has no base, and grows one
+/// when [`link::Update::Ground`] arrives. The two artifacts are absent with it:
+/// they are bakes of a world this client has no file for, exactly as they are
+/// absent today for an install with nothing baked beside it.
 ///
 /// A shard is a [`Dial`] and a [`Plan`] rather than an address and a plan: how
 /// the connection is opened is the caller's, which is what lets
@@ -438,7 +495,7 @@ pub(crate) fn scaled_gump_quads(labels: &[GumpLabel<'_>], atlas: &FontAtlas, sca
 /// the event loop it builds is what enforces it.
 pub fn run<D: Dial + Send + 'static>(
     dir: &Path,
-    world: openshard_movement::bake::WorldSource<'_>,
+    world: WorldSource<'_>,
     shard: Option<(D, Plan)>,
     ttf_font: Option<PathBuf>,
     opening: Opening,
@@ -473,21 +530,45 @@ pub fn run<D: Dial + Send + 'static>(
     // resolution the shard's boot and the two bakes use, so a client and a shard
     // pointed at one base set cannot arrive at different revisions of it —
     // `docs/map/new_map_representation/to_the_client.md`'s E0.
-    let world =
-        match openshard_movement::bake::FacetWorld::read(dir, world, openshard_protocol::world::Facet(FACET))
-        {
-            Ok(world) => world,
-            Err(error) => {
-                eprintln!("loading facet {FACET}: {error}");
+    //
+    // `None` is E2's arm and reads nothing: the ground is the shard's, and it
+    // arrives on the connection opened further down. Everything below that used
+    // to be written against a facet in hand is written against this `Option`,
+    // and each of those places says what it does without one.
+    let world = match world.on_disk() {
+        Some(source) => {
+            match openshard_movement::bake::FacetWorld::read(
+                dir,
+                source,
+                openshard_protocol::world::Facet(FACET),
+            ) {
+                Ok(world) => Some(world),
+                Err(error) => {
+                    eprintln!("loading facet {FACET}: {error}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        None => {
+            if shard.is_none() {
+                eprintln!(
+                    "the ground was asked for from the shard and no shard was dialled: \
+                     a viewer has nobody to ask, so give it --base-set or the install's map files"
+                );
                 return ExitCode::FAILURE;
             }
-        };
-    if world.patches != 0 {
-        eprintln!(
-            "facet {FACET}: {} patch(es) applied; it is at revision {}",
-            world.patches,
-            world.snapshot.revision().get()
-        );
+            eprintln!("facet {FACET}: the ground comes from the shard");
+            None
+        }
+    };
+    if let Some(world) = &world {
+        if world.patches != 0 {
+            eprintln!(
+                "facet {FACET}: {} patch(es) applied; it is at revision {}",
+                world.patches,
+                world.snapshot.revision().get()
+            );
+        }
     }
     checkpoint("facet loaded");
     let art = match Art::open(dir) {
@@ -655,12 +736,14 @@ pub fn run<D: Dial + Send + 'static>(
         },
         None => None,
     };
-    eprintln!(
-        "{} loaded: {}x{} tiles",
-        world.snapshot.map().facet_name(),
-        world.snapshot.map().width(),
-        world.snapshot.map().height()
-    );
+    if let Some(world) = &world {
+        eprintln!(
+            "{} loaded: {}x{} tiles",
+            world.snapshot.map().facet_name(),
+            world.snapshot.map().width(),
+            world.snapshot.map().height()
+        );
+    }
 
     // User events are wake-ups only. The shard thread puts updates in the
     // staged mailbox below, so a busy platform loop cannot accumulate a second
@@ -722,14 +805,18 @@ pub fn run<D: Dial + Send + 'static>(
     // and puts a body in front of the thing being looked at. It moves the camera
     // and nothing else: logged in, the shard still says where the character is
     // and the eye returns to them the moment anything relocks it (Home).
+    //
+    // With no facet in hand there is no height to look up, and [`START`]'s own
+    // `z` stands in — a placeholder nothing draws, because the arm with no facet
+    // is also the arm with a shard, and the shard's `0x1B` says where the body
+    // actually is before the first frame is gated in.
     let start_tile = at.unwrap_or(Tile::new(START.x, START.y));
     let start = Point::new(
         start_tile.x,
         start_tile.y,
         world
-            .snapshot
-            .map()
-            .land(start_tile.x, start_tile.y)
+            .as_ref()
+            .and_then(|world| world.snapshot.map().land(start_tile.x, start_tile.y))
             .map_or(START.z, |cell| cell.z),
     );
 
@@ -745,111 +832,150 @@ pub fn run<D: Dial + Send + 'static>(
     let update_proxy = event_loop.create_proxy();
     let updates = link::Updates::new();
     let connected = shard.is_some();
+    // What the connection is asked to bring back, and it is the same question
+    // `world` above answered: a client holding a facet asks the shard for none
+    // of it, and a client holding none asks for all of it. There is no third
+    // answer, which is why this is derived here rather than passed in.
+    let ground_source = match world {
+        Some(_) => link::GroundSource::OwnDisk,
+        None => link::GroundSource::Fetched,
+    };
     let shard = shard.map(|(dial, plan)| {
         eprintln!("logging in as {}", plan.account.0);
         let reports = updates.clone();
-        link::connect(dial, plan, VERSION, move |update| {
+        link::connect(dial, plan, VERSION, ground_source, move |update| {
             if reports.publish(update) {
                 let _ = update_proxy.send_event(());
             }
         })
     });
 
-    // Live `MapTerrain` still authorizes every refined step. Without this cache
-    // the viewer remains useful, but long routes are disabled.
-    // The facet comes from the snapshot rather than from `FACET` again: one
-    // answer per process is the whole point of the snapshot owning it.
-    let facet = world.snapshot.facet();
-    // Both stamps are taken here, before the snapshot moves into `Ground`, and
-    // both are taken *from the world* rather than from `dir`: a facet read from
-    // a base set is not derived from `map0LegacyMUL.uop` any more, and that file
-    // still sits there with its old mtime — so a stamp naming it would pass and
-    // hand this client a graph of a world it has never seen.
+    // The ground, and the two artifacts baked over it.
     //
-    // The artifacts go with the world for the same reason, which is why the two
-    // paths below are `world.artifacts(dir)` and not `dir`.
-    let artifacts = world.artifacts(dir).to_owned();
-    let navigation_stamp = world.stamp(dir, facet);
-    let interior_stamp = openshard_client_artscan::interiors::stamp_of(dir, &world, facet);
-    // What a rebake command has to be told, so the two hints below name the
-    // world this client is actually running on.
-    let rebake_world = match &world.base_set {
-        Some(base_set) => format!(" --base-set {:?}", base_set.display()),
-        None => String::new(),
+    // All three at once, because all three are the same question — *which world
+    // is this* — and under [`WorldSource::Shard`] all three answers are the same
+    // one: there is no world yet. A facet that arrives on the connection has no
+    // file on this disk to have baked anything beside, so the coarse graph and
+    // the interiors flood are absent exactly as they are absent today for an
+    // install with nothing baked next to it. Long routes and the interior
+    // diagnostic are what that costs, and both already have an off state.
+    let facet = world
+        .as_ref()
+        .map_or(openshard_protocol::world::Facet(FACET), |world| {
+            // The facet comes from the snapshot rather than from `FACET` again:
+            // one answer per process is the whole point of the snapshot owning
+            // it. With no snapshot there is only the constant.
+            world.snapshot.facet()
+        });
+    let (ground, coarse, interiors) = match world {
+        None => {
+            eprintln!(
+                "no navigation graph and no interiors flood: they are bakes of a world this \
+                 client has no file for"
+            );
+            // Where a body may stand cannot be baked over a facet nobody has
+            // handed over yet. `Ground::set_base` is the seam it arrives
+            // through, and it takes the bake in the same statement — see
+            // `link::Update::Ground`.
+            (
+                openshard_movement::ground::Ground::new(None, &tiledata),
+                None,
+                None,
+            )
+        }
+        Some(world) => {
+            // Both stamps are taken here, before the snapshot moves into
+            // `Ground`, and both are taken *from the world* rather than from
+            // `dir`: a facet read from a base set is not derived from
+            // `map0LegacyMUL.uop` any more, and that file still sits there with
+            // its old mtime — so a stamp naming it would pass and hand this
+            // client a graph of a world it has never seen.
+            //
+            // The artifacts go with the world for the same reason, which is why
+            // the two paths below are `world.artifacts(dir)` and not `dir`.
+            let artifacts = world.artifacts(dir).to_owned();
+            let navigation_stamp = world.stamp(dir, facet);
+            let interior_stamp = openshard_client_artscan::interiors::stamp_of(dir, &world, facet);
+            // What a rebake command has to be told, so the two hints below name
+            // the world this client is actually running on.
+            let rebake_world = match &world.base_set {
+                Some(base_set) => format!(" --base-set {:?}", base_set.display()),
+                None => String::new(),
+            };
+            // Where a body may stand, baked before anything can ask: this end
+            // predicts every step it draws, and since `navigation_spans.md`'s N3
+            // a step reads this rather than re-deriving each column from
+            // `tiledata`. One pass over the facet, and the one thing a
+            // `MapTerrain` cannot be built without.
+            //
+            // The snapshot goes in here rather than at `Resources` because the
+            // bake is taken with it: a `Ground` is the facet *and* the bake over
+            // it, so there is no window in which this end holds one without the
+            // other.
+            let ground = openshard_movement::ground::Ground::new(Some(world.snapshot), &tiledata);
+            let (width, height) = {
+                let map = ground.snapshot().expect("it was given a facet a line ago");
+                (map.map().width(), map.map().height())
+            };
+            checkpoint("span index baked");
+
+            let navigation_path = openshard_movement::bake::artifact_path(&artifacts, facet);
+            let coarse = navigation_stamp
+                .and_then(|stamp| openshard_movement::bake::load(&navigation_path, &stamp))
+                .and_then(|graph| {
+                    if graph.dimensions() == (width, height) {
+                        Ok(graph)
+                    } else {
+                        Err(openshard_movement::bake::Error::Incompatible {
+                            path: navigation_path.clone(),
+                            reason: format!(
+                                "dimensions {}x{}, expected {width}x{height}",
+                                graph.dimensions().0,
+                                graph.dimensions().1,
+                            ),
+                        })
+                    }
+                })
+                .map_err(|error| {
+                    eprintln!(
+                        "{error}; long-distance routing disabled\ncreate it with: \
+                         OPENSHARD_CLIENT={:?} cargo run --release -p openshard-movement --bin \
+                         openshard-navigation-bake -- --facet {FACET}{rebake_world}",
+                        dir
+                    );
+                })
+                .ok();
+            checkpoint("navigation graph loaded");
+
+            let interior_path = openshard_client_artscan::interiors::artifact_path(&artifacts, facet);
+            let interiors = interior_stamp
+                .and_then(|stamp| openshard_client_artscan::interiors::load_baked(&interior_path, &stamp))
+                .and_then(|graph| {
+                    if graph.dimensions() == (width, height) {
+                        Ok(graph)
+                    } else {
+                        Err(openshard_client_artscan::interiors::Error::Incompatible {
+                            path: interior_path.clone(),
+                            reason: format!(
+                                "dimensions {}x{}, expected {width}x{height}",
+                                graph.dimensions().0,
+                                graph.dimensions().1,
+                            ),
+                        })
+                    }
+                })
+                .map_err(|error| {
+                    eprintln!(
+                        "{error}; interior diagnostic disabled\ncreate it with: \\
+                         OPENSHARD_CLIENT={:?} cargo run --release -p openshard-client-artscan --bin \\
+                         openshard-interiors-bake -- --facet {FACET}{rebake_world}",
+                        dir
+                    );
+                })
+                .ok();
+            (ground, coarse, interiors)
+        }
     };
-    let map = world.snapshot;
-    // Where a body may stand, baked before anything can ask: this end predicts
-    // every step it draws, and since `navigation_spans.md`'s N3 a step reads
-    // this rather than re-deriving each column from `tiledata`. One pass over
-    // the facet, and the one thing a `MapTerrain` cannot be built without.
-    //
-    // The snapshot goes in here rather than at `Resources` because the bake is
-    // taken with it: a `Ground` is the facet *and* the bake over it, so there is
-    // no window in which this end holds one without the other. What is left
-    // below is a borrow of the snapshot it now owns, which is all the loaders
-    // after this point read of it.
-    let ground = openshard_movement::ground::Ground::new(Some(map), &tiledata);
-    let map = ground.snapshot().expect("it was given a facet a line ago");
-    checkpoint("span index baked");
-
-    let navigation_path = openshard_movement::bake::artifact_path(&artifacts, facet);
-    let coarse = navigation_stamp
-        .and_then(|stamp| openshard_movement::bake::load(&navigation_path, &stamp))
-        .and_then(|graph| {
-            if graph.dimensions() == (map.map().width(), map.map().height()) {
-                Ok(graph)
-            } else {
-                Err(openshard_movement::bake::Error::Incompatible {
-                    path: navigation_path.clone(),
-                    reason: format!(
-                        "dimensions {}x{}, expected {}x{}",
-                        graph.dimensions().0,
-                        graph.dimensions().1,
-                        map.map().width(),
-                        map.map().height()
-                    ),
-                })
-            }
-        })
-        .map_err(|error| {
-            eprintln!(
-                "{error}; long-distance routing disabled\ncreate it with: \
-                 OPENSHARD_CLIENT={:?} cargo run --release -p openshard-movement --bin \
-                 openshard-navigation-bake -- --facet {FACET}{rebake_world}",
-                dir
-            );
-        })
-        .ok();
-    checkpoint("navigation graph loaded");
-
-    let interior_path = openshard_client_artscan::interiors::artifact_path(&artifacts, facet);
-    let interiors = interior_stamp
-        .and_then(|stamp| openshard_client_artscan::interiors::load_baked(&interior_path, &stamp))
-        .and_then(|graph| {
-            if graph.dimensions() == (map.map().width(), map.map().height()) {
-                Ok(graph)
-            } else {
-                Err(openshard_client_artscan::interiors::Error::Incompatible {
-                    path: interior_path.clone(),
-                    reason: format!(
-                        "dimensions {}x{}, expected {}x{}",
-                        graph.dimensions().0,
-                        graph.dimensions().1,
-                        map.map().width(),
-                        map.map().height(),
-                    ),
-                })
-            }
-        })
-        .map_err(|error| {
-            eprintln!(
-                "{error}; interior diagnostic disabled\ncreate it with: \\
-                 OPENSHARD_CLIENT={:?} cargo run --release -p openshard-client-artscan --bin \\
-                 openshard-interiors-bake -- --facet {FACET}{rebake_world}",
-                dir
-            );
-        })
-        .ok();
     checkpoint("interior graph loaded");
 
     // The sound mixer opens before a window exists, but its values belong to

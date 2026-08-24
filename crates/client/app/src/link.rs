@@ -21,9 +21,10 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 
 use openshard_client_net::action::Outgoing;
+use openshard_client_net::chunks::Fetch;
 use openshard_client_net::connection::Event;
 use openshard_client_net::session::Plan;
-use openshard_client_net::transport::{Dial, enter_world_with};
+use openshard_client_net::transport::{Dial, Socket, enter_world_with};
 use openshard_client_net::view::WorldView;
 use openshard_client_net::walk::{Moved, Walk};
 use openshard_protocol::feedback::{Animation, NewAnimation};
@@ -112,8 +113,37 @@ impl Movement {
     }
 }
 
+/// Where this connection's ground comes from.
+///
+/// Not a `bool` and not an `Option`, because both answers are a *source*: a
+/// client that opened a facet on its own disk is not a client missing one. The
+/// window decides it — see [`crate::WorldSource`], of which this is the half the
+/// wire cares about — and it decides one thing here: whether the login is
+/// followed by a fetch before anything is reported.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GroundSource {
+    /// The window opened a facet before it dialled, from the install or from a
+    /// base set. Nothing is asked of the shard, and a stock shard notices no
+    /// difference — every client before `to_the_client.md`'s E2.
+    OwnDisk,
+    /// The shard's own, fetched over this connection.
+    ///
+    /// A [`WorldNotice`](openshard_protocol::chunks::WorldNotice) says how big
+    /// the facet is, `chunks_of` it is the list to ask for, and what comes back
+    /// is [`Update::Ground`]. A shard that sends no notice has no ground to
+    /// give, and this client has none of its own: the connection ends and says
+    /// so.
+    Fetched,
+}
+
 /// What the shard thread tells the window.
-#[derive(Clone, Debug)]
+///
+/// **Not `Clone`.** [`Update::Ground`] carries a whole facet, and a
+/// [`MapSnapshot`](openshard_map::snapshot::MapSnapshot) has one owner per
+/// process by construction — see that type's doc, which is where the rule is
+/// argued. Nothing has ever cloned an update; this is what stops one from
+/// starting.
+#[derive(Debug)]
 pub enum Update {
     /// The world as it now stands. Sent whenever a packet changed anything —
     /// whole rather than as a delta, because a renderer wants what to draw and
@@ -148,6 +178,29 @@ pub enum Update {
     /// thread has a socket and no client files; the window has the files. So the
     /// bytes travel and the decode happens where the box is knowable.
     Design(Vec<u8>),
+    /// The facet, assembled out of every chunk of it the shard sent.
+    ///
+    /// Sent once, for a connection whose [`GroundSource`] is
+    /// [`Fetched`](GroundSource::Fetched), and **after** [`Update::World`] — by
+    /// however long a facet takes to arrive.
+    ///
+    /// That gap is the whole cost of E2 and it is deliberate. The other order
+    /// was available: hold the world back until the ground is here, and the
+    /// window would never exist without a facet. It was refused because the
+    /// packets that keep arriving during the fetch have to go *somewhere*, and
+    /// the only two places are this thread's own unbounded buffer or the
+    /// bounded mailbox the window drains — which the window cannot drain while
+    /// it is waiting for a value this thread is holding back. So the gap is
+    /// real, and it is closed by a gate rather than by an ordering: see
+    /// `crate::resources::Resources::grounded`.
+    ///
+    /// `Box` for [`World`](Update::World)'s reason, and it is the reason the
+    /// engine's style allows one at all: a `MapSnapshot` is by some way the
+    /// largest thing that crosses this seam, and every other variant would be
+    /// sized for it.
+    Ground {
+        snapshot: Box<openshard_map::snapshot::MapSnapshot>,
+    },
     /// The connection ended, and why. Nothing further will arrive.
     ///
     /// The window stays open on one of these: a client that vanished when a
@@ -565,7 +618,7 @@ impl Link {
 /// `dial` is how the connection is opened and the only thing here that knows
 /// what a socket is: `Tcp` for a shard on a network, and something else for one
 /// in this process. It is moved onto the thread, so it is `Send`.
-pub fn connect<D, F>(dial: D, plan: Plan, version: ClientVersion, report: F) -> Link
+pub fn connect<D, F>(dial: D, plan: Plan, version: ClientVersion, ground: GroundSource, report: F) -> Link
 where
     D: Dial + Send + 'static,
     F: Fn(Update) + Send + 'static,
@@ -573,7 +626,7 @@ where
     let (sender, commands) = tokio::sync::mpsc::channel(COMMAND_CAPACITY);
     std::thread::Builder::new()
         .name("shard".to_owned())
-        .spawn(move || run(dial, plan, version, &report, commands))
+        .spawn(move || run(dial, plan, version, ground, &report, commands))
         // The thread is the connection; a client that could not spawn it has
         // nothing to fall back to, and the OS refusing a thread at startup is
         // not a condition worth a variant in `Update`.
@@ -587,6 +640,7 @@ fn run<D: Dial, F: Fn(Update) + Send>(
     dial: D,
     plan: Plan,
     version: ClientVersion,
+    ground: GroundSource,
     report: &F,
     commands: tokio::sync::mpsc::Receiver<Command>,
 ) {
@@ -598,9 +652,31 @@ fn run<D: Dial, F: Fn(Update) + Send>(
         }
     };
     runtime.block_on(async move {
-        let reason = play(dial, plan, version, report, commands).await;
+        let reason = play(dial, plan, version, ground, report, commands).await;
         report(Update::Lost(reason));
     });
+}
+
+/// How often a fetch says where it has got to.
+///
+/// Felucca is 7,168 chunks, so one line a thousand is seven of them — enough to
+/// tell a slow link from a stalled one, and few enough to sit in the same
+/// terminal as `run`'s own startup checkpoints without becoming the whole of it.
+const PROGRESS_EVERY: usize = 1_024;
+
+/// Put every request the fetch is ready to make on the wire.
+///
+/// In a loop until it says no: at the start of a fetch that is as many requests
+/// as [`IN_FLIGHT_CHUNKS`](openshard_client_net::chunks::IN_FLIGHT_CHUNKS)
+/// allows, and after each chunk completes it is at most one. The pacing is the
+/// fetch's; what is here is the socket.
+async fn ask<D: Dial>(socket: &mut Socket<D::Stream>, fetch: &mut Fetch) -> Result<(), String> {
+    while let Some(request) = fetch.next_request() {
+        if let Err(error) = socket.send(&request.encode()).await {
+            return Err(error.to_string());
+        }
+    }
+    Ok(())
 }
 
 /// Everything after the runtime exists, up to the reason it ended.
@@ -608,6 +684,7 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
     dial: D,
     plan: Plan,
     version: ClientVersion,
+    ground: GroundSource,
     report: &F,
     mut commands: tokio::sync::mpsc::Receiver<Command>,
 ) -> String {
@@ -616,6 +693,46 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
         Err(error) => return error.to_string(),
     };
     let player_serial = view.player.serial;
+    // The ground, if this client was told to take the shard's. The first
+    // requests go out *here*, before the world is reported, so that the fetch is
+    // already on the wire while the window is folding in its first view — but it
+    // finishes later, and `Update::Ground`'s own doc is where that gap is
+    // argued.
+    //
+    // `view.world` is a copy taken before the view moves, and it is there because
+    // the shard sends the notice *before* the `0x55` that ends the login
+    // conversation — `enter_world_with` folds everything up to that packet in,
+    // so a notice is in hand by the time this runs. `None` is a shard that has
+    // no ground for this facet at all — see `World::world_notice` — and this
+    // client has none of its own, so the connection ends and says which of the
+    // two it was.
+    let mut fetch = match ground {
+        GroundSource::OwnDisk => None,
+        GroundSource::Fetched => {
+            let Some(notice) = view.world else {
+                return "this shard has no ground for the facet, and this client opened none of its \
+                        own: start it with --base-set or with the install's map files"
+                    .to_owned();
+            };
+            match Fetch::of(notice) {
+                Ok(fetch) => {
+                    eprintln!(
+                        "the ground comes from the shard: facet {}, revision {}, {} chunks",
+                        notice.facet.0,
+                        notice.revision.0,
+                        fetch.wanted(),
+                    );
+                    Some(fetch)
+                }
+                Err(error) => return format!("the world the shard described cannot be fetched: {error}"),
+            }
+        }
+    };
+    if let Some(active) = fetch.as_mut() {
+        if let Err(reason) = ask::<D>(&mut socket, active).await {
+            return reason;
+        }
+    }
     // Where the server put us. The owner starts its `Walk` from this view, and
     // every `0x02` after it is computed there.
     report(Update::World { view: Box::new(view) });
@@ -649,6 +766,49 @@ async fn play<D: Dial, F: Fn(Update) + Send>(
                 // reading, so the loop ends and the window is told why.
                 if matches!(packet, openshard_protocol::server_packet::ServerPacket::LogoutAck(_)) {
                     return "logged out".to_owned();
+                }
+                // The ground, while it is still arriving. A chunk packet is
+                // consumed here and never reported: what the window is given is
+                // the facet, once, and not the seven thousand fragments it
+                // came in. Every failure ends the connection, because a client
+                // that was told to take the shard's ground and did not get it
+                // has nothing to draw and no second source to fall back to.
+                if let Some(active) = fetch.as_mut() {
+                    let before = active.held();
+                    let mine = match active.on_packet(&packet) {
+                        Ok(mine) => mine,
+                        Err(error) => return format!("fetching the ground: {error}"),
+                    };
+                    if mine {
+                        let held = active.held();
+                        if held != before && held % PROGRESS_EVERY == 0 {
+                            eprintln!("the ground: {held} of {} chunks", active.wanted());
+                        }
+                        if !active.is_complete() {
+                            // A chunk out is room for a chunk in, and `ask` is
+                            // what decides whether that is yet a request.
+                            if let Err(reason) = ask::<D>(&mut socket, active).await {
+                                return reason;
+                            }
+                            continue;
+                        }
+                        // Whole. The fetch is over and its one value is the
+                        // facet, so it is taken rather than left behind: what
+                        // follows on this connection is ordinary traffic, and a
+                        // `Fetch` still sitting here would refuse the next
+                        // `ChunkData` E4 sends as one nobody asked for.
+                        let done = fetch.take().expect("the fetch borrowed a line ago");
+                        eprintln!("the ground arrived: {} chunks", done.wanted());
+                        match done.finish() {
+                            Ok(snapshot) => report(Update::Ground {
+                                snapshot: Box::new(snapshot),
+                            }),
+                            Err(error) => {
+                                return format!("the ground the shard sent is not a facet: {error}");
+                            }
+                        }
+                        continue;
+                    }
                 }
                 if let openshard_protocol::server_packet::ServerPacket::Animation(animation) = packet {
                     report(Update::Animation(animation));

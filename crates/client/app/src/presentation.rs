@@ -1418,6 +1418,15 @@ impl App {
         if !self.world.render_ready {
             return;
         }
+        // And the other half of the same sentence, since `to_the_client.md`'s
+        // E2: a client whose ground comes over the connection is *told it may
+        // draw* before the facet arrives, so "the shard authorised a picture"
+        // and "there is ground to make one of" are two facts and this frame
+        // needs both. Everything below reads `Resources::map`, which is where
+        // the invariant is written down.
+        if !self.grounded() {
+            return;
+        }
         // Movement is advanced before the HUD is assembled below. Clear the
         // frame-local plan here so both consumers share at most one search.
         self.steer.begin_frame();

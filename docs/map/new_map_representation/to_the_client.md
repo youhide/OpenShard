@@ -283,6 +283,40 @@ answered with something.
 present at all and draws the same world an install-fed client draws, sampled over
 the facet.
 
+**Taken in E2, and each is a thing this document did not foresee:**
+
+- **The third arm is the *client's* enum and not
+  `openshard_movement::bake::WorldSource`'s.** The shard's boot and both bake
+  binaries share that type, and none of them can ever take a `Shard` arm — a
+  shard has no shard to ask. So the client owns a three-armed enum of its own and
+  converts at the seam, which is the one place the two have to agree.
+- **The window keeps its ground behind a gate, not behind an ordering.** The
+  other arrangement was available and is the obvious one: hold the first
+  `Update::World` back until the facet is here, and the window never exists
+  without ground. It is refused because the packets that keep arriving during a
+  21 MiB fetch have to go somewhere, and the only two places are the shard
+  thread's own unbounded buffer or the bounded mailbox the window drains — which
+  the window cannot drain while it is blocked on a value that thread is holding
+  back. So the gap between "there is a world" and "there is ground under it" is
+  real, and `Resources::grounded` is checked at the two doors that can reach the
+  map: the frame, and the window's own events.
+- **The fetch is a state machine in `client/net` and the loop is in `link.rs`.**
+  `Fetch::next_request` hands out a packet and `Fetch::on_packet` takes one, so a
+  whole facet's transfer is testable against a fixture with no socket in it.
+- **A request is full or it is the last one.** The in-flight window is a count of
+  chunks, so one chunk coming back is room for exactly one going out, and topping
+  up per chunk would ask for Felucca in four full requests and then 6,912 naming
+  one chunk each. Waiting for room for a whole request leaves 192 chunks on the
+  wire while the next one goes out.
+- **A chunk that arrives is checked against the chunk that was asked for.** The
+  check `join`'s own doc leaves to the caller, and it has to be made: a chunk is
+  self-contained and names itself, so a swapped pair is indistinguishable
+  downstream from a missing one — `assemble` would refuse the facet for the
+  blocks the duplicate did not cover and name the innocent chunk.
+- **Every failure of the fetch ends the connection.** A client told to take the
+  shard's ground and given something that is not a facet has nothing to draw and
+  no second source, so the honest thing is one line saying which chunk and why.
+
 ### E3 — the client keeps what it was given
 
 **Goal.** The 21.3 MiB is paid once.
@@ -406,3 +440,37 @@ Found while fixing the two above:
   and the test is still worth having for exactly that reason: a second writer of
   the same id is a second chance to disagree with the table. Rename, don't
   delete.
+
+Found while building E2:
+
+- **`link::play`'s own wiring has no test, and it is the one seam E2 added that
+  does not.** The pieces under it are covered — `Fetch` against a fixture in
+  `client/net`, the whole loop against a real shard in `e2e/shard`'s
+  `chunks.rs` — but the thirty lines in `play` that join them (the `continue`
+  that keeps a chunk packet off the mailbox, the order of `Update::World` and
+  `Update::Ground`, the four error returns) are checked only by running the
+  playground. The obstacle is honest and structural: `link` is private to
+  `openshard-client-app` and that crate cannot see a shard, while
+  `openshard-e2e-shard` can see both ends and cannot see `link`. Either the
+  module goes public for a test, or `e2e/playground` grows a `tests/` that drives
+  `connect` — the second is the smaller change and the playground already links
+  both.
+- **`world_of_ours` is written twice, in `map_edit.rs` and in `chunks.rs`.** The
+  same twenty-five lines — write a base set, bake a graph beside it, hand back
+  the path — differing only in whether statics are placed. E2 generalised
+  `chunks.rs`'s copy by a `blocks` argument rather than adding a third; the lift
+  is a `tests/common/mod.rs` those two share, which is dev-only and costs the
+  `openshard-e2e-shard` library nothing.
+- **A fetch that straddles a publish fails the whole facet.** `assemble` refuses
+  `MixedRevisions`, which is right — half a world before an edit and half after
+  is a world that never existed — but the client's answer to it is to end the
+  connection. The honest recovery is to start the fetch again at the new
+  revision, and it belongs with E4, which is where a client learns that a publish
+  happened at all.
+- **The window is blank for the length of the fetch and only the terminal says
+  why.** 21.3 MiB of Felucca is seconds, and what a person sees is an unpainted
+  surface while `the ground: 4096 of 7168 chunks` scrolls past in a console they
+  may not be looking at. E3 makes the common case instant, so this may never be
+  worth a picture; if it is, the state already exists — `Resources::grounded` is
+  false and `WorldState::connection` is the strip that says what the connection
+  is doing.

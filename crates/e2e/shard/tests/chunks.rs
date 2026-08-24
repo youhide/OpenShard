@@ -26,11 +26,21 @@
 //! `map_edit`'s argument again, and here there is a second one: the oracle is
 //! that file, read back through `openshard_basemap::read`, so the test needs a
 //! world it knows every byte of.
+//!
+//! # Two tests, and they are two phases
+//!
+//! The first is E1's and is about the **wire**: sixteen chunks asked for by
+//! hand, and every record compared byte for byte against what `Chunk::of` cuts
+//! out of the file. The second is E2's and is about the **client**: it drives
+//! `openshard_client_net::chunks::Fetch` — the thing a window runs — over
+//! eighty-one chunks, which is more than one request may name, and asks whether
+//! the facet it ends up holding is the shard's facet tile for tile.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use openshard_client_net::chunks::Fetch;
 use openshard_client_net::connection::Event;
 use openshard_client_net::transport::{Socket, enter_world};
 use openshard_config::{Config, FacetKey};
@@ -57,6 +67,13 @@ const FACET: Facet = Facet(0);
 const BLOCKS: u32 = 32;
 /// Chunks along each side: `BLOCKS / 8`.
 const CHUNKS: u16 = 4;
+/// 72 blocks square: **81 chunks, which is more than one request may name.**
+///
+/// The second test's fixture, and the size is the whole reason it is a second
+/// one. Sixteen chunks fit in a single `0xE002` and prove nothing about a client
+/// that has to pace itself; eighty-one are two requests, so the send-then-read
+/// loop is exercised over a socket rather than only against a fixture.
+const WIDE_BLOCKS: u32 = 72;
 const START: (u16, u16) = (128, 128);
 /// The ground the fixture is made of: grass, flat, at zero.
 ///
@@ -82,8 +99,8 @@ fn install() -> Option<PathBuf> {
 /// These are what a transposed or truncated chunk gets wrong. Their graphics are
 /// nothing `tiledata.mul` describes, which is deliberate — an unknown graphic
 /// stands in nobody's way, so the navigation bake is unaffected by them.
-fn statics() -> Vec<StaticItem> {
-    let last = u16::try_from(BLOCKS * 8).unwrap() - 1;
+fn statics(blocks: u32) -> Vec<StaticItem> {
+    let last = u16::try_from(blocks * 8).unwrap() - 1;
     let mut items: Vec<StaticItem> = [(0, 0), (63, 30), (64, 30), (30, 63), (30, 64), (last, last)]
         .into_iter()
         .enumerate()
@@ -112,16 +129,16 @@ fn statics() -> Vec<StaticItem> {
 ///
 /// `openshard-map-import` and `openshard-navigation-bake` in miniature, through
 /// the same functions — `map_edit`'s reasoning, and the same code shape.
-fn world_of_ours(dir: &Path, client: &Path) -> PathBuf {
+fn world_of_ours(dir: &Path, client: &Path, blocks: u32) -> PathBuf {
     let base_set = dir.join("fixture.osbase");
     let mut map = WorldMap::from_blocks(
         BlockExtent {
-            wide: BLOCKS,
-            down: BLOCKS,
+            wide: blocks,
+            down: blocks,
         },
         |_, _| GROUND,
     );
-    for item in statics() {
+    for item in statics(blocks) {
         map.place_static(item);
     }
     let snapshot = MapSnapshot::new(FACET, map);
@@ -191,17 +208,27 @@ async fn hear(
     heard
 }
 
-/// Every chunk of the fixture, as the wire names them.
-fn every_chunk() -> Vec<ChunkAt> {
+/// Every chunk of a fixture that size, as the wire names them.
+fn every_chunk(blocks: u32) -> Vec<ChunkAt> {
     chunks_of(BlockExtent {
-        wide: BLOCKS,
-        down: BLOCKS,
+        wide: blocks,
+        down: blocks,
     })
     .map(|at| ChunkAt {
         x: u16::try_from(at.x).unwrap(),
         y: u16::try_from(at.y).unwrap(),
     })
     .collect()
+}
+
+/// A temp directory of this test's own, removed when it passes.
+///
+/// Named for the test as well as the process: two of these run in one binary and
+/// in parallel, and a shared directory would be one bake racing another.
+fn scratch(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("openshard-{name}-e2e-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a writable temp directory");
+    dir
 }
 
 #[tokio::test]
@@ -211,9 +238,8 @@ async fn a_client_asks_for_the_ground_and_gets_the_shards_own_bytes() {
         eprintln!("OPENSHARD_CLIENT is not set, so there is no tile table to read: skipping");
         return;
     };
-    let dir = std::env::temp_dir().join(format!("openshard-chunks-e2e-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("a writable temp directory");
-    let base_set = world_of_ours(&dir, &client);
+    let dir = scratch("chunks");
+    let base_set = world_of_ours(&dir, &client, BLOCKS);
 
     // Held for the length of the test: dropping the handle stops the shard.
     let (address, shard) = spawn(config_over(base_set.clone(), client));
@@ -233,7 +259,7 @@ async fn a_client_asks_for_the_ground_and_gets_the_shards_own_bytes() {
     assert_eq!(notice.revision.0, 1, "a fresh base set nobody has patched");
 
     // Then the ground. Sixteen chunks, which is inside one request's cap.
-    let wanted = every_chunk();
+    let wanted = every_chunk(BLOCKS);
     assert_eq!(wanted.len(), usize::from(CHUNKS) * usize::from(CHUNKS));
     socket
         .send(
@@ -300,7 +326,7 @@ async fn a_client_asks_for_the_ground_and_gets_the_shards_own_bytes() {
     };
     let rebuilt = assemble(FACET, extent, &decoded).expect("a complete set");
     assert_eq!(rebuilt.static_count(), on_disk.map().static_count());
-    for item in statics() {
+    for item in statics(BLOCKS) {
         let there: Vec<StaticItem> = rebuilt.statics_at(item.x, item.y).copied().collect();
         assert!(
             there.contains(&item),
@@ -345,6 +371,107 @@ async fn a_client_asks_for_the_ground_and_gets_the_shards_own_bytes() {
             .any(|packet| matches!(packet, ServerPacket::ChunkData(_))),
         "and nothing was sent for it"
     );
+
+    shard.stop();
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// E2's own seam: the client does not compare bytes, it **holds a world**.
+///
+/// The test above is E1's — it checks each record against the file the shard cut
+/// it from, which is a statement about the wire. This one drives
+/// [`Fetch`](openshard_client_net::chunks::Fetch), the thing a window actually
+/// runs, over the same socket and asks a different question: is the facet it
+/// ends up holding the shard's facet, tile for tile.
+///
+/// Two things only this can catch. The fixture is **81 chunks**, which is more
+/// than one `0xE002` may name, so the send-then-read loop has to pace itself and
+/// the shard has to answer two requests on one connection. And what comes out is
+/// a [`MapSnapshot`] rather than a pile of records: the facet, the revision and
+/// the extent are read off it and compared with the base set the shard booted
+/// from.
+#[tokio::test]
+#[ignore = "reads the install's tiledata and bakes a graph; run it deliberately"]
+async fn a_client_with_no_map_files_ends_up_holding_the_shards_world() {
+    let Some(client) = install() else {
+        eprintln!("OPENSHARD_CLIENT is not set, so there is no tile table to read: skipping");
+        return;
+    };
+    let dir = scratch("world-from-the-wire");
+    let base_set = world_of_ours(&dir, &client, WIDE_BLOCKS);
+
+    let (address, shard) = spawn(config_over(base_set.clone(), client));
+    let (mut socket, view) =
+        tokio::time::timeout(Duration::from_secs(30), enter_world(address, plan(), version()))
+            .await
+            .expect("the login conversation finished inside the timeout")
+            .expect("the client reached the world");
+
+    let notice = view.world.expect("the shard told us what world we are in");
+    let mut fetch = Fetch::of(notice).expect("a facet the wire can name");
+    assert_eq!(fetch.wanted(), 81, "nine chunks square");
+
+    // The loop `link.rs` runs, and deliberately written out here rather than
+    // called: what is under test is that the two halves of it — ask until the
+    // window is full, then read until something completes — make progress
+    // against a real shard.
+    let mut requests = 0;
+    let fetching = async {
+        loop {
+            while let Some(request) = fetch.next_request() {
+                requests += 1;
+                socket
+                    .send(&request.encode())
+                    .await
+                    .expect("the shard is listening");
+            }
+            if fetch.is_complete() {
+                return;
+            }
+            let event = socket
+                .next_event()
+                .await
+                .expect("the socket stayed up")
+                .expect("the shard did not hang up mid-fetch");
+            if let Event::Packet(packet) = event {
+                fetch.on_packet(&packet).expect("the shard's own ground");
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(60), fetching)
+        .await
+        .expect("the facet arrived inside the timeout");
+    assert!(
+        requests > 1,
+        "81 chunks is more than one request may name, and it was asked for in {requests}"
+    );
+
+    let arrived = fetch.finish().expect("a complete set of chunks");
+
+    // The oracle: the file the shard booted from, read back through the reader a
+    // shard boots with. Not the bytes this time — the world.
+    let on_disk = openshard_basemap::read(&base_set).expect("the base set reads back");
+    assert_eq!(arrived.facet(), FACET);
+    assert_eq!(arrived.revision(), on_disk.revision(), "a world nobody patched");
+    assert_eq!(arrived.map().width(), on_disk.map().width());
+    assert_eq!(arrived.map().height(), on_disk.map().height());
+    assert_eq!(arrived.map().static_count(), on_disk.map().static_count());
+
+    // Every tile, because the failure this is against is a *transposed* chunk —
+    // one that lands somewhere plausible and is wrong everywhere. Sampling would
+    // find it only by luck.
+    for y in 0..u16::try_from(on_disk.map().height()).unwrap() {
+        for x in 0..u16::try_from(on_disk.map().width()).unwrap() {
+            assert_eq!(
+                arrived.map().land(x, y),
+                on_disk.map().land(x, y),
+                "the land at ({x}, {y})"
+            );
+            let here: Vec<StaticItem> = arrived.map().statics_at(x, y).copied().collect();
+            let there: Vec<StaticItem> = on_disk.map().statics_at(x, y).copied().collect();
+            assert_eq!(here, there, "the statics at ({x}, {y})");
+        }
+    }
 
     shard.stop();
     std::fs::remove_dir_all(&dir).ok();

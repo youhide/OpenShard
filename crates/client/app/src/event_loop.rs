@@ -174,6 +174,19 @@ impl ApplicationHandler<()> for App {
                 // thing only at zoom 1. `draw` resizes them together.
                 self.ask_redraw();
             }
+            WindowEvent::RedrawRequested => self.draw(),
+            // Everything past this line asks the world a question — which tile
+            // is under the cursor, which way to walk, what is at the end of a
+            // route — and until the facet arrives there is no world to ask. See
+            // `Resources::grounded`: this is one of the two doors it is checked
+            // at, and the three arms above it are the *window's* own events
+            // rather than the world's, so a client can still be resized,
+            // redrawn and closed while its ground is on its way.
+            //
+            // Only [`WorldSource::Shard`](crate::WorldSource::Shard) ever
+            // reaches this: under the other two arms the facet is in hand before
+            // the window exists.
+            _ if !self.grounded() => {}
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else {
                     return;
@@ -803,7 +816,6 @@ impl ApplicationHandler<()> for App {
                     }
                 }
             }
-            WindowEvent::RedrawRequested => self.draw(),
             _ => {}
         }
     }

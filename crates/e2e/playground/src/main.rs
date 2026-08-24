@@ -161,6 +161,20 @@ struct Cli {
     /// Run a deterministic presentation scenario after the window opens.
     #[arg(long, value_enum)]
     scenario: Option<Scenario>,
+
+    /// Give the window its ground over the connection instead of off the disk.
+    ///
+    /// `docs/map/new_map_representation/to_the_client.md`'s E2, and the reason
+    /// it is worth having here rather than only on `openshard-client-app`: this
+    /// is the one launcher where both ends are in one process, so a world that
+    /// arrives wrong arrives wrong beside the world it was cut from.
+    ///
+    /// It changes only the *window*. The shard still reads whatever the config
+    /// and `window_base_set` point it at — it has to, since what the window
+    /// fetches is the shard's own facet — so this is the two ends reading one
+    /// world by construction rather than by both being pointed at one file.
+    #[arg(long)]
+    world_from_shard: bool,
 }
 
 fn main() -> ExitCode {
@@ -248,10 +262,11 @@ fn main() -> ExitCode {
     // thing it just logged in to play. `--at` is the offline viewer's.
     let code = openshard_client_app::run(
         &dir,
-        base_set.as_deref().map_or(
-            openshard_movement::bake::WorldSource::Install,
-            openshard_movement::bake::WorldSource::BaseSet,
-        ),
+        match (cli.world_from_shard, base_set.as_deref()) {
+            (true, _) => openshard_client_app::WorldSource::Shard,
+            (false, Some(base_set)) => openshard_client_app::WorldSource::BaseSet(base_set),
+            (false, None) => openshard_client_app::WorldSource::Install,
+        },
         Some((dial, plan)),
         cli.ttf_font,
         openshard_client_app::Opening {

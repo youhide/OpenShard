@@ -28,3 +28,6 @@ rustc-hash.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
+# One fixture facet's land ids, for the chunk fetch's round trip. What a tile
+# *means* is still nothing this crate reads — see `chunks.rs`.
+openshard-tiles.workspace = true
