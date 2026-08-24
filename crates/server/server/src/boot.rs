@@ -542,9 +542,11 @@ fn facet_source(
     )?;
     // Beside the base set, not beside the install: the artifact belongs to the
     // world it was built from, and two worlds of one facet must not share it.
-    let beside = base_set.parent().unwrap_or_else(|| Path::new("."));
     Ok(FacetSource {
-        navigation_path: openshard_movement::bake::artifact_path(beside, facet),
+        navigation_path: openshard_movement::bake::artifact_path(
+            openshard_movement::bake::beside(base_set),
+            facet,
+        ),
         stamp,
         map,
         rebake: format!(

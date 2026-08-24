@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -114,8 +114,7 @@ fn source(
             // Beside the base set: the world is what the graph is derived from,
             // and an artifact in the install directory would be found by a
             // shard reading the install and refused for reasons it cannot see.
-            let beside = base_set.parent().unwrap_or_else(|| Path::new("."));
-            let path = bake::artifact_path(beside, facet);
+            let path = bake::artifact_path(bake::beside(base_set), facet);
             Ok((map, stamp, path))
         }
         None => {

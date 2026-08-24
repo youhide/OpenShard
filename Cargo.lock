@@ -2713,14 +2713,18 @@ dependencies = [
 name = "openshard-e2e-shard"
 version = "0.0.1"
 dependencies = [
+ "openshard-basemap",
  "openshard-client-net",
  "openshard-commands",
  "openshard-config",
  "openshard-gateway",
+ "openshard-map",
  "openshard-movement",
  "openshard-persistence",
  "openshard-protocol",
  "openshard-server",
+ "openshard-tiles",
+ "openshard-uofiles",
  "tokio",
  "toml",
 ]

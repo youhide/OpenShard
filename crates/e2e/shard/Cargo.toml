@@ -36,7 +36,19 @@ openshard-commands.workspace = true
 # For `WALK_BUFFER` only: the burst that provokes the `0x21` this test needs as
 # an oracle has to be bigger than the pace budget, and a number written here
 # would stop being bigger the day the budget grew.
+#
+# And, in `tests/map_edit.rs`, for the span bake and the navigation artifact: a
+# shard boots from a base set only if a graph stamped against it is lying beside
+# it, so a test that starts one has to make both.
 openshard-movement.workspace = true
+# The four crates `tests/map_edit.rs` needs to *be* the import pipeline: the
+# world (`map`), the file it goes in (`basemap`), the tile table it is read
+# against (`tiles`, out of `uofiles`). A fixture that wrote those files its own
+# way would be testing a pipeline the shard does not have.
+openshard-basemap.workspace = true
+openshard-map.workspace = true
+openshard-tiles.workspace = true
+openshard-uofiles.workspace = true
 # To reopen, from outside the shard, the database the shard wrote: `tests/
 # stop_saves.rs` is the only assertion anywhere that a stop actually saved. A
 # dev-dependency because the reading end is a test's, not the playground's.

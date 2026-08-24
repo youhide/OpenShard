@@ -82,6 +82,25 @@ impl std::error::Error for Error {
     }
 }
 
+/// The directory a file sits in, as a directory something can be opened on.
+///
+/// `Path::parent` has **two** ways of saying "here", and only one of them is
+/// `None`: a bare relative name like `felucca.osbase` answers `Some("")`, and an
+/// empty path is not a directory anything can open — `File::open("")` is
+/// `NotFound`. That is not a hypothetical: it is what the shard's own printed
+/// rebake command produces, and it made a successful bake report
+/// `navigation artifact  does not exist` after the artifact was already written.
+///
+/// One rule, three callers: this function, the bake binary and `boot`. Written
+/// here because this is the crate that discovered it.
+#[must_use]
+pub fn beside(path: &Path) -> &Path {
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    }
+}
+
 /// Default destination, overridable for read-only installs.
 pub fn artifact_path(client_dir: &Path, facet: Facet) -> PathBuf {
     std::env::var_os("OPENSHARD_NAVIGATION")
@@ -208,7 +227,7 @@ pub fn save(path: &Path, graph: &NavigationGraph, stamp: &Stamp) -> Result<u64, 
             reason: "writer received an old routing stamp".into(),
         });
     }
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = beside(path);
     let stem = path.file_name().and_then(|s| s.to_str()).unwrap_or("navigation");
     let mut attempt = 0u32;
     let (temp, file) = loop {
@@ -828,5 +847,20 @@ mod tests {
         let path = temp("absent.bin");
         let _ = fs::remove_file(&path);
         assert!(matches!(load(&path, &stamp()), Err(Error::Missing { .. })));
+    }
+
+    /// A bare relative name has a parent, and it is the empty path — which is
+    /// not a directory anything can open. It cost a successful bake reporting
+    /// `navigation artifact  does not exist` after writing the artifact, from
+    /// the rebake command the shard itself prints.
+    #[test]
+    fn a_bare_relative_name_sits_in_this_directory() {
+        assert_eq!(beside(Path::new("felucca.osbase")), Path::new("."));
+        assert_eq!(beside(Path::new("worlds/felucca.osbase")), Path::new("worlds"));
+        assert_eq!(beside(Path::new("/srv/felucca.osbase")), Path::new("/srv"));
+        // `File::open` is what `save` does with it, and it is the reason the
+        // empty answer is not good enough.
+        assert!(File::open(beside(Path::new("felucca.osbase"))).is_ok());
+        assert!(File::open(Path::new("")).is_err());
     }
 }

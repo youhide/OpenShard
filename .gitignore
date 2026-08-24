@@ -54,3 +54,13 @@ CLAUDE.local.md
 # visual debugging. It is a render of the client's own map data and must never
 # be committed — see CONTRIBUTING.md, "No client files. Ever."
 *.ppm
+
+# A world of ours and everything derived from it. A base set is an *import* of
+# the client's map — the same rule as the line above, and 102 MiB of it on
+# Felucca — the `.ospatch` log beside it is the edits made to that import, and
+# the navigation artifact is a bake over the pair. All three are made by
+# `openshard-map-import` and `openshard-navigation-bake` from files that are not
+# ours to distribute.
+*.osbase
+*.ospatch
+openshard-navigation-*.bin
