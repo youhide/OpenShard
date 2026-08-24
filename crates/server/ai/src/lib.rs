@@ -1028,10 +1028,24 @@ const PET_LEASH: u32 = 15;
 /// not decide anything for itself, it carries out an order. What it shares is the
 /// return — a direction for the tick to step — so a pet moves through the same
 /// `step` a wild creature and a townsperson use.
+///
+/// **A pet works a latch exactly as it did before it was tamed.** The door
+/// policy is its own brain's, the same read [`chase_step`] makes of a wild one,
+/// so a tamed orc opens the shop door and a llama stops at it — ServUO's
+/// `BaseAI`, which asks the creature and not the order. This used to pass
+/// [`Doors::AllOpen`] for every pet, which planned through doors the pet could
+/// not work and, once routes were kept, opened them: the `opens_doors` a tamed
+/// creature carries was a dead field, and it is set from the body at both the
+/// taming and the restore.
+///
+/// The brain is read rather than defaulted because every pet has one: taming
+/// gives a brainless prop horse one (`npc::pets`), a restore rebuilds it, and
+/// the tick's own loop is over brains.
 #[must_use]
 pub fn pet_beat(state: &mut WorldState, pet: EntityId) -> Option<Direction> {
     let order = *state.registry.get::<Pet>(pet)?;
     let &Position(at) = state.registry.get::<Position>(pet)?;
+    let doors = Doors::for_opener(state.registry.get::<Brain>(pet)?.opens_doors);
     let facet = state.facet_of(pet);
     let owner = state.registry.entity_of(order.owner)?;
     match order.order {
@@ -1046,7 +1060,7 @@ pub fn pet_beat(state: &mut WorldState, pet: EntityId) -> Option<Direction> {
             if openshard_state::in_range(at, target_at, 1) {
                 return None;
             }
-            step_body_toward(state, pet, facet, at, target_at, Doors::AllOpen, Goal::Moving)
+            step_body_toward(state, pet, facet, at, target_at, doors, Goal::Moving)
         }
         PetOrder::Guard | PetOrder::Follow | PetOrder::Come => {
             let &Position(owner_at) = state.registry.get::<Position>(owner)?;
@@ -1058,7 +1072,7 @@ pub fn pet_beat(state: &mut WorldState, pet: EntityId) -> Option<Direction> {
                 // than pathing across the map, the same give-up the chase has.
                 return None;
             }
-            step_body_toward(state, pet, facet, at, owner_at, Doors::AllOpen, Goal::Moving)
+            step_body_toward(state, pet, facet, at, owner_at, doors, Goal::Moving)
         }
     }
 }

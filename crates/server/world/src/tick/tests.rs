@@ -15195,6 +15195,81 @@ fn a_door_on_a_freshly_planned_step_is_opened_rather_than_walked_into() {
     );
 }
 
+/// A pet works a latch exactly as it did before it was tamed, and a llama does
+/// not.
+///
+/// **The `opens_doors` a tamed creature carries was a dead field.** `pet_beat`
+/// walked every pet on [`Doors::AllOpen`] whatever body it wore, so a horse
+/// planned through a shut shop door — and, once a route outlived the beat that
+/// planned it, opened one. ServUO asks the creature (`BaseAI.CanOpenDoors`),
+/// which is the same read a wild brain gets in `chase_step`, and the flag is
+/// set from the body at both the taming and the restore.
+///
+/// The pair is the oracle: one wall, one doorway, a shut door in it, and two
+/// pets that differ in nothing but the body they wear.
+#[test]
+fn a_pet_works_a_latch_only_if_its_body_has_hands() {
+    /// One step north of the doorway, so the door is the pet's very next step.
+    const PET_AT: Point = Point::new(DOORWAY.0, DOORWAY.1 - 1, 0);
+    /// And the owner south of it, further off than the follow gap.
+    const OWNER_AT: Point = Point::new(DOORWAY.0, DOORWAY.1 + 3, 0);
+
+    for (body, hands) in [(0x00C8_u16, false), (0x0190_u16, true)] {
+        let now = Instant::now();
+        let mut world = shard_over(one_doorway(), None);
+        let (door, _) = place_door(&mut world, Point::new(DOORWAY.0, DOORWAY.1, 0), now);
+        // The owner is spawned first, so the *other* brained body is the pet.
+        // Sight is what earns a brain at all here; nothing is ticked after it,
+        // so neither of them ever acts on what it can see.
+        let owner = spawn_brained(&mut world, 0x0190, OWNER_AT, 8, now);
+        spawn_brained(&mut world, body, PET_AT, 8, now);
+        let pet = world
+            .state
+            .registry
+            .query::<Brain>()
+            .map(|(entity, _)| entity)
+            .find(|&entity| entity != owner)
+            .expect("the second creature is the pet");
+        let owner_serial = world
+            .state
+            .registry
+            .serial_of(owner)
+            .expect("a spawned mobile has a serial");
+        world.state.registry.insert(
+            pet,
+            openshard_state::components::Pet {
+                owner: owner_serial,
+                slots: openshard_protocol::world::FollowerSlots::ONE,
+                order: openshard_state::components::PetOrder::Follow,
+                order_target: None,
+            },
+        );
+        // The premise of the case, asserted rather than assumed: the body table
+        // is what decides, and this test is about the read and not the table.
+        assert_eq!(
+            world.registry().get::<Brain>(pet).map(|brain| brain.opens_doors),
+            Some(hands),
+            "body {body:#06x} is the one this case is about"
+        );
+
+        let step = ai::pet_beat(&mut world.state, pet);
+        let opened = world
+            .registry()
+            .get::<openshard_state::components::Door>(door)
+            .is_some_and(|d| d.is_open);
+        assert_eq!(
+            opened, hands,
+            "body {body:#06x}: whether the door is opened is whether the pet has hands"
+        );
+        assert_eq!(
+            step.is_none(),
+            hands,
+            "body {body:#06x}: a beat spent on the door is not a step, and the \
+             one that cannot work it walks at the door instead"
+        );
+    }
+}
+
 /// A route says nothing from anywhere except where its next step starts, and a
 /// body that did not move is not standing there.
 ///
