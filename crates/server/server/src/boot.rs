@@ -438,6 +438,13 @@ struct FacetSource {
     stamp: openshard_movement::bake::Stamp,
     /// Where that artifact is.
     navigation_path: std::path::PathBuf,
+    /// The patch log beside the base set, when there is one on disk.
+    ///
+    /// The artifact's one forgivable input: a graph baked before the last few
+    /// edits was stamped over a shorter log than the world now has, and it is the
+    /// log itself that says how to carry it forward. `None` is a facet out of the
+    /// install, or a world of ours nobody has edited yet — neither can be behind.
+    log: Option<std::path::PathBuf>,
     /// The command that makes it, for the error that says it is missing.
     rebake: String,
     /// Where this facet's world lives, when it is a world of ours.
@@ -515,6 +522,7 @@ fn facet_source(
     Ok(FacetSource {
         navigation_path,
         stamp,
+        log: world.log,
         // The base set's own revision, not the world's: it is the log's header,
         // and a patch committed while the shard runs is appended to that log.
         // `None` for a facet read out of the install, which is a facet nothing
@@ -536,6 +544,61 @@ fn facet_source(
         map: world.snapshot,
         rebake,
     })
+}
+
+/// What a navigation artifact missed while it sat on disk.
+struct Missed {
+    /// The revision it was built from.
+    from: openshard_map::snapshot::MapRevision,
+    /// The chunks every patch committed since then touched, each one once.
+    chunks: Vec<openshard_map::chunk::ChunkCoord>,
+}
+
+/// Which chunks a graph built at `from` has to be rebaked over to stand for the
+/// world its log has since carried it to.
+///
+/// **The union, and one rebake.** `NavigationGraph::rebake_chunks` rebuilds the
+/// regions a chunk set covers, their neighbours, and a ring beyond for edges, so
+/// the set derived from a union contains every set derived from a member of it —
+/// and the ground is at its final revision either way, because the world was
+/// loaded by applying the whole log before anything here ran. Replaying the
+/// patches one at a time would rebake the same regions n times over the same
+/// map.
+///
+/// # Errors
+///
+/// A message, and every one of them ends the same way: bake the graph whole. The
+/// log is the authority on ancestry that `bake::load_behind` deliberately does
+/// not claim — a file can say it is *below* the world's revision and nothing
+/// more — so a gap the log cannot cover is found here and nowhere else.
+fn missed_chunks(
+    log: &Path,
+    facet: Facet,
+    base: openshard_map::snapshot::MapRevision,
+    from: openshard_map::snapshot::MapRevision,
+) -> Result<Missed, String> {
+    if from.get() < base.get() {
+        return Err(format!(
+            "the navigation artifact for facet {facet} was built from map revision {}, and the \
+             log beside the base set starts at {}: nothing on disk reaches back that far",
+            from.get(),
+            base.get(),
+        ));
+    }
+    let committed = openshard_basemap::patches::read(log, facet, base).map_err(|source| {
+        format!(
+            "the navigation artifact for facet {facet} is behind the world, and the log that \
+             would carry it forward could not be read: {source}"
+        )
+    })?;
+    let mut chunks: Vec<openshard_map::chunk::ChunkCoord> = committed
+        .iter()
+        .filter(|patch| patch.revision().get() > from.get())
+        .flat_map(|patch| patch.touched_chunks())
+        .collect();
+    chunks.sort_unstable();
+    chunks.dedup();
+    Ok(Missed { from, chunks })
 }
 
 /// Load the world, if it is configured.
@@ -626,11 +689,36 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
             map,
             stamp,
             navigation_path,
+            log,
             rebake,
             home,
         } = source;
-        let coarse = openshard_movement::bake::load(&navigation_path, &stamp)
-            .map_err(|error| format!("{error}\ncreate it with: {rebake}"))?;
+        // A world of ours with a log can be *ahead* of its own artifact, and that
+        // is ordinary rather than broken: the graph follows a patch on the tick
+        // that commits it, and nothing writes the file until something bakes.
+        // So the artifact is read as far behind as the log can carry it, and
+        // caught up below — once the facet is in the world, where the span index
+        // the rebake reads already exists.
+        let (coarse, behind) = match (&home, &log) {
+            (Some(home), Some(log)) => {
+                let loaded = openshard_movement::bake::load_behind(
+                    &navigation_path,
+                    &stamp,
+                    &openshard_movement::bake::file_name_of(log),
+                )
+                .map_err(|error| format!("{error}\ncreate it with: {rebake}"))?;
+                let behind = (loaded.revision != stamp.revision)
+                    .then(|| missed_chunks(log, facet, home.base, loaded.revision))
+                    .transpose()
+                    .map_err(|reason| format!("{reason}\nrecreate it with: {rebake}"))?;
+                (loaded.graph, behind)
+            }
+            _ => (
+                openshard_movement::bake::load(&navigation_path, &stamp)
+                    .map_err(|error| format!("{error}\ncreate it with: {rebake}"))?,
+                None,
+            ),
+        };
         if coarse.dimensions() != (map.map().width(), map.map().height()) {
             return Err(format!(
                 "navigation artifact {} has dimensions {}x{}, but facet {facet} is {}x{}\n\
@@ -673,6 +761,37 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
             "facet loaded"
         );
         world = world.with_facet(facet, map, Some(coarse), rules_of(config, facet), home);
+        // Now the facet has its ground and its span index, which is what the
+        // rebake reads — and the graph in hand is the one the file held, so this
+        // is the last moment anything is behind.
+        if let Some(missed) = behind {
+            let began = Instant::now();
+            let graph = world
+                .catch_up(facet, &missed.chunks)
+                .expect("a facet just loaded with a graph has one");
+            let took = began.elapsed();
+            // Written back, or the same chunks are rebaked at every start and the
+            // file never moves. A failure here is not one the shard has to die of:
+            // what is in memory is the world as it stands, and the next boot pays
+            // this again rather than getting it wrong.
+            match openshard_movement::bake::save(&navigation_path, graph, &stamp) {
+                Ok(bytes) => info!(
+                    facet = facet.0,
+                    from = missed.from.get(),
+                    to = stamp.revision.get(),
+                    chunks = missed.chunks.len(),
+                    ?took,
+                    bytes,
+                    "navigation artifact caught up with the patch log"
+                ),
+                Err(error) => warn!(
+                    facet = facet.0,
+                    %error,
+                    "the caught-up navigation artifact could not be written back; the shard runs \
+                     on the graph in memory and the next start will catch it up again"
+                ),
+            }
+        }
     }
     info!(
         facets = config.world.facets.len(),

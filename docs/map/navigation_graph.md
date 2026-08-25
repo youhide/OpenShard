@@ -189,6 +189,61 @@ borders, and a node dropped because one of them stopped naming it while the othe
 still does is a node the graph loses silently. Measure before believing it is
 worth it — the ring is sampling and component labelling, not floods.
 
+## G2 — the artifact follows the graph
+
+**Built.** G1 made the graph follow a patch; nothing made the *file* follow the
+graph, and the two together are what a shard is. The coarse graph is rebaked on
+the tick that commits an edit and lives in memory from then on, but the artifact
+beside the base set is only ever as new as the last bake — so a shard that was
+edited and then restarted met its own artifact one or more revisions behind the
+world its log had just rebuilt, and refused to boot:
+
+```
+navigation artifact ./felucca-navigation-0.bin is stale: built from map
+revision 7, expected 9
+```
+
+That is not a rare state. It is the state every edit leaves behind, so the shard
+was one `.setland` away from a start that needed a half-minute whole-facet bake
+before it would come up again.
+
+**The log is what closes it.** A world of ours *is* the base set plus its log, so
+the patches between the artifact's revision and the world's are on disk beside
+it — and G1 already knows how to spend them. Boot reads the artifact as far
+behind as the log can carry it, unions the chunks the missed patches touched,
+runs the same `rebake_chunks` a publish runs, and writes the artifact back.
+
+- **`bake::load_behind`, beside `bake::load`.** Two callers, not two levels of
+  strictness: a tool that wants *the* graph of a world, and a shard that holds
+  the ground and the log and can rebake the difference. The patch log is the one
+  input the two stamps may honestly disagree about — an artifact baked at
+  revision 7 was stamped over a shorter log, or over no log at all — so that
+  entry is dropped from **both** sides rather than compared leniently. A base set
+  that was re-imported or a tile table that moved is refused exactly as before:
+  nothing replays those.
+- **A file can only say it is *below*.** Whether the log actually holds the
+  patches between the two revisions is a question for the log, and the loader
+  does not pretend to answer it; `boot`'s `missed_chunks` is where a gap the log
+  cannot cover is found, and it ends in the same rebake command as before.
+- **Ahead is refused.** An artifact newer than the world it names is a log that
+  lost records under a graph, and there is no direction to replay that in.
+- **One rebake over the union, not one per patch.** The rebuilt set derived from
+  a union contains every set derived from a member of it, and the ground is at
+  its final revision either way — the world was loaded by applying the whole log
+  before any of this ran.
+- **The catch-up happens after the facet is loaded**, through
+  `World::catch_up` → `WorldState::catch_up` → `FacetState::catch_up`, which is
+  `publish`'s second half without the publish. That is where the facet's span
+  index already exists: carrying the graph forward outside the world would mean
+  baking a second span index over the same facet to do it.
+- **A write that fails is not fatal.** What is in memory is the world as it
+  stands; the next start catches up again rather than getting it wrong.
+
+What is *not* built is a shard that writes the artifact as it runs. It does not
+need to be: the catch-up costs one rebake per restart and a crash is covered by
+the same path, where a save-on-shutdown would leave a killed shard exactly where
+this started.
+
 ## Out of scope
 
 - Multiple graph levels. A single automatic graph is enough for this pass.

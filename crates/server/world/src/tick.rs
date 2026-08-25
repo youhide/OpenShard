@@ -446,6 +446,22 @@ impl World {
         self
     }
 
+    /// Bring a facet's coarse graph in step with ground it never saw move, and
+    /// hand it back so the caller can write it down.
+    ///
+    /// Boot's door to [`WorldState::catch_up`], and the reason the facet is
+    /// loaded *before* it is asked: the rebake reads this facet's span index and
+    /// its map, and both of those are things [`with_facet`](Self::with_facet)
+    /// built. A caller that carried the graph forward outside the world would
+    /// have to bake a second span index over the same facet to do it.
+    pub fn catch_up(
+        &mut self,
+        facet: Facet,
+        chunks: &[openshard_map::chunk::ChunkCoord],
+    ) -> Option<&openshard_movement::NavigationGraph> {
+        self.state.catch_up(facet, chunks)
+    }
+
     /// The default facet's spatial index.
     pub fn sectors(&self) -> &Sectors {
         self.state.facets[&self.state.default_facet].sectors()

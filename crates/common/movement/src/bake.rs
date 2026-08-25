@@ -556,8 +556,82 @@ pub fn save(path: &Path, graph: &NavigationGraph, stamp: &Stamp) -> Result<u64, 
     result
 }
 
+/// An artifact as it was read, and the world it was actually built from.
+///
+/// [`load_behind`]'s answer. The revision is the point of it: a caller that can
+/// carry a graph forward has to know **how far**, and the file is the only thing
+/// that knows.
+#[derive(Debug)]
+pub struct Loaded {
+    /// The graph the file holds.
+    pub graph: NavigationGraph,
+    /// The revision it was built from — the world's own, or an ancestor of it.
+    pub revision: MapRevision,
+}
+
+/// How much of a mismatch between an artifact and the world it names a loader
+/// will still answer a graph for.
+///
+/// Two arms because there are two kinds of caller, not two levels of strictness:
+/// a tool that wants *the* graph of a world, and a shard that holds the ground
+/// and the log and can rebake the difference. Neither is allowed a changed base
+/// set or a changed tile table — nothing replays those.
+#[derive(Clone, Copy, Debug)]
+enum Accept<'a> {
+    /// The world exactly: every input, and the revision.
+    Current,
+    /// The world, or a world **behind** it that the patch log carries forward.
+    ///
+    /// `log` is that log's file name in the stamp, and it is the one input the
+    /// two are allowed to disagree about: an artifact baked at revision 7 was
+    /// stamped over a shorter log than the world at revision 9 has. It may also
+    /// be absent from the older stamp altogether — a world nobody had edited had
+    /// no log file to stamp — which is why the entry is dropped from *both*
+    /// sides rather than compared leniently.
+    OrBehind { log: &'a str },
+}
+
 /// Read and validate an artifact without consulting terrain or pathfinding.
+///
+/// The world exactly as it stands: see [`load_behind`] for the caller that can
+/// take an older one.
 pub fn load(path: &Path, expected: &Stamp) -> Result<NavigationGraph, Error> {
+    read_artifact(path, expected, Accept::Current).map(|loaded| loaded.graph)
+}
+
+/// Read an artifact that may have been built from an **earlier revision of the
+/// same world**, for a caller that can carry it forward.
+///
+/// [`load`]'s other half, and the reason it has one. The shard's coarse graph
+/// follows a patch on the tick that commits it — `FacetState::publish` rebakes
+/// the chunks the patch named — but the *file* is only ever as new as the last
+/// bake, so a shard that was edited and then restarted meets an artifact one or
+/// more revisions behind the world its log rebuilds. Refusing that is refusing
+/// to boot over work the log already knows how to redo, and the answer is 80 ms
+/// of `NavigationGraph::rebake_chunks` per edit rather than a whole-facet bake
+/// measured in half-minutes.
+///
+/// `log` is the patch log's file name — [`file_name_of`] over
+/// `openshard_basemap::patches::log_path` — and it names the one input an older
+/// artifact is allowed to disagree about. Everything else still has to match
+/// byte for byte: a base set that was re-imported or a tile table that moved is
+/// a world no log can carry a graph across, and it is refused exactly as before.
+///
+/// **This does not check ancestry, and cannot.** That the recorded revision is
+/// *below* the world's is all a file can say; whether the log actually holds the
+/// patches between them is a question for the log, and the caller is the one
+/// holding it.
+///
+/// # Errors
+///
+/// [`Error`] as [`load`], and [`Error::Stale`] for an artifact *ahead* of the
+/// world it names — a log that was truncated or rolled back under a graph, which
+/// is not a gap anything can replay forward.
+pub fn load_behind(path: &Path, expected: &Stamp, log: &str) -> Result<Loaded, Error> {
+    read_artifact(path, expected, Accept::OrBehind { log })
+}
+
+fn read_artifact(path: &Path, expected: &Stamp, accept: Accept<'_>) -> Result<Loaded, Error> {
     let mut bytes = Vec::new();
     File::open(path)
         .map_err(|source| io_error(path.into(), source))?
@@ -571,7 +645,7 @@ pub fn load(path: &Path, expected: &Stamp) -> Result<NavigationGraph, Error> {
     if hash(&bytes[..payload_len]) != recorded {
         return Err(corrupt(path, "checksum mismatch"));
     }
-    decode(path, &bytes[..payload_len], expected).map_err(|error| match error {
+    decode(path, &bytes[..payload_len], expected, accept).map_err(|error| match error {
         Error::Corrupt { path: empty, reason } if empty.as_os_str().is_empty() => Error::Corrupt {
             path: path.into(),
             reason,
@@ -677,7 +751,7 @@ fn encode(mut w: impl Write, g: &NavigationGraph, stamp: &Stamp) -> io::Result<(
     Ok(())
 }
 
-fn decode(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<NavigationGraph, Error> {
+fn decode(path: &Path, bytes: &[u8], expected: &Stamp, accept: Accept<'_>) -> Result<Loaded, Error> {
     let mut r = Reader { bytes, at: 0 };
     if r.take(8)? != MAGIC {
         return Err(incompatible(path, "wrong magic"));
@@ -710,15 +784,31 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<NavigationGraph
     // length answer "are these the same client files", and the revision answers
     // "is this the same world we published". A world edited in place would keep
     // every input file's stamp and change only this number.
-    if revision != expected.revision {
-        return Err(stale(
-            path,
-            format!(
-                "built from map revision {}, expected {}",
-                revision.get(),
-                expected.revision.get()
-            ),
-        ));
+    match accept {
+        Accept::Current if revision != expected.revision => {
+            return Err(stale(
+                path,
+                format!(
+                    "built from map revision {}, expected {}",
+                    revision.get(),
+                    expected.revision.get()
+                ),
+            ));
+        }
+        // Behind is what the caller asked to be handed; ahead is a log that lost
+        // records under a graph, and there is no direction to replay that in.
+        Accept::OrBehind { .. } if revision.get() > expected.revision.get() => {
+            return Err(stale(
+                path,
+                format!(
+                    "built from map revision {}, and the world is at {}: an artifact cannot be \
+                     ahead of the world it names",
+                    revision.get(),
+                    expected.revision.get()
+                ),
+            ));
+        }
+        _ => {}
     }
     if width == 0 || height == 0 || width > u16::MAX as u32 || height > u16::MAX as u32 {
         return Err(incompatible(
@@ -749,7 +839,18 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<NavigationGraph
         routing_version: routing,
         inputs,
     };
-    if &actual != expected {
+    let agrees = match accept {
+        Accept::Current => &actual == expected,
+        // The revision is already decided above, and the log is the input the
+        // revision *is*: what is left to check is that the world underneath both
+        // is the same one.
+        Accept::OrBehind { log } => {
+            actual.facet == expected.facet
+                && actual.routing_version == expected.routing_version
+                && inputs_besides(&actual.inputs, log) == inputs_besides(&expected.inputs, log)
+        }
+    };
+    if !agrees {
         return Err(stale(path, "client-file metadata changed"));
     }
     let nr = r.count()?;
@@ -853,24 +954,36 @@ fn decode(path: &Path, bytes: &[u8], expected: &Stamp) -> Result<NavigationGraph
             }
         }
     }
-    Ok(NavigationGraph {
-        width,
-        height,
-        regions,
-        walkable,
-        // What no run points at is garbage a publish left behind, and it is
-        // counted rather than refused: a saved graph is allowed to be one an
-        // edit has already moved. See `NavigationGraph::repack`.
-        dead_nodes: (nn - named.iter().filter(|listed| **listed).count()) as u32,
-        dead_region_nodes: (nrn - listed) as u32,
-        dead_edges: (ne - reachable) as u32,
-        nodes,
-        region_runs,
-        region_nodes,
-        edge_runs,
-        edge_targets,
-        edge_costs,
+    Ok(Loaded {
+        revision,
+        graph: NavigationGraph {
+            width,
+            height,
+            regions,
+            walkable,
+            // What no run points at is garbage a publish left behind, and it is
+            // counted rather than refused: a saved graph is allowed to be one an
+            // edit has already moved. See `NavigationGraph::repack`.
+            dead_nodes: (nn - named.iter().filter(|listed| **listed).count()) as u32,
+            dead_region_nodes: (nrn - listed) as u32,
+            dead_edges: (ne - reachable) as u32,
+            nodes,
+            region_runs,
+            region_nodes,
+            edge_runs,
+            edge_targets,
+            edge_costs,
+        },
     })
+}
+
+/// Every input but the patch log, in order.
+///
+/// The log is the one input two stamps over the same world may honestly
+/// disagree about — see [`Accept::OrBehind`] — and it is dropped from both sides
+/// rather than compared, because an artifact old enough may not list it at all.
+fn inputs_besides<'a>(inputs: &'a [InputStamp], log: &str) -> Vec<&'a InputStamp> {
+    inputs.iter().filter(|input| input.name != log).collect()
 }
 
 struct Reader<'a> {
@@ -1191,6 +1304,96 @@ mod tests {
         fs::write(&path, &data).unwrap();
         assert!(matches!(load(&path, &s), Err(Error::Corrupt { .. })));
         let _ = fs::remove_file(path);
+    }
+
+    /// A stamp over a world of ours, in `stamp_of_base_set`'s order: the base
+    /// set, the log beside it when there is one, and the tile table.
+    fn base_set_stamp(revision: u64, log: Option<u64>) -> Stamp {
+        let mut inputs = vec![InputStamp {
+            name: "felucca.osbase".into(),
+            bytes: 4096,
+            modified_ns: 11,
+        }];
+        if let Some(bytes) = log {
+            inputs.push(InputStamp {
+                name: "felucca.ospatch".into(),
+                bytes,
+                modified_ns: 12,
+            });
+        }
+        inputs.push(InputStamp {
+            name: "tiledata.mul".into(),
+            bytes: 512,
+            modified_ns: 13,
+        });
+        Stamp {
+            facet: Facet(0),
+            revision: MapRevision::decoded(revision),
+            routing_version: ROUTING_VERSION,
+            inputs,
+        }
+    }
+
+    /// An artifact one or more revisions behind the world is handed to
+    /// [`load_behind`] and refused by [`load`], and it says how far behind it is.
+    ///
+    /// The case is the ordinary life of a shard that can be edited: the graph
+    /// follows a patch on the tick that commits it and nothing writes the file,
+    /// so every restart after an edit meets exactly this. What must *not* be
+    /// forgiven is anything else — a base set that moved is a world no log
+    /// carries a graph across.
+    #[test]
+    fn an_artifact_behind_the_world_is_offered_to_a_caller_that_can_carry_it_forward() {
+        let terrain = Grid::new(8, 8, &BTreeSet::new());
+        let graph = NavigationGraph::build(&terrain.footing(), 8, 8).unwrap();
+        // The world two edits on: the revision moved, and so did the log it moved
+        // by. Nothing else did.
+        let world = base_set_stamp(9, Some(480));
+
+        let path = temp("behind.bin");
+        save(&path, &graph, &base_set_stamp(7, Some(300))).unwrap();
+        assert!(
+            matches!(load(&path, &world), Err(Error::Stale { .. })),
+            "the loader that wants the world exactly still refuses it"
+        );
+        let loaded = load_behind(&path, &world, "felucca.ospatch")
+            .expect("an older revision of the same world is what the log carries forward");
+        assert_eq!(loaded.revision.get(), 7, "how far behind is the file's to say");
+        assert_eq!(loaded.graph, graph);
+
+        // Baked before anything was ever committed: there was no log file to
+        // stamp, so the older stamp is one input shorter rather than different.
+        let never_edited = temp("behind-unlogged.bin");
+        save(&never_edited, &graph, &base_set_stamp(1, None)).unwrap();
+        assert_eq!(
+            load_behind(&never_edited, &world, "felucca.ospatch")
+                .expect("a world nobody had edited is behind one that has been")
+                .revision
+                .get(),
+            1
+        );
+
+        // The base set itself moved: a re-import, and a world nothing replays.
+        let mut reimported = world.clone();
+        reimported.inputs[0].modified_ns += 1;
+        assert!(
+            matches!(
+                load_behind(&path, &reimported, "felucca.ospatch"),
+                Err(Error::Stale { .. })
+            ),
+            "only the log is forgiven"
+        );
+
+        // And the other direction, which is a log that lost records under a
+        // graph rather than a graph that missed some.
+        let ahead = load_behind(&path, &base_set_stamp(5, Some(200)), "felucca.ospatch");
+        assert!(
+            matches!(&ahead, Err(Error::Stale { reason, .. }) if reason.contains("ahead of the world")),
+            "an artifact newer than the world it names is refused, and says why: {ahead:?}"
+        );
+
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(never_edited);
     }
 
     #[test]

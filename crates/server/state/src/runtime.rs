@@ -724,6 +724,22 @@ impl FacetState {
         self.follow(&undo.map.touched_chunks(), tiles);
     }
 
+    /// Bring the coarse graph in step with ground it never saw move.
+    ///
+    /// [`publish`](Self::publish)'s half without the publish, and it exists for
+    /// one caller: the shard's boot, holding a graph read off disk that was baked
+    /// some revisions before the world its patch log just rebuilt. The chunks are
+    /// the union of the ones those missed patches touched, and what happens to
+    /// them is what a publish does — the same `rebake_chunks` over the same
+    /// ground, because there is one construction and a graph caught up at boot
+    /// must be the graph a shard that never stopped would be holding.
+    ///
+    /// The ground is already where it is going: nothing here moves the map. A
+    /// caller that has a *patch* to apply wants [`publish`](Self::publish).
+    pub fn catch_up(&mut self, chunks: &[openshard_map::chunk::ChunkCoord], tiles: &TileData) {
+        self.follow(chunks, tiles);
+    }
+
     /// Bring the coarse graph back in step with ground that has just moved.
     ///
     /// **Over the static world and nothing live**, which is the same decision
@@ -1499,6 +1515,32 @@ impl WorldState {
             .get_mut(&facet)
             .expect("an entity's facet is always loaded")
             .publish(patch, tiles)
+    }
+
+    /// Bring a facet's coarse graph in step with ground it never saw move, and
+    /// hand it back so the caller can write it down. See [`FacetState::catch_up`].
+    ///
+    /// The graph comes back because the one caller is boot, and boot's next move
+    /// is to save it: a catch-up that were not persisted would be paid again at
+    /// every start, and the file on disk would stay behind forever.
+    ///
+    /// `None` for a facet holding no graph — there is nothing to carry forward
+    /// and nothing to save.
+    ///
+    /// # Panics
+    ///
+    /// On a facet the shard did not load, as [`facet_state`](Self::facet_state).
+    pub fn catch_up(
+        &mut self,
+        facet: Facet,
+        chunks: &[openshard_map::chunk::ChunkCoord],
+    ) -> Option<&NavigationGraph> {
+        let Self { facets, tiles, .. } = self;
+        let state = facets
+            .get_mut(&facet)
+            .expect("a facet the shard just loaded is loaded");
+        state.catch_up(chunks, tiles);
+        state.coarse.as_ref()
     }
 
     /// Take back a publish that could not be written down. See

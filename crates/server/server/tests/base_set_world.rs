@@ -31,7 +31,10 @@
 use std::path::{Path, PathBuf};
 
 use openshard_config::{Config, FacetKey};
+use openshard_map::map::LandCell;
+use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
 use openshard_protocol::world::Facet;
+use openshard_tiles::LandTileId;
 
 /// The two paths, or `None` to skip.
 fn sources() -> Option<(PathBuf, PathBuf)> {
@@ -73,6 +76,118 @@ fn a_shard_loads_facet_zero_out_of_a_base_set() {
     };
     openshard_server::boot::load_world(&config(&client, Some(base_set.as_path())))
         .expect("a base set and the navigation artifact beside it");
+}
+
+/// A shard that was edited and restarted boots on the artifact it left behind.
+///
+/// **The one an operator actually meets.** The coarse graph follows a patch on
+/// the tick that commits it and nothing writes the file, so every restart after
+/// a `.setland` used to be refused outright — *"built from map revision 7,
+/// expected 9"* — and the way out was a whole-facet bake measured in half
+/// minutes. Now the log carries the graph the two revisions forward and the file
+/// is written back, which is what the second half of this asserts: an artifact
+/// that is *not* rewritten would leave the next start doing this again, and the
+/// one after that.
+///
+/// Everything happens in a copy of the base set, log and artifact, because the
+/// test commits an edit and the operator's world is not a fixture.
+#[test]
+fn an_artifact_left_behind_by_an_edit_is_caught_up_from_the_log() {
+    let Some((base_set, client)) = sources() else {
+        return;
+    };
+    let Some((copy, artifact)) = copied_world(&base_set, &client) else {
+        return;
+    };
+
+    // An edit nobody was running a shard for: written straight to the log, which
+    // is the state a shard leaves behind when it publishes and then stops.
+    let world = openshard_basemap::load(&copy).expect("the copy reads");
+    let at = (2000, 1500);
+    let op = PatchOp::set_land(
+        world.snapshot.map(),
+        at.0,
+        at.1,
+        LandCell {
+            tile: LandTileId(0x3FF),
+            z: 7,
+        },
+    )
+    .expect("a tile of facet 0");
+    let patch = Patch::new(
+        Facet(0),
+        world.snapshot.revision(),
+        PatchAuthor("a test".to_owned()),
+        PatchTime(0),
+        vec![op],
+    );
+    openshard_basemap::patches::append(
+        &openshard_basemap::patches::log_path(&copy),
+        Facet(0),
+        world.base,
+        &patch,
+    )
+    .expect("the log takes the patch");
+
+    openshard_server::boot::load_world(&config(&client, Some(copy.as_path())))
+        .expect("an artifact one revision behind is carried forward, not refused");
+
+    // And it was written back at the revision it was carried to: this is the
+    // strict loader, over a stamp taken fresh off the world as it now stands.
+    let now = openshard_movement::bake::FacetWorld::read(
+        &client,
+        openshard_movement::bake::WorldSource::BaseSet(&copy),
+        Facet(0),
+    )
+    .expect("the edited world reads");
+    let stamp = now.stamp(&client, Facet(0)).expect("its inputs are all there");
+    openshard_movement::bake::load(&artifact, &stamp)
+        .expect("the caught-up graph was saved, so the next start pays nothing");
+
+    std::fs::remove_dir_all(copy.parent().expect("the copy is in a directory of its own")).ok();
+}
+
+/// The world — base set, log and navigation artifact — copied into a directory
+/// of this test's own, or `None` where the copy could not be made.
+///
+/// **Under the same file names, with the same mtime on the base set.** A stamp
+/// records an input's name, its length and when it was last written, so a copy
+/// that renamed the base set or took a fresh mtime is a *different world* as far
+/// as the artifact beside it is concerned — and the test would be asserting the
+/// stamp's refusal instead of the catch-up. A directory of its own is what makes
+/// keeping the names possible.
+///
+/// The log comes too, so that the copy stands at the revision the original does
+/// and the artifact is behind it by exactly what it is behind the original by.
+fn copied_world(base_set: &Path, client: &Path) -> Option<(PathBuf, PathBuf)> {
+    let source = openshard_movement::bake::FacetWorld::read(
+        client,
+        openshard_movement::bake::WorldSource::BaseSet(base_set),
+        Facet(0),
+    )
+    .ok()?;
+    let from = source.navigation_path(client);
+    let dir = std::env::temp_dir().join(format!("openshard-catch-up-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).ok()?;
+    let copy = dir.join(openshard_movement::bake::file_name_of(base_set));
+    let artifact = openshard_movement::bake::artifact_path(&dir, Some(&copy), Facet(0));
+    // `OPENSHARD_NAVIGATION` names one artifact for every world, so under it the
+    // copy and the original are the same file and there is nothing to copy.
+    if artifact == from {
+        return None;
+    }
+    std::fs::copy(base_set, &copy).ok()?;
+    std::fs::File::options()
+        .write(true)
+        .open(&copy)
+        .ok()?
+        .set_modified(std::fs::metadata(base_set).ok()?.modified().ok()?)
+        .ok()?;
+    if let Some(log) = &source.log {
+        std::fs::copy(log, openshard_basemap::patches::log_path(&copy)).ok()?;
+    }
+    std::fs::copy(&from, &artifact).ok()?;
+    Some((copy, artifact))
 }
 
 /// A base set for a facet the file is not is refused, not loaded sideways.
