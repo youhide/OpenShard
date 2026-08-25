@@ -132,9 +132,9 @@ pub struct WorldMap {
     /// resort that swapped two items on one tile would change which of them is on
     /// top.
     statics: Vec<StaticItem>,
-    /// Where each block's items start, plus a final entry holding the total —
-    /// one more than the land has blocks, non-decreasing. Block `i` owns
-    /// `statics[offsets[i]..offsets[i + 1]]`.
+    /// Where each block's items are: one entry per block of the land, in the
+    /// land's own [`BlockIndex`] order. Block `i` owns
+    /// `statics[blocks[i].base..][..blocks[i].count]`.
     ///
     /// Indexed by **the same [`BlockIndex`]** the land is — which is
     /// load-bearing and which nothing enforces: the two arrays are built side by
@@ -142,9 +142,40 @@ pub struct WorldMap {
     /// [`LandGrid::index_of`], so a block's cells and a block's statics cannot
     /// come apart without that call being wrong for both.
     ///
-    /// The same CSR layout [`crate::chunk::Chunk`] has held since it was cut,
-    /// and for the same reason — see that type's `offsets`.
-    offsets: Vec<u32>,
+    /// **A table and not a prefix sum, since `what_a_change_costs.md`'s S3.** The
+    /// two are the same thing to a *reader* — both answer a block's run in two
+    /// reads — and the difference is what happens when a block's item count
+    /// moves. A prefix sum *is* the ordering, so re-laying one block in place
+    /// pushes every run after it and repairs 458,752 offsets; a table lets the
+    /// block be written at the **end** of the run and its entry repointed, which
+    /// is O(the block). The price is one extra `u32` a block, 1.75 MiB on a
+    /// 150 MiB world, and the runs the repointing orphans — see
+    /// [`dead`](Self::dead).
+    blocks: Vec<BlockRun>,
+    /// How many of [`statics`](Self::statics) no block addresses any more.
+    ///
+    /// Zero for a facet built by an importer, and it grows only through the
+    /// three writers — [`place_static`](Self::place_static),
+    /// [`remove_static`](Self::remove_static) and
+    /// [`replace_blocks`](Self::replace_blocks). The rule is the span layer's,
+    /// because it is the same trade: never compact while a session is editing,
+    /// except that dead items exceeding live ones repack the run — at which
+    /// point the facet is laid out in block order again and the count is zero.
+    dead: usize,
+}
+
+/// Where one block's statics are in the facet's run.
+///
+/// Two `u32`s rather than a start and the next block's start: a count is a fact
+/// about *this* block, and reading it out of the neighbour's base is what makes
+/// a prefix sum an ordering rather than an index.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct BlockRun {
+    /// The first item.
+    base: u32,
+    /// How many there are. Zero for the 73.7% of Britannia's blocks that hold
+    /// nothing, whose `base` is then never read.
+    count: u32,
 }
 
 /// A static's sortable coordinate within its block: **`y` first**, then `x`.
@@ -214,11 +245,12 @@ impl WorldMap {
     /// client ships is 7,168 tiles across.
     pub fn from_blocks(extent: BlockExtent, cell: impl FnMut(u16, u16) -> LandCell) -> Self {
         let land = LandGrid::from_blocks(extent, cell);
-        let offsets = vec![0; land.block_count() as usize + 1];
+        let blocks = vec![BlockRun { base: 0, count: 0 }; land.block_count() as usize];
         Self {
             land,
             statics: Vec::new(),
-            offsets,
+            blocks,
+            dead: 0,
         }
     }
 
@@ -262,14 +294,16 @@ impl WorldMap {
             land.block_count() as usize,
             "an importer handed over statics for a facet of a different size",
         );
-        let mut offsets = Vec::with_capacity(counts.len() + 1);
+        let mut blocks = Vec::with_capacity(counts.len());
         let mut total: u32 = 0;
-        offsets.push(0);
         for count in counts {
+            blocks.push(BlockRun {
+                base: total,
+                count: *count,
+            });
             total = total
                 .checked_add(*count)
                 .expect("a facet of fewer than 4G statics");
-            offsets.push(total);
         }
         assert_eq!(
             total as usize,
@@ -277,9 +311,9 @@ impl WorldMap {
             "an importer's block counts do not add up to the statics it handed over",
         );
 
-        for block in 0..counts.len() {
-            let (from, to) = (offsets[block] as usize, offsets[block + 1] as usize);
-            statics[from..to].sort_by_key(tile_key);
+        for block in &blocks {
+            let from = block.base as usize;
+            statics[from..from + block.count as usize].sort_by_key(tile_key);
         }
         // The base layer is one run and it is done growing: a loader that
         // pushed its way to three million items is holding up to twice the
@@ -289,7 +323,8 @@ impl WorldMap {
         Self {
             land,
             statics,
-            offsets,
+            blocks,
+            dead: 0,
         }
     }
 
@@ -391,24 +426,29 @@ impl WorldMap {
     ///
     /// # What it costs, and why that is not the way to load a facet
     ///
-    /// The statics are one run, so putting one in moves the rest of the facet's
-    /// items along by one and bumps every block offset after it — the block
-    /// this touches is rebuilt in place and everything past it shifts. That is
-    /// the cost a *published patch* is defined to pay, and it is nothing at all
-    /// on a scene of one block. It is also why an importer must not come this
-    /// way: three million calls would be three million shifts of a shrinking
-    /// tail. [`WorldMap::from_parts`] is the door that assembles a facet, and
-    /// the two `.mul`/base-set importers are both through it.
+    /// The block's run is **rewritten at the end of the statics** with the new
+    /// item in its place, and the block's entry repointed at it: O(the block),
+    /// which at Britannia's median is eighteen items. Nothing else on the facet
+    /// moves and no other block's entry is touched. What it leaves behind is the
+    /// run that was there, counted as garbage — see the type's `dead` field for
+    /// the rule that eventually repacks it.
+    ///
+    /// It is still not the way to load a facet: three million calls would be
+    /// three million copies of a growing run and a repack every time the garbage
+    /// caught up. [`WorldMap::from_parts`] is the door that assembles a facet,
+    /// and the two `.mul`/base-set importers are both through it.
     pub fn place_static(&mut self, item: StaticItem) {
         let Some(block) = self.block_index(item.x, item.y) else {
             return;
         };
         let (from, to) = self.span(block);
-        let at = from + self.statics[from..to].partition_point(|had| tile_key(had) <= tile_key(&item));
-        self.statics.insert(at, item);
-        for offset in &mut self.offsets[block.get() as usize + 1..] {
-            *offset += 1;
-        }
+        let at = self.statics[from..to].partition_point(|had| tile_key(had) <= tile_key(&item));
+        let mut run = Vec::with_capacity(to - from + 1);
+        run.extend_from_slice(&self.statics[from..from + at]);
+        run.push(item);
+        run.extend_from_slice(&self.statics[from + at..to]);
+        self.relocate(block, &run);
+        self.repack_if_mostly_garbage();
     }
 
     /// Take the `nth` static standing on a tile off the map, and hand it back.
@@ -424,7 +464,12 @@ impl WorldMap {
     /// against a stated revision, and taking a static out is what produces the
     /// next one.
     ///
-    /// It costs what [`WorldMap::place_static`] costs, and for the same reason.
+    /// **Cheaper than [`WorldMap::place_static`], and this is where the two
+    /// differ.** A run that loses an item still fits where it stands, so the
+    /// items after it inside *this block* close the gap and the count drops by
+    /// one: nothing is relocated and the last slot of the run becomes the
+    /// garbage. An addition has nowhere to put its item without moving the whole
+    /// facet, which is why it is the one that goes to the end.
     pub fn remove_static(&mut self, x: u16, y: u16, nth: usize) -> Option<StaticItem> {
         let block = self.block_index(x, y)?;
         let (start, end) = self.span(block);
@@ -437,11 +482,63 @@ impl WorldMap {
         if nth >= count {
             return None;
         }
-        let gone = self.statics.remove(start + from + nth);
-        for offset in &mut self.offsets[block.get() as usize + 1..] {
-            *offset -= 1;
-        }
+        let at = start + from + nth;
+        let gone = self.statics[at];
+        self.statics.copy_within(at + 1..end, at);
+        self.blocks[block.get() as usize].count -= 1;
+        self.dead += 1;
+        self.repack_if_mostly_garbage();
         Some(gone)
+    }
+
+    /// Write one block's items at the end of the run and point the block at
+    /// them, leaving what was there as garbage.
+    ///
+    /// The move S3 is: a block's run is addressed by a table entry rather than
+    /// by a prefix sum, so a block whose length changed is written somewhere it
+    /// fits instead of pushing every run after it along. Shared by the two
+    /// writers that can lengthen a block — a placed static and an arriving chunk.
+    ///
+    /// A run that is exactly as long as the one it replaces is written **where it
+    /// stands**, which is every edit to the ground: a `.setland` sends a chunk
+    /// holding the same items it replaces, and relocating them would be
+    /// manufacturing garbage out of an edit that moved no statics at all.
+    fn relocate(&mut self, block: BlockIndex, run: &[StaticItem]) {
+        let entry = self.blocks[block.get() as usize];
+        let count = u32::try_from(run.len()).expect("a block of fewer than 4G statics");
+        if count == entry.count {
+            let at = entry.base as usize;
+            self.statics[at..at + run.len()].copy_from_slice(run);
+            return;
+        }
+        self.dead += entry.count as usize;
+        self.blocks[block.get() as usize] = BlockRun {
+            base: u32::try_from(self.statics.len()).expect("a facet of fewer than 4G statics"),
+            count,
+        };
+        self.statics.extend_from_slice(run);
+    }
+
+    /// Lay the statics out in block order again, once the garbage outweighs what
+    /// is reachable.
+    ///
+    /// The span layer's rule, one crate down and for the same reason: a publish
+    /// is an operator typing, so compacting after each one would pay a facet-wide
+    /// pass for a block-sized edit — but garbage that has grown past the live
+    /// items is memory nothing can reach and a run whose next `extend` reallocates
+    /// twice what it needs. Between the two, doing it rarely and completely.
+    fn repack_if_mostly_garbage(&mut self) {
+        if self.dead <= self.statics.len() - self.dead {
+            return;
+        }
+        let mut packed = Vec::with_capacity(self.statics.len() - self.dead);
+        for block in &mut self.blocks {
+            let from = block.base as usize;
+            block.base = u32::try_from(packed.len()).expect("a facet of fewer than 4G statics");
+            packed.extend_from_slice(&self.statics[from..from + block.count as usize]);
+        }
+        self.statics = packed;
+        self.dead = 0;
     }
 
     /// Put whole blocks of the facet back, in one pass.
@@ -453,46 +550,36 @@ impl WorldMap {
     /// number of *blocks* — which is what a chunk is made of, and what
     /// [`crate::chunk::apply`] hands over.
     ///
-    /// # What it costs, and why it is not a facet rebuilt
+    /// # What it costs
+    ///
+    /// **O(the blocks that arrived**, since S3, and the shape of the answer is
+    /// the same one at both ends of the wire — see
+    /// `docs/map/new_map_representation/what_a_change_costs.md`.
     ///
     /// Land is free of the question entirely: a block is
     /// [`CELLS_PER_BLOCK`] cells wherever it sits, so each one is written where
     /// the old one was and nothing else moves — see [`LandGrid::set_block`].
     ///
-    /// The statics are the part with a cost, because a block's items are one run
-    /// in a facet-wide vector and a block whose item count changed moves every
-    /// static after it. That is one memmove of the tail, and this makes it
-    /// **once**: the run between the first replaced block and the last is
-    /// rebuilt in a local vector — untouched blocks in that span come along
-    /// because they are *inside* it, not because they moved — and goes back
-    /// through one `splice`. Which is why the blocks arrive as a set rather than
-    /// one call each: sixty-four calls would be sixty-four tails.
+    /// The statics were the part with a cost. A block's items are one run in a
+    /// facet-wide vector, and while that run was addressed by a **prefix sum** a
+    /// block whose item count changed moved every static after it — one memmove
+    /// of the tail, plus an arithmetic pass over 1.8 MiB of offsets. Measured on
+    /// Felucca, that was 0.1 ms for a block that kept its count, and between
+    /// 0.02 ms and **1.3 ms** for one that did not, in proportion to how much of
+    /// the facet stood after it. The table replaced the prefix sum for exactly
+    /// this: a block that grew or shrank is written at the end of the run and its
+    /// entry repointed, so no block but the ones named is read or written at all.
     ///
-    /// So the cost is the span, not the facet. Measured on Felucca — 458,752
-    /// blocks, 2,906,871 statics — against the whole-facet rebuild this
-    /// replaced, which was **15.3 ms** and a second 150 MiB facet resident for
-    /// the length of the call:
+    /// Two costs remain and both are the type's rather than this call's: the
+    /// reallocation the first *addition* into an importer-built facet pays, since
+    /// [`WorldMap::from_parts`] shrinks the run to fit (**7.05 ms** on Felucca,
+    /// then 0.36, then 0.04); and the repack that eventually reclaims what the
+    /// repointing orphaned, which is a facet-wide pass made once per doubling
+    /// rather than once per publish.
     ///
-    /// - blocks holding as many statics as the ones they replace — which is
-    ///   every edit to the *ground* — cost **0.1 ms**. The span is written where
-    ///   it was, nothing after it moves, and the offsets are not touched at all.
-    /// - blocks that changed the count cost the tail, and only the tail:
-    ///   **0.02 ms** at the end of the statics run against **1.3 ms** at its
-    ///   start, in proportion to how much of the facet stands after them.
-    /// - and **once per world**, whichever of those it is, the reallocation:
-    ///   [`WorldMap::from_parts`] shrinks the statics to fit, so the first item
-    ///   *added* to a facet has to move all 29 MiB of them somewhere with room.
-    ///   Measured as three adds into one world: **7.05 ms, then 0.36, then
-    ///   0.04**. Taking an item away never pays it — the run only shortens, and
-    ///   the capacity it leaves behind is what the next add spends.
-    ///
-    /// So a removal is cheaper than an addition exactly once, and after that
-    /// they are the same call. Neither is worth a caller's attention beside the
-    /// bake over the facet, which is 55 ms.
-    ///
-    /// The case with no saving in it is two blocks at opposite corners, whose
-    /// span is the facet; a caller with scattered blocks and no need of
-    /// atomicity can make several calls.
+    /// Blocks still arrive as a set rather than one call each — a chunk is
+    /// sixty-four of them and a publish is atomic — but scattered blocks no
+    /// longer cost anything extra: there is no span between them to rebuild.
     ///
     /// The sort inside each arriving block is imposed here, for
     /// [`WorldMap::from_parts`]' reason: the `(y, x)` order is this type's
@@ -510,73 +597,27 @@ impl WorldMap {
             blocks.windows(2).all(|pair| pair[0].at < pair[1].at),
             "blocks must arrive in the facet's own order, each of them once",
         );
-        let first = blocks[0].at.get() as usize;
         let last = blocks[blocks.len() - 1].at.get() as usize;
         assert!(
-            last < self.offsets.len() - 1,
+            last < self.blocks.len(),
             "a block this facet has not: {last} of {}",
-            self.offsets.len() - 1,
+            self.blocks.len(),
         );
 
-        // The span of the statics run this touches, as it stands now.
-        let from = self.offsets[first] as usize;
-        let to = self.offsets[last + 1] as usize;
-        let mut run: Vec<StaticItem> = Vec::with_capacity(to - from);
-        let mut counts: Vec<u32> = Vec::with_capacity(last + 1 - first);
-
-        let mut next = 0;
-        for block in first..=last {
-            let start = run.len();
-            match blocks.get(next).filter(|patch| patch.at.get() as usize == block) {
-                Some(patch) => {
-                    next += 1;
-                    run.extend_from_slice(patch.statics);
-                    run[start..].sort_by_key(tile_key);
-                    // The fields directly rather than `self.set_land`: the loop
-                    // borrows `self.statics` and `self.offsets` below, and the
-                    // three are disjoint.
-                    self.land.set_block(patch.at, patch.land);
-                }
-                // Not replaced, and it is in the span only because something on
-                // either side of it was. It keeps its items and its order.
-                None => run.extend_from_slice(
-                    &self.statics[self.offsets[block] as usize..self.offsets[block + 1] as usize],
-                ),
-            }
-            counts.push(u32::try_from(run.len() - start).expect("a block of fewer than 4G statics"));
+        // One block at a time, and each one is its own answer: nothing between
+        // two named blocks is read, because nothing between them moved.
+        let mut run: Vec<StaticItem> = Vec::new();
+        for patch in blocks {
+            run.clear();
+            run.extend_from_slice(patch.statics);
+            // The sort inside each arriving block is imposed here, for
+            // `from_parts`' reason: the `(y, x)` order is this type's invariant
+            // and not its callers'.
+            run.sort_by_key(tile_key);
+            self.land.set_block(patch.at, patch.land);
+            self.relocate(patch.at, &run);
         }
-
-        // The one memmove. `splice` over an exact-sized replacement shifts the
-        // tail once and leaves the vector's own capacity alone.
-        let (was, now) = (to - from, run.len());
-        self.statics.splice(from..to, run);
-
-        let mut running = self.offsets[first];
-        for (block, count) in counts.iter().enumerate() {
-            running = running
-                .checked_add(*count)
-                .expect("a facet of fewer than 4G statics");
-            self.offsets[first + 1 + block] = running;
-        }
-        // Every block past the span keeps its items and finds them somewhere
-        // else. One arithmetic pass over 1.8 MiB of offsets — 34 µs on Felucca,
-        // and nothing at all when the span's length did not change, which is
-        // every land-only edit.
-        match now.cmp(&was) {
-            std::cmp::Ordering::Greater => {
-                let grew = u32::try_from(now - was).expect("a facet of fewer than 4G statics");
-                for offset in &mut self.offsets[last + 2..] {
-                    *offset += grew;
-                }
-            }
-            std::cmp::Ordering::Less => {
-                let shrank = u32::try_from(was - now).expect("a facet of fewer than 4G statics");
-                for offset in &mut self.offsets[last + 2..] {
-                    *offset -= shrank;
-                }
-            }
-            std::cmp::Ordering::Equal => {}
-        }
+        self.repack_if_mostly_garbage();
     }
 
     /// Every static standing on a point.
@@ -688,12 +729,14 @@ impl WorldMap {
 
     /// Where one block's items begin and end in the run.
     ///
-    /// The offsets are one longer than the facet has blocks, so `block + 1` is
-    /// there for every block a [`BlockIndex`] can name — which is what makes
-    /// this infallible where [`WorldMap::statics_of`] is not.
+    /// The table holds an entry for every block a [`BlockIndex`] can name, which
+    /// is what makes this infallible where [`WorldMap::statics_of`] is not. Two
+    /// reads, exactly as the prefix sum it replaced was — the difference between
+    /// the two is at the writing end and not here.
     fn span(&self, block: BlockIndex) -> (usize, usize) {
-        let at = block.get() as usize;
-        (self.offsets[at] as usize, self.offsets[at + 1] as usize)
+        let run = self.blocks[block.get() as usize];
+        let from = run.base as usize;
+        (from, from + run.count as usize)
     }
 
     /// Which block a tile's statics are in, or `None` off the map.
@@ -702,8 +745,12 @@ impl WorldMap {
     }
 
     /// How many statics the facet holds.
+    ///
+    /// What is *reachable*, not what the run is long: a facet that has been
+    /// edited carries the runs its repointing orphaned until they are repacked,
+    /// and those are not statics anybody can find.
     pub fn static_count(&self) -> usize {
-        self.statics.len()
+        self.statics.len() - self.dead
     }
 
     /// A point on the ground, for a caller that only has x and y.
@@ -1201,10 +1248,12 @@ mod tests {
     /// What the base layer costs is its count times this, and nothing else.
     ///
     /// Nine bytes of fields in ten of storage — the padding is the alignment of
-    /// the three `u16`s. Felucca's 2,906,871 statics are 29,068,710 bytes of
-    /// run and 1,835,012 of offsets, and both halves of that are arithmetic
-    /// over this number, so a field added here is 2.9 MiB of resident memory
-    /// per byte it adds. That is the measurement the one-run layout was for.
+    /// the three `u16`s. Felucca's 2,906,871 statics are 29,068,710 bytes of run
+    /// and 3,670,016 of block table (458,752 blocks × 8, where the prefix sum it
+    /// replaced was 1,835,012 — the 1.75 MiB S3 named as the price of a block
+    /// being replaceable where it stands). A field added here is 2.9 MiB of
+    /// resident memory per byte it adds, which is the measurement the one-run
+    /// layout was for.
     #[test]
     fn a_static_is_ten_bytes_in_the_run() {
         assert_eq!(size_of::<StaticItem>(), 10);
@@ -1254,5 +1303,215 @@ mod tests {
             vec![Graphic(10), Graphic(30)],
         );
         assert_eq!(map.static_count(), 5);
+    }
+
+    // ---- S3: a block is replaced where it stands ---------------------------
+
+    /// A facet of `wide`×`down` blocks with `each` items in every block, named
+    /// by where they stand so a run read out of the wrong block says which.
+    fn facet_with_statics(wide: u32, down: u32, each: u16) -> WorldMap {
+        let land = LandGrid::from_blocks(BlockExtent { wide, down }, |_, _| LandCell::default());
+        let mut statics = Vec::new();
+        let extent = land.extent();
+        for block in extent.blocks() {
+            let coord = extent.coord_of(block).expect("the extent named this block");
+            let (origin_x, origin_y) = coord.origin();
+            for n in 0..each {
+                statics.push(StaticItem {
+                    tile: Graphic(block.get() as u16 * 100 + n),
+                    x: origin_x as u16 + n % 8,
+                    y: origin_y as u16,
+                    z: 0,
+                    hue: Hue(0),
+                });
+            }
+        }
+        let counts = vec![u32::from(each); extent.count() as usize];
+        WorldMap::from_parts(land, statics, &counts)
+    }
+
+    /// Every static of the facet, block by block, as a value two maps can be
+    /// compared by.
+    fn every_block(map: &WorldMap) -> Vec<Vec<StaticItem>> {
+        map.land
+            .extent()
+            .blocks()
+            .map(|block| {
+                let coord = map.land.coord_of(block).expect("a block of this facet");
+                map.statics_in_block(coord.x, coord.y).to_vec()
+            })
+            .collect()
+    }
+
+    /// The point of the table: a block that grew is written at the end of the
+    /// run, and no other block's entry moves — where a prefix sum would have had
+    /// to repair every one of them.
+    #[test]
+    fn a_block_that_grew_is_the_only_entry_that_moved() {
+        let mut map = facet_with_statics(3, 2, 2);
+        let before = map.blocks.clone();
+        let contents = every_block(&map);
+
+        // Into the *first* block, which every later entry of a prefix sum would
+        // be downstream of.
+        map.place_static(StaticItem {
+            tile: Graphic(999),
+            x: 1,
+            y: 1,
+            z: 0,
+            hue: Hue(0),
+        });
+
+        assert_eq!(
+            map.blocks[1..],
+            before[1..],
+            "no block but the one that grew was repointed"
+        );
+        assert_eq!(
+            map.blocks[0].base as usize, 12,
+            "and it went to the end of the run"
+        );
+        assert_eq!(map.blocks[0].count, 3);
+        assert_eq!(map.dead, 2, "what it left behind is the run it had");
+        assert_eq!(map.static_count(), 13, "which is not counted as a static");
+
+        // And every block still reads its own items.
+        for (block, was) in every_block(&map).iter().zip(&contents).skip(1) {
+            assert_eq!(block, was);
+        }
+        assert_eq!(
+            map.statics_at(1, 1).map(|item| item.tile).collect::<Vec<_>>(),
+            vec![Graphic(999)],
+        );
+    }
+
+    /// A run that kept its length is written where it stands: an edit to the
+    /// *ground* moves no statics, and relocating them would manufacture garbage
+    /// out of a publish that changed none.
+    #[test]
+    fn a_block_that_kept_its_count_stays_where_it_is() {
+        let mut map = facet_with_statics(3, 2, 2);
+        let before = map.blocks.clone();
+        let at = map.land.index_of(BlockCoord { x: 1, y: 0 }).expect("a block");
+        let land = vec![
+            LandCell {
+                tile: LandTileId(4),
+                z: 12,
+            };
+            CELLS_PER_BLOCK
+        ];
+        let statics = map.statics_in_block(1, 0).to_vec();
+
+        map.replace_blocks(&[BlockPatch::new(at, &land, &statics)]);
+
+        assert_eq!(map.blocks, before, "nothing was repointed");
+        assert_eq!(map.dead, 0, "and nothing was orphaned");
+        assert_eq!(map.land(8, 0).expect("a cell of this facet").z, 12);
+    }
+
+    /// The garbage rule: orphaned runs are left where they are until they
+    /// outweigh what is reachable, and then the run is laid out in block order
+    /// again — with every block still reading its own items.
+    #[test]
+    fn garbage_past_the_live_items_repacks_the_run() {
+        let mut map = facet_with_statics(2, 1, 4);
+        let mut placed = 0;
+        // Each addition orphans the block's whole run, so the garbage catches up
+        // fast on a facet this small — which is the point of the fixture, not of
+        // the rule: on Felucca it is thousands of publishes away.
+        while map.dead > 0 || placed == 0 {
+            placed += 1;
+            map.place_static(StaticItem {
+                tile: Graphic(500 + placed),
+                x: 1,
+                y: 1,
+                z: placed as i8,
+                hue: Hue(0),
+            });
+            if map.dead == 0 {
+                break;
+            }
+        }
+        assert!(placed > 1, "the fixture never reached a repack");
+        assert_eq!(map.dead, 0, "a repacked run holds no garbage");
+        assert_eq!(map.statics.len(), map.static_count(), "and nothing unreachable");
+        assert_eq!(map.static_count(), 8 + placed as usize);
+        assert_eq!(
+            map.statics_at(1, 1).count(),
+            placed as usize,
+            "every item placed is still where it was put"
+        );
+        assert_eq!(
+            map.statics_in_block(1, 0).len(),
+            4,
+            "and the other block is untouched"
+        );
+    }
+
+    /// **The oracle for the whole layout:** a facet edited into shape holds what
+    /// the same facet built by an importer holds, block for block.
+    ///
+    /// A repointed table and a prefix sum are the same thing to a reader, so the
+    /// failure this catches is the one that is not visible in any single edit —
+    /// a block reading a run that belongs to whoever was relocated after it.
+    #[test]
+    fn an_edited_facet_holds_what_an_imported_one_does() {
+        let mut edited = facet_with_statics(3, 3, 2);
+        let extent = edited.land.extent();
+
+        // Grow one block, shrink another, replace a third wholesale, and do it
+        // in an order that leaves the run out of block order.
+        edited.place_static(StaticItem {
+            tile: Graphic(901),
+            x: 2,
+            y: 2,
+            z: 0,
+            hue: Hue(0),
+        });
+        edited.remove_static(8, 8, 0).expect("block (1, 1) holds two");
+        let at = extent.index_of(BlockCoord { x: 2, y: 2 }).expect("a block");
+        let land = vec![LandCell::default(); CELLS_PER_BLOCK];
+        let arrived = [
+            StaticItem {
+                tile: Graphic(902),
+                x: 19,
+                y: 17,
+                z: 0,
+                hue: Hue(0),
+            },
+            StaticItem {
+                tile: Graphic(903),
+                x: 17,
+                y: 17,
+                z: 0,
+                hue: Hue(0),
+            },
+        ];
+        edited.replace_blocks(&[BlockPatch::new(at, &land, &arrived)]);
+
+        // The same world, assembled by the importer's door out of what the
+        // edited one now holds.
+        let contents = every_block(&edited);
+        let counts: Vec<u32> = contents
+            .iter()
+            .map(|block| u32::try_from(block.len()).expect("a block of fewer than 4G statics"))
+            .collect();
+        let imported = WorldMap::from_parts(
+            LandGrid::from_blocks(BlockExtent { wide: 3, down: 3 }, |_, _| LandCell::default()),
+            contents.concat(),
+            &counts,
+        );
+
+        assert_eq!(every_block(&edited), every_block(&imported));
+        assert_eq!(edited.static_count(), imported.static_count());
+        for y in 0..24u16 {
+            for x in 0..24u16 {
+                assert_eq!(
+                    edited.statics_at(x, y).collect::<Vec<_>>(),
+                    imported.statics_at(x, y).collect::<Vec<_>>(),
+                    "({x}, {y})"
+                );
+            }
+        }
     }
 }

@@ -59,7 +59,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use openshard_map::chunk::{Chunk, ChunkCoord};
-use openshard_map::map::LandCell;
+use openshard_map::map::{LandCell, StaticItem};
 use openshard_map::patch::{Patch, PatchAuthor, PatchOp, PatchTime};
 use openshard_movement::ground::Ground;
 use openshard_movement::spans::SpanIndex;
@@ -222,6 +222,52 @@ fn what_one_setland_costs_at_each_end() {
         ms(published)
     );
 
+    // The other publish, and the one the statics layout is about: an op that
+    // *adds* an item, so the block it lands in no longer holds as many statics
+    // as the block it replaces. Under the prefix sum that moved every static
+    // after it — 3.9–5.6 ms — and under the block table it is the block.
+    //
+    // A single clock rather than a best-of at both ends: each round would put a
+    // second item in, and the second one is a different edit from the first.
+    let base = ground.snapshot().expect("the facet it was built with");
+    let standing = *base
+        .map()
+        .statics_in_block(u32::from(x) / 8, u32::from(y) / 8)
+        .first()
+        .expect("the sample block holds something");
+    let added = Patch::new(
+        facet,
+        base.revision(),
+        PatchAuthor("measurement".to_owned()),
+        PatchTime(0),
+        vec![PatchOp::AddStatic {
+            item: StaticItem {
+                z: standing.z.saturating_add(20),
+                ..standing
+            },
+        }],
+    );
+    let start = Instant::now();
+    ground.publish(&added, &tiles).expect("the sample patch applies");
+    let grew = start.elapsed();
+
+    // And the same arrival at the window's end, which is the half `chunk::apply`
+    // is: a second copy of the facet, at the revision before that op, taking the
+    // chunk the op produced.
+    let heavier = vec![
+        Chunk::of(ground.snapshot().expect("the facet it was built with"), at)
+            .expect("the sample chunk is on this facet"),
+    ];
+    let behind = openshard_basemap::load(&path)
+        .expect("a readable base set")
+        .snapshot;
+    let mut window = Ground::new(Some(behind), &tiles);
+    let start = Instant::now();
+    window
+        .take_chunks(&heavier, &tiles)
+        .expect("one chunk of this facet");
+    let arrived = start.elapsed();
+
     println!("\nthe wire:");
     println!("  Chunk::of            — one square, cut        {}", ms(cut));
 
@@ -232,5 +278,9 @@ fn what_one_setland_costs_at_each_end() {
         ms(bake)
     );
     println!("  = Ground::take_chunks                         {}", ms(take));
-    println!("\nthe hitch a person sees is the last line.");
+
+    println!("\nand the publish that moves a block's *length*, at both ends:");
+    println!("  Ground::publish      — one static added       {}", ms(grew));
+    println!("  Ground::take_chunks  — that chunk, arriving   {}", ms(arrived));
+    println!("\nthe hitch a person sees is the last line of each pair.");
 }
