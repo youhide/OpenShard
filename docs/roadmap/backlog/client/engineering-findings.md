@@ -101,3 +101,20 @@
   in a file a parallel session had open. A named constructor (`RadarFrame::
   empty()`, beside the doc that already explains why the sample is reset) is the
   shape.
+- **The lighting proptest fails on fresh seeds, and its regression file grows
+  every time somebody runs the suite.**
+  [`render/tests/lighting.rs`](../../../../crates/client/render/tests/lighting.rs)'s
+  `a_fuzzed_flame_near_a_row_edge_agrees_with_the_brute_force_oracle` and its
+  `_through_the_exact_walk` sibling failed on one seed in one full-workspace run
+  during the map work of 2026-08-25, passed on the next run, and failed on two in
+  the one after — each failure appending a case to
+  `lighting.proptest-regressions`, which is then replayed for everybody. The
+  message is the test's own: *"the point sampler landed inside a solid on 1 ray(s)
+  that `deepest_crossing` says miss every box — a point in a box is in it, so this
+  is the exact test's defect."* So it is a real disagreement between the sampler
+  and the exact walk at a row edge rather than a flake in the harness, and the
+  file is the record of how often it is reachable. Two things follow: the suite is
+  not green on a random seed, and a session that runs `cargo test --workspace`
+  leaves a dirty working tree it did not write. Whoever owns
+  [`lighting_pitfalls.md`](../../../lighting_pitfalls.md)'s exact-walk ladder
+  should read the saved cases before they are trimmed.
