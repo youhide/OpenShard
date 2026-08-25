@@ -248,6 +248,35 @@ impl<K: Copy + Ord> LruBudget<K> {
         true
     }
 
+    /// Give an entry a new name, keeping its weight and its place in the use
+    /// clock.
+    ///
+    /// Not a remove and an insert: the entry stands for the same bytes and the
+    /// same last use, and only what it is called changed. Spending a fresh
+    /// stamp would make every carried entry the most recently used thing in the
+    /// cache at once, which is the opposite of what the next eviction pass is
+    /// trying to read — see `RadarCache::moved`, whose whole business is
+    /// renaming products a change did not move.
+    ///
+    /// Answers `false` when `from` names nothing.
+    pub fn rekey(&mut self, from: K, to: K) -> bool {
+        let entries = self.entries.get_mut();
+        let Some(entry) = entries.remove(&from) else {
+            return false;
+        };
+        // Carried weight is unchanged, so `retained` only moves if `to` was
+        // already holding bytes of its own — which a caller renaming onto a
+        // free name never is, and which would otherwise be double-counted.
+        let replaced = entries.insert(to, entry);
+        self.retained = self
+            .retained
+            .saturating_sub(replaced.map_or(0, |entry| entry.bytes));
+        if self.protected.remove(&from) {
+            self.protected.insert(to);
+        }
+        true
+    }
+
     pub fn remove(&mut self, key: K) -> bool {
         self.protected.remove(&key);
         let removed = self.entries.borrow_mut().remove(&key);

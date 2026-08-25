@@ -1083,6 +1083,11 @@ impl RadarCache {
     /// for the superseded source revision.
     /// Returns `false` for an old or unchanged revision, so a delayed source
     /// notification cannot make an older ready product current again.
+    ///
+    /// This is the fail-closed answer, and it is what a caller who cannot say
+    /// what moved gets: everything goes. A caller who *can* — a publish, which
+    /// arrives with the patch that caused it — says so through
+    /// [`moved`](Self::moved) and keeps the rest.
     pub fn set_revision(&mut self, facet: Facet, revision: RadarRevision) -> bool {
         if revision <= self.revision(facet) {
             return false;
@@ -1091,6 +1096,128 @@ impl RadarCache {
         // Dirty keys name one exact source snapshot.  A separately announced
         // newer snapshot supersedes any incomplete invalidation for this facet.
         self.dirty.retain(|key| key.facet != facet);
+        true
+    }
+
+    /// Adopt a newer revision, carrying every product the change did not move.
+    ///
+    /// [`set_revision`](Self::set_revision) is this same statement without the
+    /// third argument, and the third argument is the whole of era S's S2. A
+    /// facet's revision moves for all of its chunks at once, so a one-tile
+    /// publish leaves every other product reachable only through
+    /// [`select_ready`](Self::select_ready)'s stale path — 7,167 good squares
+    /// of Felucca given up for the one that moved, which is
+    /// `docs/map/radar.md` §10.2 stated from the writer's end.
+    ///
+    /// `touched` names the **level-zero chunks whose content changed**, which
+    /// is `openshard_map::patch::Patch::touched_chunks` at the other end of the
+    /// wire. A map chunk and a base radar chunk share a divisor — 64 tiles,
+    /// which `openshard_map::chunk`'s own header records as a decision rather
+    /// than a coincidence — so the conversion is a coordinate change and never
+    /// a resampling, and it belongs to the caller who has both types.
+    ///
+    /// A product is carried to `revision` when no touched chunk lies under it,
+    /// at every level, because a square nothing touched builds the pixels it
+    /// already holds. A product that does cover one is left where it is —
+    /// retained under the revision it was built at, so it is still the
+    /// complete stale picture `select_ready` falls back to while the rebuild
+    /// runs — and is marked dirty at the new revision up to [`SWEEP_LOD`],
+    /// which is [`invalidate_tile`](Self::invalidate_tile)'s column for a
+    /// chunk instead of a tile. Everything coarser than the ceiling repairs
+    /// itself: [`build_ready_ancestors`] reduces a parent once its four
+    /// children are current, and three of the four are carried.
+    ///
+    /// **The key stays fail-closed.** A caller who moves a facet's revision
+    /// without saying what moved still leaves every product unreachable, which
+    /// is exactly what happens today. The carry is what a caller who *knows*
+    /// what changed is allowed to claim; nothing is trusted by default.
+    ///
+    /// Returns `false` for an old or unchanged revision — for
+    /// `set_revision`'s reason, a delayed notification must not make an older
+    /// product current — and then nothing is carried, dirtied or moved.
+    pub fn moved(
+        &mut self,
+        facet: Facet,
+        revision: RadarRevision,
+        touched: impl IntoIterator<Item = RadarChunkCoord>,
+    ) -> bool {
+        let was = self.revision(facet);
+        if revision <= was {
+            return false;
+        }
+        let touched: Vec<RadarChunkCoord> = touched.into_iter().collect();
+        self.revisions.insert(facet, revision);
+        // Dirty keys name one exact source snapshot, and the ones this call is
+        // about to name are the only ones the new snapshot owes.
+        self.dirty.retain(|key| key.facet != facet);
+
+        // A product at level `n` covers exactly the base chunks whose ancestor
+        // `n` levels up is its own coordinate, so one test answers every level
+        // of the ladder without a per-level rectangle.
+        let covers_a_change = |key: &RadarChunkKey| {
+            touched
+                .iter()
+                .any(|chunk| chunk.ancestor_at(key.lod.value()) == key.chunk)
+        };
+
+        let carried: Vec<RadarChunkKey> = self
+            .ready
+            .keys()
+            .copied()
+            .filter(|key| key.facet == facet && key.revision == was && !covers_a_change(key))
+            .collect();
+        for key in carried {
+            let was_ready = self
+                .ready
+                .remove(&key)
+                .expect("a key just read from the ready map");
+            let carried_key = RadarChunkKey::new(facet, key.lod, key.chunk, revision);
+            self.ready.insert(
+                carried_key,
+                RadarChunk {
+                    key: carried_key,
+                    pixels: was_ready.pixels,
+                },
+            );
+            self.budget.rekey(key, carried_key);
+        }
+        // `highest_ready_lod` is bucketed by `(facet, revision)`, so a carry
+        // empties one bucket into another rather than changing any one key's
+        // level. Rebuilt rather than moved for eviction's reason: it is the
+        // one derived index here, and one owner of it is enough.
+        self.rebuild_highest_ready_lods();
+
+        // The sweep is still owed what it was owed. Its keys carry the revision
+        // they were minted under and [`Self::drain_sweep`] strikes off anything
+        // older on the grounds that the dirty set has it — true for a chunk this
+        // call named and false for every other, and a floor is owed once a
+        // session because [`Self::begin_sweep`] refuses a second. Without this a
+        // publish part-way through the first sweep of a facet would quietly
+        // finish it, and the hole shows up weeks later as backdrop at some zoom.
+        if let Some(owed) = self.sweep_owed.remove(&facet) {
+            let carried = owed
+                .into_iter()
+                .map(|key| {
+                    if key.revision == was {
+                        RadarChunkKey::new(facet, key.lod, key.chunk, revision)
+                    } else {
+                        key
+                    }
+                })
+                .collect();
+            self.sweep_owed.insert(facet, carried);
+        }
+
+        for chunk in touched {
+            for lod in 0..=SWEEP_LOD.value() {
+                self.dirty.insert(RadarChunkKey::new(
+                    facet,
+                    RadarLod::new(lod),
+                    chunk.ancestor_at(lod),
+                    revision,
+                ));
+            }
+        }
         true
     }
 
@@ -1110,13 +1237,15 @@ impl RadarCache {
     /// needs four children at the *new* revision and an edit rebuilds one. The
     /// clamp does not create that; it declines to hide it behind a stall.
     ///
-    /// **This per-tile path still has no production writer**, and the *revision*
-    /// beside it now does: a publish reaching a connected client names the
-    /// facet's new revision through [`set_revision`](Self::set_revision) — see
-    /// `to_the_client.md`'s E4 — which is one bump for a whole edit rather than
-    /// one per tile, and is what a bulk change wants. A caller with a genuinely
-    /// single-tile edit is what this is for, and the shard that grows one owes
-    /// the coarse ladder a revision model rather than a bigger frame budget.
+    /// **This per-tile path stays test-only, and that is now final rather than
+    /// pending.** A publish reaching a connected client names the facet's new
+    /// revision and the chunks it moved, through [`moved`](Self::moved) — one
+    /// call for a whole edit rather than one per tile, and the revision model
+    /// the coarse ladder was owed. A chunk is sixteen thousand tiles and a
+    /// publish names chunks, so a per-tile invalidation would be a second
+    /// vocabulary for the same fact: era S's S2 in `what_a_change_costs.md`
+    /// closes this out, and what keeps the function is that a tile is the unit
+    /// the ladder's projection is easiest to assert on.
     ///
     /// Returns `None` only if the facet revision has exhausted `u64`.  The map
     /// itself must not be changed in that case, because the cache can no longer
@@ -3041,6 +3170,172 @@ mod tests {
         assert!(
             !cache.set_revision(facet, RadarRevision(0)),
             "a delayed source notification cannot revive the old product"
+        );
+    }
+
+    /// **What a publish costs the cache is what it moved.**
+    ///
+    /// The node's own acceptance: a revision that arrives with the chunks it
+    /// touched carries every other product forward at every level, and the ones
+    /// it did touch stay exactly where a facet-wide bump leaves all of them
+    /// today — retained, stale, and safe to draw until the rebuild lands.
+    #[test]
+    fn a_publish_carries_every_product_the_change_did_not_move() {
+        let facet = Facet(0);
+        let mut cache = RadarCache::default();
+        let touched = RadarChunkCoord::new(0, 0);
+        let untouched = RadarChunkCoord::new(9, 9);
+        // Two products over the edit and two over ground it never reaches: one
+        // at the base and one a level up, because the carry is a claim about
+        // every level of the ladder and not only the one the map is walked at.
+        let over_touched = [
+            cache.key(facet, 0, touched),
+            cache.key(facet, 1, touched.ancestor_at(1)),
+        ];
+        let over_untouched = [
+            cache.key(facet, 0, untouched),
+            cache.key(facet, 1, untouched.ancestor_at(1)),
+        ];
+        for key in over_touched.into_iter().chain(over_untouched) {
+            assert!(cache.publish(
+                RadarChunk::new(key, vec![GREEN; chunk_pixel_count()]).expect("a complete product")
+            ));
+        }
+
+        assert!(
+            !cache.moved(facet, RadarRevision(0), [touched]),
+            "an unchanged revision is refused for `set_revision`'s reason"
+        );
+        assert!(cache.moved(facet, RadarRevision(1), [touched]));
+
+        for key in over_untouched {
+            let carried = cache.key(facet, key.lod(), key.chunk());
+            assert_ne!(carried, key, "the carried product answers to the new revision");
+            assert_eq!(
+                cache
+                    .select_ready(carried)
+                    .expect("ground the edit did not reach is still current")
+                    .kind(),
+                RadarReadyKind::Exact,
+            );
+        }
+        for key in over_touched {
+            let now = cache.key(facet, key.lod(), key.chunk());
+            assert!(cache.get(now).is_none(), "a product over the edit is not current");
+            assert_eq!(
+                cache
+                    .select_ready(now)
+                    .expect("the superseded raster is still a complete picture")
+                    .kind(),
+                RadarReadyKind::StaleExact,
+                "what the edit moved falls back exactly as a facet-wide bump leaves it",
+            );
+        }
+        assert_eq!(cache.retained_len(), 4, "nothing was thrown away, only renamed");
+        let counters = cache.counters();
+        assert_eq!((counters.ready, counters.stale), (2, 2));
+
+        assert!(cache.is_dirty(cache.key(facet, 0, touched)));
+        assert!(
+            cache.is_dirty(cache.key(facet, SWEEP_LOD, touched.ancestor_at(SWEEP_LOD.value()))),
+            "the touched chunk's column is dirty up to the ceiling, and no further",
+        );
+        assert!(
+            !cache.is_dirty(cache.key(facet, 0, untouched)),
+            "a chunk nothing touched is not rebuild work",
+        );
+    }
+
+    /// **Three carried siblings and one rebuilt child are a complete family.**
+    ///
+    /// This is why nothing above [`SWEEP_LOD`] needs to be named dirty, and it
+    /// is the half of §10.2 the carry actually closes: the coarse ladder used
+    /// to stay stale after an edit because a parent needs four children at the
+    /// *new* revision and an edit rebuilds one.
+    #[test]
+    fn a_carried_family_is_what_repairs_the_ladder_above_an_edit() {
+        let facet = Facet(0);
+        let extent = a_four_level_facet();
+        let mut cache = RadarCache::default();
+        let edited = RadarChunkCoord::new(1, 1);
+        for (coord, color) in [
+            (RadarChunkCoord::new(0, 0), GREEN),
+            (RadarChunkCoord::new(1, 0), RED),
+            (RadarChunkCoord::new(0, 1), BLUE),
+            (edited, RED),
+        ] {
+            assert!(
+                cache.publish(
+                    RadarChunk::new(cache.key(facet, 0, coord), vec![color; chunk_pixel_count()])
+                        .expect("a complete child")
+                )
+            );
+        }
+        let last = cache.key(facet, 0, edited);
+        assert_eq!(
+            build_ready_ancestors(&mut cache, last, extent),
+            1,
+            "the first family completes; its own parent is missing three siblings",
+        );
+
+        assert!(cache.moved(facet, RadarRevision(1), [edited]));
+        let rebuilt = cache.key(facet, 0, edited);
+        assert!(
+            cache.publish(
+                RadarChunk::new(rebuilt, vec![WHITE; chunk_pixel_count()]).expect("the rebuilt child")
+            )
+        );
+        assert_eq!(
+            build_ready_ancestors(&mut cache, rebuilt, extent),
+            1,
+            "one rebuild plus three carried siblings is a family at the new revision",
+        );
+
+        let parent = cache
+            .get(cache.key(facet, 1, RadarChunkCoord::new(0, 0)))
+            .expect("the parent is current again");
+        assert_eq!(
+            parent.pixels()[0],
+            GREEN,
+            "the north-west quadrant is the carried child's own pixels",
+        );
+        assert_eq!(
+            parent.pixels()[chunk_pixel_count() - 1],
+            WHITE,
+            "and the south-east quadrant is what the edit rebuilt",
+        );
+    }
+
+    /// A floor is owed once a session — [`RadarCache::begin_sweep`] refuses a
+    /// second — and [`RadarCache::drain_sweep`] strikes off any key older than
+    /// the facet's revision. Before the carry those two rules met in a publish
+    /// and silently finished a sweep that had built nothing.
+    #[test]
+    fn a_publish_part_way_through_a_sweep_does_not_finish_it() {
+        let facet = Facet(0);
+        let extent = RadarExtent::new(BASE_CHUNK_TILES * 8, BASE_CHUNK_TILES * 8).expect("eight chunks");
+        let mut cache = RadarCache::default();
+        assert!(cache.begin_sweep(facet, extent));
+        assert_eq!(cache.sweep_owed_len(facet), 4);
+
+        assert!(cache.moved(facet, RadarRevision(1), [RadarChunkCoord::new(0, 0)]));
+        assert_eq!(
+            cache.sweep_owed_len(facet),
+            4,
+            "the sweep is owed what it was owed"
+        );
+
+        let mut offered = Vec::new();
+        assert_eq!(
+            cache.drain_sweep(facet, |key| {
+                offered.push(key);
+                true
+            }),
+            4,
+        );
+        assert!(
+            offered.iter().all(|key| key.revision() == RadarRevision(1)),
+            "and it is owed at the revision the publish left behind",
         );
     }
 

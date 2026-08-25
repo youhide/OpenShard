@@ -954,7 +954,7 @@ extent or its zoom range leaves this reading describing a client nobody runs,
 silently. Every constant names where it came from, and that is the whole of the
 defence.
 
-### 10.2 The coarse floor is swept once, and a terrain edit does not re-sweep
+### 10.2 The coarse floor is swept once, and a terrain edit does not re-sweep ✅ (in the cache; its caller waits)
 
 `drain_sweep` strikes a key off when the facet's revision moves past it, on the
 grounds that the chunk is then the dirty set's to rebuild. That is correct for a
@@ -977,6 +977,31 @@ that gives this path a production writer owes the ladder a revision model — a
 chunk whose *content* did not change should keep its identity across a facet's
 revision — and not a bigger frame budget. Era S's live publish is where that
 lands.
+
+**Closed in the cache by `RadarCache::moved`**, which is
+[`what_a_change_costs.md`](new_map_representation/what_a_change_costs.md)'s S2.
+The revision model it asked for turned out to be a *carry* rather than a second
+key: a publish arrives with the chunks its patch touched, so every product at
+every level with no touched chunk under it is renamed to the new revision, and
+the ones over the edit are left exactly where a facet-wide bump leaves all of
+them — retained, stale, and still a complete picture to draw from. The ladder
+then repairs itself without anything above the ceiling being named at all: a
+parent needs four children at the new revision, and after a carry three of the
+four already are, so publishing the one rebuilt child completes the family and
+`build_ready_ancestors` climbs. `set_revision` stays, unchanged and fail-closed
+— a caller who cannot say what moved still loses everything, which is what makes
+the carry a claim rather than a default.
+
+Two things the same call fixes, because they are the same rule read at another
+door: a sweep part-way through a facet is no longer silently finished by a
+publish (`drain_sweep` strikes off keys older than the revision, and a floor is
+owed once a session), and `invalidate_tile` staying test-only is now settled
+rather than pending — a chunk is sixteen thousand tiles and a publish names
+chunks.
+
+**What is left is the one line at the caller**: the client's publish path still
+calls `set_revision`, in `net_command.rs`, which is the file the editor work is
+rewriting. The switch lands with that tree rather than inside it.
 
 ### 10.3 One page eviction per insert was an invariant nothing states ✅
 

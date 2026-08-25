@@ -275,11 +275,21 @@ S1 is built. S2 turned out not to depend on it — the carry needs a list of wha
 moved and not a hash of what did not — so the only ordering left is S4 behind
 S1's world id. S5 and S6 are independent of all of it.
 
+**S2's cache half is built**: `RadarCache::moved(facet, revision, touched)`
+carries every product no touched chunk lies under, at every level, and leaves
+the ones over the edit retained and stale the way a facet-wide bump leaves all
+of them. It closes two things the same call was always going to close —
+[`radar.md` §10.2](../radar.md) in the cache, and a sweep that a publish used to
+finish silently — and makes `invalidate_tile` test-only for good.
+
 **S2's one caller is in the client's publish path**, which is
-`net_command.rs` — the file the editor work is currently rewriting. The cache
-half is `client/render` and lands on its own; the one-line switch from
-`set_revision` to `moved` waits for that tree to settle rather than being
-merged into somebody else's half-finished edit.
+`net_command.rs` — the file the editor work is currently rewriting. The one-line
+switch from `set_revision` to `moved` waits for that tree to settle rather than
+being merged into somebody else's half-finished edit. What it needs beside it is
+the coordinate change from a map chunk to a base radar chunk: they share the
+64-tile divisor, which `openshard_map::chunk`'s own header records as a decision,
+so it is a rename and not a resampling — and it belongs to the caller, which is
+the one place holding both types.
 
 **S3 may go first**, and should if the editor
 ([`../editor.md`](../editor.md)) lands before it: a brush is a stream of
