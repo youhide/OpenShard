@@ -335,11 +335,6 @@ impl Rng {
     }
 }
 
-/// Nothing placed: what the *client's* own reading of the ground is, which in
-/// this simulation never holds the shard's wall — see the notes at its two use
-/// sites.
-static EMPTY_FIELD: std::sync::LazyLock<Overlay> = std::sync::LazyLock::new(Overlay::default);
-
 /// A world with a wall in it, or none.
 ///
 /// No map at all, so the ground refuses nothing and the walls are the whole of
@@ -352,6 +347,50 @@ fn field(walls: &[Tile]) -> Overlay {
         overlay.set(tile, vec![Cover::blocking(0, 20)]);
     }
     overlay
+}
+
+/// One leaf of a door, as the shard holds it.
+///
+/// The shard's `state::components::Door`, down to the two fields a step cares
+/// about: where the shut leaf stands, and the leaf that swings with it.
+#[derive(Clone, Copy, Debug)]
+struct Leaf {
+    /// The tile it fills while it is shut.
+    at: Point,
+    /// What a use packet names it by.
+    serial: Serial,
+    /// The other leaf of the same doorway, if the shard knows the two are a
+    /// pair — `Door::link`, which `items::doors::set_door_pair` swings along.
+    ///
+    /// **`None` is the ordinary case in a live world**, and it is why the
+    /// scenarios below hold it: only doors *generated* between static frames are
+    /// linked (`world::tick::decor`), while every door placed from decoration
+    /// data — which is every named door in a town — is placed with `link: None`.
+    link: Option<Serial>,
+    /// Whether it has swung aside.
+    open: bool,
+}
+
+/// What crosses the wire to the shard.
+///
+/// Two things and not one, because the whole of the doorway question is their
+/// *order*: `App::walk` sends the use of a shut leaf and then the step into it,
+/// in that order, in one wake.
+enum ToShard {
+    /// A `0x02` walk request.
+    Step(FramedClientPacket),
+    /// A `0x06` on a door leaf.
+    Use(Serial),
+}
+
+/// What crosses the wire back.
+enum ToClient {
+    /// Anything the walk handshake is made of.
+    Packet(ServerPacket),
+    /// The `0x1A` that redraws a leaf that swung aside — modelled as the one
+    /// fact this end takes from it, which is that the leaf is no longer shut and
+    /// no longer in the way.
+    Swung(Serial),
 }
 
 /// The client, the wire and a shard, on one virtual clock.
@@ -378,10 +417,34 @@ struct Sim {
     shard: Walker,
     /// What the *shard* refuses a step onto. See [`field`].
     field: Overlay,
+    /// The doorway the shard holds, if this scenario has one.
+    leaves: Vec<Leaf>,
 
-    /// `0x02`s crossing to the shard, and answers crossing back, by arrival.
-    to_shard: VecDeque<(Duration, FramedClientPacket)>,
-    to_client: VecDeque<(Duration, ServerPacket)>,
+    /// What the *client* can see of the ground. Empty in every scenario but the
+    /// doorway ones, which is what makes the rollback scenarios a rollback: the
+    /// wall in `field` is one this end finds out about only from a `0x21`.
+    seen: Overlay,
+    /// Which way this client reads a shut leaf — `App::walking_doors`. Every
+    /// scenario without a doorway reads `AsTheyStand` over an empty `seen`,
+    /// which is the same ground either way.
+    doors: Doors,
+    /// The shut leaves this client can see, as `App::open_door_ahead` collects
+    /// them out of its item list. A leaf drops out of here when the update
+    /// saying it swung arrives.
+    shut: Vec<(Point, Serial)>,
+    /// Whether the auto-door setting is on.
+    auto_open: bool,
+    /// The leaves already asked to open — `App::auto_opened_doors`.
+    auto_opened: Vec<Serial>,
+    /// Every leaf this client sent a use for, in the order it sent them. What
+    /// says whether the auto-door reached *both* leaves of a doorway or only
+    /// the one the step lands on.
+    used: Vec<Serial>,
+
+    /// `0x02`s and door uses crossing to the shard, and answers crossing back,
+    /// by arrival.
+    to_shard: VecDeque<(Duration, ToShard)>,
+    to_client: VecDeque<(Duration, ToClient)>,
     /// The prediction crossing the mpsc back into the window — `link::Update`.
     to_window: VecDeque<(Duration, Predicted, bool)>,
 
@@ -470,6 +533,13 @@ impl Sim {
             player,
             shard: Walker::new(START, facing),
             field: field(&walls),
+            leaves: Vec::new(),
+            seen: Overlay::default(),
+            doors: Doors::AsTheyStand,
+            shut: Vec::new(),
+            auto_open: false,
+            auto_opened: Vec::new(),
+            used: Vec::new(),
             to_shard: VecDeque::new(),
             to_client: VecDeque::new(),
             to_window: VecDeque::new(),
@@ -487,6 +557,71 @@ impl Sim {
             control: Control::new(Camera::new(START, 800, 600), 1 << 20, rig),
             eyes: Vec::new(),
         }
+    }
+
+    /// A client standing one tile south of a **two-leaf doorway**, with the
+    /// auto-door on.
+    ///
+    /// The picture is what `world::tick::decor`'s `generate_doors` builds: a
+    /// wall pierced by a two-tile gap, its frames at either end, and a leaf
+    /// filling each half of the gap. Here the wall runs along `y = 999` with its
+    /// frames at `x = 999` and `x = 1002`, so the leaves stand at `(1000, 999)`
+    /// and `(1001, 999)` and the body at [`START`] is directly south of the
+    /// eastern one.
+    ///
+    /// `linked` is the shard's `Door::link`: whether using one leaf swings the
+    /// other. **`false` is the ordinary world** — only doors generated between
+    /// static frames are linked, and every door placed from decoration data is
+    /// placed with none — so it is the reading these scenarios are run at.
+    ///
+    /// The client is shown the same doorway the shard holds, which is the
+    /// honest case and the whole of the question: this end plans through a shut
+    /// leaf on the promise that it opens it (`world::walking_doors`), and what
+    /// is being asked is whether it keeps that promise for *every* leaf the step
+    /// goes past.
+    fn at_a_doorway(facing: Direction, auto_open: bool, linked: bool) -> Self {
+        /// A shut leaf's cover, the shard's own: `state::obstruct`'s `DOOR_HEIGHT`.
+        const DOOR_HEIGHT: u8 = 20;
+        let west = Serial::new(0x0000_1000).unwrap();
+        let east = Serial::new(0x0000_1001).unwrap();
+        let leaves = vec![
+            Leaf {
+                at: Point::new(1000, 999, 0),
+                serial: west,
+                link: linked.then_some(east),
+                open: false,
+            },
+            Leaf {
+                at: Point::new(1001, 999, 0),
+                serial: east,
+                link: linked.then_some(west),
+                open: false,
+            },
+        ];
+        let walls = vec![Tile::new(999, 999), Tile::new(1002, 999)];
+        // A round trip long enough that a refusal is a visible rubber-band and
+        // short enough that a step and its answer both fit in the scenario.
+        let net = Net {
+            latency: Duration::from_millis(40),
+            jitter: Duration::ZERO,
+            wake_jitter: Duration::ZERO,
+        };
+        let mut sim = Self::new(facing, net, 1, walls.clone());
+        let mut seen = field(&walls);
+        for leaf in &leaves {
+            let tile = Tile::new(leaf.at.x, leaf.at.y);
+            let shut = vec![Cover::door(leaf.at.z, DOOR_HEIGHT)];
+            sim.field.set(tile, shut.clone());
+            seen.set(tile, shut);
+        }
+        sim.shut = leaves.iter().map(|leaf| (leaf.at, leaf.serial)).collect();
+        sim.leaves = leaves;
+        sim.seen = seen;
+        // The window's own rule, called rather than restated: a living player
+        // with the auto-door on plans as though every leaf were open.
+        sim.doors = crate::world::walking_doors(false, auto_open);
+        sim.auto_open = auto_open;
+        sim
     }
 
     /// The virtual clock as an `Instant`, for the two units that take one.
@@ -533,14 +668,14 @@ impl Sim {
                 let act = acts.next().unwrap();
                 match act.input {
                     Input::Press(direction) => {
-                        // open ground, not `self.field` — see the note on
-                        // `about_to_wait`.
+                        // What this end can see, not `self.field` — see the note
+                        // on `about_to_wait`.
                         if let Some(facing) = self.steering.press(
                             direction,
                             self.player.at,
                             self.instant(),
                             self.player.facing,
-                            Readings::plain(Footing::new(None, &EMPTY_FIELD, Doors::AsTheyStand)),
+                            Readings::plain(Footing::new(None, &self.seen, self.doors)),
                         ) {
                             self.send(facing);
                         }
@@ -561,7 +696,18 @@ impl Sim {
     /// Everything whose time has come, in the order it would really arrive.
     fn deliver(&mut self) {
         while self.to_shard.front().is_some_and(|(at, _)| *at <= self.now) {
-            let (_, packet) = self.to_shard.pop_front().unwrap();
+            let (_, message) = self.to_shard.pop_front().unwrap();
+            let packet = match message {
+                ToShard::Step(packet) => packet,
+                // `items::doors::toggle_door`, minus the reach and the lock:
+                // neither is what these scenarios are about, and a leaf that
+                // refuses to open is the rubber-band this file already has a
+                // name for.
+                ToShard::Use(serial) => {
+                    self.swing(serial);
+                    continue;
+                }
+            };
             // The one place the wrapper is opened, and it is the simulated
             // socket read — the same seam `link::play` unwraps at.
             let request: WalkRequest = decode_packet(packet.bytes(), version()).unwrap();
@@ -589,11 +735,21 @@ impl Sim {
                 }
             };
             let at = self.now + self.hop();
-            self.to_client.push_back((at, answer));
+            self.to_client.push_back((at, ToClient::Packet(answer)));
         }
 
         while self.to_client.front().is_some_and(|(at, _)| *at <= self.now) {
-            let (_, packet) = self.to_client.pop_front().unwrap();
+            let (_, message) = self.to_client.pop_front().unwrap();
+            let packet = match message {
+                ToClient::Packet(packet) => packet,
+                // The redraw that says a leaf swung aside. This end forgets it
+                // as an obstacle and as something to open, which is the whole of
+                // what the `0x1A` changes for a walk.
+                ToClient::Swung(serial) => {
+                    self.forget_leaf(serial);
+                    continue;
+                }
+            };
             // The net task's fold: `link.rs`'s `fold`, minus the `WorldView`,
             // which holds nothing our own body is drawn from.
             let moved = self.walk.on_packet(&packet).unwrap();
@@ -638,13 +794,17 @@ impl Sim {
 
     /// The ten lines of `App::about_to_wait` that walking goes through.
     fn about_to_wait(&mut self) {
-        // Open ground, not `self.field`: `field` models the wall the *shard*
-        // enforces (see its own doc), and the client's own static map is a
-        // separate, empty one in every scenario this harness runs — the
-        // point of the rollback scenarios below is a wall this end finds out
-        // about only from a `0x21`. Handing `Steering::due` the shard's own
-        // `field` would let `Steering::detour` route around exactly the
-        // obstacle those scenarios exist to walk blindly into.
+        // What this end can see, not `self.field`: `field` models the wall the
+        // *shard* enforces (see its own doc), and the client's own picture is a
+        // separate one that in every rollback scenario is empty — the point of
+        // those is a wall this end finds out about only from a `0x21`. Handing
+        // `Steering::due` the shard's own `field` would let `Steering::detour`
+        // route around exactly the obstacle they exist to walk blindly into.
+        //
+        // The doorway scenarios are the ones where the two pictures agree, which
+        // is the honest case: a client is *shown* the doors, plans through them
+        // on the promise that it opens them (`App::walking_doors`), and the
+        // question is then whether it keeps that promise.
         //
         // Twice at most, exactly as `App::about_to_wait` does it: a turn costs
         // no time, so the step it precedes leaves in the same wake.
@@ -653,7 +813,7 @@ impl Sim {
                 self.instant(),
                 self.player.at,
                 self.player.facing,
-                Readings::plain(Footing::new(None, &EMPTY_FIELD, Doors::AsTheyStand)),
+                Readings::plain(Footing::new(None, &self.seen, self.doors)),
             ) else {
                 break;
             };
@@ -691,6 +851,9 @@ impl Sim {
     /// — they are a channel between two threads of one process — but modelled,
     /// because the *order* they impose is real.
     fn send(&mut self, facing: Facing) {
+        // `App::walk`'s own order: the use of every shut leaf this step has to
+        // get past leaves first, and the `0x02` behind it.
+        self.open_door_ahead(facing);
         let before = self.walk.predicted().position;
         // No map, so no height: `|_, _| None` is what a caller without one
         // passes, and the flat prediction is the honest answer.
@@ -709,8 +872,65 @@ impl Sim {
             self.stepped_at.push(self.now);
         }
         let at = self.now + self.hop();
-        self.to_shard.push_back((at, packet));
+        self.to_shard.push_back((at, ToShard::Step(packet)));
         self.to_window.push_back((self.now, self.walk.predicted(), false));
+    }
+
+    /// `App::open_door_ahead`, and the rule itself is the same call the window
+    /// makes — [`crate::world::doors_a_step_needs`]. Only the item list it is
+    /// asked over differs, because this harness has no `WorldView` to keep one
+    /// in.
+    fn open_door_ahead(&mut self, facing: Facing) {
+        if !self.auto_open {
+            return;
+        }
+        let motion = self.walk.predicted();
+        let needed = crate::world::doors_a_step_needs(motion.position, motion.facing, facing, &self.shut);
+        for &serial in &needed {
+            if self.auto_opened.contains(&serial) {
+                continue;
+            }
+            self.used.push(serial);
+            let at = self.now + self.hop();
+            self.to_shard.push_back((at, ToShard::Use(serial)));
+        }
+        self.auto_opened = needed;
+    }
+
+    /// The shard's half of a use on a door: the leaf swings, and so does the one
+    /// linked to it. `items::doors::set_door_pair`.
+    fn swing(&mut self, serial: Serial) {
+        let Some(index) = self.leaves.iter().position(|leaf| leaf.serial == serial) else {
+            return;
+        };
+        let linked = self
+            .leaves
+            .iter()
+            .position(|leaf| Some(leaf.serial) == self.leaves[index].link);
+        for index in [Some(index), linked].into_iter().flatten() {
+            if self.leaves[index].open {
+                continue;
+            }
+            self.leaves[index].open = true;
+            let leaf = self.leaves[index];
+            // The line that makes the door real to movement: the tile the shut
+            // leaf filled is freed. `items::doors::set_door` unblocks the same
+            // one.
+            self.field.set(Tile::new(leaf.at.x, leaf.at.y), Vec::new());
+            let at = self.now + self.hop();
+            self.to_client.push_back((at, ToClient::Swung(leaf.serial)));
+        }
+    }
+
+    /// The client's half of the same: the leaf is no longer in the way and no
+    /// longer something to open.
+    fn forget_leaf(&mut self, serial: Serial) {
+        let Some(index) = self.shut.iter().position(|&(_, shut)| shut == serial) else {
+            return;
+        };
+        let (at, _) = self.shut.remove(index);
+        self.seen.set(Tile::new(at.x, at.y), Vec::new());
+        self.auto_opened.retain(|&opened| opened != serial);
     }
 
     /// Where the body is drawn this frame, in tiles, and where the eye went.
@@ -1577,6 +1797,123 @@ fn a_refusal_puts_the_body_back_without_walking_it_back() {
     assert!(
         sim.trace.iter().all(|(_, drawn)| drawn.0 <= 1004.0),
         "drawn past the wall"
+    );
+}
+
+// --- The doorway -----------------------------------------------------------
+
+/// **The report, in a player's words: doors block me, with a kickback, when I
+/// come at them horizontally.**
+///
+/// Horizontal on screen is a *diagonal* in tiles — the map is drawn rotated 45°
+/// and [`Direction`]'s own docs say so — and a diagonal through a two-tile
+/// doorway has the other leaf as one of its two flanks. Both readings of that
+/// leaf are involved and they disagreed:
+///
+/// - this end plans with `Doors::AllOpen` while the auto-door is on, and that
+///   reading reaches all eight neighbours through one `steps_out_of`, flanks
+///   included — so the diagonal is planned through the shut leaf on the promise
+///   that somebody opens it;
+/// - the shard reads its own flanks `AsTheyStand` and refuses the step at the
+///   corner rule: a `0x21`, a rollback, and a walk-sequence reset, once a
+///   walking beat for as long as the key is held;
+/// - and the promise was never kept, because the auto-door used the leaf the
+///   step *lands* on and nothing else. The other leaf is a flank, never a
+///   landing, so it was never used — which is also why only one leaf of the
+///   pair ever swung.
+///
+/// So this scenario asserts the three of them at once: no refusal, the body
+/// through the doorway, and a use sent for *both* leaves.
+#[test]
+fn a_double_doorway_entered_on_the_diagonal_is_not_a_rubber_band() {
+    let mut sim = Sim::at_a_doorway(Direction::NorthEast, true, false);
+    // One step's worth: pressed at once, released before the next is due, and
+    // then long enough for the answer to come back. A second step is nobody's
+    // question here — the doorway's far side is the wall's own corner, and the
+    // rule that refuses *that* is the corner rule working.
+    let script = [press(0, Direction::NorthEast), release(200, Direction::NorthEast)];
+    sim.run(&script, Duration::from_millis(900));
+
+    assert_eq!(
+        sim.refused, 0,
+        "the shard refused the step through the doorway, which is the rubber-band: \
+         the client planned through a leaf it never opened"
+    );
+    assert_eq!(
+        sim.shard.position,
+        Point::new(1001, 999, 0),
+        "the body should be through the doorway"
+    );
+    assert_eq!(
+        sim.used.len(),
+        2,
+        "both leaves are in this step's way — the one it lands on and the flank \
+         it squeezes past — so both have to be used: {:?}",
+        sim.used
+    );
+    let (_, last) = *sim.trace.last().unwrap();
+    assert!(
+        (last.0 - 1001.0).abs() < 0.01 && (last.1 - 999.0).abs() < 0.01,
+        "the screen agrees with the shard: {last:?}"
+    );
+}
+
+/// The same doorway, entered the way that always worked: a cardinal step, whose
+/// landing *is* the shut leaf.
+///
+/// The control for the scenario above, and the asymmetry the player described —
+/// "it only blocks me sideways". A cardinal has no flanks, so one leaf is the
+/// whole of what is in the way and the auto-door has always reached it. What
+/// this pins is that the fix for the diagonal did not turn every step into a
+/// doorway-wide swing: the leaf that is not in the way stays shut.
+#[test]
+fn a_cardinal_step_through_the_same_doorway_uses_the_leaf_it_lands_on() {
+    let mut sim = Sim::at_a_doorway(Direction::North, true, false);
+    let script = [press(0, Direction::North), release(200, Direction::North)];
+    sim.run(&script, Duration::from_millis(900));
+
+    assert_eq!(
+        sim.refused, 0,
+        "the leaf on the landing was opened before the step"
+    );
+    assert_eq!(
+        sim.shard.position,
+        Point::new(1000, 999, 0),
+        "the body should be standing in the doorway"
+    );
+    assert_eq!(
+        sim.used.len(),
+        1,
+        "a cardinal squeezes past nothing, so only the landing's leaf is used: {:?}",
+        sim.used
+    );
+}
+
+/// With the auto-door **off**, the same diagonal is not asked for at all.
+///
+/// The other half of `world::walking_doors`: a client that will not open a leaf
+/// reads it `AsTheyStand`, so the plan never goes through it and there is
+/// nothing for the shard to refuse. The body goes round, or stands — either is
+/// the player's own doing — and what must not happen is the `0x21` at walking
+/// pace that the setting being *on* used to produce.
+#[test]
+fn with_the_auto_door_off_the_doorway_is_walked_round_and_not_into() {
+    let mut sim = Sim::at_a_doorway(Direction::NorthEast, false, false);
+    let script = [
+        press(0, Direction::NorthEast),
+        release(1_000, Direction::NorthEast),
+    ];
+    sim.run(&script, Duration::from_millis(1_400));
+
+    assert!(sim.used.is_empty(), "nobody asked for a door: {:?}", sim.used);
+    assert_eq!(
+        sim.refused, 0,
+        "a step the client can see is refused is a step it must not send"
+    );
+    assert!(
+        sim.shard.position.y >= 1000,
+        "the shut doorway was crossed anyway: {:?}",
+        sim.shard.position
     );
 }
 

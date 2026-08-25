@@ -841,10 +841,12 @@ pub fn steps_out_of(footing: &Footing<'_>, from: Point) -> [Option<Point>; 8] {
         // between N and E), and both are cardinal — so this reads only landings
         // and can never re-enter the rule.
         let bits = usize::from(direction.to_bits());
-        if direction.is_diagonal()
-            && [(bits + 7) % 8, (bits + 1) % 8]
-                .iter()
-                .any(|&flank| landings[flank].is_none())
+        let Some(flanks) = direction.flanks() else {
+            continue;
+        };
+        if flanks
+            .iter()
+            .any(|flank| landings[usize::from(flank.to_bits())].is_none())
         {
             allowed[bits] = None;
         }

@@ -402,10 +402,14 @@ impl App {
         true
     }
 
-    /// Use the closed door in the next cell before asking the shard to step
-    /// into it. The shard remains authoritative: it may reject a locked door,
+    /// Use every closed door this step has to get past before asking the shard
+    /// to take it. The shard remains authoritative: it may reject a locked door,
     /// and only its following item update makes this client regard the way as
     /// open.
+    ///
+    /// **Every leaf, and not only the one the step lands on.** Which tiles those
+    /// are is [`crate::world::doors_a_step_needs`], where the diagonal that was
+    /// rubber-banded through a two-leaf doorway is written down.
     fn open_door_ahead(&mut self, facing: Facing) {
         // A ghost has no hands, and needs none: the leaf it is walking at is
         // already not in its way (`App::walking_doors`). Sending the use anyway
@@ -413,35 +417,36 @@ impl App {
         // did not refuse it, this client would be swinging doors open across
         // town for the living, who cannot see who is doing it.
         if !self.auto_open_doors || self.world.dead() {
-            self.auto_opened_door = None;
+            self.auto_opened_doors.clear();
             return;
         }
         let motion = self.world.motion.planning_state();
-        let openshard_movement::Intent::Stepped { target, .. } =
-            openshard_movement::intend(motion.position, motion.facing, facing)
-        else {
-            return;
-        };
-        let door = self
+        let shut: Vec<(
+            openshard_protocol::world::Point,
+            openshard_protocol::serial::Serial,
+        )> = self
             .world
             .presentation
             .items
             .iter()
             .zip(&self.world.presentation.item_serials)
-            .find(|(item, _)| {
-                item.at.x == target.x
-                    && item.at.y == target.y
-                    && doors::is_door(item.displayed())
-                    && !doors::is_open(item.displayed())
-            })
-            .map(|(_, serial)| *serial);
-        if door == self.auto_opened_door {
-            return;
+            .filter(|(item, _)| doors::is_door(item.displayed()) && !doors::is_open(item.displayed()))
+            .map(|(item, serial)| (item.at, *serial))
+            .collect();
+        let needed = crate::world::doors_a_step_needs(motion.position, motion.facing, facing, &shut);
+        // Only what has not been asked for already. A locked leaf never swings,
+        // so it stays in this list and stops receiving a use packet every
+        // walking beat; a leaf that *did* swing leaves `shut` above, and drops
+        // out of the memory here with it.
+        for &serial in &needed {
+            if self.auto_opened_doors.contains(&serial) {
+                continue;
+            }
+            if let Some(link) = self.world.shard.link() {
+                link.use_object(serial);
+            }
         }
-        self.auto_opened_door = door;
-        if let (Some(serial), Some(link)) = (door, self.world.shard.link()) {
-            link.use_object(serial);
-        }
+        self.auto_opened_doors = needed;
     }
 
     /// The place a move order names, which is the picture the cursor actually

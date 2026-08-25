@@ -113,6 +113,27 @@ impl Direction {
     pub const fn opposite(self) -> Self {
         Self::from_bits(self.to_bits().wrapping_add(4))
     }
+
+    /// The two cardinals a diagonal squeezes between — the wire directions
+    /// either side of it, and `None` for a cardinal, which squeezes between
+    /// nothing.
+    ///
+    /// This is the geometry the corner rule is made of (`movement`'s
+    /// `steps_out_of`: a diagonal is refused when either flank is), and it is
+    /// here rather than there because a second caller needs the same two tiles
+    /// for a different question — the client's auto-door has to open every shut
+    /// leaf a step goes past, not only the one it lands on. Two callers deriving
+    /// "either side of it" from index arithmetic of their own is how one of them
+    /// comes to disagree with the rule that refuses the step.
+    pub const fn flanks(self) -> Option<[Self; 2]> {
+        match self.is_diagonal() {
+            true => Some([
+                Self::from_bits(self.to_bits().wrapping_add(7)),
+                Self::from_bits(self.to_bits().wrapping_add(1)),
+            ]),
+            false => None,
+        }
+    }
 }
 
 impl fmt::Display for Direction {
@@ -199,6 +220,31 @@ mod tests {
         assert_eq!(Direction::South.to_bits(), 4);
         assert_eq!(Direction::West.to_bits(), 6);
         assert_eq!(Direction::NorthWest.to_bits(), 7);
+    }
+
+    /// A diagonal's flanks are the two cardinals it lies between, and they are
+    /// where its step's other two tiles come from — the corner rule's, and the
+    /// client auto-door's.
+    #[test]
+    fn a_diagonal_lies_between_two_cardinals_and_a_cardinal_between_none() {
+        assert_eq!(
+            Direction::NorthEast.flanks(),
+            Some([Direction::North, Direction::East])
+        );
+        assert_eq!(
+            Direction::NorthWest.flanks(),
+            Some([Direction::West, Direction::North]),
+            "the wheel wraps at north"
+        );
+        for direction in Direction::ALL {
+            match direction.flanks() {
+                Some(flanks) => assert!(
+                    flanks.iter().all(|flank| !flank.is_diagonal()),
+                    "{direction}'s flanks are cardinals"
+                ),
+                None => assert!(!direction.is_diagonal(), "{direction} squeezes between nothing"),
+            }
+        }
     }
 
     #[test]

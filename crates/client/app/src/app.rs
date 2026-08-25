@@ -185,10 +185,11 @@ pub(crate) struct App {
     pub(crate) steer: steer::Steering,
     /// Persisted movement preferences, applied at the point a step is sent.
     pub(crate) auto_open_doors: bool,
-    /// The shut leaf already asked to open. A server update clears this when it
-    /// swings, while keeping a locked door from receiving a use packet each
+    /// The shut leaves already asked to open — the landing's and, on a diagonal,
+    /// its flanks' (`world::doors_a_step_needs`). A server update clears one when
+    /// it swings, while keeping a locked door from receiving a use packet each
     /// walking beat.
-    pub(crate) auto_opened_door: Option<Serial>,
+    pub(crate) auto_opened_doors: Vec<Serial>,
     /// The last route assembled for the development HUD.
     ///
     /// A path search is considerably more expensive than drawing its line,

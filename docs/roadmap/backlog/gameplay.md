@@ -137,13 +137,43 @@ With both leaves swinging together, the picture, obstruction index and timer
 stay consistent; if a player stands under either closed position, neither leaf
 closes until the doorway is clear.
 
-**The narrower defect underneath it survives that fix**, and is worth a line of
-its own: the client reads a shut door as passable in a flank it will never open.
-Any shut leaf beside a diagonal — a second doorway, a door the shard refuses to
-open, a locked one — is the same rubber-band. Either the client opens every shut
-leaf a step needs (landing *and* both flanks of a diagonal), or the flanks are
-read `AsTheyStand` whatever the mover's own door policy is. The second is the
-conservative one and costs a diagonal the shard would have allowed.
+**The narrower defect underneath it survived that fix**, and it is the one a
+player kept hitting: the client read a shut door as passable in a flank it would
+never open. The link only reaches a *generated* doorway — every door placed from
+decoration data is placed with `link: None` (`World::decorate`), and so is every
+door a house adopts — so in a live world one leaf swings, the other stays shut,
+and the diagonal past it is refused at the corner rule. On screen the diagonals
+are the horizontal walk, which is why the report was "doors block me sideways,
+and only one of them opens".
+
+**Now closed at the client, the first of the two ways named here**: the auto-door
+opens every shut leaf a step needs — the landing *and*, on a diagonal, both
+flanks. The tiles are [`world::doors_a_step_needs`](../../../crates/client/app/src/world.rs),
+which takes them from `movement` (`intend` for the landing, `Direction::flanks`
+for the pair, the same call `steps_out_of`'s corner rule is made of) rather than
+from arithmetic of its own, so the end that *asks* for the step and the end that
+*refuses* it cannot derive different tiles. `App::auto_opened_door` became
+`auto_opened_doors`, so a locked leaf still receives one use and not one a beat.
+Three scenarios in `client/app/src/dst.rs` hold it: the diagonal through a
+two-leaf doorway takes no refusal and uses both leaves, the cardinal through the
+same doorway uses only the leaf it lands on, and with the auto-door off no use is
+sent and no step is asked for.
+
+Two threads are left, and neither is a rubber-band:
+
+- **A leaf the shard will not open** — locked, someone else's house door — is
+  still planned through and still refused, once per press now rather than once
+  per beat. The remedy is the second way named above: read the flanks
+  `AsTheyStand` whatever the mover's door policy is, which costs a diagonal the
+  shard would have allowed. Worth doing when a `0x21` at a locked door is what a
+  player actually complains about.
+- **A decoration double door still swings one leaf to a double-click**, and to a
+  cardinal walk, because nothing links the pair. ServUO links only what its
+  `DoorGenerator` places, and this engine copies that; OSI swings both. The fix
+  is to pair adjacent decoration doors at placement by their hinge graphics
+  (`doorgen::GenFacing`'s two pairs) — derivable from the door table rather than
+  guessed — and it is a decision about world data, so it is not being taken
+  here.
 
 ## Deferred / not yet ported (the Felucca converter)
 

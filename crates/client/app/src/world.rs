@@ -1021,6 +1021,76 @@ pub(crate) const fn walking_doors(dead: bool, auto_open_doors: bool) -> openshar
     }
 }
 
+/// Every shut leaf one step this way has to get past: the tile it lands on and,
+/// for a diagonal, the two cardinals it squeezes between.
+///
+/// # Why the flanks are here and not only the landing
+///
+/// [`walking_doors`] answers `AllOpen` for a living player with the auto-door
+/// on, and that reading is applied to *all eight* neighbours through one
+/// [`steps_out_of`](openshard_movement::steps_out_of) — the corner rule reads a
+/// diagonal's flanks as landings. So the plan this end makes walks a diagonal
+/// past a shut leaf on the promise that somebody opens it, and the shard, which
+/// reads its own flanks `AsTheyStand`, refuses that step at the corner rule: a
+/// `0x21`, a rollback and a walk-sequence reset, once a walking beat for as long
+/// as the player holds the key. Every diagonal through a two-leaf doorway has
+/// the *other* leaf as one of its flanks, which is why it was every one of them
+/// and not some — and on screen the diagonals are the horizontal walk, so it read
+/// as "doors block me when I come at them sideways".
+///
+/// Opening the landing alone is what this used to do. The honest fix is the one
+/// that keeps the step the shard would allow: use every leaf the step needs, so
+/// the promise the plan was made on is one this end actually keeps.
+///
+/// The tiles come from `movement` — [`intend`](openshard_movement::intend) for
+/// the landing and [`Direction::flanks`] for the pair — rather than from
+/// arithmetic of our own, because the rule that *refuses* the step derives them
+/// the same way, and two derivations are how the two ends come to disagree.
+///
+/// `shut` is every shut leaf this client can see, as `(where it stands, its
+/// serial)`. Height is not compared, exactly as it was not before: the client's
+/// item list carries the leaf's own z and the step carries the body's, and a
+/// doorway with two leaves at two heights on one tile is not a thing the art
+/// makes.
+pub(crate) fn doors_a_step_needs(
+    from: Point,
+    facing: Facing,
+    want: Facing,
+    shut: &[(Point, Serial)],
+) -> Vec<Serial> {
+    let openshard_movement::Intent::Stepped { target, .. } = openshard_movement::intend(from, facing, want)
+    else {
+        // A turn covers no ground and opens nothing, and neither does a step off
+        // the edge of the coordinate space.
+        return Vec::new();
+    };
+    let mut tiles = vec![target];
+    if let Some(flanks) = want.direction.flanks() {
+        for flank in flanks {
+            if let Some(tile) = openshard_movement::step_from(from, flank) {
+                tiles.push(tile);
+            }
+        }
+    }
+    let mut needed = Vec::new();
+    for tile in tiles {
+        let leaf = shut
+            .iter()
+            .find(|(at, _)| at.x == tile.x && at.y == tile.y)
+            .map(|&(_, serial)| serial);
+        // A leaf can stand in two of the three tiles only if the same serial is
+        // listed twice, which the caller's own view cannot produce — but a
+        // duplicate use is a wasted packet, so it is refused here rather than
+        // being a property of the caller.
+        if let Some(serial) = leaf {
+            if !needed.contains(&serial) {
+                needed.push(serial);
+            }
+        }
+    }
+    needed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1055,6 +1125,46 @@ mod tests {
             walking_doors(false, false),
             Doors::AsTheyStand,
             "and with neither, shut is shut"
+        );
+    }
+
+    /// **A diagonal needs three tiles opened and a cardinal needs one**, which
+    /// is the asymmetry a player reads as "it only blocks me sideways".
+    ///
+    /// The tiles themselves, rather than the walk that follows from them: the
+    /// scenarios in `dst.rs` are what say the walk is not refused, and this is
+    /// what says which leaves were asked for and in which order — the landing
+    /// first, because that is the one the step is *for*.
+    #[test]
+    fn a_diagonal_step_asks_for_the_leaf_on_each_flank_as_well_as_the_landing() {
+        let from = Point::new(1000, 1000, 0);
+        // The two leaves of one doorway, north of the body, and a third door
+        // across the street that no step of this walk goes near.
+        let east_leaf = Serial::new(0x0000_1001).unwrap();
+        let west_leaf = Serial::new(0x0000_1000).unwrap();
+        let elsewhere = Serial::new(0x0000_1002).unwrap();
+        let shut = [
+            (Point::new(1001, 999, 0), east_leaf),
+            (Point::new(1000, 999, 0), west_leaf),
+            (Point::new(1003, 1003, 0), elsewhere),
+        ];
+        let north_east = Facing::walking(Direction::NorthEast);
+        assert_eq!(
+            doors_a_step_needs(from, north_east, north_east, &shut),
+            vec![east_leaf, west_leaf],
+            "the leaf it lands on and the shut flank it squeezes past"
+        );
+
+        let north = Facing::walking(Direction::North);
+        assert_eq!(
+            doors_a_step_needs(from, north, north, &shut),
+            vec![west_leaf],
+            "a cardinal squeezes past nothing, so only the leaf it lands on"
+        );
+
+        assert!(
+            doors_a_step_needs(from, north, north_east, &shut).is_empty(),
+            "a turn covers no ground and opens nothing"
         );
     }
 

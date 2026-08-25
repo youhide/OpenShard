@@ -1214,7 +1214,7 @@ pub fn run<D: Dial + Send + 'static>(
             steer
         },
         auto_open_doors: movement.auto_open_doors,
-        auto_opened_door: None,
+        auto_opened_doors: Vec::new(),
         route_cache: None,
         terrain_cache: None,
         occluder_cache: None,
